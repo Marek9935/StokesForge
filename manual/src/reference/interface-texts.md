@@ -168,6 +168,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Show Data | Afficher les données |
 | Show Metadata Row | Afficher la ligne Métadonnées |
 | Show x' Row | Afficher la ligne x' |
+| Sort | Trier |
 | StokesForge — Project Manager | StokesForge — Gestionnaire de projet |
 | SVG Text | Texte SVG |
 | Text | Texte |

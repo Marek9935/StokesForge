@@ -88,7 +88,7 @@ pub use formula::{
     FormulaPart, RemoteRef, SheetAddress, SheetDirectory, SheetScope, REF_TOKEN,
 };
 pub use id::{IdAllocator, NodeId};
-pub use name::{check_name, same_name_ignoring_case, RESERVED_NAME_CHARS};
+pub use name::{check_name, natural_cmp, same_name_ignoring_case, RESERVED_NAME_CHARS};
 pub use node::{Node, NodeKind, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::{spreadsheet_name, Project};

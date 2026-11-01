@@ -668,6 +668,23 @@ neither `saved_revision` nor working path. Offered at the next startup
 only if it is newer than its `.stf`. Details:
 `docs/application/project-and-import.md`, `stokesforge-app-state/src/recovery.rs`.
 
+## Folders in manual order (#425)
+
+`FileBody::manual_order_folders` (`#[serde(default)]`, placed after `transposes` and
+before `window_geometries`) lists the raw identifiers of the folders the Project Manager
+shows in model order (`Tree::manual_order_folders()`). Every other folder, the root
+included, is shown sorted; a file without the field opens all automatic, which is how
+every file written before #425 opens. It is a view setting carried by the tree (it travels
+with snapshots and undo) and read by no formula (invariant 11).
+
+Tolerant reading (invariant 10): an identifier beyond `MAX_NODE_ID` refuses the file
+like the other raw identifier tables (`check_node_id`); a key that is a column, a window or
+no node at all is dropped alone (`Tree::with_manual_order`). Written: only existing folders.
+Additive, so `FORMAT_VERSION` stays 1 and the witness `tests/witnesses/v1/project.stf` was
+regenerated (a folder `Hand-ordered`). An older version that opens and saves the file
+again loses the manual orders: the folders come back sorted. Copy and paste between
+projects carries none (the copy arrives automatic).
+
 ## Linked transposed sheets (#253)
 
 `FileBody::transposes` (`#[serde(default)]`, placed after `correction_traces` and

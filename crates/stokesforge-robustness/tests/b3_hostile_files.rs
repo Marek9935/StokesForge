@@ -749,6 +749,54 @@ fn b3_hostile_column_widths() {
     assert!(load_with_report(&out_of_range).is_err());
 }
 
+/// #425: hostile keys in the list of manual-order folders: a column, a missing
+/// node and a huge key. Non-folders and missing nodes are dropped one by one,
+/// an out-of-range key refuses the file like the other raw identifier tables.
+#[test]
+fn b3_hostile_manual_order_folders() {
+    use stokesforge_core::NodeId;
+    use stokesforge_persistence::load_with_report;
+
+    #[derive(Serialize)]
+    struct FileBodyOrder {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+        manual_order_folders: Vec<u64>,
+    }
+    let write_order = |dir: &TempDir, name: &str, keys: &[u64]| {
+        let body = FileBodyOrder {
+            root: 1,
+            next_id_hint: 4,
+            nodes: vec![
+                folder(1, "R", None, vec![2, 3]),
+                folder(2, "A", Some(1), vec![]),
+                folder(3, "B", Some(1), vec![]),
+            ],
+            manual_order_folders: keys.to_vec(),
+        };
+        let payload = rmp_serde::to_vec_named(&body).unwrap();
+        let path = dir.path().join(name);
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"STKF").unwrap();
+        f.write_all(&1u32.to_le_bytes()).unwrap();
+        f.write_all(&payload).unwrap();
+        path
+    };
+    let dir = TempDir::new().unwrap();
+    let path = write_order(&dir, "mixed.stf", &[2, 99, 2]);
+    let (project, _, _) = load_with_report(&path).expect("hostile keys do not make the file fail");
+    let manual: Vec<_> = project
+        .tree()
+        .manual_order_folders()
+        .iter()
+        .copied()
+        .collect();
+    assert_eq!(manual, vec![NodeId::from_raw(2)]);
+    let out_of_range = write_order(&dir, "out_of_range.stf", &[u64::MAX]);
+    assert!(load_with_report(&out_of_range).is_err());
+}
+
 /// B1 (#316): a file whose columns declare more cells than the global budget
 /// is refused before any column allocation. The forged columns are each under
 /// `MAX_COLUMN_ROWS`: only the total stops them.

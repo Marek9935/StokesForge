@@ -1265,3 +1265,35 @@ fn unreadable_target_error_displays_in_plain_english() {
          (header truncated): refusing to overwrite it"
     );
 }
+
+#[test]
+fn a_manual_folder_reads_back_manual_and_the_others_automatic() {
+    let mut project = Project::new("P").unwrap();
+    let root = project.root();
+    let manual = project.add_folder(root, "Manual").unwrap();
+    let auto = project.add_folder(root, "Auto").unwrap();
+    project.set_folder_manual_order(manual, true).unwrap();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let path = dir.path().join("order.stf");
+    save(&project, &path).expect("save");
+    let loaded = load(&path).expect("load");
+    assert!(loaded.tree().is_manual_order(manual));
+    assert!(!loaded.tree().is_manual_order(auto));
+    assert!(!loaded.tree().is_manual_order(root));
+    assert_eq!(*loaded.tree(), *project.tree());
+}
+
+#[test]
+fn a_body_without_the_order_field_opens_all_automatic() {
+    // The additive field is absent from every file written before #425: the
+    // witness of the format carries none either way, so write a project whose
+    // folders are all automatic and check that nothing is manual.
+    let mut project = Project::new("P").unwrap();
+    let root = project.root();
+    project.add_folder(root, "A").unwrap();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let path = dir.path().join("auto.stf");
+    save(&project, &path).expect("save");
+    let loaded = load(&path).expect("load");
+    assert!(loaded.tree().manual_order_folders().is_empty());
+}

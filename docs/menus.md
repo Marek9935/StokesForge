@@ -119,7 +119,8 @@ The check boxes keep the menu open (#114).
 | Target | Menu |
 |---|---|
 | Window(s) | Open · Close ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete |
-| Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate ─ Delete |
+| Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate · Sort (this folder back to automatic order, greyed with its reason when it already is, #425) ─ Delete |
+| Empty area under the last row | Add Folder · Paste (in the root) ─ Sort (the root, #425) |
 
 Selection ▸ remains only in Edit.
 

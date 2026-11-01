@@ -378,6 +378,17 @@ pub enum Command {
         /// New saved colors.
         colors: SavedColors,
     },
+    /// Puts a folder in manual order (`manual: true`, the Project Manager
+    /// shows its children in model order) or back in automatic order (sorted),
+    /// #425. Data, not structure: no node moves. Does not reorder anything
+    /// by itself; a drop between rows is a macro of this command and the
+    /// `Move`s that make the model order the displayed one.
+    SetFolderOrder {
+        /// The folder.
+        folder: NodeId,
+        /// New state: `true` for manual order.
+        manual: bool,
+    },
 }
 
 impl Command {
@@ -436,6 +447,9 @@ impl Command {
             Command::EditPlotSpec { kind, .. } => HistoryLabel::EditPlotSpec(*kind),
             Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
             Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
+            Command::SetFolderOrder { folder, .. } => HistoryLabel::SortFolder {
+                name: name(*folder),
+            },
             Command::TransposeRows { .. } => HistoryLabel::TransposeRows,
             Command::RecalculateTranspose { .. } => HistoryLabel::RecalculateTranspose,
             Command::ReplaceAnalysisData { draft, .. } => {

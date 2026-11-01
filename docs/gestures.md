@@ -129,7 +129,8 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Double-click | row (OM) | opens the settings of the object |
 | Double-click | row (PM) | window: activates or restores it, never closes it; folder: toggles it once (without a modifier) |
 | Drag | row (OM) | reorders; on a graph, moves the object |
-| Drag | row (PM) | — (PM rows cannot be dragged: click only) |
+| Drag | row (PM) | moves the row, or the whole selection when the row is selected (an unselected row goes alone and becomes the selection), always a move, never a copy (#425). Folder row: top quarter inserts before it, middle drops inside it (folder highlighted), bottom quarter inserts after it (before its first child when it is open with children); window row: upper half before, lower half after. Inserting between rows puts the folder in manual order. A closed folder hovered for 1 s opens. Escape cancels; one release is one history entry; a folder into itself or a taken name is refused like Paste |
+| Drag, release below the last row | PM | drops inside the root (#425), order unchanged |
 | Right-click | row | if outside the selection, replaces it; menu of the object (a single menu, `menus.md`) |
 | Right-click › Add Folder | folder (PM) | creates a folder "FolderN" in this folder, expands it and puts the name of the new folder in in-place editing (creation and name = two history entries) |
 | Right-click | OM background | panel settings |

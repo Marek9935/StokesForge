@@ -1624,3 +1624,29 @@ mod folder_copy {
         assert_eq!(project.tree().calculations().len(), before);
     }
 }
+
+// -- displayed order (#425) --
+
+#[test]
+fn displayed_children_sorts_folders_first_then_naturally_unless_manual() {
+    let mut p = Project::new("P").unwrap();
+    let root = p.root();
+    let g10 = p.add_workbook(root, Some("Graph10")).unwrap();
+    let b = p.add_folder(root, "B").unwrap();
+    let book2 = p.add_workbook(root, Some("Book2")).unwrap();
+    let g2 = p.add_workbook(root, Some("Graph2")).unwrap();
+    let a = p.add_folder(root, "A").unwrap();
+    assert_eq!(
+        p.tree().displayed_children(root).unwrap(),
+        vec![a, b, book2, g2, g10]
+    );
+    assert!(!p.set_folder_manual_order(root, true).unwrap());
+    assert_eq!(
+        p.tree().displayed_children(root).unwrap(),
+        vec![g10, b, book2, g2, a]
+    );
+    assert!(p.set_folder_manual_order(root, false).unwrap());
+    assert!(!p.tree().is_manual_order(root));
+    // A non-folder is refused.
+    assert!(p.set_folder_manual_order(g2, true).is_err());
+}

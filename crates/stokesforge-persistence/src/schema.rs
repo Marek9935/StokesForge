@@ -72,6 +72,14 @@ pub(crate) struct FileBody {
     /// same reason as `calculations`.
     #[serde(default)]
     pub(crate) transposes: Vec<crate::transposes::TransposeRecord>,
+    /// Folders shown in manual order in the Project Manager (#425), by raw
+    /// identifier. Absent from earlier files (`#[serde(default)]`: every folder
+    /// is automatic, shown sorted). A key that is not a folder is dropped at
+    /// read (invariant 10). Placed before `window_geometries` and `save_counter`,
+    /// for the same reason as `transposes`. An older version that re-saves the
+    /// file loses these orders (additive field, invariant 12).
+    #[serde(default)]
+    pub(crate) manual_order_folders: Vec<u64>,
     /// Geometry of the windows (position/size), by node identifier —
     /// block **separate from the undoable tree** (see the head doc of
     /// `stokesforge-session`: the geometry does not live in `Project`, never goes

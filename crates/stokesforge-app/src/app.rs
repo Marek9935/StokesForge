@@ -173,6 +173,7 @@ mod plot_settings;
 #[cfg(test)]
 mod preferences_proto;
 mod preferences_window;
+mod project_dnd;
 mod project_manager;
 mod recovery;
 mod reorder_list;

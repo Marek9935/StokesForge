@@ -78,6 +78,7 @@ use crate::history_text::history_text;
 use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
 use crate::selection::{GridCursor, Selection};
 use crate::tr;
+use crate::tree_drop::{final_order, plan_moves, MovePlace};
 use crate::user_colors::UserColors;
 
 mod analysis;
@@ -231,11 +232,19 @@ pub enum Action {
     /// Deletes the selection, without confirmation: a single Ctrl+Z gives it
     /// back (S-F3, #229); the message names the graphs that used its data.
     DeleteObjects(Vec<NodeId>),
-    /// Moves the selection in a single undoable gesture.
+    /// Moves rows into a folder in a single undoable gesture (the drag and
+    /// drop of the Project Manager, #425). `Inside` appends and leaves the order
+    /// mode of the folder alone; `Before` and `AtEnd` insert and put the folder in
+    /// manual order. The refusals (a folder into itself, a name already taken) are
+    /// those of Cut and Paste.
     MoveObjects {
         ids: Vec<NodeId>,
         parent: NodeId,
+        place: MovePlace,
     },
+    /// Puts a folder back in automatic order, sorted (#425). Does nothing when it
+    /// already is.
+    SortFolder(NodeId),
     /// Commits the input of a cell: the text as typed, to be converted
     /// according to the column type.
     CommitCell {
@@ -2931,6 +2940,15 @@ pub enum ProjectTreeNode {
     },
 }
 
+impl ProjectTreeNode {
+    /// The identifier of the folder or window.
+    pub fn id(&self) -> NodeId {
+        match self {
+            ProjectTreeNode::Folder { id, .. } | ProjectTreeNode::Window { id, .. } => *id,
+        }
+    }
+}
+
 /// What [`Action::CutObjects`] remembers (#423).
 #[derive(Debug, Clone)]
 struct CutMark {
@@ -5040,10 +5058,10 @@ impl AppState {
 
     fn project_tree_children(&self, parent: NodeId) -> Vec<ProjectTreeNode> {
         let tree = &self.snapshot.tree;
-        let Some(node) = tree.node(parent) else {
+        let Ok(children) = tree.displayed_children(parent) else {
             return Vec::new();
         };
-        node.children()
+        children
             .iter()
             .filter_map(|id| {
                 let child = tree.node(*id)?;
@@ -5305,7 +5323,12 @@ impl AppState {
                 self.reveal_books(series_data_books(self.tree(), graph, series));
             }
             Action::DeleteObjects(ids) => self.delete_objects(&ids),
-            Action::MoveObjects { ids, parent } => self.move_objects(&ids, parent),
+            Action::MoveObjects { ids, parent, place } => {
+                if self.check_move_into(&ids, parent).is_some() {
+                    self.move_objects(&ids, parent, place);
+                }
+            }
+            Action::SortFolder(folder) => self.sort_folder(folder),
             Action::CommitCell { column, row, text } => {
                 self.commit_cell(column, row, text);
             }
@@ -8476,8 +8499,23 @@ impl AppState {
             self.cut_mark = None;
             return;
         }
-        if ids.contains(&parent) {
+        let Some(moving) = self.check_move_into(&ids, parent) else {
             return;
+        };
+        if let Some(mark) = self.cut_mark.take() {
+            self.consumed_cut = Some((mark.origin, text.to_string()));
+        }
+        self.move_objects(&moving, parent, MovePlace::Inside);
+    }
+
+    /// The checks shared by the paste of a cut and the drop of a drag (#423,
+    /// #425), so that the two cannot disagree: `Some(rows that change folder)`
+    /// when the move may go ahead, `None` when it is refused. Moving onto itself
+    /// is refused silently, a destination inside a moved folder or a name
+    /// already taken in the destination with a message, the whole move at once.
+    fn check_move_into(&mut self, ids: &[NodeId], parent: NodeId) -> Option<Vec<NodeId>> {
+        if ids.contains(&parent) {
+            return None;
         }
         let inside = self
             .tree()
@@ -8487,10 +8525,10 @@ impl AppState {
             .any(|ancestor| ids.contains(ancestor));
         if inside {
             self.fail(tr!("error-move-into-itself"));
-            return;
+            return None;
         }
         let moving: Vec<NodeId> = self
-            .object_targets(&ids)
+            .object_targets(ids)
             .into_iter()
             .filter(|id| {
                 self.tree()
@@ -8516,14 +8554,11 @@ impl AppState {
                 .any(|other| same_name_ignoring_case(other, &name))
             {
                 self.fail(tr!("error-move-name-taken", name = name));
-                return;
+                return None;
             }
             seen.push(name);
         }
-        if let Some(mark) = self.cut_mark.take() {
-            self.consumed_cut = Some((mark.origin, text.to_string()));
-        }
-        self.move_objects(&moving, parent);
+        Some(moving)
     }
 
     fn next_object_copy_name(
@@ -8701,24 +8736,85 @@ impl AppState {
         self.open_column_use(readers);
     }
 
-    fn move_objects(&mut self, ids: &[NodeId], parent: NodeId) {
-        let index = self.tree().children(parent).map_or(0, <[NodeId]>::len);
-        let commands = self
-            .object_targets(ids)
-            .into_iter()
-            .filter(|id| {
-                self.tree()
-                    .node(*id)
-                    .is_some_and(|node| node.parent() != Some(parent))
-            })
-            .enumerate()
-            .map(|(offset, id)| Command::Move {
-                id,
-                new_parent: parent,
-                index: index + offset,
-            })
-            .collect();
+    /// The rows of `ids` that can move, in the order the Project Manager shows them.
+    fn targets_in_displayed_order(&self, ids: &[NodeId]) -> Vec<NodeId> {
+        let targets = self.object_targets(ids);
+        let tree = self.tree();
+        let mut order = Vec::new();
+        let mut stack = vec![tree.root()];
+        while let Some(folder) = stack.pop() {
+            let children = tree.displayed_children(folder).unwrap_or_default();
+            for id in children.iter().rev() {
+                stack.push(*id);
+            }
+            if folder != tree.root() {
+                order.push(folder);
+            }
+        }
+        let mut sorted: Vec<NodeId> = targets.clone();
+        sorted.sort_by_key(|id| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
+        sorted
+    }
+
+    /// Moves `ids` into `parent` (already checked). `Inside` appends the rows
+    /// that change folder. An insertion (`Before`, `AtEnd`) puts the folder in
+    /// manual order, then makes its model order the order shown with the rows
+    /// inserted: one group, so one Ctrl+Z gives back both the flag and the order
+    /// (#425). Does nothing when the result is what the folder already shows.
+    fn move_objects(&mut self, ids: &[NodeId], parent: NodeId, place: MovePlace) {
+        let targets = self.targets_in_displayed_order(ids);
+        let tree = Arc::clone(self.tree());
+        let current = tree.children(parent).unwrap_or_default().to_vec();
+        let commands: Vec<Command> =
+            match place {
+                MovePlace::Inside => targets
+                    .into_iter()
+                    .filter(|id| tree.node(*id).is_some_and(|n| n.parent() != Some(parent)))
+                    .enumerate()
+                    .map(|(offset, id)| Command::Move {
+                        id,
+                        new_parent: parent,
+                        index: current.len() + offset,
+                    })
+                    .collect(),
+                MovePlace::Before(_) | MovePlace::AtEnd => {
+                    let manual = tree.is_manual_order(parent);
+                    let displayed = tree.displayed_children(parent).unwrap_or_default();
+                    let wanted = final_order(&displayed, &targets, place);
+                    let from_elsewhere = targets.iter().any(|id| !current.contains(id));
+                    let unchanged = if manual { &current } else { &displayed };
+                    if !from_elsewhere && wanted == *unchanged {
+                        return;
+                    }
+                    let mut commands = Vec::new();
+                    if !manual {
+                        commands.push(Command::SetFolderOrder {
+                            folder: parent,
+                            manual: true,
+                        });
+                    }
+                    commands.extend(plan_moves(&current, &wanted).into_iter().map(
+                        |(id, index)| Command::Move {
+                            id,
+                            new_parent: parent,
+                            index,
+                        },
+                    ));
+                    commands
+                }
+            };
         self.execute_object_group(MacroKind::MoveObjects, commands);
+    }
+
+    /// Puts a folder back in automatic order (#425). The model order is not
+    /// touched: the folder is only shown sorted again.
+    fn sort_folder(&mut self, folder: NodeId) {
+        if self.tree().is_manual_order(folder) {
+            self.execute(Command::SetFolderOrder {
+                folder,
+                manual: false,
+            });
+        }
     }
 
     fn execute_object_group(&mut self, kind: MacroKind, commands: Vec<Command>) {

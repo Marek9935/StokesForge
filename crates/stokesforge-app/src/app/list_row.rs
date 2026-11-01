@@ -307,7 +307,8 @@ pub(super) fn list_row(
 /// that the row carries the keyboard cursor without having egui focus (the Project
 /// Manager follows its focus itself, #170 point 6). `cut` (#423) is a cut row:
 /// label **and** icon faded, unlike `dimmed` (closed window), which fades the
-/// label only.
+/// label only. The row also senses a drag (the Project Manager's drag and
+/// drop, #425); the other lists keep a click-only row.
 pub(super) fn list_row_focused(
     ui: &mut egui::Ui,
     icon: Option<egui::Image<'static>>,
@@ -328,7 +329,7 @@ pub(super) fn list_row_focused(
             RowFade::text_if(dimmed)
         },
         focused,
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     )
 }
 

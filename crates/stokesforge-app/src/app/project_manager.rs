@@ -84,6 +84,9 @@ pub(super) struct PmInteraction<'a> {
     pub(super) close_requests: &'a mut Vec<Tab>,
     /// Nodes of the last Cut, painted dimmed until the paste (#423).
     pub(super) cut: &'a HashSet<NodeId>,
+    /// The folders in manual order (#425); any other folder, the root
+    /// included, is shown sorted. Sort is greyed for those.
+    pub(super) manual: &'a std::collections::BTreeSet<NodeId>,
 }
 
 /// The selection is shared with the viewport; the editor and the focus stay in
@@ -118,6 +121,12 @@ struct PmMemory {
     /// Row the keyboard has just reached: to make appear in the scroll area
     /// on its next painting.
     scroll_to: Option<PmEntry>,
+    /// The rectangle of each row painted this frame: where a drag's pointer is
+    /// (#425).
+    rects: std::collections::HashMap<NodeId, egui::Rect>,
+    /// The closed folder a drag has been hovering, and since when: it opens
+    /// after a second (#425, `tree_drop::OPEN_AFTER_SECS`).
+    open_since: Option<(NodeId, f64)>,
 }
 
 /// A selectable entry of the Project Manager tree (#170, point 4): a folder,
@@ -190,6 +199,15 @@ fn cursor_of(selection: &HashSet<PmEntry>, memory: &PmMemory) -> Option<PmEntry>
                 _ => None,
             }
         })
+}
+
+/// Notes where a row is painted this frame: what a drag reads (#425).
+fn note_rect(ctx: &egui::Context, memory_key: egui::Id, id: NodeId, rect: egui::Rect) {
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<PmMemory>(memory_key)
+            .rects
+            .insert(id, rect);
+    });
 }
 
 /// Notes that a row is visible in this frame (see `PmMemory::visible`).
@@ -289,7 +307,10 @@ fn selected_ids(selection: &HashSet<PmEntry>, order: &[PmEntry]) -> Vec<NodeId> 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ObjectMenuTarget {
     Windows,
-    Folder,
+    /// A folder; `sorted`: it is shown sorted already (Sort is greyed).
+    Folder {
+        sorted: bool,
+    },
 }
 
 /// The content of the object menu (#157), **flat**: the right click shows it
@@ -309,21 +330,11 @@ pub(super) fn object_menu(
     rename_viewport: egui::ViewportId,
 ) {
     let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
-    let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
     let enabled = !ids.is_empty();
     let copy_reason = || tr!("project-manager-selection-needed");
-    if target == ObjectMenuTarget::Folder {
+    if matches!(target, ObjectMenuTarget::Folder { .. }) {
         // The only gesture that creates in a subfolder (#326, `docs/menus.md`).
-        sections.section(ui, true, |ui| {
-            if ui
-                .button(tr!("action-add-folder"))
-                .on_hover_text(tr!("action-add-folder", "hint"))
-                .clicked()
-            {
-                actions.push(Action::AddFolder { parent });
-                ui.close();
-            }
-        });
+        sections.section(ui, true, |ui| add_folder_entry(ui, parent, actions));
     }
     sections.section(ui, true, |ui| {
         if ui
@@ -350,14 +361,7 @@ pub(super) fn object_menu(
             actions.push(Action::CopyObjects(ids.to_vec()));
             ui.close();
         }
-        if ui.button(tr!("action-paste")).clicked() {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(paste_key, parent);
-            });
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-            ui.close();
-        }
+        paste_entry(ui, parent);
     });
     sections.section(ui, true, |ui| {
         if ui
@@ -395,6 +399,9 @@ pub(super) fn object_menu(
         {
             actions.push(Action::DuplicateObjects(ids.to_vec()));
             ui.close();
+        }
+        if let ObjectMenuTarget::Folder { sorted } = target {
+            sort_entry(ui, parent, sorted, actions);
         }
     });
     sections.section(ui, true, |ui| {
@@ -610,6 +617,7 @@ pub(super) fn project_manager_contents_from_tree(
         memory.visible.clear();
         memory.parents.clear();
         memory.open_folders.clear();
+        memory.rects.clear();
         let PmMemory { order, parents, .. } = &mut memory;
         tree_order(tree, None, order, parents);
         // A deleted folder does not stay selected (a script, Ctrl+Z).
@@ -618,13 +626,21 @@ pub(super) fn project_manager_contents_from_tree(
             .retain(|entry| !entry.is_folder() || memory.order.contains(entry));
         data.insert_temp(memory_key, memory);
     });
-    // RAW-SCROLL(#347): tree: the area under the last row is the drop target of object_dnd::end_of_frame
+    // RAW-SCROLL(#347): tree: the area under the last row is the drop target of a
+    // Project Manager drag (`drive_drag`, #425) and carries the root's right-click
     let response = egui::ScrollArea::vertical().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         for node in tree {
             project_tree_node_ui(ui, node, tree, interaction);
         }
+        let rest = ui.clip_rect().bottom() - ui.cursor().top();
+        if rest > 1.0 {
+            let (_, empty) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), rest), egui::Sense::click());
+            empty.context_menu(|ui| root_menu(ui, interaction));
+        }
     });
+    drive_drag(ui, tree, interaction, memory_key, response.inner_rect);
     // A keyboard request is valid only for the next frame: a hidden folder
     // (collapsed under another) must not keep it in reserve.
     ui.ctx().data_mut(|data| {
@@ -641,6 +657,151 @@ pub(super) fn project_manager_contents_from_tree(
             memory.focus = inside;
             data.insert_temp(memory_key, memory);
         });
+    }
+}
+
+/// One frame of a Project Manager drag (#425): feedback under the pointer, the
+/// folder that opens after a second, and on release the one action. Without a
+/// payload (no drag, or Escape took it) nothing happens: a release is then not
+/// a drop.
+fn drive_drag(
+    ui: &egui::Ui,
+    tree: &[ProjectTreeNode],
+    interaction: &mut PmInteraction,
+    memory_key: egui::Id,
+    area: egui::Rect,
+) {
+    let ctx = ui.ctx();
+    let Some(drag) = super::project_dnd::dragged(ctx) else {
+        ctx.data_mut(|data| {
+            data.get_temp_mut_or_default::<PmMemory>(memory_key)
+                .open_since = None;
+        });
+        return;
+    };
+    let Some(pos) = ui.input(|input| input.pointer.hover_pos().or(input.pointer.interact_pos()))
+    else {
+        return;
+    };
+    let (rects, open_folders) = ctx.data(|data| {
+        data.get_temp::<PmMemory>(memory_key)
+            .map(|memory| (memory.rects, memory.open_folders))
+            .unwrap_or_default()
+    });
+    let is_open = |id: NodeId| open_folders.contains(&id);
+    let slack = ui.spacing().item_spacing.y;
+    let frame = super::project_dnd::frame(
+        tree,
+        interaction.root,
+        &drag.ids,
+        &rects,
+        area,
+        pos,
+        slack,
+        &is_open,
+    );
+    if area.contains(pos) {
+        super::cursors::grabbing(ctx);
+    }
+    if ui.input(|input| input.pointer.any_released()) {
+        if let Some(target) = frame.target {
+            interaction
+                .actions
+                .push(super::project_dnd::drop_action(&drag.ids, target));
+            // The folder that received rows shows them.
+            if target.parent != interaction.root {
+                ctx.data_mut(|data| {
+                    data.get_temp_mut_or_default::<PmMemory>(memory_key)
+                        .reveal
+                        .push(target.parent);
+                });
+            }
+        }
+        egui::DragAndDrop::clear_payload(ctx);
+        return;
+    }
+    if let Some(target) = frame.target {
+        super::project_dnd::paint_feedback(
+            ui.painter(),
+            tree,
+            interaction.root,
+            target,
+            &rects,
+            area,
+        );
+    }
+    let now = ctx.input(|input| input.time);
+    let opened = ctx.data_mut(|data| {
+        let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
+        let opened =
+            super::project_dnd::hover_open(&mut memory.open_since, frame.closed_folder, now);
+        if let Some(folder) = opened {
+            memory.reveal.push(folder);
+        }
+        opened
+    });
+    if frame.closed_folder.is_some() || opened.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+}
+
+/// The right-click on the empty area under the last row: the root folder's menu
+/// (#425). Add Folder and Paste target the root; Sort puts the root back in
+/// automatic order, greyed with its reason when it already is.
+fn root_menu(ui: &mut egui::Ui, interaction: &mut PmInteraction) {
+    let mut sections = MenuSections::new();
+    let root = interaction.root;
+    sections.section(ui, true, |ui| {
+        add_folder_entry(ui, root, interaction.actions)
+    });
+    sections.section(ui, true, |ui| paste_entry(ui, root));
+    sections.section(ui, true, |ui| {
+        sort_entry(
+            ui,
+            root,
+            !interaction.manual.contains(&root),
+            interaction.actions,
+        )
+    });
+}
+
+fn add_folder_entry(ui: &mut egui::Ui, parent: NodeId, actions: &mut Vec<Action>) {
+    if ui
+        .button(tr!("action-add-folder"))
+        .on_hover_text(tr!("action-add-folder", "hint"))
+        .clicked()
+    {
+        actions.push(Action::AddFolder { parent });
+        ui.close();
+    }
+}
+
+fn paste_entry(ui: &mut egui::Ui, parent: NodeId) {
+    let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
+    if ui.button(tr!("action-paste")).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(paste_key, parent);
+        });
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+        ui.close();
+    }
+}
+
+/// Sort (#425): the folder shown sorted again. Greyed, with the reason, when it
+/// already is (`already_sorted`).
+fn sort_entry(ui: &mut egui::Ui, folder: NodeId, already_sorted: bool, actions: &mut Vec<Action>) {
+    let clicked = ui
+        .add_enabled(
+            !already_sorted,
+            egui::Button::new(tr!("action-sort-folder")),
+        )
+        .on_hover_text(tr!("action-sort-folder", "hint"))
+        .on_disabled_hover_text(tr!("action-sort-folder", "disabled"))
+        .clicked();
+    if clicked {
+        actions.push(Action::SortFolder(folder));
+        ui.close();
     }
 }
 
@@ -748,6 +909,9 @@ fn select_gestures(
     selected: bool,
 ) -> RowGestures {
     let mut gestures = RowGestures::default();
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        begin_drag(ui, interaction, memory_key, entry, selected);
+    }
     if response.clicked() || response.secondary_clicked() {
         let modifiers = ui.input(|input| input.modifiers);
         let mut memory = ui
@@ -798,6 +962,34 @@ fn select_gestures(
         gestures.double = ui.input(|input| input.modifiers.is_none());
     }
     gestures
+}
+
+/// A row has been grabbed (#425): a selected row takes the whole selection with
+/// it, an unselected one goes alone and becomes the selection.
+fn begin_drag(
+    ui: &egui::Ui,
+    interaction: &mut PmInteraction,
+    memory_key: egui::Id,
+    entry: PmEntry,
+    selected: bool,
+) {
+    let mut memory = ui
+        .ctx()
+        .data(|data| data.get_temp::<PmMemory>(memory_key))
+        .unwrap_or_default();
+    let ids = if selected {
+        selected_ids(interaction.selection, &memory.order)
+    } else {
+        interaction.selection.clear();
+        interaction.selection.insert(entry);
+        memory.anchor = Some(entry);
+        memory.lead = None;
+        vec![entry.node()]
+    };
+    memory.focus = true;
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(memory_key, memory));
+    super::project_dnd::begin(ui.ctx(), ids);
 }
 
 /// The row that carries the focus outline: the keyboard cursor, as long as the
@@ -893,6 +1085,7 @@ fn project_tree_node_ui(
                     focused,
                 );
                 reveal_if_reached(ui.ctx(), memory_key, entry, &response);
+                note_rect(ui.ctx(), memory_key, *id, response.rect);
                 gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
                 response.context_menu(|ui| {
                     let viewport = ui.ctx().viewport_id();
@@ -904,7 +1097,9 @@ fn project_tree_node_ui(
                     object_menu(
                         ui,
                         &mut MenuSections::new(),
-                        ObjectMenuTarget::Folder,
+                        ObjectMenuTarget::Folder {
+                            sorted: !interaction.manual.contains(id),
+                        },
                         &ids,
                         *id,
                         interaction.actions,
@@ -976,6 +1171,7 @@ fn project_tree_node_ui(
                 })
                 .inner;
             reveal_if_reached(ui.ctx(), memory_key, entry, &response);
+            note_rect(ui.ctx(), memory_key, *id, response.rect);
             let gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
             response.context_menu(|ui| {
                 let mut sections = MenuSections::new();
@@ -1124,6 +1320,7 @@ impl StokesForgeApp {
                     open: &open,
                     close_requests,
                     cut: &cut,
+                    manual: self.state.tree().manual_order_folders(),
                 };
                 project_manager_contents_from_tree(ui, &tree, &mut interaction);
             });
@@ -1266,6 +1463,8 @@ pub(super) mod tests {
         close_requests: RefCell<Vec<Tab>>,
         /// The nodes of the last Cut (#423).
         cut: RefCell<HashSet<NodeId>>,
+        /// The folders in manual order (#425).
+        manual: RefCell<std::collections::BTreeSet<NodeId>>,
         /// Was ↓ still readable after the panel, in the same frame?
         /// What a grid painted afterwards would see (it reads the arrows without
         /// consuming them, #170 point 6).
@@ -1285,6 +1484,7 @@ pub(super) mod tests {
                 open: RefCell::new(HashSet::new()),
                 close_requests: RefCell::new(Vec::new()),
                 cut: RefCell::new(HashSet::new()),
+                manual: RefCell::new(std::collections::BTreeSet::new()),
                 arrow_down_left: std::cell::Cell::new(false),
                 side_arrows_left: std::cell::Cell::new(false),
                 modal: std::cell::Cell::new(false),
@@ -1326,6 +1526,7 @@ pub(super) mod tests {
                 open: &self.open.borrow(),
                 close_requests: &mut self.close_requests.borrow_mut(),
                 cut: &self.cut.borrow(),
+                manual: &self.manual.borrow(),
             };
             let mut output = context.run_ui(input, |ui| {
                 project_manager_contents_from_tree(ui, tree, &mut interaction);
@@ -1557,6 +1758,7 @@ pub(super) mod tests {
                                 open: &HashSet::new(),
                                 close_requests: &mut Vec::new(),
                                 cut: &HashSet::new(),
+                                manual: &Default::default(),
                             };
                             project_manager_contents_from_tree(ui, &tree, &mut interaction);
                         });
@@ -3288,5 +3490,305 @@ pub(super) mod tests {
         assert_eq!(neighbour(&rows, None, -1), Some(30));
         assert_eq!(neighbour(&rows, Some(99), 1), Some(10), "invisible cursor");
         assert_eq!(neighbour::<i32>(&[], Some(1), 1), None);
+    }
+
+    // -- drag and drop (#425) --
+
+    /// Docs (a folder holding Inner), then Fit2, Fit10 and Zed: created in the
+    /// order Zed, Fit10, Fit2 so that the sorted display differs from the model.
+    struct DragFixture {
+        _session: Session,
+        tree: Vec<ProjectTreeNode>,
+        docs: NodeId,
+        fit2: NodeId,
+        fit10: NodeId,
+        zed: NodeId,
+    }
+
+    fn drag_fixture() -> DragFixture {
+        let mut project = Project::new("Drag").unwrap();
+        let root = project.root();
+        let zed = project.add_note(root, Some("Zed"), "").unwrap();
+        let fit10 = project.add_note(root, Some("Fit10"), "").unwrap();
+        let fit2 = project.add_note(root, Some("Fit2"), "").unwrap();
+        let docs = project.add_folder(root, "Docs").unwrap();
+        project.add_note(docs, Some("Inner"), "").unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        DragFixture {
+            _session: session,
+            tree: state.project_tree(),
+            docs,
+            fit2,
+            fit10,
+            zed,
+        }
+    }
+
+    fn row_rect(output: &egui::FullOutput, name: &str) -> egui::Rect {
+        let center = super::super::test_support::texts(&output.shapes)
+            .iter()
+            .find(|t| t.text == name)
+            .unwrap_or_else(|| panic!("no row {name}"))
+            .center;
+        egui::Rect::from_center_size(center, egui::vec2(100.0, 24.0))
+    }
+
+    fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Press on `from`, move to `to`; the button stays down. `t` is the time of the
+    /// last frame.
+    fn start_drag(
+        bench: &Bench,
+        context: &egui::Context,
+        tree: &[ProjectTreeNode],
+        from: egui::Pos2,
+        to: egui::Pos2,
+        t: f64,
+    ) {
+        bench.paint_at(
+            context,
+            tree,
+            vec![egui::Event::PointerMoved(from)],
+            Some(0.0),
+        );
+        bench.paint_at(context, tree, vec![pointer(from, true)], Some(0.0));
+        bench.paint_at(
+            context,
+            tree,
+            vec![egui::Event::PointerMoved(to)],
+            Some(0.0),
+        );
+        bench.paint_at(context, tree, vec![egui::Event::PointerMoved(to)], Some(t));
+    }
+
+    fn release(
+        bench: &Bench,
+        context: &egui::Context,
+        tree: &[ProjectTreeNode],
+        at: egui::Pos2,
+        t: f64,
+    ) {
+        bench.paint_at(context, tree, vec![pointer(at, false)], Some(t));
+        bench.paint_at(context, tree, vec![], Some(t + 0.01));
+    }
+
+    fn moved(bench: &Bench) -> Vec<Action> {
+        bench
+            .actions
+            .borrow()
+            .iter()
+            .filter(|a| matches!(a, Action::MoveObjects { .. }))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn dragging_a_row_onto_a_folder_asks_for_one_move_inside() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let from = row_rect(&first, "Zed").center();
+        let docs = row_rect(&first, "Docs").center();
+        start_drag(&bench, &context, &f.tree, from, docs, 0.1);
+        release(&bench, &context, &f.tree, docs, 0.2);
+        assert_eq!(
+            moved(&bench),
+            vec![Action::MoveObjects {
+                ids: vec![f.zed],
+                parent: f.docs,
+                place: stokesforge_app_state::tree_drop::MovePlace::Inside,
+            }]
+        );
+        assert_eq!(
+            *bench.selection.borrow(),
+            HashSet::from([PmEntry::Window(Tab::Note(f.zed))]),
+            "an unselected row drags alone and becomes the selection"
+        );
+        assert!(
+            bench.open_requests.borrow().is_empty(),
+            "a drag opens nothing"
+        );
+    }
+
+    #[test]
+    fn the_zones_of_a_window_row_insert_before_or_after() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let from = row_rect(&first, "Zed").center();
+        let fit10 = row_rect(&first, "Fit10");
+        // Upper half of Fit10: before it.
+        let upper = fit10.center() - egui::vec2(0.0, 6.0);
+        start_drag(&bench, &context, &f.tree, from, upper, 0.1);
+        release(&bench, &context, &f.tree, upper, 0.2);
+        let actions = moved(&bench);
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::MoveObjects { place: stokesforge_app_state::tree_drop::MovePlace::Before(a), parent, .. }]
+                    if *a == f.fit10 && *parent == NodeId::from_raw(1)
+            ),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn below_the_last_row_a_drop_goes_inside_the_root() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let from = row_rect(&first, "Fit2").center();
+        let empty = egui::pos2(from.x, 380.0);
+        start_drag(&bench, &context, &f.tree, from, empty, 0.1);
+        release(&bench, &context, &f.tree, empty, 0.2);
+        assert_eq!(
+            moved(&bench),
+            vec![Action::MoveObjects {
+                ids: vec![f.fit2],
+                parent: NodeId::from_raw(1),
+                place: stokesforge_app_state::tree_drop::MovePlace::Inside,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_selected_row_drags_the_whole_selection() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let selection = HashSet::from([
+            PmEntry::Window(Tab::Note(f.fit2)),
+            PmEntry::Window(Tab::Note(f.zed)),
+        ]);
+        let bench = Bench::new(selection.clone());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let from = row_rect(&first, "Zed").center();
+        let docs = row_rect(&first, "Docs").center();
+        start_drag(&bench, &context, &f.tree, from, docs, 0.1);
+        release(&bench, &context, &f.tree, docs, 0.2);
+        let actions = moved(&bench);
+        let [Action::MoveObjects { ids, .. }] = actions.as_slice() else {
+            panic!("{actions:?}")
+        };
+        assert_eq!(ids, &vec![f.fit2, f.zed], "both rows, in reading order");
+        assert_eq!(
+            *bench.selection.borrow(),
+            selection,
+            "the selection is kept"
+        );
+    }
+
+    #[test]
+    fn escape_before_the_release_cancels_the_drag() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let from = row_rect(&first, "Zed").center();
+        let docs = row_rect(&first, "Docs").center();
+        start_drag(&bench, &context, &f.tree, from, docs, 0.1);
+        bench.paint_at(
+            &context,
+            &f.tree,
+            vec![key_with(egui::Key::Escape, egui::Modifiers::NONE)],
+            Some(0.15),
+        );
+        release(&bench, &context, &f.tree, docs, 0.2);
+        assert!(moved(&bench).is_empty(), "{:?}", bench.actions.borrow());
+    }
+
+    #[test]
+    fn a_closed_folder_opens_after_one_second_of_hover_not_half_a_second() {
+        let f = drag_fixture();
+        let shows_inner = |output: &egui::FullOutput| {
+            super::super::test_support::texts(&output.shapes)
+                .iter()
+                .any(|t| t.text == "Inner")
+        };
+        for (hold, opens) in [(0.5, false), (1.2, true)] {
+            let context = egui::Context::default();
+            let bench = Bench::new(HashSet::new());
+            let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+            assert!(!shows_inner(&first), "closed at the start");
+            let from = row_rect(&first, "Zed").center();
+            let docs = row_rect(&first, "Docs").center();
+            start_drag(&bench, &context, &f.tree, from, docs, 0.0);
+            let mid = bench.paint_at(&context, &f.tree, vec![], Some(hold));
+            let after = bench.paint_at(&context, &f.tree, vec![], Some(hold + 0.05));
+            let after = bench
+                .paint_at(&context, &f.tree, vec![], Some(hold + 0.1))
+                .shapes
+                .len()
+                .max(after.shapes.len());
+            let _ = (mid, after);
+            let last = bench.paint_at(&context, &f.tree, vec![], Some(hold + 0.15));
+            assert_eq!(shows_inner(&last), opens, "after {hold} s");
+        }
+    }
+
+    #[test]
+    fn a_row_is_not_a_target_for_itself() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let from = row_rect(&first, "Docs").center();
+        start_drag(
+            &bench,
+            &context,
+            &f.tree,
+            from,
+            from + egui::vec2(0.0, 2.0),
+            0.1,
+        );
+        release(&bench, &context, &f.tree, from, 0.2);
+        assert!(moved(&bench).is_empty(), "{:?}", bench.actions.borrow());
+    }
+
+    /// The tree is sorted (#425): the keyboard walks the rows as they are shown.
+    /// Witness: in model order ↓ from Docs would reach Zed.
+    #[test]
+    fn the_arrows_follow_the_sorted_order() {
+        let f = drag_fixture();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let first = bench.paint_at(&context, &f.tree, vec![], Some(0.0));
+        let docs = row_rect(&first, "Docs").center();
+        click_at(&context, docs, egui::Modifiers::NONE, |c, e| {
+            bench.paint(c, &f.tree, e)
+        });
+        bench.paint(
+            &context,
+            &f.tree,
+            vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        );
+        assert_eq!(
+            *bench.selection.borrow(),
+            HashSet::from([PmEntry::Window(Tab::Note(f.fit2))]),
+            "Docs, then Fit2"
+        );
+        bench.paint(
+            &context,
+            &f.tree,
+            vec![key_with(egui::Key::ArrowDown, egui::Modifiers::SHIFT)],
+        );
+        assert_eq!(
+            *bench.selection.borrow(),
+            HashSet::from([
+                PmEntry::Window(Tab::Note(f.fit2)),
+                PmEntry::Window(Tab::Note(f.fit10))
+            ]),
+            "Shift+Down extends to Fit10, not to Zed"
+        );
     }
 }

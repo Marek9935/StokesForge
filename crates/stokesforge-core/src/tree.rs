@@ -11,7 +11,7 @@
 //! facade. Each one validates **everything** before writing anything,
 //! so that a failure leaves the tree unchanged.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use stokesforge_plot::SavedColors;
@@ -20,7 +20,7 @@ use crate::calc::{Calculation, CorrectionRecord};
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
-use crate::name::{check_name, same_name_ignoring_case};
+use crate::name::{check_name, natural_cmp, same_name_ignoring_case};
 use crate::node::{containment_message, Node, NodeKind};
 use crate::path::{format_path, parse_path, ObjectPath};
 use crate::transpose::TransposeLink;
@@ -54,6 +54,11 @@ pub struct Tree {
     /// Links of the transposed sheets (#253), by transposed sheet — see
     /// [`crate::transpose`]. Carried by the tree like calculations.
     transposes: BTreeMap<NodeId, Arc<TransposeLink>>,
+    /// Folders whose order is manual (#425): the Project Manager shows their
+    /// children in model order. Any other folder is shown sorted (folders
+    /// first, then natural name order). A view setting carried by the tree to
+    /// travel with snapshots and the file; no formula reads it (invariant 11).
+    manual_order: BTreeSet<NodeId>,
 }
 
 impl Tree {
@@ -87,7 +92,54 @@ impl Tree {
             calculations: BTreeMap::new(),
             correction_traces: BTreeMap::new(),
             transposes: BTreeMap::new(),
+            manual_order: BTreeSet::new(),
         }
+    }
+
+    /// True if `folder` is shown in model order (#425) instead of sorted.
+    pub fn is_manual_order(&self, folder: NodeId) -> bool {
+        self.manual_order.contains(&folder)
+    }
+
+    /// The folders in manual order, for persistence.
+    pub fn manual_order_folders(&self) -> &BTreeSet<NodeId> {
+        &self.manual_order
+    }
+
+    /// The same tree, with these folders in manual order — for persistence.
+    /// Keys that are not folders of the tree are dropped.
+    pub fn with_manual_order(mut self, folders: impl IntoIterator<Item = NodeId>) -> Self {
+        self.manual_order = folders
+            .into_iter()
+            .filter(|id| self.nodes.get(id).is_some_and(|n| n.kind().is_folder()))
+            .collect();
+        self
+    }
+
+    pub(crate) fn manual_order_mut(&mut self) -> &mut BTreeSet<NodeId> {
+        &mut self.manual_order
+    }
+
+    /// The children of `folder` in the order a view shows them (#425): the
+    /// model order for a folder in manual order, otherwise folders first then
+    /// natural name order (`Fit2` before `Fit10`), ties by identifier.
+    pub fn displayed_children(&self, folder: NodeId) -> CoreResult<Vec<NodeId>> {
+        let mut ids = self.children(folder)?.to_vec();
+        if !self.manual_order.contains(&folder) {
+            let nodes = &self.nodes;
+            let key = |id: &NodeId| {
+                nodes
+                    .get(id)
+                    .map_or((true, ""), |n| (!n.kind().is_folder(), n.name()))
+            };
+            ids.sort_by(|a, b| {
+                let (ka, kb) = (key(a), key(b));
+                ka.0.cmp(&kb.0)
+                    .then_with(|| natural_cmp(ka.1, kb.1))
+                    .then_with(|| a.cmp(b))
+            });
+        }
+        Ok(ids)
     }
 
     /// The linked transposed sheets, by transposed sheet (#253).
@@ -207,6 +259,7 @@ impl Tree {
             calculations: BTreeMap::new(),
             correction_traces: BTreeMap::new(),
             transposes: BTreeMap::new(),
+            manual_order: BTreeSet::new(),
         };
         tree.validate_loaded()?;
         Ok(tree)

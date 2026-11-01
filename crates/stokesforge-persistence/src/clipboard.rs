@@ -221,6 +221,7 @@ fn decode_copies(
             next_id_hint: wrapper,
             nodes,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations,
             correction_traces: Default::default(),
             transposes,

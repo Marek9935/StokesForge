@@ -193,6 +193,15 @@ pub enum DataDelta {
         /// Colors after.
         after: SavedColors,
     },
+    /// Manual or automatic order of a folder (#425): a flag per folder.
+    FolderOrder {
+        /// The folder.
+        folder: NodeId,
+        /// Was manual before.
+        before: bool,
+        /// Is manual after.
+        after: bool,
+    },
 }
 
 /// A history entry: a structure snapshot, a data delta, or
@@ -1135,7 +1144,8 @@ impl History {
             | Command::SetColumnMeta { .. }
             | Command::SetPlotSpec { .. }
             | Command::EditPlotSpec { .. }
-            | Command::SetSavedColors { .. } => {
+            | Command::SetSavedColors { .. }
+            | Command::SetFolderOrder { .. } => {
                 unreachable!("apply_structural called with a data command")
             }
         }
@@ -1404,6 +1414,17 @@ impl History {
                     label,
                 })
             }
+            Command::SetFolderOrder { folder, manual } => {
+                let before = project.set_folder_manual_order(folder, manual)?;
+                Ok(Entry::Data {
+                    delta: Box::new(DataDelta::FolderOrder {
+                        folder,
+                        before,
+                        after: manual,
+                    }),
+                    label,
+                })
+            }
             Command::AddColumn { .. }
             | Command::DeleteColumn { .. }
             | Command::Rename { .. }
@@ -1563,6 +1584,10 @@ impl History {
                 project.set_saved_colors(before.clone());
                 Ok(())
             }
+            DataDelta::FolderOrder { folder, before, .. } => {
+                project.set_folder_manual_order(*folder, *before)?;
+                Ok(())
+            }
         }
     }
 
@@ -1640,6 +1665,10 @@ impl History {
                 project.set_saved_colors(after.clone());
                 Ok(())
             }
+            DataDelta::FolderOrder { folder, after, .. } => {
+                project.set_folder_manual_order(*folder, *after)?;
+                Ok(())
+            }
         }
     }
 }
@@ -1694,7 +1723,8 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             | DataDelta::NoteText { .. }
             | DataDelta::ColumnMeta { .. }
             | DataDelta::PlotSpec { .. }
-            | DataDelta::SavedColors { .. } => false,
+            | DataDelta::SavedColors { .. }
+            | DataDelta::FolderOrder { .. } => false,
         },
         Entry::Macro { .. } => false,
     }
@@ -2059,7 +2089,8 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
         DataDelta::WindowMeta { .. }
         | DataDelta::NoteText { .. }
         | DataDelta::PlotSpec { .. }
-        | DataDelta::SavedColors { .. } => {}
+        | DataDelta::SavedColors { .. }
+        | DataDelta::FolderOrder { .. } => {}
         // `ColumnMeta` joins `ColumnType` as soon as it carries `values_before`
         // (see its doc): it is then, too, a `ColumnValues`
         // potentially shared with the current tree.
@@ -2148,7 +2179,8 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::SetColumnMeta { .. }
         | Command::SetPlotSpec { .. }
         | Command::EditPlotSpec { .. }
-        | Command::SetSavedColors { .. } => {}
+        | Command::SetSavedColors { .. }
+        | Command::SetFolderOrder { .. } => {}
     }
     out
 }
@@ -2191,7 +2223,8 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
         | DataDelta::NoteText { .. }
         | DataDelta::ColumnMeta { .. }
         | DataDelta::PlotSpec { .. }
-        | DataDelta::SavedColors { .. } => {}
+        | DataDelta::SavedColors { .. }
+        | DataDelta::FolderOrder { .. } => {}
     }
     out
 }

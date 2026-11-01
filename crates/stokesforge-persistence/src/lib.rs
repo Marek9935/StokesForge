@@ -378,6 +378,12 @@ pub fn save_with_geometries(
         calculations: calculations::calculations_to_records(tree),
         correction_traces: calculations::corrections_to_records(tree),
         transposes: transposes::transposes_to_records(tree),
+        manual_order_folders: tree
+            .manual_order_folders()
+            .iter()
+            .filter(|id| tree.node(**id).is_some_and(|n| n.kind().is_folder()))
+            .map(|id| id.raw())
+            .collect(),
         window_geometries,
         column_widths,
     };
@@ -530,7 +536,11 @@ pub fn load_with_limits(
     let save_counter = body.save_counter;
     let raw_geometries = std::mem::take(&mut body.window_geometries);
     let raw_widths = std::mem::take(&mut body.column_widths);
-    for &id in raw_geometries.keys().chain(raw_widths.keys()) {
+    for &id in raw_geometries
+        .keys()
+        .chain(raw_widths.keys())
+        .chain(body.manual_order_folders.iter())
+    {
         check_node_id(id, path)?;
     }
     check_cell_budget(&body, limits.max_cells, path)?;
@@ -668,6 +678,11 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
             source,
         })?
         .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
+        .with_manual_order(
+            body.manual_order_folders
+                .iter()
+                .map(|id| NodeId::from_raw(*id)),
+        )
         .with_correction_traces(traces);
     // A1 (#316): have the inputs of a calculation changed since
     // the save? Compared on the values of the file, without recalculation.
@@ -953,7 +968,11 @@ fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u6
                 };
                 let geometry_ids = std::mem::take(&mut body.window_geometries);
                 let width_ids = std::mem::take(&mut body.column_widths);
-                for &id in geometry_ids.keys().chain(width_ids.keys()) {
+                for &id in geometry_ids
+                    .keys()
+                    .chain(width_ids.keys())
+                    .chain(body.manual_order_folders.iter())
+                {
                     check_node_id(id, path).map_err(unreadable)?;
                 }
                 build_project_reported(body, path).map_err(unreadable)?;
@@ -999,6 +1018,7 @@ mod tests {
             nodes: vec![root, child],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1028,6 +1048,7 @@ mod tests {
             nodes: vec![root, orphan],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1074,6 +1095,7 @@ mod tests {
             nodes: vec![root, orphan],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1095,6 +1117,7 @@ mod tests {
             nodes: vec![a, b],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1125,6 +1148,7 @@ mod tests {
             nodes: vec![root],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1174,6 +1198,7 @@ mod tests {
             nodes: vec![root, column],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1513,6 +1538,7 @@ mod tests {
             ],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
@@ -1690,6 +1716,7 @@ mod tests {
             ],
             save_counter: 0,
             saved_colors: Default::default(),
+            manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),

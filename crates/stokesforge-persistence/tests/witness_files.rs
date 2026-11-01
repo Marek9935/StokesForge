@@ -297,6 +297,12 @@ fn witness_project() -> (Project, ViewTables) {
             .with_gradient_added("Chaud", &["#000000".to_string(), "#ff0000".to_string()]),
     );
 
+    // A folder shown in manual order (#425), next to the automatic ones.
+    let manual = project.add_folder(root, "Hand-ordered").expect("folder");
+    project
+        .set_folder_manual_order(manual, true)
+        .expect("manual order");
+
     // View tables: more than two windows, so that the order matters.
     let mut window_geometries = HashMap::new();
     let mut column_widths = HashMap::new();

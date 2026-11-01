@@ -55,4 +55,5 @@ pub mod selection;
 pub mod startup;
 pub mod state;
 pub mod text_format;
+pub mod tree_drop;
 pub mod user_colors;
