@@ -73,7 +73,9 @@ Create objects from the **File ▸ New** menu or the **File** toolbar:
 
 A new workbook is named `Book1`, `Book2`… A new window opens in the foreground.
 
-To create a folder inside another folder, right-click the folder in the Project Manager and choose **Add Folder**. The new folder opens with its name ready to edit.
+A new workbook or graph is created in the folder you have selected in the Project Manager, or in the folder of the selected window. With nothing selected, or several entries, it goes to the top level of the project. That folder opens to show it. In a folder shown sorted it takes its place in the order, in a folder in manual order it goes to the end.
+
+To create a folder inside another folder, right-click the folder in the Project Manager and choose **Add Folder**. The new folder opens with its name ready to edit. The **Project Root** submenu of any entry holds **Add Folder**, **Paste** and **Sort** for the top level, and so does a right-click in the empty area below the last row.
 
 Folders contain workbooks, graphs and other folders. Names must be unique inside a folder.
 
@@ -99,7 +101,7 @@ Drag an entry, or several selected entries, onto a folder to move them into it. 
 
 Every folder shows its entries sorted: folders first, then by name, with numbers in numeric order (`Fit2` before `Fit10`). New entries and renamed entries take their place in that order.
 
-When you drag entries between two rows, that folder switches to **manual order**: it keeps the order you made, and new entries arrive at the end. Right-click the folder and choose **Sort** to sort it again. For the top level, right-click the empty area below the last row. **Sort** is greyed out when the folder is already sorted. The manual orders are saved with the project. Copying or duplicating a folder in manual order gives a copy that keeps its manual order, and so do the manual folders inside it.
+When you drag entries between two rows, that folder switches to **manual order**: it keeps the order you made, and new entries arrive at the end. Right-click the folder and choose **Sort** to sort it again. For the top level, right-click the empty area below the last row, or right-click any entry and choose **Project Root ▸ Sort**. **Sort** is greyed out when the folder is already sorted. The manual orders are saved with the project. Copying or duplicating a folder in manual order gives a copy that keeps its manual order, and so do the manual folders inside it.
 
 A folder can be copied and duplicated with everything it holds. What is inside the copy reads the copy: a graph in the copied folder plots the copied workbook, not the original. What is outside the folder is still read from the original. The same holds for several windows copied together: if you select Book1 and Graph1 and copy them in one gesture, the copied Graph1 plots the copied Book1. To paste into a folder, select only that folder and choose **Paste**: the folder opens to show what arrived. If the folder you copied is itself selected, **Paste** puts the copy next to it.
 

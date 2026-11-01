@@ -21,7 +21,8 @@ expand and collapse it, and a paste into it expands it to show what arrived
 (`PmMemory::reveal`). There is no slow-click rename: F2 or the menu. Delete and F2 act
 on it (one history entry, `DeleteObjects` / `RenameObjects`). Paste
 with only this folder selected pastes **into** this folder (`paste_parent`),
-otherwise at the root. A deleted folder leaves the selection. **Copy and
+otherwise at the root (a single selected window pastes at the root too, as
+documented since #170). A deleted folder leaves the selection. **Copy and
 Duplicate work on a folder (#391)**: the whole subtree is copied in one history
 entry, **what is inside the copy reads the copy** (a graph plots the copied
 workbook, a formula the copied sheet, a calculation or a transposed sheet the
@@ -29,6 +30,18 @@ copied columns) and the rest keeps reading the original. The same rule covers ev
 copy beside the original; Ctrl+V with the copied folder itself selected also
 pastes beside it (`AppState::paste_objects`), with another folder selected
 inside that folder.
+**New windows go into the selected folder (#425).** Add Workbook and Add Graph
+(File menu, File bar, shortcut) create in the folder given by
+`stokesforge_app_state::creation_folder::creation_folder` over the Project
+Manager selection: one folder, inside it; one window, in its folder; nothing or
+several rows, the root. The shell hands the selected nodes to the state
+(`AppState::set_project_manager_selection`, in `dispatch_action`) and reveals the
+folder afterwards (`project_manager::reveal_folder`). Unchanged: import and
+*Plot* from columns, which keep their own destination. A new window takes its
+place in an automatic folder and goes to the end of a manual one. The empty
+area under the last row (always at least two rows tall) and the *Project Root ▸*
+submenu of every row give the root's menu (`root_entries`).
+
 **Keyboard (#170, point 6, S-K9).** With the panel focused, Up and Down move the
 selection from one visible row to the next (`PmMemory::visible`, collected during
 painting; `order`, which keeps collapsed folders, is used only for Shift ranges),

@@ -54,7 +54,7 @@ use stokesforge_core::NodeId;
 use super::inplace_edit;
 use super::list_row::{
     list_row_focused, neighbour, raise_to_list_row_height, read_tree_navigation,
-    restore_row_height, with_list_row_height, TreeKey,
+    restore_row_height, with_list_row_height, TreeKey, LIST_ROW_HEIGHT,
 };
 use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_OBJECT, SHORTCUT_RENAME_OBJECT};
@@ -271,6 +271,18 @@ pub(super) fn begin_rename_of_new_folder(
         memory.text = None;
         memory.focus = true;
         memory.reveal.push(parent);
+        data.insert_temp(key, memory);
+    });
+    ctx.request_repaint_of(viewport);
+}
+
+/// Expands `folder` in the panel that is on screen (`viewport`): the folder
+/// that has just received a new window shows it (#425).
+pub(super) fn reveal_folder(ctx: &egui::Context, viewport: egui::ViewportId, folder: NodeId) {
+    let key = egui::Id::new(("project_manager_gestures", viewport));
+    ctx.data_mut(|data| {
+        let mut memory = data.get_temp::<PmMemory>(key).unwrap_or_default();
+        memory.reveal.push(folder);
         data.insert_temp(key, memory);
     });
     ctx.request_repaint_of(viewport);
@@ -633,12 +645,14 @@ pub(super) fn project_manager_contents_from_tree(
         for node in tree {
             project_tree_node_ui(ui, node, tree, interaction);
         }
-        let rest = ui.clip_rect().bottom() - ui.cursor().top();
-        if rest > 1.0 {
-            let (_, empty) = ui
-                .allocate_exact_size(egui::vec2(ui.available_width(), rest), egui::Sense::click());
-            empty.context_menu(|ui| root_menu(ui, interaction));
-        }
+        // Under the last row there is always a free strip (#425): scrolled to the
+        // bottom, the root's right-click is reachable even when the rows fill the
+        // panel. It grows to the panel's bottom edge when the tree is short.
+        let rest =
+            (ui.clip_rect().bottom() - ui.cursor().top()).max(FREE_STRIP_ROWS * LIST_ROW_HEIGHT);
+        let (_, empty) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), rest), egui::Sense::click());
+        empty.context_menu(|ui| root_menu(ui, interaction));
     });
     drive_drag(ui, tree, interaction, memory_key, response.inner_rect);
     // A keyboard request is valid only for the next frame: a hidden folder
@@ -749,7 +763,13 @@ fn drive_drag(
 /// (#425). Add Folder and Paste target the root; Sort puts the root back in
 /// automatic order, greyed with its reason when it already is.
 fn root_menu(ui: &mut egui::Ui, interaction: &mut PmInteraction) {
-    let mut sections = MenuSections::new();
+    root_entries(ui, &mut MenuSections::new(), interaction);
+}
+
+/// The entries of the root menu, shared by the empty-area right-click and the
+/// *Project Root* submenu of every row's right-click: one function, so the
+/// actions, the enabled rules and the disabled reasons cannot drift apart.
+fn root_entries(ui: &mut egui::Ui, sections: &mut MenuSections, interaction: &mut PmInteraction) {
     let root = interaction.root;
     sections.section(ui, true, |ui| {
         add_folder_entry(ui, root, interaction.actions)
@@ -762,6 +782,23 @@ fn root_menu(ui: &mut egui::Ui, interaction: &mut PmInteraction) {
             !interaction.manual.contains(&root),
             interaction.actions,
         )
+    });
+}
+
+/// Last section of a row's right-click (#425): *Project Root ▸* holds the root
+/// menu, so it stays reachable when the rows fill the panel and no empty area
+/// is left.
+fn project_root_section(
+    ui: &mut egui::Ui,
+    sections: &mut MenuSections,
+    interaction: &mut PmInteraction,
+) {
+    sections.section(ui, true, |ui| {
+        ui.menu_button(tr!("project-root-menu"), |ui| {
+            root_entries(ui, &mut MenuSections::new(), interaction)
+        })
+        .response
+        .on_hover_text(tr!("project-root-menu", "hint"));
     });
 }
 
@@ -1094,9 +1131,10 @@ fn project_tree_node_ui(
                         .data(|data| data.get_temp::<PmMemory>(memory_key))
                         .unwrap_or_default();
                     let ids = selected_ids(interaction.selection, &memory.order);
+                    let mut sections = MenuSections::new();
                     object_menu(
                         ui,
-                        &mut MenuSections::new(),
+                        &mut sections,
                         ObjectMenuTarget::Folder {
                             sorted: !interaction.manual.contains(id),
                         },
@@ -1104,7 +1142,8 @@ fn project_tree_node_ui(
                         *id,
                         interaction.actions,
                         viewport,
-                    )
+                    );
+                    project_root_section(ui, &mut sections, interaction);
                 });
             });
             // A click only selects; the double-click toggles the folder, once
@@ -1217,6 +1256,7 @@ fn project_tree_node_ui(
                     interaction.actions,
                     viewport,
                 );
+                project_root_section(ui, &mut sections, interaction);
             });
             // S-K3: a double-click activates or restores the window, it never
             // closes it (closing is done by Close or the header). A single click
@@ -1228,6 +1268,9 @@ fn project_tree_node_ui(
         }
     }
 }
+
+/// Height, in rows, of the strip kept free under the last row (#425).
+const FREE_STRIP_ROWS: f32 = 2.0;
 
 /// Default width of the fixed Project Manager panel, and of the separate OS
 /// window when it is detached.
@@ -3789,6 +3832,183 @@ pub(super) mod tests {
                 PmEntry::Window(Tab::Note(f.fit10))
             ]),
             "Shift+Down extends to Fit10, not to Zed"
+        );
+    }
+
+    /// A project of `n` notes at the root, the whole tree painted on the 400 x
+    /// 400 bench.
+    fn long_tree(n: usize) -> (Session, Vec<ProjectTreeNode>) {
+        let mut project = Project::new("Long").unwrap();
+        let root = project.root();
+        for _ in 0..n {
+            project.add_note(root, None, "").unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let tree = state.project_tree();
+        (session, tree)
+    }
+
+    /// #425: a tree taller than the panel still ends with a free strip. Scrolled
+    /// to the bottom, a right-click under the last row opens the root menu.
+    /// Witness: without the strip (`FREE_STRIP_ROWS` at 0) the last row touches
+    /// the bottom edge and the click lands on a row.
+    #[test]
+    fn a_tree_taller_than_the_panel_keeps_a_strip_for_the_root_menu() {
+        let (_session, tree) = long_tree(30);
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
+        paint(&context, Vec::new());
+        let wheel = vec![
+            egui::Event::PointerMoved(egui::pos2(100.0, 100.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -10_000.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        paint(&context, wheel);
+        for _ in 0..3 {
+            paint(&context, Vec::new());
+        }
+        let menu = open_context_menu(&context, egui::pos2(100.0, 395.0), paint);
+        assert!(painted(&menu, &tr!("action-add-folder")));
+        assert!(painted(&menu, &tr!("action-sort-folder")));
+        assert!(
+            !painted(&menu, &tr!("action-delete-project-object")),
+            "the root menu, not a row's"
+        );
+    }
+
+    /// Opens the *Project Root* submenu of the row `name` and returns the
+    /// painted frame.
+    fn open_project_root_of(
+        bench: &Bench,
+        tree: &[ProjectTreeNode],
+        name: &str,
+    ) -> (egui::Context, egui::FullOutput) {
+        let context = egui::Context::default();
+        let paint = |context: &egui::Context, events| bench.paint(context, tree, events);
+        paint(&context, Vec::new());
+        let first = paint(&context, Vec::new());
+        let pos = find_text_center(&first.shapes, name);
+        let menu = open_context_menu(&context, pos, paint);
+        let entry = find_text_center(&menu.shapes, &tr!("project-root-menu"));
+        click_at(&context, entry, egui::Modifiers::NONE, paint);
+        let opened = paint(&context, Vec::new());
+        (context, opened)
+    }
+
+    /// #425: the right-click of a window row ends with *Project Root*, whose
+    /// entries act on the root: Sort (enabled because the root is in manual
+    /// order here) and Add Folder push their action with the root. Witness: no
+    /// submenu, no entry.
+    #[test]
+    fn a_window_right_click_holds_the_root_menu_in_a_submenu() {
+        let (_session, _book, _graph, tree) = project_manager_fixture();
+        let bench = Bench::new(HashSet::new());
+        bench.manual.borrow_mut().insert(NodeId::from_raw(1));
+        let (context, opened) = open_project_root_of(&bench, &tree, "Graph1");
+        let texts = super::super::test_support::texts(&opened.shapes);
+        for label in [
+            tr!("action-add-folder"),
+            tr!("action-paste"),
+            tr!("action-sort-folder"),
+        ] {
+            assert!(
+                texts.iter().any(|t| t.text == label),
+                "{label} in the submenu"
+            );
+        }
+        // The submenu comes after the window's own sections.
+        assert!(
+            find_text_center(&opened.shapes, &tr!("project-root-menu")).y
+                > find_text_center(&opened.shapes, &tr!("action-delete-project-object")).y
+        );
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
+        click_at(
+            &context,
+            find_text_center(&opened.shapes, &tr!("action-sort-folder")),
+            egui::Modifiers::NONE,
+            paint,
+        );
+        assert_eq!(
+            *bench.actions.borrow(),
+            vec![Action::SortFolder(NodeId::from_raw(1))]
+        );
+    }
+
+    /// #425: same submenu on a folder row; its Add Folder (the one of the
+    /// submenu, the rightmost) targets the root, not the folder. The disabled
+    /// Sort keeps its reason when the root is already sorted.
+    #[test]
+    fn a_folder_right_click_holds_the_root_menu_in_a_submenu() {
+        let folder = NodeId::from_raw(7);
+        let tree = vec![ProjectTreeNode::Folder {
+            id: folder,
+            name: "Measurements".into(),
+            children: Vec::new(),
+        }];
+        let bench = Bench::new(HashSet::new());
+        let (context, opened) = open_project_root_of(&bench, &tree, "Measurements");
+        let texts = super::super::test_support::texts(&opened.shapes);
+        let add = texts
+            .iter()
+            .filter(|t| t.text == tr!("action-add-folder"))
+            .max_by(|a, b| a.center.x.total_cmp(&b.center.x))
+            .expect("Add Folder in the submenu");
+        let at = add.center;
+        assert_eq!(
+            texts
+                .iter()
+                .filter(|t| t.text == tr!("action-add-folder"))
+                .count(),
+            2,
+            "the folder's own and the submenu's"
+        );
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
+        click_at(&context, at, egui::Modifiers::NONE, paint);
+        assert_eq!(
+            *bench.actions.borrow(),
+            vec![Action::AddFolder {
+                parent: NodeId::from_raw(1)
+            }]
+        );
+    }
+
+    /// #425: after a new window is created from the File menu or the toolbar,
+    /// the folder of the selection is painted open and shows it. Witness: without
+    /// the reveal request the folder stays collapsed.
+    #[test]
+    fn the_folder_that_received_a_new_window_is_painted_open() {
+        let mut project = Project::new("Reveal").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Measurements").unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        bench.paint(&context, &app.state.project_tree(), Vec::new());
+        app.pm_selection = [PmEntry::Folder(folder)].into_iter().collect();
+        app.dispatch_action(&context, Action::AddGraph);
+        let tree = app.state.project_tree();
+        let new_graph = app
+            .state
+            .tree()
+            .children(folder)
+            .unwrap()
+            .last()
+            .copied()
+            .expect("the graph is in the folder");
+        let name = app.state.tree().node(new_graph).unwrap().name().to_string();
+        bench.paint(&context, &tree, Vec::new());
+        let output = bench.paint(&context, &tree, Vec::new());
+        assert!(
+            painted(&output, &name),
+            "{name} is shown in the open folder"
         );
     }
 }

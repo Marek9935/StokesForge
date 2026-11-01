@@ -34,6 +34,7 @@ pub mod analysis;
 pub mod analysis_recent;
 pub mod cell_sides;
 pub mod column_move;
+pub mod creation_folder;
 pub mod default_folders;
 pub mod errors;
 pub mod figure_texts;

@@ -57,7 +57,7 @@ progress or an open macro. The first **Save** ("Save") asks for a
 destination, then the following ones use that file.
 
 **File › New › Add Graph** ("File › Add Graph") and the File bar
-create an empty graph at the root: one plot area, no series or title.
+create an empty graph in the folder of the Project Manager selection (#425; the root when nothing or several rows are selected): one plot area, no series or title.
 Its window opens in the foreground. It goes through the existing `AddGraph`
 command: Undo removes it, Redo brings back the same identity, and the `.stf`
 keeps it. This gesture has no extra shortcut; it stays reachable from the menu.

@@ -204,6 +204,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Whole group / This series only | Tout le groupe / Cette série seulement | Scope of the settings of a series that is in a group; the settings specific to one series are greyed out in "group" scope (#177) | Appliquer à tous | G |
 | Leave Group | Quitter le groupe | Detaches the series from its group, style kept (#177) | Dissocier, Sortir | G |
 | Sort | Trier | Puts a Project Manager folder back in automatic order: folders first, then natural name order (#425) | Order, Classer | G |
+| Project Root | Racine du projet | Submenu of every Project Manager row's right-click: Add Folder, Paste and Sort applied to the top level of the project (#425). « root » is the term of the formula errors (`error-formula-ambiguous-workbook`) | Racine, Dossier racine, Top level | G |
 | Color gradient | Nuancier | Gradient of colors spread over the series of a group: Blue to Red / Bleu vers Rouge… (#178; the arrow → is not in the interface font: a square is shown in its place, do not use it); can be saved in the project or for the user, with its name | Palette (qualitative, sans ordre), Dégradé | G |
 | Plot type | Type de tracé | Way of plotting a series | Mode | O |
 | Bins | Classes | Number of bars of a Histogram series, whole number 1 to 65536 (#359) | Intervalles, Bacs | O |

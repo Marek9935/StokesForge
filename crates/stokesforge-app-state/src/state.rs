@@ -159,12 +159,13 @@ pub enum Action {
     /// the read discarded" (#309, F3): `true` writes, `false` gives up (and
     /// forgets the gesture that was waiting for the save).
     ConfirmDiscardedSave(bool),
-    /// Adds an empty graph at the root, undoable like a plot.
+    /// Adds an empty graph, undoable like a plot, in the folder of the Project
+    /// Manager selection (#425, [`AppState::creation_folder`]): the root when
+    /// nothing or several rows are selected.
     AddGraph,
-    /// Adds a workbook and its initial sheet at the root of the project.
-    ///
-    /// The File menu carries no ambiguous destination: a new workbook always
-    /// belongs to the root folder of the open project.
+    /// Adds a workbook and its initial sheet in the folder of the Project
+    /// Manager selection (#425, [`AppState::creation_folder`]), the root when
+    /// nothing or several rows are selected.
     AddWorkbook,
     /// Adds an empty folder in `parent`, under the first free name "FolderN"
     /// among its children (#326). The File menu and the toolbar target the
@@ -2991,6 +2992,9 @@ pub struct AppState {
     alert: Option<Alert>,
     /// Export that would overwrite a file the picker has not seen (S-F3).
     pending_overwrite: Option<(PathBuf, Box<PlotSpec>)>,
+    /// Nodes selected in the Project Manager, kept by the shell (#425): a new
+    /// window is created in their folder ([`AppState::creation_folder`]).
+    pm_selection: Vec<NodeId>,
     /// The **source** file of the last load and what its read
     /// discarded, as long as that has not been saved (#309, F3): overwriting it
     /// would delete that data from disk, hence the confirmation. Set by
@@ -3246,6 +3250,7 @@ impl AppState {
             quit_ready: false,
             alert: None,
             pending_overwrite: None,
+            pm_selection: Vec::new(),
             discarded_source: None,
             pending_discarded_save: None,
             renaming_sheet: None,
@@ -3390,6 +3395,17 @@ impl AppState {
     /// Last snapshot received.
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
+    }
+
+    /// The shell tells the state which nodes the Project Manager has selected.
+    pub fn set_project_manager_selection(&mut self, selection: Vec<NodeId>) {
+        self.pm_selection = selection;
+    }
+
+    /// The folder a new window is created in (#425), see
+    /// [`crate::creation_folder::creation_folder`].
+    pub fn creation_folder(&self) -> NodeId {
+        crate::creation_folder::creation_folder(&self.snapshot.tree, &self.pm_selection)
     }
 
     /// Tree of the last snapshot.
@@ -5261,7 +5277,7 @@ impl AppState {
             }
             Action::ConfirmDiscardedSave(accept) => self.confirm_discarded_save(accept),
             Action::AddGraph => self.execute(Command::AddGraph {
-                parent: self.snapshot.tree.root(),
+                parent: self.creation_folder(),
                 name: None,
                 spec: PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
@@ -9917,7 +9933,7 @@ impl AppState {
     /// part, creates its workbooks empty (`create_import_book`): the file
     /// provides the columns.
     fn add_workbook(&mut self) {
-        let root = self.snapshot.tree.root();
+        let root = self.creation_folder();
         if !self.begin_creation_macro(MacroKind::AddWorkbook) {
             return;
         }

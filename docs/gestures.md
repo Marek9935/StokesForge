@@ -131,6 +131,8 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Drag | row (OM) | reorders; on a graph, moves the object |
 | Drag | row (PM) | moves the row, or the whole selection when the row is selected (an unselected row goes alone and becomes the selection), always a move, never a copy (#425). Folder row: top quarter inserts before it, middle drops inside it (folder highlighted), bottom quarter inserts after it (before its first child when it is open with children); window row: upper half before, lower half after. Inserting between rows puts the folder in manual order. A closed folder hovered for 1 s opens. Escape cancels; one release is one history entry; a folder into itself or a taken name is refused like Paste |
 | Drag, release below the last row | PM | drops inside the root (#425), order unchanged |
+| Right-click | empty strip under the last row (always at least two rows tall) | root menu: Add Folder · Paste ─ Sort (#425); the same entries are in *Project Root ▸* of every row's right-click |
+| File ▸ New ▸ Add Workbook / Add Graph, File bar | PM selection | creates in the selected folder, or in the folder of the selected window; the root for none or several rows; that folder expands (#425) |
 | Right-click | row | if outside the selection, replaces it; menu of the object (a single menu, `menus.md`) |
 | Right-click › Add Folder | folder (PM) | creates a folder "FolderN" in this folder, expands it and puts the name of the new folder in in-place editing (creation and name = two history entries) |
 | Right-click | OM background | panel settings |
