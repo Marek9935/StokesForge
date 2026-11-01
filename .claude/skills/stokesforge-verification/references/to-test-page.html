@@ -125,6 +125,7 @@ function testBox(x){
     b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(el('li','',s)));b.appendChild(o);
   }
   if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
+  if(x.try){b.appendChild(el('div','lbl','Avant, lance (pas encore fusionné)'));b.appendChild(el('code','',x.try));}
   const m=[];if(x.date)m.push(String(x.date).slice(0,10));if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
   if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
   const editing=openBack&&openBack.id===x.id;
