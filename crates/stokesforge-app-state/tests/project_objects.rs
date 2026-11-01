@@ -470,7 +470,7 @@ fn plotted_column(state: &AppState, folder: NodeId) -> NodeId {
 }
 
 /// #391 (C1): copying a folder and pasting it into another folder gives
-/// `<name> copy 1`, inner windows keep their names, and the copied graph
+/// `<name>` (free there, #423), inner windows keep their names, and the copied graph
 /// plots the copied workbook. Witness: the original graph keeps its own.
 #[test]
 fn a_copied_folder_pasted_into_another_folder_reads_its_own_workbook() {
@@ -482,8 +482,8 @@ fn a_copied_folder_pasted_into_another_folder_reads_its_own_workbook() {
         parent: f.other,
         text,
     });
-    assert_eq!(names_in(&f.state, f.other), vec!["Folder copy 1"]);
-    let copy = child_by_name(&f.state, f.other, "Folder copy 1");
+    assert_eq!(names_in(&f.state, f.other), vec!["Folder"]);
+    let copy = child_by_name(&f.state, f.other, "Folder");
     assert_eq!(names_in(&f.state, copy), vec!["Book1", "Graph1"]);
     let copied_book = child_by_name(&f.state, copy, "Book1");
     assert_ne!(copied_book, f.book);
@@ -898,4 +898,99 @@ fn pasting_a_cut_into_another_project_copies() {
         Some(f.folder),
         "the source stays where it was"
     );
+}
+
+/// #423: a copy keeps its name when the destination does not hold it; a
+/// colliding one gets `copy 1`. Witness: always suffixing renames the first.
+#[test]
+fn a_pasted_window_keeps_its_name_unless_the_destination_holds_it() {
+    let mut f = folder_fixture();
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::CopyObjects(vec![graph]));
+    let text = f.state.take_object_clipboard_text().expect("copied");
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: text.clone(),
+    });
+    assert_eq!(names_in(&f.state, f.other), vec!["Graph1"]);
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text,
+    });
+    assert_eq!(names_in(&f.state, f.other), vec!["Graph1", "Graph1 copy 1"]);
+}
+
+/// #423: duplicating a copy never stacks suffixes. Witness: using the whole
+/// original name as the base gives "Folder copy 1 copy 1".
+#[test]
+fn duplicating_a_copy_counts_on_instead_of_stacking_suffixes() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::DuplicateObjects(vec![f.folder]));
+    let first = child_by_name(&f.state, f.root, "Folder copy 1");
+    f.state.dispatch(Action::DuplicateObjects(vec![first]));
+    let second = child_by_name(&f.state, f.root, "Folder copy 2");
+    f.state.dispatch(Action::DuplicateObjects(vec![second]));
+    assert_eq!(
+        names_in(&f.state, f.root),
+        vec![
+            "Folder",
+            "Other",
+            "Folder copy 1",
+            "Folder copy 2",
+            "Folder copy 3"
+        ]
+    );
+}
+
+/// #423: a name that only ends with digits is not a copy suffix.
+#[test]
+fn duplicating_a_name_ending_in_digits_keeps_it_whole() {
+    let mut f = folder_fixture();
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::RenameObject {
+        id: graph,
+        name: "Graph10".into(),
+    });
+    f.state.dispatch(Action::DuplicateObjects(vec![graph]));
+    assert_eq!(
+        names_in(&f.state, f.folder),
+        vec!["Book1", "Graph10", "Graph10 copy 1"]
+    );
+}
+
+/// #423: items pasted in one gesture read each other's new names. Into a
+/// folder holding "X", "X" becomes "X copy 1" and the pasted "X copy 1" must
+/// not collide with it. Witness: ignoring the batch gives two "X copy 1".
+/// (The clipboard refuses two roots of the same name, so the batch collision
+/// goes through a suffixed sibling.)
+#[test]
+fn a_batch_reads_the_names_it_just_gave() {
+    let mut project = Project::new("Batch").unwrap();
+    let root = project.root();
+    let a = project.add_folder(root, "A").unwrap();
+    let b = project.add_folder(root, "B").unwrap();
+    let dest = project.add_folder(root, "Dest").unwrap();
+    let empty = project.add_folder(root, "Empty").unwrap();
+    project.add_workbook(dest, Some("X")).unwrap();
+    let x = project.add_workbook(a, Some("X")).unwrap();
+    let x1 = project.add_workbook(b, Some("X copy 1")).unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    state.dispatch(Action::CopyObjects(vec![x, x1]));
+    let text = state.take_object_clipboard_text().expect("copied");
+    state.dispatch(Action::PasteObjects {
+        parent: dest,
+        text: text.clone(),
+    });
+    assert_eq!(names_in(&state, dest), vec!["X", "X copy 1", "X copy 2"]);
+    state.dispatch(Action::PasteObjects {
+        parent: empty,
+        text,
+    });
+    assert_eq!(names_in(&state, empty), vec!["X", "X copy 1"]);
 }

@@ -8526,36 +8526,29 @@ impl AppState {
         self.move_objects(&moving, parent);
     }
 
+    /// Name of an object copy placed in `parent`: the original name when it
+    /// is free there, otherwise `<base> copy N` (see [`unique_copy_name`]).
     fn next_object_copy_name(
         &self,
         parent: NodeId,
         origin: &str,
         taken: &[(NodeId, String)],
     ) -> String {
-        (1u64..)
-            .map(|number| {
-                tr!(
-                    "sheet-copy-name",
-                    name = origin,
-                    number = number.to_string()
-                )
-            })
-            .find(|name| {
-                taken
+        let siblings: Vec<String> = self
+            .tree()
+            .children(parent)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|id| self.tree().node(*id).map(|n| n.name().to_string()))
+            .collect();
+        unique_copy_name(origin, &copy_name_template, |name| {
+            taken
+                .iter()
+                .all(|(at, other)| *at != parent || !same_name_ignoring_case(other, name))
+                && siblings
                     .iter()
-                    .all(|(at, other)| *at != parent || !same_name_ignoring_case(other, name))
-                    && self
-                        .tree()
-                        .children(parent)
-                        .unwrap_or_default()
-                        .iter()
-                        .all(|id| {
-                            self.tree()
-                                .node(*id)
-                                .is_none_or(|node| !same_name_ignoring_case(node.name(), name))
-                        })
-            })
-            .unwrap_or_else(|| origin.to_string())
+                    .all(|other| !same_name_ignoring_case(other, name))
+        })
     }
 
     fn duplicate_objects(&mut self, ids: &[NodeId]) {
@@ -8828,20 +8821,12 @@ impl AppState {
             .map(|node| node.name().to_string())
             .unwrap_or_default();
         let existing = self.worksheets_of(book);
-        let name = (1u64..)
-            .map(|n| {
-                tr!(
-                    "sheet-copy-name",
-                    name = origin.as_str(),
-                    number = n.to_string()
-                )
-            })
-            .find(|candidate| {
-                existing
-                    .iter()
-                    .all(|(_, other)| !same_name_ignoring_case(other, candidate))
-            })
-            .unwrap_or(origin.clone());
+        // The origin is in the book, so its own name is never free here.
+        let name = unique_copy_name(&origin, &copy_name_template, |candidate| {
+            existing
+                .iter()
+                .all(|(_, other)| !same_name_ignoring_case(other, candidate))
+        });
         let before: Vec<NodeId> = existing.iter().map(|(id, _)| *id).collect();
         self.execute(Command::DuplicateWorksheet { sheet, name });
         let copy = self
@@ -11006,6 +10991,65 @@ fn workbooks_of_columns(tree: &Tree, columns: impl IntoIterator<Item = NodeId>) 
     books
 }
 
+/// Renders the `sheet-copy-name` template of the current language.
+fn copy_name_template(name: &str, number: &str) -> String {
+    tr!("sheet-copy-name", name = name, number = number)
+}
+
+/// Drops a trailing copy suffix from `name`, in the language of `template` or
+/// in English (a project made in another language keeps its suffixes). The
+/// suffix shape is read off the template itself, by rendering it with
+/// sentinels, so a translation needs no code change. A name that merely ends
+/// with digits (`Graph10`) is left untouched.
+fn strip_copy_suffix<'a>(name: &'a str, template: &dyn Fn(&str, &str) -> String) -> &'a str {
+    const NAME: &str = "\u{1}";
+    const NUMBER: &str = "\u{2}";
+    // The English fallback is explicit: `en` is the catalog a project made
+    // in another language than the current one most likely carries.
+    let english = format!("{NAME} copy {NUMBER}");
+    let current = template(NAME, NUMBER);
+    for shape in [current.as_str(), english.as_str()] {
+        let Some((head, rest)) = shape.split_once(NAME) else {
+            continue;
+        };
+        let Some((between, tail)) = rest.split_once(NUMBER) else {
+            continue;
+        };
+        let Some(inner) = name.strip_prefix(head).and_then(|n| n.strip_suffix(tail)) else {
+            continue;
+        };
+        let digits = inner.len() - inner.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        if digits == 0 {
+            continue;
+        }
+        let Some(base) = inner[..inner.len() - digits].strip_suffix(between) else {
+            continue;
+        };
+        if !base.is_empty() {
+            return base;
+        }
+    }
+    name
+}
+
+/// #423: the copy keeps `origin` when `is_free(origin)`; otherwise it is
+/// `<base> copy N` for the smallest free `N >= 1`, `base` being `origin`
+/// without its own copy suffix, so suffixes never stack.
+fn unique_copy_name(
+    origin: &str,
+    template: &dyn Fn(&str, &str) -> String,
+    is_free: impl Fn(&str) -> bool,
+) -> String {
+    if is_free(origin) {
+        return origin.to_string();
+    }
+    let base = strip_copy_suffix(origin, template);
+    (1u64..)
+        .map(|n| template(base, &n.to_string()))
+        .find(|name| is_free(name))
+        .unwrap_or_else(|| origin.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     //! Unit tests targeted at what depends on no session nor project: the
@@ -11014,6 +11058,43 @@ mod tests {
     //! (dispatch, history, save...) is covered in integration by
     //! `tests/shell.rs` and by the `stokesforge-robustness` bench (battery 15),
     //! which need a real session.
+
+    use super::{strip_copy_suffix, unique_copy_name};
+
+    fn en(name: &str, number: &str) -> String {
+        format!("{name} copy {number}")
+    }
+
+    fn fr(name: &str, number: &str) -> String {
+        format!("{name} copie {number}")
+    }
+
+    /// #423: suffixes never stack, in either language, and a plain trailing
+    /// number is not a suffix. Witness: returning `origin` as the base gives
+    /// "Folder copy 1 copy 1".
+    #[test]
+    fn copy_suffixes_do_not_stack() {
+        let taken = |names: &'static [&'static str]| {
+            move |n: &str| !names.iter().any(|t| t.eq_ignore_ascii_case(n))
+        };
+        assert_eq!(
+            unique_copy_name("Folder copy 1", &en, taken(&["Folder copy 1"])),
+            "Folder copy 2"
+        );
+        assert_eq!(
+            unique_copy_name("Workbooks copie 1", &fr, taken(&["Workbooks copie 1"])),
+            "Workbooks copie 2"
+        );
+        // An English suffix is recognised under the French template, and back.
+        assert_eq!(strip_copy_suffix("Workbooks copy 3", &fr), "Workbooks");
+        assert_eq!(
+            strip_copy_suffix("Workbooks copie 3", &en),
+            "Workbooks copie 3"
+        );
+        assert_eq!(strip_copy_suffix("Graph10", &en), "Graph10");
+        assert_eq!(strip_copy_suffix("copy 1", &en), "copy 1");
+        assert_eq!(unique_copy_name("Graph1", &en, taken(&[])), "Graph1");
+    }
 
     use super::{
         external_clipboard_from_text, grid_clipboard_to_text, GridClipboard, HeaderField,

@@ -91,8 +91,12 @@ this window, and not from the last entry clicked in the Project Manager.
 `window_stack` handles the explicit click and asks the detached Project
 Manager to republish.
 
-Names are unique in the parent folder. Copies get the first free
-suffix "copy N" / "copie N" and new identifiers for their whole
+Names are unique in the parent folder. A pasted copy keeps its name when
+the destination does not hold it (#423); otherwise it gets the first free
+suffix "copy N" / "copie N" after its base name (a copy suffix of the
+original, English or current language, is dropped first, so duplicating
+"Folder copy 1" gives "Folder copy 2", never "Folder copy 1 copy 1"; "Graph10"
+keeps its digits). Copies get new identifiers for their whole
 descendants. A graph copied within its project keeps its references to the
 original columns. A duplicated workbook keeps its open or closed state;
 the graphs that use it are not duplicated. Delete closes the floating
