@@ -16,6 +16,7 @@
 use proptest::prelude::*;
 use std::sync::Arc;
 
+use stokesforge_analysis::functions::Func;
 use stokesforge_core::formula::{evaluate, ColumnFormula, Formula, FormulaError};
 use stokesforge_core::{ColumnValues, MixedCell, NodeId, NumericStatus};
 
@@ -184,7 +185,14 @@ fn render(e: &E, minimal: bool) -> String {
 }
 
 /// Reference: value and status of the documented semantics.
-fn reference(e: &E, cols: &[Vec<f64>], row: usize) -> (f64, St) {
+/// `app_primitives`: compute `^` and the table functions with the
+/// application's own primitives (`Func::apply`) instead of the platform `f64`
+/// methods. The transcendental differential uses it: their accuracy is the job
+/// of the table tests below, and a one-ulp difference between two libraries,
+/// amplified by an ill-conditioned chain (`sin(B^10)` with B = 123456.789,
+/// an argument near 1e50), would otherwise fail a case at random. What it
+/// checks is the composition: parsing, precedence, statuses, bit for bit.
+fn reference(e: &E, cols: &[Vec<f64>], row: usize, app_primitives: bool) -> (f64, St) {
     let unless_ok = |v: f64, s: St| if s == St::Ok { v } else { f64::NAN };
     let domain = |v: f64, s: St| {
         if v.is_nan() && s == St::Ok {
@@ -200,12 +208,12 @@ fn reference(e: &E, cols: &[Vec<f64>], row: usize) -> (f64, St) {
             (v, if v.is_nan() { St::Missing } else { St::Ok })
         }
         E::Neg(inner) => {
-            let (v, s) = reference(inner, cols, row);
+            let (v, s) = reference(inner, cols, row, app_primitives);
             (-v, s)
         }
         E::Bin(op, a, b) => {
-            let (x, sa) = reference(a, cols, row);
-            let (y, sb) = reference(b, cols, row);
+            let (x, sa) = reference(a, cols, row, app_primitives);
+            let (y, sb) = reference(b, cols, row, app_primitives);
             let v = match op {
                 '+' => x + y,
                 '-' => x - y,
@@ -215,14 +223,19 @@ fn reference(e: &E, cols: &[Vec<f64>], row: usize) -> (f64, St) {
             (v, sa.combine(sb))
         }
         E::Pow(a, b) => {
-            let (x, sa) = reference(a, cols, row);
-            let (y, sb) = reference(b, cols, row);
+            let (x, sa) = reference(a, cols, row, app_primitives);
+            let (y, sb) = reference(b, cols, row, app_primitives);
             let s = sa.combine(sb);
-            domain(unless_ok(x.powf(y), s), s)
+            let v = if app_primitives {
+                Func::Pow.apply(&[x, y])
+            } else {
+                x.powf(y)
+            };
+            domain(unless_ok(v, s), s)
         }
         E::Cmp(op, a, b) => {
-            let (x, sa) = reference(a, cols, row);
-            let (y, sb) = reference(b, cols, row);
+            let (x, sa) = reference(a, cols, row, app_primitives);
+            let (y, sb) = reference(b, cols, row, app_primitives);
             let s = sa.combine(sb);
             let v = if x.is_nan() || y.is_nan() {
                 f64::NAN
@@ -240,13 +253,13 @@ fn reference(e: &E, cols: &[Vec<f64>], row: usize) -> (f64, St) {
             (unless_ok(v, s), s)
         }
         E::If(c, a, b) => {
-            let (cv, cs) = reference(c, cols, row);
+            let (cv, cs) = reference(c, cols, row, app_primitives);
             if cv.is_nan() {
                 (f64::NAN, cs)
             } else if cv != 0.0 {
-                reference(a, cols, row)
+                reference(a, cols, row, app_primitives)
             } else {
-                reference(b, cols, row)
+                reference(b, cols, row, app_primitives)
             }
         }
         E::F(name, args) => {
@@ -254,12 +267,19 @@ fn reference(e: &E, cols: &[Vec<f64>], row: usize) -> (f64, St) {
             let v: Vec<f64> = args
                 .iter()
                 .map(|a| {
-                    let (x, sa) = reference(a, cols, row);
+                    let (x, sa) = reference(a, cols, row, app_primitives);
                     s = s.combine(sa);
                     x
                 })
                 .collect();
-            domain(unless_ok(reference_fn(name, &v), s), s)
+            let value = if app_primitives {
+                Func::from_name(name)
+                    .unwrap_or_else(|| panic!("unknown function {name}"))
+                    .apply(&v)
+            } else {
+                reference_fn(name, &v)
+            };
+            domain(unless_ok(value, s), s)
         }
     }
 }
@@ -324,8 +344,8 @@ fn reference_fn(name: &str, v: &[f64]) -> f64 {
 enum Mode {
     /// Only IEEE-exact operations: results must match bit for bit.
     Exact,
-    /// Transcendental functions and `^`, compared with a tolerance; no
-    /// comparison or `if` (a one-ulp difference could flip a branch).
+    /// Transcendental functions and `^`, computed in the reference with the
+    /// application's primitives (see [`reference`]); no comparison or `if`.
     Transcendental,
 }
 
@@ -451,7 +471,7 @@ fn differential(mode: Mode, e: &E, cols: &[Vec<f64>], minimal: bool) -> Result<(
     let result = evaluate(&formula, &sheet_values(&values), 6);
     prop_assert_eq!(&result.error, &None, "`{}`", text);
     for row in 0..6 {
-        let (rv, rs) = reference(e, cols, row);
+        let (rv, rs) = reference(e, cols, row, mode == Mode::Transcendental);
         prop_assert!(
             close(result.values[row], rv, mode) && rs.matches(result.statuses[row]),
             "`{}` row {}: app {:?} {:?}, reference {:?} {:?}; columns {:?}",
