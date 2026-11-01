@@ -888,6 +888,7 @@ fn project_tree_node_ui(
                     Some(icon_image(Icon::Folder, IconRole::Folder)),
                     name,
                     selected,
+                    false,
                     interaction.cut.contains(id),
                     focused,
                 );
@@ -955,7 +956,8 @@ fn project_tree_node_ui(
                 .y;
             }
             let selected = interaction.selection.contains(&entry);
-            let is_closed = !interaction.open.contains(&tab) || interaction.cut.contains(id);
+            let is_closed = !interaction.open.contains(&tab);
+            let is_cut = interaction.cut.contains(id);
             let focused =
                 keyboard_cursor(ui.ctx(), memory_key, interaction.selection) == Some(entry);
             // The per-tab salt prevents all the rows from sharing the same Id.
@@ -968,6 +970,7 @@ fn project_tree_node_ui(
                         name,
                         selected,
                         is_closed,
+                        is_cut,
                         focused,
                     )
                 })
@@ -3147,6 +3150,51 @@ pub(super) mod tests {
             text_color(&folder.shapes, "Folder"),
             text_color(&folder.shapes, "Delta")
         );
+    }
+
+    /// The tint of the icon painted at height `y` (`None` if none is painted).
+    fn icon_tint_at(shapes: &[egui::epaint::ClippedShape], y: f32) -> Option<egui::Color32> {
+        shapes.iter().find_map(|painted| match &painted.shape {
+            egui::Shape::Rect(rect)
+                if rect.brush.is_some() && (rect.rect.center().y - y).abs() < 4.0 =>
+            {
+                Some(rect.fill)
+            }
+            _ => None,
+        })
+    }
+
+    /// A cut row fades its text **and** its icon; a closed window fades its
+    /// text only (#423). Witness: with the icon not tinted for a cut, the two
+    /// rows have the same icon tint.
+    #[test]
+    fn a_cut_row_fades_its_icon_and_a_closed_window_does_not() {
+        let (tree, tabs) = tree_with_collapsed_folder();
+        let alpha = tabs[0];
+        let context = super::super::test_support::context();
+        let bench = Bench::new(HashSet::new());
+        // Alpha open and cut, Delta closed, nothing else dimmed.
+        bench.open.borrow_mut().insert(alpha);
+        bench.cut.borrow_mut().insert(tab_node(alpha));
+        for _ in 0..4 {
+            bench.paint(&context, &tree, vec![]);
+        }
+        let frame = bench.paint(&context, &tree, vec![]);
+        let alpha_y = find_text_center(&frame.shapes, "Alpha").y;
+        let delta_y = find_text_center(&frame.shapes, "Delta").y;
+        assert_eq!(
+            text_color(&frame.shapes, "Alpha"),
+            text_color(&frame.shapes, "Delta"),
+            "both texts are dimmed"
+        );
+        let cut_icon = icon_tint_at(&frame.shapes, alpha_y).expect("cut icon painted");
+        let closed_icon = icon_tint_at(&frame.shapes, delta_y).expect("closed icon painted");
+        assert_eq!(
+            closed_icon,
+            egui::Color32::WHITE,
+            "a closed window keeps its icon"
+        );
+        assert_ne!(cut_icon, closed_icon, "a cut row fades its icon");
     }
 
     /// Paste into a closed folder asks for the paste into it and the folder

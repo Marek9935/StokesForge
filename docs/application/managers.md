@@ -58,7 +58,10 @@ copy) pastes as a copy. Provisional edge cases, all in
 `AppState::paste_cut_objects`: the cut folder itself selected moves nothing; a
 destination inside a cut folder, or a name already taken there, is refused
 whole with `error-move-into-itself` / `error-move-name-taken`; after a move the
-system clipboard keeps its text, so a second Ctrl+V pastes a copy. Drag and drop
+consumed text is remembered (`consumed_cut`): a cut pastes once, a second Ctrl+V of
+that text does nothing, until a Copy or a Cut replaces it; a cut row is painted
+with its label and its icon faded (`list_row`'s `cut` flag), unlike a closed window,
+which fades its label only. Drag and drop
 to move: #425.
 
 F2, Ctrl+D, Ctrl+C, Ctrl+X, Ctrl+V and Delete apply to this selection when the

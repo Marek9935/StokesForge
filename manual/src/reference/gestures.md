@@ -127,7 +127,7 @@ The whole row responds to the mouse, except the visibility box.
 | <kbd>Enter</kbd> | The selected rows | Opens the windows, opens or closes the folders. |
 | <kbd>Left</kbd> / <kbd>Right</kbd> | The selected row | <kbd>Right</kbd> opens a closed folder, then goes to its first entry. <kbd>Left</kbd> closes an open folder, otherwise goes to the folder that contains the row. |
 | <kbd>Shift</kbd>+<kbd>Up</kbd> / <kbd>Down</kbd> | The selected row | Extends the selection one row at a time, like <kbd>Shift</kbd>+click. |
-| <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Ctrl</kbd>+<kbd>V</kbd> | The selected rows | Moves them into the selected folder. The cut rows are dimmed until you paste. |
+| <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Ctrl</kbd>+<kbd>V</kbd> | The selected rows | Moves them into the selected folder. The cut rows are dimmed (text and icon) until you paste, and a cut pastes only once. |
 | Right-click | A row | If the row is outside the selection, selects it first. Opens the menu of the object. |
 | Right-click, **Add Folder** | A folder | Creates a folder in it and puts its name in editing. |
 | Wheel | The list | Scrolls. |

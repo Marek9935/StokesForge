@@ -694,6 +694,42 @@ fn cut_then_paste_of_the_same_text_moves_the_node_in_one_history_entry() {
 }
 
 #[test]
+fn a_cut_pastes_once_a_second_paste_does_nothing_until_a_new_copy() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: text.clone(),
+    });
+    let after_move = f.state.tree().clone();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.root,
+        text: text.clone(),
+    });
+    assert_eq!(f.state.tree(), &after_move, "the second paste does nothing");
+    assert!(f.state.take_copied_objects().is_empty());
+    // A new Copy of the same node pastes normally.
+    f.state.dispatch(Action::CopyObjects(vec![f.book]));
+    let copied = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.root,
+        text: copied,
+    });
+    assert_eq!(
+        f.state.take_copied_objects().len(),
+        1,
+        "Copy rearms the paste"
+    );
+    // The consumed text itself pastes again after the Copy replaced it.
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.root,
+        text,
+    });
+    assert_eq!(f.state.take_copied_objects().len(), 1);
+}
+
+#[test]
 fn a_paste_of_a_text_from_elsewhere_copies_and_keeps_the_mark() {
     let mut f = folder_fixture();
     let mut outside = folder_fixture();

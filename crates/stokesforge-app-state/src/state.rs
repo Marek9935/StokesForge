@@ -2992,6 +2992,10 @@ pub struct AppState {
     /// The last Cut, until a paste, a Copy, a new Cut or a project change
     /// (#423).
     cut_mark: Option<CutMark>,
+    /// The `(origin, text)` of a cut already pasted: a cut pastes once, a later
+    /// paste of that same text does nothing until a Copy or a Cut replaces it
+    /// (#423).
+    consumed_cut: Option<(String, String)>,
     /// The representations of the figure to offer to the system, prepared by
     /// [`Action::CopyGraphFigure`] and picked up by the window (#149).
     figure_clipboard: Option<Vec<FigureBytes>>,
@@ -3238,6 +3242,7 @@ impl AppState {
             ),
             object_clipboard_output: None,
             cut_mark: None,
+            consumed_cut: None,
             figure_clipboard: None,
             copied_objects: Vec::new(),
             selected_sheets: std::collections::HashMap::new(),
@@ -5287,6 +5292,7 @@ impl AppState {
             Action::RenameObjects(changes) => self.rename_objects(changes),
             Action::CopyObjects(ids) => {
                 self.cut_mark = None;
+                self.consumed_cut = None;
                 self.copy_objects(&ids);
             }
             Action::CutObjects(ids) => self.cut_objects_action(&ids),
@@ -8442,6 +8448,7 @@ impl AppState {
     /// text into a move.
     fn cut_objects_action(&mut self, ids: &[NodeId]) {
         self.cut_mark = None;
+        self.consumed_cut = None;
         let targets = self.object_targets(ids);
         self.object_clipboard_output = None;
         self.copy_objects(&targets);
@@ -8460,7 +8467,7 @@ impl AppState {
     /// the mark; a destination inside a cut folder, or a name already taken
     /// there, is refused whole with a message; a successful move clears the
     /// mark.
-    fn paste_cut_objects(&mut self, parent: NodeId) {
+    fn paste_cut_objects(&mut self, parent: NodeId, text: &str) {
         if self.cut_mark.is_none() {
             return;
         }
@@ -8513,7 +8520,9 @@ impl AppState {
             }
             seen.push(name);
         }
-        self.cut_mark = None;
+        if let Some(mark) = self.cut_mark.take() {
+            self.consumed_cut = Some((mark.origin, text.to_string()));
+        }
         self.move_objects(&moving, parent);
     }
 
@@ -8572,7 +8581,16 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|mark| mark.origin == origin && mark.text == text)
         {
-            self.paste_cut_objects(parent);
+            self.paste_cut_objects(parent, text);
+            return;
+        }
+        // A cut already pasted pastes once: the same text again does nothing.
+        if same_origin
+            && self
+                .consumed_cut
+                .as_ref()
+                .is_some_and(|(consumed, done)| *consumed == origin && done == text)
+        {
             return;
         }
         let copies = if same_origin {

@@ -86,7 +86,7 @@ Select one or more entries in the Project Manager, then use the right-click menu
 | **Rename** | <kbd>F2</kbd> | Edits the name in place. <kbd>Enter</kbd> confirms, <kbd>Esc</kbd> cancels. With several entries selected, you name them one after the other |
 | **Duplicate** | <kbd>Ctrl</kbd>+<kbd>D</kbd> | Makes a copy named `… copy 1`, `… copy 2`… A copied graph keeps using the original data, unless its workbook is copied with it (a folder) |
 | **Delete** | <kbd>Del</kbd> | Removes the entries and closes their windows |
-| **Cut** / **Paste** | <kbd>Ctrl</kbd>+<kbd>X</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd> | Moves the entries into the selected folder, in one step that Undo reverts. The cut rows are dimmed until you paste. Pasted into another project, a cut copies instead of moving. A folder cannot go into itself, and a name already used in the destination refuses the whole move |
+| **Cut** / **Paste** | <kbd>Ctrl</kbd>+<kbd>X</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd> | Moves the entries into the selected folder, in one step that Undo reverts. The cut rows, text and icon, are dimmed until you paste. A cut pastes only once: pasting again does nothing until you copy or cut something. Pasted into another project, a cut copies instead of moving. A folder cannot go into itself, and a name already used in the destination refuses the whole move |
 | **Copy** / **Paste** | <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd> | Copies the entries, also to another project open in another window |
 
 An empty name is refused and the previous name is kept.
