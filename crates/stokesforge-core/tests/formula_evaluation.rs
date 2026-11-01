@@ -1,4 +1,4 @@
-//! Probe of the column formula evaluator (numbers and semantics), part 1:
+//! Tests of the column formula evaluator (numbers and semantics), part 1:
 //! the row-wise operators and functions.
 //!
 //! * (a) differential property test against a reference evaluator written
@@ -488,7 +488,7 @@ fn differential(mode: Mode, e: &E, cols: &[Vec<f64>], minimal: bool) -> Result<(
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 3000, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 3000, failure_persistence: None, rng_algorithm: proptest::test_runner::RngAlgorithm::ChaCha, rng_seed: proptest::test_runner::RngSeed::Fixed(412), ..ProptestConfig::default() })]
 
     #[test]
     fn exact_operations_match_the_reference_fully_parenthesized(
@@ -622,9 +622,9 @@ fn division_by_zero_is_infinity_with_status_ok() {
 /// The manual says a result with no value (`ln(-1)`...) is a failed
 /// calculation. `0/0`, `inf - inf` and `0 * inf` are NaN too, but the
 /// operators do not run the domain check: status Ok, an "empty cell" that is
-/// not "shown as a failed calculation". Design question recorded by the probe.
+/// not "shown as a failed calculation". Design question: #433 point 1.
 #[test]
-#[ignore = "bug: design: 0/0 is NaN with status Ok (empty cell), only functions run the domain check, formula.rs:2321-2331"]
+#[ignore = "design: #433 point 1: 0/0 is NaN with status Ok (empty cell), only functions run the domain check, formula.rs:2321-2331"]
 fn nan_from_arithmetic_is_a_failed_calculation_like_ln_of_minus_one() {
     let (v, s) = run("A/A", &[float_column(&[0.0])], 1);
     assert!(v[0].is_nan());
@@ -636,7 +636,7 @@ fn nan_from_arithmetic_is_a_failed_calculation_like_ln_of_minus_one() {
 }
 
 #[test]
-#[ignore = "bug: design: inf - inf is NaN with status Ok, formula.rs:2321-2331"]
+#[ignore = "design: #433 point 1: inf - inf is NaN with status Ok, formula.rs:2321-2331"]
 fn nan_from_infinity_arithmetic_is_a_failed_calculation() {
     let (v, s) = run("1e308*10 - 1e308*10", &[float_column(&[0.0])], 1);
     assert!(v[0].is_nan());
@@ -1232,13 +1232,13 @@ fn assert_table(names: &[&str]) {
 }
 
 #[test]
-#[ignore = "bug: erf has 5-235 ulps error on [2, 3) (Maclaurin series cancellation), functions.rs:338-364"]
+#[ignore = "bug: #429: erf has 5-235 ulps error on [2, 3) (Maclaurin series cancellation), functions.rs:338-364"]
 fn erf_matches_reference_values() {
     assert_table(&["erf"]);
 }
 
 #[test]
-#[ignore = "bug: erfc = 1 - erf below 2.5 loses digits (up to 615 ulps), 0 above 27 where it is still subnormal; functions.rs:313-333"]
+#[ignore = "bug: #429: erfc = 1 - erf below 2.5 loses digits (up to 615 ulps), 0 above 27 where it is still subnormal; functions.rs:313-333"]
 fn erfc_matches_reference_values() {
     assert_table(&["erfc"]);
 }
@@ -1299,7 +1299,7 @@ fn round_matches_binary_exact_reference_values() {
 }
 
 #[test]
-#[ignore = "bug: round(1.005, 2) = 1 not 1.01 (x * 10^n is binary, not Excel decimal), functions.rs:272-295"]
+#[ignore = "bug: #428: round(1.005, 2) = 1 not 1.01 (x * 10^n is binary, not Excel decimal), functions.rs:272-295"]
 fn round_matches_excel_decimal_reference_values() {
     let (failures, _) = table_failures(ROUND_DECIMAL, &["round"]);
     assert!(
@@ -1337,7 +1337,7 @@ fn signed_zero_results_of_functions() {
 }
 
 #[test]
-#[ignore = "bug: erf(-0) is +0 (the sign is applied only when x < 0), functions.rs:367"]
+#[ignore = "bug: #429: erf(-0) is +0 (the sign is applied only when x < 0), functions.rs:367"]
 fn erf_of_minus_zero_is_minus_zero() {
     let (v, _) = run("erf(A)", &[float_column(&[-0.0])], 1);
     assert_eq!(v[0].to_bits(), (-0.0f64).to_bits());
@@ -1382,14 +1382,14 @@ fn min_max_sign_of_an_empty_cell_stay_empty() {
 
 /// `mod` result stays inside `[0, b)` for a positive divisor.
 #[test]
-#[ignore = "bug: design: mod(-1e-20, 3) = 3 (like Excel and Python), functions.rs:299-307"]
+#[ignore = "design: pending decision (#412 follow-up), mod(-1e-20, 3) = 3 (like Excel and Python), functions.rs:299-307"]
 fn mod_with_a_tiny_negative_dividend_stays_below_the_divisor() {
     let (v, _) = run("mod(A, 3)", &[float_column(&[-1e-20])], 1);
     assert!(v[0] >= 0.0 && v[0] < 3.0, "mod(-1e-20, 3) = {}", v[0]);
 }
 
 #[test]
-#[ignore = "bug: logx = ln(x)/ln(b): logx(1000, 10) = 2.9999999999999996, functions.rs:242"]
+#[ignore = "bug: #429: logx = ln(x)/ln(b): logx(1000, 10) = 2.9999999999999996, functions.rs:242"]
 fn logx_of_exact_powers_is_exact() {
     let cases = [
         (1000.0, 10.0, 3.0),
@@ -1409,7 +1409,7 @@ fn logx_of_exact_powers_is_exact() {
 }
 
 #[test]
-#[ignore = "bug: floor(logx(1000, 10)) = 2, functions.rs:242"]
+#[ignore = "bug: #429: floor(logx(1000, 10)) = 2, functions.rs:242"]
 fn floor_of_logx_of_a_power_of_ten_is_the_exponent() {
     let (v, _) = run("floor(logx(A, 10))", &[float_column(&[1000.0])], 1);
     assert_eq!(v[0], 3.0);
@@ -1545,7 +1545,7 @@ fn refused_forms_are_refused_with_an_error() {
 /// Literals beyond the range of f64: the doc says nothing. The text `1e400`
 /// is accepted as infinity and `1e-400` as 0 (design question).
 #[test]
-#[ignore = "bug: 1e400 reads as inf and 1e-400 as 0 silently, formula.rs:751"]
+#[ignore = "bug: #429: 1e400 reads as inf and 1e-400 as 0 silently, formula.rs:751"]
 fn out_of_range_literals_are_refused_or_flagged() {
     for text in ["1e400", "1e-400", "-1e400"] {
         let v = outcome(text);
@@ -1554,7 +1554,7 @@ fn out_of_range_literals_are_refused_or_flagged() {
 }
 
 #[test]
-#[ignore = "bug: a 400-digit literal reads as inf silently, formula.rs:751"]
+#[ignore = "bug: #429: a 400-digit literal reads as inf silently, formula.rs:751"]
 fn very_long_digit_runs_do_not_panic() {
     let long = format!("1{}", "0".repeat(400));
     let v = outcome(&long);

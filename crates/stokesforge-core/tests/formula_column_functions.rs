@@ -1,4 +1,4 @@
-//! Probe of the column formula evaluator, part 2: the column functions
+//! Tests of the column formula evaluator, part 2: the column functions
 //! (`at`, `max`, `min`, `mean`, `sum`, `std`, `integral` and their range
 //! forms).
 //!
@@ -342,7 +342,7 @@ fn nist_std_stays_within_12_digits_of_the_exact_statistic_of_the_stored_doubles(
 /// digits), the range path merges rounded means with Chan's formula (Mavro
 /// 12.6, Michelso 13.3 digits: an error of about 1e-16 * mean / std).
 #[test]
-#[ignore = "bug: std loses up to 4 digits: naive mean in the whole path (NumAcc4 12.3), Chan merge of rounded means in the range path (Mavro 12.6), column_values.rs:76-86,111-117"]
+#[ignore = "bug: #429: std loses up to 4 digits: naive mean in the whole path (NumAcc4 12.3), Chan merge of rounded means in the range path (Mavro 12.6), column_values.rs:76-86,111-117"]
 fn nist_std_keeps_15_digits_of_the_exact_statistic_of_the_stored_doubles() {
     for r in nist_results() {
         assert!(
@@ -369,7 +369,7 @@ fn nist_whole_column_and_range_paths_agree_closely() {
 /// `mean(B)` and `sum(B)` add left to right (`Agg::of_slice`): 14 digits on
 /// NumAcc2/NumAcc4 where the range path (pairwise in the tree) gives 16.
 #[test]
-#[ignore = "bug: whole-column mean/sum use a naive running sum, 14 digits on NumAcc2 and NumAcc4 where the range path gives 16, column_values.rs:76"]
+#[ignore = "bug: #429: whole-column mean/sum use a naive running sum, 14 digits on NumAcc2 and NumAcc4 where the range path gives 16, column_values.rs:76"]
 fn nist_whole_column_mean_and_sum_have_15_digits() {
     for r in nist_results() {
         assert!(
@@ -383,7 +383,7 @@ fn nist_whole_column_mean_and_sum_have_15_digits() {
 
 /// A constant column: mean is the constant and std is 0.
 #[test]
-#[ignore = "bug: naive running sum, mean of 1000 x 0.1 is not 0.1 and std of a constant column is not 0, column_values.rs:76"]
+#[ignore = "bug: #429: naive running sum, mean of 1000 x 0.1 is not 0.1 and std of a constant column is not 0, column_values.rs:76"]
 fn constant_column_has_its_value_as_mean_and_zero_std() {
     for (value, n) in [(0.1, 10usize), (0.1, 1000), (0.7, 1000), (1.1, 100_000)] {
         let y = vec![value; n];
@@ -667,7 +667,7 @@ fn bound() -> impl Strategy<Value = f64> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 1500, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 1500, failure_persistence: None, rng_algorithm: proptest::test_runner::RngAlgorithm::ChaCha, rng_seed: proptest::test_runner::RngSeed::Fixed(412), ..ProptestConfig::default() })]
 
     #[test]
     fn integral_with_literal_bounds_equals_integral_with_column_bounds(
@@ -874,10 +874,10 @@ fn grid() -> impl Strategy<Value = (Vec<f64>, Vec<f64>)> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 500, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 500, failure_persistence: None, rng_algorithm: proptest::test_runner::RngAlgorithm::ChaCha, rng_seed: proptest::test_runner::RngSeed::Fixed(412), ..ProptestConfig::default() })]
 
     #[test]
-    #[ignore = "bug: at(B, x_k) is off by an ulp from y_k on about a third of random grids (series.rs:107), so B / at(B, x_k) is not exactly 1"]
+    #[ignore = "bug: #427: at(B, x_k) is off by an ulp from y_k on about a third of random grids (series.rs:107), so B / at(B, x_k) is not exactly 1"]
     fn at_a_random_grid_point_returns_the_stored_value_exactly((x, y) in grid(), k in 0usize..29) {
         let k = k % x.len();
         let got = on_xy(&format!("at(B, {:e})", x[k]), &x, &y).unwrap();
@@ -897,7 +897,7 @@ proptest! {
 }
 
 #[test]
-#[ignore = "bug: at(B, x_k) is y_(k-1) + (y_k - y_(k-1)) * 1, not y_k when the difference rounds (1e20 then 1 gives 0), series.rs:107"]
+#[ignore = "bug: #427: at(B, x_k) is y_(k-1) + (y_k - y_(k-1)) * 1, not y_k when the difference rounds (1e20 then 1 gives 0), series.rs:107"]
 fn at_a_grid_point_returns_the_stored_value_exactly() {
     // y_k + (y_{k+1} - y_k) * 1 is not y_{k+1} when the difference rounds.
     let x = [0.0, 1.0];
@@ -1036,7 +1036,7 @@ fn sum_overflow_is_an_empty_cell() {
 /// The mean of two finite numbers is finite: `mean` computes `sum / n`, so
 /// the intermediate sum overflows and the cell is empty.
 #[test]
-#[ignore = "bug: mean(B) of [1.7e308, 1.7e308] is empty (sum overflows before the division), column_values.rs:111,119"]
+#[ignore = "bug: #429: mean(B) of [1.7e308, 1.7e308] is empty (sum overflows before the division), column_values.rs:111,119"]
 fn mean_of_huge_values_is_not_lost_to_an_overflowing_sum() {
     let y = [1.7e308, 1.7e308];
     assert_eq!(scalar("mean(B)", &[&y, &y], &[]), Some(1.7e308));
@@ -1047,7 +1047,7 @@ fn mean_of_huge_values_is_not_lost_to_an_overflowing_sum() {
 /// `std` of finite values whose squared deviations overflow is empty even
 /// when the deviation itself is representable (1e200 scale).
 #[test]
-#[ignore = "bug: std of [-1e200, 1e200] is empty although 1.41e200 is representable (squared deviations overflow), column_values.rs:76-86"]
+#[ignore = "bug: #429: std of [-1e200, 1e200] is empty although 1.41e200 is representable (squared deviations overflow), column_values.rs:76-86"]
 fn std_of_values_with_large_squares_is_not_lost() {
     let y = [-1e200, 1e200];
     let got = scalar("std(B)", &[&y, &y], &[]);
@@ -1074,13 +1074,13 @@ fn normalisation_formula_has_one_at_the_reference_row() {
     assert_eq!(v[row], 1.0);
 }
 
-// -- performance probe --
+// -- performance bench --
 
 /// Timings of a 1e6-row sheet; prints, never fails. Run with
-/// `cargo test -p stokesforge-core --test formula_probe_columns --release -- --ignored --nocapture perf`.
+/// `cargo test -p stokesforge-core --test formula_column_functions --release -- --ignored --nocapture perf`.
 #[test]
-#[ignore = "performance probe: prints timings"]
-fn perf_probe_per_row_bounds_scale_like_n_log_n() {
+#[ignore = "bench: prints timings, run with --release"]
+fn per_row_bounds_scale_like_n_log_n() {
     for n in [100_000usize, 1_000_000] {
         let x: Vec<f64> = (0..n).map(|i| i as f64 * 0.001).collect();
         let y: Vec<f64> = x.iter().map(|v| v.sin() + 2.0).collect();

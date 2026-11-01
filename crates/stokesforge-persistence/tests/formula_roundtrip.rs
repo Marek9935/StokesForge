@@ -1,4 +1,4 @@
-//! Probe of the `.stf` round trip of column formulas (#412): every formula
+//! Tests of the `.stf` round trip of column formulas (#412): every formula
 //! feature through save / load, crafted formula records (bad remote parts,
 //! cycles, over-deep text, dangling identifiers), and what a load must never
 //! do (panic, or read a different column than the one written).
@@ -218,7 +218,7 @@ fn every_formula_feature_survives_save_and_load() {
             errors.push(format!("{text}: {error}"));
         }
     }
-    // Most formulas must really compute: a probe that compares two errors
+    // Most formulas must really compute: a test that compares two errors
     // proves nothing. Print what does not.
     assert!(
         errors.is_empty(),
@@ -427,7 +427,7 @@ fn remote_records_with_bad_part_indices_are_dropped_but_never_read_wrong() {
 
 #[test]
 fn a_remote_record_on_the_wrong_column_part_silently_changes_the_read() {
-    // Design probe: two column parts, the record is on the wrong one. Nothing
+    // Design question: two column parts, the record is on the wrong one. Nothing
     // can detect it (shape is valid); only the sheet check protects. Here the
     // wrong part is in the formula's own sheet, so it becomes a `#REF`.
     let mut f = fixture();

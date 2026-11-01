@@ -1,11 +1,11 @@
-//! Probes of cross-structure formula behavior (#412): copies, pastes, transposes,
+//! Tests of cross-structure formula behavior (#412): copies, pastes, transposes,
 //! type changes, removals, moves, renames, cycles, row edits, reloads. Every
 //! scenario checks the **correct values**, computed by hand, in both
 //! [`FormulaRecalc::Targeted`] and [`FormulaRecalc::Full`].
 //!
-//! A probe that fails because the application is wrong stays here with
-//! `#[ignore = "bug: …"]`; a probe that pins an undocumented choice says
-//! "design question" in its name or comment.
+//! A test that fails because the application is wrong stays here with
+//! `#[ignore = "bug: #N …"]`; a test that pins an undocumented choice is
+//! marked `#[ignore = "design: #433 point N …"]` or carries a comment.
 
 use std::collections::BTreeMap;
 
@@ -152,7 +152,7 @@ fn versions(t: &Tree) -> BTreeMap<NodeId, u64> {
 /// re-evaluation of every formula. Returns its snapshot.
 fn reloaded_full(h: &SessionHandle, name: &str) -> Snapshot {
     let dir = scratch(name);
-    let path = dir.join("probe.stf");
+    let path = dir.join("reloaded.stf");
     h.save(&path).expect("save");
     let project = stokesforge_persistence::load(&path).expect("load");
     let session = Session::spawn_with_recalc(project, None, FormulaRecalc::Full).expect("actor");
@@ -174,7 +174,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::path::PathBuf::from(
         "/tmp/claude-1000/-home-aliocha-dev-project-StokesForge/fad0f84f-0105-478e-b1c5-b15b94956c7e/scratchpad",
     )
-    .join("formula_probe_cross")
+    .join("formula_structure")
     .join(name);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
@@ -223,7 +223,8 @@ fn book_with_c() -> Project {
 /// column's formula through the grid clipboard (letters), not this path, so the
 /// object-level copy of a lone column is probably unreachable from the UI.
 #[test]
-fn design_question_local_copy_of_a_lone_formula_column_reads_ref() {
+// #433 point 4
+fn a_local_copy_of_a_lone_formula_column_reads_ref() {
     for mode in BOTH {
         let (_s, h) = spawn(book_with_c(), mode);
         let t = snap(&h).tree;
@@ -789,7 +790,7 @@ fn direct_writes_into_a_formula_column_never_survive() {
 /// the gesture is accepted, records an undo entry, and the next recalculation
 /// pass silently puts the computed type back.
 #[test]
-#[ignore = "bug: SetColumnType is accepted on a formula column (history.rs ~1230 only refuses calculation outputs); the docstring and SetCells say refuse"]
+#[ignore = "bug: #431: SetColumnType is accepted on a formula column (history.rs ~1230 only refuses calculation outputs); the docstring and SetCells say refuse"]
 fn set_column_type_on_a_formula_column_is_refused() {
     for mode in BOTH {
         let (_s, h) = spawn(book_with_c(), mode);
@@ -1221,7 +1222,8 @@ fn renames_recalculate_nothing_keep_values_and_round_trip() {
 // -- 10. a sheet whose only columns are formulas reading remote columns --------
 
 #[test]
-fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing_design_question() {
+// #433 point 8
+fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
     for mode in BOTH {
         let mut p = Project::new("P").expect("project");
         let root = p.root();
@@ -2113,7 +2115,7 @@ fn a_non_ascii_sheet_name_is_quoted_on_display_and_round_trips() {
 /// the sheet shows as stale after every open. Calculations are spared by the
 /// one-shot `trust_loaded` flag; transposed sheets have no such protection.
 #[test]
-#[ignore = "bug: a transposed sheet over a formula column is reported stale after every load (formula versions restamped by the first pass)"]
+#[ignore = "bug: #430: a transposed sheet over a formula column is reported stale after every load (formula versions restamped by the first pass)"]
 fn a_transposed_sheet_over_a_formula_column_is_not_stale_after_reload_or_unrelated_commands() {
     let (_s, h) = spawn(transposable(), FormulaRecalc::Targeted);
     let t = snap(&h).tree;

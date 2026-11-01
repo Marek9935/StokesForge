@@ -1,4 +1,4 @@
-//! Probe of column formulas through `pyst` (#412): remote references, quoted
+//! Tests of column formulas through `pyst` (#412): remote references, quoted
 //! names, column functions, removal of a formula, column type, undo of a
 //! script group, duplication, and a differential check of the numeric
 //! functions against Python's `math` / `statistics`.
@@ -137,7 +137,7 @@ assert pyst.values(second) == (11., 21.), pyst.values(second)
 }
 
 #[test]
-#[ignore = "bug: pyst.set_column_type accepts a formula column (docstring: refused); silently reverted by the recalc, one useless history entry"]
+#[ignore = "bug: #431: pyst.set_column_type accepts a formula column (docstring: refused); silently reverted by the recalc, one useless history entry"]
 fn set_column_type_on_a_formula_column_is_refused() {
     let bench = bench();
     let before = bench.session.snapshot().unwrap().revision;

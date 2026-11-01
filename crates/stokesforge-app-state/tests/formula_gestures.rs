@@ -1,4 +1,4 @@
-//! Probe of the formula gestures of the application state (#412): full-column
+//! Tests of the formula gestures of the application state (#412): full-column
 //! copy / paste of formulas, the object clipboard, removing a formula, typing
 //! in the header field, refreshing an imported column, a stale snapshot during
 //! a long recalculation, and the column type of a formula column.
@@ -11,7 +11,7 @@ use stokesforge_app_state::state::{Action, AppState, FullColumnsCopy, HeaderFiel
 use stokesforge_core::{Column, ColumnMeta, ColumnType, NodeId, Project};
 use stokesforge_session::Session;
 
-#[allow(dead_code)] // some handles are only used by some probes
+#[allow(dead_code)] // some handles are only used by some tests
 struct World {
     _language: i18n::LanguageGuard,
     _session: Session,
@@ -193,7 +193,7 @@ impl World {
 
 const FORMULA_READ_ONLY: &str = "This column is computed by a formula";
 
-/// The five formulas of the probe, typed in new columns of `Sheet1`.
+/// The five formulas of these tests, typed in new columns of `Sheet1`.
 fn sources(w: &mut World) -> Vec<(&'static str, NodeId)> {
     let sheet1 = w.sheet1;
     [
@@ -209,7 +209,7 @@ fn sources(w: &mut World) -> Vec<(&'static str, NodeId)> {
 }
 
 #[test]
-fn sources_compute_what_the_probe_expects() {
+fn sources_compute_what_the_tests_expect() {
     let mut w = world();
     let src = sources(&mut w);
     let expect: [f64; 5] = [3104.0, 5104.0, 4102.0, 11.0, 11.0];
@@ -302,7 +302,7 @@ fn a_formulas_paste_is_one_history_entry() {
 }
 
 #[test]
-#[ignore = "bug: a successful paste of a formulas copy ends with the error status `This column is computed by a formula` (the pasted frozen values are then written into the new formula column and refused)"]
+#[ignore = "bug: #432: a successful paste of a formulas copy ends with the error status `This column is computed by a formula` (the pasted frozen values are then written into the new formula column and refused)"]
 fn a_successful_formulas_paste_does_not_end_on_an_error() {
     let mut w = world();
     let src = sources(&mut w);
@@ -338,7 +338,7 @@ fn pasting_a_formula_that_closes_a_loop_is_refused_with_the_loop_sentence() {
 }
 
 #[test]
-#[ignore = "design: a refused formula in a formulas paste still writes the copied frozen values over the destination's data (the loop paste above overwrites Sheet3!B)"]
+#[ignore = "design: #433 point 3: a refused formula in a formulas paste still writes the copied frozen values over the destination's data (the loop paste above overwrites Sheet3!B)"]
 fn a_refused_formulas_paste_leaves_the_destination_data_alone() {
     let mut w = world();
     let _ = sources(&mut w);
@@ -811,7 +811,7 @@ fn a_formula_with_a_syntax_error_is_kept_and_the_column_is_empty() {
 }
 
 #[test]
-#[ignore = "design: a kept formula that does not parse (`A +`, `(A`, deeper than 1000) shows no sentence anywhere (formula_issue covers #REF, loop, no X, no point only); unknown function and wrong arity are refused with one"]
+#[ignore = "design: #433 point 2: a kept formula that does not parse (`A +`, `(A`, deeper than 1000) shows no sentence anywhere (formula_issue covers #REF, loop, no X, no point only); unknown function and wrong arity are refused with one"]
 fn a_kept_formula_that_does_not_parse_tells_the_user_why() {
     let mut w = world();
     let target = new_target(&mut w);
@@ -1025,7 +1025,7 @@ fn a_type_change_never_corrupts_a_formula_column() {
 }
 
 #[test]
-#[ignore = "bug: choosing a type for a formula column answers `Change Type of Column E` (success notice, history entry) but the recalculation puts the column back to Mixed: the menu is not disabled and the tick never moves"]
+#[ignore = "bug: #431: choosing a type for a formula column answers `Change Type of Column E` (success notice, history entry) but the recalculation puts the column back to Mixed: the menu is not disabled and the tick never moves"]
 fn a_type_change_on_a_formula_column_is_refused_or_applied_not_silently_undone() {
     let mut w = world();
     let sheet1 = w.sheet1;
@@ -1149,7 +1149,7 @@ fn a_header_paste_started_during_a_long_recalculation_writes_every_field() {
     let running = h.state.recalc_work().is_some();
     assert!(
         running,
-        "the probe needs the long recalculation to be running"
+        "the test needs the long recalculation to be running"
     );
     // The gesture starts while the snapshot is stale.
     h.state.select_header_field(sheet, p, HeaderField::LongName);
@@ -1191,7 +1191,7 @@ fn deleting_a_column_with_readers_during_a_long_recalculation_is_consistent() {
     let running = h.state.recalc_work().is_some();
     assert!(
         running,
-        "the probe needs the long recalculation to be running"
+        "the test needs the long recalculation to be running"
     );
     h.state.select_column(sheet, p);
     h.state.dispatch(Action::DeleteSelectedCells { sheet });

@@ -9,6 +9,6 @@ License: works of the United States government (NIST), public domain.
 
 Each file has a 60-line header whose "Certified Values" lines give the sample
 mean and the sample standard deviation (denominator n - 1), then one value
-per line. They are used by `formula_probe_columns.rs` to check `mean`, `std`
+per line. They are used by `formula_column_functions.rs` to check `mean`, `std`
 and `sum` of the column formulas. Treat the files as data: the test reads
 only the numbers on the certified lines and the data lines.
