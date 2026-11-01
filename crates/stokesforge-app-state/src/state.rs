@@ -8667,7 +8667,14 @@ impl AppState {
         let mut items: Vec<CopyInsertion> = Vec::new();
         let mut taken: Vec<(NodeId, String)> = Vec::new();
         let mut sources = Vec::new();
+        // Per copy: the source nodes in prefix order and which folders were
+        // manual, to give the new folders the same order mode (#425).
+        let mut manual_sources: Vec<(Vec<NodeId>, Vec<NodeId>)> = Vec::new();
         for copy in copies {
+            manual_sources.push((
+                copy.nodes().iter().map(|n| n.id()).collect(),
+                copy.manual_folders().to_vec(),
+            ));
             let destination = parent
                 .or(copy.root().parent())
                 .unwrap_or(self.tree().root());
@@ -8692,7 +8699,10 @@ impl AppState {
         }
         self.refresh();
         let mut created = Vec::new();
-        for (source, (destination, name)) in sources.into_iter().zip(placed) {
+        let mut manual_new: Vec<NodeId> = Vec::new();
+        for ((source, (destination, name)), (nodes, manual)) in
+            sources.into_iter().zip(placed).zip(manual_sources)
+        {
             if let Some(id) = self
                 .tree()
                 .children(destination)
@@ -8705,6 +8715,29 @@ impl AppState {
                 })
             {
                 created.push((source, *id, duplicate));
+                if !manual.is_empty() {
+                    // Same shape, same prefix order: the n-th new node is the
+                    // copy of the n-th source node.
+                    let new_nodes = self.tree().walk(*id).unwrap_or_default();
+                    manual_new.extend(
+                        nodes
+                            .iter()
+                            .zip(new_nodes)
+                            .filter(|(old, _)| manual.contains(old))
+                            .map(|(_, new)| new),
+                    );
+                }
+            }
+        }
+        for folder in manual_new {
+            if let Err(err) = self.handle.execute(Command::SetFolderOrder {
+                folder,
+                manual: true,
+            }) {
+                let _ = self.handle.abort_macro();
+                self.refresh();
+                self.fail(errors::session::error_message(&err));
+                return;
             }
         }
         if let Err(err) = self.handle.end_macro() {

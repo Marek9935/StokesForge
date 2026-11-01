@@ -1177,3 +1177,132 @@ fn new_objects_arrive_last_in_a_manual_folder_and_in_place_in_an_automatic_one()
     let last_name = f.state.tree().node(last).unwrap().name().to_string();
     assert_eq!(shown_names(&f.state).last().unwrap(), &last_name);
 }
+
+// -- copies keep the manual order (#425) --
+
+/// Root: `Manual` (manual; Zed, Alpha, then the manual `Inner` holding Y, X),
+/// `Plain` (automatic, with Zed and Alpha created in that order), `Target`.
+struct CopyOrderFixture {
+    _session: Session,
+    state: AppState,
+    manual: NodeId,
+    plain: NodeId,
+    target: NodeId,
+}
+
+fn copy_order_fixture() -> CopyOrderFixture {
+    let mut project = Project::new("Copies").unwrap();
+    let root = project.root();
+    let manual = project.add_folder(root, "Manual").unwrap();
+    project.add_note(manual, Some("Zed"), "").unwrap();
+    project.add_note(manual, Some("Alpha"), "").unwrap();
+    let inner = project.add_folder(manual, "Inner").unwrap();
+    project.add_note(inner, Some("Y"), "").unwrap();
+    project.add_note(inner, Some("X"), "").unwrap();
+    let plain = project.add_folder(root, "Plain").unwrap();
+    project.add_note(plain, Some("Zed"), "").unwrap();
+    project.add_note(plain, Some("Alpha"), "").unwrap();
+    let target = project.add_folder(root, "Target").unwrap();
+    project.set_folder_manual_order(manual, true).unwrap();
+    project.set_folder_manual_order(inner, true).unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    CopyOrderFixture {
+        _session: session,
+        state,
+        manual,
+        plain,
+        target,
+    }
+}
+
+fn shown_in(state: &AppState, folder: NodeId) -> Vec<String> {
+    state
+        .tree()
+        .displayed_children(folder)
+        .unwrap()
+        .iter()
+        .map(|id| state.tree().node(*id).unwrap().name().to_string())
+        .collect()
+}
+
+#[test]
+fn a_pasted_manual_folder_stays_manual_with_its_order_and_one_undo_removes_it() {
+    let mut f = copy_order_fixture();
+    let before = f.state.tree().clone();
+    f.state
+        .dispatch(Action::CopyObjects(vec![f.manual, f.plain]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.target,
+        text,
+    });
+    let starting = |prefix: &str| {
+        *f.state
+            .tree()
+            .children(f.target)
+            .unwrap()
+            .iter()
+            .find(|id| {
+                f.state
+                    .tree()
+                    .node(**id)
+                    .unwrap()
+                    .name()
+                    .starts_with(prefix)
+            })
+            .expect("the pasted copy")
+    };
+    let manual_copy = starting("Manual");
+    let plain_copy = starting("Plain");
+    let inner_copy = child_by_name(&f.state, manual_copy, "Inner");
+    assert!(f.state.tree().is_manual_order(manual_copy));
+    assert!(f.state.tree().is_manual_order(inner_copy), "nested kept");
+    assert!(
+        !f.state.tree().is_manual_order(plain_copy),
+        "auto stays auto"
+    );
+    assert_eq!(
+        shown_in(&f.state, manual_copy),
+        vec!["Zed", "Alpha", "Inner"]
+    );
+    assert_eq!(shown_in(&f.state, inner_copy), vec!["Y", "X"]);
+    assert_eq!(shown_in(&f.state, plain_copy), vec!["Alpha", "Zed"]);
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before, "one Ctrl+Z removes everything");
+}
+
+#[test]
+fn a_duplicated_manual_folder_stays_manual() {
+    let mut f = copy_order_fixture();
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::DuplicateObjects(vec![f.manual]));
+    let copy = f
+        .state
+        .tree()
+        .children(f.state.tree().root())
+        .unwrap()
+        .iter()
+        .copied()
+        .find(|id| {
+            *id != f.manual
+                && f.state
+                    .tree()
+                    .node(*id)
+                    .unwrap()
+                    .name()
+                    .starts_with("Manual")
+        })
+        .expect("the duplicate");
+    assert!(f.state.tree().is_manual_order(copy));
+    assert_eq!(shown_in(&f.state, copy), vec!["Zed", "Alpha", "Inner"]);
+    let inner = child_by_name(&f.state, copy, "Inner");
+    assert!(f.state.tree().is_manual_order(inner));
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before);
+}

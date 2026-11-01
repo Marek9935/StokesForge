@@ -32,7 +32,8 @@ without a message, see `docs/persistence.md`).
   one Undo gives it all back. Every folder is now shown sorted (folders first,
   then by name, Fit2 before Fit10); dropping between rows puts that folder in
   manual order, and right-click > Sort (on the folder, or on the empty area for
-  the root) sorts it again. The `.stf` file gains an optional list of
+  the root) sorts it again. Copying or duplicating a manual-order folder keeps
+  the manual order in the copy. The `.stf` file gains an optional list of
   manual-order folders: an older version that opens and saves the file again
   loses those orders.
 

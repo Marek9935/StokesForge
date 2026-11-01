@@ -682,8 +682,8 @@ like the other raw identifier tables (`check_node_id`); a key that is a column, 
 no node at all is dropped alone (`Tree::with_manual_order`). Written: only existing folders.
 Additive, so `FORMAT_VERSION` stays 1 and the witness `tests/witnesses/v1/project.stf` was
 regenerated (a folder `Hand-ordered`). An older version that opens and saves the file
-again loses the manual orders: the folders come back sorted. Copy and paste between
-projects carries none (the copy arrives automatic).
+again loses the manual orders: the folders come back sorted. The object clipboard text carries them too
+(`ClipboardRecord::manual_folders`, `#[serde(default)]`: per copied object, the folders that were manual): Copy + Paste and Duplicate give a copy whose manual folders, nested ones included, are manual with the same child order, and automatic folders stay automatic. The paste sets the flags with `Command::SetFolderOrder` inside the same macro (one Ctrl+Z). A text without the field, or a version that ignores it, pastes automatic folders.
 
 ## Linked transposed sheets (#253)
 
