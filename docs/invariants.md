@@ -19,7 +19,7 @@ gets lost.
 | 8 | Strict LIFO on the history stack | the structure of `History`, checked by `tests/history.rs` |
 | 9 | No Python object crosses the actor channel | PyO3's `Ungil` marker, at compile time |
 | 10 | A data defect degrades, it does not crash | first-class states, not errors |
-| 11 | A targeted recalculation gives exactly the full recalculation | the fingerprint contains every piece of data of the calculation; `b22` (twin oracle) and `stokesforge-session/tests/recalc_targeted.rs` |
+| 11 | A targeted recalculation gives exactly the full recalculation | the fingerprint contains every piece of data of the calculation; `b22` and `b23` (twin oracle) and `stokesforge-session/tests/recalc_targeted.rs` |
 | 12 | A `.stf` file written by V1 can be read back up to V3, and an older version refuses a file of a newer format (number) | `version::decode_body` (one arm per version), the witness files (`stokesforge-persistence/tests/witness_files.rs`), `UnsupportedVersion` |
 
 ---

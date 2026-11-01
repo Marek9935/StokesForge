@@ -76,7 +76,7 @@ guards.
 | `stokesforge-cli` | import and Python scripts without an interface | [application](application/state-and-console.md) |
 | `stokesforge-importer` | from the result of `stokesforge-import` to the columns of the model (sheet plan, column construction) — no commands, no interface, shared by the application, the CLI and the scripts | [application](application/project-and-import.md) |
 | `stokesforge-clipboard` | offers the same content to the system clipboard under several MIME types (the figure of a graph: SVG, PNG, PDF); Wayland, X11, Windows, macOS; independent of the rest of the workspace | [application](application/graph.md) |
-| `stokesforge-robustness` | 22 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
+| `stokesforge-robustness` | 23 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
 | `stokesforge-arch-guard` | shared reading of the `Cargo.toml` files for the dependency guards (dev-dependency) | [tests](tests.md) |
 
 ## The three separation lines
