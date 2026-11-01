@@ -155,7 +155,7 @@ function renderTests(){
   $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;
   const fill=(id,arr,empty)=>{const box=$(id);box.replaceChildren();box.style.display='flex';box.style.flexDirection='column';box.style.gap='12px';
     if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(testBox(x)));};
-  fill('todo',todo,'Rien à tester pour l’instant. Chaque fusion dans main ajoute ici ce qu’il faut essayer.');
+  fill('todo',todo,'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
   fill('back',back,'Aucun retour en attente.');
   fill('done',done,'');
   const bn=$('banner');
