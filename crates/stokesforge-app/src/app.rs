@@ -2030,7 +2030,8 @@ mod tests {
             output = run(&mut app, Vec::new());
             extra += 1;
         }
-        assert_eq!(app.floating_tabs.last(), Some(&book));
+        // A single click only selects (#423): the active window stays the graph.
+        assert_eq!(app.floating_tabs.last(), Some(&tab));
         assert_eq!(app.pm_selection, project_manager::tests::windows([book]));
         let highlighted: Vec<f32> = output
             .shapes

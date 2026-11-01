@@ -105,13 +105,13 @@ mechanics.
 | S-L9 | `onglets-secondaires-a-gauche` | One level of tabs: the strip is on top. Two levels: the primary tabs are horizontal on top, the secondary tabs vertical at the left of the content; the secondary strip stays fixed, only the content scrolls. |
 | S-K1 | `registre-des-touches` | All keys are in the registry of `app/shortcuts.rs`; no `consume_key` elsewhere. |
 | S-K2 | `suppr-immediat-annulable` | Del deletes the selection right away, undoable, everywhere (the grid empties first). |
-| S-K3 | `double-clic-par-sorte` | Double-click: text or name → in-place editing; object → Properties; empty background of a graph → view reset; Project Manager → activates the window, never closes it, and collapses a folder. |
-| S-K4 | `renommer-f2-ou-clic-lent` | Rename in the Project Manager: F2, or a slow click on an already selected name. |
+| S-K3 | `double-clic-par-sorte` | Double-click: text or name → in-place editing; object → Properties; empty background of a graph → view reset; in a tree (Project Manager) → activates the window, never closes it, and toggles a folder once. A single click in a tree only selects. |
+| S-K4 | `renommer-f2-ou-menu` | Rename in a tree (Project Manager): F2 or the context menu's Rename; never a slow click on an already selected name. |
 | S-K5 | `aide-raccourcis-generee` | Help › Keyboard Shortcuts is generated from the key registry. |
 | S-K6 | `tab-suit-la-lecture` | Tab follows the reading order: top-bottom, left-right. |
 | S-K7 | `outils-dans-la-barre-tools` | No tool selector in a window: tools stay in the Tools bar, the object first; an accepted exit (analysis tools), always justified in the code and the docs. |
 | S-K8 | `gestes-dans-la-matrice` | Every mouse wheel or double-click gesture is filed in the `gestures.md` matrix, where one sees whether the same gesture does something else elsewhere. |
-| S-K9 | `fleches-dans-les-gestionnaires` | In the focused Project Manager and Object Manager, ↑ and ↓ move the selection from one visible row to the next (without opening or writing to the history), Enter opens the window, expands or collapses the folder, or opens the Properties of the object; the cursor row carries the focus outline. |
+| S-K9 | `fleches-dans-les-gestionnaires` | In the focused Project Manager and Object Manager, ↑ and ↓ move the selection from one visible row to the next (without opening or writing to the history), Enter opens the window, expands or collapses the folder, or opens the Properties of the object; the cursor row carries the focus outline. In a tree (Project Manager), Shift+↑/↓ extend the selection, → and ← unfold, fold and walk to the first child or the parent, and Cut + Paste moves. |
 | S-X1 | `ctrl-molette-zoom` | Ctrl+wheel zooms, everywhere. |
 | S-X2 | `curseurs` | Open then closed hand for dragging, resize arrow on a handle, finger on a clickable element that is not a button. |
 | S-X3 | `fenetre-preferences` | **Planned (#148).** Application settings go in Edit › Preferences…; menus keep the frequent display toggles. |
@@ -417,9 +417,10 @@ History: #222, #218 (dates).
 - **In-place editor, a single contract** (S-T4): all the text selected on
   opening; Enter and a click elsewhere validate, Esc cancels, Tab validates and
   moves to the next.
-- **Rename in the Project Manager** (S-K4): F2, or a slow click on an already
-  selected name (0.5 s without a second click; a double-click never opens the
-  field).
+- **Rename in a tree** (S-K4, Project Manager): F2 or the context menu's
+  Rename. There is no slow click on an already selected name (#423): clicking
+  again on the selected row, before Ctrl+C or to start a drag, must never open
+  the field.
 
 How it is held:
 
@@ -759,15 +760,18 @@ History: #227, #237 (width "a few digits"), #241 (Results panel).
 - **Double-click** (S-K3 → S-R7): text or name (cell, tab, title) → in-place
   editing; object (series, axis) → Properties; empty background of a graph → view
   reset; Project Manager → activates or restores the window, **never
-  closes**. On a **folder**, a click selects it and expands it if it is
-  closed (never collapses it), the double-click collapses it (#170).
+  closes**. In a tree, a **single click only selects**, a window or a folder:
+  it opens nothing and expands nothing (#423). A **folder** expands or
+  collapses on the triangle, the double-click (exactly one toggle), Enter and
+  → / ←; the double-click is the gesture to open a window, with Enter and the
+  menu's Open. These rules hold for every tree, not only the Project Manager.
 - **Help › Keyboard Shortcuts**, generated from `shortcuts.rs` (S-K5).
 - **Ctrl+wheel = zoom**, everywhere (S-X1 → S-R1, S-R7).
 - **Cursors** (S-X2): open then closed hand for dragging, resize
   arrow on a handle, finger on a clickable element that is
   not a button.
 - **Single drop stroke** (S-X5, #170): hovering a workbook or the workspace with a file from the system, a graph with columns or rows, lights up the **border of the target window** with the same light blue stroke, `theme::drop_target_stroke` (never red, which is for errors; nothing is painted inside the content, #386). One window at a time: over a workbook only its border, over the workspace (destination "new workbook") only the application's outline; a maximized target gets the stroke around the area it fills. The stroke replaces the active outline. Tests: `file_drop::tests`, `graph_window::tests`, `window_detach::tests`, `window_stack::tests`, `theme::tests`.
-- **Arrows and Enter in the managers** (S-K9, #170): the Project Manager and the Object Manager can be walked by keyboard when they have the focus (a click in them gives it). ↑ and ↓ select the neighboring **visible** row (the children of a collapsed folder or section are skipped), bounded at both ends; they open nothing and write nothing to the history. Enter opens: a window opens (like the double-click), a folder expands or collapses, a series or an object of the Object Manager opens its Properties. The row that carries the cursor has the focus outline of `selection.stroke` (`list_row::paint_focus_outline`). Shift+↑/↓ and Alt+↓ are consumed without effect; Ctrl+↑/↓ of the Object Manager keeps "move the series". The keys are consumed before the grid of a workbook, which reads the arrows without consuming them. Keys: `KEY_ARROW_UP`, `KEY_ARROW_DOWN`, `KEY_ENTER` of `app/shortcuts.rs`, help lines `help-select-neighbour` and `help-open-entry`.
+- **Arrows and Enter in the managers** (S-K9, #170): the Project Manager and the Object Manager can be walked by keyboard when they have the focus (a click in them gives it). ↑ and ↓ select the neighboring **visible** row (the children of a collapsed folder or section are skipped), bounded at both ends; they open nothing and write nothing to the history. Enter opens: a window opens (like the double-click), a folder expands or collapses, a series or an object of the Object Manager opens its Properties. The row that carries the cursor has the focus outline of `selection.stroke` (`list_row::paint_focus_outline`). In the Object Manager, Shift+↑/↓ and Alt+↓ are consumed without effect and Ctrl+↑/↓ keeps "move the series". **In a tree** (Project Manager, #423): Shift+↑/↓ extend the selection from the anchor with the rule of the Shift-click (the full order, collapsed folders included); → expands a closed folder, then goes to its first child; ← collapses an open folder, otherwise goes to the parent folder; nothing at the root level; Alt+↓ is still consumed without effect. **Cut** (Ctrl+X, context menu, first of the clipboard section) copies and marks the rows (dimmed); Paste of that same copy **moves** them (`Action::MoveObjects`, one history entry), into the selected folder, which expands to show what arrived. Provisional edge cases, see `PmInteraction::cut` and `AppState::paste_cut_objects`: the cut folder itself selected moves nothing; a paste into a cut folder's own subfolder, or onto a name already taken, is refused whole with a message; a paste into another project copies. Drag and drop to move is #425. The keys are consumed before the grid of a workbook, which reads the arrows without consuming them. Keys: `KEY_ARROW_UP`, `KEY_ARROW_DOWN`, `KEY_ARROW_LEFT`, `KEY_ARROW_RIGHT`, `KEY_ENTER` of `app/shortcuts.rs`, help lines `help-select-neighbour`, `help-extend-selection`, `help-fold-with-arrows` and `help-open-entry`.
 - **No tool selector in a window** (S-K7, #299). The object first:
   one clicks or drags the object itself (a curve, a handle, a
   cell); the tools (Pointer, Text, Zoom, shapes) live in the Tools

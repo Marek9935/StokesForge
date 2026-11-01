@@ -207,6 +207,10 @@ pub enum Action {
     RenameObjects(Vec<(NodeId, String)>),
     /// Copies the selection to the system transport.
     CopyObjects(Vec<NodeId>),
+    /// Cuts the selection (#423): copies it like [`Action::CopyObjects`] and
+    /// marks it, so that pasting that same copy into a folder of this project
+    /// **moves** it (one `MoveObjects` history entry) instead of copying it.
+    CutObjects(Vec<NodeId>),
     /// Duplicates the selection in its original folders.
     DuplicateObjects(Vec<NodeId>),
     /// Pastes the system transport into a folder.
@@ -2927,6 +2931,16 @@ pub enum ProjectTreeNode {
     },
 }
 
+/// What [`Action::CutObjects`] remembers (#423).
+#[derive(Debug, Clone)]
+struct CutMark {
+    ids: Vec<NodeId>,
+    /// `clipboard_origin()` at the cut: a reopened project is another origin.
+    origin: String,
+    /// The transport text of the cut: only a paste of this very text moves.
+    text: String,
+}
+
 /// The state of the test bench: a handle to the actor, the last snapshot
 /// received, what is selected, the current file path, the last message
 /// and the entry in progress.
@@ -2975,6 +2989,9 @@ pub struct AppState {
     pending_row_drop: Option<PendingRowDrop>,
     object_clipboard_origin: String,
     object_clipboard_output: Option<String>,
+    /// The last Cut, until a paste, a Copy, a new Cut or a project change
+    /// (#423).
+    cut_mark: Option<CutMark>,
     /// The representations of the figure to offer to the system, prepared by
     /// [`Action::CopyGraphFigure`] and picked up by the window (#149).
     figure_clipboard: Option<Vec<FigureBytes>>,
@@ -3220,6 +3237,7 @@ impl AppState {
                     .as_nanos()
             ),
             object_clipboard_output: None,
+            cut_mark: None,
             figure_clipboard: None,
             copied_objects: Vec::new(),
             selected_sheets: std::collections::HashMap::new(),
@@ -5267,7 +5285,11 @@ impl AppState {
             Action::DeleteSheet(sheet) => self.delete_sheet(sheet),
             Action::RenameObject { id, name } => self.rename_object(id, &name),
             Action::RenameObjects(changes) => self.rename_objects(changes),
-            Action::CopyObjects(ids) => self.copy_objects(&ids),
+            Action::CopyObjects(ids) => {
+                self.cut_mark = None;
+                self.copy_objects(&ids);
+            }
+            Action::CutObjects(ids) => self.cut_objects_action(&ids),
             Action::DuplicateObjects(ids) => self.duplicate_objects(&ids),
             Action::PasteObjects { parent, text } => self.paste_objects(parent, &text),
             Action::ShowGraphData { graph } => {
@@ -6061,6 +6083,7 @@ impl AppState {
                     self.pending_overwrite = None;
                     self.pending_discarded_save = None;
                     self.object_clipboard_output = None;
+                    self.cut_mark = None;
                     self.copied_objects.clear();
                 }
                 let reopened = self.snapshot.epoch != snapshot.epoch;
@@ -8270,6 +8293,19 @@ impl AppState {
         self.object_clipboard_output.take()
     }
 
+    /// The nodes of the last Cut that still exist (#423): the rows to paint
+    /// dimmed until the paste. Empty without a Cut, after a Copy, a paste or a
+    /// project change; a deleted node (Delete, Undo) drops out.
+    pub fn cut_objects(&self) -> Vec<NodeId> {
+        self.cut_mark.as_ref().map_or_else(Vec::new, |mark| {
+            mark.ids
+                .iter()
+                .copied()
+                .filter(|id| self.tree().node(*id).is_some())
+                .collect()
+        })
+    }
+
     /// Copies created: source, destination and whether the view state is kept.
     pub fn take_copied_objects(&mut self) -> Vec<(NodeId, NodeId, bool)> {
         std::mem::take(&mut self.copied_objects)
@@ -8402,6 +8438,85 @@ impl AppState {
         }
     }
 
+    /// Cut (#423): a copy, then the mark that turns the paste of that very
+    /// text into a move.
+    fn cut_objects_action(&mut self, ids: &[NodeId]) {
+        self.cut_mark = None;
+        let targets = self.object_targets(ids);
+        self.object_clipboard_output = None;
+        self.copy_objects(&targets);
+        if let Some(text) = self.object_clipboard_output.clone() {
+            self.cut_mark = Some(CutMark {
+                ids: targets,
+                origin: self.clipboard_origin(),
+                text,
+            });
+        }
+    }
+
+    /// Paste of the text of the last Cut into this project: moves the cut
+    /// nodes into `parent` (#423). Provisional rules, each one isolated here:
+    /// the cut folder itself selected (#391: beside it) moves nothing and keeps
+    /// the mark; a destination inside a cut folder, or a name already taken
+    /// there, is refused whole with a message; a successful move clears the
+    /// mark.
+    fn paste_cut_objects(&mut self, parent: NodeId) {
+        if self.cut_mark.is_none() {
+            return;
+        }
+        let ids = self.cut_objects();
+        if ids.is_empty() {
+            self.cut_mark = None;
+            return;
+        }
+        if ids.contains(&parent) {
+            return;
+        }
+        let inside = self
+            .tree()
+            .ancestors(parent)
+            .unwrap_or_default()
+            .iter()
+            .any(|ancestor| ids.contains(ancestor));
+        if inside {
+            self.fail(tr!("error-move-into-itself"));
+            return;
+        }
+        let moving: Vec<NodeId> = self
+            .object_targets(&ids)
+            .into_iter()
+            .filter(|id| {
+                self.tree()
+                    .node(*id)
+                    .is_some_and(|node| node.parent() != Some(parent))
+            })
+            .collect();
+        let existing: Vec<String> = self
+            .tree()
+            .children(parent)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|id| self.tree().node(*id).map(|n| n.name().to_string()))
+            .collect();
+        let mut seen: Vec<String> = Vec::new();
+        for id in &moving {
+            let Some(name) = self.tree().node(*id).map(|n| n.name().to_string()) else {
+                continue;
+            };
+            if existing
+                .iter()
+                .chain(seen.iter())
+                .any(|other| same_name_ignoring_case(other, &name))
+            {
+                self.fail(tr!("error-move-name-taken", name = name));
+                return;
+            }
+            seen.push(name);
+        }
+        self.cut_mark = None;
+        self.move_objects(&moving, parent);
+    }
+
     fn next_object_copy_name(
         &self,
         parent: NodeId,
@@ -8451,6 +8566,15 @@ impl AppState {
             }
         };
         let same_origin = origin == self.clipboard_origin();
+        if same_origin
+            && self
+                .cut_mark
+                .as_ref()
+                .is_some_and(|mark| mark.origin == origin && mark.text == text)
+        {
+            self.paste_cut_objects(parent);
+            return;
+        }
         let copies = if same_origin {
             copies
         } else {

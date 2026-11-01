@@ -553,3 +553,48 @@ mod tests {
         }
     }
 }
+
+/// The keys of a **tree** (Project Manager, #423): the list keys, plus
+/// Shift+↑ / Shift+↓ (extend the selection) and ← / → (fold, unfold, go to the
+/// parent or the first child).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TreeKey {
+    Up,
+    Down,
+    ShiftUp,
+    ShiftDown,
+    Left,
+    Right,
+    Enter,
+}
+
+/// Reads the tree keys, consumed once per frame. Alt+↓ is swallowed first (it
+/// does nothing here), then the Shift variants, which `consume_shortcut`
+/// would otherwise take for plain ↑ and ↓. ← and → are consumed: a workbook's
+/// grid, painted after the panel, reads them without consuming.
+pub(super) fn read_tree_navigation(input: &mut egui::InputState) -> Option<TreeKey> {
+    use super::shortcuts::{
+        KEY_ALT_ARROW_DOWN, KEY_ARROW_DOWN, KEY_ARROW_LEFT, KEY_ARROW_RIGHT, KEY_ARROW_UP,
+        KEY_ENTER, KEY_SHIFT_ARROW_DOWN, KEY_SHIFT_ARROW_UP,
+    };
+    if input.consume_shortcut(&KEY_ALT_ARROW_DOWN) {
+        return None;
+    }
+    if input.consume_shortcut(&KEY_SHIFT_ARROW_UP) {
+        Some(TreeKey::ShiftUp)
+    } else if input.consume_shortcut(&KEY_SHIFT_ARROW_DOWN) {
+        Some(TreeKey::ShiftDown)
+    } else if input.consume_shortcut(&KEY_ARROW_UP) {
+        Some(TreeKey::Up)
+    } else if input.consume_shortcut(&KEY_ARROW_DOWN) {
+        Some(TreeKey::Down)
+    } else if input.consume_shortcut(&KEY_ARROW_LEFT) {
+        Some(TreeKey::Left)
+    } else if input.consume_shortcut(&KEY_ARROW_RIGHT) {
+        Some(TreeKey::Right)
+    } else if input.consume_shortcut(&KEY_ENTER) {
+        Some(TreeKey::Enter)
+    } else {
+        None
+    }
+}

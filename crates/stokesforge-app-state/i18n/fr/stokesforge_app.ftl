@@ -1419,6 +1419,8 @@ history-macro-move-objects = Déplacer des objets
 
 object-rename-empty = Le nom est vide, le nom précédent a été conservé
 object-clipboard-invalid = Le presse-papiers ne contient aucun objet StokesForge valide
+error-move-into-itself = Un dossier ne peut pas être déplacé dans lui-même ni dans un de ses sous-dossiers. Choisissez une autre destination
+error-move-name-taken = Rien n'a été déplacé : « { $name } » existe déjà dans le dossier de destination. Renommez l'un des deux d'abord
 object-delete-used = Supprimé ; données utilisées par { $graphs }. Annuler les rétablit
 
 action-rename-project-object = Renommer
@@ -2094,6 +2096,7 @@ help-keys-escape = Échap
 help-keys-tab = Tab
 help-keys-arrows = Haut / Bas
 help-keys-shift-arrows = Maj+Haut / Maj+Bas
+help-keys-left-right = Gauche / Droite
 help-undo = Annuler
 help-redo = Rétablir
 help-new-project = Nouveau projet
@@ -2122,6 +2125,8 @@ help-delete-selection = Supprimer la sélection
 help-duplicate = Dupliquer
 help-select-neighbour = Sélectionner la ligne précédente ou suivante
 help-open-entry = Ouvrir la fenêtre, déplier ou replier le dossier
+help-extend-selection = Étendre la sélection depuis l'ancre
+help-fold-with-arrows = Déplier ou replier le dossier, aller à son premier enfant ou à son parent
 help-validate = Valider
 help-cancel = Annuler
 help-next-field = Valider et passer au champ suivant

@@ -220,6 +220,9 @@ pub(super) struct ProjectManagerViewModel {
     pub(super) open: HashSet<Tab>,
     /// Copy of the foreground tab, same resynchronization.
     pub(super) active_tab: Option<Tab>,
+    /// Copy of the nodes of the last Cut ([`AppState::cut_objects`]), same
+    /// resynchronization: their rows are dimmed (#423).
+    pub(super) cut: HashSet<NodeId>,
 }
 
 /// What the detached OS window of the Project Manager writes, so that the
@@ -744,6 +747,7 @@ impl StokesForgeApp {
         active_tab: Option<Tab>,
     ) {
         let open = self.open_tabs();
+        let cut: HashSet<NodeId> = self.state.cut_objects().into_iter().collect();
         let changed = {
             let mut model = self
                 .pm_view_model
@@ -753,13 +757,15 @@ impl StokesForgeApp {
             let changed = model.snapshot_stamp != Some(stamp)
                 || model.selected != self.pm_selection
                 || model.open != open
-                || model.active_tab != active_tab;
+                || model.active_tab != active_tab
+                || model.cut != cut;
             model.snapshot_stamp = Some(stamp);
             model.tree = self.state.project_tree();
             model.root = Some(self.state.tree().root());
             model.selected = self.pm_selection.clone();
             model.open = open;
             model.active_tab = active_tab;
+            model.cut = cut;
             changed
         };
         let view_model = Arc::clone(&self.pm_view_model);
@@ -800,6 +806,7 @@ impl StokesForgeApp {
                         selection: &mut model.selected,
                         open: &model.open,
                         close_requests: &mut closed,
+                        cut: &model.cut,
                     };
                     project_manager_contents_from_tree(ui, &model.tree, &mut interaction);
                 });
