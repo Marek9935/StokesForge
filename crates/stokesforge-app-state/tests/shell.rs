@@ -14881,3 +14881,26 @@ fn set_layer_placement_is_one_step_with_the_draft_result() {
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), grid, "one Undo is enough");
 }
+
+/// #423: duplicating a copy counts on instead of stacking the suffix.
+/// Witness: using the whole name as the base gives "Sheet1 copy 1 copy 1".
+#[test]
+fn duplicating_a_sheet_copy_does_not_stack_the_suffix() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    state.dispatch(Action::DuplicateSheet(sheet1));
+    let copy1 = sheet_named(state.tree(), "Sheet1 copy 1");
+    state.dispatch(Action::DuplicateSheet(copy1));
+    let book = book_named(state.tree(), "Book1");
+    let names: Vec<String> = state
+        .worksheets_of(book)
+        .into_iter()
+        .map(|(_, n)| n)
+        .collect();
+    assert!(names.contains(&"Sheet1 copy 2".to_string()), "{names:?}");
+    assert!(
+        !names.iter().any(|n| n.contains("copy 1 copy")),
+        "{names:?}"
+    );
+}
