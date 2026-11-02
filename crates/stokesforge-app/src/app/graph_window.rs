@@ -514,7 +514,7 @@ pub(super) fn graph_view_contents(
                 );
                 let mut strip_ui =
                     ui.new_child(egui::UiBuilder::new().max_rect(controls).layout(
-                        egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                        egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
                     ));
                 strip_ui.set_clip_rect(ui.clip_rect().intersect(controls));
                 if let Some(spec) =

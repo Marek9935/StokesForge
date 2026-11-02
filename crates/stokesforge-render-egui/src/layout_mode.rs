@@ -143,10 +143,18 @@ fn luma(color: Color32) -> u32 {
 fn accent(visuals: &Visuals) -> Color32 {
     let fill = visuals.selection.bg_fill;
     let stroke = visuals.selection.stroke.color;
-    if luma(fill) <= luma(stroke) {
+    let darker = if luma(fill) <= luma(stroke) {
         fill
     } else {
         stroke
+    };
+    // A pale theme selection (light green) would not read on white: darken it
+    // until white text on it stays legible.
+    if luma(darker) > 1000 {
+        let shade = |v: u8| (u16::from(v) * 55 / 100) as u8;
+        Color32::from_rgb(shade(darker.r()), shade(darker.g()), shade(darker.b()))
+    } else {
+        darker
     }
 }
 

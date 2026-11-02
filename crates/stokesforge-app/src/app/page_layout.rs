@@ -479,6 +479,12 @@ fn length_quantity(unit: LengthUnit, min_points: f64, max_points: f64) -> Quanti
         .short()
 }
 
+/// A length as the inspector shows it: rounded to the unit's decimals.
+fn shown(value: f64, unit: LengthUnit) -> f64 {
+    let factor = 10f64.powi(unit.decimals() as i32);
+    (value * factor).round() / factor
+}
+
 fn within(value: f64, low: f64, high: f64) -> f64 {
     value.min(high.max(low)).max(low)
 }
@@ -524,16 +530,29 @@ pub(super) fn inspector(
     ui.spacing_mut().item_spacing.x = 4.0;
     ui.label(tr!("layout-mode-figure"));
     if let Some(page) = page {
-        let mut size = (unit.from_points(page.width), unit.from_points(page.height));
+        // Shown rounded to the unit's decimals; only a field the user changed
+        // is read back, so the other keeps its exact value.
+        let mut size = (
+            shown(unit.from_points(page.width), unit),
+            shown(unit.from_points(page.height), unit),
+        );
         let quantity = length_quantity(unit, MIN_PAGE_EXTENT, stokesforge_plot::MAX_FIGURE_EXTENT);
-        let mut changed = number_field(ui, ("layout_figure", 0), &mut size.0, &quantity).changed;
+        let width_changed = number_field(ui, ("layout_figure", 0), &mut size.0, &quantity).changed;
         ui.label(tr!("layout-mode-by"));
-        changed |= number_field(ui, ("layout_figure", 1), &mut size.1, &quantity).changed;
+        let height_changed = number_field(ui, ("layout_figure", 1), &mut size.1, &quantity).changed;
         ui.label(symbol);
-        if changed {
+        if width_changed || height_changed {
             let wanted = FreePage {
-                width: unit.to_points(size.0),
-                height: unit.to_points(size.1),
+                width: if width_changed {
+                    unit.to_points(size.0)
+                } else {
+                    page.width
+                },
+                height: if height_changed {
+                    unit.to_points(size.1)
+                } else {
+                    page.height
+                },
                 ..page
             };
             let new_page = wanted.sanitized().unwrap_or(page);
@@ -551,12 +570,9 @@ pub(super) fn inspector(
     if let (Some(page), Some(selected)) = (page, view.selected_box()) {
         ui.label(tr!("layout-mode-layer", n = (active + 1).to_string()));
         let o = selected.outer;
-        let mut fields = [
-            unit.from_points(o.left - page.left),
-            unit.from_points(o.top - page.top),
-            unit.from_points(o.width),
-            unit.from_points(o.height),
-        ];
+        let exact = [o.left - page.left, o.top - page.top, o.width, o.height];
+        let mut fields = exact.map(|points| shown(unit.from_points(points), unit));
+        let mut edited = [false; 4];
         let position = length_quantity(unit, 0.0, page.width.max(page.height));
         let size = length_quantity(unit, MIN_FRAME_SIZE, page.width.max(page.height));
         let mut changed = false;
@@ -570,19 +586,22 @@ pub(super) fn inspector(
         .enumerate()
         {
             ui.label(label);
-            changed |=
+            edited[index] =
                 number_field(ui, ("layout_box", index), &mut fields[index], quantity).changed;
+            changed |= edited[index];
         }
+        let points = |index: usize| {
+            if edited[index] {
+                unit.to_points(fields[index])
+            } else {
+                exact[index]
+            }
+        };
         if changed {
             let outer = box_in_page(
                 &selected,
                 page,
-                (
-                    unit.to_points(fields[0]),
-                    unit.to_points(fields[1]),
-                    unit.to_points(fields[2]),
-                    unit.to_points(fields[3]),
-                ),
+                (points(0), points(1), points(2), points(3)),
             );
             actions.push(Action::SetFreeLayout {
                 graph,
