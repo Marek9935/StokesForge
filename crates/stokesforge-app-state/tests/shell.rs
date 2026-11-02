@@ -7422,6 +7422,70 @@ fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
     assert!(state.status().expect("message").is_error());
 }
 
+/// Names of the children of the root, in order.
+fn root_child_names(state: &AppState) -> Vec<String> {
+    let tree = state.tree();
+    tree.node(tree.root())
+        .unwrap()
+        .children()
+        .iter()
+        .map(|id| tree.node(*id).unwrap().name().to_string())
+        .collect()
+}
+
+fn last_root_child_name(state: &AppState) -> String {
+    root_child_names(state).pop().expect("a child")
+}
+
+/// #434: a graph plotted from a workbook is named after it, numbered when
+/// the name is taken; undo frees the name, redo keeps it.
+#[test]
+fn plot_columns_names_the_graph_after_the_workbook() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let book = state.tree().parent(sheet1).unwrap().unwrap();
+    let book_name = state.tree().node(book).unwrap().name().to_string();
+    let signal = column_id(&state, sheet1, "Signal");
+    let plot = |state: &mut AppState| {
+        state.dispatch(Action::PlotColumns {
+            sheet: sheet1,
+            columns: vec![signal],
+            plot_type: PlotType::Line,
+        });
+        last_root_child_name(state)
+    };
+
+    assert_eq!(plot(&mut state), format!("{book_name} plot"));
+    assert_eq!(plot(&mut state), format!("{book_name} plot 2"));
+    state.dispatch(Action::Undo);
+    assert_eq!(plot(&mut state), format!("{book_name} plot 2"));
+    state.dispatch(Action::Undo);
+    state.dispatch(Action::Redo);
+    assert_eq!(last_root_child_name(&state), format!("{book_name} plot 2"));
+}
+
+/// #434: `PlotRows` follows the same rule; an empty `AddGraph` keeps GraphN.
+#[test]
+fn plot_rows_and_empty_graph_names() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, _columns) = kinetics(dir.path());
+    let book = state.tree().parent(sheet).unwrap().unwrap();
+    let book_name = state.tree().node(book).unwrap().name().to_string();
+
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(last_root_child_name(&state), format!("{book_name} plot"));
+
+    state.dispatch(Action::AddGraph);
+    let name = last_root_child_name(&state);
+    assert!(name.starts_with("Graph"), "{name}");
+    assert!(!name.contains(" plot"), "{name}");
+}
+
 /// Plot of a row selection (#166): a fresh graph where each row is
 /// a series, not all the columns crossed; a single undo step.
 #[test]

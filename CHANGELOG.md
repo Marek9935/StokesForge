@@ -26,6 +26,10 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A new graph plotted from a workbook is named after it (#434): "Book1 plot",
+  then "Book1 plot 2"… instead of Graph1, Graph2. `pyst.plot` without `name`
+  does the same. A graph without series is still named GraphN.
+
 - Project Manager (#425): drag rows to move them. Drop on a folder to put them
   inside it, between two rows to reorder, below the last row to move them to the
   root. A closed folder opens after a second under the pointer, Escape cancels,
