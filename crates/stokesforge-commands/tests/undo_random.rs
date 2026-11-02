@@ -21,7 +21,10 @@ use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestRng, TestRunner};
 
 use stokesforge_commands::{Command, History, HistoryLabel, MacroKind};
-use stokesforge_core::{Column, ColumnType, MixedCell, Node, NodeId, Project, ValueBlock};
+use stokesforge_core::{
+    Column, ColumnFormula, ColumnMeta, ColumnType, FormulaPart, MixedCell, Node, NodeId, Project,
+    ValueBlock,
+};
 use stokesforge_plot::{PlotSpec, SeriesSpec};
 
 // -- draw -----------------------------------------------------------------
@@ -92,6 +95,19 @@ enum Step {
         at: usize,
         count: usize,
     },
+    /// `Command::SetColumnMeta` that gives `column` the formula
+    /// `<source>*<factor>+1` (a column already holding a formula changes it;
+    /// a source that is the target itself is a draw rejection).
+    SetFormula {
+        column: usize,
+        source: usize,
+        factor: usize,
+    },
+    /// `Command::SetColumnMeta` that takes the formula of `column` away (a
+    /// column without one is a no-op meta write, still undoable).
+    RemoveFormula {
+        column: usize,
+    },
 }
 
 /// A single step, or a group of 2-3 steps played in a macro.
@@ -107,39 +123,48 @@ fn value() -> impl Strategy<Value = f64> {
 
 fn step() -> impl Strategy<Value = Step> {
     prop_oneof![
-        (0usize..8, 0usize..6, prop::collection::vec(value(), 0..4)).prop_map(
+        2 => (0usize..8, 0usize..6, prop::collection::vec(value(), 0..4)).prop_map(
             |(column, start, values)| Step::Cells {
                 column,
                 start,
                 values
             }
         ),
-        (0usize..8, 0usize..6, prop::collection::vec(value(), 0..4)).prop_map(
+        2 => (0usize..8, 0usize..6, prop::collection::vec(value(), 0..4)).prop_map(
             |(column, start, values)| Step::CellsPromoting {
                 column,
                 start,
                 values
             }
         ),
-        (0usize..2, 0usize..6).prop_map(|(sheet, index)| Step::AddColumn { sheet, index }),
-        (0usize..8).prop_map(|column| Step::DeleteColumn { column }),
-        (0usize..8).prop_map(|column| Step::Rename { column }),
-        (0usize..8, 0usize..2, 0usize..6).prop_map(|(column, sheet, index)| Step::Move {
+        2 => (0usize..2, 0usize..6).prop_map(|(sheet, index)| Step::AddColumn { sheet, index }),
+        2 => (0usize..8).prop_map(|column| Step::DeleteColumn { column }),
+        2 => (0usize..8).prop_map(|column| Step::Rename { column }),
+        2 => (0usize..8, 0usize..2, 0usize..6).prop_map(|(column, sheet, index)| Step::Move {
             column,
             sheet,
             index
         }),
-        (0usize..8, 0usize..4).prop_map(|(column, kind)| Step::SetType { column, kind }),
-        (0usize..2, 0usize..6, 1usize..4).prop_map(|(sheet, at, count)| Step::InsertRows {
+        2 => (0usize..8, 0usize..4).prop_map(|(column, kind)| Step::SetType { column, kind }),
+        2 => (0usize..2, 0usize..6, 1usize..4).prop_map(|(sheet, at, count)| Step::InsertRows {
             sheet,
             at,
             count
         }),
-        (0usize..2, 0usize..6, 1usize..4).prop_map(|(sheet, at, count)| Step::DeleteRows {
+        2 => (0usize..2, 0usize..6, 1usize..4).prop_map(|(sheet, at, count)| Step::DeleteRows {
             sheet,
             at,
             count
         }),
+        // Formulas: about one step in ten (#412).
+        1 => (0usize..8, 0usize..8, 1usize..5).prop_map(|(column, source, factor)| {
+            Step::SetFormula {
+                column,
+                source,
+                factor,
+            }
+        }),
+        1 => (0usize..8).prop_map(|column| Step::RemoveFormula { column }),
     ]
 }
 
@@ -172,6 +197,8 @@ struct World {
     project: Project,
     sheets: Vec<NodeId>,
     next_name: u32,
+    /// Accepted `SetFormula` steps: the coverage check of the main test.
+    formulas_set: usize,
 }
 
 impl World {
@@ -220,6 +247,7 @@ impl World {
             project,
             sheets: vec![sheet1, sheet2],
             next_name: 0,
+            formulas_set: 0,
         }
     }
 
@@ -237,6 +265,14 @@ impl World {
             .iter()
             .flat_map(|sheet| self.children_of(*sheet))
             .collect()
+    }
+
+    fn column_meta(&self, column: NodeId) -> Option<ColumnMeta> {
+        self.project
+            .tree()
+            .node(column)
+            .and_then(Node::as_column)
+            .map(|c| c.meta().clone())
     }
 
     fn column_type(&self, column: NodeId) -> Option<ColumnType> {
@@ -367,6 +403,35 @@ impl World {
                     count: *count,
                 })
             }
+            Step::SetFormula {
+                column,
+                source,
+                factor,
+            } => {
+                let target = *columns.get(column % columns.len().max(1))?;
+                let source = *columns.get(source % columns.len().max(1))?;
+                if source == target {
+                    return None;
+                }
+                let mut meta = self.column_meta(target)?;
+                meta.formula = Some(ColumnFormula::from_parts(vec![
+                    FormulaPart::Column(source),
+                    FormulaPart::Text(format!("*{factor}+1")),
+                ]));
+                Some(Command::SetColumnMeta {
+                    column: target,
+                    meta,
+                })
+            }
+            Step::RemoveFormula { column } => {
+                let target = *columns.get(column % columns.len().max(1))?;
+                let mut meta = self.column_meta(target)?;
+                meta.formula = None;
+                Some(Command::SetColumnMeta {
+                    column: target,
+                    meta,
+                })
+            }
         }
     }
 
@@ -374,7 +439,13 @@ impl World {
     /// rejection, silent.
     fn play_step(&mut self, history: &mut History, step: &Step) -> bool {
         match self.command_for(step) {
-            Some(command) => history.execute(&mut self.project, command).is_ok(),
+            Some(command) => {
+                let accepted = history.execute(&mut self.project, command).is_ok();
+                if accepted && matches!(step, Step::SetFormula { .. }) {
+                    self.formulas_set += 1;
+                }
+                accepted
+            }
             None => false,
         }
     }
@@ -454,6 +525,7 @@ fn redo_all(history: &mut History, project: &mut Project) -> Result<(), TestCase
 #[test]
 fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
     let mut runner = deterministic_runner();
+    let formulas_set = std::cell::Cell::new(0);
     runner
         .run(&prop::collection::vec(script(), 70..=90), |scripts| {
             let mut world = World::new();
@@ -461,6 +533,7 @@ fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
             let initial = Arc::clone(world.project.tree());
 
             let accepted = world.play(&mut history, &scripts);
+            formulas_set.set(formulas_set.get() + world.formulas_set);
             prop_assert!(
                 accepted >= 50,
                 "draw too degenerate: only {accepted} commands accepted"
@@ -489,6 +562,13 @@ fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
             Ok(())
         })
         .expect("round-trip property verified");
+    // The formula steps must really reach the history, or the property above
+    // would say nothing about them.
+    assert!(
+        formulas_set.get() >= 40,
+        "only {} formulas set over all the cases",
+        formulas_set.get()
+    );
 }
 
 // -- 23. determinism -------------------------------------------------------
