@@ -765,7 +765,7 @@ fn new_target(w: &mut World) -> NodeId {
 fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     let mut w = world();
     let target = new_target(&mut w);
-    let cases: [(&str, &str); 9] = [
+    let cases: [(&str, &str); 11] = [
         ("frob(A)", "frob"),
         ("sin(A, B)", "argument"),
         ("sin()", "argument"),
@@ -775,6 +775,8 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
         ("max([Nobook]Sheet1!A)", "Nobook"),
         ("max(Sheet3!B, Sheet3!A)", "can only be read by"),
         ("at(Sheet3!B, 1, Sheet3!A)", "without a prefix"),
+        ("1e400*A", "too large"),
+        ("A*1e-400", "too small"),
     ];
     for (text, hint) in cases {
         w.type_formula(target, text);
@@ -788,6 +790,25 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     }
 }
 
+/// A number outside the f64 range is refused as soon as it is typed: the
+/// field stays open (`header_edit_refusal`), and a stored text keeps its
+/// number (#429).
+#[test]
+fn a_number_out_of_range_is_refused_while_typing() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    w.state.begin_header_edit(target, HeaderField::Formula);
+    w.state.header_editing_mut().unwrap().buffer = "1e400*A".to_string();
+    let refusal = w.state.header_edit_refusal().expect("refused while typing");
+    assert!(
+        refusal.contains("1e400") && refusal.contains("too large"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("NumberOutOfRange"), "{refusal}");
+    w.state.header_editing_mut().unwrap().buffer = "1e308*A".to_string();
+    assert_eq!(w.state.header_edit_refusal(), None);
+}
+
 /// The manual says a formula with a syntax error is kept and the column has
 /// no values until it is fixed. Pinned: kept, empty, history entry written.
 #[test]
@@ -796,7 +817,7 @@ fn a_formula_with_a_syntax_error_is_kept_and_the_column_is_empty() {
     let target = new_target(&mut w);
     let deep = format!("{}A{}", "(".repeat(1001), ")".repeat(1001));
     let very_deep = format!("{}A", "-".repeat(100_000));
-    for text in ["A +", "(A", "1e999999 * A", "A ## B", &deep, &very_deep] {
+    for text in ["A +", "(A", "A ## B", &deep, &very_deep] {
         w.type_formula(target, text);
         let kept = w.letters(target);
         assert_eq!(

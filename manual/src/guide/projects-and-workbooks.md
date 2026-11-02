@@ -298,6 +298,7 @@ If you misspell a function name, the message proposes the nearest one (`sqr(A)` 
 
 - Columns are written with their letters: `A`, `B`, `AA`. Capitals or lowercase both work.
 - Numbers: `2`, `0.5`, `1e-3`.
+  A number beyond about 1.8e308, or non-zero but too small to be stored (under about 4.9e-324), is refused when you enter the formula, with a message that gives the limit. Write `0` for zero.
 - Operators: `+`, `-`, `*`, `/`, `^` (power), and a minus sign in front of a value (`-A`).
 - Parentheses: `(A+B)/2`. `^` is done first, then `*` and `/`, then `+` and `-`. `^` reads from the right (`2^3^2` is 512) and binds tighter than a minus sign (`-2^2` is -4).
 - Comparisons: `<`, `<=`, `>`, `>=`, `==`, `!=`. They give 1 when true and 0 when false, and are done last.

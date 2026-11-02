@@ -200,6 +200,15 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Formulas (#429): `logx` of an exact power is exact (`floor(logx(1000, 10))` is
+  3, `logx(243, 3)` is 5); `erf` and `erfc` keep their relative precision
+  everywhere (within 2 ulps on the Boost.Math tables, `erfc` subnormal up to
+  27.2, `erf(-0)` is -0); `mean`, `sum` and `std` of a whole column or a range
+  use compensated sums (the mean of ten 0.1 is 0.1, the `std` of a constant
+  column is 0) and no longer lose a representable result to an intermediate
+  overflow (`mean` of two 1.7e308); a number typed in a formula beyond the
+  `f64` range (`1e400`) or too small to be stored (`1e-400`) is refused with a
+  sentence, while a stored formula holding one still loads.
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that

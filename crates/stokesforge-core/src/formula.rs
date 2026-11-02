@@ -220,6 +220,12 @@ pub enum FormulaError {
     /// `at(B, x, Sheet3!D)`: the X column must be in the sheet of the column
     /// read. Refused at input.
     RemoteXColumn,
+    /// A number typed in the formula is outside what an `f64` stores: beyond
+    /// about 1.8e308 (`too_large`), or non-zero but under about 4.9e-324 (it
+    /// would be stored as 0). Refused at input only, by
+    /// [`ColumnFormula::from_letters`]: a stored formula that holds such a
+    /// literal still loads and computes (invariants 10 and 12).
+    NumberOutOfRange { text: String, too_large: bool },
     /// Every cell of the result is empty because the column functions found no
     /// point (empty column, empty range, `at` outside the X domain). Never
     /// returned by [`evaluate`]: the application derives it from the cells
@@ -286,6 +292,15 @@ impl std::fmt::Display for FormulaError {
             FormulaError::NoPoint => {
                 write!(f, "the column functions found no point to compute from")
             }
+            FormulaError::NumberOutOfRange { text, too_large } => write!(
+                f,
+                "the number {text} is too {} for a 64-bit float",
+                if *too_large {
+                    "large"
+                } else {
+                    "small to be stored"
+                }
+            ),
             FormulaError::UnknownSheet(name) => write!(f, "no sheet named {name}"),
             FormulaError::UnknownWorkbook(name) => write!(f, "no workbook named {name}"),
             FormulaError::WorkbookWithoutSheet(name) => {
@@ -646,6 +661,26 @@ fn number_end(chars: &[char], start: usize) -> usize {
         }
     }
     i
+}
+
+/// Input-time check of a number literal (not run when a stored formula is
+/// compiled): refused when it reads as infinity, or as 0 although its mantissa
+/// has a non-zero digit (`1e-400`). Subnormals and a written zero (`0e400`,
+/// `0.000`) are accepted.
+fn check_number_range(literal: &[char]) -> Result<(), FormulaError> {
+    let text: String = literal.iter().collect();
+    let Ok(value) = text.parse::<f64>() else {
+        // Not a number (`.`, `1.2.3`): the parser says what is wrong.
+        return Ok(());
+    };
+    let mantissa = text.split(['e', 'E']).next().unwrap_or("");
+    let too_large = value.is_infinite();
+    let too_small = value == 0.0 && mantissa.chars().any(|c| ('1'..='9').contains(&c));
+    if too_large || too_small {
+        Err(FormulaError::NumberOutOfRange { text, too_large })
+    } else {
+        Ok(())
+    }
 }
 
 /// Tokens of all fragments, in order: a text fragment is
@@ -1395,6 +1430,7 @@ impl ColumnFormula {
                 return Err(FormulaError::DeletedColumn);
             } else if c.is_ascii_digit() || c == '.' {
                 let end = number_end(&chars, i);
+                check_number_range(&chars[i..end])?;
                 buffer.extend(&chars[i..end]);
                 i = end;
             } else if let Some(prefix) = if matches!(c, '[' | '\'') || c.is_ascii_alphabetic() {

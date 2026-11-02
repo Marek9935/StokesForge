@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use stokesforge_analysis::functions::Func;
 use stokesforge_core::formula::{evaluate, ColumnFormula, Formula, FormulaError};
-use stokesforge_core::{ColumnValues, MixedCell, NodeId, NumericStatus};
+use stokesforge_core::{ColumnValues, FormulaPart, MixedCell, NodeId, NumericStatus};
 
 // -- helpers --
 
@@ -1564,19 +1564,51 @@ fn refused_forms_are_refused_with_an_error() {
     }
 }
 
-/// Literals beyond the range of f64: the doc says nothing. The text `1e400`
-/// is accepted as infinity and `1e-400` as 0 (design question).
+/// Literals beyond the range of f64 are refused at entry (#429): `1e400` would
+/// be infinity and `1e-400` would be 0. What is representable, subnormals
+/// included, and a written zero stay accepted.
 #[test]
-#[ignore = "bug: #429: 1e400 reads as inf and 1e-400 as 0 silently, formula.rs:751"]
-fn out_of_range_literals_are_refused_or_flagged() {
+fn out_of_range_literals_are_refused_at_entry() {
     for text in ["1e400", "1e-400", "-1e400"] {
         let v = outcome(text);
         assert!(v.is_err(), "`{text}` silently read as {v:?}");
     }
+    assert_eq!(
+        parse("1e400").err(),
+        Some(FormulaError::NumberOutOfRange {
+            text: "1e400".into(),
+            too_large: true
+        })
+    );
+    assert_eq!(
+        parse("1e-400").err(),
+        Some(FormulaError::NumberOutOfRange {
+            text: "1e-400".into(),
+            too_large: false
+        })
+    );
+    for (text, expected) in [
+        ("1e-310", 1e-310),
+        ("4.9e-324", 5e-324),
+        ("0e400", 0.0),
+        ("0.000", 0.0),
+        ("1.7976931348623157e308", f64::MAX),
+    ] {
+        assert_eq!(outcome(text), Ok(expected), "`{text}`");
+    }
+}
+
+/// A stored formula keeps a literal outside the range: it loads and computes
+/// (invariants 10 and 12), only the entry refuses it.
+#[test]
+fn a_stored_out_of_range_literal_still_compiles() {
+    let stored = ColumnFormula::from_parts(vec![FormulaPart::Text("1e400".into())]);
+    assert!(stored.compile().is_ok());
+    let stored = ColumnFormula::from_parts(vec![FormulaPart::Text("1e-400".into())]);
+    assert!(stored.compile().is_ok());
 }
 
 #[test]
-#[ignore = "bug: #429: a 400-digit literal reads as inf silently, formula.rs:751"]
 fn very_long_digit_runs_do_not_panic() {
     let long = format!("1{}", "0".repeat(400));
     let v = outcome(&long);
