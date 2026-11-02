@@ -55,6 +55,32 @@ fn versions(project: &Project, ids: &[NodeId]) -> Vec<(NodeId, u64)> {
         .collect()
 }
 
+/// The formula columns of the sheet `Formules` of the witness: name and text in
+/// letters. Mirrored, with the expected values, by
+/// `stokesforge-session/tests/formula_witness.rs`.
+const FORMULA_FAMILIES: [(&str, &str); 14] = [
+    ("Operators", "B*2+C-A/2"),
+    ("Power", "2^3^2+A^2"),
+    (
+        "Comparisons",
+        "(B>2)+(C<=7)*10+(A==1)*100+(A!=1)*1000+(A>=2)*10000+(A<1)*100000",
+    ),
+    ("If", "if(A<B, A, B)+if(C>6, 100, 0)"),
+    ("RowFunctions1", "sqrt(B*B)+abs(A-2)+sign(A-1)"),
+    (
+        "RowFunctions2",
+        "floor(C/4)+ceil(C/4)+round(C/4, 0)+mod(C, 4)+pow(2, A)+min(A, 1)+max(B, 3)+exp(A*0)+ln(B/B)+cos(A*0)",
+    ),
+    ("At", "at(B, 1.5)"),
+    ("MaxRange", "max(B, 0.5, 2.5)"),
+    ("MinAll", "min(B)"),
+    ("MeanRange", "mean(B, 0.5, 2.5)"),
+    ("SumAll", "sum(C)"),
+    ("StdRange", "std(C, -1, 2.5)"),
+    ("IntegralAll", "integral(B)"),
+    ("IntegralRange", "integral(B, 0.5, 2.5)"),
+];
+
 /// The witness project and its view tables. Any change to this function
 /// changes the expected bytes: regenerate.
 fn witness_project() -> (Project, ViewTables) {
@@ -278,6 +304,43 @@ fn witness_project() -> (Project, ViewTables) {
             .formula_from_letters(id, &text)
             .expect("remote formula entered");
         assert!(!formula.remote_refs().is_empty(), "{text}");
+        project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            )
+            .expect("formula set");
+    }
+
+    // One formula column per family of the grammar, on a sheet of its own (not
+    // transposed: #430): operators, `^`, comparisons, `if`, row-wise functions,
+    // and the column functions with an X range. The data are chosen so that the
+    // golden test of the session (`formula_witness.rs`) computes every result by
+    // hand: A is the X of B.
+    let formulas_sheet = project
+        .add_worksheet(book, Some("Formules"))
+        .expect("sheet");
+    let fx = add_column(&mut project, formulas_sheet, "A", &[0.0, 1.0, 2.0, 3.0]);
+    project
+        .set_column_meta(
+            fx,
+            ColumnMeta {
+                role: ColumnRole::X,
+                ..Default::default()
+            },
+        )
+        .expect("role set");
+    add_column(&mut project, formulas_sheet, "B", &[1.0, 2.0, 4.0, 8.0]);
+    add_column(&mut project, formulas_sheet, "C", &[3.0, 5.0, 7.0, 9.0]);
+    for (name, text) in FORMULA_FAMILIES {
+        let id = add_column(&mut project, formulas_sheet, name, &[0.0; 4]);
+        let formula = project
+            .tree()
+            .formula_from_letters(id, text)
+            .expect("family formula entered");
         project
             .set_column_meta(
                 id,
