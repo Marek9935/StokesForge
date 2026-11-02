@@ -1380,12 +1380,12 @@ fn min_max_sign_of_an_empty_cell_stay_empty() {
     }
 }
 
-/// `mod` result stays inside `[0, b)` for a positive divisor.
+/// The exact remainder 3 - 1e-20 rounds to 3 in f64, so `mod` returns the divisor
+/// itself, like Python and Excel (decided in #412).
 #[test]
-#[ignore = "design: pending decision (#412 follow-up), mod(-1e-20, 3) = 3 (like Excel and Python), functions.rs:299-307"]
-fn mod_with_a_tiny_negative_dividend_stays_below_the_divisor() {
+fn mod_of_a_tiny_negative_dividend_rounds_to_the_divisor_like_python_and_excel() {
     let (v, _) = run("mod(A, 3)", &[float_column(&[-1e-20])], 1);
-    assert!(v[0] >= 0.0 && v[0] < 3.0, "mod(-1e-20, 3) = {}", v[0]);
+    assert_eq!(v[0], 3.0);
 }
 
 #[test]
