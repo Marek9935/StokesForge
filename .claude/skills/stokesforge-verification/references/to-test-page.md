@@ -36,9 +36,9 @@ A package with sub-issues (#419): one `chantiers/<parent>` document for the whol
 
 A `retour` **after** the merge becomes a GitLab issue through `stokesforge-bug-report`; the entry then gets `issue: <m>`. A `retour` **during the trial** is fixed on the branch, then the entry goes back to `todo`.
 
-## Trial checklist (#423)
+## Trial checklist
 
-The user does not guess what to test: before asking for `scripts/try.sh <n>`, write one `tests/<n>-<k>` entry per small check, in one `batch`.
+(#423) The user does not guess what to test: before asking for `scripts/try.sh <n>`, write one `tests/<n>-<k>` entry per small check, in one `batch`.
 
 - One behaviour per entry: each decided gesture, each edge case (refusal and its message), and the routes a bench test cannot see (save and reopen, detached window, `STOKESFORGE_LANG=en-XA` when texts changed).
 - `steps`: 2 to 4 short French imperatives, from a state the user can reach (the demo project, « crée un dossier »), with the English labels as on screen; `expect`: what is seen, not what the code does.
