@@ -663,6 +663,8 @@ pub fn set_grid_placement(spec: &mut PlotSpec) -> bool {
     spec.frame_widths = widths;
     spec.frame_heights = heights;
     spec.layer_placement = LayerPlacement::Grid;
+    // #426d: the page belongs to Free placement only.
+    spec.free_page = None;
     true
 }
 
@@ -2056,6 +2058,20 @@ mod free_placement_tests {
         assert_eq!(spec.frame_widths, vec![180.0, 150.0]);
         assert_eq!(spec.frame_heights, vec![120.0, 60.0]);
         assert!(spec.panels.iter().all(|p| p.free_frame.is_none()));
+    }
+
+    /// #426d: leaving Free placement drops the page.
+    #[test]
+    fn leaving_free_placement_clears_the_page() {
+        let mut spec = free(vec![cell(0, 0, (0.0, 0.0, 100.0, 80.0))]);
+        spec.free_page = Some(stokesforge_plot::FreePage {
+            left: 0.0,
+            top: 0.0,
+            width: 300.0,
+            height: 200.0,
+        });
+        assert!(set_grid_placement(&mut spec));
+        assert_eq!(spec.free_page, None);
     }
 
     #[test]

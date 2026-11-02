@@ -147,6 +147,40 @@ impl FreeFrame {
     }
 }
 
+/// The page of a Free graph (#426d): the rectangle the figure is at least,
+/// in the **same stored page coordinates as [`FreeFrame`]** (the area under
+/// the graph title band), in points. Plain data (invariant 3).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct FreePage {
+    /// Left edge of the page.
+    pub left: f64,
+    /// Top edge of the page (under the graph title band).
+    pub top: f64,
+    /// Width of the page.
+    pub width: f64,
+    /// Height of the page.
+    pub height: f64,
+}
+
+impl FreePage {
+    /// This page made usable: `None` when a number is not finite, otherwise
+    /// the size is brought into `[MIN_FRAME_SIZE, MAX_FIGURE_EXTENT]` and the
+    /// position into `±MAX_FIGURE_EXTENT / 2`.
+    pub fn sanitized(self) -> Option<FreePage> {
+        let all = [self.left, self.top, self.width, self.height];
+        if all.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        let half = MAX_FIGURE_EXTENT / 2.0;
+        Some(FreePage {
+            left: self.left.clamp(-half, half),
+            top: self.top.clamp(-half, half),
+            width: self.width.clamp(MIN_FRAME_SIZE, MAX_FIGURE_EXTENT),
+            height: self.height.clamp(MIN_FRAME_SIZE, MAX_FIGURE_EXTENT),
+        })
+    }
+}
+
 /// A panel and its four axes.
 ///
 /// `row`/`column` place the panel in the grid of the [`crate::PlotSpec`] —
@@ -1394,5 +1428,35 @@ mod group_tests {
         assert_eq!(panel.group_series(&[1, 1]), None);
         assert_eq!(panel.group_series(&[0, 9]), None);
         assert_eq!(panel, before);
+    }
+}
+
+#[cfg(test)]
+mod free_page_tests {
+    use super::*;
+
+    #[test]
+    fn a_page_is_clamped_and_a_non_finite_one_reads_none() {
+        let page = FreePage {
+            left: -1e300,
+            top: 5.0,
+            width: 1.0,
+            height: 1e300,
+        };
+        let ok = page.sanitized().expect("finite");
+        assert_eq!(ok.left, -MAX_FIGURE_EXTENT / 2.0);
+        assert_eq!(ok.top, 5.0);
+        assert_eq!(ok.width, MIN_FRAME_SIZE);
+        assert_eq!(ok.height, MAX_FIGURE_EXTENT);
+        let nan = FreePage {
+            width: f64::NAN,
+            ..page
+        };
+        assert_eq!(nan.sanitized(), None);
+        let spec = crate::PlotSpec {
+            free_page: Some(nan),
+            ..crate::PlotSpec::default()
+        };
+        assert_eq!(spec.sanitized_free_page(), None);
     }
 }

@@ -295,6 +295,9 @@ pub enum PlotEditKind {
     MoveLayer,
     /// A layer of a free graph resized by one of its edges (#398).
     ResizeLayer,
+    /// The page (the figure) of a free graph resized in the Page Layout Mode
+    /// (#426d), the boxes following in proportion.
+    ResizeFigure,
     /// Layers of a free graph lined up on the first selected one (#398).
     AlignLayers,
     /// Layers of a free graph given the width or height of the first
@@ -306,7 +309,7 @@ pub enum PlotEditKind {
     LayerPlacement,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -328,6 +331,7 @@ impl PlotEditKind {
         Self::LayerBackground,
         Self::MoveLayer,
         Self::ResizeLayer,
+        Self::ResizeFigure,
         Self::AlignLayers,
         Self::MatchLayerSize,
         Self::DistributeLayers,
@@ -358,6 +362,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::LayerBackground => "Change Layer Background",
             Self::MoveLayer => "Move Layer",
             Self::ResizeLayer => "Resize Layer",
+            Self::ResizeFigure => "Resize Figure",
             Self::AlignLayers => "Align Layers",
             Self::MatchLayerSize => "Match Layer Size",
             Self::DistributeLayers => "Distribute Layers",

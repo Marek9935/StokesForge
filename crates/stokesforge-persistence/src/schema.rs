@@ -771,6 +771,19 @@ pub(crate) struct PlotSpecRecord {
     /// value (newer file) reads as the grid too.
     #[serde(default)]
     pub(crate) layer_placement: LayerPlacementRecord,
+    /// Page of a Free graph (#426d): absent = none, the figure is the
+    /// bounding box of the cells (today's behaviour). Written only when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) free_page: Option<FreePageRecord>,
+}
+
+/// [`stokesforge_plot::FreePage`], flat, in points. Written as held.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct FreePageRecord {
+    pub(crate) left: f64,
+    pub(crate) top: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
 }
 
 /// [`stokesforge_plot::LayerPlacement`], flat. An unknown value reads as the
@@ -835,6 +848,7 @@ impl Default for PlotSpecRecord {
             figure_left: None,
             figure_top: None,
             layer_placement: LayerPlacementRecord::Grid,
+            free_page: None,
         }
     }
 }
@@ -1454,6 +1468,8 @@ mod tests {
         assert!(!reloaded.fixed_figure);
         assert_eq!(reloaded.figure_left, None);
         assert_eq!(reloaded.figure_top, None);
+        // #426d: nor a page.
+        assert_eq!(reloaded.free_page, None);
     }
 }
 
