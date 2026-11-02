@@ -152,7 +152,7 @@ fn versions(t: &Tree) -> BTreeMap<NodeId, u64> {
 /// re-evaluation of every formula. Returns its snapshot.
 fn reloaded_full(h: &SessionHandle, name: &str) -> Snapshot {
     let dir = scratch(name);
-    let path = dir.join("reloaded.stf");
+    let path = dir.path().join("reloaded.stf");
     h.save(&path).expect("save");
     let project = stokesforge_persistence::load(&path).expect("load");
     let session = Session::spawn_with_recalc(project, None, FormulaRecalc::Full).expect("actor");
@@ -170,14 +170,12 @@ fn reloaded_full(h: &SessionHandle, name: &str) -> Snapshot {
     s
 }
 
-fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::path::PathBuf::from(
-        "/tmp/claude-1000/-home-aliocha-dev-project-StokesForge/fad0f84f-0105-478e-b1c5-b15b94956c7e/scratchpad",
-    )
-    .join("formula_structure")
-    .join(name);
-    std::fs::create_dir_all(&dir).expect("scratch dir");
-    dir
+/// A fresh temporary directory, removed when the guard drops.
+fn scratch(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("formula_structure-{name}-"))
+        .tempdir()
+        .expect("scratch dir")
 }
 
 /// Every formula column's cells of `a` equal those of `b` (same identifiers).
@@ -889,7 +887,7 @@ fn removing_the_remote_workbook_or_folder_gives_ref_and_undo_restores() {
             // Save with the dangling reference, reload: still REF, then undo is
             // not possible across a load, but the values hold.
             let dir = scratch("remove");
-            let path = dir.join(format!("{what}-{mode:?}.stf"));
+            let path = dir.path().join(format!("{what}-{mode:?}.stf"));
             h.save(&path).expect("save");
             h.load(&path).expect("load");
             check_remote_state(&snap(&h).tree, true, &format!("{ctx} reloaded"));
@@ -1657,7 +1655,7 @@ fn a_dangling_reference_never_comes_back_after_reload_and_many_additions() {
         })
         .expect("remove Sheet3");
         let dir = scratch("dangling");
-        let path = dir.join(format!("{mode:?}.stf"));
+        let path = dir.path().join(format!("{mode:?}.stf"));
         h.save(&path).expect("save");
         h.load(&path).expect("load");
         let t = snap(&h).tree;
@@ -1976,7 +1974,7 @@ fn a_macro_over_a_three_sheet_chain_undoes_redoes_and_reloads_exactly() {
         h.redo().expect("redo macro");
         changed(&snap(&h).tree);
         let dir = scratch("chain");
-        let path = dir.join(format!("{mode:?}.stf"));
+        let path = dir.path().join(format!("{mode:?}.stf"));
         h.save(&path).expect("save");
         h.load(&path).expect("load");
         changed(&snap(&h).tree);
@@ -2138,7 +2136,8 @@ fn a_transposed_sheet_over_a_formula_column_is_not_stale_after_reload_or_unrelat
     })
     .expect("unrelated");
     assert!(!state(&h).stale, "after an unrelated command");
-    let path = scratch("transpose-stale").join("t.stf");
+    let dir = scratch("transpose-stale");
+    let path = dir.path().join("t.stf");
     h.save(&path).expect("save");
     h.load(&path).expect("load");
     assert!(!state(&h).stale, "after save and load");
@@ -2199,7 +2198,8 @@ fn a_calculation_over_a_formula_column_is_not_stale_after_load() {
             .collect::<Vec<_>>()
     };
     assert_eq!(stale(&h), vec![false]);
-    let path = scratch("diag2").join("t.stf");
+    let dir = scratch("diag2");
+    let path = dir.path().join("t.stf");
     h.save(&path).expect("save");
     h.load(&path).expect("load");
     assert_eq!(stale(&h), vec![false], "after load");
