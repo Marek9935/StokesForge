@@ -311,6 +311,16 @@ conversions: pasted in its own project, a workbook keeps a reference to a sheet
 outside the copy and follows the one inside it; pasted in another project, the
 reference to a sheet outside the copy is `#REF`.
 
+The same witness (#412) also holds the sheet `Formules` (not transposed, #430):
+one formula column per family of the grammar (operators, `^` with its right
+associativity, comparisons, `if`, row-wise functions, and `at`, `max`, `min`,
+`mean`, `sum`, `std`, `integral` with an X range), regenerated additively. The
+golden test `stokesforge-session/tests/formula_witness.rs` loads it, recalculates
+it in `Targeted` and `Full`, and compares the literal formula texts and the
+literal values (computed by hand, `==`): a renamed function, a changed
+associativity or a changed text of the witness fails it. Regenerating the
+witness with other formulas means editing that table by hand.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added

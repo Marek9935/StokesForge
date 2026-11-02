@@ -2633,3 +2633,61 @@ fn row_series_beyond_the_sheet_resolve_to_nan_without_panicking() {
     assert!(resolved.y.expect("y").as_slice()[0].is_nan());
     let _ = v;
 }
+
+#[test]
+fn insert_rows_past_the_data_end_keeps_its_entry_when_it_moves_a_row_series() {
+    let mut f = fixture();
+    // V has 8 rows: inserting at row 20 extends no column, yet the series
+    // at row 25 moves (#436).
+    let (graph, _) = row_graph(&mut f, &[(None, Some(25))]);
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    history
+        .execute(
+            &mut f.project,
+            Command::InsertRows {
+                sheet: f.sheet2,
+                at: 20,
+                count: 3,
+            },
+        )
+        .expect("insertion");
+    let after = snapshot(&f.project);
+    assert_eq!(series_rows(&f.project, graph), vec![Some(28)]);
+    assert!(!history.is_empty(), "the entry must exist");
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(25)]);
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(28)]);
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn delete_rows_past_the_data_end_keeps_its_entry_when_it_moves_a_row_series() {
+    let mut f = fixture();
+    // Rows 20..22 hold no data (`removed` is empty), the series at row 25
+    // still moves back by 2 (#436).
+    let (graph, _) = row_graph(&mut f, &[(None, Some(25))]);
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet2,
+                at: 20,
+                count: 2,
+            },
+        )
+        .expect("deletion");
+    let after = snapshot(&f.project);
+    assert_eq!(series_rows(&f.project, graph), vec![Some(23)]);
+    assert!(!history.is_empty(), "the entry must exist");
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(25)]);
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(23)]);
+    assert_eq!(**f.project.tree(), *after);
+}

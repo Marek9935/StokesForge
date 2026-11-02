@@ -1041,171 +1041,186 @@ fn a_type_change_on_a_formula_column_is_refused_or_applied_not_silently_undone()
 
 // -- stale snapshot during a long recalculation --
 
-/// 200 000 rows, 150 formula columns reading `A`, plus the plain columns `P`
-/// and `Q` (the heavy recalculation lasts several times the 200 ms wait).
-struct Heavy {
-    _language: i18n::LanguageGuard,
-    _session: Session,
-    state: AppState,
-    _dir: tempfile::TempDir,
-    sheet: NodeId,
-    a: NodeId,
-    p: NodeId,
-    q: NodeId,
-    reader: NodeId,
-}
+/// Slow tests: the name prefix `slow::` is THE marker (`cargo test -- --skip
+/// slow::` leaves them out; `docs/tests.md`, "Slow tests").
+mod slow {
+    use super::*;
 
-fn heavy() -> Heavy {
-    use stokesforge_core::{ColumnFormula, FormulaPart};
-    let language = i18n::test_language(Language::English);
-    let mut project = Project::new("H").unwrap();
-    let root = project.root();
-    let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
-    let sheet = project.add_worksheet(book, Some("Sheet1")).unwrap();
-    let big: Vec<f64> = (0..200_000).map(f64::from).collect();
-    let a = data(&mut project, sheet, "A", &big);
-    let p = data(&mut project, sheet, "P", &[1.0, 2.0, 3.0]);
-    let q = data(&mut project, sheet, "Q", &[4.0, 5.0, 6.0]);
-    let mut reader = a;
-    for index in 0..150 {
-        let id = data(&mut project, sheet, &format!("F{index}"), &[0.0]);
-        let formula = ColumnFormula::from_parts(vec![
-            FormulaPart::Column(a),
-            FormulaPart::Text("*2+".into()),
-            FormulaPart::Column(a),
-            FormulaPart::Text("*3".into()),
-        ]);
-        project
-            .set_column_meta(
-                id,
-                ColumnMeta {
-                    formula: Some(formula),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        reader = id;
-    }
-    let session = Session::spawn(project, None).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let mut state = AppState::new_with_preferences(
-        session.handle(),
-        dir.path().join("h.stf").display().to_string(),
-        stokesforge_app_state::preferences::Preferences::load_from(None),
-    )
-    .unwrap();
-    // First pass over every formula (the spawned project holds none).
-    state.dispatch(Action::AddFolder { parent: root });
-    wait_recalc(&mut state);
-    Heavy {
-        _language: language,
-        _session: session,
-        state,
-        _dir: dir,
-        sheet,
-        a,
-        p,
-        q,
-        reader,
-    }
-}
+    /// Size of the heavy sheet. Measured in debug (2026-11-02): the recalculation
+    /// after the paste lasts about 2.5 s (150 columns x 80 000 rows; the original 200 000 rows lasted 6.4 s), that is 12 times `RECALC_WAIT`.
+    ///
+    /// Mutation witness: reading every field's meta of a header paste from one
+    /// snapshot taken before the write loop (`paste_header_text`) makes the first
+    /// test fail at this size, and no fast test of this file notices it.
+    const ROWS: u32 = 80_000;
+    const FORMULAS: usize = 150;
 
-fn wait_recalc(state: &mut AppState) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while state.recalc_work().is_some() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "recalculation too long"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
+    /// `ROWS` rows, `FORMULAS` formula columns reading `A`, plus the plain columns
+    /// `P` and `Q` (the recalculation lasts several times the 200 ms wait).
+    struct Heavy {
+        _language: i18n::LanguageGuard,
+        _session: Session,
+        state: AppState,
+        _dir: tempfile::TempDir,
+        sheet: NodeId,
+        a: NodeId,
+        p: NodeId,
+        q: NodeId,
+        reader: NodeId,
     }
-    state.poll_recalc();
-}
 
-#[test]
-fn a_header_paste_started_during_a_long_recalculation_writes_every_field() {
-    let mut h = heavy();
-    let (sheet, a, p, q) = (h.sheet, h.a, h.p, h.q);
-    // Three header fields on Q, copied.
-    for (field, text) in [
-        (HeaderField::LongName, "long"),
-        (HeaderField::Unit, "unit"),
-        (HeaderField::Comment, "note"),
-    ] {
-        h.state.begin_header_edit(q, field);
-        h.state.header_editing_mut().unwrap().buffer = text.into();
-        h.state.commit_header_edit();
+    fn heavy() -> Heavy {
+        use stokesforge_core::{ColumnFormula, FormulaPart};
+        let language = i18n::test_language(Language::English);
+        let mut project = Project::new("H").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
+        let sheet = project.add_worksheet(book, Some("Sheet1")).unwrap();
+        let big: Vec<f64> = (0..ROWS).map(f64::from).collect();
+        let a = data(&mut project, sheet, "A", &big);
+        let p = data(&mut project, sheet, "P", &[1.0, 2.0, 3.0]);
+        let q = data(&mut project, sheet, "Q", &[4.0, 5.0, 6.0]);
+        let mut reader = a;
+        for index in 0..FORMULAS {
+            let id = data(&mut project, sheet, &format!("F{index}"), &[0.0]);
+            let formula = ColumnFormula::from_parts(vec![
+                FormulaPart::Column(a),
+                FormulaPart::Text("*2+".into()),
+                FormulaPart::Column(a),
+                FormulaPart::Text("*3".into()),
+            ]);
+            project
+                .set_column_meta(
+                    id,
+                    ColumnMeta {
+                        formula: Some(formula),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            reader = id;
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new_with_preferences(
+            session.handle(),
+            dir.path().join("h.stf").display().to_string(),
+            stokesforge_app_state::preferences::Preferences::load_from(None),
+        )
+        .unwrap();
+        // First pass over every formula (the spawned project holds none).
+        state.dispatch(Action::AddFolder { parent: root });
+        wait_recalc(&mut state);
+        Heavy {
+            _language: language,
+            _session: session,
+            state,
+            _dir: dir,
+            sheet,
+            a,
+            p,
+            q,
+            reader,
+        }
     }
-    h.state.select_header_field(sheet, q, HeaderField::LongName);
-    h.state
-        .extend_header_field_selection(sheet, q, HeaderField::Comment);
-    let text = h.state.copy_selection(sheet).unwrap();
-    // A heavy recalculation: edit the big source column.
-    h.state.select_cell(sheet, a, 0);
-    h.state.dispatch(Action::Paste {
-        sheet,
-        text: "7".into(),
-    });
-    let running = h.state.recalc_work().is_some();
-    assert!(
-        running,
-        "the test needs the long recalculation to be running"
-    );
-    // The gesture starts while the snapshot is stale.
-    h.state.select_header_field(sheet, p, HeaderField::LongName);
-    h.state.dispatch(Action::Paste { sheet, text });
-    wait_recalc(&mut h.state);
-    let meta = h.state.column_meta(p);
-    assert_eq!(
-        (
-            meta.long_name.as_str(),
-            meta.unit.as_str(),
-            meta.comment.as_str()
-        ),
-        ("long", "unit", "note"),
-        "recalc running at the start: {running}"
-    );
-    // The edit itself is not lost either.
-    assert_eq!(
+
+    fn wait_recalc(state: &mut AppState) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while state.recalc_work().is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "recalculation too long"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        state.poll_recalc();
+    }
+
+    #[test]
+    fn a_header_paste_started_during_a_long_recalculation_writes_every_field() {
+        let mut h = heavy();
+        let (sheet, a, p, q) = (h.sheet, h.a, h.p, h.q);
+        // Three header fields on Q, copied.
+        for (field, text) in [
+            (HeaderField::LongName, "long"),
+            (HeaderField::Unit, "unit"),
+            (HeaderField::Comment, "note"),
+        ] {
+            h.state.begin_header_edit(q, field);
+            h.state.header_editing_mut().unwrap().buffer = text.into();
+            h.state.commit_header_edit();
+        }
+        h.state.select_header_field(sheet, q, HeaderField::LongName);
         h.state
-            .tree()
-            .node(a)
-            .unwrap()
-            .as_column()
-            .unwrap()
-            .values()
-            .number_at(0),
-        7.0
-    );
-}
+            .extend_header_field_selection(sheet, q, HeaderField::Comment);
+        let text = h.state.copy_selection(sheet).unwrap();
+        // A heavy recalculation: edit the big source column.
+        h.state.select_cell(sheet, a, 0);
+        h.state.dispatch(Action::Paste {
+            sheet,
+            text: "7".into(),
+        });
+        let running = h.state.recalc_work().is_some();
+        assert!(
+            running,
+            "the test needs the long recalculation to be running"
+        );
+        // The gesture starts while the snapshot is stale.
+        h.state.select_header_field(sheet, p, HeaderField::LongName);
+        h.state.dispatch(Action::Paste { sheet, text });
+        wait_recalc(&mut h.state);
+        let meta = h.state.column_meta(p);
+        assert_eq!(
+            (
+                meta.long_name.as_str(),
+                meta.unit.as_str(),
+                meta.comment.as_str()
+            ),
+            ("long", "unit", "note"),
+            "recalc running at the start: {running}"
+        );
+        // The edit itself is not lost either.
+        assert_eq!(
+            h.state
+                .tree()
+                .node(a)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .values()
+                .number_at(0),
+            7.0
+        );
+    }
 
-#[test]
-fn deleting_a_column_with_readers_during_a_long_recalculation_is_consistent() {
-    let mut h = heavy();
-    let (sheet, a, p) = (h.sheet, h.a, h.p);
-    h.state.select_cell(sheet, a, 1);
-    h.state.dispatch(Action::Paste {
-        sheet,
-        text: "9".into(),
-    });
-    let running = h.state.recalc_work().is_some();
-    assert!(
-        running,
-        "the test needs the long recalculation to be running"
-    );
-    h.state.select_column(sheet, p);
-    h.state.dispatch(Action::DeleteSelectedCells { sheet });
-    wait_recalc(&mut h.state);
-    assert!(
-        !h.state.tree().children(sheet).unwrap().contains(&p),
-        "running: {running}"
-    );
-    let reader = h.reader;
-    let node = h.state.tree().node(reader).unwrap().as_column().unwrap();
-    assert_eq!(
-        node.values().number_at(1),
-        9.0 * 2.0 + 9.0 * 3.0,
-        "reader saw the edit"
-    );
-    assert!(h.state.tree().formula_letters(reader).is_some());
+    #[test]
+    fn deleting_a_column_with_readers_during_a_long_recalculation_is_consistent() {
+        let mut h = heavy();
+        let (sheet, a, p) = (h.sheet, h.a, h.p);
+        h.state.select_cell(sheet, a, 1);
+        h.state.dispatch(Action::Paste {
+            sheet,
+            text: "9".into(),
+        });
+        let running = h.state.recalc_work().is_some();
+        assert!(
+            running,
+            "the test needs the long recalculation to be running"
+        );
+        h.state.select_column(sheet, p);
+        h.state.dispatch(Action::DeleteSelectedCells { sheet });
+        wait_recalc(&mut h.state);
+        assert!(
+            !h.state.tree().children(sheet).unwrap().contains(&p),
+            "running: {running}"
+        );
+        let reader = h.reader;
+        let node = h.state.tree().node(reader).unwrap().as_column().unwrap();
+        assert_eq!(
+            node.values().number_at(1),
+            9.0 * 2.0 + 9.0 * 3.0,
+            "reader saw the edit"
+        );
+        assert!(h.state.tree().formula_letters(reader).is_some());
+    }
 }

@@ -103,7 +103,10 @@ Each line is observed by a command or a page; none is declared
      `StokesForge-1.0.0-windows-setup.exe`, uploaded to the GitLab package
      registry (no GitHub release: GitHub is only a mirror);
    - `publier`, when all of that is done: GitLab release (notes taken from the
-     CHANGELOG, links to the three packages). No GitLab runner is used for this;
+     CHANGELOG, links to the three packages, and a closing line "Built with
+     rustc ..." naming the compiler of the Linux and Windows builds, #412; the
+     publication is refused if either version is missing). No GitLab runner is
+     used for this;
    - the `pages` job of GitLab, on a final tag only (not an `-rcN`): at the end
      of `publier`, `scripts/release-publish.sh` starts a GitLab pipeline on the
      tag, which publishes the manual of the release on GitLab Pages

@@ -33,6 +33,9 @@ use stokesforge_persistence::clipboard::{decode_objects, encode_objects};
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
 
+mod common;
+use common::{link_shapes, strip_links};
+
 // -- draw -----------------------------------------------------------------
 
 /// Letters, in the sheet the column is in. References to sheets and workbooks
@@ -585,45 +588,6 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
         }),
         Step::Undo | Step::Redo | Step::UndoThenRedo { .. } | Step::Reload => None,
     }
-}
-
-/// The tree without its transposed-sheet links. A link records the **version**
-/// of every source column it read, and the two live modes legitimately number
-/// formula columns differently (the full pass rewrites more), so links are
-/// compared by shape ([`link_shapes`]) instead.
-fn strip_links(tree: &Tree) -> Tree {
-    tree.clone().with_transposes(BTreeMap::new())
-}
-
-/// Everything of a link except version numbers: sheet, source, x' column, rows
-/// with their content stamp, and the source columns read.
-#[allow(clippy::type_complexity)]
-fn link_shapes(
-    tree: &Tree,
-) -> Vec<(
-    NodeId,
-    NodeId,
-    NodeId,
-    u64,
-    Vec<(usize, NodeId, u64)>,
-    Vec<NodeId>,
-)> {
-    tree.transposes()
-        .iter()
-        .map(|(sheet, link)| {
-            (
-                *sheet,
-                link.source,
-                link.x_column,
-                link.x_stamp,
-                link.rows
-                    .iter()
-                    .map(|r| (r.row, r.column, r.stamp))
-                    .collect(),
-                link.inputs.iter().map(|i| i.column).collect(),
-            )
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
