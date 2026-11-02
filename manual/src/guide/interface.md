@@ -126,12 +126,13 @@ The **Project Manager** shows the folders and windows of your project: workbooks
 
 <img src="../images/interface-project-manager.png" alt="The Project Manager on the demo project: workbooks, graphs and folders. Closed windows are dimmed." width="260">
 
-- Click a window to open it, or to bring it to the front if it is already open.
-- A window that is closed is shown dimmed. Click it to open it again.
-- Click a folder to select it and open it. Double-click it, or click its triangle, to close it.
+- Click a window or a folder to select it. A click opens nothing.
+- Double-click a window to open it, or to bring it to the front if it is already open. <kbd>Enter</kbd> does the same on the selected windows.
+- A window that is closed is shown dimmed. Double-click it to open it again.
+- Double-click a folder, or click its triangle, to open or close it. <kbd>Right</kbd> opens the selected folder, <kbd>Left</kbd> closes it.
 - <kbd>Ctrl</kbd>+click adds or removes an entry from the selection. <kbd>Shift</kbd>+click selects a range.
-- <kbd>↑</kbd> and <kbd>↓</kbd> move the selection. <kbd>Enter</kbd> opens the selected windows.
-- Right-click an entry for **Open**, **Close**, **Copy**, **Paste**, **Rename**, **Duplicate** and **Delete**. These are also in **Edit ▸ Selection**.
+- <kbd>↑</kbd> and <kbd>↓</kbd> move the selection. <kbd>Shift</kbd>+<kbd>↑</kbd> and <kbd>Shift</kbd>+<kbd>↓</kbd> extend it. <kbd>←</kbd> goes to the folder that contains the entry.
+- Right-click an entry for **Open**, **Close**, **Cut**, **Copy**, **Paste**, **Rename**, **Duplicate** and **Delete**. These are also in **Edit ▸ Selection**. Cut then Paste moves entries into a folder.
 - <kbd>F2</kbd> renames the selected entry. <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates it.
 
 Clicking a window in the workspace also selects it in the Project Manager.

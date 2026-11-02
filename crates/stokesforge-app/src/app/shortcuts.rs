@@ -44,10 +44,20 @@ pub(crate) const KEY_ARROW_UP: egui::KeyboardShortcut =
 /// (S-K9).
 pub(crate) const KEY_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowDown);
-/// Shift+↑ — ten steps up in a number field.
+/// ← — collapses the open folder, or goes to the parent folder (Project
+/// Manager, #423).
+pub(crate) const KEY_ARROW_LEFT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowLeft);
+/// → — expands the closed folder, or goes to its first child (Project
+/// Manager, #423).
+pub(crate) const KEY_ARROW_RIGHT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowRight);
+/// Shift+↑ — ten steps up in a number field; extends the selection one row
+/// up in the Project Manager (#423).
 pub(crate) const KEY_SHIFT_ARROW_UP: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowUp);
-/// Shift+↓ — ten steps down in a number field.
+/// Shift+↓ — ten steps down in a number field; extends the selection one row
+/// down in the Project Manager (#423).
 pub(crate) const KEY_SHIFT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
 /// Alt+↓ — opens the list of suggested values of a number field.
@@ -326,10 +336,23 @@ pub(super) const HELP: &[HelpEntry] = &[
     entry!(Managers, "help-rename", shortcut SHORTCUT_RENAME_OBJECT),
     entry!(Managers, "help-delete-selection", text shortcut_text_delete),
     entry!(Managers, "help-duplicate", shortcut SHORTCUT_DUPLICATE_OBJECT),
+    entry!(Managers, "help-copy", shortcut SHORTCUT_COPY),
+    entry!(Managers, "help-cut", shortcut SHORTCUT_CUT),
+    entry!(Managers, "help-paste", shortcut SHORTCUT_PASTE),
     entry!(
         Managers,
         "help-select-neighbour",
         text || tr!("help-keys-arrows")
+    ),
+    entry!(
+        Managers,
+        "help-extend-selection",
+        text || tr!("help-keys-shift-arrows")
+    ),
+    entry!(
+        Managers,
+        "help-fold-with-arrows",
+        text || tr!("help-keys-left-right")
     ),
     entry!(Managers, "help-open-entry", text || tr!("help-keys-enter")),
     entry!(Fields, "help-validate", text || tr!("help-keys-enter")),

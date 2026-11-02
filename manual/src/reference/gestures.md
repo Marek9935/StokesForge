@@ -117,18 +117,22 @@ The whole row responds to the mouse, except the visibility box.
 
 | Gesture | Where | What it does |
 |---|---|---|
-| Click | A window row | Selects it and opens it. |
-| Click | A folder row | Selects it. Opens it if it was closed. It does not close an open folder. |
+| Click | A window row | Selects it. It does not open it. |
+| Click | A folder row | Selects it. It does not open or close it. |
 | <kbd>Ctrl</kbd>+click | A row | Adds the row to the selection, or removes it. |
 | <kbd>Shift</kbd>+click | A row | Selects the range from the anchor to this row, in tree order. A folder in the range brings its windows with it. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+click adds the range to the selection. |
-| Slow click | The only selected row | Renames it in place. A quick double-click does not rename. |
 | Double-click | A window row | Brings the window to the front, or restores it. It never closes it. |
-| Double-click | A folder row | Closes the folder. |
+| Double-click | A folder row | Opens the folder if it is closed, closes it if it is open. |
+| <kbd>F2</kbd> | The selected row | Renames it in place. |
+| <kbd>Enter</kbd> | The selected rows | Opens the windows, opens or closes the folders. |
+| <kbd>Left</kbd> / <kbd>Right</kbd> | The selected row | <kbd>Right</kbd> opens a closed folder, then goes to its first entry. <kbd>Left</kbd> closes an open folder, otherwise goes to the folder that contains the row. |
+| <kbd>Shift</kbd>+<kbd>Up</kbd> / <kbd>Down</kbd> | The selected row | Extends the selection one row at a time, like <kbd>Shift</kbd>+click. |
+| <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Ctrl</kbd>+<kbd>V</kbd> | The selected rows | Moves them into the selected folder. The cut rows are dimmed (text and icon) until you paste, and a cut pastes only once. |
 | Right-click | A row | If the row is outside the selection, selects it first. Opens the menu of the object. |
 | Right-click, **Add Folder** | A folder | Creates a folder in it and puts its name in editing. |
 | Wheel | The list | Scrolls. |
 
-Rows of the Project Manager cannot be dragged.
+Rows of the Project Manager cannot be dragged: to move an entry, cut it and paste it into a folder.
 
 ## Object Manager
 

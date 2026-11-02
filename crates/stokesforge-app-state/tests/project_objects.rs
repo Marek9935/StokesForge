@@ -1,6 +1,6 @@
 //! #105: Project Manager decisions without a display server.
 
-use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState, UnsavedChoice};
 use stokesforge_commands::{HistoryLabel, MacroKind};
 use stokesforge_core::{Column, NodeId, NodeKind, Project};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -470,7 +470,7 @@ fn plotted_column(state: &AppState, folder: NodeId) -> NodeId {
 }
 
 /// #391 (C1): copying a folder and pasting it into another folder gives
-/// `<name> copy 1`, inner windows keep their names, and the copied graph
+/// `<name>` (free there, #423), inner windows keep their names, and the copied graph
 /// plots the copied workbook. Witness: the original graph keeps its own.
 #[test]
 fn a_copied_folder_pasted_into_another_folder_reads_its_own_workbook() {
@@ -482,8 +482,8 @@ fn a_copied_folder_pasted_into_another_folder_reads_its_own_workbook() {
         parent: f.other,
         text,
     });
-    assert_eq!(names_in(&f.state, f.other), vec!["Folder copy 1"]);
-    let copy = child_by_name(&f.state, f.other, "Folder copy 1");
+    assert_eq!(names_in(&f.state, f.other), vec!["Folder"]);
+    let copy = child_by_name(&f.state, f.other, "Folder");
     assert_eq!(names_in(&f.state, copy), vec!["Book1", "Graph1"]);
     let copied_book = child_by_name(&f.state, copy, "Book1");
     assert_ne!(copied_book, f.book);
@@ -657,4 +657,340 @@ fn object_clipboard_keeps_remote_references_in_its_project_only() {
     let (inside, outside, _) = pasted_formulas(&other, pasted);
     assert_eq!(inside, "max(Sheet2!A)", "the copied sheet comes along");
     assert_eq!(outside, "max(#REF)");
+}
+
+// -- Cut and paste = move (#423) ------------------------------------------
+
+#[test]
+fn cut_then_paste_of_the_same_text_moves_the_node_in_one_history_entry() {
+    let mut f = folder_fixture();
+    let (book, other, folder) = (f.book, f.other, f.folder);
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::CutObjects(vec![book]));
+    assert_eq!(f.state.cut_objects(), vec![book], "the cut rows are marked");
+    let text = f
+        .state
+        .take_object_clipboard_text()
+        .expect("cut copies too");
+    f.state.dispatch(Action::PasteObjects {
+        parent: other,
+        text,
+    });
+    assert_eq!(
+        f.state.tree().node(book).unwrap().parent(),
+        Some(other),
+        "moved, same NodeId"
+    );
+    assert_eq!(names_in(&f.state, other), vec!["Book1"], "no copy made");
+    assert!(f.state.take_copied_objects().is_empty());
+    assert!(f.state.cut_objects().is_empty(), "the mark is cleared");
+    assert_eq!(
+        f.state.snapshot().history.undo_label,
+        Some(HistoryLabel::Macro(MacroKind::MoveObjects))
+    );
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before, "one Undo restores");
+    assert_eq!(f.state.tree().node(book).unwrap().parent(), Some(folder));
+}
+
+#[test]
+fn a_cut_pastes_once_a_second_paste_does_nothing_until_a_new_copy() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: text.clone(),
+    });
+    let after_move = f.state.tree().clone();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.root,
+        text: text.clone(),
+    });
+    assert_eq!(f.state.tree(), &after_move, "the second paste does nothing");
+    assert!(f.state.take_copied_objects().is_empty());
+    // A new Copy of the same node pastes normally.
+    f.state.dispatch(Action::CopyObjects(vec![f.book]));
+    let copied = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.root,
+        text: copied,
+    });
+    assert_eq!(
+        f.state.take_copied_objects().len(),
+        1,
+        "Copy rearms the paste"
+    );
+    // The consumed text itself pastes again after the Copy replaced it.
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.root,
+        text,
+    });
+    assert_eq!(f.state.take_copied_objects().len(), 1);
+}
+
+#[test]
+fn a_paste_of_a_text_from_elsewhere_copies_and_keeps_the_mark() {
+    let mut f = folder_fixture();
+    let mut outside = folder_fixture();
+    outside
+        .state
+        .dispatch(Action::CopyObjects(vec![outside.book]));
+    let foreign = outside.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: foreign,
+    });
+    assert_eq!(
+        f.state.tree().node(f.book).unwrap().parent(),
+        Some(f.folder),
+        "the cut node did not move"
+    );
+    assert_eq!(f.state.take_copied_objects().len(), 1, "a copy was pasted");
+    assert_eq!(f.state.cut_objects(), vec![f.book], "the mark stays");
+    // An older copy of this same project, pasted after the cut: same origin,
+    // other text, so it copies as well.
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::CopyObjects(vec![graph]));
+    let older = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: older,
+    });
+    assert_eq!(
+        f.state.tree().node(f.book).unwrap().parent(),
+        Some(f.folder),
+        "a text other than the cut's never moves"
+    );
+}
+
+#[test]
+fn a_new_project_forgets_the_cut() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    f.state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    f.state
+        .dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+    assert_eq!(f.state.tree().len(), 1, "witness: the project was replaced");
+    assert!(f.state.cut_objects().is_empty());
+}
+
+#[test]
+fn a_copy_or_a_new_cut_clears_the_mark_and_the_old_text_copies() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    let cut_text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::CopyObjects(vec![f.book]));
+    assert!(f.state.cut_objects().is_empty(), "Copy clears the mark");
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: cut_text,
+    });
+    assert_eq!(
+        f.state.tree().node(f.book).unwrap().parent(),
+        Some(f.folder),
+        "without the mark the old cut text only copies"
+    );
+    assert_eq!(f.state.take_copied_objects().len(), 1);
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    f.state.dispatch(Action::CutObjects(vec![graph]));
+    assert_eq!(f.state.cut_objects(), vec![graph], "a new cut replaces it");
+}
+
+#[test]
+fn a_cut_node_that_is_deleted_drops_out_of_the_mark() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::DeleteObjects(vec![f.book]));
+    assert!(f.state.cut_objects().is_empty(), "stale id filtered");
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text,
+    });
+    assert_eq!(f.state.tree(), &before, "nothing to move, nothing pasted");
+}
+
+#[test]
+fn a_cut_folder_cannot_go_into_itself_or_its_subfolder() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::AddFolder { parent: f.folder });
+    let sub = *f
+        .state
+        .tree()
+        .children(f.folder)
+        .unwrap()
+        .iter()
+        .find(|id| f.state.tree().node(**id).unwrap().kind().is_folder())
+        .expect("the new subfolder");
+    f.state.dispatch(Action::CutObjects(vec![f.folder]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    let before = f.state.tree().clone();
+    // Into its own descendant: refused with a sentence, nothing moved.
+    f.state.dispatch(Action::PasteObjects {
+        parent: sub,
+        text: text.clone(),
+    });
+    assert_eq!(f.state.tree(), &before);
+    let status = f.state.status().expect("a message");
+    assert!(status.is_error());
+    assert!(
+        !status.text.to_lowercase().contains("structure"),
+        "no raw core detail: {}",
+        status.text
+    );
+    // The cut folder itself selected (beside it, #391): nothing moves and the
+    // mark is kept.
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.folder,
+        text,
+    });
+    assert_eq!(f.state.tree(), &before);
+    assert_eq!(f.state.cut_objects(), vec![f.folder]);
+}
+
+#[test]
+fn a_name_already_taken_in_the_target_refuses_the_whole_move() {
+    let mut f = folder_fixture();
+    // A "Book1" already in Other.
+    f.state.dispatch(Action::CopyObjects(vec![f.book]));
+    let copy_text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: copy_text,
+    });
+    let pasted = f.state.take_copied_objects()[0].1;
+    f.state
+        .dispatch(Action::RenameObjects(vec![(pasted, "Book1".into())]));
+    assert_eq!(names_in(&f.state, f.other), vec!["Book1"]);
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::CutObjects(vec![graph, f.book]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text,
+    });
+    assert_eq!(f.state.tree(), &before, "Graph1 did not move either");
+    let status = f.state.status().expect("a message");
+    assert!(status.is_error());
+    assert!(status.text.contains("Book1"), "{}", status.text);
+    assert_eq!(f.state.cut_objects().len(), 2, "the mark is kept");
+}
+
+#[test]
+fn pasting_a_cut_into_another_project_copies() {
+    let mut f = folder_fixture();
+    let mut target = folder_fixture();
+    f.state.dispatch(Action::CutObjects(vec![f.book]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    let parent = target.other;
+    target.state.dispatch(Action::PasteObjects { parent, text });
+    assert_eq!(target.state.take_copied_objects().len(), 1);
+    assert_eq!(
+        f.state.tree().node(f.book).unwrap().parent(),
+        Some(f.folder),
+        "the source stays where it was"
+    );
+}
+
+/// #423: a copy keeps its name when the destination does not hold it; a
+/// colliding one gets `copy 1`. Witness: always suffixing renames the first.
+#[test]
+fn a_pasted_window_keeps_its_name_unless_the_destination_holds_it() {
+    let mut f = folder_fixture();
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::CopyObjects(vec![graph]));
+    let text = f.state.take_object_clipboard_text().expect("copied");
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text: text.clone(),
+    });
+    assert_eq!(names_in(&f.state, f.other), vec!["Graph1"]);
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text,
+    });
+    assert_eq!(names_in(&f.state, f.other), vec!["Graph1", "Graph1 copy 1"]);
+}
+
+/// #423: duplicating a copy never stacks suffixes. Witness: using the whole
+/// original name as the base gives "Folder copy 1 copy 1".
+#[test]
+fn duplicating_a_copy_counts_on_instead_of_stacking_suffixes() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::DuplicateObjects(vec![f.folder]));
+    let first = child_by_name(&f.state, f.root, "Folder copy 1");
+    f.state.dispatch(Action::DuplicateObjects(vec![first]));
+    let second = child_by_name(&f.state, f.root, "Folder copy 2");
+    f.state.dispatch(Action::DuplicateObjects(vec![second]));
+    assert_eq!(
+        names_in(&f.state, f.root),
+        vec![
+            "Folder",
+            "Other",
+            "Folder copy 1",
+            "Folder copy 2",
+            "Folder copy 3"
+        ]
+    );
+}
+
+/// #423: a name that only ends with digits is not a copy suffix.
+#[test]
+fn duplicating_a_name_ending_in_digits_keeps_it_whole() {
+    let mut f = folder_fixture();
+    let graph = child_by_name(&f.state, f.folder, "Graph1");
+    f.state.dispatch(Action::RenameObject {
+        id: graph,
+        name: "Graph10".into(),
+    });
+    f.state.dispatch(Action::DuplicateObjects(vec![graph]));
+    assert_eq!(
+        names_in(&f.state, f.folder),
+        vec!["Book1", "Graph10", "Graph10 copy 1"]
+    );
+}
+
+/// #423: items pasted in one gesture read each other's new names. Into a
+/// folder holding "X", "X" becomes "X copy 1" and the pasted "X copy 1" must
+/// not collide with it. Witness: ignoring the batch gives two "X copy 1".
+/// (The clipboard refuses two roots of the same name, so the batch collision
+/// goes through a suffixed sibling.)
+#[test]
+fn a_batch_reads_the_names_it_just_gave() {
+    let mut project = Project::new("Batch").unwrap();
+    let root = project.root();
+    let a = project.add_folder(root, "A").unwrap();
+    let b = project.add_folder(root, "B").unwrap();
+    let dest = project.add_folder(root, "Dest").unwrap();
+    let empty = project.add_folder(root, "Empty").unwrap();
+    project.add_workbook(dest, Some("X")).unwrap();
+    let x = project.add_workbook(a, Some("X")).unwrap();
+    let x1 = project.add_workbook(b, Some("X copy 1")).unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    state.dispatch(Action::CopyObjects(vec![x, x1]));
+    let text = state.take_object_clipboard_text().expect("copied");
+    state.dispatch(Action::PasteObjects {
+        parent: dest,
+        text: text.clone(),
+    });
+    assert_eq!(names_in(&state, dest), vec!["X", "X copy 1", "X copy 2"]);
+    state.dispatch(Action::PasteObjects {
+        parent: empty,
+        text,
+    });
+    assert_eq!(names_in(&state, empty), vec!["X", "X copy 1"]);
 }

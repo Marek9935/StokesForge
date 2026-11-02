@@ -13,25 +13,34 @@
 //! selection; the tree starts directly under the header.
 //!
 //! A selectable entry is a folder **or** a window ([`PmEntry`], #170 point 4).
-//! A click on a folder selects it and, if it is closed, expands it; a click on
-//! an open folder does not collapse it (a selection click must not make the
-//! tree jump); the double-click and the triangle collapse it. Delete and
-//! Rename act on it, a folder selection pastes **into** that folder. Copy and
-//! Duplicate work on a folder too (#391): `AppState` copies the whole subtree,
-//! what is inside the copy reads the copy, and pasting with the copied folder
-//! itself selected puts the copy beside it.
+//! **A plain click only selects** (#423), a window or a folder: it opens
+//! nothing and expands nothing. A window opens or activates on the
+//! double-click, Enter and the menu's Open; a folder expands or collapses on
+//! the triangle, the double-click (exactly one toggle), Enter and → / ←. There
+//! is no slow-click rename: Rename is F2 or the menu. Delete and Rename act on
+//! a folder, a folder selection pastes **into** that folder (which then
+//! expands to show what arrived). Copy and Duplicate work on a folder too
+//! (#391): `AppState` copies the whole subtree, what is inside the copy reads
+//! the copy, and pasting with the copied folder itself selected puts the copy
+//! beside it. **Cut** (Ctrl+X, the menu) copies and marks the rows
+//! (`PmInteraction::cut`, painted dimmed): pasting that same copy into this
+//! project moves it (`Action::MoveObjects`, one history entry).
 //!
-//! **Keyboard navigation (#170, point 6).** With the panel focused
+//! **Keyboard navigation (#170, point 6; #423).** With the panel focused
 //! (`PmMemory::focus`, set by a click), ↑ and ↓ move the selection from one
 //! **visible** row to the other (`PmMemory::visible`, collected while painting:
 //! collapsed folders are skipped, unlike `order`, which serves the Shift
-//! ranges), and Enter opens the selected window(s), expands or collapses the
-//! folders. The arrow touches no window and not the history. The keys are
+//! ranges). Shift+↑ / Shift+↓ extend the selection from the anchor with the
+//! range rule of the Shift-click (#327); the moving end is `PmMemory::lead`.
+//! → expands a closed folder, then goes to its first child; ← collapses an
+//! open folder, otherwise goes to the parent folder (nothing at the root
+//! level). Enter opens the selected window(s), expands or collapses the
+//! folders. The arrows touch no window and not the history. The keys are
 //! consumed here, before a workbook's grid (painted after the panel), which
-//! reads the arrows without consuming them; the Shift and Alt+↓ variants, which
-//! egui would confuse with ↑ and ↓ (it ignores extra Shift and Alt), are
-//! consumed first and left without effect. The row that carries the keyboard
-//! cursor has the focus outline of list rows (`list_row::paint_focus_outline`).
+//! reads the arrows without consuming them; Alt+↓, which egui would confuse
+//! with ↓ (it ignores extra Shift and Alt), is consumed first and left without
+//! effect. The row that carries the keyboard cursor has the focus outline of
+//! list rows (`list_row::paint_focus_outline`).
 
 use std::collections::HashSet;
 
@@ -44,8 +53,8 @@ use stokesforge_core::NodeId;
 
 use super::inplace_edit;
 use super::list_row::{
-    list_row_focused, neighbour, raise_to_list_row_height, read_navigation, restore_row_height,
-    with_list_row_height, NavKey,
+    list_row_focused, neighbour, raise_to_list_row_height, read_tree_navigation,
+    restore_row_height, with_list_row_height, TreeKey,
 };
 use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_OBJECT, SHORTCUT_RENAME_OBJECT};
@@ -61,7 +70,7 @@ use super::StokesForgeApp;
 pub(super) struct PmInteraction<'a> {
     pub(super) actions: &'a mut Vec<Action>,
     pub(super) root: NodeId,
-    /// Tab opened or focused by a single click — see
+    /// Tab opened or focused by a double-click, Enter or Open — see
     /// [`StokesForgeApp::open_tab`].
     pub(super) open_requests: &'a mut Vec<Tab>,
     /// Current selection in the tree — Ctrl/Cmd-click toggles the membership
@@ -73,6 +82,8 @@ pub(super) struct PmInteraction<'a> {
     /// Tabs that "Close" asks to close, through the same path as the window's
     /// cross (floating or detached).
     pub(super) close_requests: &'a mut Vec<Tab>,
+    /// Nodes of the last Cut, painted dimmed until the paste (#423).
+    pub(super) cut: &'a HashSet<NodeId>,
 }
 
 /// The selection is shared with the viewport; the editor and the focus stay in
@@ -81,16 +92,20 @@ pub(super) struct PmInteraction<'a> {
 struct PmMemory {
     focus: bool,
     anchor: Option<PmEntry>,
+    /// The moving end of a Shift+arrow range (#423): the keyboard cursor
+    /// while `anchor` stays put. `None` after any other gesture.
+    lead: Option<PmEntry>,
     rename: Vec<NodeId>,
     renamed: Vec<(NodeId, String)>,
     text: Option<String>,
-    /// Last single click on a window already alone in the selection: if it is
-    /// not followed by a second click before [`SLOW_CLICK_SECONDS`], it is a
-    /// slow click, hence a rename (S-K4, #224).
-    slow_click: Option<(PmEntry, f64)>,
     /// The tree's folders and windows in reading order, collapsed folders
     /// included (#327): the Shift range and the acting ids depend on it.
     order: Vec<PmEntry>,
+    /// The folder that contains each entry (none at the top level): what ←
+    /// walks up (#423).
+    parents: std::collections::HashMap<PmEntry, PmEntry>,
+    /// The folders painted open in the previous frame: what → and ← read.
+    open_folders: HashSet<NodeId>,
     /// Folders to expand on their next painting (#326): the parent of a
     /// folder just created must show its new child.
     reveal: Vec<NodeId>,
@@ -129,16 +144,23 @@ impl PmEntry {
 
 /// The folders and windows of `tree`, in depth-first order, a folder before
 /// its children.
-fn tree_order(tree: &[ProjectTreeNode], out: &mut Vec<PmEntry>) {
+fn tree_order(
+    tree: &[ProjectTreeNode],
+    parent: Option<PmEntry>,
+    out: &mut Vec<PmEntry>,
+    parents: &mut std::collections::HashMap<PmEntry, PmEntry>,
+) {
     for node in tree {
-        match node {
-            ProjectTreeNode::Folder { id, children, .. } => {
-                out.push(PmEntry::Folder(*id));
-                tree_order(children, out);
-            }
-            ProjectTreeNode::Window { id, kind, .. } => {
-                out.push(PmEntry::Window(tab_for_window(*id, *kind)));
-            }
+        let entry = match node {
+            ProjectTreeNode::Folder { id, .. } => PmEntry::Folder(*id),
+            ProjectTreeNode::Window { id, kind, .. } => PmEntry::Window(tab_for_window(*id, *kind)),
+        };
+        out.push(entry);
+        if let Some(parent) = parent {
+            parents.insert(entry, parent);
+        }
+        if let ProjectTreeNode::Folder { children, .. } = node {
+            tree_order(children, Some(entry), out, parents);
         }
     }
 }
@@ -153,11 +175,14 @@ pub(super) fn paste_parent(selection: &HashSet<PmEntry>, root: NodeId) -> NodeId
     }
 }
 
-/// The row that carries the keyboard cursor: the anchor of the last gesture if
-/// it is selected, otherwise the only selected entry.
-fn cursor_of(selection: &HashSet<PmEntry>, anchor: Option<PmEntry>) -> Option<PmEntry> {
-    anchor
+/// The row that carries the keyboard cursor: the moving end of the last
+/// Shift+arrow range, else the anchor of the last gesture, if it is selected,
+/// otherwise the only selected entry.
+fn cursor_of(selection: &HashSet<PmEntry>, memory: &PmMemory) -> Option<PmEntry> {
+    memory
+        .lead
         .filter(|entry| selection.contains(entry))
+        .or(memory.anchor.filter(|entry| selection.contains(entry)))
         .or_else(|| {
             let mut entries = selection.iter();
             match (entries.next(), entries.next()) {
@@ -206,6 +231,7 @@ pub(super) fn follow_selection_anchor(ctx: &egui::Context, tab: Option<Tab>) {
             let key = egui::Id::new(("project_manager_gestures", viewport));
             let mut memory = data.get_temp::<PmMemory>(key).unwrap_or_default();
             memory.anchor = anchor;
+            memory.lead = None;
             data.insert_temp(key, memory);
         }
     });
@@ -241,6 +267,23 @@ pub(super) fn renaming_in(ctx: &egui::Context, viewport: egui::ViewportId) -> Ve
         .unwrap_or_default()
 }
 
+/// Who owns the keyboard this frame (#423): true while the Project Manager of
+/// this viewport has the focus (a click inside it) and no modal window is
+/// shown. Then the clipboard and object keys (Ctrl+C/X/V, Delete, F2, Ctrl+D,
+/// Enter, arrows) go to the panel and to nothing else: the graph in front must
+/// not copy its figure, delete its selected object, and a grid must not paste
+/// or move its selection. Every workspace key consumer asks this one question.
+pub(super) fn owns_keyboard(ctx: &egui::Context) -> bool {
+    !super::dialogs::modal_shown(ctx) && has_focus(ctx)
+}
+
+/// Gives or takes the keyboard focus of the panel (tests of the other windows).
+#[cfg(test)]
+pub(super) fn set_focus_for_test(ctx: &egui::Context, focus: bool) {
+    let key = memory_id(ctx);
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<PmMemory>(key).focus = focus);
+}
+
 pub(super) fn has_focus(ctx: &egui::Context) -> bool {
     let memory_key = memory_id(ctx);
     ctx.data(|data| {
@@ -268,7 +311,7 @@ pub(super) enum ObjectMenuTarget {
 
 /// The content of the object menu (#157), **flat**: the right click shows it
 /// as is, Edit › Selection wraps it. Sections of `docs/menus.md` —
-/// clipboard (Copy · Paste), organize (Rename · Duplicate), delete.
+/// clipboard (Cut · Copy · Paste), organize (Rename · Duplicate), delete.
 /// `sections` is the calling menu's: the entries specific to the panel
 /// (Open · Close) are painted before, under the same count of separators.
 /// Pasting triggers a read request to egui-winit, hence also uses the Wayland
@@ -300,6 +343,18 @@ pub(super) fn object_menu(
         });
     }
     sections.section(ui, true, |ui| {
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new(tr!("action-cut"))
+                    .shortcut_text(ui.ctx().format_shortcut(&super::shortcuts::SHORTCUT_CUT)),
+            )
+            .on_disabled_hover_text(copy_reason())
+            .clicked()
+        {
+            actions.push(Action::CutObjects(ids.to_vec()));
+            ui.close();
+        }
         if ui
             .add_enabled(
                 enabled,
@@ -375,10 +430,6 @@ pub(super) fn object_menu(
     });
 }
 
-/// Delay of a slow click (S-K4): longer than egui's double-click interval, so
-/// that a double-click (open) never opens the field.
-const SLOW_CLICK_SECONDS: f64 = 0.5;
-
 fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
     let ctx = ui.ctx();
     let memory_key = memory_id(ctx);
@@ -393,25 +444,6 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         value
     });
     let ids = selected_ids(interaction.selection, &memory.order);
-    // Slow click: the delay elapsed without a second click, the name is renamed like on F2.
-    if let Some((entry, at)) = memory.slow_click {
-        let now = ctx.input(|input| input.time);
-        if now - at >= SLOW_CLICK_SECONDS {
-            memory.slow_click = None;
-            if memory.rename.is_empty() && interaction.selection.len() == 1 {
-                memory.rename = ids.clone();
-                memory.renamed.clear();
-                memory.text = None;
-                ctx.request_repaint();
-            }
-        } else if !interaction.selection.contains(&entry) {
-            memory.slow_click = None;
-        } else {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                SLOW_CLICK_SECONDS - (now - at) + 0.02,
-            ));
-        }
-    }
     // #406: under a modal window the tree keys (Del, F2, Enter, arrows,
     // clipboard) belong to the modal.
     if !super::dialogs::modal_shown(ctx)
@@ -424,7 +456,7 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         let mut navigation = None;
         ctx.input_mut(|input| {
             if memory.focus {
-                navigation = read_navigation(input);
+                navigation = read_tree_navigation(input);
             }
             if memory.focus && !ids.is_empty() {
                 if input.consume_shortcut(&super::shortcuts::SHORTCUT_RENAME_OBJECT) {
@@ -446,6 +478,10 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
                     interaction.actions.push(Action::CopyObjects(ids.clone()));
                     false
                 }
+                egui::Event::Cut if memory.focus => {
+                    interaction.actions.push(Action::CutObjects(ids.clone()));
+                    false
+                }
                 egui::Event::Paste(text) => {
                     paste = Some(text.clone());
                     false
@@ -454,44 +490,120 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
             });
         });
         if let Some(text) = paste {
+            // The target folder opens to show what arrives (#423).
+            if parent != interaction.root {
+                memory.reveal.push(parent);
+            }
             interaction
                 .actions
                 .push(Action::PasteObjects { parent, text });
         } else if let Some(parent) = pending {
             ctx.data_mut(|data| data.insert_temp(paste_key, parent));
         }
-        match navigation {
-            Some(key @ (NavKey::Up | NavKey::Down)) => {
-                let step = if key == NavKey::Up { -1 } else { 1 };
-                let cursor = cursor_of(interaction.selection, memory.anchor);
-                if let Some(entry) = neighbour(&memory.visible, cursor, step) {
-                    interaction.selection.clear();
-                    interaction.selection.insert(entry);
-                    memory.anchor = Some(entry);
-                    memory.slow_click = None;
-                    memory.scroll_to = Some(entry);
-                    ctx.request_repaint();
-                }
-            }
-            Some(NavKey::Enter) => {
-                // Like the menu's "Open": each selected window opens,
-                // each folder toggles.
-                for entry in memory
-                    .order
-                    .iter()
-                    .filter(|e| interaction.selection.contains(e))
-                {
-                    match entry {
-                        PmEntry::Window(tab) => interaction.open_requests.push(*tab),
-                        PmEntry::Folder(id) => memory.toggle.push(*id),
-                    }
-                }
-                ctx.request_repaint();
-            }
-            None => {}
+        if let Some(key) = navigation {
+            handle_tree_key(ctx, interaction, &mut memory, key);
         }
     }
     ctx.data_mut(|data| data.insert_temp(memory_key, memory));
+}
+
+/// Moves the selection to `entry` alone (a plain arrow, ←, →).
+fn select_only(
+    ctx: &egui::Context,
+    interaction: &mut PmInteraction,
+    memory: &mut PmMemory,
+    entry: PmEntry,
+) {
+    interaction.selection.clear();
+    interaction.selection.insert(entry);
+    memory.anchor = Some(entry);
+    memory.lead = None;
+    memory.scroll_to = Some(entry);
+    ctx.request_repaint();
+}
+
+/// What one tree key does (#170 point 6, #423). Everything reads the previous
+/// frame's `visible`, `order`, `parents` and `open_folders`.
+fn handle_tree_key(
+    ctx: &egui::Context,
+    interaction: &mut PmInteraction,
+    memory: &mut PmMemory,
+    key: TreeKey,
+) {
+    let cursor = cursor_of(interaction.selection, memory);
+    match key {
+        TreeKey::Up | TreeKey::Down => {
+            let step = if key == TreeKey::Up { -1 } else { 1 };
+            if let Some(entry) = neighbour(&memory.visible, cursor, step) {
+                select_only(ctx, interaction, memory, entry);
+            }
+        }
+        TreeKey::ShiftUp | TreeKey::ShiftDown => {
+            let step = if key == TreeKey::ShiftUp { -1 } else { 1 };
+            let Some(target) = neighbour(&memory.visible, cursor, step) else {
+                return;
+            };
+            // Same range rule as the Shift-click (#327): the complete order,
+            // collapsed folders included, from the anchor to the target.
+            let anchor = memory.anchor.or(cursor).unwrap_or(target);
+            if let (Some(a), Some(b)) = (
+                memory.order.iter().position(|e| *e == anchor),
+                memory.order.iter().position(|e| *e == target),
+            ) {
+                interaction.selection.clear();
+                interaction
+                    .selection
+                    .extend(memory.order[a.min(b)..=a.max(b)].iter().copied());
+                memory.anchor = Some(anchor);
+                memory.lead = Some(target);
+                memory.scroll_to = Some(target);
+                ctx.request_repaint();
+            }
+        }
+        TreeKey::Right => {
+            if let Some(PmEntry::Folder(id)) = cursor {
+                if !memory.open_folders.contains(&id) {
+                    memory.toggle.push(id);
+                    ctx.request_repaint();
+                } else if let Some(child) = neighbour(&memory.visible, cursor, 1)
+                    .filter(|child| memory.parents.get(child) == cursor.as_ref())
+                {
+                    select_only(ctx, interaction, memory, child);
+                }
+            }
+        }
+        TreeKey::Left => {
+            let Some(entry) = cursor else {
+                return;
+            };
+            match entry {
+                PmEntry::Folder(id) if memory.open_folders.contains(&id) => {
+                    memory.toggle.push(id);
+                    ctx.request_repaint();
+                }
+                _ => {
+                    if let Some(parent) = memory.parents.get(&entry).copied() {
+                        select_only(ctx, interaction, memory, parent);
+                    }
+                }
+            }
+        }
+        TreeKey::Enter => {
+            // Like the menu's "Open": each selected window opens, each folder
+            // toggles.
+            for entry in memory
+                .order
+                .iter()
+                .filter(|e| interaction.selection.contains(e))
+            {
+                match entry {
+                    PmEntry::Window(tab) => interaction.open_requests.push(*tab),
+                    PmEntry::Folder(id) => memory.toggle.push(*id),
+                }
+            }
+            ctx.request_repaint();
+        }
+    }
 }
 
 /// The body of the Project Manager, from an already built tree rather than a
@@ -513,7 +625,10 @@ pub(super) fn project_manager_contents_from_tree(
         let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
         memory.order.clear();
         memory.visible.clear();
-        tree_order(tree, &mut memory.order);
+        memory.parents.clear();
+        memory.open_folders.clear();
+        let PmMemory { order, parents, .. } = &mut memory;
+        tree_order(tree, None, order, parents);
         // A deleted folder does not stay selected (a script, Ctrl+Z).
         interaction
             .selection
@@ -534,6 +649,13 @@ pub(super) fn project_manager_contents_from_tree(
         memory.toggle.clear();
         memory.scroll_to = None;
     });
+    // A window that stops being the active one of the system keeps no
+    // keyboard focus in the panel (a detached graph clicked, #423).
+    if ui.input(|input| input.viewport().focused) == Some(false) {
+        ui.ctx().data_mut(|data| {
+            data.get_temp_mut_or_default::<PmMemory>(memory_key).focus = false;
+        });
+    }
     if ui.input(|input| input.pointer.any_pressed()) {
         let inside = ui
             .input(|input| input.pointer.interact_pos())
@@ -632,17 +754,15 @@ fn rename_editor(
 /// What a row received as a selection gesture (see [`select_gestures`]).
 #[derive(Default)]
 struct RowGestures {
-    /// Single click without modifier: the row becomes the only one selected.
-    plain: bool,
     /// Double-click without modifier.
     double: bool,
 }
 
 /// A row's selection gestures, common to folders and windows: right click
 /// (selects if needed), Shift (range), Ctrl/Cmd (toggle), single click
-/// (replaces, arms the slow click of the rename) and double-click (disarms the
-/// slow click). What the single click then **does** — open the window,
-/// expand the folder — is up to the caller.
+/// (replaces) and double-click. A single click only selects (#423): what the
+/// double-click **does** — open the window, toggle the folder — is up to the
+/// caller.
 fn select_gestures(
     ui: &egui::Ui,
     interaction: &mut PmInteraction,
@@ -677,33 +797,28 @@ fn select_gestures(
                 interaction
                     .selection
                     .extend(memory.order[a.min(b)..=a.max(b)].iter().copied());
+                memory.lead = Some(entry);
             }
         } else if modifiers.command {
             if !interaction.selection.remove(&entry) {
                 interaction.selection.insert(entry);
             }
             memory.anchor = Some(entry);
+            memory.lead = None;
         } else {
-            let alone = selected && interaction.selection.len() == 1;
-            memory.slow_click = alone.then(|| (entry, ui.input(|input| input.time)));
             interaction.selection.clear();
             interaction.selection.insert(entry);
             memory.anchor = Some(entry);
-            gestures.plain = true;
+            memory.lead = None;
         }
         memory.focus = true;
         ui.ctx()
             .data_mut(|data| data.insert_temp(memory_key, memory));
-        // The open request applies after painting: without a frame claimed
-        // here, the highlight and the active window would appear only on
+        // Without a frame claimed here, the highlight would appear only on
         // the next mouse move.
         ui.ctx().request_repaint();
     }
     if response.double_clicked() {
-        ui.ctx().data_mut(|data| {
-            data.get_temp_mut_or_default::<PmMemory>(memory_key)
-                .slow_click = None;
-        });
         gestures.double = ui.input(|input| input.modifiers.is_none());
     }
     gestures
@@ -719,7 +834,7 @@ fn keyboard_cursor(
 ) -> Option<PmEntry> {
     let memory = ctx.data(|data| data.get_temp::<PmMemory>(memory_key))?;
     (memory.focus && memory.rename.is_empty())
-        .then(|| cursor_of(selection, memory.anchor))
+        .then(|| cursor_of(selection, &memory))
         .flatten()
 }
 
@@ -779,6 +894,7 @@ fn project_tree_node_ui(
             // #170: the header row has the height of a list row; the height is
             // given back after the body (the response borrows the `Ui`).
             let previous_height = raise_to_list_row_height(ui);
+            let ctx = ui.ctx().clone();
             let mut gestures = RowGestures::default();
             let mut header = state.show_header(ui, |ui| {
                 if is_renaming(ui.ctx(), memory_key, *id) {
@@ -797,6 +913,7 @@ fn project_tree_node_ui(
                     name,
                     selected,
                     false,
+                    interaction.cut.contains(id),
                     focused,
                 );
                 reveal_if_reached(ui.ctx(), memory_key, entry, &response);
@@ -819,13 +936,17 @@ fn project_tree_node_ui(
                     )
                 });
             });
-            // A click on a closed folder expands it, on an open folder it does
-            // not collapse it; the double-click collapses it (the triangle too).
-            if gestures.plain && !header.is_open() {
-                header.set_open(true);
-            }
+            // A click only selects; the double-click toggles the folder, once
+            // (the triangle too, #423).
             if gestures.double {
-                header.set_open(false);
+                header.set_open(!header.is_open());
+            }
+            if header.is_open() {
+                ctx.data_mut(|data| {
+                    data.get_temp_mut_or_default::<PmMemory>(memory_key)
+                        .open_folders
+                        .insert(*id);
+                });
             }
             let (toggle, _, _) = header.body(|ui| {
                 crate::tree_lines::tree_children(ui, |ui, branch| {
@@ -860,6 +981,7 @@ fn project_tree_node_ui(
             }
             let selected = interaction.selection.contains(&entry);
             let is_closed = !interaction.open.contains(&tab);
+            let is_cut = interaction.cut.contains(id);
             let focused =
                 keyboard_cursor(ui.ctx(), memory_key, interaction.selection) == Some(entry);
             // The per-tab salt prevents all the rows from sharing the same Id.
@@ -872,15 +994,13 @@ fn project_tree_node_ui(
                         name,
                         selected,
                         is_closed,
+                        is_cut,
                         focused,
                     )
                 })
                 .inner;
             reveal_if_reached(ui.ctx(), memory_key, entry, &response);
             let gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
-            if gestures.plain {
-                interaction.open_requests.push(tab);
-            }
             response.context_menu(|ui| {
                 let mut sections = MenuSections::new();
                 sections.section(ui, true, |ui| {
@@ -927,7 +1047,8 @@ fn project_tree_node_ui(
                 );
             });
             // S-K3: a double-click activates or restores the window, it never
-            // closes it (closing is done by Close or the header).
+            // closes it (closing is done by Close or the header). A single click
+            // only selects (#423).
             if gestures.double {
                 interaction.open_requests.push(tab);
             }
@@ -1018,6 +1139,7 @@ impl StokesForgeApp {
                 }
                 let tree = self.state.project_tree();
                 let open = self.open_tabs();
+                let cut: HashSet<NodeId> = self.state.cut_objects().into_iter().collect();
                 let mut interaction = PmInteraction {
                     actions,
                     root: self.state.tree().root(),
@@ -1025,6 +1147,7 @@ impl StokesForgeApp {
                     selection: &mut self.pm_selection,
                     open: &open,
                     close_requests,
+                    cut: &cut,
                 };
                 project_manager_contents_from_tree(ui, &tree, &mut interaction);
             });
@@ -1165,10 +1288,14 @@ pub(super) mod tests {
         selection: RefCell<HashSet<PmEntry>>,
         open: RefCell<HashSet<Tab>>,
         close_requests: RefCell<Vec<Tab>>,
+        /// The nodes of the last Cut (#423).
+        cut: RefCell<HashSet<NodeId>>,
         /// Was ↓ still readable after the panel, in the same frame?
         /// What a grid painted afterwards would see (it reads the arrows without
         /// consuming them, #170 point 6).
         arrow_down_left: std::cell::Cell<bool>,
+        /// Was ← or → still readable after the panel, in the same frame?
+        side_arrows_left: std::cell::Cell<bool>,
         /// Paint a modal window after the panel, in the same frame (#406).
         modal: std::cell::Cell<bool>,
     }
@@ -1181,7 +1308,9 @@ pub(super) mod tests {
                 selection: RefCell::new(selection),
                 open: RefCell::new(HashSet::new()),
                 close_requests: RefCell::new(Vec::new()),
+                cut: RefCell::new(HashSet::new()),
                 arrow_down_left: std::cell::Cell::new(false),
+                side_arrows_left: std::cell::Cell::new(false),
                 modal: std::cell::Cell::new(false),
             }
         }
@@ -1196,7 +1325,7 @@ pub(super) mod tests {
         }
 
         /// Like [`Bench::paint`], at instant `time`: the gestures that depend
-        /// on the delay (slow click) cannot be driven by the real clock.
+        /// on the delay (animations) cannot be driven by the real clock.
         fn paint_at(
             &self,
             context: &egui::Context,
@@ -1220,11 +1349,16 @@ pub(super) mod tests {
                 selection: &mut self.selection.borrow_mut(),
                 open: &self.open.borrow(),
                 close_requests: &mut self.close_requests.borrow_mut(),
+                cut: &self.cut.borrow(),
             };
             let mut output = context.run_ui(input, |ui| {
                 project_manager_contents_from_tree(ui, tree, &mut interaction);
                 self.arrow_down_left
                     .set(ui.input(|input| input.key_pressed(egui::Key::ArrowDown)));
+                self.side_arrows_left.set(ui.input(|input| {
+                    input.key_pressed(egui::Key::ArrowLeft)
+                        || input.key_pressed(egui::Key::ArrowRight)
+                }));
                 if self.modal.get() {
                     super::super::dialogs::modal_read_only(
                         ui.ctx(),
@@ -1391,8 +1525,8 @@ pub(super) mod tests {
         assert_anchor(Some(PmEntry::Window(graph)));
         app.follow_project_manager_active_tab(&context, None);
         assert_eq!(app.pm_selection, windows([book, graph]));
-        // The existing single click replaces the selection. Same active window:
-        // do not overwrite that click before its open request is applied.
+        // A click replaces the selection. Same active window: do not overwrite
+        // that click.
         app.pm_selection = windows([book]);
         app.follow_project_manager_active_tab(&context, None);
         assert_eq!(app.pm_selection, windows([book]));
@@ -1446,6 +1580,7 @@ pub(super) mod tests {
                                 selection: &mut app.pm_selection,
                                 open: &HashSet::new(),
                                 close_requests: &mut Vec::new(),
+                                cut: &HashSet::new(),
                             };
                             project_manager_contents_from_tree(ui, &tree, &mut interaction);
                         });
@@ -1607,7 +1742,7 @@ pub(super) mod tests {
 
     /// The fixed panel ([`StokesForgeApp::project_manager_panel`]) occupies the
     /// left edge and links the tree to the application's fields: a
-    /// Ctrl-click selects in `pm_selection`, a single click requests the
+    /// Ctrl-click selects in `pm_selection`, a double-click requests the
     /// opening, applied later by `ui()`.
     #[test]
     fn the_fixed_panel_links_the_tree_to_the_application_fields() {
@@ -1656,6 +1791,9 @@ pub(super) mod tests {
             open.borrow().is_empty(),
             "Ctrl-click selects without opening"
         );
+        // The test clock stands still: two clicks make a double-click (#423: a
+        // single click no longer opens).
+        click_at(&context, book, egui::Modifiers::NONE, paint);
         click_at(&context, book, egui::Modifiers::NONE, paint);
         assert!(open.borrow().contains(&book_tab));
         session.shutdown().unwrap();
@@ -1914,10 +2052,10 @@ pub(super) mod tests {
         paint(context, Vec::new())
     }
 
-    /// The visibility actions open on right click. The single click
-    /// still opens its entry, without moving the tree when selecting.
+    /// The visibility actions open on right click. The single click only
+    /// selects its entry (#423: it opens nothing), without moving the tree.
     #[test]
-    fn the_visibility_actions_are_in_the_context_menu_and_the_single_click_opens() {
+    fn the_visibility_actions_are_in_the_context_menu_and_the_single_click_only_selects() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
         let bench = Bench::new(HashSet::new());
@@ -1931,7 +2069,10 @@ pub(super) mod tests {
         );
         let graph_pos = find_text_center(&first.shapes, "Graph1");
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
-        assert_eq!(*bench.open_requests.borrow(), vec![graph_tab]);
+        assert!(
+            bench.open_requests.borrow().is_empty(),
+            "a single click opens nothing (#423)"
+        );
         assert_eq!(
             *bench.selection.borrow(),
             windows([graph_tab]),
@@ -1951,7 +2092,7 @@ pub(super) mod tests {
         assert!(painted(&menu, &tr!("project-manager-open")));
     }
 
-    /// #157: a window's right click is **flat** — Open · Close ─ Copy ·
+    /// #157: a window's right click is **flat** — Open · Close ─ Cut · Copy ·
     /// Paste ─ Rename · Duplicate ─ Delete, without "Selection ▸".
     #[test]
     fn a_window_right_click_is_flat_in_section_order() {
@@ -1966,6 +2107,7 @@ pub(super) mod tests {
         let order = [
             tr!("project-manager-open"),
             tr!("project-manager-close"),
+            tr!("action-cut"),
             tr!("action-copy"),
             tr!("action-paste"),
             tr!("action-rename-project-object"),
@@ -2022,6 +2164,7 @@ pub(super) mod tests {
         // Copy and Duplicate are enabled on a folder (#391): the right click
         // targets the folder, and the click pushes the action.
         for (label, expected) in [
+            (tr!("action-cut"), Action::CutObjects(vec![folder])),
             (tr!("action-copy"), Action::CopyObjects(vec![folder])),
             (
                 tr!("action-duplicate-project-object"),
@@ -2058,9 +2201,9 @@ pub(super) mod tests {
 
     /// A closed window stays listed, dimmed: its color differs from that of
     /// the same open window, and its neighbors do not change; a click on the
-    /// dimmed row opens it (#327).
+    /// dimmed row only selects it, the double-click opens it (#327, #423).
     #[test]
-    fn a_closed_window_stays_listed_but_dimmed_and_a_click_opens_it() {
+    fn a_closed_window_stays_listed_but_dimmed_and_a_double_click_opens_it() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
         let bench = Bench::new(HashSet::new());
@@ -2083,6 +2226,17 @@ pub(super) mod tests {
         click_at(&context, pos, egui::Modifiers::NONE, |ctx, events| {
             bench.paint(ctx, &tree, events)
         });
+        assert!(
+            bench.open_requests.borrow().is_empty(),
+            "a single click on a closed window opens nothing"
+        );
+        // Fresh context: see `double_click_activates_the_entry_without_modifier`.
+        let context = egui::Context::default();
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
+        let frame = paint(&context, Vec::new());
+        let pos = find_text_center(&frame.shapes, "Graph1");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
         assert_eq!(*bench.open_requests.borrow(), vec![graph_tab]);
     }
 
@@ -2235,37 +2389,35 @@ pub(super) mod tests {
         );
     }
 
-    /// A slow click (S-K4) on a window already alone in the selection opens
-    /// its rename; a double-click, never; the field opens on the selected
-    /// name.
+    /// No slow-click rename (#423): clicking again on the entry that is alone
+    /// in the selection, then waiting past the old delay, opens no field;
+    /// F2 opens it. Witness: the old slow click armed by that re-click made
+    /// the field open.
     #[test]
-    fn a_slow_click_on_a_selected_name_renames_it_not_a_double_click() {
+    fn a_click_on_the_selected_name_never_renames_it_only_f2_does() {
         let (_session, book, _graph, tree) = project_manager_fixture();
-        for double in [false, true] {
-            let context = egui::Context::default();
-            let bench = Bench::new(windows([book]));
-            let clock = std::cell::Cell::new(1.0);
-            let paint = |ctx: &egui::Context, events| {
-                clock.set(clock.get() + 0.01);
-                bench.paint_at(ctx, &tree, events, Some(clock.get()))
-            };
-            let first = paint(&context, Vec::new());
-            let pos = find_text_center(&first.shapes, "Book1");
-            click_at(&context, pos, egui::Modifiers::NONE, paint);
-            if double {
-                click_at(&context, pos, egui::Modifiers::NONE, paint);
-            }
-            paint(&context, Vec::new());
-            assert!(!context.text_edit_focused(), "not yet (double={double})");
-            clock.set(clock.get() + 0.6);
-            paint(&context, Vec::new());
-            paint(&context, Vec::new());
-            assert_eq!(
-                context.text_edit_focused(),
-                !double,
-                "the rename opens after a slow click only (double={double})"
-            );
-        }
+        let context = egui::Context::default();
+        let bench = Bench::new(windows([book]));
+        let clock = std::cell::Cell::new(1.0);
+        let paint = |ctx: &egui::Context, events| {
+            clock.set(clock.get() + 0.01);
+            bench.paint_at(ctx, &tree, events, Some(clock.get()))
+        };
+        let first = paint(&context, Vec::new());
+        let pos = find_text_center(&first.shapes, "Book1");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        paint(&context, Vec::new());
+        clock.set(clock.get() + 0.6);
+        paint(&context, Vec::new());
+        paint(&context, Vec::new());
+        assert!(!context.text_edit_focused(), "no slow-click rename");
+        paint(
+            &context,
+            vec![key_with(egui::Key::F2, egui::Modifiers::NONE)],
+        );
+        paint(&context, Vec::new());
+        paint(&context, Vec::new());
+        assert!(context.text_edit_focused(), "F2 opens the field");
     }
 
     /// A name already taken by a sibling keeps the field open: Enter sends
@@ -2332,11 +2484,12 @@ pub(super) mod tests {
         });
     }
 
-    /// A click on a folder selects it and, if it is closed, expands it;
-    /// it opens no window. Witness: without inserting the folder in the
-    /// selection, nothing is selected.
+    /// A click on a folder only selects it (#423): it neither expands it nor
+    /// opens a window. Witness: without inserting the folder in the
+    /// selection, nothing is selected; with the old expand-on-click, Beta is
+    /// painted.
     #[test]
-    fn a_click_on_a_folder_selects_and_expands_it() {
+    fn a_click_on_a_folder_selects_it_without_expanding_it() {
         let (tree, _tabs) = tree_with_collapsed_folder();
         let folder = tree_folder();
         let context = egui::Context::default();
@@ -2353,7 +2506,7 @@ pub(super) mod tests {
         );
         paint(&context, vec![]);
         let after = paint(&context, vec![]);
-        assert!(painted(&after, "Beta"), "the click expanded the folder");
+        assert!(!painted(&after, "Beta"), "the click did not expand it");
         assert!(
             bench.open_requests.borrow().is_empty(),
             "a folder opens no window"
@@ -2406,8 +2559,8 @@ pub(super) mod tests {
     }
 
     /// A click on an open folder selects it **without** collapsing it, even
-    /// when it is already alone in the selection. Witness: a click on a closed
-    /// folder opens it (other test).
+    /// when it is already alone in the selection. Witness: the double-click
+    /// collapses it (next test).
     #[test]
     fn a_click_on_an_open_folder_selects_it_without_collapsing_it() {
         let (tree, [alpha, ..]) = tree_with_collapsed_folder();
@@ -2443,10 +2596,11 @@ pub(super) mod tests {
         }
     }
 
-    /// A double-click collapses the folder, whether it was open or closed at
-    /// the start (the first click of a double-click expands a closed folder).
+    /// A double-click toggles the folder exactly once (#423): closed, it
+    /// opens; open, it closes. Witness: with the old expand-on-click plus
+    /// collapse-on-double-click, the closed folder ended closed.
     #[test]
-    fn a_double_click_collapses_the_folder() {
+    fn a_double_click_toggles_the_folder_once() {
         let (tree, _tabs) = tree_with_collapsed_folder();
         let folder = tree_folder();
         for open_at_start in [false, true] {
@@ -2467,13 +2621,14 @@ pub(super) mod tests {
             let pos = find_text_center(&first.shapes, "Folder");
             click_at(&context, pos, egui::Modifiers::NONE, paint);
             click_at(&context, pos, egui::Modifiers::NONE, paint);
-            // The collapse is animated: we let time pass.
+            // The animation: we let time pass.
             clock.set(clock.get() + 2.0);
             paint(&context, vec![]);
             let after = paint(&context, vec![]);
-            assert!(
-                !painted(&after, "Beta"),
-                "double-click: collapsed (open at start: {open_at_start})"
+            assert_eq!(
+                painted(&after, "Beta"),
+                !open_at_start,
+                "one toggle (open at start: {open_at_start})"
             );
             assert_eq!(
                 *bench.selection.borrow(),
@@ -2787,22 +2942,47 @@ pub(super) mod tests {
         });
     }
 
-    /// Shift+↓ and Alt+↓ do not pass for ↓ (egui ignores extra Shift and Alt):
-    /// they are consumed and do not move the selection. Witness: ↓
-    /// alone moves it.
+    /// Shift+↓ extends the selection from the anchor along `order` (collapsed
+    /// folders included, the Shift-click rule), Shift+↑ shrinks it back;
+    /// Alt+↓ is consumed and does nothing (#423). Witness: a Shift+↓ that
+    /// behaved as ↓ would replace the selection instead of extending it.
     #[test]
-    fn shift_and_alt_down_do_not_move_the_selection() {
-        with_focused_panel(|bench, context, paint, [alpha, ..]| {
-            for modifiers in [egui::Modifiers::SHIFT, egui::Modifiers::ALT] {
-                paint(context, vec![key_with(egui::Key::ArrowDown, modifiers)]);
-                assert_eq!(*bench.selection.borrow(), windows([alpha]), "{modifiers:?}");
-                assert!(!bench.arrow_down_left.get(), "{modifiers:?} consumed");
-            }
+    fn shift_arrows_extend_and_shrink_the_range_and_alt_down_does_nothing() {
+        with_focused_panel(|bench, context, paint, [alpha, beta, gamma, delta]| {
+            let folder = PmEntry::Folder(tree_folder());
             paint(
                 context,
-                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::SHIFT)],
             );
-            assert_ne!(*bench.selection.borrow(), windows([alpha]), "witness");
+            let mut range = windows([alpha]);
+            range.insert(folder);
+            assert_eq!(*bench.selection.borrow(), range, "Alpha..Folder");
+            assert!(!bench.arrow_down_left.get(), "Shift+Down consumed");
+            paint(
+                context,
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::SHIFT)],
+            );
+            let mut range = windows([alpha, beta, gamma, delta]);
+            range.insert(folder);
+            assert_eq!(
+                *bench.selection.borrow(),
+                range,
+                "the second step reaches the next visible row, hidden children inside the range"
+            );
+            paint(
+                context,
+                vec![key_with(egui::Key::ArrowUp, egui::Modifiers::SHIFT)],
+            );
+            let mut range = windows([alpha]);
+            range.insert(folder);
+            assert_eq!(*bench.selection.borrow(), range, "Shift+Up shrinks");
+            let before = bench.selection.borrow().clone();
+            paint(
+                context,
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+            );
+            assert_eq!(*bench.selection.borrow(), before, "Alt+Down: no effect");
+            assert!(!bench.arrow_down_left.get(), "Alt+Down consumed");
         });
     }
 
@@ -2854,6 +3034,237 @@ pub(super) mod tests {
             }
             assert!(!painted(&after, "Beta"), "Enter collapses the open folder");
         });
+    }
+
+    /// → on a closed folder opens it, the cursor staying on it; → again goes to
+    /// its first child; ← on a child goes back to the parent folder; ← on an
+    /// open folder closes it; ← at the root level does nothing; the arrows are
+    /// consumed (#423, P4). Witness: without the key handling the selection
+    /// never leaves Alpha.
+    #[test]
+    fn left_and_right_fold_unfold_and_walk_the_tree_like_a_file_explorer() {
+        with_focused_panel(|bench, context, paint, [alpha, beta, ..]| {
+            let folder = PmEntry::Folder(tree_folder());
+            let key = |key| vec![key_with(key, egui::Modifiers::NONE)];
+            let settle = |n: usize| {
+                let mut last = paint(context, vec![]);
+                for _ in 0..n {
+                    last = paint(context, vec![]);
+                }
+                last
+            };
+            // ← at the root level: Alpha has no parent folder.
+            paint(context, key(egui::Key::ArrowLeft));
+            assert_eq!(*bench.selection.borrow(), windows([alpha]), "root level");
+            assert!(bench.actions.borrow().is_empty());
+            paint(context, key(egui::Key::ArrowDown));
+            assert_eq!(*bench.selection.borrow(), HashSet::from([folder]));
+            assert!(!painted(&settle(2), "Beta"), "precondition: closed");
+            paint(context, key(egui::Key::ArrowRight));
+            assert!(painted(&settle(10), "Beta"), "→ opens the closed folder");
+            assert_eq!(
+                *bench.selection.borrow(),
+                HashSet::from([folder]),
+                "cursor stays"
+            );
+            paint(context, key(egui::Key::ArrowRight));
+            assert_eq!(
+                *bench.selection.borrow(),
+                windows([beta]),
+                "→ goes to the first child"
+            );
+            paint(context, key(egui::Key::ArrowLeft));
+            assert_eq!(
+                *bench.selection.borrow(),
+                HashSet::from([folder]),
+                "← goes to the parent"
+            );
+            paint(context, key(egui::Key::ArrowLeft));
+            assert!(!painted(&settle(10), "Beta"), "← closes the open folder");
+            assert_eq!(*bench.selection.borrow(), HashSet::from([folder]));
+            paint(context, key(egui::Key::ArrowLeft));
+            assert_eq!(
+                *bench.selection.borrow(),
+                HashSet::from([folder]),
+                "root level again"
+            );
+            assert!(bench.open_requests.borrow().is_empty());
+        });
+    }
+
+    /// ← and → are consumed by the panel: a workbook's grid, painted after
+    /// it, reads them without consuming them. Witness: without focus, the
+    /// keys stay readable.
+    #[test]
+    fn left_and_right_do_not_reach_the_grid() {
+        with_focused_panel(|bench, context, paint, _| {
+            for key in [egui::Key::ArrowLeft, egui::Key::ArrowRight] {
+                paint(context, vec![key_with(key, egui::Modifiers::NONE)]);
+                assert!(!bench.side_arrows_left.get(), "{key:?} consumed");
+            }
+        });
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        bench.paint(&context, &tree, vec![]);
+        bench.paint(
+            &context,
+            &tree,
+            vec![key_with(egui::Key::ArrowLeft, egui::Modifiers::NONE)],
+        );
+        assert!(
+            bench.side_arrows_left.get(),
+            "witness: no focus, not consumed"
+        );
+    }
+
+    /// A click outside the panel takes the keyboard focus away (#423): the front graph or workbook gets its
+    /// keys back. Witness: a focus that is never cleared.
+    #[test]
+    fn a_click_elsewhere_clears_the_panel_focus() {
+        with_focused_panel(|_bench, context, paint, _tabs| {
+            assert!(has_focus(context));
+            click_at(
+                context,
+                egui::pos2(5000.0, 5000.0),
+                egui::Modifiers::NONE,
+                paint,
+            );
+            assert!(!has_focus(context), "a click outside");
+        });
+    }
+
+    /// Ctrl+X with the panel focused cuts the selection; without focus, the
+    /// event is left alone (#423).
+    #[test]
+    fn ctrl_x_cuts_the_selection_only_with_the_focus() {
+        with_focused_panel(|bench, context, paint, [alpha, ..]| {
+            bench.actions.borrow_mut().clear();
+            paint(context, vec![egui::Event::Cut]);
+            assert_eq!(
+                bench.actions.take(),
+                vec![Action::CutObjects(vec![tab_node(alpha)])]
+            );
+        });
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::from([PmEntry::Folder(tree_folder())]));
+        bench.paint(&context, &tree, vec![]);
+        bench.paint(&context, &tree, vec![egui::Event::Cut]);
+        assert!(bench.actions.borrow().is_empty(), "no focus, no cut");
+    }
+
+    /// A cut row is painted dimmed until the cut mark goes away (#423).
+    /// Witness: the mark absent, same color as its neighbor.
+    #[test]
+    fn a_cut_row_is_dimmed_and_a_cleared_mark_restores_it() {
+        let (tree, tabs) = tree_with_collapsed_folder();
+        let alpha = tabs[0];
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        bench.open.borrow_mut().extend(tabs);
+        bench.paint(&context, &tree, vec![]);
+        let plain = bench.paint(&context, &tree, vec![]);
+        assert_eq!(
+            text_color(&plain.shapes, "Alpha"),
+            text_color(&plain.shapes, "Delta")
+        );
+        bench.cut.borrow_mut().insert(tab_node(alpha));
+        let cut = bench.paint(&context, &tree, vec![]);
+        assert_ne!(
+            text_color(&cut.shapes, "Alpha"),
+            text_color(&cut.shapes, "Delta"),
+            "the cut row is dimmed"
+        );
+        bench.cut.borrow_mut().clear();
+        let after_copy = bench.paint(&context, &tree, vec![]);
+        assert_eq!(
+            text_color(&after_copy.shapes, "Alpha"),
+            text_color(&after_copy.shapes, "Delta"),
+            "after Copy (mark cleared) the row is back to normal"
+        );
+        // A cut folder is dimmed too.
+        bench.cut.borrow_mut().insert(tree_folder());
+        let folder = bench.paint(&context, &tree, vec![]);
+        assert_ne!(
+            text_color(&folder.shapes, "Folder"),
+            text_color(&folder.shapes, "Delta")
+        );
+    }
+
+    /// The tint of the icon painted at height `y` (`None` if none is painted).
+    fn icon_tint_at(shapes: &[egui::epaint::ClippedShape], y: f32) -> Option<egui::Color32> {
+        shapes.iter().find_map(|painted| match &painted.shape {
+            egui::Shape::Rect(rect)
+                if rect.brush.is_some() && (rect.rect.center().y - y).abs() < 4.0 =>
+            {
+                Some(rect.fill)
+            }
+            _ => None,
+        })
+    }
+
+    /// A cut row fades its text **and** its icon; a closed window fades its
+    /// text only (#423). Witness: with the icon not tinted for a cut, the two
+    /// rows have the same icon tint.
+    #[test]
+    fn a_cut_row_fades_its_icon_and_a_closed_window_does_not() {
+        let (tree, tabs) = tree_with_collapsed_folder();
+        let alpha = tabs[0];
+        let context = super::super::test_support::context();
+        let bench = Bench::new(HashSet::new());
+        // Alpha open and cut, Delta closed, nothing else dimmed.
+        bench.open.borrow_mut().insert(alpha);
+        bench.cut.borrow_mut().insert(tab_node(alpha));
+        for _ in 0..4 {
+            bench.paint(&context, &tree, vec![]);
+        }
+        let frame = bench.paint(&context, &tree, vec![]);
+        let alpha_y = find_text_center(&frame.shapes, "Alpha").y;
+        let delta_y = find_text_center(&frame.shapes, "Delta").y;
+        assert_eq!(
+            text_color(&frame.shapes, "Alpha"),
+            text_color(&frame.shapes, "Delta"),
+            "both texts are dimmed"
+        );
+        let cut_icon = icon_tint_at(&frame.shapes, alpha_y).expect("cut icon painted");
+        let closed_icon = icon_tint_at(&frame.shapes, delta_y).expect("closed icon painted");
+        assert_eq!(
+            closed_icon,
+            egui::Color32::WHITE,
+            "a closed window keeps its icon"
+        );
+        assert_ne!(cut_icon, closed_icon, "a cut row fades its icon");
+    }
+
+    /// Paste into a closed folder asks for the paste into it and the folder
+    /// shows what arrives: painted open on the next frame (#423, P3).
+    #[test]
+    fn a_paste_into_a_closed_folder_opens_it() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let pos = find_text_center(&first.shapes, "Folder");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        assert!(!painted(&paint(&context, vec![]), "Beta"), "still closed");
+        bench.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Paste("data".into())]);
+        assert_eq!(
+            bench.actions.take(),
+            vec![Action::PasteObjects {
+                parent: folder,
+                text: "data".into()
+            }]
+        );
+        paint(&context, vec![]);
+        assert!(
+            painted(&paint(&context, vec![]), "Beta"),
+            "opened by the paste"
+        );
     }
 
     /// The row that carries the keyboard cursor has the focus outline of

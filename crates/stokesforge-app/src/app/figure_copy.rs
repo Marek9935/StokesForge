@@ -61,7 +61,10 @@ pub(super) fn copy_event_pending(ctx: &egui::Context) -> bool {
 ///
 /// `view` is the view of the graph that the gesture would target: its selection decides.
 pub(super) fn take_figure_copy_gesture(ctx: &egui::Context, view: &GraphView) -> bool {
-    if keyboard_focus_outside_grid(ctx) || selected_manager_target(view).is_some() {
+    if keyboard_focus_outside_grid(ctx)
+        || super::project_manager::owns_keyboard(ctx)
+        || selected_manager_target(view).is_some()
+    {
         return false;
     }
     ctx.input_mut(|input| {
@@ -288,6 +291,25 @@ mod tests {
             }]
         );
         assert!(!is_copy(&remaining), "the event must be consumed");
+        session.shutdown().unwrap();
+    }
+
+    /// While the Project Manager has the keyboard (#423), Ctrl+C belongs to it:
+    /// no figure copy and the event stays for the panel; once the focus is gone
+    /// the figure goes out again. Witness: remove `owns_keyboard` from
+    /// `take_figure_copy_gesture`.
+    #[test]
+    fn a_focused_project_manager_keeps_ctrl_c() {
+        let (session, mut app, graph) = bench();
+        let ctx = context();
+        let tab = Some(Tab::Graph(graph));
+        super::super::project_manager::set_focus_for_test(&ctx, true);
+        let (actions, remaining) = paint_app(&mut app, &ctx, tab, copy_events());
+        assert!(actions.is_empty(), "{actions:?}");
+        assert!(is_copy(&remaining), "the event stays for the panel");
+        super::super::project_manager::set_focus_for_test(&ctx, false);
+        let (actions, _) = paint_app(&mut app, &ctx, tab, copy_events());
+        assert_eq!(actions.len(), 1, "focus gone: the figure is copied again");
         session.shutdown().unwrap();
     }
 

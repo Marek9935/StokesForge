@@ -118,14 +118,17 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 |---|---|---|
 | Click | row (OM) | selects the object (and activates it, for a layer) |
 | Delete | layer node (OM) | deletes the cell and its overlay layers (an overlay layer alone); the last cell is refused (#357) |
-| Click | row (PM) | window: selects and opens; folder: selects and expands it if closed, without collapsing it if open (#170) |
+| Click | row (PM) | selects the window or the folder, and nothing else: no opening, no expansion (#423) |
 | Ctrl + click | row (PM) | toggles the row in the selection |
-| Shift + click | row (PM) | range anchor → target in tree order, collapsed folders included: the folder and its windows enter the selection and the action (Delete, Open, Close; Copy refuses a folder) (Ctrl + Shift: adds the range) |
-| Slow click (click on the entry already alone selected, then delay elapsed without a second click) | row (PM) | renames, like F2; a quick double-click does not rename |
-| ↑, ↓ | row (OM, PM focused) | selects the previous or next visible row, without opening (S-K9); Shift+↑/↓ and Alt+↓ have no effect |
+| Shift + click | row (PM) | range anchor → target in tree order, collapsed folders included: the folder and its windows enter the selection and the action (Delete, Open, Close, Cut, Copy) (Ctrl + Shift: adds the range) |
+| F2 | row (PM focused) | renames in place, like the menu's Rename (there is no slow click, #423) |
+| ↑, ↓ | row (OM, PM focused) | selects the previous or next visible row, without opening (S-K9); Shift+↑/↓: PM extends the selection from the anchor (the Shift-click range), OM no effect; Alt+↓ has no effect |
+| →, ← | row (PM focused) | → expands a closed folder, then goes to its first child; ← collapses an open folder, otherwise goes to the parent folder; nothing at the root level (#423) |
+| Ctrl + C, Ctrl + X, Ctrl + V, Delete, F2, Ctrl + D, Enter, arrows | PM focused | the panel owns these keys while it has the focus (a click inside it, cleared by a click anywhere else or by its window losing the system focus): the graph or workbook in front does not copy its figure, delete its object, paste or move its cells (`project_manager::owns_keyboard`, #423) |
+| Ctrl + X | row (PM focused) | cuts the selection: rows dimmed; Paste of that copy moves them (one history entry), into the selected folder, which expands |
 | Enter | row (OM, PM focused) | PM: opens the window, expands or collapses the folder; OM: opens the settings of the selected series or object (like the double-click) |
 | Double-click | row (OM) | opens the settings of the object |
-| Double-click | row (PM) | window: activates or restores it, never closes it; folder: collapses it (without a modifier) |
+| Double-click | row (PM) | window: activates or restores it, never closes it; folder: toggles it once (without a modifier) |
 | Drag | row (OM) | reorders; on a graph, moves the object |
 | Drag | row (PM) | — (PM rows cannot be dragged: click only) |
 | Right-click | row | if outside the selection, replaces it; menu of the object (a single menu, `menus.md`) |
@@ -225,7 +228,7 @@ never changed for real.
   column letter (click, Shift, Ctrl), row number (click, Shift), box "#",
   double-click cell (editing), right-click, drag the edge of a column
   to a graph (series added); PM: click, Ctrl + click, slow click
-  (renames); tabs: click, double-click (renames); windows: drag the
+  (renamed; removed by #423); tabs: click, double-click (renames); windows: drag the
   title bar, resize by the corner, click outside a modal dialog
   (blocked; the blinking of the outline was not observed); analysis
   preview (Integral window): Wheel (zoom), Ctrl + wheel (no
@@ -234,7 +237,7 @@ never changed for real.
 - **Fixed**: Ctrl + drag of the graph (pan, not "—"); Ctrl + drag of
   the preview (draws a zone); drag a PM row (nothing, no
   drag and drop); drag edge of the grid (left/right edges under the
-  letters); slow click (triggered by the delay, not by a second click).
+  letters); slow click (triggered by the delay, not by a second click; removed by #423).
 - **Not replayed, read in the code**: Shift + wheel of the graph; click
   Text and shape tools; double-click of a text, the title, a legend entry, a shape, an axis;
   width handle; drag of the analysis

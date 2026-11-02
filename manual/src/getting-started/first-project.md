@@ -143,7 +143,7 @@ See [Rules to remember](../guide/graphs.md#rules-to-remember).
 
 ### 10. Integrate the peak
 
-Bring the workbook to the front: click its name in the **Project Manager** at the left. Click the letter **B** to select the Y column, then choose **Analysis ▸ Integrate…**.
+Bring the workbook to the front: double-click its name in the **Project Manager** at the left. Click the letter **B** to select the Y column, then choose **Analysis ▸ Integrate…**.
 
 The window **New analysis: Integrate** opens. It shows the curve, with the settings on the left.
 
@@ -161,7 +161,7 @@ The analysis is saved with the project. You can reopen it later with **Edit Calc
 
 ### 11. Export the figure
 
-Bring the graph to the front: click its name in the **Project Manager**. Choose **Graph ▸ Export ▸ Export Graph…** (<kbd>Ctrl</kbd>+<kbd>E</kbd>).
+Bring the graph to the front: double-click its name in the **Project Manager**. Choose **Graph ▸ Export ▸ Export Graph…** (<kbd>Ctrl</kbd>+<kbd>E</kbd>).
 
 In the **Export Graph** dialog, pick a folder and type the name `spectrum.svg`. The extension decides the format: `.svg`, `.pdf` or `.png`. Confirm.
 

@@ -118,8 +118,8 @@ The check boxes keep the menu open (#114).
 
 | Target | Menu |
 |---|---|
-| Window(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
-| Folder | Add Folder (in this folder) ─ Copy (disabled) · Paste (in this folder) ─ Rename (in place) · Duplicate (disabled) ─ Delete |
+| Window(s) | Open · Close ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete |
+| Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate ─ Delete |
 
 Selection ▸ remains only in Edit.
 

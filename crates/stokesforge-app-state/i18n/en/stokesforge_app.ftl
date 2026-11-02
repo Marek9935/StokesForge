@@ -1420,6 +1420,8 @@ history-macro-move-objects = Move Objects
 
 object-rename-empty = The name is empty; the previous name was kept
 object-clipboard-invalid = The clipboard contains no valid StokesForge objects
+error-move-into-itself = A folder cannot be moved into itself or one of its subfolders. Pick another destination
+error-move-name-taken = Nothing was moved: "{ $name }" already exists in the destination folder. Rename one of them first
 object-delete-used = Deleted; its data was used by { $graphs }. Undo brings it back
 
 action-rename-project-object = Rename
@@ -2095,6 +2097,7 @@ help-keys-escape = Esc
 help-keys-tab = Tab
 help-keys-arrows = Up / Down
 help-keys-shift-arrows = Shift+Up / Shift+Down
+help-keys-left-right = Left / Right
 help-undo = Undo
 help-redo = Redo
 help-new-project = New project
@@ -2123,6 +2126,8 @@ help-delete-selection = Delete the selection
 help-duplicate = Duplicate
 help-select-neighbour = Select the previous or next row
 help-open-entry = Open the window, expand or collapse the folder
+help-extend-selection = Extend the selection from the anchor
+help-fold-with-arrows = Expand or collapse the folder, go to its first child or to its parent
 help-validate = Confirm
 help-cancel = Cancel
 help-next-field = Confirm and go to the next field

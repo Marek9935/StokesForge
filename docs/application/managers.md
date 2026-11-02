@@ -14,10 +14,11 @@ including the windows of collapsed folders (#327).
 **Selectable folders (#170, point 4).** The Project Manager selection
 is a set of `PmEntry` entries (`app/project_manager.rs`): a folder or
 a window (its `Tab`). A folder is painted like a window
-(`list_row`: pale background, accent rule, hover). A click **selects** it and
-expands it if it is closed, without opening a window (`open_requests` stays reserved
-for windows); a click on an open folder selects it **without
-collapsing it**; a double-click collapses it, and so does the triangle. Delete and F2 act
+(`list_row`: pale background, accent rule, hover). A click **only selects** it (#423:
+it neither expands nor opens anything; `open_requests` stays reserved for
+windows); the triangle, the double-click (exactly one toggle), Enter and → / ←
+expand and collapse it, and a paste into it expands it to show what arrived
+(`PmMemory::reveal`). There is no slow-click rename: F2 or the menu. Delete and F2 act
 on it (one history entry, `DeleteObjects` / `RenameObjects`). Paste
 with only this folder selected pastes **into** this folder (`paste_parent`),
 otherwise at the root. A deleted folder leaves the selection. **Copy and
@@ -31,17 +32,39 @@ inside that folder.
 **Keyboard (#170, point 6, S-K9).** With the panel focused, Up and Down move the
 selection from one visible row to the next (`PmMemory::visible`, collected during
 painting; `order`, which keeps collapsed folders, is used only for Shift ranges),
-Enter opens the selected windows and toggles the folders. The cursor row (the
-anchor of the last gesture) carries the focus outline
+Enter opens the selected windows and toggles the folders. Shift+Up / Shift+Down
+extend the selection from the anchor (`PmMemory::lead` is the moving end; same
+range rule as the Shift-click, over `order`); Right expands a closed folder then
+goes to its first child, Left collapses an open folder, otherwise goes to the
+parent (`PmMemory::parents`, `open_folders`), nothing at the root level. The
+cursor row (the lead, else the anchor of the last gesture) carries the focus outline
 (`list_row::paint_focus_outline`); the area scrolls to it. The keys
-are read and consumed by `list_row::read_navigation` (Shift+arrow and Alt+Down
-first, without effect) before a workbook grid; the detached window has its
+are read and consumed by `list_row::read_tree_navigation` (Alt+Down first,
+without effect; the Object Manager keeps `read_navigation`, which also swallows
+Shift+arrow) before a workbook grid; the detached window has its
 own memory per viewport. The Object Manager follows the same contract
 (`object_manager_contents`): Up and Down select the neighbouring visible series,
 group or object, Enter asks for its Properties; Ctrl+Up/Down stays "move the
 series".
 
-F2, Ctrl+D, Ctrl+C, Ctrl+V and Delete apply to this selection when the
+**Cut and Paste move (#423).** Ctrl+X and the menu's Cut (first of the clipboard
+section) run `Action::CutObjects`: a copy to the system clipboard plus a mark in
+`AppState` (`cut_objects()`, painted dimmed through `PmInteraction::cut`). A
+Paste of that very text (same origin and epoch) into this project runs
+`move_objects` (one `MoveObjects` history entry, nodes keep their `NodeId`) and
+clears the mark; Copy, a new Cut, a project change or the deletion of the nodes
+also clear or filter it, and a text from elsewhere (another project, an outside
+copy) pastes as a copy. Provisional edge cases, all in
+`AppState::paste_cut_objects`: the cut folder itself selected moves nothing; a
+destination inside a cut folder, or a name already taken there, is refused
+whole with `error-move-into-itself` / `error-move-name-taken`; after a move the
+consumed text is remembered (`consumed_cut`): a cut pastes once, a second Ctrl+V of
+that text does nothing, until a Copy or a Cut replaces it; a cut row is painted
+with its label and its icon faded (`list_row`'s `cut` flag), unlike a closed window,
+which fades its label only. Drag and drop
+to move: #425.
+
+F2, Ctrl+D, Ctrl+C, Ctrl+X, Ctrl+V and Delete apply to this selection when the
 Project Manager has focus, also in a detached window. Multiple renames
 input the names one after another, then commit a single undoable entry;
 Esc abandons the whole set. The field is committed by Enter or by losing focus.
@@ -68,8 +91,12 @@ this window, and not from the last entry clicked in the Project Manager.
 `window_stack` handles the explicit click and asks the detached Project
 Manager to republish.
 
-Names are unique in the parent folder. Copies get the first free
-suffix "copy N" / "copie N" and new identifiers for their whole
+Names are unique in the parent folder. A pasted copy keeps its name when
+the destination does not hold it (#423); otherwise it gets the first free
+suffix "copy N" / "copie N" after its base name (a copy suffix of the
+original, English or current language, is dropped first, so duplicating
+"Folder copy 1" gives "Folder copy 2", never "Folder copy 1 copy 1"; "Graph10"
+keeps its digits). Copies get new identifiers for their whole
 descendants. A graph copied within its project keeps its references to the
 original columns. A duplicated workbook keeps its open or closed state;
 the graphs that use it are not duplicated. Delete closes the floating

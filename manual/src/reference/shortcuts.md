@@ -53,7 +53,12 @@ The same list is shown by **Help ▸ Keyboard Shortcuts…**.
 | Rename | <kbd>F2</kbd> |
 | Delete the selection | <kbd>Del</kbd> |
 | Duplicate | <kbd>Ctrl</kbd>+<kbd>D</kbd> |
+| Copy | <kbd>Ctrl</kbd>+<kbd>C</kbd> |
+| Cut | <kbd>Ctrl</kbd>+<kbd>X</kbd> |
+| Paste | <kbd>Ctrl</kbd>+<kbd>V</kbd> |
 | Select the previous or next row | <kbd>Up</kbd> / <kbd>Down</kbd> |
+| Extend the selection from the anchor | <kbd>Shift</kbd>+<kbd>Up</kbd> / <kbd>Shift</kbd>+<kbd>Down</kbd> |
+| Expand or collapse the folder, go to its first child or to its parent | <kbd>Left</kbd> / <kbd>Right</kbd> |
 | Open the window, expand or collapse the folder | <kbd>Enter</kbd> |
 
 ## Fields and dialogs
