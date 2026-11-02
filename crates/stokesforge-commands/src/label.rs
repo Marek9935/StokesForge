@@ -223,6 +223,11 @@ pub enum HistoryLabel {
     },
     /// Changing the colors saved in the project.
     SetSavedColors,
+    /// Putting a folder back in automatic (sorted) order, or in manual order (#425).
+    SortFolder {
+        /// Name of the folder.
+        name: Option<String>,
+    },
     /// Recording an analysis calculation (#181).
     AddCalculation(OperationKind),
     /// Final correction of the original values.
@@ -454,6 +459,8 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::SetPlotSpec { name: None } => f.write_str("Edit Graph"),
             HistoryLabel::EditPlotSpec(kind) => kind.fmt(f),
             HistoryLabel::SetSavedColors => f.write_str("Edit Saved Colors"),
+            HistoryLabel::SortFolder { name: Some(name) } => write!(f, "Sort Folder “{name}”"),
+            HistoryLabel::SortFolder { name: None } => f.write_str("Sort Folder"),
             HistoryLabel::ReplaceAnalysisData(kind) => {
                 write!(f, "Replace Original Data ({})", family_english(*kind))
             }

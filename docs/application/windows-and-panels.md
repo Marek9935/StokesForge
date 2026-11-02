@@ -75,7 +75,7 @@ Each floating window can also be maximized (full frame of the
 `CentralPanel`, `StokesForgeApp::maximized_tab`) or detached into a real
 separate OS window (`StokesForgeApp::detach_tab`/`reattach_tab`, for multi-screen).
 
-The File menu offers creating a new workbook (Add Workbook), a folder
+The File menu offers creating a new workbook (Add Workbook, in the selected folder, #425), a folder
 at the root (Add Folder, #326) and importing files. The position and
 size of the content windows are saved in the project (see
 "Window geometry and state"). The matrix editor remains a placeholder.

@@ -92,6 +92,10 @@ enum Step {
         at: usize,
         count: usize,
     },
+    /// Manual or automatic order of the root folder (#425).
+    FolderOrder {
+        manual: bool,
+    },
 }
 
 /// A single step, or a group of 2-3 steps played in a macro.
@@ -140,6 +144,7 @@ fn step() -> impl Strategy<Value = Step> {
             at,
             count
         }),
+        any::<bool>().prop_map(|manual| Step::FolderOrder { manual }),
     ]
 }
 
@@ -367,6 +372,10 @@ impl World {
                     count: *count,
                 })
             }
+            Step::FolderOrder { manual } => Some(Command::SetFolderOrder {
+                folder: self.project.root(),
+                manual: *manual,
+            }),
         }
     }
 

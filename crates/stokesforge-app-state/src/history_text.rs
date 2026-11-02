@@ -145,6 +145,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::LayerPlacement => tr!("history-plot-layer-placement"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
+        HistoryLabel::SortFolder { name: None } => tr!("history-sort-folder"),
+        HistoryLabel::SortFolder { name: Some(name) } => {
+            tr!("history-sort-folder-named", name = name.as_str())
+        }
         HistoryLabel::ReplaceAnalysisData(kind) => tr!(
             "history-replace-analysis-data",
             kind = kind_title(loader, *kind)

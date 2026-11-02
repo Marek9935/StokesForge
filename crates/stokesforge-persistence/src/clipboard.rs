@@ -50,6 +50,10 @@ struct ClipboardRecord {
     /// Transposed sheets of each object whose source is inside it (#391).
     #[serde(default)]
     transposes: Vec<Vec<TransposeRecord>>,
+    /// Folders of each object that were in manual order (#425). Absent from
+    /// an older text: every folder pastes automatic.
+    #[serde(default)]
+    manual_folders: Vec<Vec<u64>>,
 }
 
 /// Recognizes an object transport before a spreadsheet treats it as text.
@@ -78,6 +82,10 @@ pub fn encode_objects(origin: &str, copies: &[NodeCopy]) -> PersistenceResult<St
         transposes: copies
             .iter()
             .map(|copy| copied_transposes_to_records(copy.transposes()))
+            .collect(),
+        manual_folders: copies
+            .iter()
+            .map(|copy| copy.manual_folders().iter().map(|id| id.raw()).collect())
             .collect(),
     };
     let mut buffer = ClipboardBuffer {
@@ -139,13 +147,18 @@ pub fn decode_objects(text: &str) -> PersistenceResult<(String, Vec<NodeCopy>)> 
     // between two roots (calculation, transposed sheet, #391) survives and
     // each root keeps only what is inside the whole gesture.
     let mut copies = Vec::new();
-    for copy in decode_copies(record.objects, record.calculations, record.transposes)? {
+    for copy in decode_copies(
+        record.objects,
+        record.calculations,
+        record.transposes,
+        record.manual_folders,
+    )? {
         let dependencies = data
             .next()
             .unwrap_or_default()
             .into_iter()
             .map(|(graph, nodes)| {
-                let mut copies = decode_copies(vec![nodes], Vec::new(), Vec::new())?;
+                let mut copies = decode_copies(vec![nodes], Vec::new(), Vec::new(), Vec::new())?;
                 Ok((NodeId::from_raw(graph), copies.remove(0)))
             })
             .collect::<PersistenceResult<Vec<_>>>()?;
@@ -175,7 +188,9 @@ fn decode_copies(
     objects: Vec<Vec<NodeRecord>>,
     calculations: Vec<Vec<CalculationRecord>>,
     transposes: Vec<Vec<TransposeRecord>>,
+    manual_folders: Vec<Vec<u64>>,
 ) -> PersistenceResult<Vec<NodeCopy>> {
+    let manual_folders: Vec<u64> = manual_folders.into_iter().flatten().collect();
     let calculations: Vec<CalculationRecord> = calculations.into_iter().flatten().collect();
     let transposes: Vec<TransposeRecord> = transposes.into_iter().flatten().collect();
     let mut roots = Vec::new();
@@ -221,6 +236,8 @@ fn decode_copies(
             next_id_hint: wrapper,
             nodes,
             saved_colors: Default::default(),
+            // Keys that are not folders of the objects are dropped on build.
+            manual_order_folders: manual_folders,
             calculations,
             correction_traces: Default::default(),
             transposes,
@@ -262,5 +279,54 @@ mod tests {
             .serialize(&mut rmp_serde::Serializer::new(&mut buffer))
             .is_err());
         assert_eq!(buffer.bytes.len(), 4);
+    }
+
+    /// #425: the manual folders travel; a text written before the field
+    /// existed (no `manual_folders` key) decodes with every folder automatic.
+    #[test]
+    fn manual_folders_travel_and_an_older_text_decodes_automatic() {
+        use stokesforge_core::Project;
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let manual = project.add_folder(root, "Manual").unwrap();
+        let auto = project.add_folder(manual, "Auto").unwrap();
+        project.set_folder_manual_order(manual, true).unwrap();
+        let copy = NodeCopy::capture(project.tree(), manual).unwrap();
+        assert_eq!(copy.manual_folders(), [manual]);
+
+        let text = encode_objects("origin", std::slice::from_ref(&copy)).unwrap();
+        let (_, back) = decode_objects(&text).unwrap();
+        assert_eq!(back[0].manual_folders().len(), 1);
+        let name_of = |c: &NodeCopy, id: NodeId| {
+            c.nodes()
+                .iter()
+                .find(|n| n.id() == id)
+                .unwrap()
+                .name()
+                .to_string()
+        };
+        assert_eq!(name_of(&back[0], back[0].manual_folders()[0]), "Manual");
+        assert!(back[0].nodes().iter().any(|n| n.name() == "Auto"));
+        assert!(!back[0].manual_folders().contains(&auto));
+
+        #[derive(Serialize)]
+        struct Old {
+            origin: String,
+            objects: Vec<Vec<NodeRecord>>,
+        }
+        let old = Old {
+            origin: "origin".into(),
+            objects: vec![copy_records(&copy)],
+        };
+        let mut bytes = Vec::new();
+        old.serialize(&mut rmp_serde::Serializer::new(&mut bytes).with_struct_map())
+            .unwrap();
+        use std::fmt::Write as _;
+        let mut text = String::from(PREFIX);
+        for byte in bytes {
+            let _ = write!(text, "{byte:02x}");
+        }
+        let (_, old_back) = decode_objects(&text).unwrap();
+        assert!(old_back[0].manual_folders().is_empty());
     }
 }

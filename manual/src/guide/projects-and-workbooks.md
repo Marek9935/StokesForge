@@ -73,7 +73,9 @@ Create objects from the **File ▸ New** menu or the **File** toolbar:
 
 A new workbook is named `Book1`, `Book2`… A new window opens in the foreground.
 
-To create a folder inside another folder, right-click the folder in the Project Manager and choose **Add Folder**. The new folder opens with its name ready to edit.
+A new workbook or graph is created in the folder you have selected in the Project Manager, or in the folder of the selected window. With nothing selected, or several entries, it goes to the top level of the project. That folder opens to show it. In a folder shown sorted it takes its place in the order, in a folder in manual order it goes to the end.
+
+To create a folder inside another folder, right-click the folder in the Project Manager and choose **Add Folder**. The new folder opens with its name ready to edit. A right-click in the empty area below the last row holds **Add Folder**, **Paste** and **Sort** for the top level. A click in that empty area deselects everything, so the next new workbook or graph, or **Paste**, goes to the top level.
 
 Folders contain workbooks, graphs and other folders. Names must be unique inside a folder.
 
@@ -91,7 +93,17 @@ Select one or more entries in the Project Manager, then use the right-click menu
 
 An empty name is refused and the previous name is kept.
 
-A folder can be copied and duplicated with everything it holds. What is inside the copy reads the copy: a graph in the copied folder plots the copied workbook, not the original. What is outside the folder is still read from the original. The same holds for several windows copied together: if you select Book1 and Graph1 and copy them in one gesture, the copied Graph1 plots the copied Book1. To paste into a folder, select only that folder and choose **Paste**: the folder opens to show what arrived. If the folder you copied is itself selected, **Paste** puts the copy next to it.
+### Move entries by dragging
+
+Drag an entry, or several selected entries, onto a folder to move them into it. Drag them between two rows to put them there. Release below the last row to move them to the top level. The folder under the pointer is highlighted, or a line shows the place. A closed folder opens after a second. Press <kbd>Esc</kbd> before releasing to cancel. One **Undo** puts everything back. The same rules as Cut and Paste apply: a folder cannot go into itself, and a name already used in the destination refuses the whole move.
+
+### Order of a folder
+
+Every folder shows its entries sorted: folders first, then by name, with numbers in numeric order (`Fit2` before `Fit10`). New entries and renamed entries take their place in that order.
+
+When you drag entries between two rows, that folder switches to **manual order**: it keeps the order you made, and new entries arrive at the end. Right-click the folder and choose **Sort** to sort it again. For the top level, right-click the empty area below the last row. **Sort** is greyed out when the folder is already sorted. The manual orders are saved with the project. Copying or duplicating a folder in manual order gives a copy that keeps its manual order, and so do the manual folders inside it.
+
+A folder can be copied and duplicated with everything it holds. What is inside the copy reads the copy: a graph in the copied folder plots the copied workbook, not the original. What is outside the folder is still read from the original. The same holds for several windows copied together: if you select Book1 and Graph1 and copy them in one gesture, the copied Graph1 plots the copied Book1. **Paste** goes where a new workbook would: select only a folder to paste into it, select a window to paste into its folder, select nothing to paste at the top level. To paste into a folder, select only that folder and choose **Paste**: the folder opens to show what arrived. If the folder you copied is itself selected, **Paste** puts the copy next to it.
 
 **Delete** asks no confirmation. If graphs used the deleted data, the status bar says so. Undo brings everything back. Undo does not reopen the windows.
 

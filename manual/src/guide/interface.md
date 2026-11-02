@@ -132,7 +132,7 @@ The **Project Manager** shows the folders and windows of your project: workbooks
 - Double-click a folder, or click its triangle, to open or close it. <kbd>Right</kbd> opens the selected folder, <kbd>Left</kbd> closes it.
 - <kbd>Ctrl</kbd>+click adds or removes an entry from the selection. <kbd>Shift</kbd>+click selects a range.
 - <kbd>↑</kbd> and <kbd>↓</kbd> move the selection. <kbd>Shift</kbd>+<kbd>↑</kbd> and <kbd>Shift</kbd>+<kbd>↓</kbd> extend it. <kbd>←</kbd> goes to the folder that contains the entry.
-- Right-click an entry for **Open**, **Close**, **Cut**, **Copy**, **Paste**, **Rename**, **Duplicate** and **Delete**. These are also in **Edit ▸ Selection**. Cut then Paste moves entries into a folder.
+- Right-click an entry for **Open**, **Close**, **Cut**, **Copy**, **Paste**, **Rename**, **Duplicate** and **Delete**. These are also in **Edit ▸ Selection**. Cut then Paste, or dragging the entries, moves them into a folder.
 - <kbd>F2</kbd> renames the selected entry. <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates it.
 
 Clicking a window in the workspace also selects it in the Project Manager.

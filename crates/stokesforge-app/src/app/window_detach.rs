@@ -223,6 +223,8 @@ pub(super) struct ProjectManagerViewModel {
     /// Copy of the nodes of the last Cut ([`AppState::cut_objects`]), same
     /// resynchronization: their rows are dimmed (#423).
     pub(super) cut: HashSet<NodeId>,
+    /// Copy of the folders in manual order (#425), same resynchronization.
+    pub(super) manual: std::collections::BTreeSet<NodeId>,
 }
 
 /// What the detached OS window of the Project Manager writes, so that the
@@ -758,7 +760,8 @@ impl StokesForgeApp {
                 || model.selected != self.pm_selection
                 || model.open != open
                 || model.active_tab != active_tab
-                || model.cut != cut;
+                || model.cut != cut
+                || &model.manual != self.state.tree().manual_order_folders();
             model.snapshot_stamp = Some(stamp);
             model.tree = self.state.project_tree();
             model.root = Some(self.state.tree().root());
@@ -766,6 +769,7 @@ impl StokesForgeApp {
             model.open = open;
             model.active_tab = active_tab;
             model.cut = cut;
+            model.manual = self.state.tree().manual_order_folders().clone();
             changed
         };
         let view_model = Arc::clone(&self.pm_view_model);
@@ -807,6 +811,7 @@ impl StokesForgeApp {
                         open: &model.open,
                         close_requests: &mut closed,
                         cut: &model.cut,
+                        manual: &model.manual,
                     };
                     project_manager_contents_from_tree(ui, &model.tree, &mut interaction);
                 });

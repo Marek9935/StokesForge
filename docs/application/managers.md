@@ -20,8 +20,9 @@ windows); the triangle, the double-click (exactly one toggle), Enter and → / �
 expand and collapse it, and a paste into it expands it to show what arrived
 (`PmMemory::reveal`). There is no slow-click rename: F2 or the menu. Delete and F2 act
 on it (one history entry, `DeleteObjects` / `RenameObjects`). Paste
-with only this folder selected pastes **into** this folder (`paste_parent`),
-otherwise at the root. A deleted folder leaves the selection. **Copy and
+follows the same place rule as a new window (#425, `paste_parent` asks
+`creation_folder_by`): one folder selected, **into** it; one window, into its
+folder; nothing or several rows, the root. A deleted folder leaves the selection. **Copy and
 Duplicate work on a folder (#391)**: the whole subtree is copied in one history
 entry, **what is inside the copy reads the copy** (a graph plots the copied
 workbook, a formula the copied sheet, a calculation or a transposed sheet the
@@ -29,6 +30,20 @@ copied columns) and the rest keeps reading the original. The same rule covers ev
 copy beside the original; Ctrl+V with the copied folder itself selected also
 pastes beside it (`AppState::paste_objects`), with another folder selected
 inside that folder.
+**New windows go into the selected folder (#425).** Add Workbook and Add Graph
+(File menu, File bar, shortcut) create in the folder given by
+`stokesforge_app_state::creation_folder::creation_folder` over the Project
+Manager selection: one folder, inside it; one window, in its folder; nothing or
+several rows, the root. The shell hands the selected nodes to the state
+(`AppState::set_project_manager_selection`, in `dispatch_action`) and reveals the
+folder afterwards (`project_manager::reveal_folder`). Unchanged: import and
+*Plot* from columns, which keep their own destination. A new window takes its
+place in an automatic folder and goes to the end of a manual one. The empty
+area under the last row (always at least two rows tall) gives the root's menu
+(`root_entries`), and a click or right-click there clears the selection (the
+creation folder comes from the selection only; following the active tab
+re-selects a row only when the active tab changes).
+
 **Keyboard (#170, point 6, S-K9).** With the panel focused, Up and Down move the
 selection from one visible row to the next (`PmMemory::visible`, collected during
 painting; `order`, which keeps collapsed folders, is used only for Shift ranges),
@@ -63,6 +78,8 @@ that text does nothing, until a Copy or a Cut replaces it; a cut row is painted
 with its label and its icon faded (`list_row`'s `cut` flag), unlike a closed window,
 which fades its label only. Drag and drop
 to move: #425.
+
+**Drag and drop, and the order of a folder (#425).** `app/project_dnd.rs` holds the payload (`PmDrag`, a type of its own, distinct from the Object Manager's `RowDrag`), the target under the pointer (from the row rectangles painted this frame, `PmMemory::rects`) and the feedback (the folder highlight and the insertion line use the theme's drop colours, the cursor goes through `cursors`); the decisions are pure in `stokesforge-app-state/src/tree_drop.rs` (`drop_target`, `hover_opens_folder`, `final_order`, `plan_moves`). The row senses a drag (`list_row_focused`, the Project Manager only). The drop asks for `Action::MoveObjects { ids, parent, place }` with `MovePlace::{Inside, Before(anchor), AtEnd}`; the checks are those of the paste of a cut and live in one function, `AppState::check_move_into`. `Inside` appends and leaves the order mode alone. An insertion is one `MacroKind::MoveObjects` group: `Command::SetFolderOrder { manual: true }` when the folder was automatic, then the fewest `Command::Move`s (`plan_moves`, longest run kept in place) that make the model order the displayed order with the rows inserted; one Ctrl+Z gives back both. A drop that changes nothing sends nothing. **Order**: `Tree::displayed_children` (`manual_order` set, carried by the tree) sorts an automatic folder (folders first, then `natural_cmp`, ties by identifier) and shows a manual one in model order; `AppState::project_tree` uses it, so the keyboard order, the Shift range and the detached viewport (a copy of the tree plus the manual set) follow. New objects and Paste still append to the model end: they show last in a manual folder and in their sorted place in an automatic one. `Action::SortFolder` (right-click on a folder, or on the empty area for the root; greyed with its reason when already automatic) sends `SetFolderOrder { manual: false }` and does not touch the model order. Copy + Paste and Duplicate of a manual folder keep the manual order: `NodeCopy::manual_folders` (captured from the tree, carried by the clipboard text), then `insert_object_copies` sends `SetFolderOrder { manual: true }` for the new folders inside the paste macro; automatic folders stay automatic. The flag is not read by any formula (invariant 11). The empty area under the last row is also the root's right-click (Add Folder · Paste ─ Sort).
 
 F2, Ctrl+D, Ctrl+C, Ctrl+X, Ctrl+V and Delete apply to this selection when the
 Project Manager has focus, also in a detached window. Multiple renames
@@ -109,9 +126,7 @@ clipboard; paste reads that, without rereading the source objects. Workbooks,
 notes and matrices transfer between projects and between processes; graphs
 between projects carry their columns in a hidden workbook (#107).
 Paste in a folder's menu places the copies there. The grid refuses this object transport instead of
-turning it into cells. `Action::MoveObjects` prepares the move between
-future folders in a single undoable group; the Cut gesture remains to be wired when
-they are introduced.
+turning it into cells. `Action::MoveObjects` moves rows between folders in a single undoable group (Cut + Paste, and the drag below).
 
 
 

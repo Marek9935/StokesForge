@@ -915,6 +915,26 @@ impl Project {
         std::mem::replace(tree.saved_colors_mut(), colors.bounded())
     }
 
+    /// Puts `folder` in manual order (`true`: the Project Manager shows its
+    /// children in model order) or back in automatic order (sorted), and returns
+    /// the previous state (#425). `Err(Structure)` if `folder` is not a folder.
+    pub fn set_folder_manual_order(&mut self, folder: NodeId, manual: bool) -> CoreResult<bool> {
+        let node = self.tree.get(folder)?;
+        if !node.kind().is_folder() {
+            return Err(CoreError::Structure(format!(
+                "{folder} is not a folder but {}",
+                node.kind().with_article()
+            )));
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        let set = tree.manual_order_mut();
+        Ok(if manual {
+            !set.insert(folder)
+        } else {
+            set.remove(&folder)
+        })
+    }
+
     // -- data --
 
     /// Writes `block` into `column` starting at row `start`.

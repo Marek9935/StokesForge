@@ -124,13 +124,17 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | F2 | row (PM focused) | renames in place, like the menu's Rename (there is no slow click, #423) |
 | ↑, ↓ | row (OM, PM focused) | selects the previous or next visible row, without opening (S-K9); Shift+↑/↓: PM extends the selection from the anchor (the Shift-click range), OM no effect; Alt+↓ has no effect |
 | →, ← | row (PM focused) | → expands a closed folder, then goes to its first child; ← collapses an open folder, otherwise goes to the parent folder; nothing at the root level (#423) |
+| Click | empty strip under the last row | clears the selection: the next new window or Paste goes to the root (#425) |
 | Ctrl + C, Ctrl + X, Ctrl + V, Delete, F2, Ctrl + D, Enter, arrows | PM focused | the panel owns these keys while it has the focus (a click inside it, cleared by a click anywhere else or by its window losing the system focus): the graph or workbook in front does not copy its figure, delete its object, paste or move its cells (`project_manager::owns_keyboard`, #423) |
 | Ctrl + X | row (PM focused) | cuts the selection: rows dimmed; Paste of that copy moves them (one history entry), into the selected folder, which expands |
 | Enter | row (OM, PM focused) | PM: opens the window, expands or collapses the folder; OM: opens the settings of the selected series or object (like the double-click) |
 | Double-click | row (OM) | opens the settings of the object |
 | Double-click | row (PM) | window: activates or restores it, never closes it; folder: toggles it once (without a modifier) |
 | Drag | row (OM) | reorders; on a graph, moves the object |
-| Drag | row (PM) | — (PM rows cannot be dragged: click only) |
+| Drag | row (PM) | moves the row, or the whole selection when the row is selected (an unselected row goes alone and becomes the selection), always a move, never a copy (#425). Folder row: top quarter inserts before it, middle drops inside it (folder highlighted), bottom quarter inserts after it (before its first child when it is open with children); window row: upper half before, lower half after. Inserting between rows puts the folder in manual order. A closed folder hovered for 1 s opens. Escape cancels; one release is one history entry; a folder into itself or a taken name is refused like Paste |
+| Drag, release below the last row | PM | drops inside the root (#425), order unchanged |
+| Right-click | empty strip under the last row (always at least two rows tall) | root menu: Add Folder · Paste ─ Sort (#425) (the selection is cleared first) |
+| File ▸ New ▸ Add Workbook / Add Graph, File bar | PM selection | creates in the selected folder, or in the folder of the selected window; the root for none or several rows; that folder expands (#425) |
 | Right-click | row | if outside the selection, replaces it; menu of the object (a single menu, `menus.md`) |
 | Right-click › Add Folder | folder (PM) | creates a folder "FolderN" in this folder, expands it and puts the name of the new folder in in-place editing (creation and name = two history entries) |
 | Right-click | OM background | panel settings |

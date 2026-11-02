@@ -85,10 +85,11 @@ fn rank(command: &Command) -> usize {
         Command::TransposeRows { .. } => 31,
         Command::RecalculateTranspose { .. } => 32,
         Command::InsertCopies { .. } => 33,
+        Command::SetFolderOrder { .. } => 34,
     }
 }
 
-const VARIANTS: usize = 34;
+const VARIANTS: usize = 35;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -322,6 +323,15 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 colors: SavedColors::default(),
             },
             HistoryLabel::SetSavedColors,
+        ),
+        (
+            Command::SetFolderOrder {
+                folder: root,
+                manual: false,
+            },
+            HistoryLabel::SortFolder {
+                name: named("Demo"),
+            },
         ),
         (
             Command::TransposeRows {

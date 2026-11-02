@@ -1,6 +1,7 @@
 //! #105: Project Manager decisions without a display server.
 
-use stokesforge_app_state::state::{Action, AppState, UnsavedChoice};
+use stokesforge_app_state::state::{Action, AppState, ProjectTreeNode, UnsavedChoice};
+use stokesforge_app_state::tree_drop::MovePlace;
 use stokesforge_commands::{HistoryLabel, MacroKind};
 use stokesforge_core::{Column, NodeId, NodeKind, Project};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -311,6 +312,7 @@ fn paste_into_another_folder_and_grouped_move() {
     state.dispatch(Action::MoveObjects {
         ids: vec![book, note],
         parent: b,
+        place: MovePlace::Inside,
     });
     assert_eq!(state.tree().node(book).unwrap().parent(), Some(b));
     state.dispatch(Action::Undo);
@@ -898,6 +900,411 @@ fn pasting_a_cut_into_another_project_copies() {
         Some(f.folder),
         "the source stays where it was"
     );
+}
+
+// -- drag and drop, folders sorted by default (#425) --
+
+/// Root: Graph10, B/, Book2, Graph2, A/ in model order, so the sorted display is
+/// A, B, Book2, Graph2, Graph10. `hidden` is a hidden workbook, `a` and `b` the folders.
+struct OrderFixture {
+    _session: Session,
+    state: AppState,
+    root: NodeId,
+    a: NodeId,
+    b: NodeId,
+    book2: NodeId,
+    graph2: NodeId,
+    graph10: NodeId,
+    hidden: NodeId,
+}
+
+fn order_fixture() -> OrderFixture {
+    let mut project = Project::new("Order").unwrap();
+    let root = project.root();
+    let graph10 = project.add_workbook(root, Some("Graph10")).unwrap();
+    let b = project.add_folder(root, "B").unwrap();
+    let book2 = project.add_workbook(root, Some("Book2")).unwrap();
+    let graph2 = project.add_workbook(root, Some("Graph2")).unwrap();
+    let a = project.add_folder(root, "A").unwrap();
+    let hidden = project.add_workbook(root, Some("Hidden")).unwrap();
+    let mut meta = match project.tree().node(hidden).unwrap().kind() {
+        NodeKind::Workbook { meta, .. } => meta.clone(),
+        _ => unreachable!(),
+    };
+    meta.hidden = true;
+    project.set_window_meta(hidden, meta).unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    OrderFixture {
+        _session: session,
+        state,
+        root,
+        a,
+        b,
+        book2,
+        graph2,
+        graph10,
+        hidden,
+    }
+}
+
+fn shown_names(state: &AppState) -> Vec<String> {
+    state
+        .project_tree()
+        .iter()
+        .map(|n| match n {
+            ProjectTreeNode::Folder { name, .. } | ProjectTreeNode::Window { name, .. } => {
+                name.clone()
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn folders_open_sorted_folders_first_in_natural_order_and_hidden_stays_hidden() {
+    let f = order_fixture();
+    assert_eq!(
+        shown_names(&f.state),
+        vec!["A", "B", "Book2", "Graph2", "Graph10"]
+    );
+    assert!(f.state.tree().node(f.hidden).is_some());
+}
+
+#[test]
+fn a_drop_inside_a_folder_appends_keeps_it_automatic_and_is_one_entry() {
+    let mut f = order_fixture();
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.graph10, f.book2],
+        parent: f.a,
+        place: MovePlace::Inside,
+    });
+    assert_eq!(
+        names_in(&f.state, f.a),
+        vec!["Book2", "Graph10"],
+        "displayed order"
+    );
+    assert!(!f.state.tree().is_manual_order(f.a));
+    assert!(!f.state.tree().is_manual_order(f.root));
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before, "one Ctrl+Z");
+}
+
+#[test]
+fn an_insertion_puts_the_folder_in_manual_order_with_the_shown_order_plus_the_row() {
+    let mut f = order_fixture();
+    let before = f.state.tree().clone();
+    // Graph10 dropped between Book2 and Graph2 in the sorted root.
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.graph10],
+        parent: f.root,
+        place: MovePlace::Before(f.graph2),
+    });
+    assert!(f.state.tree().is_manual_order(f.root));
+    assert_eq!(
+        shown_names(&f.state),
+        vec!["A", "B", "Book2", "Graph10", "Graph2"]
+    );
+    // The model order is the shown order (the hidden workbook keeps its place at the end).
+    let model: Vec<NodeId> = f.state.tree().children(f.root).unwrap().to_vec();
+    assert_eq!(
+        model,
+        vec![f.a, f.b, f.book2, f.graph10, f.graph2, f.hidden]
+    );
+    assert_eq!(
+        f.state.snapshot().history.undo_label,
+        Some(HistoryLabel::Macro(MacroKind::MoveObjects))
+    );
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before, "flag and order come back together");
+    assert!(!f.state.tree().is_manual_order(f.root));
+}
+
+#[test]
+fn a_drop_that_changes_nothing_leaves_the_folder_automatic_and_the_history_alone() {
+    let mut f = order_fixture();
+    // Book2 right before Graph2 is where it already is.
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.book2],
+        parent: f.root,
+        place: MovePlace::Before(f.graph2),
+    });
+    assert!(!f.state.tree().is_manual_order(f.root));
+    assert_eq!(f.state.snapshot().history.undo_label, None);
+}
+
+#[test]
+fn an_insertion_across_folders_moves_the_row_and_reorders() {
+    let mut f = order_fixture();
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.graph10],
+        parent: f.a,
+        place: MovePlace::AtEnd,
+    });
+    assert_eq!(f.state.tree().node(f.graph10).unwrap().parent(), Some(f.a));
+    assert!(f.state.tree().is_manual_order(f.a));
+    assert!(!f.state.tree().is_manual_order(f.root));
+}
+
+#[test]
+fn a_drop_follows_the_refusals_of_cut_and_paste() {
+    let mut f = order_fixture();
+    f.state.dispatch(Action::AddFolder { parent: f.a });
+    let sub = *f
+        .state
+        .tree()
+        .children(f.a)
+        .unwrap()
+        .iter()
+        .find(|id| f.state.tree().node(**id).unwrap().kind().is_folder())
+        .expect("subfolder");
+    let before = f.state.tree().clone();
+    // A folder into its own descendant: refused with a sentence.
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.a],
+        parent: sub,
+        place: MovePlace::Inside,
+    });
+    assert_eq!(f.state.tree(), &before);
+    let status = f.state.status().expect("a message").clone();
+    assert!(status.is_error(), "{}", status.text);
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("error-move-into-itself"),
+        "the sentence of Paste"
+    );
+    // Insertion into it: the same refusal.
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.a],
+        parent: sub,
+        place: MovePlace::AtEnd,
+    });
+    assert_eq!(f.state.tree(), &before);
+    // Onto itself: silent.
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.a],
+        parent: f.a,
+        place: MovePlace::Inside,
+    });
+    assert_eq!(f.state.tree(), &before);
+    // A name taken in the destination: refused whole, with the name.
+    let mut other = order_fixture();
+    other.state.dispatch(Action::CopyObjects(vec![other.book2]));
+    let text = other.state.take_object_clipboard_text().unwrap();
+    other.state.dispatch(Action::PasteObjects {
+        parent: other.a,
+        text,
+    });
+    let pasted = other.state.take_copied_objects()[0].1;
+    other
+        .state
+        .dispatch(Action::RenameObjects(vec![(pasted, "Book2".into())]));
+    let before = other.state.tree().clone();
+    other.state.dispatch(Action::MoveObjects {
+        ids: vec![other.graph10, other.book2],
+        parent: other.a,
+        place: MovePlace::Inside,
+    });
+    assert_eq!(other.state.tree(), &before, "Graph10 did not move either");
+    let status = other.state.status().expect("a message");
+    assert!(status.is_error());
+    assert!(status.text.contains("Book2"), "{}", status.text);
+}
+
+#[test]
+fn sort_puts_a_manual_folder_back_in_automatic_order_without_touching_the_model() {
+    let mut f = order_fixture();
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.graph10],
+        parent: f.root,
+        place: MovePlace::Before(f.a),
+    });
+    assert_eq!(shown_names(&f.state)[0], "Graph10");
+    let model = f.state.tree().children(f.root).unwrap().to_vec();
+    f.state.dispatch(Action::SortFolder(f.root));
+    assert!(!f.state.tree().is_manual_order(f.root));
+    assert_eq!(
+        shown_names(&f.state),
+        vec!["A", "B", "Book2", "Graph2", "Graph10"]
+    );
+    assert_eq!(f.state.tree().children(f.root).unwrap(), &model[..]);
+    assert_eq!(
+        f.state.snapshot().history.undo_label,
+        Some(HistoryLabel::SortFolder {
+            name: Some("Order".into())
+        })
+    );
+    f.state.dispatch(Action::Undo);
+    assert!(f.state.tree().is_manual_order(f.root));
+    // Sorting an automatic folder does nothing.
+    f.state.dispatch(Action::SortFolder(f.root));
+    f.state.dispatch(Action::SortFolder(f.root));
+    assert!(!f.state.tree().is_manual_order(f.root));
+}
+
+#[test]
+fn new_objects_arrive_last_in_a_manual_folder_and_in_place_in_an_automatic_one() {
+    let mut f = order_fixture();
+    f.state.dispatch(Action::AddWorkbook);
+    let new = *f.state.tree().children(f.root).unwrap().last().unwrap();
+    // Automatic: the new workbook shows at its sorted place, not last.
+    let shown = shown_names(&f.state);
+    let name = f.state.tree().node(new).unwrap().name().to_string();
+    assert!(
+        shown.iter().position(|n| *n == name) < Some(shown.len() - 1),
+        "{shown:?}"
+    );
+    // A rename moves it to its place.
+    f.state
+        .dispatch(Action::RenameObjects(vec![(new, "Zzz".into())]));
+    assert_eq!(shown_names(&f.state).last().unwrap(), "Zzz");
+    f.state
+        .dispatch(Action::RenameObjects(vec![(new, "Aaa".into())]));
+    assert_eq!(shown_names(&f.state)[2], "Aaa");
+    // Manual: a new workbook is shown last.
+    f.state.dispatch(Action::MoveObjects {
+        ids: vec![f.graph10],
+        parent: f.root,
+        place: MovePlace::Before(f.a),
+    });
+    f.state.dispatch(Action::AddWorkbook);
+    let last = *f.state.tree().children(f.root).unwrap().last().unwrap();
+    let last_name = f.state.tree().node(last).unwrap().name().to_string();
+    assert_eq!(shown_names(&f.state).last().unwrap(), &last_name);
+}
+
+// -- copies keep the manual order (#425) --
+
+/// Root: `Manual` (manual; Zed, Alpha, then the manual `Inner` holding Y, X),
+/// `Plain` (automatic, with Zed and Alpha created in that order), `Target`.
+struct CopyOrderFixture {
+    _session: Session,
+    state: AppState,
+    manual: NodeId,
+    plain: NodeId,
+    target: NodeId,
+}
+
+fn copy_order_fixture() -> CopyOrderFixture {
+    let mut project = Project::new("Copies").unwrap();
+    let root = project.root();
+    let manual = project.add_folder(root, "Manual").unwrap();
+    project.add_note(manual, Some("Zed"), "").unwrap();
+    project.add_note(manual, Some("Alpha"), "").unwrap();
+    let inner = project.add_folder(manual, "Inner").unwrap();
+    project.add_note(inner, Some("Y"), "").unwrap();
+    project.add_note(inner, Some("X"), "").unwrap();
+    let plain = project.add_folder(root, "Plain").unwrap();
+    project.add_note(plain, Some("Zed"), "").unwrap();
+    project.add_note(plain, Some("Alpha"), "").unwrap();
+    let target = project.add_folder(root, "Target").unwrap();
+    project.set_folder_manual_order(manual, true).unwrap();
+    project.set_folder_manual_order(inner, true).unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    CopyOrderFixture {
+        _session: session,
+        state,
+        manual,
+        plain,
+        target,
+    }
+}
+
+fn shown_in(state: &AppState, folder: NodeId) -> Vec<String> {
+    state
+        .tree()
+        .displayed_children(folder)
+        .unwrap()
+        .iter()
+        .map(|id| state.tree().node(*id).unwrap().name().to_string())
+        .collect()
+}
+
+#[test]
+fn a_pasted_manual_folder_stays_manual_with_its_order_and_one_undo_removes_it() {
+    let mut f = copy_order_fixture();
+    let before = f.state.tree().clone();
+    f.state
+        .dispatch(Action::CopyObjects(vec![f.manual, f.plain]));
+    let text = f.state.take_object_clipboard_text().unwrap();
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.target,
+        text,
+    });
+    let starting = |prefix: &str| {
+        *f.state
+            .tree()
+            .children(f.target)
+            .unwrap()
+            .iter()
+            .find(|id| {
+                f.state
+                    .tree()
+                    .node(**id)
+                    .unwrap()
+                    .name()
+                    .starts_with(prefix)
+            })
+            .expect("the pasted copy")
+    };
+    let manual_copy = starting("Manual");
+    let plain_copy = starting("Plain");
+    let inner_copy = child_by_name(&f.state, manual_copy, "Inner");
+    assert!(f.state.tree().is_manual_order(manual_copy));
+    assert!(f.state.tree().is_manual_order(inner_copy), "nested kept");
+    assert!(
+        !f.state.tree().is_manual_order(plain_copy),
+        "auto stays auto"
+    );
+    assert_eq!(
+        shown_in(&f.state, manual_copy),
+        vec!["Zed", "Alpha", "Inner"]
+    );
+    assert_eq!(shown_in(&f.state, inner_copy), vec!["Y", "X"]);
+    assert_eq!(shown_in(&f.state, plain_copy), vec!["Alpha", "Zed"]);
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before, "one Ctrl+Z removes everything");
+}
+
+#[test]
+fn a_duplicated_manual_folder_stays_manual() {
+    let mut f = copy_order_fixture();
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::DuplicateObjects(vec![f.manual]));
+    let copy = f
+        .state
+        .tree()
+        .children(f.state.tree().root())
+        .unwrap()
+        .iter()
+        .copied()
+        .find(|id| {
+            *id != f.manual
+                && f.state
+                    .tree()
+                    .node(*id)
+                    .unwrap()
+                    .name()
+                    .starts_with("Manual")
+        })
+        .expect("the duplicate");
+    assert!(f.state.tree().is_manual_order(copy));
+    assert_eq!(shown_in(&f.state, copy), vec!["Zed", "Alpha", "Inner"]);
+    let inner = child_by_name(&f.state, copy, "Inner");
+    assert!(f.state.tree().is_manual_order(inner));
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before);
 }
 
 /// #423: a copy keeps its name when the destination does not hold it; a

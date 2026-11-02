@@ -132,7 +132,11 @@ The whole row responds to the mouse, except the visibility box.
 | Right-click, **Add Folder** | A folder | Creates a folder in it and puts its name in editing. |
 | Wheel | The list | Scrolls. |
 
-Rows of the Project Manager cannot be dragged: to move an entry, cut it and paste it into a folder.
+| Drag | A row | Moves the row, or the whole selection if the row is selected. An unselected row moves alone and becomes the selection. A drag always moves, it never copies. Over a folder, the middle of its row drops inside it (the folder is highlighted), its top and bottom quarters insert before and after it. Over a window, the upper half inserts before and the lower half after. A line shows where the rows will land. Release below the last row to move them to the top level. |
+| Hold a drag | A closed folder | Opens it after one second. |
+| <kbd>Esc</kbd> | During a drag | Cancels the drag. |
+
+A drop that inserts between two rows puts that folder in manual order: see [Order of a folder](../guide/projects-and-workbooks.md#order-of-a-folder).
 
 ## Object Manager
 
