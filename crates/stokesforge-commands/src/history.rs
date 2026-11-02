@@ -1701,7 +1701,8 @@ fn structural(before: &Arc<Tree>, project: &Project, label: HistoryLabel) -> Ent
 ///   to be recognized by name: the structural comparison of the two trees
 ///   (`Tree` derives `PartialEq`) catches both in the same way.
 /// - `Data`: only `InsertRows`/`DeleteRows` can target zero columns
-///   (see `Project::row_targets`) — `Cells` and `ColumnType` always
+///   (see `Project::row_targets`), and they are a no-op only if they also
+///   moved no "row" series (`plots` empty, #436) — `Cells` and `ColumnType` always
 ///   write something once `apply` has accepted them.
 /// - `Macro`: a macro closed with at least one entry has, by
 ///   construction, applied at least one real delta (`end_macro` already filters
@@ -1710,8 +1711,8 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
     match entry {
         Entry::Structural { before, after, .. } => before == after,
         Entry::Data { delta, .. } => match delta.as_ref() {
-            DataDelta::InsertRows { columns, .. } => columns.is_empty(),
-            DataDelta::DeleteRows { removed, .. } => removed.is_empty(),
+            DataDelta::InsertRows { columns, plots, .. } => columns.is_empty() && plots.is_empty(),
+            DataDelta::DeleteRows { removed, plots, .. } => removed.is_empty() && plots.is_empty(),
             DataDelta::DeleteCells { removed, .. } => removed.is_empty(),
             // Like `Cells`/`ColumnType`: once `apply` has accepted them,
             // these four commands have always replaced something (a
