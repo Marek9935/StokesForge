@@ -234,6 +234,8 @@ assert pyst.info(cols['Far'])['column']['formula'] == 'max(Sheet3!A) + A'
 
 /// Differential check of the numeric functions against Python's own `math`
 /// and `statistics`, on seeded random data. The bound is on ULP distance.
+/// What is known not to hold yet is in
+/// `erf_erfc_and_the_aggregates_meet_their_target_tolerance` (#429).
 #[test]
 fn numeric_functions_agree_with_python_math_within_a_few_ulps() {
     let bench = bench();
@@ -255,41 +257,44 @@ def ulps(a, b):
         return 0
     return abs(ordered(a) - ordered(b))
 
+def add_column(name, data):
+    col = pyst.create_column(S1, name)
+    pyst.set_values(col, data)
+    return col
+
+def letter(name):
+    names = [pyst.info(c)['name'] for c in pyst.children(S1)]
+    return chr(ord('A') + names.index(name))
+
 random.seed(412)
 data = [random.uniform(-3.0, 3.0) for _ in range(500)]
 data += [1e-300, -1e-300, 0.0, 1e10, 123456.789]
-col = pyst.create_column(S1, 'Rand')
-pyst.set_values(col, data)
-rand_letter = [pyst.info(c)['name'] for c in pyst.children(S1)].index('Rand')
-letter = chr(ord('A') + rand_letter)
+add_column('Rand', data)
+x = letter('Rand')
 
 rowwise = {
-    'exp(%s)': lambda x: math.exp(x) if x < 700 else math.inf,
+    'exp(%s)': lambda v: math.exp(v) if v < 700 else math.inf,
     'sin(%s)': math.sin,
     'cos(%s)': math.cos,
     'tan(%s)': math.tan,
     'atan(%s)': math.atan,
-    'sinh(%s)': lambda x: math.sinh(x) if abs(x) < 700 else math.copysign(math.inf, x),
-    'cosh(%s)': lambda x: math.cosh(x) if abs(x) < 700 else math.inf,
+    'sinh(%s)': lambda v: math.sinh(v) if abs(v) < 700 else math.copysign(math.inf, v),
+    'cosh(%s)': lambda v: math.cosh(v) if abs(v) < 700 else math.inf,
     'tanh(%s)': math.tanh,
     'abs(%s)': abs,
-    '%s ^ 2': lambda x: x * x,
+    '%s ^ 2': lambda v: v * v,
 }
-worst = {}
-worst_x = {}
-# erf: documented absolute error < 1e-12 (functions.rs); erfc: relative.
+# erf and erfc: documented absolute error < 1e-12 (functions.rs). Their
+# relative error is the subject of the ignored test (#429).
 for text, fn in (('erf(%s)', math.erf), ('erfc(%s)', math.erfc)):
-    f = formula_column(text % letter)
-    got = pyst.values(f)
-    errs = [(abs(g - fn(x)), x) for g, x in zip(got, data)]
-    assert max(errs)[0] < 1e-12, (text, max(errs))
-    rel = [(abs(g - fn(x)) / abs(fn(x)), x) for g, x in zip(got, data) if fn(x) != 0.0]
-    worst_x[text] = max(rel)
-print('erf relative worst (value, x):', worst_x)
+    got = pyst.values(formula_column(text % x))
+    worst = max(abs(g - fn(v)) for g, v in zip(got, data))
+    assert worst < 1e-12, (text, worst)
+worst = {}
 for text, fn in rowwise.items():
-    f = formula_column(text % letter)
-    got = pyst.values(f)
-    worst[text] = max(ulps(g, fn(x)) for g, x in zip(got, data))
+    got = pyst.values(formula_column(text % x))
+    worst[text] = max(ulps(g, fn(v)) for g, v in zip(got, data))
+# Aggregates: naive summation may differ from fsum by a few hundred ulps.
 agg = {
     'sum(%s)': math.fsum(data),
     'mean(%s)': math.fsum(data) / len(data),
@@ -298,17 +303,143 @@ agg = {
     'min(%s)': min(data),
 }
 for text, expected in agg.items():
-    f = formula_column(text % letter)
-    got = pyst.values(f)
-    worst[text] = max(ulps(g, expected) for g in got)
+    got = pyst.values(formula_column(text % x))
     assert len(got) >= 1
-report = sorted(worst.items(), key=lambda kv: -kv[1])
-print('ULP', report)
-# Tolerances: libm functions within 2 ulps of the C library; aggregates
-# within a handful (naive summation is allowed to differ from fsum).
+    worst[text] = max(ulps(g, expected) for g in got)
 loose = {'sum(%s)': 2000, 'mean(%s)': 2000, 'std(%s)': 2000}
 for text, distance in worst.items():
-    assert distance <= loose.get(text, 2), (text, distance, report)
+    assert distance <= loose.get(text, 2), (text, distance, sorted(worst.items(), key=lambda kv: -kv[1]))
+"#,
+    );
+}
+
+/// Row-wise functions not covered above, against Python's `math`, with one
+/// tolerance per function. Tolerances hold on any libm (Windows included): 4
+/// ulps for the transcendental ones, exact for what IEEE makes exact.
+/// Left out on purpose: `round` ties (#428), `at` on a grid point (#427),
+/// `logx` of powers and `erf` (#429).
+#[test]
+fn more_row_wise_functions_agree_with_python_math() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+import math, random, statistics, struct
+
+def ordered(x):
+    bits = struct.unpack('<q', struct.pack('<d', x))[0]
+    return -(bits & 0x7fffffffffffffff) if bits < 0 else bits
+
+def ulps(a, b):
+    if math.isnan(a) and math.isnan(b):
+        return 0
+    if math.isnan(a) or math.isnan(b):
+        return 10**9
+    if a == b:
+        return 0
+    return abs(ordered(a) - ordered(b))
+
+def add_column(name, data):
+    col = pyst.create_column(S1, name)
+    pyst.set_values(col, data)
+    return col
+
+def letter(name):
+    names = [pyst.info(c)['name'] for c in pyst.children(S1)]
+    return chr(ord('A') + names.index(name))
+
+random.seed(7)
+pos = [random.uniform(1e-3, 50.0) for _ in range(300)] + [0.5, 2.0, 1e-300, 1e10]
+unit = [random.uniform(-0.999, 0.999) for _ in range(300)] + [0.0, 0.5, -0.5]
+anyx = [random.uniform(-50.0, 50.0) for _ in range(300)] + [0.0, -0.0, 2.5, -2.5, 1e10, -1e10]
+other = [random.uniform(0.5, 4.0) for _ in range(len(anyx))]
+signed = [random.choice([-1.0, 1.0]) * random.uniform(0.5, 4.0) for _ in range(len(anyx))]
+add_column('Pos', pos)
+add_column('Unit', unit)
+add_column('Any', anyx)
+add_column('Other', other)
+add_column('Signed', signed)
+
+# (formula, expected values, tolerance in ulps)
+cases = [
+    ('sqrt(%s)' % letter('Pos'), [math.sqrt(v) for v in pos], 0),
+    ('ln(%s)' % letter('Pos'), [math.log(v) for v in pos], 4),
+    ('log10(%s)' % letter('Pos'), [math.log10(v) for v in pos], 4),
+    ('log2(%s)' % letter('Pos'), [math.log2(v) for v in pos], 4),
+    ('asin(%s)' % letter('Unit'), [math.asin(v) for v in unit], 4),
+    ('acos(%s)' % letter('Unit'), [math.acos(v) for v in unit], 4),
+    ('atan2(%s, %s)' % (letter('Any'), letter('Signed')),
+     [math.atan2(y, x) for y, x in zip(anyx, signed)], 4),
+    ('pow(%s, %s)' % (letter('Other'), letter('Signed')),
+     [math.pow(a, b) for a, b in zip(other, signed)], 4),
+    ('floor(%s)' % letter('Any'), [float(math.floor(v)) for v in anyx], 0),
+    ('ceil(%s)' % letter('Any'), [float(math.ceil(v)) for v in anyx], 0),
+    ('sign(%s)' % letter('Any'), [float((v > 0) - (v < 0)) for v in anyx], 0),
+    ('mod(%s, %s)' % (letter('Any'), letter('Signed')),
+     [a % b for a, b in zip(anyx, signed)], 0),
+]
+failures = []
+for text, expected, tolerance in cases:
+    got = pyst.values(formula_column(text))
+    assert len(got) == len(expected), (text, len(got), len(expected))
+    worst = max(ulps(g, e) for g, e in zip(got, expected))
+    if worst > tolerance:
+        failures.append((text, worst, tolerance))
+assert not failures, failures
+"#,
+    );
+}
+
+/// What the differential check cannot yet assert: the relative error of `erf`
+/// and `erfc` in the tail, and `sum`, `mean`, `std` at the tolerance a compensated
+/// summation would give (2 ulps from `math.fsum`).
+#[test]
+#[ignore = "bug: #429: erf/erfc lose their relative precision away from 0, and sum/mean/std are only held to a loose 2000 ulps bound"]
+fn erf_erfc_and_the_aggregates_meet_their_target_tolerance() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+import math, random, statistics, struct
+
+def ordered(x):
+    bits = struct.unpack('<q', struct.pack('<d', x))[0]
+    return -(bits & 0x7fffffffffffffff) if bits < 0 else bits
+
+def ulps(a, b):
+    if math.isnan(a) and math.isnan(b):
+        return 0
+    if math.isnan(a) or math.isnan(b):
+        return 10**9
+    if a == b:
+        return 0
+    return abs(ordered(a) - ordered(b))
+
+def add_column(name, data):
+    col = pyst.create_column(S1, name)
+    pyst.set_values(col, data)
+    return col
+
+def letter(name):
+    names = [pyst.info(c)['name'] for c in pyst.children(S1)]
+    return chr(ord('A') + names.index(name))
+
+random.seed(412)
+data = [random.uniform(-3.0, 3.0) for _ in range(500)]
+data += [1e-300, -1e-300, 0.0, 1e10, 123456.789]
+add_column('Rand', data)
+x = letter('Rand')
+for text, fn in (('erf(%s)', math.erf), ('erfc(%s)', math.erfc)):
+    got = pyst.values(formula_column(text % x))
+    assert max(ulps(g, fn(v)) for g, v in zip(got, data)) <= 4, text
+agg = {
+    'sum(%s)': math.fsum(data),
+    'mean(%s)': math.fsum(data) / len(data),
+    'std(%s)': statistics.stdev(data),
+}
+for text, expected in agg.items():
+    got = pyst.values(formula_column(text % x))
+    assert max(ulps(g, expected) for g in got) <= 2, text
 "#,
     );
 }
