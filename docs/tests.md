@@ -541,7 +541,9 @@ Linux runner is registered; Windows is not affected by this choice.
 | `upload-linux-packages` (GitHub) | on a tag, after `test-linux-packages` | uploads the RPM and DEB (`scripts/release-upload.sh rpm\|deb`) only when `PUBLISH_LINUX_PACKAGES=1` in `scripts/linux-packages.env` (gated on the steps, not on the job, so that `publier` does not skip); `release-publish.sh` links them under the same switch |
 | `release-manual` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` | same tag guards as `release-linux`; builds the manual with the version in its title and uploads `StokesForge-X.Y.Z-manual.tar.gz` to the GitLab package registry (`scripts/release-upload.sh manual`, #362) |
 | `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333) | same checks on a clean machine; on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
-| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md) |
+| `test-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking; GitHub only, not in `.gitlab-ci.yml` nor in `JOBS` of `scripts/gitlab-status.py` (#412) | `cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands`: the formula engine on Windows (float formatting, paths, stack depth); the first errors go in a `::error` annotation |
+| Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta. Read with `gh run list --workflow toolchain-weekly.yml` |
+| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md); the notes end with a line "Built with rustc … (Linux) and rustc … (Windows)" (outputs `rustc` of `release-linux` and `dist-windows`, `scripts/rustc-note.sh`), and `release-publish.sh` refuses to publish if one is missing (#412) |
 | `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, the token's role is not allowed to run pipelines on the protected tags `v*`: raise it to Maintainer |
 
 The Linux jobs run on the pushed branches `main`, `feature/**`,
@@ -650,6 +652,10 @@ development machine in three ways that have already caused failures:
 - **A newer stable Rust** than the machine's (`rust-toolchain.toml` asks for
   `stable`): a new Clippy lint can make `clippy` fail without anything
   having changed. Fix the code, do not pin the version.
+  The weekly workflow `toolchain-weekly.yml` (#412) runs beta ahead of time
+  (workspace tests, clippy) and the depth-cap tests in release mode on stable
+  and beta, so a new compiler is caught before it becomes the stable that
+  `ci.yml` uses.
 - **No GPU**: the captures (`egui_kittest` + wgpu) look for a Vulkan
   adapter. `ci.yml` installs the software driver `mesa-vulkan-drivers libvulkan1`
   (jobs `test` and `test-python`).
