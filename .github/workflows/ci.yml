@@ -389,7 +389,7 @@ jobs:
   # `test-python-windows`, it is skipped on `feature/**` pushes, and a job
   # absent from the attempt would be posted as failed.
   test-windows:
-    if: github.event_name == 'push' && (!startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/heads/feature/412-'))
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest
     defaults:
       run:
