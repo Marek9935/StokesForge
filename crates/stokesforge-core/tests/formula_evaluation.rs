@@ -1232,13 +1232,11 @@ fn assert_table(names: &[&str]) {
 }
 
 #[test]
-#[ignore = "bug: #429: erf has 5-235 ulps error on [2, 3) (Maclaurin series cancellation), functions.rs:338-364"]
 fn erf_matches_reference_values() {
     assert_table(&["erf"]);
 }
 
 #[test]
-#[ignore = "bug: #429: erfc = 1 - erf below 2.5 loses digits (up to 615 ulps), 0 above 27 where it is still subnormal; functions.rs:313-333"]
 fn erfc_matches_reference_values() {
     assert_table(&["erfc"]);
 }
@@ -1337,7 +1335,6 @@ fn signed_zero_results_of_functions() {
 }
 
 #[test]
-#[ignore = "bug: #429: erf(-0) is +0 (the sign is applied only when x < 0), functions.rs:367"]
 fn erf_of_minus_zero_is_minus_zero() {
     let (v, _) = run("erf(A)", &[float_column(&[-0.0])], 1);
     assert_eq!(v[0].to_bits(), (-0.0f64).to_bits());
