@@ -342,7 +342,6 @@ fn nist_std_stays_within_12_digits_of_the_exact_statistic_of_the_stored_doubles(
 /// digits), the range path merges rounded means with Chan's formula (Mavro
 /// 12.6, Michelso 13.3 digits: an error of about 1e-16 * mean / std).
 #[test]
-#[ignore = "bug: #429: std loses up to 4 digits: naive mean in the whole path (NumAcc4 12.3), Chan merge of rounded means in the range path (Mavro 12.6), column_values.rs:76-86,111-117"]
 fn nist_std_keeps_15_digits_of_the_exact_statistic_of_the_stored_doubles() {
     for r in nist_results() {
         assert!(
@@ -369,7 +368,6 @@ fn nist_whole_column_and_range_paths_agree_closely() {
 /// `mean(B)` and `sum(B)` add left to right (`Agg::of_slice`): 14 digits on
 /// NumAcc2/NumAcc4 where the range path (pairwise in the tree) gives 16.
 #[test]
-#[ignore = "bug: #429: whole-column mean/sum use a naive running sum, 14 digits on NumAcc2 and NumAcc4 where the range path gives 16, column_values.rs:76"]
 fn nist_whole_column_mean_and_sum_have_15_digits() {
     for r in nist_results() {
         assert!(
@@ -383,9 +381,17 @@ fn nist_whole_column_mean_and_sum_have_15_digits() {
 
 /// A constant column: mean is the constant and std is 0.
 #[test]
-#[ignore = "bug: #429: naive running sum, mean of 1000 x 0.1 is not 0.1 and std of a constant column is not 0, column_values.rs:76"]
 fn constant_column_has_its_value_as_mean_and_zero_std() {
-    for (value, n) in [(0.1, 10usize), (0.1, 1000), (0.7, 1000), (1.1, 100_000)] {
+    for (value, n) in [
+        (0.1, 10usize),
+        (0.1, 1000),
+        (0.7, 1000),
+        (1.1, 100_000),
+        // sum / n alone is 0.10000000000000002 and 0.1 + 5.55e-17: only the
+        // second pass of the mean gives back the constant.
+        (0.1, 3),
+        (0.1, 41),
+    ] {
         let y = vec![value; n];
         let mean = scalar("mean(B)", &[&y, &y], &[]).unwrap();
         assert_eq!(mean, value, "mean of {n} x {value}");

@@ -17,6 +17,17 @@
 //! cell, `sum` and `integral` included, never 0); the bounds of a range come in
 //! any order and are inclusive.
 //!
+//! Sums are **compensated** (Neumaier), never a plain running sum (#429): the
+//! sum of ten 0.1 is 1, the mean of a constant column is that constant and its
+//! standard deviation is 0. The whole-column path computes the mean from the
+//! compensated sum, then corrects it with the compensated mean of the
+//! deviations (second pass), then sums the squared deviations the same way.
+//! The range path builds its tree on values shifted by one **anchor** (the
+//! compensated mean of the column): the means and the sums of squares of the
+//! segments are those of `y - anchor`, which are close to zero, so merging two
+//! rounded means no longer costs `1e-16 * mean / std`. `sum` stays on the raw
+//! values and the anchor is added back to the mean.
+//!
 //! The standard deviation is the **sample** one (divided by n - 1), computed
 //! in two passes and merged with Chan's formula in the tree: never a
 //! difference of sums of squares, which loses all its digits on data such as
@@ -63,26 +74,30 @@ impl Agg {
         max: f64::NEG_INFINITY,
     };
 
-    fn leaf(y: f64) -> Agg {
+    /// One value; `anchor` is subtracted from the mean field only.
+    fn leaf(y: f64, anchor: f64) -> Agg {
         Agg {
             n: 1,
             sum: y,
-            mean: y,
+            mean: y - anchor,
             m2: 0.0,
             min: y,
             max: y,
         }
     }
 
-    /// Two passes over the values (mean, then squared deviations).
+    /// Compensated sum, then the mean corrected by a second pass, then the
+    /// compensated sum of the squared deviations from that mean.
     fn of_slice(values: &[f64]) -> Agg {
         if values.is_empty() {
             return Agg::EMPTY;
         }
         let n = values.len();
-        let sum: f64 = values.iter().sum();
-        let mean = sum / n as f64;
-        let m2 = values.iter().map(|v| (v - mean) * (v - mean)).sum();
+        let nf = n as f64;
+        let sum = neumaier(values.iter().copied());
+        let mut mean = sum / nf;
+        mean += neumaier(values.iter().map(|v| v - mean)) / nf;
+        let m2 = neumaier(values.iter().map(|v| (v - mean) * (v - mean)));
         Agg {
             n,
             sum,
@@ -114,13 +129,15 @@ impl Agg {
         }
     }
 
-    fn value(&self, stat: Stat) -> Option<f64> {
+    /// `anchor`: what was subtracted from the values of the mean field (0 on
+    /// the whole-column path).
+    fn value(&self, stat: Stat, anchor: f64) -> Option<f64> {
         let value = match stat {
             _ if self.n == 0 => return None,
             Stat::Max => self.max,
             Stat::Min => self.min,
             Stat::Sum => self.sum,
-            Stat::Mean => self.sum / self.n as f64,
+            Stat::Mean => self.mean + anchor,
             Stat::Std if self.n < 2 => return None,
             Stat::Std => (self.m2 / (self.n - 1) as f64).sqrt(),
         };
@@ -128,11 +145,26 @@ impl Agg {
     }
 }
 
+/// Neumaier's compensated sum (a sum that overflows gives a non-finite value).
+fn neumaier(values: impl Iterator<Item = f64>) -> f64 {
+    let (mut sum, mut comp) = (0.0_f64, 0.0_f64);
+    for v in values {
+        let t = sum + v;
+        if sum.abs() >= v.abs() {
+            comp += (sum - t) + v;
+        } else {
+            comp += (v - t) + sum;
+        }
+        sum = t;
+    }
+    sum + comp
+}
+
 /// `stat` of the finite values of `ys`; `None` if there is none (or, for
 /// `Std`, fewer than two).
 pub fn column_stat(stat: Stat, ys: &[f64]) -> Option<f64> {
     let finite: Vec<f64> = ys.iter().copied().filter(|y| y.is_finite()).collect();
-    Agg::of_slice(&finite).value(stat)
+    Agg::of_slice(&finite).value(stat, 0.0)
 }
 
 /// The finite `(x, y)` pairs of two parallel columns (the common length only),
@@ -196,8 +228,11 @@ impl AtTable {
 pub struct ColumnIndex {
     xs: Vec<f64>,
     ys: Vec<f64>,
-    /// Iterative segment tree: leaves at `n..2n`.
+    /// Iterative segment tree: leaves at `n..2n`. The mean fields hold
+    /// `y - anchor`.
     tree: Vec<Agg>,
+    /// Compensated mean of all the Y (0 if it is not finite).
+    anchor: f64,
     /// `cum[k]`: trapezoid area from the first point to point `k`.
     cum: Vec<f64>,
 }
@@ -206,9 +241,19 @@ impl ColumnIndex {
     pub fn new(x: &[f64], y: &[f64]) -> Self {
         let (xs, ys) = sorted_pairs(x, y);
         let n = xs.len();
+        let anchor = if n == 0 {
+            0.0
+        } else {
+            let a = neumaier(ys.iter().copied()) / n as f64;
+            if a.is_finite() {
+                a
+            } else {
+                0.0
+            }
+        };
         let mut tree = vec![Agg::EMPTY; 2 * n];
         for (k, &y) in ys.iter().enumerate() {
-            tree[n + k] = Agg::leaf(y);
+            tree[n + k] = Agg::leaf(y, anchor);
         }
         for k in (1..n).rev() {
             tree[k] = tree[2 * k].merge(tree[2 * k + 1]);
@@ -217,7 +262,13 @@ impl ColumnIndex {
         for k in 1..n {
             cum[k] = cum[k - 1] + 0.5 * (ys[k] + ys[k - 1]) * (xs[k] - xs[k - 1]);
         }
-        ColumnIndex { xs, ys, tree, cum }
+        ColumnIndex {
+            xs,
+            ys,
+            tree,
+            anchor,
+            cum,
+        }
     }
 
     /// Number of indexed points.
@@ -262,7 +313,7 @@ impl ColumnIndex {
         if from >= to {
             return None;
         }
-        self.query(from, to).value(stat)
+        self.query(from, to).value(stat, self.anchor)
     }
 
     /// Area under the curve over `[lo, hi]` (either order), clipped to the
