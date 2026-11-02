@@ -524,6 +524,18 @@ pub(super) fn inspector(
     actions: &mut Vec<Action>,
 ) {
     let ctx = ui.ctx().clone();
+    let active = view.active_panel(spec);
+    let extra = view.extra_layers(spec);
+    ui.horizontal(|ui| measures_row(ui, view, graph, actions));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        arrange_row(ui, &ctx, spec, graph, active, &extra, actions);
+    });
+}
+
+/// First row of the inspector: figure size, selected box, plot area.
+fn measures_row(ui: &mut egui::Ui, view: &GraphView, graph: NodeId, actions: &mut Vec<Action>) {
+    let ctx = ui.ctx().clone();
     let unit = length_unit(&ctx);
     let symbol = unit.symbol();
     let page = view.layout_page();
@@ -565,10 +577,11 @@ pub(super) fn inspector(
         }
     }
     ui.separator();
-    let active = view.active_panel(spec);
-    let extra = view.extra_layers(spec);
     if let (Some(page), Some(selected)) = (page, view.selected_box()) {
-        ui.label(tr!("layout-mode-layer", n = (active + 1).to_string()));
+        ui.label(tr!(
+            "layout-mode-layer",
+            n = (selected.base + 1).to_string()
+        ));
         let o = selected.outer;
         let exact = [o.left - page.left, o.top - page.top, o.width, o.height];
         let mut fields = exact.map(|points| shown(unit.from_points(points), unit));
@@ -623,8 +636,20 @@ pub(super) fn inspector(
             ),
             unit = symbol
         )));
-        ui.separator();
     }
+}
+
+/// Second row of the inspector: arrangement menus and the grid.
+fn arrange_row(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    spec: &PlotSpec,
+    graph: NodeId,
+    active: usize,
+    extra: &[usize],
+    actions: &mut Vec<Action>,
+) {
+    let extra = extra.to_vec();
     let cells = stokesforge_core::compose::arrange_targets(spec, active, &extra).len();
     ui.add_enabled_ui(cells >= 2, |ui| {
         ui.menu_button(tr!("menu-layout-align"), |ui| {
@@ -640,7 +665,7 @@ pub(super) fn inspector(
         });
     });
     ui.separator();
-    let mut grid = grid_state(&ctx, graph);
+    let mut grid = grid_state(ctx, graph);
     let before = grid;
     if ui
         .add(egui::Button::new(tr!("layout-mode-grid")).selected(grid.on))
@@ -664,7 +689,7 @@ pub(super) fn inspector(
         grid.fine = true;
     }
     if grid != before {
-        set_grid_state(&ctx, graph, grid);
+        set_grid_state(ctx, graph, grid);
     }
 }
 

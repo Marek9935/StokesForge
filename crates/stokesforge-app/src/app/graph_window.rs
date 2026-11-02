@@ -512,10 +512,11 @@ pub(super) fn graph_view_contents(
                     egui::vec2(available.x, controls_height),
                     egui::Sense::hover(),
                 );
-                let mut strip_ui =
-                    ui.new_child(egui::UiBuilder::new().max_rect(controls).layout(
-                        egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    ));
+                let mut strip_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(controls)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
                 strip_ui.set_clip_rect(ui.clip_rect().intersect(controls));
                 if let Some(spec) =
                     stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)

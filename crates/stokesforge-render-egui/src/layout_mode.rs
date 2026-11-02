@@ -148,14 +148,15 @@ fn accent(visuals: &Visuals) -> Color32 {
     } else {
         stroke
     };
-    // A pale theme selection (light green) would not read on white: darken it
-    // until white text on it stays legible.
-    if luma(darker) > 1000 {
-        let shade = |v: u8| (u16::from(v) * 55 / 100) as u8;
-        Color32::from_rgb(shade(darker.r()), shade(darker.g()), shade(darker.b()))
-    } else {
-        darker
+    // The theme selection may be translucent and pale (light green): take it
+    // opaque and darken it until white text on it stays legible.
+    let [r, g, b, _] = darker.to_srgba_unmultiplied();
+    let mut opaque = Color32::from_rgb(r, g, b);
+    while luma(opaque) > 900 {
+        let shade = |v: u8| (u16::from(v) * 80 / 100) as u8;
+        opaque = Color32::from_rgb(shade(opaque.r()), shade(opaque.g()), shade(opaque.b()));
     }
+    opaque
 }
 
 fn resize_cursor(left_right: bool, top_bottom: bool, same_diagonal: bool) -> CursorIcon {
