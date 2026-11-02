@@ -118,11 +118,11 @@ The check boxes keep the menu open (#114).
 
 | Target | Menu |
 |---|---|
-| Window(s) | Open · Close ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete ─ Project Root ▸ |
-| Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate · Sort (this folder back to automatic order, greyed with its reason when it already is, #425) ─ Delete ─ Project Root ▸ |
+| Window(s) | Open · Close ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete |
+| Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate · Sort (this folder back to automatic order, greyed with its reason when it already is, #425) ─ Delete |
 | Empty area under the last row | Add Folder · Paste (in the root) ─ Sort (the root, #425) |
 
-**Project Root ▸ (#425).** Every row's right-click ends with its own last section, *Project Root ▸*, holding exactly the entries of the empty-area menu (Add Folder · Paste ─ Sort, all acting on the root, same greying and reasons: one function, `root_entries`). The strip under the last row cannot be relied on (a tree that fills the panel leaves no empty area), and nothing may be reachable only by one gesture. It obeys the submenu rule (three entries of the same family, depth 2). The strip is also always there: the scroll area keeps two rows free under the last one (`FREE_STRIP_ROWS`).
+The empty-area right-click (strip under the last row, always at least two rows tall, `FREE_STRIP_ROWS`) is the root menu: Add Folder · Paste ─ Sort, all acting on the root. A click or right-click in that area also clears the selection (#425). Paste shows its shortcut, Ctrl+V, in every menu.
 
 Selection ▸ remains only in Edit.
 

@@ -20,9 +20,9 @@ windows); the triangle, the double-click (exactly one toggle), Enter and → / �
 expand and collapse it, and a paste into it expands it to show what arrived
 (`PmMemory::reveal`). There is no slow-click rename: F2 or the menu. Delete and F2 act
 on it (one history entry, `DeleteObjects` / `RenameObjects`). Paste
-with only this folder selected pastes **into** this folder (`paste_parent`),
-otherwise at the root (a single selected window pastes at the root too, as
-documented since #170). A deleted folder leaves the selection. **Copy and
+follows the same place rule as a new window (#425, `paste_parent` asks
+`creation_folder_by`): one folder selected, **into** it; one window, into its
+folder; nothing or several rows, the root. A deleted folder leaves the selection. **Copy and
 Duplicate work on a folder (#391)**: the whole subtree is copied in one history
 entry, **what is inside the copy reads the copy** (a graph plots the copied
 workbook, a formula the copied sheet, a calculation or a transposed sheet the
@@ -39,8 +39,10 @@ several rows, the root. The shell hands the selected nodes to the state
 folder afterwards (`project_manager::reveal_folder`). Unchanged: import and
 *Plot* from columns, which keep their own destination. A new window takes its
 place in an automatic folder and goes to the end of a manual one. The empty
-area under the last row (always at least two rows tall) and the *Project Root ▸*
-submenu of every row give the root's menu (`root_entries`).
+area under the last row (always at least two rows tall) gives the root's menu
+(`root_entries`), and a click or right-click there clears the selection (the
+creation folder comes from the selection only; following the active tab
+re-selects a row only when the active tab changes).
 
 **Keyboard (#170, point 6, S-K9).** With the panel focused, Up and Down move the
 selection from one visible row to the next (`PmMemory::visible`, collected during

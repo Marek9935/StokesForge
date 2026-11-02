@@ -53,7 +53,6 @@ action-add-folder = Add Folder
 action-sort-folder = Sort
     .hint = Shows this folder sorted again: folders first, then by name
     .disabled = Already sorted. Dragging a row between two others sorts it by hand
-project-root-menu = Project Root
     .hint = Add Folder, Paste and Sort, applied to the top level of the project
 unsaved-title = Unsaved Changes
 unsaved-new = Save the changes to this project before creating a new one?

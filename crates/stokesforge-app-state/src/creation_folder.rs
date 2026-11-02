@@ -9,19 +9,33 @@ use stokesforge_core::{NodeId, Tree};
 
 /// The folder that receives a new window, given the selected nodes.
 pub fn creation_folder(tree: &Tree, selection: &[NodeId]) -> NodeId {
-    let root = tree.root();
+    creation_folder_by(tree.root(), selection, |id| {
+        tree.node(id)
+            .map(|node| (node.kind().is_folder(), node.parent()))
+    })
+}
+
+/// The same rule over any view of the tree: `lookup` tells, for a node, whether
+/// it is a folder and which node contains it (`None` at the top). The Project
+/// Manager panel, which paints a simplified tree, asks the rule through this
+/// door, so there is one rule only.
+pub fn creation_folder_by(
+    root: NodeId,
+    selection: &[NodeId],
+    lookup: impl Fn(NodeId) -> Option<(bool, Option<NodeId>)>,
+) -> NodeId {
     let [only] = selection else {
         return root;
     };
     let mut current = *only;
     loop {
-        let Some(node) = tree.node(current) else {
+        let Some((is_folder, parent)) = lookup(current) else {
             return root;
         };
-        if node.kind().is_folder() {
+        if is_folder {
             return current;
         }
-        match node.parent() {
+        match parent {
             Some(parent) => current = parent,
             None => return root,
         }

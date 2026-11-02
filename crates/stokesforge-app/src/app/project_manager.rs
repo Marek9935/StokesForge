@@ -174,14 +174,16 @@ fn tree_order(
     }
 }
 
-/// Where the clipboard is pasted: **into** the folder when the selection is
-/// that single folder, at the root otherwise (as before #170).
-pub(super) fn paste_parent(selection: &HashSet<PmEntry>, root: NodeId) -> NodeId {
-    let mut entries = selection.iter();
-    match (entries.next(), entries.next()) {
-        (Some(PmEntry::Folder(id)), None) => *id,
-        _ => root,
-    }
+/// Where the clipboard is pasted: the creation folder rule of a new window
+/// (#425, `stokesforge_app_state::creation_folder`). One folder selected:
+/// inside it; one window: its folder; nothing or several rows: the root.
+fn paste_parent(selection: &HashSet<PmEntry>, memory: &PmMemory, root: NodeId) -> NodeId {
+    let nodes: Vec<NodeId> = selection.iter().map(|entry| entry.node()).collect();
+    stokesforge_app_state::creation_folder::creation_folder_by(root, &nodes, |id| {
+        let entry = memory.order.iter().find(|entry| entry.node() == id)?;
+        let parent = memory.parents.get(entry).map(|parent| parent.node());
+        Some((entry.is_folder(), parent))
+    })
 }
 
 /// The row that carries the keyboard cursor: the moving end of the last
@@ -452,8 +454,8 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         && (pending.is_some()
             || (memory.focus && memory.rename.is_empty() && !ctx.text_edit_focused()))
     {
-        let parent =
-            pending.unwrap_or_else(|| paste_parent(interaction.selection, interaction.root));
+        let parent = pending
+            .unwrap_or_else(|| paste_parent(interaction.selection, &memory, interaction.root));
         let mut paste = None;
         let mut navigation = None;
         ctx.input_mut(|input| {
@@ -652,6 +654,18 @@ pub(super) fn project_manager_contents_from_tree(
             (ui.clip_rect().bottom() - ui.cursor().top()).max(FREE_STRIP_ROWS * LIST_ROW_HEIGHT);
         let (_, empty) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), rest), egui::Sense::click());
+        // Like a file explorer, a click in the empty area deselects: the next
+        // new window or Paste then goes to the root (the creation folder comes
+        // from the selection only). Following the active tab does not bring the
+        // row back until the active tab changes.
+        if empty.clicked() || empty.secondary_clicked() {
+            interaction.selection.clear();
+            ui.ctx().data_mut(|data| {
+                let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
+                memory.anchor = None;
+                memory.lead = None;
+            });
+        }
         empty.context_menu(|ui| root_menu(ui, interaction));
     });
     drive_drag(ui, tree, interaction, memory_key, response.inner_rect);
@@ -766,9 +780,7 @@ fn root_menu(ui: &mut egui::Ui, interaction: &mut PmInteraction) {
     root_entries(ui, &mut MenuSections::new(), interaction);
 }
 
-/// The entries of the root menu, shared by the empty-area right-click and the
-/// *Project Root* submenu of every row's right-click: one function, so the
-/// actions, the enabled rules and the disabled reasons cannot drift apart.
+/// The entries of the root menu (the empty-area right-click).
 fn root_entries(ui: &mut egui::Ui, sections: &mut MenuSections, interaction: &mut PmInteraction) {
     let root = interaction.root;
     sections.section(ui, true, |ui| {
@@ -785,23 +797,6 @@ fn root_entries(ui: &mut egui::Ui, sections: &mut MenuSections, interaction: &mu
     });
 }
 
-/// Last section of a row's right-click (#425): *Project Root ▸* holds the root
-/// menu, so it stays reachable when the rows fill the panel and no empty area
-/// is left.
-fn project_root_section(
-    ui: &mut egui::Ui,
-    sections: &mut MenuSections,
-    interaction: &mut PmInteraction,
-) {
-    sections.section(ui, true, |ui| {
-        ui.menu_button(tr!("project-root-menu"), |ui| {
-            root_entries(ui, &mut MenuSections::new(), interaction)
-        })
-        .response
-        .on_hover_text(tr!("project-root-menu", "hint"));
-    });
-}
-
 fn add_folder_entry(ui: &mut egui::Ui, parent: NodeId, actions: &mut Vec<Action>) {
     if ui
         .button(tr!("action-add-folder"))
@@ -815,7 +810,13 @@ fn add_folder_entry(ui: &mut egui::Ui, parent: NodeId, actions: &mut Vec<Action>
 
 fn paste_entry(ui: &mut egui::Ui, parent: NodeId) {
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
-    if ui.button(tr!("action-paste")).clicked() {
+    if ui
+        .add(
+            egui::Button::new(tr!("action-paste"))
+                .shortcut_text(ui.ctx().format_shortcut(&super::shortcuts::SHORTCUT_PASTE)),
+        )
+        .clicked()
+    {
         ui.ctx().data_mut(|data| {
             data.insert_temp(paste_key, parent);
         });
@@ -1143,7 +1144,6 @@ fn project_tree_node_ui(
                         interaction.actions,
                         viewport,
                     );
-                    project_root_section(ui, &mut sections, interaction);
                 });
             });
             // A click only selects; the double-click toggles the folder, once
@@ -1246,7 +1246,7 @@ fn project_tree_node_ui(
                     .unwrap_or_default();
                 let ids = selected_ids(interaction.selection, &memory.order);
                 let viewport = ui.ctx().viewport_id();
-                let parent = paste_parent(interaction.selection, interaction.root);
+                let parent = paste_parent(interaction.selection, &memory, interaction.root);
                 object_menu(
                     ui,
                     &mut sections,
@@ -1256,7 +1256,6 @@ fn project_tree_node_ui(
                     interaction.actions,
                     viewport,
                 );
-                project_root_section(ui, &mut sections, interaction);
             });
             // S-K3: a double-click activates or restores the window, it never
             // closes it (closing is done by Close or the header). A single click
@@ -3020,19 +3019,44 @@ pub(super) mod tests {
         );
     }
 
-    /// `paste_parent`: the single folder, otherwise the root.
+    /// `paste_parent` follows the creation folder rule (#425): one folder,
+    /// inside it; one window, its folder; nothing or several, the root.
     #[test]
-    fn the_paste_parent_is_the_single_folder_or_the_root() {
+    fn the_paste_parent_follows_the_creation_folder_rule() {
         let root = NodeId::from_raw(1);
-        let folder = PmEntry::Folder(NodeId::from_raw(3));
-        let window = PmEntry::Window(Tab::Book(NodeId::from_raw(2)));
+        let folder_a = PmEntry::Folder(NodeId::from_raw(3));
+        let inside = PmEntry::Window(Tab::Book(NodeId::from_raw(4)));
+        let top = PmEntry::Window(Tab::Book(NodeId::from_raw(2)));
+        let tree = vec![
+            ProjectTreeNode::Folder {
+                id: NodeId::from_raw(3),
+                name: "A".into(),
+                children: vec![ProjectTreeNode::Window {
+                    id: NodeId::from_raw(4),
+                    kind: WindowKind::Book,
+                    name: "Inside".into(),
+                }],
+            },
+            ProjectTreeNode::Window {
+                id: NodeId::from_raw(2),
+                kind: WindowKind::Book,
+                name: "Top".into(),
+            },
+        ];
+        let mut memory = PmMemory::default();
+        let PmMemory { order, parents, .. } = &mut memory;
+        tree_order(&tree, None, order, parents);
+        let parent =
+            |entries: &[PmEntry]| paste_parent(&entries.iter().copied().collect(), &memory, root);
+        assert_eq!(parent(&[folder_a]), NodeId::from_raw(3));
         assert_eq!(
-            paste_parent(&HashSet::from([folder]), root),
-            NodeId::from_raw(3)
+            parent(&[inside]),
+            NodeId::from_raw(3),
+            "a window: its folder"
         );
-        assert_eq!(paste_parent(&HashSet::from([window]), root), root);
-        assert_eq!(paste_parent(&HashSet::from([folder, window]), root), root);
-        assert_eq!(paste_parent(&HashSet::new(), root), root);
+        assert_eq!(parent(&[top]), root);
+        assert_eq!(parent(&[folder_a, inside]), root);
+        assert_eq!(parent(&[]), root);
     }
 
     // -- Keyboard navigation (#170, point 6) ----------------------------------
@@ -3882,100 +3906,156 @@ pub(super) mod tests {
         );
     }
 
-    /// Opens the *Project Root* submenu of the row `name` and returns the
-    /// painted frame.
-    fn open_project_root_of(
-        bench: &Bench,
-        tree: &[ProjectTreeNode],
-        name: &str,
-    ) -> (egui::Context, egui::FullOutput) {
+    /// The painted texts of the right-click menu of the row `name`.
+    fn row_menu(bench: &Bench, tree: &[ProjectTreeNode], name: &str) -> egui::FullOutput {
         let context = egui::Context::default();
         let paint = |context: &egui::Context, events| bench.paint(context, tree, events);
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
         let pos = find_text_center(&first.shapes, name);
-        let menu = open_context_menu(&context, pos, paint);
-        let entry = find_text_center(&menu.shapes, &tr!("project-root-menu"));
-        click_at(&context, entry, egui::Modifiers::NONE, paint);
-        let opened = paint(&context, Vec::new());
-        (context, opened)
+        open_context_menu(&context, pos, paint)
     }
 
-    /// #425: the right-click of a window row ends with *Project Root*, whose
-    /// entries act on the root: Sort (enabled because the root is in manual
-    /// order here) and Add Folder push their action with the root. Witness: no
-    /// submenu, no entry.
+    fn painted_ctrl_v(output: &egui::FullOutput) -> bool {
+        let shortcut =
+            egui::Context::default().format_shortcut(&super::super::shortcuts::SHORTCUT_PASTE);
+        painted(output, &shortcut)
+    }
+
+    /// #425: the row menus carry no *Project Root* submenu (the empty-area menu
+    /// reaches the root), and Paste shows its shortcut in every menu. Witness:
+    /// restoring the submenu paints its entry; Paste without `shortcut_text`
+    /// paints no Ctrl+V.
     #[test]
-    fn a_window_right_click_holds_the_root_menu_in_a_submenu() {
+    fn row_menus_have_no_project_root_and_paste_shows_ctrl_v() {
         let (_session, _book, _graph, tree) = project_manager_fixture();
         let bench = Bench::new(HashSet::new());
-        bench.manual.borrow_mut().insert(NodeId::from_raw(1));
-        let (context, opened) = open_project_root_of(&bench, &tree, "Graph1");
-        let texts = super::super::test_support::texts(&opened.shapes);
-        for label in [
-            tr!("action-add-folder"),
-            tr!("action-paste"),
-            tr!("action-sort-folder"),
-        ] {
-            assert!(
-                texts.iter().any(|t| t.text == label),
-                "{label} in the submenu"
-            );
-        }
-        // The submenu comes after the window's own sections.
-        assert!(
-            find_text_center(&opened.shapes, &tr!("project-root-menu")).y
-                > find_text_center(&opened.shapes, &tr!("action-delete-project-object")).y
-        );
-        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
-        click_at(
-            &context,
-            find_text_center(&opened.shapes, &tr!("action-sort-folder")),
-            egui::Modifiers::NONE,
-            paint,
-        );
-        assert_eq!(
-            *bench.actions.borrow(),
-            vec![Action::SortFolder(NodeId::from_raw(1))]
-        );
-    }
+        let window = row_menu(&bench, &tree, "Graph1");
+        assert!(!painted(&window, "Project Root"));
+        assert!(painted(&window, &tr!("action-paste")));
+        assert!(painted_ctrl_v(&window), "window menu: Paste Ctrl+V");
 
-    /// #425: same submenu on a folder row; its Add Folder (the one of the
-    /// submenu, the rightmost) targets the root, not the folder. The disabled
-    /// Sort keeps its reason when the root is already sorted.
-    #[test]
-    fn a_folder_right_click_holds_the_root_menu_in_a_submenu() {
-        let folder = NodeId::from_raw(7);
-        let tree = vec![ProjectTreeNode::Folder {
-            id: folder,
+        let folder = vec![ProjectTreeNode::Folder {
+            id: NodeId::from_raw(7),
             name: "Measurements".into(),
             children: Vec::new(),
         }];
         let bench = Bench::new(HashSet::new());
-        let (context, opened) = open_project_root_of(&bench, &tree, "Measurements");
-        let texts = super::super::test_support::texts(&opened.shapes);
-        let add = texts
-            .iter()
-            .filter(|t| t.text == tr!("action-add-folder"))
-            .max_by(|a, b| a.center.x.total_cmp(&b.center.x))
-            .expect("Add Folder in the submenu");
-        let at = add.center;
-        assert_eq!(
-            texts
-                .iter()
-                .filter(|t| t.text == tr!("action-add-folder"))
-                .count(),
-            2,
-            "the folder's own and the submenu's"
-        );
+        let menu = row_menu(&bench, &folder, "Measurements");
+        assert!(!painted(&menu, "Project Root"));
+        assert!(painted_ctrl_v(&menu), "folder menu: Paste Ctrl+V");
+    }
+
+    /// #425: the empty-area root menu shows Paste with its shortcut too.
+    #[test]
+    fn the_root_menu_shows_paste_with_ctrl_v() {
+        let (_session, tree) = long_tree(3);
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
         let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
-        click_at(&context, at, egui::Modifiers::NONE, paint);
-        assert_eq!(
-            *bench.actions.borrow(),
-            vec![Action::AddFolder {
-                parent: NodeId::from_raw(1)
-            }]
+        paint(&context, Vec::new());
+        let menu = open_context_menu(&context, egui::pos2(100.0, 300.0), paint);
+        assert!(painted(&menu, &tr!("action-add-folder")));
+        assert!(painted_ctrl_v(&menu));
+    }
+
+    /// #425: a click in the empty area clears the selection (right-click too).
+    /// Witness: without the clearing the window stays selected.
+    #[test]
+    fn a_click_in_the_empty_area_clears_the_selection() {
+        for secondary in [false, true] {
+            let (_session, tree) = long_tree(3);
+            let context = egui::Context::default();
+            let bench = Bench::new(HashSet::new());
+            let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
+            paint(&context, Vec::new());
+            let first = paint(&context, Vec::new());
+            let ProjectTreeNode::Window { kind, id, .. } = &tree[0] else {
+                unreachable!()
+            };
+            let row = find_text_center(&first.shapes, &tree_name(&tree[0]));
+            click_at(&context, row, egui::Modifiers::NONE, paint);
+            assert_eq!(bench.selection.borrow().len(), 1, "a row is selected");
+            let _ = (kind, id);
+            let empty = egui::pos2(100.0, 300.0);
+            if secondary {
+                open_context_menu(&context, empty, paint);
+            } else {
+                click_at(&context, empty, egui::Modifiers::NONE, paint);
+            }
+            assert!(bench.selection.borrow().is_empty());
+        }
+    }
+
+    fn tree_name(node: &ProjectTreeNode) -> String {
+        match node {
+            ProjectTreeNode::Folder { name, .. } | ProjectTreeNode::Window { name, .. } => {
+                name.clone()
+            }
+        }
+    }
+
+    /// #425: the front window lives in Folder1; a click in the empty area at root
+    /// level, then a new workbook: it goes to the root, and following the active
+    /// tab does not bring the row back. Cause of the bug: the empty area did not
+    /// deselect, so the followed active window stayed the creation folder.
+    #[test]
+    fn an_empty_click_then_a_new_workbook_goes_to_the_root() {
+        let mut project = Project::new("Empty click").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Folder1").unwrap();
+        let book = project.add_empty_workbook(folder, None).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let app = RefCell::new(StokesForgeApp::new(state));
+        let front = Tab::Book(book);
+        let context = super::super::test_support::context();
+        egui_extras::install_image_loaders(&context);
+        let paint = |ctx: &egui::Context, events| {
+            super::super::test_support::frame_of(ctx, egui::vec2(1400.0, 900.0), events, |ui| {
+                let mut app = app.borrow_mut();
+                let tree = app.state.project_tree();
+                app.follow_project_manager_active_tab(ui.ctx(), Some(front));
+                egui::Panel::left("pm_test")
+                    .exact_size(260.0)
+                    .show(ui, |ui| {
+                        let mut interaction = PmInteraction {
+                            actions: &mut Vec::new(),
+                            root: app.state.tree().root(),
+                            open_requests: &mut Vec::new(),
+                            selection: &mut app.pm_selection,
+                            open: &HashSet::new(),
+                            close_requests: &mut Vec::new(),
+                            cut: &HashSet::new(),
+                            manual: &Default::default(),
+                        };
+                        project_manager_contents_from_tree(ui, &tree, &mut interaction);
+                    });
+            })
+        };
+        paint(&context, vec![]);
+        paint(&context, vec![]);
+        assert_eq!(app.borrow().pm_selection, windows([front]), "followed");
+        click_at(
+            &context,
+            egui::pos2(100.0, 600.0),
+            egui::Modifiers::NONE,
+            paint,
         );
+        paint(&context, vec![]);
+        assert!(app.borrow().pm_selection.is_empty());
+        app.borrow_mut()
+            .dispatch_action(&context, Action::AddWorkbook);
+        let app = app.borrow();
+        let tree = app.state.tree();
+        let books_at_root = tree
+            .children(root)
+            .unwrap()
+            .iter()
+            .filter(|id| !tree.node(**id).unwrap().kind().is_folder())
+            .count();
+        assert_eq!(books_at_root, 1, "the new workbook is at the root");
+        assert_eq!(tree.children(folder).unwrap().len(), 1, "Folder1 unchanged");
     }
 
     /// #425: after a new window is created from the File menu or the toolbar,
