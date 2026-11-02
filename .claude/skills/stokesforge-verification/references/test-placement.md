@@ -8,7 +8,7 @@ Read at step 1 of `stokesforge-verification`. Families and guards: `docs/tests.m
 |---|---|
 | local behaviour | `#[cfg(test)]` in `src/`, next to its code |
 | crate property: public contract, boundary, agreement between paths | `crates/*/tests/` |
-| the core at its limits | `stokesforge-robustness/tests/b1`…`b22` (index in its `src/lib.rs`) |
+| the core at its limits | `stokesforge-robustness/tests/b1`…`b23` (index in its `src/lib.rs`) |
 | an `AppState` decision | `crates/stokesforge-app-state/tests/shell.rs` (`cargo test -p stokesforge-app-state`, no egui to compile) |
 | a painted gesture (click, key, layout read from shapes) | the `tests` module of the surface (`src/app/<surface>.rs`), without a window |
 | orchestration (panel order, deferred application, confirmations, global shortcuts) | the `tests` module of `app.rs`, and nothing else |
