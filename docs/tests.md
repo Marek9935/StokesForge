@@ -38,7 +38,7 @@ licenses. Policy and commands:
 |---|---|---|
 | **unit tests** | `#[cfg(test)]` in `src/` | a local behavior, as close as possible to its code |
 | **integration tests** | `crates/*/tests/` | a crate property: public contract, boundary, agreement between paths |
-| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 22 batteries `b1`…`b22` |
+| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 23 batteries `b1`…`b23` |
 
 ## Guards not to break
 
@@ -109,7 +109,7 @@ first.
 `stokesforge-robustness` contains **no production code**. It depends on the
 whole workspace and carries two things:
 
-- **22 batteries** (`tests/b1…b22`) that test the foundation at its limits:
+- **23 batteries** (`tests/b1…b23`) that test the foundation at its limits:
   extreme numeric values (`b1`), persistence (`b2`), malformed then
   semantically hostile `.stf` files (`b3`), identifier allocator
   (`b4`), macros (`b5`), concurrency between clients (`b6`), Rust ↔ Python
@@ -123,7 +123,10 @@ whole workspace and carries two things:
   open (`b18`), file written by a newer version (`b19`), two
   writers on the same file (`b20`), cost and identity on the write
   path (`b21`), targeted recalculation of formulas against full recalculation
-  (`b22`, see "Targeted recalculation (#193) — and what to test when relying on it" below);
+  (`b22`, see "Targeted recalculation (#193) — and what to test when relying on it" below),
+  then the same oracle for structural gestures (renames, moves, removals,
+  pastes, transposes, column type changes) plus an independent re-evaluation
+  of every formula from a saved and reloaded copy (`b23`, #412);
 - **two out-of-process probes**, `alloc_probe` and `stack_probe`, because the
   cases they test end with an `abort()` that nothing catches:
   a Rust allocation failure is not a catchable panic, and a stack
@@ -208,9 +211,22 @@ formulas, and saves and reloads them through the `.stf` side field.
 | Axis direction and axis settings (#344) | `AxisSpec::orient`: table (auto or explicit × inverted × order of the bounds, bounds missing or not finite, idempotence) in `stokesforge-plot/src/axis.rs`; identical rendering before and after `orient` (`an_oriented_axis_is_drawn_like_the_original_axis`, `stokesforge-render/tests/geometry.rs`); opening a file with `inverted` and bounds (-1, 10): bounds (10, -1), `inverted` true, empty history, file untouched (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`); `pyst.set_graph` (`set_graph_orients_the_axes_from_the_order_of_the_bounds`, `stokesforge-script/tests/set_graph.rs`); axes page (`stokesforge-app/src/app/plot_settings.rs`, module `tests`): no more "Inverted axis" / "Auto range" / "Closed frame" boxes, "Advanced" block closed then opened on click (title or arrow), input of a bound under Auto = two bounds fixed in **one** history entry, From > To inverts the axis, Auto button = data while keeping the direction, From shows the high bound of an inverted axis; proven mutants (`orient` without swapping the bounds, `load_project` without `orient_graphs`, input that does not fix, Auto button that loses the direction, click on the arrow of "Advanced" counted twice) |
 | `stokesforge-session/tests/analysis.rs` (`on_load_no_calculation_is_rerun_and_the_fingerprint_says_whether_it_is_stale`, `trust_on_load_applies_only_to_the_load`) | A1 (#316): on opening no calculation (automatic or manual) is rerun, in both modes (`Full` as well as `Targeted`, otherwise the oracle diverges); input modified outside the application (file bytes) → `Manual` and file values kept, then `recalculate` makes them right; intact file → up to date; the `trust_loaded` flag is single-use (a calculation without a memo after `AddCalculation` is still recalculated). Mutants: flag removed, fingerprint comparison always true, always false |
 | `stokesforge-session/tests/formula.rs` | the behavior of formulas itself (before #193, unchanged) |
+| `stokesforge-robustness/tests/b23_formula_structure_oracle.rs` | the `b22` oracle for the gestures `b22` does not draw (renames, moves, removals, object pastes, transposed sheets, column type changes), plus an independent re-evaluation of every formula in a fresh `Full` session after save and load |
+| `stokesforge-core/tests/formula_evaluation.rs` | the evaluator against a reference evaluator (operators, functions, literals, numeric precision; seeded proptests) |
+| `stokesforge-core/tests/formula_column_functions.rs` | `at`, `max`, `min`, `mean`, `sum`, `std`, `integral` and their range forms; NIST StRD certified values (`tests/data/nist-strd/`, US government work, public domain, unmodified); a `bench:` of per-row bounds |
+| `stokesforge-session/tests/formula_structure.rs` | formulas across structural gestures (copy, paste, transpose, type change, removal, move, rename, cycles, row edits, reloads), in `Targeted` and `Full` |
+| `stokesforge-app-state/tests/formula_gestures.rs` | formula gestures seen from the application state (full-column paste, header paste, undo, long recalculation) |
+| `stokesforge-persistence/tests/formula_roundtrip.rs` | `.stf` round trip of column formulas, local and remote |
+| `stokesforge-script/tests/formulas.rs` | column formulas through `pyst` (feature `python`) |
 | `stokesforge-core/src/sheet_refs.rs` (`tests`), `stokesforge-app-state/tests/formula_sheets.rs`, `stokesforge-persistence/tests/remote_formula.rs` | formulas that read other sheets (#403, batch 1): reading `Sheet3!B` / `[Book2]Sheet5!B`, case, quotes, workbook lookup (own folder, then project, path when ambiguous), the refusals (outside a column function, remote X, workbook without sheet), sibling names that differ only by case, loops (local, remote, through a paired X) refused at typing and framed when a file holds one; a remote formula saved and reloaded keeps its sheet (`formula_remote`, batch 2), forged files (sheet id beyond the bound refused, missing or non-sheet target and bad part index degrade to `#REF`), a project without remote reference writes no such field, and the object clipboard keeps or voids the reference (`project_objects.rs`) |
 | `stokesforge-robustness/tests/b14_sweep.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
 | `stokesforge-core` (`project.rs`, `an_inserted_column_moves_the_counter_past_its_version`) | inserting a column moves the counter beyond its version |
+
+Ignored tests state why in their reason string: `#[ignore = "bug: #N …"]` is a
+known bug (the issue number is the handle; lift the ignore when it is fixed),
+`#[ignore = "design: #433 point N …"]` is behavior awaiting a decision, and
+`#[ignore = "bench: …"]` is a timing bench run by hand. The proptests of these
+files use a fixed seed (`rng_seed: Fixed(412)`) so that a failure replays.
 
 The oracle does not see an error **common** to both modes (calculation order,
 evaluation, output type): they share all the code except the decision

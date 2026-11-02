@@ -32,7 +32,7 @@ A size or layout edit of a graph (#394) is an `EditPlotSpec` (`PlotEditKind::Res
 | structural nature | LIFO holds in a macro (`stokesforge-commands/tests/history.rs`) |
 | history label | the example in `stokesforge-commands/tests/labels.rs` (exhaustive) |
 | persistence | `.stf` round trip (`stokesforge-persistence/tests/roundtrip.rs`); additive field → regenerate the witness file (`tests/witness_files.rs`) |
-| column data write | the gesture added to the draws of `b14` and `b22` |
+| column data write | the gesture added to the draws of `b14` and `b22`; structural gestures (rename, move, remove, paste, type change) are drawn by `b23` |
 | memory | `stokesforge-commands/tests/memory_pinning.rs` |
 | interface | `stokesforge-app-state/tests/shell.rs` for the `Action` |
 
