@@ -428,7 +428,9 @@ pub(super) fn graph_view_contents(
             {
                 calculation_handles(ui, view, &snapshot.tree, graph_id, &spec, actions);
             }
-            if !keyboard_focus_outside_grid(ui.ctx()) {
+            if !keyboard_focus_outside_grid(ui.ctx())
+                && !super::project_manager::owns_keyboard(ui.ctx())
+            {
                 if let Some(spec) =
                     stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
                 {
@@ -1190,7 +1192,8 @@ fn annotation_interactions(
         None => {
             // Delete removes the selected text, when no field has
             // focus (otherwise the key belongs to the input).
-            let typing = keyboard_focus_outside_grid(ui.ctx());
+            let typing = keyboard_focus_outside_grid(ui.ctx())
+                || super::project_manager::owns_keyboard(ui.ctx());
             if let Some(target) = view.selected_annotation() {
                 if !typing
                     && ui
@@ -2785,6 +2788,56 @@ pub(super) mod tests {
                 "{label}"
             );
         }
+    }
+
+    /// While the Project Manager has the keyboard (#423), Delete does not remove
+    /// the selected object of the graph in front. Witness: remove `owns_keyboard`
+    /// from the `typing` test of `annotation_interactions`.
+    #[test]
+    fn a_focused_project_manager_keeps_delete() {
+        use stokesforge_render_egui::AnnotationRef;
+        let mut project = Project::new("Objects").unwrap();
+        let root = project.root();
+        let mut spec = PlotSpec::empty("Objects");
+        spec.panels.get_mut(0).unwrap().annotations.push(
+            stokesforge_render_egui::AnnotationSpec::new("Peak", 0.0, 0.0),
+        );
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let tree = project.tree().clone();
+        let text = AnnotationRef { panel: 0, index: 0 };
+        let delete = egui::Event::Key {
+            key: egui::Key::Delete,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let run = |focused: bool| {
+            let context = egui::Context::default();
+            super::super::project_manager::set_focus_for_test(&context, focused);
+            let mut view = GraphView::new();
+            view.select_annotation(Some(text), &spec);
+            let mut actions = Vec::new();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 300.0),
+                )),
+                events: vec![delete.clone()],
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                annotation_interactions(ui, &mut view, &tree, graph, &mut actions);
+            });
+            output.textures_delta.clear();
+            actions
+        };
+        assert!(run(true).is_empty(), "Delete belongs to the panel");
+        assert_eq!(
+            run(false).len(),
+            1,
+            "witness: without the panel focus it deletes"
+        );
     }
 
     /// Delete removes the selected free text or object when no field

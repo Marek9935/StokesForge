@@ -2301,6 +2301,7 @@ fn grid_keyboard(
         && state.import_state().is_none()
         && focus_free
         && !super::dialogs::modal_shown(ui.ctx())
+        && !super::project_manager::has_focus(ui.ctx())
     {
         // #143: F2 belongs only to the focused grid. The other shortcuts keep their
         // fallback without focus, but F2 must stay available for the managers. Reuse
@@ -4463,6 +4464,38 @@ mod tests {
                 "{modal:?}: the grid keeps its selection"
             );
         }
+    }
+
+    /// #423: while the Project Manager has the keyboard, a workbook in front
+    /// neither pastes nor moves its selection; the keys come back once the
+    /// panel's focus is gone. Witness: remove `project_manager::has_focus` from
+    /// the grid key guard.
+    #[test]
+    fn a_focused_project_manager_keeps_paste_and_arrows() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.image(Vec::new());
+        super::super::project_manager::set_focus_for_test(&bench.context, true);
+        bench.seen.clear();
+        bench.image(vec![egui::Event::Paste("1\t2".into())]);
+        bench.press_key(egui::Key::ArrowDown, egui::Modifiers::NONE);
+        assert!(
+            !bench
+                .seen
+                .iter()
+                .any(|action| matches!(action, Action::Paste { .. })),
+            "no cell paste: {:?}",
+            bench.seen
+        );
+        super::super::project_manager::set_focus_for_test(&bench.context, false);
+        bench.image(vec![egui::Event::Paste("1\t2".into())]);
+        assert!(
+            bench
+                .seen
+                .iter()
+                .any(|action| matches!(action, Action::Paste { .. })),
+            "witness: without the panel focus the grid pastes"
+        );
     }
 
     /// #406: the grid answers again once the modal has been gone for two
