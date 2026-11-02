@@ -125,7 +125,12 @@
 //!   modes). Their staleness marker comes from the file, completed by
 //!   persistence: it marks `Manual` a calculation whose fingerprint of the
 //!   inputs' content (`Calculation::inputs_digest`) no longer matches. The
-//!   formula columns, on the other hand, are still recalculated on load;
+//!   formula columns, on the other hand, are still recalculated on load.
+//!   The transposed links (#430) are trusted in the same one-shot way, in
+//!   both modes: after that pass, a link that was up to date in the loaded
+//!   tree and whose input columns kept their type and values is re-recorded
+//!   (`Project::trust_loaded_transposes`), the pass having only renumbered
+//!   the formula columns;
 //! - formulas and calculations feed each other: `run` alternates the two until
 //!   a calculation writes nothing more (at most [`MAX_ROUNDS`] rounds). A loop
 //!   that crosses a calculation (its output feeds a formula that feeds its
@@ -250,10 +255,20 @@ impl Recalculator {
     /// persistence (fingerprint of the inputs' content,
     /// `stokesforge_persistence`), without a calculation either. The flag is
     /// single-use: reset to `false` before returning.
+    ///
+    /// The **transposed links** (#430) get the same trust in one step after
+    /// the pass: `Project::trust_loaded_transposes` re-records the link of a
+    /// sheet that was up to date in the loaded tree and whose input columns
+    /// kept their type and values (the pass only renumbered the formula
+    /// columns). Both modes, once; outside history, no version drawn.
     pub(crate) fn run_after_load(&mut self, project: &mut Project) {
         self.trust_loaded = true;
+        // The tree as loaded: the transposed links trusted afterwards are
+        // judged against it (#430).
+        let before = std::sync::Arc::clone(project.tree());
         self.run(project);
         self.trust_loaded = false;
+        project.trust_loaded_transposes(&before);
     }
 
     /// Recalculates the project's formula columns that need it — **direct**

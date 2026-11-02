@@ -8,7 +8,9 @@
 //! sheet is called *stale* when the source no longer matches it, *modified*
 //! when a value of a column created by the link has been edited. Neither
 //! state is stored: they are derived from the tree (like the staleness
-//! of a calculation), and do not go through the targeted recalculation of formulas.
+//! of a calculation), and do not go through the targeted recalculation of
+//! formulas, except for one step after a load
+//! ([`Project::trust_loaded_transposes`], #430).
 //!
 //! The link is carried by the tree ([`Tree::transposes`]), like calculations:
 //! it travels with the history snapshots and the file.
@@ -180,6 +182,55 @@ pub fn transposed_name(source_name: &str) -> String {
 }
 
 impl Project {
+    /// **Outside history** (#430) — the trust-on-load step of the links,
+    /// like the one of the analysis calculations: the first recalculation
+    /// pass after a load rewrites the formula columns and draws them fresh
+    /// versions with identical values, which would make every link over a
+    /// formula column read stale. `before` is the tree as loaded, before
+    /// that pass. A link is re-recorded (`inputs` re-read from the current
+    /// tree, x' included) only if it was **not stale in `before`** and every
+    /// input column has the **same type and the same values, bit for bit**,
+    /// now as then. A stale link, or one whose inputs really changed,
+    /// stays as it is. Writes no column data and draws no version.
+    pub fn trust_loaded_transposes(&mut self, before: &Tree) {
+        let trusted: Vec<(NodeId, Vec<TransposeSourceColumn>)> = self
+            .tree()
+            .transposes()
+            .iter()
+            .filter_map(|(sheet, link)| {
+                let was = before.transposes().get(sheet)?;
+                if was.state(before).stale || **link != **was {
+                    return None;
+                }
+                let same = link.inputs.iter().all(|input| {
+                    let now = self.tree().node(input.column).and_then(|n| n.as_column());
+                    let then = before.node(input.column).and_then(|n| n.as_column());
+                    match (now, then) {
+                        (Some(a), Some(b)) => {
+                            a.column_type() == b.column_type() && a.values() == b.values()
+                        }
+                        _ => false,
+                    }
+                });
+                if !same {
+                    return None;
+                }
+                let inputs = read_inputs(self.tree(), link.source);
+                (inputs != link.inputs).then_some((*sheet, inputs))
+            })
+            .collect();
+        for (sheet, inputs) in trusted {
+            let Some(link) = self.tree().transposes().get(&sheet) else {
+                continue;
+            };
+            let mut next = (**link).clone();
+            next.inputs = inputs;
+            Arc::make_mut(self.tree_arc_mut())
+                .transposes_mut()
+                .insert(sheet, Arc::new(next));
+        }
+    }
+
     /// Creates or completes the transposed sheet of `source` with the rows
     /// `rows` (0 = the first) and returns that sheet. Atomic.
     ///

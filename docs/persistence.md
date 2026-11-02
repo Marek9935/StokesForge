@@ -707,6 +707,13 @@ written: they are derived on reading, hence the importance of the column version
 (written by the file) and of the content fingerprints (FNV-1a written in hard code, stable
 from one Rust version to another).
 
+On load, the first recalculation pass rewrites the formula columns and draws
+them fresh versions, same values. A link that was up to date in the file and
+whose input columns kept their type and values through that pass has its
+versions re-recorded (`Project::trust_loaded_transposes`, #430), so it is not
+shown stale; a link stale in the file, or whose inputs really changed, keeps
+its recorded versions. Once, outside history.
+
 Tolerant reading (invariant 10): a link whose sheet or source is not
 a sheet of the tree, or one of whose identifiers exceeds `MAX_NODE_ID`, is dropped alone;
 the sheet stays, ordinary. A column identifier that no longer exists is accepted
