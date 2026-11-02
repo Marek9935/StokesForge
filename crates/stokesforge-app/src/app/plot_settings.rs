@@ -457,7 +457,9 @@ fn graph_settings_page(
         // axes"), almost never changed: it lives in the closed Advanced block.
         commit |= form
             .collapsible("plot_graph_advanced", tr!("common-advanced"), |form| {
-                figure_size_row(form, spec, layout)
+                let mut commit = plot_area_rows(form, spec, panel, layout, unit);
+                commit |= figure_size_row(form, spec, layout);
+                commit
             })
             .unwrap_or(false);
         commit
@@ -533,35 +535,47 @@ fn size_section(
     if spec.layer_placement == LayerPlacement::Free {
         return free_size_section(form, spec, panel, size_lock, layout, unit, env);
     }
-    // What each frame is drawn with: the stored size, else the legacy one the
-    // last painted figure laid out (its `frame_widths` are the frames a legacy
-    // graph is drawn with).
-    let drawn = |stored: Option<Vec<f64>>, painted: Option<&Vec<f64>>, count: usize, fallback| {
-        stored.unwrap_or_else(|| {
-            painted
-                .filter(|sizes| sizes.len() == count)
-                .cloned()
-                .unwrap_or_else(|| vec![fallback; count])
-        })
-    };
-    let drawn_widths = drawn(
-        spec.sanitized_frame_widths(),
-        layout.map(|layout| &layout.frame_widths),
-        spec.columns(),
-        FALLBACK_FRAME.0,
+    let (drawn_widths, drawn_heights) = drawn_frames(spec, layout);
+    if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
+        return false;
+    }
+    form.section(tr!("plot-size"));
+    // The figure the frames make once the axes and the title are added around
+    // them, as the last painted figure lays them out.
+    let frames = (
+        spec.sanitized_frame_widths().unwrap_or(drawn_widths),
+        spec.sanitized_frame_heights().unwrap_or(drawn_heights),
     );
-    let drawn_heights = drawn(
-        spec.sanitized_frame_heights(),
-        layout.map(|layout| &layout.frame_heights),
-        spec.rows(),
-        FALLBACK_FRAME.1,
+    let (total_width, total_height) = layout.map_or_else(
+        || (frames.0.iter().sum(), frames.1.iter().sum()),
+        |layout| layout.size_with_frames(&frames.0, &frames.1),
     );
+    let mut commit = total_row(form, spec, size_lock, (total_width, total_height), unit);
+    form.note_dimmed(tr!("plot-size-figure-note"));
+    commit |= placement_row(form, spec);
+    form.note(tr!("plot-size-note"));
+    commit
+}
+
+/// General › Advanced: the plot area rows (#426d prototype). Grid: the width of
+/// each column, the height of each row, Left and Top. Free: Left, Top, Width and
+/// Height of the layer chosen in the list.
+fn plot_area_rows(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    panel: usize,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
+    if spec.layer_placement == LayerPlacement::Free {
+        return free_plot_area_rows(form, spec, panel, layout, unit);
+    }
+    let (drawn_widths, drawn_heights) = drawn_frames(spec, layout);
     if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
         return false;
     }
     let symbol = unit.symbol();
-    form.section(tr!("plot-size"));
-    let mut commit = placement_row(form, spec);
+    let mut commit = false;
     let quantity = quantities::frame_size(unit);
     for (axis, sizes) in [
         (FrameAxis::Column, &drawn_widths),
@@ -594,18 +608,6 @@ fn size_section(
         }
     }
     commit |= offset_rows(form, spec, layout, unit, (&drawn_widths, &drawn_heights));
-    // The graph the frames make once the axes and the title are added around
-    // them, as the last painted figure lays them out.
-    let frames = (
-        spec.sanitized_frame_widths().unwrap_or(drawn_widths),
-        spec.sanitized_frame_heights().unwrap_or(drawn_heights),
-    );
-    let (total_width, total_height) = layout.map_or_else(
-        || (frames.0.iter().sum(), frames.1.iter().sum()),
-        |layout| layout.size_with_frames(&frames.0, &frames.1),
-    );
-    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
-    form.note(tr!("plot-size-note"));
     commit
 }
 
@@ -805,12 +807,60 @@ fn free_size_section(
     unit: LengthUnit,
     env: &mut PickerEnv,
 ) -> bool {
-    let symbol = unit.symbol();
     form.section(tr!("plot-size"));
-    let mut commit = placement_row(form, spec);
     let Some(layout) = layout else {
-        return commit;
+        return placement_row(form, spec);
     };
+    // The extent as frames and bands add up, not the whole-point size: a total
+    // typed and reached reads back as typed (#407).
+    let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
+        .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
+    let mut commit = total_row(form, spec, size_lock, (total_width, total_height), unit);
+    form.note_dimmed(tr!("plot-size-figure-note"));
+    commit |= placement_row(form, spec);
+    if free_fields(spec, panel).is_none() {
+        return commit;
+    }
+    // Background of the layer (#398): Auto paints only where the layer covers
+    // another one.
+    let stored = spec
+        .cell_bases()
+        .get(panel)
+        .and_then(|&base| spec.panels.get(base))
+        .map(|base| base.layer_background.clone())
+        .unwrap_or_default();
+    let mut background = stored.clone();
+    // The picker edits the string while a gesture is under way and reports the
+    // end of it: the draft follows every change, the commit flag only the end.
+    let ended = form.color(
+        &tr!("plot-size-layer-background"),
+        &mut background,
+        ColorUsage::Background,
+        Some(&tr!("plot-size-layer-background-auto")),
+        env,
+    );
+    if background != stored {
+        stokesforge_core::compose::set_layer_background(spec, panel, &background);
+    }
+    commit |= ended;
+    form.note(tr!("plot-size-free-note"));
+    commit
+}
+
+/// General › Advanced, Free placement: Left, Top, Width and Height of the layer
+/// chosen in the list (#398, #426d prototype).
+fn free_plot_area_rows(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    panel: usize,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
+    let symbol = unit.symbol();
+    let mut commit = false;
+    if layout.is_none() {
+        return commit;
+    }
     let Some(fields) = free_fields(spec, panel) else {
         return commit;
     };
@@ -851,34 +901,6 @@ fn free_size_section(
             commit |= set_free_field_in_draft(spec, panel, field, unit.to_points(shown));
         }
     }
-    // Background of the layer (#398): Auto paints only where the layer covers
-    // another one.
-    let stored = spec
-        .cell_bases()
-        .get(panel)
-        .and_then(|&base| spec.panels.get(base))
-        .map(|base| base.layer_background.clone())
-        .unwrap_or_default();
-    let mut background = stored.clone();
-    // The picker edits the string while a gesture is under way and reports the
-    // end of it: the draft follows every change, the commit flag only the end.
-    let ended = form.color(
-        &tr!("plot-size-layer-background"),
-        &mut background,
-        ColorUsage::Background,
-        Some(&tr!("plot-size-layer-background-auto")),
-        env,
-    );
-    if background != stored {
-        stokesforge_core::compose::set_layer_background(spec, panel, &background);
-    }
-    commit |= ended;
-    // The extent as frames and bands add up, not the whole-point size: a total
-    // typed and reached reads back as typed (#407).
-    let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
-        .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
-    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
-    form.note(tr!("plot-size-free-note"));
     commit
 }
 
@@ -2679,6 +2701,43 @@ mod tests {
         one_frame(context, &mut harness.state, Vec::new());
     }
 
+    /// #426d prototype: the plot area rows moved into the Advanced block of
+    /// General (closed by default): opens it with a click on its title.
+    fn open_advanced(context: &egui::Context, harness: &mut Harness) {
+        scroll_page(context, harness, -1000.0);
+        let painted = paint_window(context, &mut harness.state, Vec::new());
+        let pos = text_exact(&painted, &tr!("common-advanced")).center;
+        click(context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        scroll_page(context, harness, -1000.0);
+    }
+
+    /// Scrolls the General page back to its top (the Size section).
+    fn scroll_to_top(context: &egui::Context, harness: &mut Harness) {
+        scroll_page(context, harness, 1000.0);
+    }
+
+    /// The wheel over the page of General (below its tab strip: the bottom
+    /// row of the window holds OK and Cancel).
+    fn scroll_page(context: &egui::Context, harness: &mut Harness, delta: f32) {
+        let painted = paint_window(context, &mut harness.state, Vec::new());
+        let pos = text_exact(&painted, &tr!("plot-tab-general")).center + egui::vec2(0.0, 80.0);
+        paint_window(
+            context,
+            &mut harness.state,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(0.0, delta),
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+    }
+
     /// #394: General › Size shows the plot area width, its height and the size
     /// of the graph in the unit of the Preferences (centimetres: a 392 x 284 pt
     /// plot area is 13.83 x 10.02, the 480 x 360 pt graph it makes with its two
@@ -2695,13 +2754,20 @@ mod tests {
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size"),
-            tr!("plot-size-width", unit = "cm"),
-            tr!("plot-size-height", unit = "cm"),
             tr!("plot-size-total", unit = "cm"),
-            "13.8289".to_owned(),
-            "10.0189".to_owned(),
             "16.93".to_owned(),
             "12.7".to_owned(),
+        ] {
+            assert!(is_painted(&painted, &label), "{label:?} not painted");
+        }
+        // #426d prototype: the plot area fields live in Advanced.
+        open_advanced(&context, &mut harness);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for label in [
+            tr!("plot-size-width", unit = "cm"),
+            tr!("plot-size-height", unit = "cm"),
+            "13.8289".to_owned(),
+            "10.0189".to_owned(),
         ] {
             assert!(is_painted(&painted, &label), "{label:?} not painted");
         }
@@ -2728,6 +2794,7 @@ mod tests {
         let mut harness = harness(|_| {});
         harness.open(PlotSettingsTab::Graph, None);
         assert!(harness.model().frame_widths.is_empty());
+        open_advanced(&context, &mut harness);
         type_into(&context, &mut harness, "10.0189", "5");
         let model = harness.model();
         assert_eq!(model.frame_widths, [392.0], "drawn width stored as it was");
@@ -2822,6 +2889,7 @@ mod tests {
         assert!((width - 566.929).abs() <= 1.0, "20 cm, got {width}");
         assert_eq!(height, 360.0, "the height is not linked");
         assert!(model.frame_widths[0] > 392.0);
+        open_advanced(&context, &mut harness);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
             is_painted(&painted, &cm(model.frame_widths[0])),
@@ -2956,7 +3024,9 @@ mod tests {
         let mut harness = sized_harness();
         harness.open(PlotSettingsTab::Graph, None);
         click_lock(&context, &mut harness);
+        open_advanced(&context, &mut harness);
         type_into(&context, &mut harness, "10.0189", "5");
+        scroll_to_top(&context, &mut harness);
         let (w0, h0) = image_size(&harness.model());
         let ratio = h0 / w0;
         assert!(
@@ -3051,7 +3121,8 @@ mod tests {
             plot_settings_window(ui.ctx(), &mut harness.state)
         });
         // The page is taller than the window: "Size" is already scrolled out.
-        let painted = scroll_down(&context, &mut harness.state, &tr!("common-advanced"));
+        scroll_page(&context, &mut harness, -1000.0);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &tr!("plot-figure-size")));
         assert!(is_painted(&painted, &tr!("plot-figure-size-grows")));
         assert_eq!(harness.model(), harness.draft(), "opening changes nothing");
@@ -3081,6 +3152,7 @@ mod tests {
             spec.figure_top = Some(200.0);
         });
         harness.open(PlotSettingsTab::Graph, None);
+        open_advanced(&context, &mut harness);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size-left", unit = "cm"),
@@ -3206,14 +3278,14 @@ mod tests {
             );
         }
 
-        // The four fields show, the grid ones are gone.
+        // The four fields show (in Advanced), the grid ones are gone.
+        open_advanced(&context, &mut harness);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size-position-left", unit = "cm"),
             tr!("plot-size-position-top", unit = "cm"),
             tr!("plot-size-width", unit = "cm"),
             tr!("plot-size-height", unit = "cm"),
-            tr!("plot-size-total", unit = "cm"),
         ] {
             assert!(is_painted(&painted, &label), "{label:?} not painted");
         }
@@ -3222,6 +3294,7 @@ mod tests {
             "no grid field in Free"
         );
 
+        scroll_to_top(&context, &mut harness);
         click_label(
             &context,
             &mut harness.state,
@@ -3244,6 +3317,7 @@ mod tests {
         let mut harness = harness(|spec| two_layers(spec, true));
         harness.open(PlotSettingsTab::Graph, None);
         harness.state.plot_edit_mut().unwrap().selected_panel = 1;
+        open_advanced(&context, &mut harness);
         let draft = harness.draft();
         let raw = draft.panels[1].free_frame.unwrap().left;
         assert!(raw > 1000.0, "the layer sits far from the origin");
@@ -4309,6 +4383,7 @@ mod tests {
             spec.frame_heights = vec![284.0];
         });
         harness.open(PlotSettingsTab::Graph, None);
+        open_advanced(&context, &mut harness);
         type_into(&context, &mut harness, "13.8289", "10");
         assert!(harness.state.plot_settings().is_some(), "(b) window open");
         assert!(
