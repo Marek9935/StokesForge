@@ -34,7 +34,8 @@
 //! self-referencing, in a cycle, removed; columns added (including with an
 //! already carried version, or cloned from a snapshot), deleted, moved within
 //! the worksheet or to another one; types changed; rows inserted, deleted;
-//! cells deleted (including in a formula column); worksheets duplicated,
+//! cells deleted (including in a formula column); worksheets transposed (#430
+//! keeps their links compared by shape) and refreshed; worksheets duplicated,
 //! pasted, deleted; workbooks pasted; undo, redo, and series of undos followed
 //! by as many redos (the redo of a structural entry is the only path that does
 //! not restamp the versions); macros closed or aborted; save and reload,
@@ -70,6 +71,9 @@ use stokesforge_core::{
 };
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
+
+mod common;
+use common::{link_shapes, strip_links};
 
 // -- draw -----------------------------------------------------------------
 
@@ -230,6 +234,17 @@ enum Step {
         column: usize,
         role_index: usize,
     },
+    /// Transposes the first two rows of a worksheet whose Y columns are all
+    /// plain numbers with an x' (copied from `b23`): the transposed sheet is a
+    /// new worksheet that formulas can read and that the other gestures move,
+    /// copy and delete.
+    Transpose {
+        idx: usize,
+    },
+    /// Refreshes a transposed sheet from its source.
+    RecalculateTranspose {
+        idx: usize,
+    },
     /// "Recalculate Out of Date": reruns the stale calculations.
     RecalculateOutOfDate,
     Undo,
@@ -363,9 +378,11 @@ fn step() -> impl Strategy<Value = Step> {
                 role_index,
             }
         }),
+        1 => (0usize..4).prop_map(|idx| Step::Transpose { idx }),
+        2 => (0usize..4).prop_map(|idx| Step::RecalculateTranspose { idx }),
         2 => Just(Step::RecalculateOutOfDate),
         4 => Just(Step::Undo),
-        3 => Just(Step::Redo),
+        4 => Just(Step::Redo),
         2 => (1usize..5).prop_map(|k| Step::UndoThenRedo { k }),
         1 => Just(Step::OpenMacro),
         1 => Just(Step::CloseMacro),
@@ -399,6 +416,8 @@ const STEP_NAMES: &[&str] = &[
     "AddCalculation",
     "RemoveCalculation",
     "SetRole",
+    "Transpose",
+    "RecalculateTranspose",
     "RecalculateOutOfDate",
     "Undo",
     "Redo",
@@ -435,6 +454,8 @@ fn step_name(step: &Step) -> &'static str {
         Step::AddCalculation { .. } => "AddCalculation",
         Step::RemoveCalculation { .. } => "RemoveCalculation",
         Step::SetRole { .. } => "SetRole",
+        Step::Transpose { .. } => "Transpose",
+        Step::RecalculateTranspose { .. } => "RecalculateTranspose",
         Step::RecalculateOutOfDate => "RecalculateOutOfDate",
         Step::Undo => "Undo",
         Step::Redo => "Redo",
@@ -510,9 +531,10 @@ fn initial_project() -> Project {
     // The other workbook: an X column and a column to read.
     let other = project.add_workbook(root, Some("Book2")).expect("Book2");
     let other_sheet = project.tree().children(other).expect("sheets")[0];
-    for (values, role) in [
-        (&[4.0, 5.0, 6.0][..], ColumnRole::X),
-        (&[40.0, 50.0, 60.0][..], ColumnRole::default()),
+    // The column to read has an x', so that the sheet can be transposed.
+    for (values, role, x_prime) in [
+        (&[4.0, 5.0, 6.0][..], ColumnRole::X, None),
+        (&[40.0, 50.0, 60.0][..], ColumnRole::default(), Some(1.5)),
     ] {
         project
             .add_column(
@@ -524,6 +546,7 @@ fn initial_project() -> Project {
                     ValueBlock::Float(values.to_vec()),
                     ColumnMeta {
                         role,
+                        x_prime,
                         ..Default::default()
                     },
                 )
@@ -602,6 +625,26 @@ fn columns_of(tree: &Tree, sheet: Option<NodeId>) -> Vec<NodeId> {
 
 /// Choice in worksheet order, without depending on the hash table. The
 /// computation and the command stay the same as in the real clients.
+/// Worksheets whose Y columns can all be transposed: numeric, with an x', no
+/// formula, and not themselves transposed (same rule as `b23`).
+fn transposable(tree: &Tree) -> Vec<NodeId> {
+    worksheets_of(tree)
+        .into_iter()
+        .filter(|&s| {
+            let ys: Vec<_> = columns_of(tree, Some(s))
+                .into_iter()
+                .filter_map(|c| tree.node(c).and_then(|n| n.as_column()))
+                .filter(|c| c.meta().role == ColumnRole::Y)
+                .collect();
+            tree.transpose_link(s).is_none()
+                && !ys.is_empty()
+                && ys.iter().all(|c| {
+                    c.meta().formula.is_none() && c.meta().x_prime.is_some_and(f64::is_finite)
+                })
+        })
+        .collect()
+}
+
 fn correction_command(tree: &Tree, columns: &[NodeId], rank: usize) -> Option<Command> {
     let candidates: Vec<_> = columns
         .iter()
@@ -918,6 +961,16 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
             parent: tree.root(),
             name: format!("Witness{rank}"),
         }),
+        Step::Transpose { idx } => {
+            pick(&transposable(tree), idx).map(|source| Command::TransposeRows {
+                source,
+                rows: vec![0, 1],
+            })
+        }
+        Step::RecalculateTranspose { idx } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            pick(&linked, idx).map(|sheet| Command::RecalculateTranspose { sheet })
+        }
         Step::RecalculateOutOfDate
         | Step::Undo
         | Step::Redo
@@ -1173,11 +1226,20 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
 
         let (s_targeted, s_full) = (targeted.snapshot(), full.snapshot());
         // 1. oracle
+        // The links of transposed sheets are compared by shape, without version
+        // numbers (`common`, #430).
         prop_assert!(
-            *s_targeted.tree == *s_full.tree,
+            strip_links(&s_targeted.tree) == strip_links(&s_full.tree),
             "step {rank} ({step:?}): the targeted recalculation diverges from the full recalculation\ntargeted calculations: {:?}\nfull calculations: {:?}",
             s_targeted.tree.calculations(),
             s_full.tree.calculations()
+        );
+        prop_assert_eq!(
+            link_shapes(&s_targeted.tree),
+            link_shapes(&s_full.tree),
+            "step {} ({:?}): transposed-sheet links differ",
+            rank,
+            step
         );
 
         // 2. version ↔ content, in each session.
