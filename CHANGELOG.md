@@ -200,6 +200,10 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
+  the stored value, like Excel: `round(1.005, 2)` is 1.01 (it was 1), and
+  `round(2.675, 2)` is 2.68.
+
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that
