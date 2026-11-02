@@ -267,6 +267,23 @@ pub(super) fn renaming_in(ctx: &egui::Context, viewport: egui::ViewportId) -> Ve
         .unwrap_or_default()
 }
 
+/// Who owns the keyboard this frame (#423): true while the Project Manager of
+/// this viewport has the focus (a click inside it) and no modal window is
+/// shown. Then the clipboard and object keys (Ctrl+C/X/V, Delete, F2, Ctrl+D,
+/// Enter, arrows) go to the panel and to nothing else: the graph in front must
+/// not copy its figure, delete its selected object, and a grid must not paste
+/// or move its selection. Every workspace key consumer asks this one question.
+pub(super) fn owns_keyboard(ctx: &egui::Context) -> bool {
+    !super::dialogs::modal_shown(ctx) && has_focus(ctx)
+}
+
+/// Gives or takes the keyboard focus of the panel (tests of the other windows).
+#[cfg(test)]
+pub(super) fn set_focus_for_test(ctx: &egui::Context, focus: bool) {
+    let key = memory_id(ctx);
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<PmMemory>(key).focus = focus);
+}
+
 pub(super) fn has_focus(ctx: &egui::Context) -> bool {
     let memory_key = memory_id(ctx);
     ctx.data(|data| {
@@ -632,6 +649,13 @@ pub(super) fn project_manager_contents_from_tree(
         memory.toggle.clear();
         memory.scroll_to = None;
     });
+    // A window that stops being the active one of the system keeps no
+    // keyboard focus in the panel (a detached graph clicked, #423).
+    if ui.input(|input| input.viewport().focused) == Some(false) {
+        ui.ctx().data_mut(|data| {
+            data.get_temp_mut_or_default::<PmMemory>(memory_key).focus = false;
+        });
+    }
     if ui.input(|input| input.pointer.any_pressed()) {
         let inside = ui
             .input(|input| input.pointer.interact_pos())
@@ -3092,6 +3116,22 @@ pub(super) mod tests {
             bench.side_arrows_left.get(),
             "witness: no focus, not consumed"
         );
+    }
+
+    /// A click outside the panel takes the keyboard focus away (#423): the front graph or workbook gets its
+    /// keys back. Witness: a focus that is never cleared.
+    #[test]
+    fn a_click_elsewhere_clears_the_panel_focus() {
+        with_focused_panel(|_bench, context, paint, _tabs| {
+            assert!(has_focus(context));
+            click_at(
+                context,
+                egui::pos2(5000.0, 5000.0),
+                egui::Modifiers::NONE,
+                paint,
+            );
+            assert!(!has_focus(context), "a click outside");
+        });
     }
 
     /// Ctrl+X with the panel focused cuts the selection; without focus, the

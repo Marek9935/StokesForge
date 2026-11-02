@@ -124,6 +124,7 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | F2 | row (PM focused) | renames in place, like the menu's Rename (there is no slow click, #423) |
 | ↑, ↓ | row (OM, PM focused) | selects the previous or next visible row, without opening (S-K9); Shift+↑/↓: PM extends the selection from the anchor (the Shift-click range), OM no effect; Alt+↓ has no effect |
 | →, ← | row (PM focused) | → expands a closed folder, then goes to its first child; ← collapses an open folder, otherwise goes to the parent folder; nothing at the root level (#423) |
+| Ctrl + C, Ctrl + X, Ctrl + V, Delete, F2, Ctrl + D, Enter, arrows | PM focused | the panel owns these keys while it has the focus (a click inside it, cleared by a click anywhere else or by its window losing the system focus): the graph or workbook in front does not copy its figure, delete its object, paste or move its cells (`project_manager::owns_keyboard`, #423) |
 | Ctrl + X | row (PM focused) | cuts the selection: rows dimmed; Paste of that copy moves them (one history entry), into the selected folder, which expands |
 | Enter | row (OM, PM focused) | PM: opens the window, expands or collapses the folder; OM: opens the settings of the selected series or object (like the double-click) |
 | Double-click | row (OM) | opens the settings of the object |
