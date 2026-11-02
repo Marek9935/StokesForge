@@ -350,7 +350,11 @@ impl StokesForgeApp {
             } else {
                 egui::ViewportId::ROOT
             };
-            let root = self.state.tree().root();
+            let selected: Vec<_> = self.pm_selection.iter().map(|entry| entry.node()).collect();
+            let paste_parent = stokesforge_app_state::creation_folder::creation_folder(
+                self.state.tree(),
+                &selected,
+            );
             sections.section(ui, true, |ui| {
                 ui.menu_button(tr!("menu-selected-content"), |ui| {
                     super::project_manager::object_menu(
@@ -358,7 +362,7 @@ impl StokesForgeApp {
                         &mut MenuSections::new(),
                         super::project_manager::ObjectMenuTarget::Windows,
                         &ids,
-                        super::project_manager::paste_parent(&self.pm_selection, root),
+                        paste_parent,
                         actions,
                         rename_viewport,
                     );
@@ -1779,7 +1783,7 @@ mod tests {
         let (_, menu) = open_menu(&mut app, tab, &tr!("menu-edit"));
         assert!(find_entry(&menu, &tr!("action-delete-project-object")).is_none());
         app.pm_selection.clear();
-        let (_, menu) = open_path(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[tr!("menu-edit"), tr!("menu-selected-content")],
@@ -1787,8 +1791,16 @@ mod tests {
         assert!(!active(&menu, &tr!("action-delete-project-object")).enabled);
         assert!(!active(&menu, &tr!("action-copy")).enabled);
         assert!(
-            active(&menu, &tr!("action-paste")).enabled,
-            "witness independent of the selection"
+            active(
+                &menu,
+                &format!(
+                    "{} {}",
+                    tr!("action-paste"),
+                    ctx.format_shortcut(&crate::app::shortcuts::SHORTCUT_PASTE)
+                )
+            )
+            .enabled,
+            "witness independent of the selection, and Paste shows Ctrl+V (#425)"
         );
         app.pm_selection
             .insert(super::super::project_manager::PmEntry::Window(Tab::Graph(

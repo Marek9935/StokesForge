@@ -155,7 +155,7 @@ describes its effects.
 | Call | Result / effect |
 |---|---|
 | `root()` | handle of the root folder of the current project |
-| `children(handle=None)` | list of handles of the direct children, in model order; without a handle, children of the root |
+| `children(handle=None)` | list of handles of the direct children, in **model order** (not the Project Manager's sorted display, #425: an automatic folder is only *shown* sorted); without a handle, children of the root |
 | `info(handle)` | detached dictionary: name, kind, parent, row count and column metadata |
 | `values(handle)` | copied tuple of the stored cells, as `float`, `str` or `None` |
 | `resolve(path)` | opaque handle resolved by the model's path grammar |

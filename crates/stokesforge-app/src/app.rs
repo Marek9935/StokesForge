@@ -173,6 +173,7 @@ mod plot_settings;
 #[cfg(test)]
 mod preferences_proto;
 mod preferences_window;
+mod project_dnd;
 mod project_manager;
 mod recovery;
 mod reorder_list;
@@ -1445,8 +1446,13 @@ impl StokesForgeApp {
         // `Project::add_graph` inserts it there in last position, and
         // `AppState::dispatch` already refreshed `self.state`
         // (`AppState::refresh`) on return from this call.
+        // A new window goes into the folder of the Project Manager selection (#425).
+        self.state.set_project_manager_selection(
+            self.pm_selection.iter().map(|entry| entry.node()).collect(),
+        );
+        let creation_folder = self.state.creation_folder();
         let plotted_from = if matches!(action, Action::AddGraph) {
-            Some(self.state.tree().root())
+            Some(creation_folder)
         } else if let Action::PlotColumns { sheet, .. } = &action {
             self.state
                 .tree()
@@ -1457,6 +1463,7 @@ impl StokesForgeApp {
             None
         };
         let creates_workbook = matches!(action, Action::AddWorkbook);
+        let creates_graph = matches!(action, Action::AddGraph);
         // *Add Folder* (#326): same pattern as `plotted_from` — the new folder
         // is the last child of its parent, and its name is edited in place.
         let folder_parent = if let Action::AddFolder { parent } = &action {
@@ -1646,16 +1653,22 @@ impl StokesForgeApp {
             return true;
         }
         if creates_workbook && self.state.revision() != revision_before {
-            let root = self.state.tree().root();
             if let Some(book) = self
                 .state
                 .tree()
-                .node(root)
+                .node(creation_folder)
                 .and_then(|node| node.children().last().copied())
                 .filter(|id| self.state.worksheets_of(*id).len() == 1)
             {
                 self.open_tab(Tab::Book(book));
             }
+        }
+        // The folder that received a new window shows it (#425).
+        if (creates_workbook || creates_graph)
+            && creation_folder != self.state.tree().root()
+            && self.state.revision() != revision_before
+        {
+            project_manager::reveal_folder(ctx, pm_viewport, creation_folder);
         }
         if let Some(parent) = folder_parent {
             if self.state.revision() != revision_before {
@@ -2030,7 +2043,8 @@ mod tests {
             output = run(&mut app, Vec::new());
             extra += 1;
         }
-        assert_eq!(app.floating_tabs.last(), Some(&book));
+        // A single click only selects (#423): the active window stays the graph.
+        assert_eq!(app.floating_tabs.last(), Some(&tab));
         assert_eq!(app.pm_selection, project_manager::tests::windows([book]));
         let highlighted: Vec<f32> = output
             .shapes

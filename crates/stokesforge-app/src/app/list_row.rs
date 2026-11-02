@@ -29,6 +29,28 @@ use eframe::egui;
 use crate::icons::ICON_SIZE;
 use crate::theme;
 
+/// How a row is faded: not at all, label only (a closed window), or label and
+/// icon (a cut row, #423).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowFade {
+    None,
+    Text,
+    TextAndIcon,
+}
+
+impl RowFade {
+    fn text_if(dimmed: bool) -> Self {
+        if dimmed {
+            RowFade::Text
+        } else {
+            RowFade::None
+        }
+    }
+}
+
+/// Opacity of the icon of a cut row (#423).
+const CUT_ICON_OPACITY: f32 = 0.4;
+
 /// Width of the accent strip on the left of a selected row.
 pub(super) const LIST_ROW_MARK: f32 = 3.0;
 
@@ -275,7 +297,7 @@ pub(super) fn list_row(
         icon,
         text,
         selected,
-        dimmed,
+        RowFade::text_if(dimmed),
         false,
         egui::Sense::click(),
     )
@@ -283,13 +305,17 @@ pub(super) fn list_row(
 
 /// [`list_row`] whose focus outline is also painted when the caller knows
 /// that the row carries the keyboard cursor without having egui focus (the Project
-/// Manager follows its focus itself, #170 point 6).
+/// Manager follows its focus itself, #170 point 6). `cut` (#423) is a cut row:
+/// label **and** icon faded, unlike `dimmed` (closed window), which fades the
+/// label only. The row also senses a drag (the Project Manager's drag and
+/// drop, #425); the other lists keep a click-only row.
 pub(super) fn list_row_focused(
     ui: &mut egui::Ui,
     icon: Option<egui::Image<'static>>,
     text: &str,
     selected: bool,
     dimmed: bool,
+    cut: bool,
     focused: bool,
 ) -> egui::Response {
     list_row_sensed(
@@ -297,9 +323,13 @@ pub(super) fn list_row_focused(
         icon,
         text,
         selected,
-        dimmed,
+        if cut {
+            RowFade::TextAndIcon
+        } else {
+            RowFade::text_if(dimmed)
+        },
         focused,
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     )
 }
 
@@ -311,7 +341,7 @@ pub(super) fn list_row_draggable(ui: &mut egui::Ui, text: &str, selected: bool) 
         None,
         text,
         selected,
-        false,
+        RowFade::None,
         false,
         egui::Sense::click_and_drag(),
     )
@@ -322,7 +352,7 @@ fn list_row_sensed(
     icon: Option<egui::Image<'static>>,
     text: &str,
     selected: bool,
-    dimmed: bool,
+    fade: RowFade,
     focused: bool,
     sense: egui::Sense,
 ) -> egui::Response {
@@ -353,11 +383,17 @@ fn list_row_sensed(
                 egui::pos2(text_left, rect.center().y - ICON_SIZE / 2.0),
                 egui::Vec2::splat(ICON_SIZE),
             );
+            // A cut row (#423) fades its icon too; a closed window keeps its icon.
+            let icon = if fade == RowFade::TextAndIcon {
+                icon.tint(egui::Color32::WHITE.gamma_multiply(CUT_ICON_OPACITY))
+            } else {
+                icon
+            };
             icon.paint_at(ui, icon_rect);
             text_left = icon_rect.right() + LIST_ROW_GAP;
         }
         let text_index = egui::pos2(text_left, rect.center().y - galley.size().y / 2.0);
-        let color = list_row_text_color(ui, selected, dimmed);
+        let color = list_row_text_color(ui, selected, fade != RowFade::None);
         ui.painter().galley(text_index, galley, color);
         if focused || response.has_focus() {
             paint_focus_outline(ui, rect);
@@ -551,5 +587,50 @@ mod tests {
                 assert!(rects(&output, theme::accent()).is_empty());
             }
         }
+    }
+}
+
+/// The keys of a **tree** (Project Manager, #423): the list keys, plus
+/// Shift+↑ / Shift+↓ (extend the selection) and ← / → (fold, unfold, go to the
+/// parent or the first child).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TreeKey {
+    Up,
+    Down,
+    ShiftUp,
+    ShiftDown,
+    Left,
+    Right,
+    Enter,
+}
+
+/// Reads the tree keys, consumed once per frame. Alt+↓ is swallowed first (it
+/// does nothing here), then the Shift variants, which `consume_shortcut`
+/// would otherwise take for plain ↑ and ↓. ← and → are consumed: a workbook's
+/// grid, painted after the panel, reads them without consuming.
+pub(super) fn read_tree_navigation(input: &mut egui::InputState) -> Option<TreeKey> {
+    use super::shortcuts::{
+        KEY_ALT_ARROW_DOWN, KEY_ARROW_DOWN, KEY_ARROW_LEFT, KEY_ARROW_RIGHT, KEY_ARROW_UP,
+        KEY_ENTER, KEY_SHIFT_ARROW_DOWN, KEY_SHIFT_ARROW_UP,
+    };
+    if input.consume_shortcut(&KEY_ALT_ARROW_DOWN) {
+        return None;
+    }
+    if input.consume_shortcut(&KEY_SHIFT_ARROW_UP) {
+        Some(TreeKey::ShiftUp)
+    } else if input.consume_shortcut(&KEY_SHIFT_ARROW_DOWN) {
+        Some(TreeKey::ShiftDown)
+    } else if input.consume_shortcut(&KEY_ARROW_UP) {
+        Some(TreeKey::Up)
+    } else if input.consume_shortcut(&KEY_ARROW_DOWN) {
+        Some(TreeKey::Down)
+    } else if input.consume_shortcut(&KEY_ARROW_LEFT) {
+        Some(TreeKey::Left)
+    } else if input.consume_shortcut(&KEY_ARROW_RIGHT) {
+        Some(TreeKey::Right)
+    } else if input.consume_shortcut(&KEY_ENTER) {
+        Some(TreeKey::Enter)
+    } else {
+        None
     }
 }

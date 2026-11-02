@@ -26,6 +26,17 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Project Manager (#425): drag rows to move them. Drop on a folder to put them
+  inside it, between two rows to reorder, below the last row to move them to the
+  root. A closed folder opens after a second under the pointer, Escape cancels,
+  one Undo gives it all back. Every folder is now shown sorted (folders first,
+  then by name, Fit2 before Fit10); dropping between rows puts that folder in
+  manual order, and right-click > Sort (on the folder, or on the empty area for
+  the root) sorts it again. Copying or duplicating a manual-order folder keeps
+  the manual order in the copy. The `.stf` file gains an optional list of
+  manual-order folders: an older version that opens and saves the file again
+  loses those orders.
+
 - Set the total size of a graph (#407): in Graph Properties > General > Size,
   **Graph size** is now two fields, width and height, in the unit of the
   Preferences. Typing one resizes every plot area in proportion (the axes,

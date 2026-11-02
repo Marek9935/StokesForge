@@ -40,6 +40,52 @@ pub fn same_name_ignoring_case(a: &str, b: &str) -> bool {
             .eq(b.chars().flat_map(char::to_lowercase))
 }
 
+/// Natural name order (#425): case-insensitive, runs of ASCII digits compared
+/// by value (`Fit2` before `Fit10`, `a01` after `a1` only as a tie-break on
+/// the run length). The digit runs are never parsed to a number, so a run of
+/// any length cannot overflow: leading zeros are stripped, then the shorter
+/// run is the smaller, then the digits compare as text.
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut ai, mut bi) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (ai.peek().copied(), bi.peek().copied()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let run = |it: &mut std::iter::Peekable<std::str::Chars<'_>>| {
+                    let mut s = String::new();
+                    while let Some(c) = it.next_if(char::is_ascii_digit) {
+                        s.push(c);
+                    }
+                    s
+                };
+                let (ra, rb) = (run(&mut ai), run(&mut bi));
+                let (ta, tb) = (ra.trim_start_matches('0'), rb.trim_start_matches('0'));
+                let ord = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                // Same value: the run with fewer leading zeros first.
+                let ord = ra.len().cmp(&rb.len());
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+            (Some(x), Some(y)) => {
+                let (lx, ly) = (x.to_lowercase().next(), y.to_lowercase().next());
+                let ord = lx.cmp(&ly);
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                ai.next();
+                bi.next();
+            }
+        }
+    }
+}
+
 /// Validates an object name: not empty, no edge space, no
 /// reserved character, no control character nor deceptive Unicode
 /// formatting/direction mark, and at most [`MAX_NAME_CHARS`] characters. Returns the name
@@ -75,6 +121,22 @@ pub fn check_name(name: &str) -> CoreResult<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn natural_order_compares_digit_runs_by_value() {
+        use std::cmp::Ordering::*;
+        assert_eq!(natural_cmp("Fit2", "Fit10"), Less);
+        assert_eq!(natural_cmp("fit10", "FIT2"), Greater);
+        assert_eq!(natural_cmp("a1", "a01"), Less);
+        assert_eq!(natural_cmp("a01", "a2"), Less);
+        assert_eq!(natural_cmp("Book", "Book1"), Less);
+        let big_a = format!("x{}1", "9".repeat(30));
+        let big_b = format!("x{}2", "9".repeat(30));
+        assert_eq!(natural_cmp(&big_a, &big_b), Less);
+        let longer = format!("x{}", "9".repeat(31));
+        assert_eq!(natural_cmp(&big_a, &longer), Less);
+        assert_eq!(natural_cmp("B", "a"), Greater);
+    }
 
     #[test]
     fn rejects_invalid_names() {

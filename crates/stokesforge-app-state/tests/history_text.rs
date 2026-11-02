@@ -52,10 +52,11 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::RestoreOriginalData(_) => 29,
         HistoryLabel::TransposeRows => 30,
         HistoryLabel::RecalculateTranspose => 31,
+        HistoryLabel::SortFolder { .. } => 32,
     }
 }
 
-const VARIANTS: usize = 32;
+const VARIANTS: usize = 33;
 
 /// Each variant, in **each** of its forms (known target or not, 0, 1 and
 /// several rows, each kind of group).
@@ -123,6 +124,8 @@ fn all_labels() -> Vec<HistoryLabel> {
             name: name("Graph1"),
         },
         HistoryLabel::SetSavedColors,
+        HistoryLabel::SortFolder { name: None },
+        HistoryLabel::SortFolder { name: name("Data") },
     ];
     for count in [0, 1, 2, 3, 1000] {
         labels.push(HistoryLabel::InsertRows { count });

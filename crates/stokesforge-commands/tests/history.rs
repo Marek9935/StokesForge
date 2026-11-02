@@ -2308,6 +2308,65 @@ fn set_saved_colors_round_trip() {
 }
 
 #[test]
+fn set_folder_order_round_trip_and_one_undo_for_a_reorder_macro() {
+    let mut f = fixture();
+    let root = f.project.root();
+    let a = f.project.add_workbook(root, Some("A")).unwrap();
+    let b = f.project.add_workbook(root, Some("B")).unwrap();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetFolderOrder {
+                folder: root,
+                manual: true,
+            },
+        )
+        .expect("order set");
+    assert!(f.project.tree().is_manual_order(root));
+    let manual = snapshot(&f.project);
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert!(!f.project.tree().is_manual_order(root));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *manual);
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+
+    // A reorder is one macro: flag and moves undone together.
+    let start = history.len();
+    let order_before = f.project.tree().children(root).unwrap().to_vec();
+    history.begin_macro(MacroKind::MoveObjects).unwrap();
+    history
+        .execute(
+            &mut f.project,
+            Command::SetFolderOrder {
+                folder: root,
+                manual: true,
+            },
+        )
+        .unwrap();
+    history
+        .execute(
+            &mut f.project,
+            Command::Move {
+                id: b,
+                new_parent: root,
+                index: 0,
+            },
+        )
+        .unwrap();
+    history.end_macro(&mut f.project).unwrap();
+    assert_eq!(history.len(), start + 1);
+    assert_eq!(f.project.tree().displayed_children(root).unwrap()[0], b);
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert!(!f.project.tree().is_manual_order(root));
+    assert_eq!(f.project.tree().children(root).unwrap(), &order_before[..]);
+    assert!(order_before.contains(&a));
+}
+
+#[test]
 fn set_plot_spec_round_trip() {
     let mut f = fixture();
     let root = f.project.root();

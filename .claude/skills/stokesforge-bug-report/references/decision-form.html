@@ -124,6 +124,11 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .mfb.you{border-color:var(--warn);background:var(--warn-soft)} .mfb.ag{border-color:var(--accent);background:var(--accent-soft)}
 .mfb.ok{border-color:var(--ok);background:var(--ok-soft)} .mfb.bad{border-color:var(--bad);background:var(--bad-soft)}
 .mfa{color:var(--muted);font-weight:700}
+.mtree{display:flex;flex-direction:column;border:2px solid var(--muted);border-radius:6px;background:var(--panel);padding:4px 0;min-width:220px;max-width:340px;font-size:.92rem}
+.mtree>span{padding:1px 10px;white-space:nowrap}
+.mtree .sel{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent)}
+.mtree .act{font-weight:700} .mtree .off{color:var(--muted)} .mtree .bad{color:var(--bad);font-weight:700}
+.mtree .edit .mf{min-width:120px;padding:0 6px}
 #intro{display:flex;flex-direction:column;gap:8px;padding-block:8px}
 .itag{font-weight:700;border:2px solid var(--muted);border-radius:6px;padding:1px 8px;white-space:nowrap}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -161,6 +166,8 @@ const slider=p=>`<span class="msl"><i style="width:${p}%"></i><b style="left:${p
 const sheet=cols=>`<div class="msh">${cols.map(([l,t,c=''])=>`<div class="msc ${c}"><b>${l}</b><span>${t}</span></div>`).join('')}</div>`;
 // Schéma de déroulé : chaînes = étapes, '→' = flèche, [texte, classe] : you (toi, attente), ag (agents), ok (livré), bad (problème)
 const flow=(...s)=>`<div class="mflow">${s.map(x=>x==='→'?'<span class="mfa">→</span>':Array.isArray(x)?`<span class="mfb ${x[1]}">${x[0]}</span>`:`<span class="mfb">${x}</span>`).join('')}</div>`;
+// Arbre du Project Manager : lignes [profondeur, texte, c] ; c = sel (sélectionnée) | act (fenêtre active) | off (fenêtre fermée) | bad | edit (champ de renommage)
+const tree=rows=>`<div class="mtree">${rows.map(([d,t,c=''])=>`<span class="${c}" style="padding-left:${10+d*18}px">${c.includes('edit')?f(t):t}</span>`).join('')}</div>`;
 // Une option : nom, puces « après », schéma « après », avantage, défaut. La première est la recommandation.
 const O=(t,pts,m,plus,moins)=>({t,pts:pts||[],m:m||'',plus:plus||'',moins:moins||''});
 

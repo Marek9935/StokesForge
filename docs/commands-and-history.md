@@ -42,6 +42,7 @@ Authoritative list: `stokesforge-commands/src/command.rs` (`Command`,
 | `SetPlotSpec { graph, spec }` | data |
 | `EditPlotSpec { graph, spec, kind }` | data (same spec delta, with a `PlotEditKind` reason) |
 | `SetSavedColors { colors }` | data |
+| `SetFolderOrder { folder, manual }` | data (#425: automatic or manual order of a folder, `DataDelta::FolderOrder`; label `SortFolder`) |
 
 The empty graph of "File › Add Graph" (#73) reuses `AddGraph` with
 `PlotSpec::empty("")`: one plot area, no series, the same undo and persistence
@@ -260,7 +261,7 @@ right after the original, including when unknown kinds are kept in it.
 
 Multiple gestures are grouped by `MacroKind::{PasteObjects,
 DuplicateObjects, DeleteObjects, RenameObjects, MoveObjects}` (Project
-Manager); moving several columns of a sheet has its own,
+Manager; a drop between two rows is a `MoveObjects` group made of `SetFolderOrder { manual: true }` then the `Move`s that give the displayed order, #425); moving several columns of a sheet has its own,
 `MacroKind::MoveColumns` (#319: a series of `Command::Move` computed by
 `stokesforge-app-state::column_move::plan`, index counted **after removal**, a
 single `execute` with no macro for one column); an intermediate failure aborts

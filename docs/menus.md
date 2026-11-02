@@ -118,8 +118,11 @@ The check boxes keep the menu open (#114).
 
 | Target | Menu |
 |---|---|
-| Window(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
-| Folder | Add Folder (in this folder) ─ Copy (disabled) · Paste (in this folder) ─ Rename (in place) · Duplicate (disabled) ─ Delete |
+| Window(s) | Open · Close ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete |
+| Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate · Sort (this folder back to automatic order, greyed with its reason when it already is, #425) ─ Delete |
+| Empty area under the last row | Add Folder · Paste (in the root) ─ Sort (the root, #425) |
+
+The empty-area right-click (strip under the last row, always at least two rows tall, `FREE_STRIP_ROWS`) is the root menu: Add Folder · Paste ─ Sort, all acting on the root. A click or right-click in that area also clears the selection (#425). Paste shows its shortcut, Ctrl+V, in every menu.
 
 Selection ▸ remains only in Edit.
 

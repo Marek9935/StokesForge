@@ -21,6 +21,8 @@ pub struct NodeCopy {
     calculations: Vec<(NodeId, Calculation)>,
     /// Transposed sheets of the subtree whose source is inside it too.
     transposes: Vec<(NodeId, TransposeLink)>,
+    /// Folders of the subtree that were in manual order in the source (#425).
+    manual_folders: Vec<NodeId>,
     external: bool,
 }
 
@@ -199,18 +201,31 @@ impl NodeCopy {
                         graph_data: Vec::new(),
                         calculations: Vec::new(),
                         transposes: Vec::new(),
+                        manual_folders: Vec::new(),
                         external: false,
                     },
                 ));
             }
         }
+        let manual_folders = nodes
+            .iter()
+            .map(Node::id)
+            .filter(|id| tree.is_manual_order(*id))
+            .collect();
         Ok(Self {
             nodes,
             graph_data,
             calculations: Vec::new(),
             transposes: Vec::new(),
+            manual_folders,
             external: false,
         })
+    }
+
+    /// The folders of the copy (source identifiers) that were in manual order
+    /// (#425): the paste puts the copies of those in manual order too.
+    pub fn manual_folders(&self) -> &[NodeId] {
+        &self.manual_folders
     }
 
     /// Calculations carried by the copy, with their identifier in the source.
