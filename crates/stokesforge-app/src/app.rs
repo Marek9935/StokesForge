@@ -982,6 +982,13 @@ impl eframe::App for StokesForgeApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` is an `Arc`: the clone avoids the read borrow of the painted Ui.
         let ctx = ui.ctx().clone();
+        // Published once per frame for the graph windows (size bubble, #426b).
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                egui::Id::new("stokesforge_length_unit"),
+                self.state.length_unit(),
+            );
+        });
         self.sync_window_title_and_status(&ctx);
         self.prepare_panel_windows();
         let published_stamp = snapshot_stamp(self.state.snapshot());

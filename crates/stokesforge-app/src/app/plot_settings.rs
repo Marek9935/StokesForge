@@ -457,7 +457,7 @@ fn graph_settings_page(
         // axes"), almost never changed: it lives in the closed Advanced block.
         commit |= form
             .collapsible("plot_graph_advanced", tr!("common-advanced"), |form| {
-                figure_size_row(form, spec, layout)
+                size_advanced(form, spec, layout, unit)
             })
             .unwrap_or(false);
         commit
@@ -515,12 +515,32 @@ fn figure_size_row(
     set_fixed_in_draft(spec, (&widths, &heights), fixed)
 }
 
-/// General › Size (#394): the width of the plot area (the frame) of each grid
-/// column and its height for each grid row, in the unit of the Preferences, and
-/// the size of the graph they add up to with the axes and the title (read-only).
-/// Edits go into the draft like every other field of the window, in the one
-/// undo step of the window; a graph from an old file is first given the frames
-/// it is drawn with, so only the edited one changes.
+/// What each frame is drawn with: the stored size, else the legacy one the last
+/// painted figure laid out. `None` if the counts do not match the grid.
+fn drawn_sizes(spec: &PlotSpec, layout: Option<&FigureLayout>) -> Option<(Vec<f64>, Vec<f64>)> {
+    let (widths, heights) = drawn_frames(spec, layout);
+    (widths.len() == spec.columns() && heights.len() == spec.rows()).then_some((widths, heights))
+}
+
+/// The bands (axes, labels, margins) around the frame of a column or a row in
+/// the last laid-out figure, `None` when the layout does not know that cell.
+fn bands(layout: Option<&FigureLayout>, axis: FrameAxis, index: usize) -> Option<f64> {
+    let layout = layout?;
+    let gutters = match axis {
+        FrameAxis::Column => &layout.column_gutters,
+        FrameAxis::Row => &layout.row_gutters,
+    };
+    gutters
+        .get(index)
+        .map(|&(before, after)| f64::from(before) + f64::from(after))
+}
+
+/// General › Size (#426b prototype): the layer placement, the figure size (the
+/// whole image), then the size of each graph box (axes and labels included).
+/// The plot area fields, Left / Top and the Adding-axes choice are in
+/// [`size_advanced`]; where the layout does not know a cell (legacy graph), the
+/// plot area field is shown here instead. Edits go into the draft like every
+/// other field of the window, in the one undo step of the window.
 fn size_section(
     form: &mut Form<'_>,
     spec: &mut PlotSpec,
@@ -533,52 +553,50 @@ fn size_section(
     if spec.layer_placement == LayerPlacement::Free {
         return free_size_section(form, spec, panel, size_lock, layout, unit, env);
     }
-    // What each frame is drawn with: the stored size, else the legacy one the
-    // last painted figure laid out (its `frame_widths` are the frames a legacy
-    // graph is drawn with).
-    let drawn = |stored: Option<Vec<f64>>, painted: Option<&Vec<f64>>, count: usize, fallback| {
-        stored.unwrap_or_else(|| {
-            painted
-                .filter(|sizes| sizes.len() == count)
-                .cloned()
-                .unwrap_or_else(|| vec![fallback; count])
-        })
-    };
-    let drawn_widths = drawn(
-        spec.sanitized_frame_widths(),
-        layout.map(|layout| &layout.frame_widths),
-        spec.columns(),
-        FALLBACK_FRAME.0,
-    );
-    let drawn_heights = drawn(
-        spec.sanitized_frame_heights(),
-        layout.map(|layout| &layout.frame_heights),
-        spec.rows(),
-        FALLBACK_FRAME.1,
-    );
-    if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
+    let Some((drawn_widths, drawn_heights)) = drawn_sizes(spec, layout) else {
         return false;
-    }
-    let symbol = unit.symbol();
+    };
     form.section(tr!("plot-size"));
     let mut commit = placement_row(form, spec);
-    let quantity = quantities::frame_size(unit);
+    // The image the frames make once the axes and the title are added around
+    // them, as the last painted figure lays them out.
+    let (total_width, total_height) = layout.map_or_else(
+        || (drawn_widths.iter().sum(), drawn_heights.iter().sum()),
+        |layout| layout.size_with_frames(&drawn_widths, &drawn_heights),
+    );
+    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
+    let symbol = unit.symbol();
+    let quantity = quantities::figure_total(unit, 0.0, stokesforge_plot::MAX_FIGURE_EXTENT);
     for (axis, sizes) in [
         (FrameAxis::Column, &drawn_widths),
         (FrameAxis::Row, &drawn_heights),
     ] {
         for (index, &points) in sizes.iter().enumerate() {
+            let Some(bands) = bands(layout, axis, index) else {
+                // Fallback: the plot area field, as before.
+                commit |= plot_area_field(
+                    form,
+                    spec,
+                    (&drawn_widths, &drawn_heights),
+                    axis,
+                    index,
+                    unit,
+                );
+                continue;
+            };
             let number = index + 1;
             let label = match (axis, sizes.len() == 1) {
-                (FrameAxis::Column, true) => tr!("plot-size-width", unit = symbol),
+                (FrameAxis::Column, true) => tr!("plot-size-box-width", unit = symbol),
                 (FrameAxis::Column, false) => {
-                    tr!("plot-size-column-width", n = number, unit = symbol)
+                    tr!("plot-size-box-column-width", n = number, unit = symbol)
                 }
-                (FrameAxis::Row, true) => tr!("plot-size-height", unit = symbol),
-                (FrameAxis::Row, false) => tr!("plot-size-row-height", n = number, unit = symbol),
+                (FrameAxis::Row, true) => tr!("plot-size-box-height", unit = symbol),
+                (FrameAxis::Row, false) => {
+                    tr!("plot-size-box-row-height", n = number, unit = symbol)
+                }
             };
-            let mut shown = unit.from_points(points);
-            let id = ("graph_size", matches!(axis, FrameAxis::Row), index);
+            let mut shown = round_to_unit(unit.from_points(points + bands), unit);
+            let id = ("graph_box_size", matches!(axis, FrameAxis::Row), index);
             let changed = form.row(label, |ui| {
                 number_field(ui, id, &mut shown, &quantity).changed
             });
@@ -588,24 +606,73 @@ fn size_section(
                     (&drawn_widths, &drawn_heights),
                     axis,
                     index,
-                    unit.to_points(shown),
+                    unit.to_points(shown) - bands,
                 );
             }
         }
     }
-    commit |= offset_rows(form, spec, layout, unit, (&drawn_widths, &drawn_heights));
-    // The graph the frames make once the axes and the title are added around
-    // them, as the last painted figure lays them out.
-    let frames = (
-        spec.sanitized_frame_widths().unwrap_or(drawn_widths),
-        spec.sanitized_frame_heights().unwrap_or(drawn_heights),
-    );
-    let (total_width, total_height) = layout.map_or_else(
-        || (frames.0.iter().sum(), frames.1.iter().sum()),
-        |layout| layout.size_with_frames(&frames.0, &frames.1),
-    );
-    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     form.note(tr!("plot-size-note"));
+    commit
+}
+
+/// One plot area field (the frame of a column or a row), in `unit`.
+fn plot_area_field(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    drawn: (&[f64], &[f64]),
+    axis: FrameAxis,
+    index: usize,
+    unit: LengthUnit,
+) -> bool {
+    let symbol = unit.symbol();
+    let sizes = match axis {
+        FrameAxis::Column => drawn.0,
+        FrameAxis::Row => drawn.1,
+    };
+    let number = index + 1;
+    let label = match (axis, sizes.len() == 1) {
+        (FrameAxis::Column, true) => tr!("plot-size-width", unit = symbol),
+        (FrameAxis::Column, false) => tr!("plot-size-column-width", n = number, unit = symbol),
+        (FrameAxis::Row, true) => tr!("plot-size-height", unit = symbol),
+        (FrameAxis::Row, false) => tr!("plot-size-row-height", n = number, unit = symbol),
+    };
+    let quantity = quantities::frame_size(unit);
+    let mut shown = unit.from_points(sizes[index]);
+    let id = ("graph_size", matches!(axis, FrameAxis::Row), index);
+    let changed = form.row(label, |ui| {
+        number_field(ui, id, &mut shown, &quantity).changed
+    });
+    changed && set_size_in_draft(spec, drawn, axis, index, unit.to_points(shown))
+}
+
+/// General › Advanced (#426b prototype): the plot area of each column and row
+/// (those the graph box fields above do not stand for), Left and Top, and
+/// what adding an axis does to the figure.
+fn size_advanced(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
+    let mut commit = false;
+    if spec.layer_placement != LayerPlacement::Free {
+        if let Some((widths, heights)) = drawn_sizes(spec, layout) {
+            for (axis, count) in [
+                (FrameAxis::Column, widths.len()),
+                (FrameAxis::Row, heights.len()),
+            ] {
+                for index in 0..count {
+                    // A cell the layout does not know is already above.
+                    if bands(layout, axis, index).is_some() {
+                        commit |=
+                            plot_area_field(form, spec, (&widths, &heights), axis, index, unit);
+                    }
+                }
+            }
+            commit |= offset_rows(form, spec, layout, unit, (&widths, &heights));
+        }
+    }
+    commit |= figure_size_row(form, spec, layout);
     commit
 }
 
@@ -811,6 +878,12 @@ fn free_size_section(
     let Some(layout) = layout else {
         return commit;
     };
+    // The figure size first: the box around the layers.
+    // The extent as frames and bands add up, not the whole-point size: a total
+    // typed and reached reads back as typed (#407).
+    let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
+        .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
+    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     let Some(fields) = free_fields(spec, panel) else {
         return commit;
     };
@@ -873,11 +946,6 @@ fn free_size_section(
         stokesforge_core::compose::set_layer_background(spec, panel, &background);
     }
     commit |= ended;
-    // The extent as frames and bands add up, not the whole-point size: a total
-    // typed and reached reads back as typed (#407).
-    let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
-        .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
-    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     form.note(tr!("plot-size-free-note"));
     commit
 }
@@ -1980,6 +2048,16 @@ mod tests {
         texts.iter().any(|t| t.text == wanted)
     }
 
+    /// The first painted text equal to `wanted`: since #426b the figure size
+    /// and the graph box of a one-cell graph show the same number, the figure
+    /// size being above.
+    fn first_text<'a>(texts: &'a [Text], wanted: &str) -> &'a Text {
+        texts
+            .iter()
+            .find(|t| t.text == wanted)
+            .unwrap_or_else(|| panic!("{wanted:?} not painted: {texts:?}"))
+    }
+
     fn click_event(pos: egui::Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton {
             pos,
@@ -2359,7 +2437,7 @@ mod tests {
     fn hover_label(context: &egui::Context, state: &mut AppState, label: &str) -> Vec<Text> {
         context.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
         let painted = paint_window(context, state, Vec::new());
-        let pos = text_exact(&painted, label).center;
+        let pos = first_text(&painted, label).center;
         paint_window(context, state, vec![egui::Event::PointerMoved(pos)]);
         paint_window(context, state, vec![egui::Event::PointerMoved(pos)])
     }
@@ -2666,6 +2744,40 @@ mod tests {
         );
     }
 
+    /// Opens the closed Advanced block of General (the plot area fields, Left
+    /// and Top, and Adding axes live in it since #426b) and leaves the page
+    /// scrolled down to it: the fields at the top are out of view until
+    /// [`scroll_up`].
+    fn open_advanced(context: &egui::Context, harness: &mut Harness) {
+        let painted = scroll_down(context, &mut harness.state, &tr!("plot-size"));
+        let pos = text_exact(&painted, &tr!("common-advanced")).center;
+        click(context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        // Hover a label that is in view: Advanced itself may be below the fold.
+        scroll_down(context, &mut harness.state, &tr!("plot-size"));
+    }
+
+    /// Scrolls the page of General back to its top.
+    fn scroll_up(context: &egui::Context, harness: &mut Harness) {
+        let painted = paint_window(context, &mut harness.state, Vec::new());
+        let pos = text_exact(&painted, &tr!("common-advanced")).center;
+        paint_window(
+            context,
+            &mut harness.state,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(0.0, 5000.0),
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        paint_window(context, &mut harness.state, Vec::new());
+    }
+
     /// Types `typed` into the numeric field that displays `value`, commits on
     /// Enter.
     fn type_into(context: &egui::Context, harness: &mut Harness, value: &str, typed: &str) {
@@ -2679,13 +2791,12 @@ mod tests {
         one_frame(context, &mut harness.state, Vec::new());
     }
 
-    /// #394: General › Size shows the plot area width, its height and the size
-    /// of the graph in the unit of the Preferences (centimetres: a 392 x 284 pt
-    /// plot area is 13.83 x 10.02, the 480 x 360 pt graph it makes with its two
-    /// axes 16.93 x 12.7), and typing a width stores points and leaves the height alone, in
-    /// the one step of the window.
+    /// #426b: General › Size shows the figure size, then the size of each graph
+    /// box (axes included) in the unit of the Preferences; the plot area
+    /// fields are in the closed Advanced block. A 392 x 284 pt plot area makes
+    /// a 480 x 360 pt graph (16.93 x 12.7 cm) with its two axes.
     #[test]
-    fn the_size_fields_show_the_unit_and_store_points() {
+    fn the_size_fields_show_the_figure_then_the_graph_boxes() {
         let context = test_support::context();
         let mut harness = harness(|spec| {
             spec.frame_widths = vec![392.0];
@@ -2695,26 +2806,70 @@ mod tests {
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size"),
-            tr!("plot-size-width", unit = "cm"),
-            tr!("plot-size-height", unit = "cm"),
             tr!("plot-size-total", unit = "cm"),
-            "13.8289".to_owned(),
-            "10.0189".to_owned(),
+            tr!("plot-size-box-width", unit = "cm"),
+            tr!("plot-size-box-height", unit = "cm"),
             "16.93".to_owned(),
             "12.7".to_owned(),
         ] {
             assert!(is_painted(&painted, &label), "{label:?} not painted");
         }
+        for hidden in [
+            tr!("plot-size-width", unit = "cm"),
+            tr!("plot-size-height", unit = "cm"),
+        ] {
+            assert!(!is_painted(&painted, &hidden), "{hidden:?}: in Advanced");
+        }
+        let y = |label: &str| text_exact(&painted, label).center.y;
+        assert!(
+            y(&tr!("plot-size-total", unit = "cm")) < y(&tr!("plot-size-box-width", unit = "cm")),
+            "the figure size comes first"
+        );
+    }
+
+    /// #426b: the graph width field shows the frame plus the bands of its
+    /// column (axes and labels), and typing a value stores `typed - bands` as
+    /// the frame width, in the one step of the window.
+    #[test]
+    fn the_graph_width_is_the_frame_plus_its_bands() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.frame_widths = vec![392.0];
+            spec.frame_heights = vec![284.0];
+        });
+        harness.open(PlotSettingsTab::Graph, None);
+        let layout =
+            stokesforge_app_state::frame_sizes::figure_layout(&harness.draft()).expect("layout");
+        let (left, right) = layout.column_gutters[0];
+        let bands = f64::from(left) + f64::from(right);
+        assert!(bands > 0.0);
+        // The box is 392 + bands points: 16.93 cm for the stock 480 pt.
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let shown = format!("{:.2}", (392.0 + bands) / 72.0 * 2.54);
+        let boxes: Vec<_> = painted.iter().filter(|t| t.text == shown).collect();
+        assert!(boxes.len() >= 2, "total and box show {shown}: {painted:?}");
         let history = harness.state.undo_label();
 
-        type_into(&context, &mut harness, "13.8289", "10");
+        // The box field is the second one that shows it (the total is first).
+        let pos = boxes[1].center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("10".into())],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(&context, &mut harness.state, Vec::new());
         let model = harness.model();
+        let expected = 10.0 / 2.54 * 72.0 - bands;
         assert!(
-            (model.frame_widths[0] - 283.464_566_9).abs() < 1e-6,
-            "{model:?}"
+            (model.frame_widths[0] - expected).abs() < 1e-3,
+            "{} vs {expected}",
+            model.frame_widths[0]
         );
         assert_eq!(model.frame_heights, [284.0]);
-        // The window is one history entry, closed with it.
         harness.state.close_plot_settings();
         assert_ne!(harness.state.undo_label(), history, "an undoable entry");
     }
@@ -2785,7 +2940,7 @@ mod tests {
         for _ in 0..8 {
             paint_window(context, &mut harness.state, Vec::new());
         }
-        let row = text_exact(
+        let row = first_text(
             &paint_window(context, &mut harness.state, Vec::new()),
             &width,
         )
@@ -2824,8 +2979,8 @@ mod tests {
         assert!(model.frame_widths[0] > 392.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
-            is_painted(&painted, &cm(model.frame_widths[0])),
-            "the plot area field follows"
+            is_painted(&painted, &total_text(width)),
+            "the graph box field follows (one cell: the figure width)"
         );
         harness.state.close_plot_settings();
         harness.state.dispatch(Action::Undo);
@@ -2956,7 +3111,9 @@ mod tests {
         let mut harness = sized_harness();
         harness.open(PlotSettingsTab::Graph, None);
         click_lock(&context, &mut harness);
+        open_advanced(&context, &mut harness);
         type_into(&context, &mut harness, "10.0189", "5");
+        scroll_up(&context, &mut harness);
         let (w0, h0) = image_size(&harness.model());
         let ratio = h0 / w0;
         assert!(
@@ -3081,6 +3238,7 @@ mod tests {
             spec.figure_top = Some(200.0);
         });
         harness.open(PlotSettingsTab::Graph, None);
+        open_advanced(&context, &mut harness);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size-left", unit = "cm"),
@@ -3795,7 +3953,9 @@ mod tests {
     /// selected), then returns the field's center for the rest of the gesture.
     fn focus_field(context: &egui::Context, state: &mut AppState, value: &str) -> egui::Pos2 {
         let painted = paint_window(context, state, Vec::new());
-        let center = text_exact(&painted, value).center;
+        // The first one: since #426b the figure size and the graph box show
+        // the same number for a one-cell graph, the figure size being above.
+        let center = first_text(&painted, value).center;
         click(context, center, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), state)
         });
@@ -4309,6 +4469,7 @@ mod tests {
             spec.frame_heights = vec![284.0];
         });
         harness.open(PlotSettingsTab::Graph, None);
+        open_advanced(&context, &mut harness);
         type_into(&context, &mut harness, "13.8289", "10");
         assert!(harness.state.plot_settings().is_some(), "(b) window open");
         assert!(

@@ -271,6 +271,10 @@ grid-drag-rows =
 graph-row-series = Ligne { $number }
 graph-series-broken-reference = (référence rompue)
 graph-series-broken-reference-named = { $name } — référence rompue
+graph-resize-bubble-graph = Graphe { $n } : { $w } × { $h } { $unit }
+graph-resize-bubble-figure = Figure : { $w } × { $h } { $unit }
+graph-zoom-indicator = { $percent } %
+graph-zoom-indicator-hint = Zoom de la fenêtre seulement : l'image exportée a la taille Figure des propriétés du graphe
 graph-legend-more = { $count ->
     [one] … et { $count } autre
    *[other] … et { $count } autres
@@ -857,7 +861,7 @@ plot-size-column-width = Largeur de la zone de tracé, colonne { $n } ({ $unit }
 plot-size-row-height = Hauteur de la zone de tracé, ligne { $n } ({ $unit })
 plot-size-layer-background = Fond du calque
 plot-size-layer-background-auto = Auto (seulement sur un autre calque)
-plot-size-total = Taille du graphique ({ $unit })
+plot-size-total = Taille de la figure ({ $unit })
 plot-size-total-by = ×
 plot-size-total-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) : la valeur a été remontée à ce minimum
 plot-size-total-lowered = Un graphique peut faire { $maximum } ({ $unit }) au plus ici : la valeur a été ramenée à ce maximum
@@ -867,18 +871,22 @@ plot-size-left = Zone de tracé, depuis le bord gauche ({ $unit })
 plot-size-top = Zone de tracé, depuis le bord haut ({ $unit })
 plot-size-left-raised = Les axes demandent au moins { $minimum } ({ $unit }) à gauche : la valeur a été remontée à ce minimum
 plot-size-top-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) en haut : la valeur a été remontée à ce minimum
-plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit le graphique, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille. Saisir une taille de graphique redimensionne toutes les zones de tracé en proportion ; les axes et le titre gardent la leur.
+plot-size-box-width = Largeur du graphe ({ $unit })
+plot-size-box-height = Hauteur du graphe ({ $unit })
+plot-size-box-column-width = Largeur du graphe, colonne { $n } ({ $unit })
+plot-size-box-row-height = Hauteur du graphe, ligne { $n } ({ $unit })
+plot-size-note = La taille de la figure est celle de l’image entière. Glisser la limite entre deux graphes répartit la place et garde la taille de la figure ; glisser le bord extérieur redimensionne toute la figure. Ajouter un axe ou un titre agrandit la figure et garde la zone de tracé (sauf si Avancé > Ajout d’axes garde la figure).
 plot-size-placement = Placement des calques
 plot-size-placement-grid = Grille régulière
 plot-size-placement-free = Libre
 plot-size-position-left = Position, gauche ({ $unit })
 plot-size-position-top = Position, haut ({ $unit })
-plot-size-free-note = Les valeurs ci-dessus sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. Le graphique grandit ou rétrécit autour des calques. Saisir une taille de graphique met à l’échelle chaque calque et sa position, depuis le coin en haut à gauche.
+plot-size-free-note = La figure est la boîte autour des calques ; glisser un calque le garde dans la figure. Les valeurs ci-dessus sont celles du calque choisi dans la liste ; les positions sont celles de la page et peuvent être négatives.
 
-plot-figure-size = Taille de la figure
-    .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l’image. Fixe : la place de quatre axes est gardée d’avance, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
-plot-figure-size-grows = Grandit avec les axes
-plot-figure-size-fixed = Fixe
+plot-figure-size = Ajout d’axes
+    .hint = Agrandit la figure : un axe ou un titre ajouté agrandit l’image. Garde la figure : la place de quatre axes est réservée dès le départ, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
+plot-figure-size-grows = Agrandit la figure
+plot-figure-size-fixed = Garde la figure (place réservée)
 
 # Onglet Zone de tracé
 

@@ -479,6 +479,8 @@ pub(super) fn graph_view_contents(
                 }
             }
             shape_properties_ui(ui.ctx(), view, graph_id, actions);
+            resize_bubble(ui, view, outer);
+            zoom_indicator(ui, view, graph_id, outer);
             if ui.small_button(tr!("plot-view-reset-zoom")).clicked() {
                 view.reset_view();
             }
@@ -490,6 +492,107 @@ pub(super) fn graph_view_contents(
             );
         }
     }
+}
+
+/// The size bubble of a drag in progress (#426b prototype): the outer size of
+/// each graph being changed and the figure size, in the Preferences unit.
+fn resize_bubble(ui: &egui::Ui, view: &GraphView, outer: egui::Rect) {
+    let Some(feedback) = view.resize_feedback() else {
+        return;
+    };
+    let unit = ui
+        .ctx()
+        .data(|d| {
+            d.get_temp::<stokesforge_app_state::length_unit::LengthUnit>(egui::Id::new(
+                "stokesforge_length_unit",
+            ))
+        })
+        .unwrap_or_default();
+    let number = |points: f64| format!("{:.*}", unit.decimals(), unit.from_points(points));
+    let mut lines: Vec<String> = feedback
+        .graphs
+        .iter()
+        .map(|&(base, (w, h))| {
+            tr!(
+                "graph-resize-bubble-graph",
+                n = ((base + 1) as i64),
+                w = number(w),
+                h = number(h),
+                unit = unit.symbol()
+            )
+        })
+        .collect();
+    lines.push(tr!(
+        "graph-resize-bubble-figure",
+        w = number(feedback.figure.0),
+        h = number(feedback.figure.1),
+        unit = unit.symbol()
+    ));
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    let color = ui.visuals().text_color();
+    let galleys: Vec<_> = lines
+        .into_iter()
+        .map(|line| ui.painter().layout_no_wrap(line, font.clone(), color))
+        .collect();
+    let pad = egui::vec2(6.0, 4.0);
+    let width = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max);
+    let height: f32 = galleys.iter().map(|g| g.size().y).sum();
+    let size = egui::vec2(width, height) + pad * 2.0;
+    let mut min = feedback.pointer + egui::vec2(16.0, 16.0);
+    min.x = min.x.min(outer.right() - size.x).max(outer.left());
+    min.y = min.y.min(outer.bottom() - size.y).max(outer.top());
+    let rect = egui::Rect::from_min_size(min, size);
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("stokesforge_resize_bubble"),
+    ));
+    painter.rect(
+        rect,
+        4.0,
+        ui.visuals().window_fill,
+        ui.visuals().window_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let mut y = rect.top() + pad.y;
+    for galley in galleys {
+        let line_height = galley.size().y;
+        painter.galley(egui::pos2(rect.left() + pad.x, y), galley, color);
+        y += line_height;
+    }
+}
+
+/// The discreet window zoom indicator in the bottom-right corner (#426b
+/// prototype).
+fn zoom_indicator(ui: &mut egui::Ui, view: &GraphView, graph: NodeId, outer: egui::Rect) {
+    let Some(scale) = view.display_scale() else {
+        return;
+    };
+    let text = tr!(
+        "graph-zoom-indicator",
+        percent = ((scale * 100.0).round() as i64)
+    );
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    let color = ui.visuals().weak_text_color();
+    let galley = ui.painter().layout_no_wrap(text, font, color);
+    let size = galley.size() + egui::vec2(8.0, 4.0);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(outer.right() - 6.0 - size.x, outer.bottom() - 6.0 - size.y),
+        size,
+    );
+    let response = ui
+        .interact(
+            rect,
+            egui::Id::new(("stokesforge_zoom_indicator", graph)),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(tr!("graph-zoom-indicator-hint"));
+    ui.painter().rect_filled(
+        response.rect,
+        3.0,
+        ui.visuals().window_fill.gamma_multiply(0.6),
+    );
+    ui.painter()
+        .galley(response.rect.min + egui::vec2(4.0, 2.0), galley, color);
 }
 
 /// The bounds that the last draw kept for the axes of a layer, in
@@ -1160,8 +1263,13 @@ fn annotation_interactions(
             stokesforge_render_egui::GraphEvent::FrameResized { column, row } => {
                 actions.push(Action::SetFrameSizes { graph, column, row });
             }
-            // TODO(#426b batch B): commit the sizes as one undoable step.
-            stokesforge_render_egui::GraphEvent::FramesResized { .. } => {}
+            stokesforge_render_egui::GraphEvent::FramesResized { widths, heights } => {
+                actions.push(Action::SetFrameSizeList {
+                    graph,
+                    widths,
+                    heights,
+                });
+            }
             stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
                 actions.push(Action::SetFigureOffsets { graph, left, top });
             }

@@ -814,6 +814,17 @@ pub enum Action {
         /// Grid row and its new frame height, in points.
         row: Option<(usize, f64)>,
     },
+    /// Sets several column widths and row heights in one go, as one undo step
+    /// (#426b): what a splitter or figure-edge drag commits. Same rules as
+    /// [`Action::SetFrameSize`].
+    SetFrameSizeList {
+        /// Target graph.
+        graph: NodeId,
+        /// Grid columns and their new frame widths, in points.
+        widths: Vec<(usize, f64)>,
+        /// Grid rows and their new frame heights, in points.
+        heights: Vec<(usize, f64)>,
+    },
     /// Sets Left and/or Top of the graph, in points (#405): the distance from
     /// the left (top) edge of the image to the first plot area, what a drag of
     /// the left or top edge of the figure commits. A graph without stored
@@ -5297,6 +5308,20 @@ impl AppState {
                 let row = row
                     .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
                 self.set_frame_sizes(graph, column.into_iter().chain(row))
+            }
+            Action::SetFrameSizeList {
+                graph,
+                widths,
+                heights,
+            } => {
+                use stokesforge_core::compose::FrameAxis;
+                let widths = widths
+                    .into_iter()
+                    .map(|(index, size)| (FrameAxis::Column, index, size));
+                let heights = heights
+                    .into_iter()
+                    .map(|(index, size)| (FrameAxis::Row, index, size));
+                self.set_frame_sizes(graph, widths.chain(heights))
             }
             Action::SetFigureOffsets { graph, left, top } => {
                 self.set_figure_offsets(graph, left, top)

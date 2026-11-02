@@ -14293,6 +14293,30 @@ fn removing_an_overlay_layer_leaves_its_cell() {
     assert_eq!(graph_spec(&state, graph).panels.len(), 1);
 }
 
+/// #426b: a splitter drag commits several widths and heights as ONE undo step.
+#[test]
+fn a_frame_size_list_is_one_undo_step() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let before = graph_spec(&state, graph);
+    state.dispatch(Action::SetFrameSizeList {
+        graph,
+        widths: vec![(0, 300.0), (1, 250.0)],
+        heights: Vec::new(),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.frame_widths, vec![300.0, 250.0]);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo restores both");
+}
+
 /// #405: a drag of the left or top edge of the figure commits Left and Top as
 /// ONE undo step; a legacy graph is given its frames in the same command; a
 /// refused or unchanged value commits nothing.
