@@ -109,6 +109,10 @@ fn eval_segments(pts: &[(f64, f64)], x: f64) -> f64 {
     let i = pts.partition_point(|p| p.0 < x).clamp(1, n - 1);
     let (x0, y0) = pts[i - 1];
     let (x1, y1) = pts[i];
+    // An anchor returns its own Y exactly (#427).
+    if x == x1 {
+        return y1;
+    }
     y0 + (y1 - y0) * (x - x0) / (x1 - x0)
 }
 
@@ -763,6 +767,19 @@ mod tests {
                 degree: 3
             }
         );
+    }
+
+    #[test]
+    fn segments_return_the_anchor_value_exactly() {
+        let b = build(
+            &BaselineMethod::Anchors {
+                points: vec![(0.0, 1e20), (1.0, 1.0), (2.0, 1.0)],
+                interpolation: Interpolation::Segments,
+            },
+            &Series::default(),
+        )
+        .unwrap();
+        assert_eq!(b.eval(1.0), 1.0);
     }
 
     #[test]

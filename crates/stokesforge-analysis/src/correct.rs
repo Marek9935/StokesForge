@@ -130,6 +130,16 @@ mod tests {
     }
 
     #[test]
+    fn a_reference_grid_point_gives_the_stored_value() {
+        // 1e20 + (2 - 1e20) * 1 is 0 in floating point: it must be 2 (#427).
+        let reference = Series::new(vec![0.0, 1.0], vec![1e20, 2.0]);
+        let data = Series::new(vec![1.0], vec![4.0]);
+        let c = correct(&data, &reference, &[], CorrectOp::Divide).unwrap();
+        assert_eq!(c.values, vec![2.0]);
+        assert_eq!(c.division_by_zero, 0);
+    }
+
+    #[test]
     fn subtraction_and_unsorted_reference() {
         let data = Series::new(vec![1.0, 2.0], vec![5.0, 7.0]);
         let reference = Series::new(vec![2.0, 1.0], vec![3.0, 1.0]);

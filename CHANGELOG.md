@@ -204,6 +204,10 @@ without a message, see `docs/persistence.md`).
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that
   remains.
+- Formulas (#427): `at(B, x)` on a stored X now returns the stored value exactly
+  (it could be off by a rounding error, and `B / at(B, x)` was not exactly 1);
+  the same exact read applies to corrections by a reference, integration
+  bounds and segment baselines.
 
 ### Changed
 

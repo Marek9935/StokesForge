@@ -441,7 +441,7 @@ fn reference_integral(x: &[f64], y: &[f64], range: Option<(f64, f64)>) -> Option
             return pairs[0].1;
         }
         let (p0, p1) = (pairs[k - 1], pairs[k]);
-        if p1.0 == p0.0 {
+        if p1.0 == t {
             p1.1
         } else {
             p0.1 + (p1.1 - p0.1) * (t - p0.0) / (p1.0 - p0.0)
@@ -468,6 +468,13 @@ fn integral_of_x_squared_on_a_uniform_grid_has_the_known_trapezoid_error() {
     assert!(rel_close(got, expected, 1e-13), "{got:e} vs {expected:e}");
     let got = on_xy("integral(B, 0, 1)", &x, &y).unwrap();
     assert!(rel_close(got, expected, 1e-13), "{got:e} vs {expected:e}");
+}
+
+#[test]
+fn integral_starting_on_a_grid_point_uses_the_stored_value() {
+    // at(1) over y = [1e20, 1, 1] must be 1, not 0 (#427).
+    let got = on_xy("integral(B, 1, 2)", &[0.0, 1.0, 2.0], &[1e20, 1.0, 1.0]).unwrap();
+    assert_eq!(got, 1.0);
 }
 
 #[test]
@@ -877,7 +884,6 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 500, failure_persistence: None, rng_algorithm: proptest::test_runner::RngAlgorithm::ChaCha, rng_seed: proptest::test_runner::RngSeed::Fixed(412), ..ProptestConfig::default() })]
 
     #[test]
-    #[ignore = "bug: #427: at(B, x_k) is off by an ulp from y_k on about a third of random grids (series.rs:107), so B / at(B, x_k) is not exactly 1"]
     fn at_a_random_grid_point_returns_the_stored_value_exactly((x, y) in grid(), k in 0usize..29) {
         let k = k % x.len();
         let got = on_xy(&format!("at(B, {:e})", x[k]), &x, &y).unwrap();
@@ -897,7 +903,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "bug: #427: at(B, x_k) is y_(k-1) + (y_k - y_(k-1)) * 1, not y_k when the difference rounds (1e20 then 1 gives 0), series.rs:107"]
 fn at_a_grid_point_returns_the_stored_value_exactly() {
     // y_k + (y_{k+1} - y_k) * 1 is not y_{k+1} when the difference rounds.
     let x = [0.0, 1.0];

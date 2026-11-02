@@ -198,6 +198,15 @@ mod tests {
     }
 
     #[test]
+    fn a_range_starting_on_a_grid_point_uses_the_stored_value() {
+        // Interpolating at x = 1 from 1e20 would give 0 instead of 1 (#427).
+        let s = Series::new(vec![0.0, 1.0, 2.0], vec![1e20, 1.0, 1.0]);
+        let mut sp = spec();
+        sp.ranges = vec![(1.0, 2.0)];
+        assert_eq!(integrate(&s, &sp).unwrap().total, 1.0);
+    }
+
+    #[test]
     fn several_ranges_give_one_area_each() {
         let mut sp = spec();
         sp.ranges = vec![(0.0, 0.5), (0.5, 1.0)];
