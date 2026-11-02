@@ -1420,23 +1420,6 @@ fn logx_of_a_value_close_to_a_power_is_not_snapped() {
     assert!((v[0] - 5.0).abs() < 1e-11);
 }
 
-/// Bases 10 and 2 are the `log10` / `log2` of libm, bit for bit.
-#[test]
-fn logx_in_base_10_and_2_is_log10_and_log2_bitwise() {
-    let xs: Vec<f64> = (1..400).map(|i| (i as f64) * 0.37 + 0.001).collect();
-    let n = xs.len();
-    for (base, f) in [(10.0, libm::log10 as fn(f64) -> f64), (2.0, libm::log2)] {
-        let (v, _) = run(
-            "logx(A, B)",
-            &[float_column(&xs), float_column(&vec![base; n])],
-            n,
-        );
-        for (x, got) in xs.iter().zip(&v) {
-            assert_eq!(got.to_bits(), f(*x).to_bits(), "logx({x}, {base})");
-        }
-    }
-}
-
 // -- (c) number lexing --
 
 /// What the evaluator does with a text: its value on a constant formula, or

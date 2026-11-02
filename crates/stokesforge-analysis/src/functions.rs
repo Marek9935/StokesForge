@@ -356,6 +356,24 @@ mod tests {
         Func::from_name(name).expect(name).apply(args)
     }
 
+    /// Bases 10 and 2 are the `log10` / `log2` of libm, bit for bit (#429).
+    #[test]
+    fn logx_in_base_10_and_2_is_log10_and_log2_bitwise() {
+        for i in 1..400 {
+            let x = f64::from(i) * 0.37 + 0.001;
+            assert_eq!(
+                call("logx", &[x, 10.0]).to_bits(),
+                libm::log10(x).to_bits(),
+                "logx({x}, 10)"
+            );
+            assert_eq!(
+                call("logx", &[x, 2.0]).to_bits(),
+                libm::log2(x).to_bits(),
+                "logx({x}, 2)"
+            );
+        }
+    }
+
     /// Position of each variant: an exhaustive `match`, so that a new
     /// variant does not compile until it is counted here (and so listed in
     /// [`Func::ALL`]).

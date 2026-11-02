@@ -18,4 +18,3 @@ stokesforge-plot = { path = "../stokesforge-plot" }
 stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
 proptest = "1"
 toml = "0.8"
-libm = "0.2.16"
