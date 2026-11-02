@@ -68,8 +68,9 @@ sequences: [`.claude/skills/README.md`](.claude/skills/README.md).
 - Rust notices: `scripts/licenses-rust.sh` adds the missing upstream copyrights of `vendor/crate-license-notices/`. Their fingerprint ties the report to the exact `Cargo.lock`; any change to the lock requires revalidating these supplements before generating the notices.
 - `rustfmt` + `clippy -D warnings` are mandatory (GitHub CI `.github/workflows/ci.yml`).
 - CI: `.github/workflows/ci.yml` (Linux and Windows, hosted runners) mirrors
-  the GitLab commands. It builds the release packages and creates the
-  GitLab release (`publier`, #333). The workflow `gitlab-status.yml` sends back the
+  the GitLab commands, plus `test-windows` (formula crates on Windows, #412). It builds the release packages and creates the
+  GitLab release (`publier`, #333), whose notes name the rustc used. The weekly
+  workflow `toolchain-weekly.yml` (stable and beta, informative, #412) is kept out of it. The workflow `gitlab-status.yml` sends back the
   check results via `scripts/gitlab-status.py`, tested without network by `gitlab-status-test.py`.
   GitHub secret `GITLAB_STATUS_TOKEN`, instructions, runner pitfalls and
   maintenance are in `docs/tests.md` ("Using CI day to day"). Results of a commit, read from GitLab: `scripts/ci-status.sh [commit]`.

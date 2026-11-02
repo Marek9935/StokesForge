@@ -152,7 +152,9 @@ tn "stage-integration needs three arguments" env -i HOME="$tmp/home" PATH="$MINB
 # --- the release links: rpm and deb only when the switch is 1 ---
 ver="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO_ROOT/crates/stokesforge-id/Cargo.toml" | head -n1)"
 dry() { # dry <switch>
-    STOKESFORGE_RELEASE_DRYRUN=1 PUBLISH_LINUX_PACKAGES="$1" "$HERE/release-publish.sh" "v${ver}-rc9"
+    RUSTC_LINUX="rustc 1.2.3 (aaa 2026-01-01) (LLVM 9.9.9, x86_64-unknown-linux-gnu)" \
+        RUSTC_WINDOWS="rustc 1.2.3 (aaa 2026-01-01) (LLVM 9.9.9, x86_64-pc-windows-msvc)" \
+        STOKESFORGE_RELEASE_DRYRUN=1 PUBLISH_LINUX_PACKAGES="$1" "$HERE/release-publish.sh" "v${ver}-rc9"
 }
 dry 0 > "$tmp/pub0" 2>&1 || true
 dry 1 > "$tmp/pub1" 2>&1 || true
@@ -161,6 +163,12 @@ t "switch 0: no rpm link" hasnt '.rpm' "$tmp/pub0"
 t "switch 0: no deb link" hasnt '.deb' "$tmp/pub0"
 t "switch 1: rpm link" has "StokesForge-${ver}-rc9-linux-x86_64.rpm" "$tmp/pub1"
 t "switch 1: deb link" has "StokesForge-${ver}-rc9-linux-x86_64.deb" "$tmp/pub1"
+# #412: the notes name the compiler of both builds, rc included; without the
+# versions the publication is refused (even in a dry run).
+t "notes: Linux rustc line" has 'Built with rustc 1.2.3 (aaa 2026-01-01) (LLVM 9.9.9, x86_64-unknown-linux-gnu) (Linux)' "$tmp/pub0"
+t "notes: Windows rustc line" has '(Linux) and rustc 1.2.3 (aaa 2026-01-01) (LLVM 9.9.9, x86_64-pc-windows-msvc) (Windows).' "$tmp/pub0"
+tn "publish refused without RUSTC_LINUX" env -u RUSTC_LINUX RUSTC_WINDOWS=x STOKESFORGE_RELEASE_DRYRUN=1 "$HERE/release-publish.sh" "v${ver}-rc9"
+tn "publish refused without RUSTC_WINDOWS" env -u RUSTC_WINDOWS RUSTC_LINUX=x STOKESFORGE_RELEASE_DRYRUN=1 "$HERE/release-publish.sh" "v${ver}-rc9"
 # release-upload.sh knows both formats and names the producer of a missing file.
 mkdir -p "$tmp/repo/scripts" "$tmp/repo/dist"
 cp "$HERE/release-upload.sh" "$tmp/repo/scripts/"

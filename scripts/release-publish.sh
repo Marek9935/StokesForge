@@ -11,7 +11,10 @@
 # Usage: scripts/release-publish.sh vX.Y.Z | vX.Y.Z-rcN
 # Environment: GITLAB_RELEASE_TOKEN (GitHub secret: GitLab project token,
 # Developer role, `api` scope). STOKESFORGE_RELEASE_DRYRUN=1 prints the request
-# without sending it (local trial, token not required).
+# without sending it (local trial, token not required). RUSTC_LINUX and
+# RUSTC_WINDOWS (the `rustc` outputs of `release-linux` and `dist-windows`,
+# written by scripts/rustc-note.sh) are required: the notes end with a
+# "Built with rustc ..." line, rc included (#412).
 #
 # For a FINAL tag, once the release exists, it also starts a GitLab pipeline on
 # the tag with STOKESFORGE_PUBLISH_MANUAL=1: the `pages` job of .gitlab-ci.yml
@@ -47,6 +50,18 @@ if [ "$ESSAI" = 1 ]; then
     NOTES="Publication trial (${TAG}): this release is deleted at once."
     NOM="${NOM} (trial)"
 fi
+# #412: every release names the compiler of each build. A missing version
+# (a job that did not report it) stops the publication rather than leaving the
+# notes silent about it.
+for var in RUSTC_LINUX RUSTC_WINDOWS; do
+    if [ -z "${!var:-}" ]; then
+        echo "[release] ERROR: ${var} is empty: the build job did not report its rustc version (see scripts/rustc-note.sh)" >&2
+        exit 1
+    fi
+done
+NOTES="${NOTES}
+
+Built with ${RUSTC_LINUX} (Linux) and ${RUSTC_WINDOWS} (Windows)."
 SETUP="StokesForge-${VERSION}-windows-setup.exe"
 LINUX="StokesForge-${VERSION}-linux-x86_64.tar.gz"
 MANUEL="StokesForge-${VERSION}-manual.tar.gz"

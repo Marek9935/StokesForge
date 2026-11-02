@@ -5,7 +5,8 @@
 # any change to its commands is repeated here. The Windows jobs
 # (`dist-windows`, `test-python-windows`) and the release jobs (`release-linux`,
 # `release-manual`, `publier`) live only here, on hosted runners (#333):
-# GitLab runs only the `pages` job, started by `publier` (#362).
+# GitLab runs only the `pages` job, started by `publier` (#362). So does
+# `test-windows` (#412): the formula crates on Windows, GitHub only.
 #
 # As on the GitLab side, `fmt`, `clippy` and `test` never enable the `python`
 # feature: only `test-python` exercises the PyO3 bridge.
@@ -15,7 +16,7 @@ name: CI
 on:
   push:
     # Linux on all these branches; Windows only outside `feature/**` (see the
-    # `if` of `test-python-windows` and `dist-windows`).
+    # `if` of `test-windows`, `test-python-windows` and `dist-windows`).
     branches: [main, 'feature/**', 'v[0-9]*', 'release/**']
     tags: ['v*']
   pull_request:
@@ -186,6 +187,9 @@ jobs:
     # Ubuntu 22.04 = glibc 2.35 (scripts/glibc-floor.env). The day GitHub
     # retires this runner, change the runner and the floor together.
     runs-on: ubuntu-22.04
+    # #412: the compiler that built the archive, for the release notes.
+    outputs:
+      rustc: ${{ steps.rustc.outputs.rustc }}
     permissions:
       contents: read
     steps:
@@ -224,6 +228,10 @@ jobs:
             echo "::error title=app-dist::$( (grep -m6 -E 'ERROR|^error|panicked|FAILED' dist.log; echo ...; tail -n 14 dist.log) | tr '\n' '|' | cut -c1-1500)"
           fi
           exit "$code"
+      # #412: after the build, so the toolchain is the one that compiled.
+      - name: Compiler version
+        id: rustc
+        run: echo "rustc=$(scripts/rustc-note.sh)" >> "$GITHUB_OUTPUT"
       # #389: no file of the archive may need a glibc above the floor.
       - run: scripts/glibc-floor.sh dist/stokesforge-app
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
@@ -375,6 +383,30 @@ jobs:
   # Blocking: `publier` waits for them. On failure, the first errors and the
   # end of the log are put in an annotation (readable through the API without
   # signing in). Git Bash (`shell: bash`): the scripts are the same as on Linux.
+  # #412: the crates of the formula engine (parser, evaluation, recalculation,
+  # `.stf` round trip) on Windows: float formatting, paths and stack depth
+  # differ there. Not in the `JOBS` of scripts/gitlab-status.py: like
+  # `test-python-windows`, it is skipped on `feature/**` pushes, and a job
+  # absent from the attempt would be posted as failed.
+  test-windows:
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --system core.longpaths true
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          set +e
+          cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands > windows-formula.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=test-windows::$( (grep -m6 -E '^error|panicked|FAILED' windows-formula.log; echo ...; tail -n 12 windows-formula.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+
   test-python-windows:
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest
@@ -404,6 +436,9 @@ jobs:
   dist-windows:
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest
+    # #412: the compiler that built the installer, for the release notes.
+    outputs:
+      rustc: ${{ steps.rustc.outputs.rustc }}
     defaults:
       run:
         shell: bash
@@ -447,6 +482,9 @@ jobs:
             echo "::error title=dist-windows::$( (grep -m6 -E '^error|ERROR|panicked|FAILED' windows-dist.log; echo ...; tail -n 12 windows-dist.log) | tr '\n' '|' | cut -c1-1500)"
           fi
           exit "$code"
+      - name: Compiler version
+        id: rustc
+        run: echo "rustc=$(scripts/rustc-note.sh)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installeur
@@ -465,7 +503,7 @@ jobs:
   # runner.
   publier:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, licenses, clippy, test, test-python, robustness, test-python-windows, manual, linux-packages, release-linux, upload-linux-packages, release-manual, dist-windows]
+    needs: [fmt, licenses, clippy, test, test-python, robustness, test-windows, test-python-windows, manual, linux-packages, release-linux, upload-linux-packages, release-manual, dist-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -480,4 +518,6 @@ jobs:
       - name: Release GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
+          RUSTC_LINUX: ${{ needs.release-linux.outputs.rustc }}
+          RUSTC_WINDOWS: ${{ needs.dist-windows.outputs.rustc }}
         run: scripts/release-publish.sh "$GITHUB_REF_NAME"

@@ -1,0 +1,92 @@
+# #412: weekly check against the newest compilers, informative only.
+#
+# `rust-toolchain.toml` pins "stable", which moves by itself: a new stable or
+# beta can change the numerics or the stack depth the formula engine relies on.
+# This workflow runs the depth-cap tests in release mode (optimised frames are
+# smaller, so the stack overflows later than in the debug `cargo test` of `ci.yml`)
+# on stable and beta, and the whole workspace plus clippy on beta.
+#
+# Kept out of `ci.yml` on purpose: `gitlab-status.yml` listens to the workflow
+# `CI` on push and would post these jobs as GitLab statuses. Nothing here blocks
+# a merge or a release. A failure shows as a red run, a GitHub email to the
+# repository owner and a `::error` annotation (first errors of the log, readable
+# through the API). Read the runs with:
+#   gh run list --workflow toolchain-weekly.yml
+# A scheduled workflow only runs from the default branch (`main`); until then
+# start it by hand with `gh workflow run toolchain-weekly.yml` (it needs the
+# file on the default branch too).
+
+name: Toolchain weekly
+
+on:
+  schedule:
+    # Monday 05:17 UTC (off the round hour, when GitHub queues are busy).
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  toolchain:
+    name: ${{ matrix.tc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tc: [stable, beta]
+    env:
+      # Beats rust-toolchain.toml (order: +toolchain, RUSTUP_TOOLCHAIN,
+      # directory override, toolchain file, default).
+      RUSTUP_TOOLCHAIN: ${{ matrix.tc }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install ${{ matrix.tc }} --profile minimal --component clippy
+      - run: rustc -vV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: toolchain-weekly-${{ matrix.tc }}
+      # Same packages as the `test` and `robustness` jobs of ci.yml: lavapipe
+      # for the captures, wayland-sys links with pkg-config.
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev
+      # The depth-cap tests, release mode. Each filter matches at least one test:
+      # core lib `deep`/`depth` (5), formula_evaluation `deeply_nested` (1),
+      # recalc_targeted `too_deep` (2), formula_roundtrip `deeper_than_the_cap` (1).
+      - name: Depth caps in release mode
+        run: |
+          set +e
+          {
+            cargo test --release -p stokesforge-core --lib -- deep depth &&
+            cargo test --release -p stokesforge-core --test formula_evaluation -- deeply_nested &&
+            cargo test --release -p stokesforge-session --test recalc_targeted -- too_deep &&
+            cargo test --release -p stokesforge-persistence --test formula_roundtrip -- deeper_than_the_cap
+          } > depth.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=depth-caps ${{ matrix.tc }}::$( (grep -m6 -E '^error|panicked|FAILED|overflow' depth.log; echo ...; tail -n 12 depth.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+      - name: Workspace tests (beta)
+        if: matrix.tc == 'beta' && !cancelled()
+        run: |
+          set +e
+          cargo test --workspace > beta-test.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=test beta::$( (grep -m6 -E '^error|panicked|FAILED' beta-test.log; echo ...; tail -n 12 beta-test.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+      - name: Clippy (beta)
+        if: matrix.tc == 'beta' && !cancelled()
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > beta-clippy.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=clippy beta::$( (grep -m6 -E '^(error|warning)' beta-clippy.log; echo ...; tail -n 12 beta-clippy.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
