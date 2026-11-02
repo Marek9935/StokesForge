@@ -1170,6 +1170,13 @@ fn annotation_interactions(
                     frame,
                 });
             }
+            stokesforge_render_egui::GraphEvent::LayoutEdited { frames, page } => {
+                actions.push(Action::SetFreeLayout {
+                    graph,
+                    frames,
+                    page,
+                });
+            }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {
                     graph,

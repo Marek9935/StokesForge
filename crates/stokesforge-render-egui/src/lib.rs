@@ -78,6 +78,7 @@
 pub mod backend;
 pub mod cache;
 pub mod feathering;
+mod layout_mode;
 pub mod scaled;
 mod shape_tools;
 pub mod typst_screen;
@@ -105,6 +106,11 @@ use stokesforge_session::Snapshot;
 pub use backend::{EguiBackend, EguiBackendError};
 pub use cache::{CacheKey, Outcome, ShapeCache};
 pub use feathering::Feathering;
+pub use layout_mode::{LAYOUT_GRAB_MARGIN, LAYOUT_TOLERANCE_POINTS};
+// What the shell reads from the Page Layout Mode (#426d) without declaring an
+// edge to the geometry crates.
+pub use stokesforge_plot::{FreePage, LengthUnit};
+pub use stokesforge_render::{GraphBox, LayoutHandle};
 // Re-exported so that the UI does not have to declare an edge to
 // `stokesforge-render` to read what the figure drew: this crate is already
 // its screen rendering facade.
@@ -208,6 +214,19 @@ pub enum GraphEvent {
         /// The size changed (an edge was pulled), else the layer only moved.
         resized: bool,
     },
+    /// A gesture of the Page Layout Mode ended (#426d): a graph box moved or
+    /// resized, the page corner pulled, or a burst of arrow-key nudges. Every
+    /// moved frame (by base layer, stack kept) and the page the figure keeps,
+    /// to commit as **one** change of the model. Nothing is signalled during
+    /// the gesture. The preview stays displayed until the model changes
+    /// ([`GraphView::hold_preview`]).
+    LayoutEdited {
+        /// New frame of each moved or resized layer, by base layer.
+        frames: Vec<(usize, FreeFrame)>,
+        /// The page, in stored page coordinates (frozen during a box gesture,
+        /// the new one for a page corner drag).
+        page: Option<stokesforge_plot::FreePage>,
+    },
     /// Double click on a title: edit it in place (issue #53).
     EditText(TextTarget),
     /// Double click on a legend entry: rename the series of layer `panel`
@@ -293,7 +312,7 @@ impl GraphTool {
 /// `base` is the frames the figure was drawn with when the gesture began, so
 /// that a legacy graph (no stored frame) previews exactly what the committing
 /// action will fix.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 struct FramePreview {
     column: Option<(usize, f64)>,
     row: Option<(usize, f64)>,
@@ -304,10 +323,27 @@ struct FramePreview {
     /// The frame a free layer is being moved or resized to (#398): the base
     /// layer of its cell and the frame.
     free: Option<(usize, FreeFrame)>,
+    /// The frames the Page Layout Mode is moving or scaling (#426d): base
+    /// layer and frame, several at once for a page corner drag or a nudge of
+    /// a selection.
+    frees: Vec<(usize, FreeFrame)>,
+    /// The page the Page Layout Mode previews (frozen during a box gesture).
+    page: Option<stokesforge_plot::FreePage>,
 }
 
 impl FramePreview {
     fn apply(&self, spec: &mut PlotSpec) {
+        if !self.frees.is_empty() || self.page.is_some() {
+            for (base, frame) in &self.frees {
+                if let Some(panel) = spec.panels.get_mut(*base) {
+                    panel.free_frame = Some(*frame);
+                }
+            }
+            if let Some(page) = self.page {
+                spec.free_page = Some(page);
+            }
+            return;
+        }
         if let Some((base, frame)) = self.free {
             if let Some(panel) = spec.panels.get_mut(base) {
                 panel.free_frame = Some(frame);
@@ -369,6 +405,11 @@ fn moved_value(preview: Option<f64>, start: Option<f64>) -> bool {
 /// grabbed (#405): the strip straddles the edge. The host must leave at least
 /// that much room around the figure and let its clip rectangle reach it.
 pub const FIGURE_GRAB_MARGIN: f32 = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS as f32;
+
+/// Prototype #426d: the layout drags of the grid cell edges, the figure edges
+/// and the free layers are only offered in the Page Layout Mode. Flip this to
+/// bring the old gestures back outside the mode.
+const OUTSIDE_MODE_LAYOUT_DRAGS: bool = false;
 
 /// A cell-handle drag in progress (#394).
 #[derive(Debug, Clone)]
@@ -726,6 +767,8 @@ pub struct GraphView {
     frame_drag: Option<FrameDrag>,
     /// Move or resize of a layer of a free figure in progress (#398).
     free_drag: Option<FreeDrag>,
+    /// The Page Layout Mode (#426d): view state, never saved.
+    layout: layout_mode::LayoutState,
     /// Selected free text (click), target of Delete.
     selected_annotation: Option<AnnotationRef>,
     /// The selected title, axis title or legend (issue #77).
@@ -855,6 +898,7 @@ impl GraphView {
             frame_preview: None,
             frame_drag: None,
             free_drag: None,
+            layout: layout_mode::LayoutState::default(),
             selected_annotation: None,
             selected_text: None,
             shape_preview: None,
@@ -972,6 +1016,7 @@ impl GraphView {
         self.text_preview = None;
         self.frame_drag = None;
         self.free_drag = None;
+        self.layout.forget_gestures();
         self.frame_preview = None;
         self.shape_drag = None;
         self.shape_preview = None;
@@ -1780,8 +1825,14 @@ impl GraphView {
         // the interaction area reaches that far outside the figure, into the
         // margin the window leaves around it, so the outer edges are grabbed
         // before the window's own border is.
+        let grab = if self.layout.mode {
+            // The page corner handles sit outside the page (#426d).
+            LAYOUT_GRAB_MARGIN
+        } else {
+            FIGURE_GRAB_MARGIN
+        };
         let response = ui.interact(
-            display_rect.expand(FIGURE_GRAB_MARGIN),
+            display_rect.expand(grab),
             self.id,
             egui::Sense::click_and_drag(),
         );
@@ -1817,8 +1868,17 @@ impl GraphView {
             self.extra_layers.clear();
         }
         self.handle_navigation(&response, &context, &spec);
+        // The Page Layout Mode reads the layout the gesture of this frame
+        // previewed, so that its overlay follows the figure (#426d).
+        if self.layout.mode {
+            let _ = self.figure_layout(&context, snapshot, graph);
+            self.layout.view = self.compute_layout_view(&spec);
+        } else {
+            self.layout.view = None;
+        }
         let real_gesture = response.dragged()
             && (self.nav_drag.is_some_and(NavDrag::is_pan)
+                || self.layout.drag.is_some()
                 || self.drag_box.is_some()
                 || self.shape_drag.is_some()
                 || self.annotation_drag.is_some()
@@ -1924,7 +1984,15 @@ impl GraphView {
         // painted **over** what precedes — never in the `Vec<Shape>` cached
         // above, on pain of replaying the whole pipeline at each mouse move
         // (`crate::cache`, module header).
-        self.hover = self.paint_overlay(&painter, &response, &snapshot.tree, &spec);
+        if self.layout.mode {
+            self.hover = None;
+            let overlay = ui
+                .painter()
+                .with_clip_rect(display_rect.expand(LAYOUT_GRAB_MARGIN));
+            self.paint_layout_overlay(&overlay, ui.visuals());
+        } else {
+            self.hover = self.paint_overlay(&painter, &response, &snapshot.tree, &spec);
+        }
 
         Ok(outcome.cached)
     }
@@ -2077,9 +2145,16 @@ impl GraphView {
         if self.last.is_none() {
             return;
         }
+        // The Page Layout Mode owns every gesture of the figure (#426d): no
+        // pan, no zoom, no object drag; the layout drags below only live here.
+        if self.layout.mode {
+            self.nav_drag = None;
+            self.handle_layout_mode(response, context, spec);
+            return;
+        }
         let nav = self.decide_nav(response, context);
         let pan = nav.is_some_and(NavDrag::is_pan);
-        if self.tool == GraphTool::Pointer && !pan {
+        if OUTSIDE_MODE_LAYOUT_DRAGS && self.tool == GraphTool::Pointer && !pan {
             self.frame_handle_cursor(response, context);
         }
 
@@ -2193,16 +2268,18 @@ impl GraphView {
         }
         if self.tool == GraphTool::Pointer
             && !pan
-            && (self.handle_frame_drag(response, context)
+            && ((OUTSIDE_MODE_LAYOUT_DRAGS && self.handle_frame_drag(response, context))
                 // A layer edge beats every object; a gesture in progress is
                 // always continued here, before another handler can pick it up
                 // from the layer sliding under the pointer (#398).
-                || self.handle_free_drag(response, context, spec, FreeStart::Edges)
+                || (OUTSIDE_MODE_LAYOUT_DRAGS
+                    && self.handle_free_drag(response, context, spec, FreeStart::Edges))
                 || self.handle_annotation_drag(response, spec)
                 || self.handle_shape_drag(response, spec)
                 || self.handle_text_drag(response, spec)
                 // Nothing else claimed the drag: the plot area moves its layer.
-                || self.handle_free_drag(response, context, spec, FreeStart::Move))
+                || (OUTSIDE_MODE_LAYOUT_DRAGS
+                    && self.handle_free_drag(response, context, spec, FreeStart::Move)))
         {
             return;
         }
@@ -2518,6 +2595,7 @@ impl GraphView {
             top: drag.top.map(|start| offset(start, delta.y, min_top)),
             base: drag.base,
             free: None,
+            ..FramePreview::default()
         }));
         true
     }
@@ -2525,6 +2603,9 @@ impl GraphView {
     /// The dashed guides of the magnets painted over the figure while a layer
     /// is moved or resized (#398); empty otherwise.
     pub fn magnet_guides(&self) -> &[stokesforge_render::Guide] {
+        if let Some(drag) = &self.layout.drag {
+            return drag.guides.as_slice();
+        }
         self.free_drag
             .as_ref()
             .map_or(&[], |drag| drag.guides.as_slice())
@@ -2674,6 +2755,7 @@ impl GraphView {
             top: None,
             base: (Vec::new(), Vec::new()),
             free: Some((drag.handle.base, result.frame)),
+            ..FramePreview::default()
         }));
         true
     }
