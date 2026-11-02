@@ -7465,6 +7465,35 @@ fn plot_columns_names_the_graph_after_the_workbook() {
     assert_eq!(last_root_child_name(&state), format!("{book_name} plot 2"));
 }
 
+/// #434: numbering continues after the highest number, a deleted graph
+/// leaves a gap that is not filled.
+#[test]
+fn plot_columns_numbering_does_not_fill_a_deleted_gap() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let book = state.tree().parent(sheet1).unwrap().unwrap();
+    let book_name = state.tree().node(book).unwrap().name().to_string();
+    let signal = column_id(&state, sheet1, "Signal");
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        state.dispatch(Action::PlotColumns {
+            sheet: sheet1,
+            columns: vec![signal],
+            plot_type: PlotType::Line,
+        });
+        let tree = state.tree();
+        ids.push(*tree.node(tree.root()).unwrap().children().last().unwrap());
+    }
+    state.dispatch(Action::DeleteObjects(vec![ids[1]]));
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(last_root_child_name(&state), format!("{book_name} plot 4"));
+}
+
 /// #434: `PlotRows` follows the same rule; an empty `AddGraph` keeps GraphN.
 #[test]
 fn plot_rows_and_empty_graph_names() {

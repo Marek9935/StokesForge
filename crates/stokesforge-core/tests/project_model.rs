@@ -1755,6 +1755,101 @@ mod graph_names {
         assert_eq!(graph_name(&mut project, root, spec_of(&[col])), "Graph2");
     }
 
+    fn plots(project: &mut Project, col: NodeId, n: usize) -> Vec<NodeId> {
+        let root = project.root();
+        (0..n)
+            .map(|_| project.add_graph(root, None, spec_of(&[col])).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn numbering_continues_after_the_highest_never_filling_a_gap() {
+        let mut project = Project::new("t").unwrap();
+        let root = project.root();
+        let col = book_with_column(&mut project, "Book1");
+        let graphs = plots(&mut project, col, 3);
+        project.remove(graphs[1]).unwrap();
+        assert_eq!(
+            graph_name(&mut project, root, spec_of(&[col])),
+            "Book1 plot 4"
+        );
+    }
+
+    #[test]
+    fn only_the_highest_left_gives_the_next_number() {
+        let mut project = Project::new("t").unwrap();
+        let root = project.root();
+        let col = book_with_column(&mut project, "Book1");
+        let graphs = plots(&mut project, col, 3);
+        project.remove(graphs[0]).unwrap();
+        project.remove(graphs[1]).unwrap();
+        assert_eq!(
+            graph_name(&mut project, root, spec_of(&[col])),
+            "Book1 plot 4"
+        );
+    }
+
+    #[test]
+    fn a_number_glued_to_plot_in_another_case_counts() {
+        let mut project = Project::new("t").unwrap();
+        let root = project.root();
+        let col = book_with_column(&mut project, "Book1");
+        project
+            .add_graph(root, Some("book1 PLOT7"), PlotSpec::default())
+            .unwrap();
+        assert_eq!(
+            graph_name(&mut project, root, spec_of(&[col])),
+            "Book1 plot 8"
+        );
+    }
+
+    #[test]
+    fn other_suffixes_are_ignored() {
+        let mut project = Project::new("t").unwrap();
+        let root = project.root();
+        let col = book_with_column(&mut project, "Book1");
+        project
+            .add_graph(root, Some("Book1 plot old"), PlotSpec::default())
+            .unwrap();
+        project
+            .add_graph(root, Some("Book1 plotter"), PlotSpec::default())
+            .unwrap();
+        assert_eq!(
+            graph_name(&mut project, root, spec_of(&[col])),
+            "Book1 plot"
+        );
+    }
+
+    #[test]
+    fn an_overflowing_number_falls_back_to_graph_n() {
+        let mut project = Project::new("t").unwrap();
+        let root = project.root();
+        let col = book_with_column(&mut project, "Book1");
+        project
+            .add_graph(
+                root,
+                Some("Book1 plot 18446744073709551615"),
+                PlotSpec::default(),
+            )
+            .unwrap();
+        assert_eq!(graph_name(&mut project, root, spec_of(&[col])), "Graph1");
+    }
+
+    #[test]
+    fn a_number_too_big_to_parse_falls_back_to_graph_n() {
+        let mut project = Project::new("t").unwrap();
+        let root = project.root();
+        let col = book_with_column(&mut project, "Book1");
+        project
+            .add_graph(
+                root,
+                Some("Book1 plot 99999999999999999999999"),
+                PlotSpec::default(),
+            )
+            .unwrap();
+        assert_eq!(graph_name(&mut project, root, spec_of(&[col])), "Graph1");
+    }
+
     #[test]
     fn explicit_name_wins() {
         let mut project = Project::new("t").unwrap();

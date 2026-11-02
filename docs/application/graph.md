@@ -8,7 +8,7 @@ In addition to the types (Numeric, Mixed) and the "Role" submenu, the row of
 letters offers a "Plot" submenu (Line, Scatter, Line + Symbol, Bar) that creates a graph from
 the current column selection. It has the same target as the other two
 submenus (`target_columns`: the whole selected range if the clicked column is
-part of it, otherwise that column alone). The new graph is named "<workbook> plot" (then "<workbook> plot 2"…, `Project::next_graph_name`) and is added without a
+part of it, otherwise that column alone). The new graph is named "<workbook> plot" (then "<workbook> plot 2"… numbered after the highest existing number, `Project::next_graph_name`) and is added without a
 title in the folder that contains the workbook (`Command::AddGraph`, no
 separate entry for the sheet) and opens at once in its own tab.
 

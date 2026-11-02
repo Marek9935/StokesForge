@@ -1250,7 +1250,8 @@ impl Project {
     }
 
     /// Name of a new graph created under `parent` without an explicit name:
-    /// "<Book> plot", then "<Book> plot 2", "<Book> plot 3"… where `<Book>`
+    /// "<Book> plot", then "<Book> plot 2", "<Book> plot 3"… numbered after
+    /// the highest number already used (gaps are not filled), where `<Book>`
     /// is the workbook of the `y` column of the first series of `spec`.
     ///
     /// A candidate is free when no window of the project bears it (case
@@ -1274,7 +1275,46 @@ impl Project {
         }
         let base = format!("{} plot", node.name());
         let siblings = self.tree.children(parent).ok()?;
-        let mut n: u64 = 1;
+        // Highest number already used by a window "<base>", "<base> N" or
+        // "<base>N" (case insensitive); numbering continues after it and
+        // never fills a gap. Other suffixes are ignored.
+        let base_lower: String = base.chars().flat_map(char::to_lowercase).collect();
+        let mut highest: Option<u64> = None;
+        let mut overflow = false;
+        self.tree.visit_windows(|id| {
+            let Some(window) = self.tree.node(id) else {
+                return false;
+            };
+            let lower: String = window.name().chars().flat_map(char::to_lowercase).collect();
+            let Some(suffix) = lower.strip_prefix(base_lower.as_str()) else {
+                return false;
+            };
+            let digits = suffix.trim_start_matches(' ');
+            let number = if suffix.is_empty() {
+                Some(1)
+            } else if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+                match digits.parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => {
+                        overflow = true;
+                        return true;
+                    }
+                }
+            } else {
+                None
+            };
+            if let Some(n) = number {
+                highest = Some(highest.map_or(n, |h| h.max(n)));
+            }
+            false
+        });
+        if overflow {
+            return None;
+        }
+        let mut n: u64 = match highest {
+            None => 1,
+            Some(h) => h.checked_add(1)?,
+        };
         loop {
             let candidate = if n == 1 {
                 base.clone()
@@ -1290,7 +1330,7 @@ impl Project {
             if !taken {
                 return Some(candidate);
             }
-            n += 1;
+            n = n.checked_add(1)?;
         }
     }
 
