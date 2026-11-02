@@ -1389,7 +1389,6 @@ fn mod_of_a_tiny_negative_dividend_rounds_to_the_divisor_like_python_and_excel()
 }
 
 #[test]
-#[ignore = "bug: #429: logx = ln(x)/ln(b): logx(1000, 10) = 2.9999999999999996, functions.rs:242"]
 fn logx_of_exact_powers_is_exact() {
     let cases = [
         (1000.0, 10.0, 3.0),
@@ -1397,6 +1396,7 @@ fn logx_of_exact_powers_is_exact() {
         (243.0, 3.0, 5.0),
         (125.0, 5.0, 3.0),
         (1e15, 10.0, 15.0),
+        (8.0, 0.5, -3.0),
     ];
     for (x, base, expected) in cases {
         let (v, _) = run(
@@ -1409,10 +1409,35 @@ fn logx_of_exact_powers_is_exact() {
 }
 
 #[test]
-#[ignore = "bug: #429: floor(logx(1000, 10)) = 2, functions.rs:242"]
 fn floor_of_logx_of_a_power_of_ten_is_the_exponent() {
     let (v, _) = run("floor(logx(A, 10))", &[float_column(&[1000.0])], 1);
     assert_eq!(v[0], 3.0);
+}
+
+/// A value only close to a power is not snapped to the integer.
+#[test]
+fn logx_of_a_value_close_to_a_power_is_not_snapped() {
+    let x = 243.0 * (1.0 + 1e-12);
+    let (v, _) = run("logx(A, B)", &[float_column(&[x]), float_column(&[3.0])], 1);
+    assert_ne!(v[0], 5.0);
+    assert!((v[0] - 5.0).abs() < 1e-11);
+}
+
+/// Bases 10 and 2 are the `log10` / `log2` of libm, bit for bit.
+#[test]
+fn logx_in_base_10_and_2_is_log10_and_log2_bitwise() {
+    let xs: Vec<f64> = (1..400).map(|i| (i as f64) * 0.37 + 0.001).collect();
+    let n = xs.len();
+    for (base, f) in [(10.0, libm::log10 as fn(f64) -> f64), (2.0, libm::log2)] {
+        let (v, _) = run(
+            "logx(A, B)",
+            &[float_column(&xs), float_column(&vec![base; n])],
+            n,
+        );
+        for (x, got) in xs.iter().zip(&v) {
+            assert_eq!(got.to_bits(), f(*x).to_bits(), "logx({x}, {base})");
+        }
+    }
 }
 
 // -- (c) number lexing --

@@ -5237,6 +5237,7 @@ dependencies = [
 name = "stokesforge-core"
 version = "1.0.0"
 dependencies = [
+ "libm",
  "proptest",
  "stokesforge-analysis",
  "stokesforge-arch-guard",

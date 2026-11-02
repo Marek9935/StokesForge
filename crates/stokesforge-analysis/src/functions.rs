@@ -239,13 +239,37 @@ impl Func {
             // Base ≤ 0 or = 1: NaN (ln b = 0 would give ±inf or 0/0); x ≤ 0:
             // `ln` already gives NaN (−inf for 0, which we keep like `ln`).
             Func::Logx if b.is_nan() || b <= 0.0 || b == 1.0 => f64::NAN,
-            Func::Logx => libm::log(a) / libm::log(b),
+            Func::Logx => logx(a, b),
             Func::Root => root(a, b),
             Func::Round => round(a, b),
             Func::Mod => modulo(a, b),
             Func::Pi => std::f64::consts::PI,
         }
     }
+}
+
+/// Logarithm of `a` in base `b` (`b` > 0, `b` != 1, already checked).
+///
+/// Bases 10 and 2 go through `log10`/`log2` (exact on powers). Otherwise
+/// `ln(a) / ln(b)` is used. In every case, when `b^k == a` holds exactly for
+/// the integer `k` nearest to the result, the result is `k`: `logx(243, 3)` is
+/// 5 and `floor(logx(1000, 10))` is 3. A value only close to a power is not
+/// snapped.
+fn logx(a: f64, b: f64) -> f64 {
+    let r = if b == 10.0 {
+        libm::log10(a)
+    } else if b == 2.0 {
+        libm::log2(a)
+    } else {
+        libm::log(a) / libm::log(b)
+    };
+    if r.is_finite() {
+        let k = r.round();
+        if libm::pow(b, k) == a {
+            return k;
+        }
+    }
+    r
 }
 
 /// `n`-th root. Odd integer `n` with `x < 0` keeps the real root
