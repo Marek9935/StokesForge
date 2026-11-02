@@ -11,10 +11,10 @@
 # a merge or a release. A failure shows as a red run, a GitHub email to the
 # repository owner and a `::error` annotation (first errors of the log, readable
 # through the API). Read the runs with:
-#   gh run list --workflow toolchain-weekly.yml
+#   scripts/toolchain-weekly-status.sh
 # A scheduled workflow only runs from the default branch (`main`); until then
-# start it by hand with `gh workflow run toolchain-weekly.yml` (it needs the
-# file on the default branch too).
+# start it by hand from the Actions page of the mirror (Run workflow), or with
+# `gh workflow run toolchain-weekly.yml`; both need the file on the default branch.
 
 name: Toolchain weekly
 
