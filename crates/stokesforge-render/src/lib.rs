@@ -124,8 +124,8 @@ pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use frame_gesture::{grid_grips, resized_frames, GridGrips, Grip};
 pub use free_gesture::{
-    clamp_into_image, framed_by, free_handle_at, image_limits, magnetized, FreeHandle, Guide,
-    ImageLimits, Magnetized, MAGNET_THRESHOLD_POINTS,
+    clamp_into_image, framed_by, free_edge_handle_of, free_handle_at, image_limits, magnetized,
+    FreeHandle, Guide, ImageLimits, Magnetized, MAGNET_THRESHOLD_POINTS,
 };
 pub use hit::{
     cell_edge_at, component_at, component_at_with_tolerance, figure_edge_at, AxisSide, CellEdge,

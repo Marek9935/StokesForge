@@ -2654,7 +2654,12 @@ impl GraphView {
         let (_, layout) = self.figure_memo.as_ref()?;
         let tolerance = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS
             / f64::from(self.display_scale().filter(|scale| *scale > 0.0)?);
-        stokesforge_render::free_handle_at(layout, f64::from(pos.x), f64::from(pos.y), tolerance)
+        let (x, y) = (f64::from(pos.x), f64::from(pos.y));
+        // The selected graph's edges and corners win over the layers in front
+        // of it (#426b prototype): its handles are the ones painted.
+        self.selected_graph
+            .and_then(|base| stokesforge_render::free_edge_handle_of(layout, base, x, y, tolerance))
+            .or_else(|| stokesforge_render::free_handle_at(layout, x, y, tolerance))
     }
 
     /// Moving or resizing a layer of a free figure (#398): a primary drag

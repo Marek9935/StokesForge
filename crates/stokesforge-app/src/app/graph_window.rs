@@ -480,10 +480,12 @@ pub(super) fn graph_view_contents(
             }
             shape_properties_ui(ui.ctx(), view, graph_id, actions);
             resize_bubble(ui, view, outer);
-            zoom_indicator(ui, view, graph_id, outer);
-            if ui.small_button(tr!("plot-view-reset-zoom")).clicked() {
-                view.reset_view();
-            }
+            ui.horizontal(|ui| {
+                if ui.small_button(tr!("plot-view-reset-zoom")).clicked() {
+                    view.reset_view();
+                }
+                zoom_indicator(ui, view);
+            });
         }
         Err(err) => {
             ui.colored_label(
@@ -528,7 +530,7 @@ fn resize_bubble(ui: &egui::Ui, view: &GraphView, outer: egui::Rect) {
         h = number(feedback.figure.1),
         unit = unit.symbol()
     ));
-    let font = egui::TextStyle::Small.resolve(ui.style());
+    let font = egui::TextStyle::Body.resolve(ui.style());
     let color = ui.visuals().text_color();
     let galleys: Vec<_> = lines
         .into_iter()
@@ -561,9 +563,10 @@ fn resize_bubble(ui: &egui::Ui, view: &GraphView, outer: egui::Rect) {
     }
 }
 
-/// The discreet window zoom indicator in the bottom-right corner (#426b
-/// prototype).
-fn zoom_indicator(ui: &mut egui::Ui, view: &GraphView, graph: NodeId, outer: egui::Rect) {
+/// The discreet window zoom indicator (#426b prototype), beside Reset Zoom
+/// under the figure: how much the window enlarges the figure, which is never
+/// its exported size.
+fn zoom_indicator(ui: &mut egui::Ui, view: &GraphView) {
     let Some(scale) = view.display_scale() else {
         return;
     };
@@ -571,28 +574,8 @@ fn zoom_indicator(ui: &mut egui::Ui, view: &GraphView, graph: NodeId, outer: egu
         "graph-zoom-indicator",
         percent = ((scale * 100.0).round() as i64)
     );
-    let font = egui::TextStyle::Small.resolve(ui.style());
-    let color = ui.visuals().weak_text_color();
-    let galley = ui.painter().layout_no_wrap(text, font, color);
-    let size = galley.size() + egui::vec2(8.0, 4.0);
-    let rect = egui::Rect::from_min_size(
-        egui::pos2(outer.right() - 6.0 - size.x, outer.bottom() - 6.0 - size.y),
-        size,
-    );
-    let response = ui
-        .interact(
-            rect,
-            egui::Id::new(("stokesforge_zoom_indicator", graph)),
-            egui::Sense::hover(),
-        )
+    ui.add(egui::Label::new(crate::theme::secondary_text(text)).sense(egui::Sense::hover()))
         .on_hover_text(tr!("graph-zoom-indicator-hint"));
-    ui.painter().rect_filled(
-        response.rect,
-        3.0,
-        ui.visuals().window_fill.gamma_multiply(0.6),
-    );
-    ui.painter()
-        .galley(response.rect.min + egui::vec2(4.0, 2.0), galley, color);
 }
 
 /// The bounds that the last draw kept for the axes of a layer, in

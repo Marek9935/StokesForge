@@ -268,13 +268,27 @@ fn drag_with(
     scale: f32,
     modifiers: egui::Modifiers,
 ) -> Vec<GraphEvent> {
+    drag_at(context, view, fixture, (from, to), scale, modifiers, 0.1)
+}
+
+/// [`drag_with`] starting at `start` seconds, for a gesture that follows other
+/// input (a click that selects first).
+fn drag_at(
+    context: &egui::Context,
+    view: &mut GraphView,
+    fixture: &Fixture,
+    (from, to): (Pos2, Pos2),
+    scale: f32,
+    modifiers: egui::Modifiers,
+    start: f64,
+) -> Vec<GraphEvent> {
     let button = |pos: Pos2, pressed: bool| egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
         pressed,
         modifiers,
     };
-    let mut time = 0.1;
+    let mut time = start;
     let (mut signals, _) = frame_with(
         context,
         view,
@@ -1776,4 +1790,47 @@ fn the_resize_feedback_follows_the_drag_and_ends_with_it() {
         (f64::from(size.0) + 40.0, f64::from(size.1))
     );
     assert_eq!(feedback.graphs.len(), 1);
+}
+
+/// #426b prototype: once a graph is selected, its edges and corners are grabbed
+/// even where a layer drawn in front of it covers them (its handles are the
+/// painted ones). Layer 1 (front) covers the right edge of layer 0. Witness:
+/// without the selected cell first, the drag starts on layer 1 instead.
+#[test]
+fn the_selected_layer_keeps_its_edges_under_a_front_layer() {
+    let fixture = Fixture::free_two_layers_at((100.0, 200.0), (0, 1)).with_spare_room();
+    let (context, mut view) = ready(&fixture);
+    warm_up(&context, &mut view, &fixture, 1.0);
+    let back = free_cell(&mut view, &context, &fixture, 0);
+    let front = free_cell(&mut view, &context, &fixture, 1);
+    let right = (back.outer.0 + back.outer.2) as f32;
+    assert!(
+        right > front.outer.0 as f32 && right < (front.outer.0 + front.outer.2) as f32,
+        "the fixture hides the right edge of layer 0 under layer 1"
+    );
+    // Select layer 0 where layer 1 does not cover it.
+    let visible = Pos2::new(back.frame.0 as f32 + 5.0, center(&back, 1.0).y);
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        visible,
+        egui::Modifiers::NONE,
+        1.0,
+    );
+    assert_eq!(view.selected_graph(), Some(0));
+    let from = Pos2::new(right, center(&back, 1.0).y);
+    let signals = drag_at(
+        &context,
+        &mut view,
+        &fixture,
+        (from, from - egui::vec2(30.0, 0.0)),
+        1.0,
+        egui::Modifiers::NONE,
+        3.0,
+    );
+    let (panel, frame, resized) = framed(&signals);
+    assert_eq!(panel, 0);
+    assert!(resized);
+    assert!((frame.width - 270.0).abs() < 1.0, "{frame:?}");
 }

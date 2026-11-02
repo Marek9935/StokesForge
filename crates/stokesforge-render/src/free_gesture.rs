@@ -80,6 +80,39 @@ pub fn free_handle_at(layout: &FigureLayout, x: f64, y: f64, tolerance: f64) -> 
     None
 }
 
+/// The edge or corner handle of the cell of base layer `base` alone under the
+/// figure pixel `(x, y)`, within `tolerance` of its outer boundary, whatever
+/// lies in front of it (#426b prototype): the selected graph's handles win over
+/// the layers drawn after it. `None` inside the cell or away from its edges.
+pub fn free_edge_handle_of(
+    layout: &FigureLayout,
+    base: usize,
+    x: f64,
+    y: f64,
+    tolerance: f64,
+) -> Option<FreeHandle> {
+    if layout.placement != LayerPlacement::Free {
+        return None;
+    }
+    let tolerance = if tolerance.is_finite() {
+        tolerance.clamp(0.0, CELL_EDGE_MAX_TOLERANCE)
+    } else {
+        0.0
+    };
+    let cell = layout.free_cells.iter().find(|cell| cell.base == base)?;
+    let (ox, oy, ow, oh) = cell.outer;
+    let (left, top) = (f64::from(ox), f64::from(oy));
+    let (right, bottom) = (left + f64::from(ow), top + f64::from(oh));
+    let near = x >= left - tolerance
+        && x <= right + tolerance
+        && y >= top - tolerance
+        && y <= bottom + tolerance;
+    if !near {
+        return None;
+    }
+    handle_of(cell, (left, top, right, bottom), (x, y), tolerance).filter(|h| !h.is_move())
+}
+
 /// What the point grabs on `cell`, whose outer rectangle is `outer` as
 /// `(left, top, right, bottom)`: an edge or a corner within `tolerance`, the
 /// move inside the frame, nothing in the bands between.

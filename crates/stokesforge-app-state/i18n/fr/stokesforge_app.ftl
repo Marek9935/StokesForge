@@ -271,10 +271,10 @@ grid-drag-rows =
 graph-row-series = Ligne { $number }
 graph-series-broken-reference = (référence rompue)
 graph-series-broken-reference-named = { $name } — référence rompue
-graph-resize-bubble-graph = Graphe { $n } : { $w } × { $h } { $unit }
-graph-resize-bubble-figure = Figure : { $w } × { $h } { $unit }
-graph-zoom-indicator = { $percent } %
-graph-zoom-indicator-hint = Zoom de la fenêtre seulement : l'image exportée a la taille Figure des propriétés du graphe
+graph-resize-bubble-graph = Graphe { $n } : { $w } × { $h } { $unit }
+graph-resize-bubble-figure = Figure : { $w } × { $h } { $unit }
+graph-zoom-indicator = { $percent } %
+graph-zoom-indicator-hint = Zoom de la fenêtre seulement : l'image exportée a la taille Figure des propriétés du graphe
 graph-legend-more = { $count ->
     [one] … et { $count } autre
    *[other] … et { $count } autres
@@ -884,7 +884,7 @@ plot-size-position-top = Position, haut ({ $unit })
 plot-size-free-note = La figure est la boîte autour des calques ; glisser un calque le garde dans la figure. Les valeurs ci-dessus sont celles du calque choisi dans la liste ; les positions sont celles de la page et peuvent être négatives.
 
 plot-figure-size = Ajout d’axes
-    .hint = Agrandit la figure : un axe ou un titre ajouté agrandit l’image. Garde la figure : la place de quatre axes est réservée dès le départ, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
+    .hint = Agrandit la figure : un axe ou un titre ajouté agrandit l’image. Garde la figure : la place de quatre axes est réservée dès le départ, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
 plot-figure-size-grows = Agrandit la figure
 plot-figure-size-fixed = Garde la figure (place réservée)
 
