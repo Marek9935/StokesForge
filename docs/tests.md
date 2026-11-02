@@ -165,6 +165,17 @@ bounds a time (10 s, very wide) because a quadratic CPU cost allocates nothing.
 The refusals of `MAX_COLUMN_ROWS` on reading are tested with `check_rows` and tiny
 limits (`convert.rs`), never with 10^8 rows.
 
+### Slow tests (#412)
+
+A test that takes more than a couple of seconds in debug lives in a `mod slow`
+of its file, so that its path starts with `slow::`: `cargo test -- --skip slow::`
+leaves them out, `cargo test slow::` runs only them. This prefix is THE marker
+(no other name, no `#[ignore]`: a slow test still runs in CI); it prepares a
+fast/slow split of the CI jobs. Today: the two long-recalculation gestures of
+`stokesforge-app-state/tests/formula_gestures.rs` (80 000 rows x 150 formula
+columns, a 2.5 s recalculation, i.e. 12 times `RECALC_WAIT`; they assert that
+the recalculation is still running, which is their precondition).
+
 ## Targeted recalculation (#193) — and what to test when relying on it
 
 Since #193, the actor rewrites a formula column only if a piece of data of its
