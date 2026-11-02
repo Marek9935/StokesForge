@@ -184,7 +184,19 @@ pub enum GraphEvent {
         /// Grid row and its new frame height, for a horizontal boundary.
         row: Option<(usize, f64)>,
     },
-    /// The left or top edge of the figure was pulled then released (#405): the
+    /// A splitter between two columns or rows, or the right or bottom edge of
+    /// the figure, was pulled then released (#426b): every changed column and
+    /// row with its new frame size in points, to commit as **one** change of
+    /// the model. The preview stays displayed until the model changes
+    /// ([`GraphView::hold_preview`]).
+    FramesResized {
+        /// Grid columns that changed and their new frame widths.
+        widths: Vec<(usize, f64)>,
+        /// Grid rows that changed and their new frame heights.
+        heights: Vec<(usize, f64)>,
+    },
+    /// The left or top edge of the figure was pulled then released (#405,
+    /// no longer emitted since #426b): the
     /// new distance in points from the edge of the image to the first frame
     /// (Left / Top), to commit as **one** change of the model. The preview stays
     /// displayed until the model changes ([`GraphView::hold_preview`]).
@@ -288,19 +300,15 @@ impl GraphTool {
     }
 }
 
-/// The frame sizes a cell handle is being pulled to (#394): applied to the
-/// clone of the spec when the figure is laid out and drawn, never to the model.
-/// `base` is the frames the figure was drawn with when the gesture began, so
-/// that a legacy graph (no stored frame) previews exactly what the committing
-/// action will fix.
+/// The frame sizes a cell handle is being pulled to (#394, #426b): applied to
+/// the clone of the spec when the figure is laid out and drawn, never to the
+/// model.
 #[derive(Debug, Clone, PartialEq)]
 struct FramePreview {
-    column: Option<(usize, f64)>,
-    row: Option<(usize, f64)>,
-    /// Left and Top the figure edges are being pulled to (#405).
-    left: Option<f64>,
-    top: Option<f64>,
-    base: (Vec<f64>, Vec<f64>),
+    /// The frame width of every column and the frame height of every row of
+    /// the grid (a legacy graph previews exactly the frames it is drawn with,
+    /// which the committing action will then fix).
+    sizes: Option<(Vec<f64>, Vec<f64>)>,
     /// The frame a free layer is being moved or resized to (#398): the base
     /// layer of its cell and the frame.
     free: Option<(usize, FreeFrame)>,
@@ -314,55 +322,29 @@ impl FramePreview {
             }
             return;
         }
-        let bounds = |size: f64| {
+        let bounds = |size: &f64| {
             size.clamp(
                 stokesforge_plot::MIN_FRAME_SIZE,
                 stokesforge_plot::MAX_FRAME_SIZE,
             )
         };
-        let mut widths = spec
-            .sanitized_frame_widths()
-            .unwrap_or_else(|| self.base.0.clone());
-        let mut heights = spec
-            .sanitized_frame_heights()
-            .unwrap_or_else(|| self.base.1.clone());
-        if let Some((index, size)) = self.column {
-            if let Some(slot) = widths.get_mut(index) {
-                *slot = bounds(size);
-            }
-        }
-        if let Some((index, size)) = self.row {
-            if let Some(slot) = heights.get_mut(index) {
-                *slot = bounds(size);
-            }
-        }
-        spec.frame_widths = widths;
-        spec.frame_heights = heights;
-        if let Some(left) = self.left {
-            spec.figure_left = Some(left);
-        }
-        if let Some(top) = self.top {
-            spec.figure_top = Some(top);
+        if let Some((widths, heights)) = &self.sizes {
+            spec.frame_widths = widths.iter().map(bounds).collect();
+            spec.frame_heights = heights.iter().map(bounds).collect();
         }
     }
 }
 
-/// True if the previewed size differs from the starting one by half a point
-/// or more (the preview is rounded to whole points).
-fn moved(preview: Option<(usize, f64)>, start: Option<(usize, f64)>) -> bool {
-    match (preview, start) {
-        (Some((_, now)), Some((_, before))) => (now - before).abs() >= 0.5,
-        _ => false,
-    }
-}
-
-/// True if a previewed Left or Top differs from the starting one by half a
-/// point or more (#405).
-fn moved_value(preview: Option<f64>, start: Option<f64>) -> bool {
-    match (preview, start) {
-        (Some(now), Some(before)) => (now - before).abs() >= 0.5,
-        _ => false,
-    }
+/// What a resize or move in progress changes (#426b), for the size bubble.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResizeFeedback {
+    /// Pointer, in egui screen points.
+    pub pointer: Pos2,
+    /// Every cell being changed: base layer index and its outer box
+    /// (plot area + axes + labels) size in points, as the preview lays it out.
+    pub graphs: Vec<(usize, (f64, f64))>,
+    /// The figure (whole image) size in points, as the preview lays it out.
+    pub figure: (f64, f64),
 }
 
 /// How far outside the figure, in screen points, its edge handles can be
@@ -370,17 +352,18 @@ fn moved_value(preview: Option<f64>, start: Option<f64>) -> bool {
 /// that much room around the figure and let its clip rectangle reach it.
 pub const FIGURE_GRAB_MARGIN: f32 = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS as f32;
 
-/// A cell-handle drag in progress (#394).
+/// A cell-handle drag in progress (#394, #426b).
 #[derive(Debug, Clone)]
 struct FrameDrag {
-    /// Column and frame width at the start of the gesture.
-    column: Option<(usize, f64)>,
-    /// Row and frame height at the start of the gesture.
-    row: Option<(usize, f64)>,
-    /// Left and Top at the start of the gesture, when the left or top edge of
-    /// the figure is pulled (#405).
-    left: Option<f64>,
-    top: Option<f64>,
+    /// What the press grabbed: a splitter or a figure edge, per axis.
+    grips: stokesforge_render::GridGrips,
+    /// The frame widths and heights at the start of the gesture (the frames
+    /// the figure was drawn with: a legacy graph starts from them).
+    start: (Vec<f64>, Vec<f64>),
+    /// The layout at the start of the gesture.
+    layout: FigureLayout,
+    /// The base layers of the grid at the start: `(layer, row, column)`.
+    cells: Vec<(usize, usize, usize)>,
     /// Press point, in screen coordinates, and the display scale at that
     /// moment: the distance is measured in screen points and divided by that
     /// scale, because the figure (and the window that follows it) grows under
@@ -388,8 +371,8 @@ struct FrameDrag {
     /// position would be a frame behind.
     press: Pos2,
     scale: f32,
-    /// The frames the figure was drawn with at the start.
-    base: (Vec<f64>, Vec<f64>),
+    /// The pointer at the last frame, in screen points.
+    pointer: Pos2,
 }
 
 /// Which layer gesture a call of [`GraphView::handle_free_drag`] may start.
@@ -416,6 +399,11 @@ struct FreeDrag {
     scale: f32,
     /// The dashed guides of the magnets, painted over the figure.
     guides: Vec<stokesforge_render::Guide>,
+    /// Where the frame may be so that the outer box stays inside the image as
+    /// it was at the press (#426b).
+    limits: Option<stokesforge_render::ImageLimits>,
+    /// The pointer at the last frame, in screen points.
+    pointer: Pos2,
 }
 
 /// A title or legend drag in progress (issue #53).
@@ -724,6 +712,9 @@ pub struct GraphView {
     /// Preview of the frame sizes of a cell handle being pulled (#394).
     frame_preview: Option<FramePreview>,
     frame_drag: Option<FrameDrag>,
+    /// The cell selected by a click in its plot area (#426b): base layer
+    /// index. It carries the resize handles painted over the figure.
+    selected_graph: Option<usize>,
     /// Move or resize of a layer of a free figure in progress (#398).
     free_drag: Option<FreeDrag>,
     /// Selected free text (click), target of Delete.
@@ -854,6 +845,7 @@ impl GraphView {
             text_drag: None,
             frame_preview: None,
             frame_drag: None,
+            selected_graph: None,
             free_drag: None,
             selected_annotation: None,
             selected_text: None,
@@ -962,6 +954,9 @@ impl GraphView {
         self.selected_series = None;
         self.selected_group = None;
         self.selected_text = None;
+        self.selected_graph = self
+            .selected_graph
+            .and_then(|graph| map.get(graph).copied().flatten());
         self.seen_selection = (None, None, None, None);
         self.nav_drag = None;
         self.drag_box = None;
@@ -1662,8 +1657,92 @@ impl GraphView {
     /// (#405), as `(left, top)`: the window that follows the figure then grows
     /// towards that side, so the frame stays put on screen.
     pub fn placing_edges(&self) -> (bool, bool) {
-        self.frame_drag.as_ref().map_or((false, false), |drag| {
-            (drag.left.is_some(), drag.top.is_some())
+        // Since #426b the left and top edges of the figure no longer move.
+        (false, false)
+    }
+
+    /// The cell selected by a click in its plot area (#426b): its base layer
+    /// index.
+    pub fn selected_graph(&self) -> Option<usize> {
+        self.selected_graph
+    }
+
+    /// Clears the selection of a cell (#426b).
+    pub fn clear_graph_selection(&mut self) {
+        self.selected_graph = None;
+    }
+
+    /// What a resize or move in progress changes (#426b), for the size bubble;
+    /// `None` outside a frame drag or a free drag. Read from the figure as the
+    /// preview lays it out.
+    pub fn resize_feedback(&self) -> Option<ResizeFeedback> {
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let figure = (f64::from(layout.size.0), f64::from(layout.size.1));
+        if let Some(drag) = &self.frame_drag {
+            // Computed from the start layout and the previewed frames, so that
+            // it is never a frame behind the pointer.
+            let sizes = self
+                .frame_preview
+                .as_ref()
+                .and_then(|preview| preview.sizes.as_ref());
+            let explicit = drag.layout.is_explicit();
+            let figure_now = match sizes {
+                Some((widths, heights)) if explicit => {
+                    drag.layout.size_with_frames(widths, heights)
+                }
+                _ => figure,
+            };
+            let cell_size = |row: usize, column: usize| -> Option<(f64, f64)> {
+                match sizes {
+                    Some((widths, heights)) if explicit => {
+                        let (left, right) = *drag.layout.column_gutters.get(column)?;
+                        let (top, bottom) = *drag.layout.row_gutters.get(row)?;
+                        Some((
+                            widths.get(column)? + f64::from(left + right),
+                            heights.get(row)? + f64::from(top + bottom),
+                        ))
+                    }
+                    _ => {
+                        let (_, _, width, height) = layout.cell_rect(row, column)?;
+                        Some((f64::from(width), f64::from(height)))
+                    }
+                }
+            };
+            let mut chosen: Vec<usize> = Vec::new();
+            let mut graphs: Vec<(usize, (f64, f64))> = Vec::new();
+            for &(base, row, column) in &drag.cells {
+                let wanted =
+                    |grip: Option<stokesforge_render::Grip>, own: usize, other: usize| match grip {
+                        Some(stokesforge_render::Grip::FigureEdge) => true,
+                        Some(stokesforge_render::Grip::Splitter(n)) => {
+                            (own == n || own == n + 1) && other == 0
+                        }
+                        None => false,
+                    };
+                if !(wanted(drag.grips.column, column, row) || wanted(drag.grips.row, row, column))
+                    || chosen.contains(&base)
+                {
+                    continue;
+                }
+                let Some(size) = cell_size(row, column) else {
+                    continue;
+                };
+                chosen.push(base);
+                graphs.push((base, size));
+            }
+            return Some(ResizeFeedback {
+                pointer: drag.pointer,
+                graphs,
+                figure: figure_now,
+            });
+        }
+        let drag = self.free_drag.as_ref()?;
+        let base = drag.handle.base;
+        let cell = layout.free_cells.iter().find(|cell| cell.base == base)?;
+        Some(ResizeFeedback {
+            pointer: drag.pointer,
+            graphs: vec![(base, (f64::from(cell.outer.2), f64::from(cell.outer.3)))],
+            figure,
         })
     }
 
@@ -1806,6 +1885,9 @@ impl GraphView {
             self.clear_previews();
         }
 
+        self.selected_graph = self
+            .selected_graph
+            .filter(|graph| *graph < spec.panels.len());
         self.selected_series = self
             .selected_series
             .filter(|target| spec.series_at(*target).is_some());
@@ -2079,6 +2161,14 @@ impl GraphView {
         }
         let nav = self.decide_nav(response, context);
         let pan = nav.is_some_and(NavDrag::is_pan);
+        // Escape drops the selected cell and its handles (#426b). The view
+        // does not know of an in-place text editor: the key is only read here,
+        // never consumed.
+        if (response.hovered() || response.has_focus())
+            && context.input(|input| input.key_pressed(egui::Key::Escape))
+        {
+            self.selected_graph = None;
+        }
         if self.tool == GraphTool::Pointer && !pan {
             self.frame_handle_cursor(response, context);
         }
@@ -2119,6 +2209,9 @@ impl GraphView {
                     }
                 }
             }
+        }
+        if response.clicked() && self.tool == GraphTool::Pointer {
+            self.select_graph_at(pointer);
         }
         if response.clicked() {
             self.selected_series = None;
@@ -2320,8 +2413,44 @@ impl GraphView {
         }
     }
 
-    /// The resize cursor over a cell handle or a figure edge, and during its
-    /// drag (#394, #405).
+    /// A click at `pointer` (#426b): in the plot area of a layer, it selects
+    /// that layer's cell; on no cell at all (background), it clears the
+    /// selection; elsewhere in a cell (axes, labels) the selection is left.
+    fn select_graph_at(&mut self, pointer: Option<Pos2>) {
+        let Some(pos) = pointer else {
+            return;
+        };
+        let Some(last) = self.last.as_ref() else {
+            return;
+        };
+        if let Some(PlotComponent::PlotArea { panel }) = self.component_at(pos) {
+            if let Some(drawn) = last.panels.get(panel) {
+                // An overlay layer shares the cell of its base layer.
+                let base = last
+                    .panels
+                    .iter()
+                    .find(|other| {
+                        other.overlay.is_none()
+                            && other.row == drawn.row
+                            && other.column == drawn.column
+                    })
+                    .map_or(drawn.index, |other| other.index);
+                self.selected_graph = Some(base);
+            }
+            return;
+        }
+        let in_a_cell = last
+            .panels
+            .iter()
+            .filter_map(|panel| self.cell_rect_screen(panel.index))
+            .any(|rect| rect.contains(pos));
+        if !in_a_cell {
+            self.selected_graph = None;
+        }
+    }
+
+    /// The resize cursor over a splitter or the right or bottom edge of the
+    /// figure, and during its drag (#394, #426b).
     fn frame_handle_cursor(&self, response: &Response, context: &egui::Context) {
         if let Some(icon) = self.free_cursor(response) {
             context.set_cursor_icon(icon);
@@ -2330,23 +2459,13 @@ impl GraphView {
         let (mut horizontal, mut vertical) = (false, false);
         match &self.frame_drag {
             Some(drag) => {
-                horizontal = drag.column.is_some() || drag.left.is_some();
-                vertical = drag.row.is_some() || drag.top.is_some();
+                horizontal = drag.grips.column.is_some();
+                vertical = drag.grips.row.is_some();
             }
             None if response.hovered() => {
-                if let Some(pos) = response.hover_pos() {
-                    if let Some(edge) = self.cell_edge_at(pos).filter(|e| self.edge_is_editable(e))
-                    {
-                        horizontal |= edge.column.is_some();
-                        vertical |= edge.row.is_some();
-                    }
-                    if let Some(edge) = self
-                        .figure_edge_at(pos)
-                        .filter(|_| self.figure_is_placeable())
-                    {
-                        horizontal |= edge.left;
-                        vertical |= edge.top;
-                    }
+                if let Some(grips) = response.hover_pos().and_then(|pos| self.grips_at(pos)) {
+                    horizontal = grips.column.is_some();
+                    vertical = grips.row.is_some();
                 }
             }
             None => {}
@@ -2360,6 +2479,22 @@ impl GraphView {
         context.set_cursor_icon(icon);
     }
 
+    /// What the cell boundary under the screen position `pos` is (#426b): a
+    /// splitter or a figure edge, per axis. `None` off the boundaries, on a
+    /// free figure and on a grid with no frame to edit.
+    fn grips_at(&self, pos: Pos2) -> Option<stokesforge_render::GridGrips> {
+        let edge = self
+            .cell_edge_at(pos)
+            .filter(|edge| self.edge_is_editable(edge))?;
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let grips = stokesforge_render::grid_grips(
+            &edge,
+            layout.frame_widths.len(),
+            layout.frame_heights.len(),
+        );
+        (grips.column.is_some() || grips.row.is_some()).then_some(grips)
+    }
+
     /// True if the figure was drawn with free layer placement (#398): its
     /// layers have no grid column or row to pull, so no handle exists (they
     /// come with the mouse gestures of free placement).
@@ -2367,16 +2502,6 @@ impl GraphView {
         self.figure_memo
             .as_ref()
             .is_some_and(|(_, layout)| layout.placement == stokesforge_plot::LayerPlacement::Free)
-    }
-
-    /// True if the layout the figure was drawn with has frames to place (a
-    /// compact fallback grid has none; a free figure has no handle yet).
-    fn figure_is_placeable(&self) -> bool {
-        self.figure_memo.as_ref().is_some_and(|(_, layout)| {
-            layout.placement == stokesforge_plot::LayerPlacement::Grid
-                && !layout.frame_widths.is_empty()
-                && !layout.frame_heights.is_empty()
-        })
     }
 
     /// True if the layout the figure was drawn with has a frame for the column
@@ -2395,37 +2520,43 @@ impl GraphView {
                 .is_some_and(|index| index < layout.frame_heights.len())
     }
 
-    /// Pulling a cell handle (#394): a primary drag **starting on the outer
-    /// boundary of a cell** changes the frame size of its column and/or row by
-    /// the distance the pointer travels. The preview follows the pointer; at
-    /// release, a single [`GraphEvent::FrameResized`]. Returns `true` if the
-    /// gesture is a handle drag (the other drags must then do nothing with it).
+    /// Pulling a splitter or the edge of the figure (#394, #426b): a primary
+    /// drag **starting on the outer boundary of a cell**. A splitter between
+    /// two columns (rows) moves size from one to the other, the figure keeps
+    /// its size; the right (bottom) edge of the figure resizes it, every frame
+    /// in proportion. The preview follows the pointer; at release, a single
+    /// [`GraphEvent::FramesResized`]. Returns `true` if the gesture is a
+    /// handle drag (the other drags must then do nothing with it).
     fn handle_frame_drag(&mut self, response: &Response, context: &egui::Context) -> bool {
         if response.drag_stopped_by(PointerButton::Primary) {
             let Some(drag) = self.frame_drag.take() else {
                 return false;
             };
-            match self.frame_preview.clone() {
-                Some(preview)
-                    if moved(preview.column, drag.column)
-                        || moved(preview.row, drag.row)
-                        || moved_value(preview.left, drag.left)
-                        || moved_value(preview.top, drag.top) =>
-                {
-                    if preview.column.is_some() || preview.row.is_some() {
-                        self.events.push(GraphEvent::FrameResized {
-                            column: preview.column,
-                            row: preview.row,
-                        });
+            let sizes = self
+                .frame_preview
+                .as_ref()
+                .and_then(|preview| preview.sizes.clone());
+            let changed = |now: &[f64], before: &[f64]| -> Vec<(usize, f64)> {
+                now.iter()
+                    .zip(before)
+                    .enumerate()
+                    .filter(|(_, (now, before))| (**now - **before).abs() >= 0.005)
+                    .map(|(index, (now, _))| (index, *now))
+                    .collect()
+            };
+            match sizes {
+                Some((widths, heights)) => {
+                    let widths = changed(&widths, &drag.start.0);
+                    let heights = changed(&heights, &drag.start.1);
+                    if widths.is_empty() && heights.is_empty() {
+                        self.set_frame_preview(None);
                     } else {
-                        self.events.push(GraphEvent::FramePlaced {
-                            left: preview.left,
-                            top: preview.top,
-                        });
+                        self.events
+                            .push(GraphEvent::FramesResized { widths, heights });
+                        self.hold_preview();
                     }
-                    self.hold_preview();
                 }
-                _ => self.set_frame_preview(None),
+                None => self.set_frame_preview(None),
             }
             return true;
         }
@@ -2439,84 +2570,46 @@ impl GraphView {
             let origin = context
                 .input(|input| input.pointer.press_origin())
                 .unwrap_or(pos - response.drag_delta());
-            let cell_edge = self.cell_edge_at(origin);
-            let figure_edge = self.figure_edge_at(origin);
-            if cell_edge.is_none() && figure_edge.is_none() {
+            let Some(grips) = self.grips_at(origin) else {
                 return false;
-            }
+            };
             let Some((_, layout)) = &self.figure_memo else {
                 return false;
             };
-            let base = (layout.frame_widths.clone(), layout.frame_heights.clone());
-            let column = cell_edge
-                .and_then(|edge| edge.column)
-                .and_then(|index| Some((index, *base.0.get(index)?)));
-            let row = cell_edge
-                .and_then(|edge| edge.row)
-                .and_then(|index| Some((index, *base.1.get(index)?)));
-            // Where the first frame is now, measured from the image edge: read
-            // from what was drawn, so that a legacy graph (whose layout stores
-            // no frame) starts from the plot area it is drawn with.
-            let first = self.last.as_ref().and_then(|plot| {
-                plot.panels
-                    .iter()
-                    .find(|panel| panel.row == 0 && panel.column == 0)
-                    .map(|panel| panel.pixel_origin)
-            });
-            let placeable = !base.0.is_empty() && !base.1.is_empty() && first.is_some();
-            let left = figure_edge
-                .filter(|edge| edge.left && placeable)
-                .and_then(|_| first.map(|origin| f64::from(origin.0)));
-            let top = figure_edge
-                .filter(|edge| edge.top && placeable)
-                .and_then(|_| first.map(|origin| f64::from(origin.1)));
             let Some(scale) = self.display_scale().filter(|scale| *scale > 0.0) else {
                 return false;
             };
-            if column.is_none() && row.is_none() && left.is_none() && top.is_none() {
-                return false;
-            }
+            let cells = self.last.as_ref().map_or_else(Vec::new, |plot| {
+                plot.panels
+                    .iter()
+                    .filter(|panel| panel.overlay.is_none())
+                    .map(|panel| (panel.index, panel.row, panel.column))
+                    .collect()
+            });
             self.frame_drag = Some(FrameDrag {
-                column,
-                row,
-                left,
-                top,
+                grips,
+                start: (layout.frame_widths.clone(), layout.frame_heights.clone()),
+                layout: layout.clone(),
+                cells,
                 press: origin,
                 scale,
-                base,
+                pointer: pos,
             });
         }
-        let Some(drag) = self.frame_drag.clone() else {
+        let Some(drag) = self.frame_drag.as_mut() else {
             return false;
         };
+        drag.pointer = pos;
+        let drag = drag.clone();
         let delta = (pos - drag.press) / drag.scale;
-        let bounds = |size: f64| {
-            size.round().clamp(
-                stokesforge_plot::MIN_FRAME_SIZE,
-                stokesforge_plot::MAX_FRAME_SIZE,
-            )
-        };
-        // Pulling the left or top edge of the image outwards (towards smaller
-        // coordinates) gives the frame more room on that side, and the other
-        // way round.
-        let (min_left, min_top) = self.figure_memo.as_ref().map_or((0.0, 0.0), |(_, layout)| {
-            (f64::from(layout.min_left), f64::from(layout.min_top))
-        });
-        let offset = |start: f64, moved: f32, minimum: f64| {
-            (start - f64::from(moved))
-                .round()
-                .clamp(minimum, stokesforge_plot::MAX_FRAME_SIZE)
-        };
+        let (widths, heights) = stokesforge_render::resized_frames(
+            &drag.layout,
+            &drag.grips,
+            (&drag.start.0, &drag.start.1),
+            (f64::from(delta.x), f64::from(delta.y)),
+        );
         self.set_frame_preview(Some(FramePreview {
-            column: drag
-                .column
-                .map(|(index, start)| (index, bounds(start + f64::from(delta.x)))),
-            row: drag
-                .row
-                .map(|(index, start)| (index, bounds(start + f64::from(delta.y)))),
-            left: drag.left.map(|start| offset(start, delta.x, min_left)),
-            top: drag.top.map(|start| offset(start, delta.y, min_top)),
-            base: drag.base,
+            sizes: Some((widths, heights)),
             free: None,
         }));
         true
@@ -2648,7 +2741,15 @@ impl GraphView {
                 press: origin,
                 scale,
                 guides: Vec::new(),
+                limits: self
+                    .figure_memo
+                    .as_ref()
+                    .and_then(|(_, layout)| stokesforge_render::image_limits(layout, handle.base)),
+                pointer: pos,
             });
+        }
+        if let Some(active) = self.free_drag.as_mut() {
+            active.pointer = pos;
         }
         let Some(drag) = self.free_drag.clone() else {
             return false;
@@ -2667,13 +2768,16 @@ impl GraphView {
         if let Some(active) = self.free_drag.as_mut() {
             active.guides = result.guides;
         }
+        // The outer box stays inside the image as it was at the press (#426b).
+        let frame = match &drag.limits {
+            Some(limits) => {
+                stokesforge_render::clamp_into_image(result.frame, &drag.handle, limits)
+            }
+            None => result.frame,
+        };
         self.set_frame_preview(Some(FramePreview {
-            column: None,
-            row: None,
-            left: None,
-            top: None,
-            base: (Vec::new(), Vec::new()),
-            free: Some((drag.handle.base, result.frame)),
+            sizes: None,
+            free: Some((drag.handle.base, frame)),
         }));
         true
     }
@@ -2892,6 +2996,166 @@ impl GraphView {
         true
     }
 
+    /// The box and the resize handles of the selected cell, the faint ones of
+    /// the cell under the pointer, the splitter bar and the outline of the
+    /// figure during a figure-edge drag (#426b). Screen only, never exported.
+    fn paint_graph_handles(&self, painter: &Painter, response: &Response) {
+        if self.tool != GraphTool::Pointer {
+            return;
+        }
+        let (Some(display), Some(scale), Some((_, layout))) =
+            (self.display_rect, self.display_scale(), &self.figure_memo)
+        else {
+            return;
+        };
+        let dragging = self.frame_drag.is_some() || self.free_drag.is_some();
+        let hover = response.hover_pos();
+
+        // The splitter bar: hovered or being dragged.
+        let grips = match &self.frame_drag {
+            Some(drag) => Some(drag.grips),
+            None if !dragging => hover.and_then(|pos| self.grips_at(pos)),
+            None => None,
+        };
+        let blue = |alpha: u8| Color32::from_rgba_unmultiplied(90, 150, 255, alpha);
+        if let Some(grips) = grips {
+            let band = layout.title_band as f32;
+            if let Some(stokesforge_render::Grip::Splitter(n)) = grips.column {
+                if let Some(x) = layout.column_breaks.get(n + 1) {
+                    let x = display.min.x + *x as f32 * scale;
+                    let bar = Rect::from_min_max(
+                        Pos2::new(x - 1.5, display.min.y + band * scale),
+                        Pos2::new(x + 1.5, display.max.y),
+                    );
+                    painter.rect_filled(bar, 0.0, blue(120));
+                }
+            }
+            if let Some(stokesforge_render::Grip::Splitter(n)) = grips.row {
+                if let Some(y) = layout.row_breaks.get(n + 1) {
+                    let y = display.min.y + (band + *y as f32) * scale;
+                    let bar = Rect::from_min_max(
+                        Pos2::new(display.min.x, y - 1.5),
+                        Pos2::new(display.max.x, y + 1.5),
+                    );
+                    painter.rect_filled(bar, 0.0, blue(120));
+                }
+            }
+            if self.frame_drag.is_some()
+                && (grips.column == Some(stokesforge_render::Grip::FigureEdge)
+                    || grips.row == Some(stokesforge_render::Grip::FigureEdge))
+            {
+                let corners = [
+                    display.left_top(),
+                    display.right_top(),
+                    display.right_bottom(),
+                    display.left_bottom(),
+                    display.left_top(),
+                ];
+                painter.extend(egui::Shape::dashed_line(
+                    &corners,
+                    Stroke::new(1.5, blue(255)),
+                    6.0,
+                    4.0,
+                ));
+            }
+        }
+
+        // The cell under the pointer, faint, when it is not the selected one.
+        if !dragging {
+            let hovered = hover.and_then(|pos| {
+                let plot = self.last.as_ref()?;
+                plot.panels
+                    .iter()
+                    .filter(|panel| panel.overlay.is_none())
+                    .find(|panel| {
+                        self.cell_rect_screen(panel.index)
+                            .is_some_and(|rect| rect.contains(pos))
+                    })
+                    .map(|panel| panel.index)
+            });
+            if let Some(base) = hovered.filter(|base| Some(*base) != self.selected_graph) {
+                self.paint_cell_handles(painter, layout, base, 90);
+            }
+        }
+        if let Some(base) = self.selected_graph {
+            self.paint_cell_handles(painter, layout, base, 255);
+        }
+    }
+
+    /// The box around the outer cell of layer `base` and its handles, in the
+    /// selection blue at `alpha` (#426b).
+    fn paint_cell_handles(&self, painter: &Painter, layout: &FigureLayout, base: usize, alpha: u8) {
+        let Some(rect) = self.cell_rect_screen(base) else {
+            return;
+        };
+        let Some(drawn) = self
+            .last
+            .as_ref()
+            .and_then(|plot| plot.panels.iter().find(|panel| panel.index == base))
+        else {
+            return;
+        };
+        let blue = Color32::from_rgba_unmultiplied(90, 150, 255, alpha);
+        let white = Color32::from_rgba_unmultiplied(255, 255, 255, alpha);
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.5, blue), StrokeKind::Middle);
+        let square = |at: Pos2| {
+            painter.rect(
+                Rect::from_center_size(at, egui::vec2(7.0, 7.0)),
+                0.0,
+                white,
+                Stroke::new(1.0, blue),
+                StrokeKind::Middle,
+            );
+        };
+        let pill = |at: Pos2, vertical: bool| {
+            let size = if vertical {
+                egui::vec2(4.0, 18.0)
+            } else {
+                egui::vec2(18.0, 4.0)
+            };
+            painter.rect(
+                Rect::from_center_size(at, size),
+                2.0,
+                white,
+                Stroke::new(1.0, blue),
+                StrokeKind::Middle,
+            );
+        };
+        let center = rect.center();
+        if layout.placement == stokesforge_plot::LayerPlacement::Free {
+            for x in [rect.left(), center.x, rect.right()] {
+                for y in [rect.top(), center.y, rect.bottom()] {
+                    if (x, y) != (center.x, center.y) {
+                        square(Pos2::new(x, y));
+                    }
+                }
+            }
+            return;
+        }
+        let columns = layout.frame_widths.len();
+        let rows = layout.frame_heights.len();
+        let (column, row) = (drawn.column, drawn.row);
+        // Right and bottom: a splitter unless it is an edge of the figure.
+        if column + 1 < columns {
+            pill(Pos2::new(rect.right(), center.y), true);
+        } else {
+            square(Pos2::new(rect.right(), center.y));
+        }
+        if row + 1 < rows {
+            pill(Pos2::new(center.x, rect.bottom()), false);
+        } else {
+            square(Pos2::new(center.x, rect.bottom()));
+        }
+        // Left and top: the splitters of the neighbours.
+        if column > 0 {
+            pill(Pos2::new(rect.left(), center.y), true);
+        }
+        if row > 0 {
+            pill(Pos2::new(center.x, rect.top()), false);
+        }
+        square(rect.right_bottom());
+    }
+
     /// Crosshair, point designation and rubber-band zoom rectangle —
     /// tasks 7.2 to 7.4. Painted directly on `painter`, **never** in the
     /// cache's `Vec<Shape>`: this is what replaces the `copy_from_bbox`
@@ -2944,6 +3208,8 @@ impl GraphView {
                 painter.extend(egui::Shape::dashed_line(&ends, stroke, 5.0, 3.0));
             }
         }
+
+        self.paint_graph_handles(painter, response);
 
         // The selected free text: its rotated rectangle (issue #35).
         if let Some((center, size, rotation)) = self

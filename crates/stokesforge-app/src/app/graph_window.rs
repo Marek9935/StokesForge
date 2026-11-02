@@ -1160,6 +1160,8 @@ fn annotation_interactions(
             stokesforge_render_egui::GraphEvent::FrameResized { column, row } => {
                 actions.push(Action::SetFrameSizes { graph, column, row });
             }
+            // TODO(#426b batch B): commit the sizes as one undoable step.
+            stokesforge_render_egui::GraphEvent::FramesResized { .. } => {}
             stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
                 actions.push(Action::SetFigureOffsets { graph, left, top });
             }

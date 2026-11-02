@@ -57,6 +57,32 @@ impl Fixture {
         }
     }
 
+    /// A grid graph with two columns side by side (#426b): frame widths 300 and
+    /// 200 pt, one row of 200 pt.
+    fn two_columns() -> Self {
+        let fixture = Self::new(false);
+        let snapshot = fixture.snapshot();
+        let node = snapshot.tree.node(fixture.graph).expect("graph");
+        let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+            panic!("a graph");
+        };
+        let first = spec.panels[0].clone();
+        let mut second = first.clone();
+        second.column = 1;
+        let mut grid = spec.clone().with_panels(Panels::new([first, second]));
+        grid.frame_widths = vec![300.0, 200.0];
+        grid.frame_heights = vec![200.0];
+        fixture
+            .session
+            .handle()
+            .execute(stokesforge_commands::Command::SetPlotSpec {
+                graph: fixture.graph,
+                spec: grid,
+            })
+            .expect("two columns");
+        fixture
+    }
+
     /// A graph in free placement (#398) with two layers: layer 0 at the right
     /// (grid cell `(0, 0)`), layer 1 at the left (grid cell `(0, 1)`).
     fn free_two_layers() -> Self {
@@ -101,6 +127,40 @@ impl Fixture {
             })
             .expect("free spec");
         fixture
+    }
+
+    /// The same free graph with two more layers far away at the top-left and at
+    /// the bottom-right, so that the image has room all around the first two
+    /// (#426b: a layer cannot leave the image as it was at the press).
+    fn with_spare_room(self) -> Self {
+        let snapshot = self.snapshot();
+        let node = snapshot.tree.node(self.graph).expect("graph");
+        let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+            panic!("a graph");
+        };
+        let mut panels: Vec<PanelSpec> = spec.panels.iter().cloned().collect();
+        for (column, left, top) in [(2, -600.0, -500.0), (3, 3600.0, 1000.0)] {
+            let mut spare = panels[0].clone();
+            spare.row = 0;
+            spare.column = column;
+            spare.free_frame = Some(FreeFrame {
+                left,
+                top,
+                width: 300.0,
+                height: 200.0,
+                stack: 0,
+            });
+            panels.push(spare);
+        }
+        let roomy = spec.clone().with_panels(Panels::new(panels));
+        self.session
+            .handle()
+            .execute(stokesforge_commands::Command::SetPlotSpec {
+                graph: self.graph,
+                spec: roomy,
+            })
+            .expect("spare room");
+        self
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -306,9 +366,9 @@ fn pulling_the_right_boundary_signals_the_new_frame_width_on_release_only() {
     );
     assert_eq!(
         signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, 360.0)),
-            row: None
+        [GraphEvent::FramesResized {
+            widths: vec![(0, 360.0)],
+            heights: vec![]
         }]
     );
     assert_eq!(fixture.snapshot().revision, revision, "the model moved");
@@ -379,9 +439,9 @@ fn the_bottom_boundary_and_the_corner_signal_once() {
     );
     assert_eq!(
         signals,
-        [GraphEvent::FrameResized {
-            column: None,
-            row: Some((0, 150.0))
+        [GraphEvent::FramesResized {
+            widths: vec![],
+            heights: vec![(0, 150.0)]
         }]
     );
 
@@ -405,9 +465,9 @@ fn the_bottom_boundary_and_the_corner_signal_once() {
     );
     assert_eq!(
         signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, 320.0)),
-            row: Some((0, 230.0))
+        [GraphEvent::FramesResized {
+            widths: vec![(0, 320.0)],
+            heights: vec![(0, 230.0)]
         }]
     );
 }
@@ -438,7 +498,7 @@ fn a_drag_on_the_axis_line_or_in_the_frame_resizes_nothing() {
         assert!(
             !signals
                 .iter()
-                .any(|signal| matches!(signal, GraphEvent::FrameResized { .. })),
+                .any(|signal| matches!(signal, GraphEvent::FramesResized { .. })),
             "{signals:?}"
         );
     }
@@ -465,9 +525,9 @@ fn a_legacy_graph_is_pulled_from_the_frames_it_is_drawn_with() {
     );
     assert_eq!(
         signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, drawn + 25.0)),
-            row: None
+        [GraphEvent::FramesResized {
+            widths: vec![(0, drawn + 25.0)],
+            heights: vec![]
         }]
     );
 }
@@ -493,10 +553,10 @@ fn a_drag_that_comes_back_signals_nothing() {
     assert_eq!(after, size);
 }
 
-/// Pulling the left edge of the figure outwards gives the frame more room on
-/// the left: one signal on release, Left = start + distance, nothing before.
+/// #426b: the left edge of the figure no longer does anything: no resize
+/// cursor, no signal, no preview.
 #[test]
-fn pulling_the_left_edge_signals_the_new_left_on_release_only() {
+fn pulling_the_left_edge_signals_nothing() {
     let fixture = Fixture::new(false);
     let (context, mut view) = ready(&fixture);
     let revision = fixture.snapshot().revision;
@@ -512,7 +572,7 @@ fn pulling_the_left_edge_signals_the_new_left_on_release_only() {
         vec![egui::Event::PointerMoved(from)],
         0.05,
     );
-    assert_eq!(hover, egui::CursorIcon::ResizeHorizontal);
+    assert_eq!(hover, egui::CursorIcon::Default);
     let signals = drag(
         &context,
         &mut view,
@@ -520,83 +580,41 @@ fn pulling_the_left_edge_signals_the_new_left_on_release_only() {
         from,
         from + egui::vec2(-40.0, 0.0),
     );
-    // 76 pt of left axis and margin + 40.
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(116.0),
-            top: None
-        }]
-    );
-    assert_eq!(fixture.snapshot().revision, revision, "the model moved");
+    assert!(signals.is_empty(), "{signals:?}");
+    assert_eq!(fixture.snapshot().revision, revision);
     let after = view
         .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout");
-    assert_eq!(after.size, (size.0 + 40, size.1), "the preview is held");
-    assert_eq!(after.frame_rect(0, 0).map(|r| r.0), Some(116));
+        .expect("layout")
+        .size;
+    assert_eq!(after, size, "no preview");
+    assert_eq!(view.placing_edges(), (false, false));
 }
 
-/// The top edge, and the corner (both at once, one signal); pulling inwards
-/// below what the axes need stops at the minimum.
+/// #426b: nor does the top edge, nor the top-left corner.
 #[test]
-fn pulling_the_top_edge_and_the_corner_signal_once() {
+fn pulling_the_top_edge_and_the_corner_signals_nothing() {
     let fixture = Fixture::placed(false, Some(150.0), Some(120.0));
     let (context, mut view) = ready(&fixture);
     let size = view
         .figure_layout(&context, &fixture.snapshot(), fixture.graph)
         .expect("layout")
         .size;
-    let from = Pos2::new(size.0 as f32 / 2.0, 2.0);
-    let (_, hover) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from)],
-        0.05,
-    );
-    assert_eq!(hover, egui::CursorIcon::ResizeVertical);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(0.0, 30.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: None,
-            top: Some(90.0)
-        }]
-    );
-
-    let fixture = Fixture::placed(false, Some(150.0), Some(120.0));
-    let (context, mut view) = ready(&fixture);
-    let corner = Pos2::new(2.0, 2.0);
-    let (_, cursor) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(corner)],
-        0.05,
-    );
-    assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(500.0, 500.0),
-    );
-    // The axes need 76 on the left and 12 on top: the values stop there.
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(76.0),
-            top: Some(12.0)
-        }]
-    );
-    assert_eq!(view.placing_edges(), (false, false), "the gesture is over");
+    for (from, by) in [
+        (Pos2::new(size.0 as f32 / 2.0, 2.0), egui::vec2(0.0, 30.0)),
+        (Pos2::new(2.0, 2.0), egui::vec2(500.0, 500.0)),
+    ] {
+        let (context, mut view) = ready(&fixture);
+        let (_, hover) = frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![egui::Event::PointerMoved(from)],
+            0.05,
+        );
+        assert_eq!(hover, egui::CursorIcon::Default);
+        let signals = drag(&context, &mut view, &fixture, from, from + by);
+        assert!(signals.is_empty(), "{signals:?}");
+    }
 }
 
 /// A click on the left axis line is no handle.
@@ -627,40 +645,22 @@ fn the_left_axis_line_is_not_the_left_edge() {
     assert!(signals.is_empty(), "{signals:?}");
 }
 
-/// #405: a graph from an old file stores no frame, yet its left edge is pulled
-/// from the plot area it is drawn with (76 pt), not from zero: pulling out by
-/// 40 gives 116, pushing in below what the axes need changes nothing and sends
-/// no signal (no stray history step).
+/// #426b: the left edge of a graph from an old file does nothing either.
 #[test]
-fn a_legacy_graph_edge_starts_from_its_drawn_plot_area() {
+fn a_legacy_graph_left_edge_signals_nothing() {
     let fixture = Fixture::new(true);
     let (context, mut view) = ready(&fixture);
     let from = Pos2::new(2.0, 200.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(-40.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(116.0),
-            top: None
-        }]
-    );
-
-    let fixture = Fixture::new(true);
-    let (context, mut view) = ready(&fixture);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(60.0, 0.0),
-    );
-    assert!(signals.is_empty(), "{signals:?}");
+    for by in [-40.0, 60.0] {
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            from,
+            from + egui::vec2(by, 0.0),
+        );
+        assert!(signals.is_empty(), "{signals:?}");
+    }
 }
 
 /// #405: the handle can be taken from the margin just outside the figure (the
@@ -673,7 +673,7 @@ fn the_outer_edges_are_grabbed_from_the_margin_outside_the_figure() {
         .figure_layout(&context, &fixture.snapshot(), fixture.graph)
         .expect("layout")
         .size;
-    // 3 points left of the figure: inside the strip, outside the figure.
+    // 3 points left of the figure: nothing since #426b.
     let from = Pos2::new(-3.0, size.1 as f32 / 2.0);
     let (_, cursor) = frame(
         &context,
@@ -682,22 +682,8 @@ fn the_outer_edges_are_grabbed_from_the_margin_outside_the_figure() {
         vec![egui::Event::PointerMoved(from)],
         0.05,
     );
-    assert_eq!(cursor, egui::CursorIcon::ResizeHorizontal);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(-40.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(116.0),
-            top: None
-        }]
-    );
-    // Same on the right outer edge, 3 points beyond the figure.
+    assert_eq!(cursor, egui::CursorIcon::Default);
+    // The right outer edge, 3 points beyond the figure, is still grabbed.
     let fixture = Fixture::new(false);
     let (context, mut view) = ready(&fixture);
     let from = Pos2::new(size.0 as f32 + 3.0, 100.0);
@@ -710,9 +696,9 @@ fn the_outer_edges_are_grabbed_from_the_margin_outside_the_figure() {
     );
     assert_eq!(
         signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, 330.0)),
-            row: None
+        [GraphEvent::FramesResized {
+            widths: vec![(0, 330.0)],
+            heights: vec![]
         }]
     );
 }
@@ -783,7 +769,7 @@ fn center(cell: &stokesforge_render::pipeline::FreeCellRect, scale: f32) -> Pos2
 #[test]
 fn dragging_the_plot_area_moves_the_layer_in_free_placement() {
     for scale in [1.0_f32, 2.0] {
-        let fixture = Fixture::free_two_layers();
+        let fixture = Fixture::free_two_layers().with_spare_room();
         let (context, mut view) = ready(&fixture);
         warm_up(&context, &mut view, &fixture, scale);
         let cell = free_cell(&mut view, &context, &fixture, 0);
@@ -813,7 +799,7 @@ fn dragging_the_plot_area_moves_the_layer_in_free_placement() {
 /// #398 L2: the preview follows the pointer without touching the model.
 #[test]
 fn the_move_previews_the_layer_before_the_release() {
-    let fixture = Fixture::free_two_layers();
+    let fixture = Fixture::free_two_layers().with_spare_room();
     let (context, mut view) = ready(&fixture);
     let cell = free_cell(&mut view, &context, &fixture, 0);
     let from = center(&cell, 1.0);
@@ -948,7 +934,7 @@ fn the_edges_resize_the_frame_and_the_opposite_edge_stays() {
         egui::CursorIcon,
     );
     let start = {
-        let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
+        let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0)).with_spare_room();
         stored(&fixture, 0)
     };
     // (name, grab point of the outer rectangle, delta, expected frame, cursor)
@@ -997,7 +983,7 @@ fn the_edges_resize_the_frame_and_the_opposite_edge_stays() {
         ),
     ];
     for (name, (fx, fy), delta, (left, top, width, height), cursor) in cases {
-        let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
+        let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0)).with_spare_room();
         let (context, mut view) = ready(&fixture);
         let cell = free_cell(&mut view, &context, &fixture, 0);
         let (x, y, w, h) = cell.outer;
@@ -1027,7 +1013,7 @@ fn the_edges_resize_the_frame_and_the_opposite_edge_stays() {
 /// on the left edge shifts the right edge.
 #[test]
 fn the_edges_keep_the_size_within_bounds() {
-    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
+    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0)).with_spare_room();
     let before = stored(&fixture, 0);
     let (context, mut view) = ready(&fixture);
     let cell = free_cell(&mut view, &context, &fixture, 0);
@@ -1044,7 +1030,7 @@ fn the_edges_keep_the_size_within_bounds() {
     assert_eq!(frame.width, 36.0);
     assert_eq!(frame.left + frame.width, before.left + before.width);
 
-    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
+    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0)).with_spare_room();
     let (context, mut view) = ready(&fixture);
     let right = Pos2::new((x + w) as f32, y as f32 + h as f32 / 2.0);
     let signals = drag(
@@ -1055,7 +1041,7 @@ fn the_edges_keep_the_size_within_bounds() {
         right + egui::vec2(-900.0, 0.0),
     );
     assert_eq!(framed(&signals).1.width, 36.0);
-    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
+    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0)).with_spare_room();
     let (context, mut view) = ready(&fixture);
     let signals = drag(
         &context,
@@ -1072,7 +1058,7 @@ fn the_edges_keep_the_size_within_bounds() {
 #[test]
 fn the_front_most_layer_takes_the_move() {
     for (stacks, front) in [((0, 0), 1), ((1, 0), 0)] {
-        let fixture = Fixture::free_two_layers_at((100.0, 200.0), stacks);
+        let fixture = Fixture::free_two_layers_at((100.0, 200.0), stacks).with_spare_room();
         let (context, mut view) = ready(&fixture);
         let b = free_cell(&mut view, &context, &fixture, 1);
         // Inside both frames.
@@ -1474,4 +1460,320 @@ fn a_right_click_inside_the_layer_selection_keeps_it() {
     right_click(&mut view, centre(0), 5.0);
     assert_eq!(view.active_panel(&spec), 0);
     assert!(view.extra_layers(&spec).is_empty());
+}
+
+// ---- #426b: splitters, figure edges, clamp, selection, feedback ----
+
+/// The shared boundary of the two columns of [`Fixture::two_columns`], as a
+/// point just inside the strip, at mid height.
+fn splitter_point(view: &GraphView) -> Pos2 {
+    let panel = &view.last_drawn().expect("drawn").panels[0];
+    Pos2::new(
+        (panel.cell_origin.0 + panel.cell_size.0 as i32) as f32 - 2.0,
+        (panel.cell_origin.1 + panel.cell_size.1 as i32) as f32 / 2.0,
+    )
+}
+
+fn figure_size(context: &egui::Context, view: &mut GraphView, fixture: &Fixture) -> (u32, u32) {
+    view.figure_layout(context, &fixture.snapshot(), fixture.graph)
+        .expect("layout")
+        .size
+}
+
+/// Dragging the boundary between two columns moves size from one to the other:
+/// one signal at the release, the figure keeps its size.
+#[test]
+fn a_splitter_moves_size_between_the_columns_and_keeps_the_figure_size() {
+    let fixture = Fixture::two_columns();
+    let (context, mut view) = ready(&fixture);
+    let size = figure_size(&context, &mut view, &fixture);
+    let from = splitter_point(&view);
+    let (_, hover) = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from)],
+        0.05,
+    );
+    assert_eq!(hover, egui::CursorIcon::ResizeHorizontal);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(40.0, 0.0),
+    );
+    assert_eq!(
+        signals,
+        [GraphEvent::FramesResized {
+            widths: vec![(0, 340.0), (1, 160.0)],
+            heights: vec![]
+        }]
+    );
+    let after = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout");
+    assert_eq!(after.size, size, "the figure size is unchanged");
+    assert_eq!(after.frame_widths, [340.0, 160.0]);
+}
+
+/// A splitter pulled far away leaves the next column at the minimum.
+#[test]
+fn a_splitter_stops_when_the_next_column_reaches_the_minimum() {
+    let fixture = Fixture::two_columns();
+    let (context, mut view) = ready(&fixture);
+    let from = splitter_point(&view);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(5000.0, 0.0),
+    );
+    let min = stokesforge_plot::MIN_FRAME_SIZE;
+    assert_eq!(
+        signals,
+        [GraphEvent::FramesResized {
+            widths: vec![(0, 500.0 - min), (1, min)],
+            heights: vec![]
+        }]
+    );
+}
+
+/// The right edge of the figure resizes the whole figure: one cell gets 60 pt
+/// wider; with two columns, both widths are scaled by the same factor.
+#[test]
+fn the_figure_edge_resizes_the_whole_figure_in_proportion() {
+    let fixture = Fixture::new(false);
+    let (context, mut view) = ready(&fixture);
+    let size = figure_size(&context, &mut view, &fixture);
+    let (right, bottom, _, _) = geometry(&view);
+    let from = Pos2::new(right - 2.0, bottom / 2.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(60.0, 0.0),
+    );
+    assert!(matches!(&signals[..], [GraphEvent::FramesResized { .. }]));
+    let wider = figure_size(&context, &mut view, &fixture).0;
+    assert!(
+        (i64::from(wider) - i64::from(size.0) - 60).abs() <= 1,
+        "{wider} vs {}",
+        size.0
+    );
+
+    let fixture = Fixture::two_columns();
+    let (context, mut view) = ready(&fixture);
+    let last = &view.last_drawn().expect("drawn").panels[1];
+    let from = Pos2::new(
+        (last.cell_origin.0 + last.cell_size.0 as i32) as f32 - 2.0,
+        100.0,
+    );
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(50.0, 0.0),
+    );
+    // 500 -> 550: both widths scaled by 1.1.
+    assert_eq!(
+        signals,
+        [GraphEvent::FramesResized {
+            widths: vec![(0, 330.0), (1, 220.0)],
+            heights: vec![]
+        }]
+    );
+}
+
+/// The free layer moved far beyond the right of the image stops with its outer
+/// box at the image's edge; the signal carries the clamped frame.
+#[test]
+fn a_free_layer_is_stopped_at_the_edge_of_the_image() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    warm_up(&context, &mut view, &fixture, 1.0);
+    let cell = free_cell(&mut view, &context, &fixture, 1);
+    let layout = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout");
+    let from = center(&cell, 1.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(3000.0, 2000.0),
+    );
+    let (panel, frame, resized) = framed(&signals);
+    assert_eq!(panel, 1);
+    assert!(!resized);
+    let right_band = f64::from(cell.outer.0 + cell.outer.2 - cell.frame.0 - cell.frame.2);
+    let bottom_band = f64::from(cell.outer.1 + cell.outer.3 - cell.frame.1 - cell.frame.3);
+    let image_right = layout.free_origin.0 + f64::from(layout.size.0);
+    let image_bottom = layout.free_origin.1 + f64::from(layout.size.1 - layout.title_band);
+    assert!(
+        (frame.left + frame.width + right_band - image_right).abs() < 0.011,
+        "{frame:?}"
+    );
+    assert!(
+        (frame.top + frame.height + bottom_band - image_bottom).abs() < 0.011,
+        "{frame:?}"
+    );
+    assert_eq!((frame.width, frame.height), (300.0, 200.0), "a translation");
+}
+
+/// A click in a plot area selects the cell; a click on no cell clears it; so
+/// does Escape.
+#[test]
+fn a_click_selects_the_graph_and_the_background_or_escape_clears_it() {
+    let fixture = Fixture::free_two_layers_at((10.0, 600.0), (0, 1));
+    let (context, mut view) = ready(&fixture);
+    warm_up(&context, &mut view, &fixture, 1.0);
+    assert_eq!(view.selected_graph(), None);
+    let first = free_cell(&mut view, &context, &fixture, 0);
+    let second = free_cell(&mut view, &context, &fixture, 1);
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        center(&second, 1.0),
+        egui::Modifiers::NONE,
+        1.0,
+    );
+    assert_eq!(view.selected_graph(), Some(1));
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        center(&first, 1.0),
+        egui::Modifiers::NONE,
+        2.0,
+    );
+    assert_eq!(view.selected_graph(), Some(0));
+    // The gap between the two cells is no cell.
+    let (left, right) = if first.outer.0 < second.outer.0 {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let gap = Pos2::new(
+        ((left.outer.0 + left.outer.2 + right.outer.0) / 2) as f32,
+        center(&left, 1.0).y,
+    );
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        gap,
+        egui::Modifiers::NONE,
+        3.0,
+    );
+    assert_eq!(view.selected_graph(), None, "the background clears it");
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        center(&first, 1.0),
+        egui::Modifiers::NONE,
+        4.0,
+    );
+    assert_eq!(view.selected_graph(), Some(0));
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![
+            egui::Event::PointerMoved(center(&first, 1.0)),
+            egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: Some(egui::Key::Escape),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+        5.0,
+    );
+    assert_eq!(view.selected_graph(), None, "Escape clears it");
+}
+
+/// The feedback exists only while a drag is in progress, and says what the
+/// preview lays out: a splitter keeps the figure size and reports both cells,
+/// the figure edge reports the new figure size.
+#[test]
+fn the_resize_feedback_follows_the_drag_and_ends_with_it() {
+    let fixture = Fixture::two_columns();
+    let (context, mut view) = ready(&fixture);
+    let size = figure_size(&context, &mut view, &fixture);
+    assert_eq!(view.resize_feedback(), None);
+    let from = splitter_point(&view);
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from), button_event(from, true)],
+        0.1,
+    );
+    let mut time = 0.1;
+    let mut pointer = from;
+    for _ in 0..4 {
+        time += 0.05;
+        pointer += egui::vec2(10.0, 0.0);
+        frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![egui::Event::PointerMoved(pointer)],
+            time,
+        );
+    }
+    let feedback = view.resize_feedback().expect("a drag is in progress");
+    assert_eq!(
+        feedback.figure,
+        (f64::from(size.0), f64::from(size.1)),
+        "a splitter keeps the figure size"
+    );
+    assert_eq!(feedback.pointer, pointer);
+    let bases: Vec<usize> = feedback.graphs.iter().map(|(base, _)| *base).collect();
+    assert_eq!(bases, [0, 1]);
+    let before = figure_size(&context, &mut view, &fixture);
+    assert_eq!(before, size);
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![button_event(pointer, false)],
+        time + 0.05,
+    );
+    assert_eq!(view.resize_feedback(), None, "nothing after the release");
+
+    // The figure edge: the feedback carries the new figure size.
+    let fixture = Fixture::new(false);
+    let (context, mut view) = ready(&fixture);
+    let size = figure_size(&context, &mut view, &fixture);
+    let (right, bottom, _, _) = geometry(&view);
+    let from = Pos2::new(right - 2.0, bottom / 2.0);
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from), button_event(from, true)],
+        0.1,
+    );
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from + egui::vec2(40.0, 0.0))],
+        0.2,
+    );
+    let feedback = view.resize_feedback().expect("a drag is in progress");
+    assert_eq!(
+        feedback.figure,
+        (f64::from(size.0) + 40.0, f64::from(size.1))
+    );
+    assert_eq!(feedback.graphs.len(), 1);
 }

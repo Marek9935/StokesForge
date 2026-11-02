@@ -73,6 +73,7 @@ pub mod color;
 pub mod decimate;
 pub mod fonts;
 pub mod formula;
+pub mod frame_gesture;
 pub mod free_gesture;
 pub mod hit;
 pub mod interact;
@@ -121,8 +122,10 @@ impl std::error::Error for RenderError {}
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use frame_gesture::{grid_grips, resized_frames, GridGrips, Grip};
 pub use free_gesture::{
-    framed_by, free_handle_at, magnetized, FreeHandle, Guide, Magnetized, MAGNET_THRESHOLD_POINTS,
+    clamp_into_image, framed_by, free_handle_at, image_limits, magnetized, FreeHandle, Guide,
+    ImageLimits, Magnetized, MAGNET_THRESHOLD_POINTS,
 };
 pub use hit::{
     cell_edge_at, component_at, component_at_with_tolerance, figure_edge_at, AxisSide, CellEdge,

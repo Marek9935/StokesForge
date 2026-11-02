@@ -287,6 +287,77 @@ fn guides_of(frame: &FreeFrame, handle: &FreeHandle, others: &[FreeFrame]) -> Ve
     guides
 }
 
+/// Where the **frame** of a free layer may have its edges so that the layer's
+/// outer box (frame, axis bands, panel title) stays inside the image as it was
+/// at the press (#426b): stored page coordinates, in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageLimits {
+    /// Smallest `left` of the frame.
+    pub min_left: f64,
+    /// Largest right edge (`left + width`) of the frame.
+    pub max_right: f64,
+    /// Smallest `top` of the frame.
+    pub min_top: f64,
+    /// Largest bottom edge (`top + height`) of the frame.
+    pub max_bottom: f64,
+}
+
+/// The limits of the frame of layer `base` in a free `layout`: the image
+/// covers stored x in `[free_origin.0, free_origin.0 + size.0]` and stored y in
+/// `[free_origin.1, free_origin.1 + size.1 - title_band]`, and the bands of the
+/// cell are `frame - outer`. `None` for a layer that has no cell.
+pub fn image_limits(layout: &FigureLayout, base: usize) -> Option<ImageLimits> {
+    if layout.placement != LayerPlacement::Free {
+        return None;
+    }
+    let cell = layout.free_cells.iter().find(|cell| cell.base == base)?;
+    let (ox, oy, ow, oh) = cell.outer;
+    let (fx, fy, fw, fh) = cell.frame;
+    let band = |a: u32, b: u32| f64::from(a) - f64::from(b);
+    let left_band = band(fx, ox);
+    let top_band = band(fy, oy);
+    let right_band = band(ox + ow, fx + fw);
+    let bottom_band = band(oy + oh, fy + fh);
+    let (x0, y0) = layout.free_origin;
+    Some(ImageLimits {
+        min_left: x0 + left_band,
+        max_right: x0 + f64::from(layout.size.0) - right_band,
+        min_top: y0 + top_band,
+        max_bottom: y0 + f64::from(layout.size.1 - layout.title_band.min(layout.size.1))
+            - bottom_band,
+    })
+}
+
+/// `frame` (the result of a gesture) brought back inside `limits` (#426b). A
+/// move is clamped as a translation (the size is kept); a resize clamps only
+/// the edge(s) the handle pulls, the opposite edge staying put.
+pub fn clamp_into_image(frame: FreeFrame, handle: &FreeHandle, limits: &ImageLimits) -> FreeFrame {
+    let mut out = frame;
+    let (right, bottom) = (frame.left + frame.width, frame.top + frame.height);
+    if handle.is_move() {
+        let max_left = (limits.max_right - frame.width).max(limits.min_left);
+        out.left = frame.left.clamp(limits.min_left, max_left);
+        let max_top = (limits.max_bottom - frame.height).max(limits.min_top);
+        out.top = frame.top.clamp(limits.min_top, max_top);
+        return out;
+    }
+    if handle.left && frame.left < limits.min_left {
+        out.left = limits.min_left;
+        out.width = (right - out.left).min(MAX_FRAME_SIZE);
+    }
+    if handle.right && right > limits.max_right {
+        out.width = (limits.max_right - frame.left).max(MIN_FRAME_SIZE);
+    }
+    if handle.top && frame.top < limits.min_top {
+        out.top = limits.min_top;
+        out.height = (bottom - out.top).min(MAX_FRAME_SIZE);
+    }
+    if handle.bottom && bottom > limits.max_bottom {
+        out.height = (limits.max_bottom - frame.top).max(MIN_FRAME_SIZE);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +543,72 @@ mod tests {
         let resized = magnetized(start, &right, (297.0, 0.0), &[other], 6.0, true);
         assert_eq!(resized.frame.left, 0.0);
         assert_eq!(resized.frame.width, 400.0);
+    }
+
+    #[test]
+    fn a_move_is_clamped_as_a_translation_inside_the_image() {
+        let limits = ImageLimits {
+            min_left: 10.0,
+            max_right: 790.0,
+            min_top: 5.0,
+            max_bottom: 395.0,
+        };
+        let start = frame(100.0, 100.0, 300.0, 200.0);
+        let far = clamp_into_image(frame(900.0, 500.0, 300.0, 200.0), &MOVE, &limits);
+        assert_eq!((far.left, far.top), (490.0, 195.0));
+        assert_eq!((far.width, far.height), (300.0, 200.0));
+        let back = clamp_into_image(frame(-50.0, -50.0, 300.0, 200.0), &MOVE, &limits);
+        assert_eq!((back.left, back.top), (10.0, 5.0));
+        let inside = clamp_into_image(start, &MOVE, &limits);
+        assert_eq!(inside, start);
+    }
+
+    #[test]
+    fn a_resize_clamps_only_the_pulled_edge() {
+        let limits = ImageLimits {
+            min_left: 10.0,
+            max_right: 790.0,
+            min_top: 5.0,
+            max_bottom: 395.0,
+        };
+        let right = FreeHandle {
+            right: true,
+            bottom: true,
+            ..MOVE
+        };
+        let out = clamp_into_image(frame(100.0, 100.0, 900.0, 500.0), &right, &limits);
+        assert_eq!((out.left, out.top), (100.0, 100.0));
+        assert_eq!((out.width, out.height), (690.0, 295.0));
+        let left = FreeHandle {
+            left: true,
+            top: true,
+            ..MOVE
+        };
+        // Pulled to left = -40 with the right edge at 400.
+        let out = clamp_into_image(frame(-40.0, -20.0, 440.0, 320.0), &left, &limits);
+        assert_eq!((out.left, out.top), (10.0, 5.0));
+        assert_eq!((out.width, out.height), (390.0, 295.0));
+    }
+
+    #[test]
+    fn the_limits_come_from_the_bands_of_the_cell_and_the_image() {
+        let cell = FreeCellRect {
+            base: 3,
+            row: 0,
+            column: 0,
+            outer: (10, 50, 400, 300),
+            frame: (60, 70, 300, 200),
+        };
+        let mut layout = layout(vec![cell]);
+        layout.title_band = 30;
+        layout.size = (800, 430);
+        layout.free_origin = (5.0, 0.0);
+        let limits = image_limits(&layout, 3).expect("limits");
+        // Left band 50, right band 50, top band 20, bottom band 80.
+        assert_eq!(limits.min_left, 55.0);
+        assert_eq!(limits.max_right, 5.0 + 800.0 - 50.0);
+        assert_eq!(limits.min_top, 20.0);
+        assert_eq!(limits.max_bottom, 400.0 - 80.0);
+        assert!(image_limits(&layout, 9).is_none());
     }
 }
