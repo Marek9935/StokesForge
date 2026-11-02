@@ -1047,7 +1047,6 @@ fn sum_overflow_is_an_empty_cell() {
 /// The mean of two finite numbers is finite: `mean` computes `sum / n`, so
 /// the intermediate sum overflows and the cell is empty.
 #[test]
-#[ignore = "bug: #429: mean(B) of [1.7e308, 1.7e308] is empty (sum overflows before the division), column_values.rs:111,119"]
 fn mean_of_huge_values_is_not_lost_to_an_overflowing_sum() {
     let y = [1.7e308, 1.7e308];
     assert_eq!(scalar("mean(B)", &[&y, &y], &[]), Some(1.7e308));
@@ -1058,7 +1057,6 @@ fn mean_of_huge_values_is_not_lost_to_an_overflowing_sum() {
 /// `std` of finite values whose squared deviations overflow is empty even
 /// when the deviation itself is representable (1e200 scale).
 #[test]
-#[ignore = "bug: #429: std of [-1e200, 1e200] is empty although 1.41e200 is representable (squared deviations overflow), column_values.rs:76-86"]
 fn std_of_values_with_large_squares_is_not_lost() {
     let y = [-1e200, 1e200];
     let got = scalar("std(B)", &[&y, &y], &[]);

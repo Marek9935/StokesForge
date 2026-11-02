@@ -28,6 +28,14 @@
 //! rounded means no longer costs `1e-16 * mean / std`. `sum` stays on the raw
 //! values and the anchor is added back to the mean.
 //!
+//! No intermediate result overflows when the result is representable: the
+//! whole-column path divides its values by a power of two taken from the
+//! largest `|v|` (exact), sums and squares them, and scales the result back,
+//! so the mean of `[1.7e308, 1.7e308]` and the standard deviation of
+//! `[-1e200, 1e200]` exist, while a `sum` that really overflows stays an empty
+//! cell. The range path scales only its anchor: a range `std` whose squares
+//! overflow stays empty.
+//!
 //! The standard deviation is the **sample** one (divided by n - 1), computed
 //! in two passes and merged with Chan's formula in the tree: never a
 //! difference of sums of squares, which loses all its digits on data such as
@@ -54,9 +62,15 @@ pub enum Stat {
 
 /// Count, sum, mean, sum of squared deviations, extremes: what one segment of
 /// values tells, and what two segments merge into.
+///
+/// `sum`, `mean` and `m2` are in units of `2^exp` (`m2` in units of `2^(2 exp)`):
+/// the whole-column path scales its values by a power of two, which is exact,
+/// so that no intermediate sum or square overflows. The tree leaves have
+/// `exp == 0`, and only these are merged.
 #[derive(Debug, Clone, Copy)]
 struct Agg {
     n: usize,
+    exp: i32,
     sum: f64,
     mean: f64,
     m2: f64,
@@ -67,6 +81,7 @@ struct Agg {
 impl Agg {
     const EMPTY: Agg = Agg {
         n: 0,
+        exp: 0,
         sum: 0.0,
         mean: 0.0,
         m2: 0.0,
@@ -78,6 +93,7 @@ impl Agg {
     fn leaf(y: f64, anchor: f64) -> Agg {
         Agg {
             n: 1,
+            exp: 0,
             sum: y,
             mean: y - anchor,
             m2: 0.0,
@@ -94,12 +110,15 @@ impl Agg {
         }
         let n = values.len();
         let nf = n as f64;
-        let sum = neumaier(values.iter().copied());
+        let exp = scale_exponent(values);
+        let scaled: Vec<f64> = values.iter().map(|&v| libm::scalbn(v, -exp)).collect();
+        let sum = neumaier(scaled.iter().copied());
         let mut mean = sum / nf;
-        mean += neumaier(values.iter().map(|v| v - mean)) / nf;
-        let m2 = neumaier(values.iter().map(|v| (v - mean) * (v - mean)));
+        mean += neumaier(scaled.iter().map(|v| v - mean)) / nf;
+        let m2 = neumaier(scaled.iter().map(|v| (v - mean) * (v - mean)));
         Agg {
             n,
+            exp,
             sum,
             mean,
             m2,
@@ -116,11 +135,16 @@ impl Agg {
         if other.n == 0 {
             return self;
         }
+        debug_assert!(
+            self.exp == 0 && other.exp == 0,
+            "only unscaled leaves merge"
+        );
         let n = self.n + other.n;
         let (na, nb, nt) = (self.n as f64, other.n as f64, n as f64);
         let delta = other.mean - self.mean;
         Agg {
             n,
+            exp: 0,
             sum: self.sum + other.sum,
             mean: self.mean + delta * nb / nt,
             m2: self.m2 + other.m2 + delta * delta * na * nb / nt,
@@ -136,13 +160,33 @@ impl Agg {
             _ if self.n == 0 => return None,
             Stat::Max => self.max,
             Stat::Min => self.min,
-            Stat::Sum => self.sum,
-            Stat::Mean => self.mean + anchor,
+            // An overflowing sum is an empty cell; the mean is not lost to it.
+            Stat::Sum => libm::scalbn(self.sum, self.exp),
+            Stat::Mean => libm::scalbn(self.mean, self.exp) + anchor,
             Stat::Std if self.n < 2 => return None,
-            Stat::Std => (self.m2 / (self.n - 1) as f64).sqrt(),
+            Stat::Std => libm::scalbn((self.m2 / (self.n - 1) as f64).sqrt(), self.exp),
         };
         value.is_finite().then_some(value)
     }
+}
+
+/// The power of two `e` such that the values divided by `2^e` are below 1 in
+/// absolute value (0 when they are all 0).
+fn scale_exponent(values: &[f64]) -> i32 {
+    let max = values.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    if max == 0.0 || !max.is_finite() {
+        0
+    } else {
+        libm::frexp(max).1
+    }
+}
+
+/// Compensated mean, summed on values scaled by a power of two so that a sum
+/// of huge values does not overflow.
+fn compensated_mean(values: &[f64]) -> f64 {
+    let exp = scale_exponent(values);
+    let sum = neumaier(values.iter().map(|&v| libm::scalbn(v, -exp)));
+    libm::scalbn(sum / values.len() as f64, exp)
 }
 
 /// Neumaier's compensated sum (a sum that overflows gives a non-finite value).
@@ -244,7 +288,7 @@ impl ColumnIndex {
         let anchor = if n == 0 {
             0.0
         } else {
-            let a = neumaier(ys.iter().copied()) / n as f64;
+            let a = compensated_mean(&ys);
             if a.is_finite() {
                 a
             } else {
