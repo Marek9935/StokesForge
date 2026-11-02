@@ -387,7 +387,7 @@ fn is_ancestor(tree: &Tree, ancestor: NodeId, node: NodeId) -> bool {
 
 /// Sheets whose Y columns can all be transposed (numeric, with an x'). Formula
 /// columns are left out: when tried for #430, transposing a sheet with one made
-/// the targeted and full twins differ after an undo (not investigated).
+/// the targeted and full twins differ after an undo, also without #430 (#439).
 fn transposable(tree: &Tree) -> Vec<NodeId> {
     sheets(tree)
         .into_iter()
