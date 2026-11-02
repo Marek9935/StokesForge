@@ -1025,12 +1025,21 @@ pub(super) fn layout_menu_contents(
     actions: &mut Vec<Action>,
 ) {
     use stokesforge_app_state::object_manager::VisibilityTarget;
-    use stokesforge_app_state::state::LayerArrange;
-    use stokesforge_core::compose::{arrange_targets, AlignEdge, Dimension};
-    use stokesforge_render::pipeline::DistributeAxis;
+    use stokesforge_core::compose::arrange_targets;
     let free = spec.layer_placement == stokesforge_plot::LayerPlacement::Free;
     let cells = arrange_targets(spec, active, extra).len();
     let mut sections = MenuSections::new();
+    // The Page Layout Mode (#426d prototype): the first entry, checked while on.
+    sections.section(ui, true, |ui| {
+        let on = super::page_layout::published_layout_mode(ui.ctx(), graph);
+        if menu_choice(ui, on, tr!("menu-layout-page-mode"))
+            .on_hover_text(tr!("menu-layout-page-mode", "hint"))
+            .clicked()
+        {
+            super::page_layout::request_layout_mode_toggle(ui.ctx(), graph);
+            ui.close();
+        }
+    });
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-layer-placement"), |ui| {
             for (label, hint, to_free) in [
@@ -1097,100 +1106,18 @@ pub(super) fn layout_menu_contents(
         .response
         .on_hover_text(tr!("menu-new-layer-beside", "hint"));
     });
-    let arrange = |actions: &mut Vec<Action>, arrange: LayerArrange| {
-        actions.push(Action::ArrangeLayers {
-            graph,
-            active,
-            extra: extra.to_vec(),
-            arrange,
-        });
-    };
     sections.section(ui, free, |ui| {
         ui.add_enabled_ui(cells >= 2, |ui| {
             ui.menu_button(tr!("menu-layout-align"), |ui| {
-                for (label, hint, edge) in [
-                    (
-                        tr!("action-layout-align-bottom"),
-                        tr!("action-layout-align-bottom", "hint"),
-                        AlignEdge::Bottom,
-                    ),
-                    (
-                        tr!("action-layout-align-top"),
-                        tr!("action-layout-align-top", "hint"),
-                        AlignEdge::Top,
-                    ),
-                    (
-                        tr!("action-layout-align-vcenter"),
-                        tr!("action-layout-align-vcenter", "hint"),
-                        AlignEdge::VCenter,
-                    ),
-                    (
-                        tr!("action-layout-align-left"),
-                        tr!("action-layout-align-left", "hint"),
-                        AlignEdge::Left,
-                    ),
-                    (
-                        tr!("action-layout-align-right"),
-                        tr!("action-layout-align-right", "hint"),
-                        AlignEdge::Right,
-                    ),
-                    (
-                        tr!("action-layout-align-hcenter"),
-                        tr!("action-layout-align-hcenter", "hint"),
-                        AlignEdge::HCenter,
-                    ),
-                ] {
-                    if ui.button(label).on_hover_text(hint).clicked() {
-                        arrange(actions, LayerArrange::Align(edge));
-                        ui.close();
-                    }
-                }
+                align_items(ui, graph, active, extra, actions);
             })
             .response
         })
         .inner
         .on_hover_text(tr!("menu-layout-align", "hint"))
         .on_disabled_hover_text(tr!("menu-layout-align", "disabled"));
-        for (enabled, label, hint, disabled, what) in [
-            (
-                cells >= 2,
-                tr!("action-layout-same-width"),
-                tr!("action-layout-same-width", "hint"),
-                tr!("action-layout-same-width", "disabled"),
-                LayerArrange::Match(Dimension::Width),
-            ),
-            (
-                cells >= 2,
-                tr!("action-layout-same-height"),
-                tr!("action-layout-same-height", "hint"),
-                tr!("action-layout-same-height", "disabled"),
-                LayerArrange::Match(Dimension::Height),
-            ),
-            (
-                cells >= 3,
-                tr!("action-layout-distribute-horizontally"),
-                tr!("action-layout-distribute-horizontally", "hint"),
-                tr!("action-layout-distribute-horizontally", "disabled"),
-                LayerArrange::Distribute(DistributeAxis::Horizontal),
-            ),
-            (
-                cells >= 3,
-                tr!("action-layout-distribute-vertically"),
-                tr!("action-layout-distribute-vertically", "hint"),
-                tr!("action-layout-distribute-vertically", "disabled"),
-                LayerArrange::Distribute(DistributeAxis::Vertical),
-            ),
-        ] {
-            if ui
-                .add_enabled(enabled, egui::Button::new(label))
-                .on_hover_text(hint)
-                .on_disabled_hover_text(disabled)
-                .clicked()
-            {
-                arrange(actions, what);
-                ui.close();
-            }
-        }
+        same_size_items(ui, graph, active, extra, cells, actions);
+        distribute_items(ui, graph, active, extra, cells, actions);
     });
     sections.section(ui, free, |ui| {
         super::object_manager_ui::layer_stacking_items(ui, graph, spec, active, actions);
@@ -1211,6 +1138,148 @@ pub(super) fn layout_menu_contents(
             ui.close();
         }
     });
+}
+
+fn arrange(
+    actions: &mut Vec<Action>,
+    graph: NodeId,
+    active: usize,
+    extra: &[usize],
+    arrange: stokesforge_app_state::state::LayerArrange,
+) {
+    actions.push(Action::ArrangeLayers {
+        graph,
+        active,
+        extra: extra.to_vec(),
+        arrange,
+    });
+}
+
+/// The edges of "Align" (the Layout menu and the Page Layout Mode strip).
+pub(super) fn align_items(
+    ui: &mut egui::Ui,
+    graph: NodeId,
+    active: usize,
+    extra: &[usize],
+    actions: &mut Vec<Action>,
+) {
+    use stokesforge_app_state::state::LayerArrange;
+    use stokesforge_core::compose::AlignEdge;
+    for (label, hint, edge) in [
+        (
+            tr!("action-layout-align-bottom"),
+            tr!("action-layout-align-bottom", "hint"),
+            AlignEdge::Bottom,
+        ),
+        (
+            tr!("action-layout-align-top"),
+            tr!("action-layout-align-top", "hint"),
+            AlignEdge::Top,
+        ),
+        (
+            tr!("action-layout-align-vcenter"),
+            tr!("action-layout-align-vcenter", "hint"),
+            AlignEdge::VCenter,
+        ),
+        (
+            tr!("action-layout-align-left"),
+            tr!("action-layout-align-left", "hint"),
+            AlignEdge::Left,
+        ),
+        (
+            tr!("action-layout-align-right"),
+            tr!("action-layout-align-right", "hint"),
+            AlignEdge::Right,
+        ),
+        (
+            tr!("action-layout-align-hcenter"),
+            tr!("action-layout-align-hcenter", "hint"),
+            AlignEdge::HCenter,
+        ),
+    ] {
+        if ui.button(label).on_hover_text(hint).clicked() {
+            arrange(actions, graph, active, extra, LayerArrange::Align(edge));
+            ui.close();
+        }
+    }
+}
+
+/// "Same Width" and "Same Height" (the Layout menu and the Page Layout Mode strip).
+pub(super) fn same_size_items(
+    ui: &mut egui::Ui,
+    graph: NodeId,
+    active: usize,
+    extra: &[usize],
+    cells: usize,
+    actions: &mut Vec<Action>,
+) {
+    use stokesforge_app_state::state::LayerArrange;
+    use stokesforge_core::compose::Dimension;
+    for (enabled, label, hint, disabled, what) in [
+        (
+            cells >= 2,
+            tr!("action-layout-same-width"),
+            tr!("action-layout-same-width", "hint"),
+            tr!("action-layout-same-width", "disabled"),
+            LayerArrange::Match(Dimension::Width),
+        ),
+        (
+            cells >= 2,
+            tr!("action-layout-same-height"),
+            tr!("action-layout-same-height", "hint"),
+            tr!("action-layout-same-height", "disabled"),
+            LayerArrange::Match(Dimension::Height),
+        ),
+    ] {
+        if ui
+            .add_enabled(enabled, egui::Button::new(label))
+            .on_hover_text(hint)
+            .on_disabled_hover_text(disabled)
+            .clicked()
+        {
+            arrange(actions, graph, active, extra, what);
+            ui.close();
+        }
+    }
+}
+
+/// "Distribute Horizontally / Vertically" (the Layout menu and the Page Layout Mode strip).
+pub(super) fn distribute_items(
+    ui: &mut egui::Ui,
+    graph: NodeId,
+    active: usize,
+    extra: &[usize],
+    cells: usize,
+    actions: &mut Vec<Action>,
+) {
+    use stokesforge_app_state::state::LayerArrange;
+    use stokesforge_render::pipeline::DistributeAxis;
+    for (enabled, label, hint, disabled, what) in [
+        (
+            cells >= 3,
+            tr!("action-layout-distribute-horizontally"),
+            tr!("action-layout-distribute-horizontally", "hint"),
+            tr!("action-layout-distribute-horizontally", "disabled"),
+            LayerArrange::Distribute(DistributeAxis::Horizontal),
+        ),
+        (
+            cells >= 3,
+            tr!("action-layout-distribute-vertically"),
+            tr!("action-layout-distribute-vertically", "hint"),
+            tr!("action-layout-distribute-vertically", "disabled"),
+            LayerArrange::Distribute(DistributeAxis::Vertical),
+        ),
+    ] {
+        if ui
+            .add_enabled(enabled, egui::Button::new(label))
+            .on_hover_text(hint)
+            .on_disabled_hover_text(disabled)
+            .clicked()
+        {
+            arrange(actions, graph, active, extra, what);
+            ui.close();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2448,6 +2517,44 @@ mod tests {
                 }],
                 "the active layer (2), not the first"
             );
+        }
+        session.shutdown().unwrap();
+    }
+
+    /// #426d prototype: the first entry of the Layout menu toggles the Page
+    /// Layout Mode, and entering it on a grid graph switches the graph to Free.
+    #[test]
+    fn the_layout_menu_toggles_the_page_layout_mode_and_frees_a_grid_graph() {
+        let (session, mut app, graph) = layout_bench(2, false);
+        let tab = Some(Tab::Graph(graph));
+        let ctx = context();
+        for expected in [true, false] {
+            let (output, _) = paint_bar(&mut app, &ctx, tab, Vec::new());
+            let pos = active(&entries(&output), &tr!("menu-layout")).center;
+            click_at(&mut app, &ctx, tab, pos);
+            let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+            let entry = active(&menu, &tr!("menu-layout-page-mode"));
+            assert!(click_at(&mut app, &ctx, tab, entry.center).is_empty());
+            let mut actions = Vec::new();
+            app.run_layout_mode_requests(&ctx, Some(graph), &mut actions);
+            assert_eq!(
+                app.read_graph_view(graph, stokesforge_render_egui::GraphView::layout_mode),
+                Some(expected)
+            );
+            if expected {
+                assert_eq!(
+                    actions,
+                    vec![Action::SetLayerPlacement { graph, free: true }]
+                );
+                assert_eq!(
+                    app.state.status().map(|status| status.text.clone()),
+                    Some(tr!("status-layout-mode-free"))
+                );
+            } else {
+                assert!(actions.is_empty());
+            }
+            // Published, like the active layer, for the menu's check mark.
+            super::super::page_layout::publish_layout_mode(&ctx, graph, expected);
         }
         session.shutdown().unwrap();
     }

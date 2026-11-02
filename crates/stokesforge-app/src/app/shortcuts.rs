@@ -60,6 +60,15 @@ pub(crate) const KEY_SHIFT_ARROW_UP: egui::KeyboardShortcut =
 /// down in the Project Manager (#423).
 pub(crate) const KEY_SHIFT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
+/// Shift+← — ten nudge steps left in the Page Layout Mode (#426d).
+pub(crate) const KEY_SHIFT_ARROW_LEFT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowLeft);
+/// Shift+→ — ten nudge steps right in the Page Layout Mode (#426d).
+pub(crate) const KEY_SHIFT_ARROW_RIGHT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+/// G — shows or hides the snapping grid in the Page Layout Mode (#426d).
+pub(crate) const KEY_LAYOUT_GRID: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::G);
 /// Alt+↓ — opens the list of suggested values of a number field.
 pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
