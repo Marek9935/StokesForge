@@ -943,7 +943,8 @@ def cmd_qcm_list(a):
 # ------------------------------------------------------------------ server
 MAX_BODY = 256 * 1024
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suivi-page.html")
-CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+# img-src data: lets the inline SVG tab icon load; nothing else is fetched as an image.
+CSP = ("default-src 'none'; img-src data:; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
        "font-src https://fonts.gstatic.com; connect-src 'self'; base-uri 'none'; form-action 'none'; "
        "frame-ancestors 'none'")
 

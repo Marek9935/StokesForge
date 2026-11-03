@@ -562,6 +562,12 @@ class ServerBase(Base):
             return f.read()
 
 class TestServer(ServerBase):
+    def test_csp_lets_the_inline_tab_icon_load(self):
+        status, headers, _ = self.req("GET", "/")
+        csp = {k.lower(): v for k, v in headers.items()}["content-security-policy"]
+        self.assertIn("img-src data:", csp)
+        self.assertIn("default-src 'none'", csp)
+
     def test_post_without_the_custom_header_is_403_and_writes_nothing(self):
         before = self.entry_text()
         self.assertEqual(self.post(headers={"Content-Type": "text/plain"})[0], 403)
