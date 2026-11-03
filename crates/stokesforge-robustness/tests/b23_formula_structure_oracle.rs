@@ -34,7 +34,7 @@ use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
 
 mod common;
-use common::{link_shapes, strip_links};
+use common::{link_shapes, link_states, strip_links};
 
 // -- draw -----------------------------------------------------------------
 
@@ -385,7 +385,9 @@ fn is_ancestor(tree: &Tree, ancestor: NodeId, node: NodeId) -> bool {
     tree.ancestors(node).is_ok_and(|a| a.contains(&ancestor))
 }
 
-/// Sheets whose Y columns can all be transposed (numeric, with an x').
+/// Sheets whose Y columns can all be transposed (numeric, with an x'). Formula
+/// columns are left out: when tried for #430, transposing a sheet with one made
+/// the targeted and full twins differ after an undo, also without #430 (#439).
 fn transposable(tree: &Tree) -> Vec<NodeId> {
     sheets(tree)
         .into_iter()
@@ -745,6 +747,18 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
         );
         coverage.accepted += usize::from(rt != Reply::Rejected);
         let (st, sf) = (targeted.snapshot(), full.snapshot());
+        // 0. a reload keeps every link's state on the targeted side: the first
+        // pass trusts a link that was up to date and whose inputs kept their
+        // values (#430); a stale or modified one stays so.
+        if matches!(step, Step::Reload) && rt != Reply::Rejected {
+            prop_assert_eq!(
+                link_states(&before.tree),
+                link_states(&st.tree),
+                "step {} ({:?}): a reload changed the state of a link",
+                rank,
+                step
+            );
+        }
         // 1. twin oracle.
         prop_assert!(
             strip_links(&st.tree) == strip_links(&sf.tree),

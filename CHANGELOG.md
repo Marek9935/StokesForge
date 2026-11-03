@@ -26,6 +26,11 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A new graph plotted from a workbook is named after it (#434): "Book1 plot",
+  then "Book1 plot 2"… (numbered after the highest existing number, a deleted
+  graph leaves a gap) instead of Graph1, Graph2. `pyst.plot` without `name`
+  does the same. A graph without series is still named GraphN.
+
 - Project Manager (#425): drag rows to move them. Drop on a folder to put them
   inside it, between two rows to reorder, below the last row to move them to the
   root. A closed folder opens after a second under the pointer, Escape cancels,
@@ -205,7 +210,8 @@ without a message, see `docs/persistence.md`).
 - Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
   the stored value, like Excel: `round(1.005, 2)` is 1.01 (it was 1), and
   `round(2.675, 2)` is 2.68.
-
+- A transposed sheet whose source holds a formula column is no longer shown stale
+  right after opening a file where it was up to date (#430).
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that

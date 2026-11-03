@@ -356,7 +356,7 @@ sheet (Xn for a `y` of role Yn: X2 for Y2, X3 for Y3…), like the window
 only if the sheet has no X column to the left. **Change from #257**: before,
 `plot(y)` without `x=` always gave the row index, even when a column
 has the X role. An explicit `x=` keeps priority, role or not. `parent` accepts a
-folder, `name` chooses the name (automatic `GraphN` otherwise). `graph=g` adds
+folder, `name` chooses the name (otherwise `<workbook> plot`, `<workbook> plot 2`… numbered after the highest existing number, after the workbook of the first series, `GraphN` if there is none). `graph=g` adds
 a series to the first panel of an existing graph and keeps its other
 panels, series and settings; `name` and `parent` are then refused. One call
 adds one series, or several if `y` is a list of columns: these series form a group (§ Series groups, #196).

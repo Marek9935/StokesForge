@@ -808,3 +808,18 @@ fn a_script_edit_of_a_legacy_graph_fixes_its_frames() {
     assert_eq!(spec.frame_heights, drawn.frame_heights);
     assert_eq!(layout_of(&spec).size, (480, 360 - drawn.title_band));
 }
+
+/// #434: without `name`, a graph is named after the workbook of its first
+/// series; several calls in one script each see the previous graph.
+#[test]
+fn an_unnamed_python_graph_is_named_after_its_workbook() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}pyst.plot(y, x)\npyst.plot(y, x)\npyst.plot(y, x, name='Fig')\n"),
+    );
+    let snap = b.session.snapshot().unwrap();
+    for path in ["[Book1 plot]", "[Book1 plot 2]", "[Fig]"] {
+        assert!(snap.tree.resolve(path).is_ok(), "{path} resolves");
+    }
+}
