@@ -606,14 +606,26 @@ arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the C
 own commit. To keep pushes orderly, merge and push `main` under the lock
 `scripts/main-lock.sh take "<square> #<n>"` … `release`. The scripts of this workflow
 (`chantier.sh`, `try.sh`, `main-lock.sh`, `workflow-lib.sh`) are tested by
-`scripts/workflow-test.sh`, run by the `fmt` job. Besides the colours, briefing and locks, it covers
-(#441) one colour per issue (sibling worktrees `feature<n>b`, detached HEAD),
+`scripts/workflow-test.sh`, run by the `fmt` job, and the colour rule by `scripts/suivi-test.py`
+(same job). Besides the colours, briefing and locks, `workflow-test.sh` covers
+(#441) `lance` recording the owner session (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`) and a rerun in
+a new session keeping the colour, one record per issue (sibling worktrees `feature<n>b`, detached HEAD),
 `chantier.sh --status [--json]` (six colours in order, `since`/`days` with the
-`SF_TODAY` seam, colourless worktrees, paused packages), `--pause` (refused while a
-worktree exists, frees the colour, keeps the list, `--start` reserves again), the
-package `since` date surviving a rerun, and `--release` (one fixed line; refuses an
+`SF_TODAY` seam, colourless worktrees, paused issues), `--pause` of a package (refused while a
+worktree exists, frees the colour, keeps the list, `--start` takes the first free again) and of a plain
+issue (worktree kept, previous colour back on resume), the
+package `since` date surviving a rerun, `suivi.py check` clean at the end, and `--release` (one fixed line; refuses an
 unmerged branch, modified or untracked files, ignored files other than `target/`,
 a run from a worktree or off `main`; never `-D` nor `--force`).
+
+`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder) pins the rule
+of `scripts/suivi.py`: a live owner holds (pid exists, same start time, no newer `ended/<sid>`); a
+dead pid, a reused pid or an ended session pauses; an open QCM or a `todo` trial entry with a `try`
+field holds, a finished QCM, an `ok` entry or one without `try` does not; resume takes the previous
+colour when free, else the first free; the seventh claim fails; parallel claims get distinct colours
+(lock); the `session-end` hook always exits 0 and writes nothing on bad input; `migrate` is
+idempotent; the `release-line` reasons and `check`. Each case was proved by a mutation (drop the
+clause, see the test fail, restore).
 
 **Reading the result.**
 
