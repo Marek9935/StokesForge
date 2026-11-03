@@ -11,7 +11,7 @@ Read from step 7 of `stokesforge-verification`, and by `stokesforge-feature` at 
 | `n` | issue number (int) |
 | `colour` | one of the six squares printed by `scripts/chantier.sh`; absent while the package is paused |
 | `name` | short name, in the French the user reads |
-| `state` | `questions`, `code`, `essai` (trial), `fusion` (merge) or `pause` (a package between two sub-issues, no colour) |
+| `state` | `questions`, `code`, `essai` (trial), `fusion` (merge) or `pause` (a package stopped with `scripts/chantier.sh --pause`: no worktree, no colour; between two sub-issues a package keeps its colour) |
 | `waiting` | `false`, `true`, or a short string saying what is awaited |
 | `wait_kind` | who is awaited: `you` (the user: « T'attend »), `dep` (another work package or step: « Attend »), `ag` (an agent is working). Absent: `waiting` set reads as `you`, `waiting: false` shows nothing |
 | `what` | one line |
