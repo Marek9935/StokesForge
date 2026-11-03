@@ -2103,17 +2103,28 @@ fn a_non_ascii_sheet_name_is_quoted_on_display_and_round_trips() {
 
 // -- extra: a transposed sheet over a formula column is not spuriously stale -----
 
-/// The link of a transposed sheet records the version of each source column it
-/// read, formula columns included. A reload, an unrelated command and an undo of
-/// an unrelated edit must not make it look stale (Targeted mode only: the Full
-/// oracle rewrites formula columns on every pass, which renumbers them).
-/// Actual: a `Load` empties the memo (`recalc.rs` `forget`), the first pass
-/// rewrites every formula column and restamps its version (v3 -> v5, same
-/// values), and `TransposeLink::state` (`transpose.rs:87`) compares versions:
-/// the sheet shows as stale after every open. Calculations are spared by the
-/// one-shot `trust_loaded` flag; transposed sheets have no such protection.
+/// State of the link of the sheet transposed from `source`.
+fn link_state(h: &SessionHandle, source: NodeId) -> stokesforge_core::TransposeState {
+    let t = snap(h).tree;
+    let (_sheet, link) = t.transposed_from(source).expect("link");
+    link.state(&t)
+}
+
+fn add_folder(h: &SessionHandle, name: &str) {
+    h.execute(Command::AddFolder {
+        parent: snap(h).tree.root(),
+        name: name.into(),
+    })
+    .expect("unrelated command");
+}
+
+/// (#430) The link of a transposed sheet records the version of each source
+/// column it read, formula columns included. A reload (whose first pass
+/// rewrites every formula column and renumbers it, same values), an unrelated
+/// command and an undo of an unrelated edit must not make it look stale. The
+/// first pass after a load trusts a link that was up to date in the file and
+/// whose inputs kept their type and values (`trust_loaded_transposes`).
 #[test]
-#[ignore = "bug: #430: a transposed sheet over a formula column is reported stale after every load (formula versions restamped by the first pass)"]
 fn a_transposed_sheet_over_a_formula_column_is_not_stale_after_reload_or_unrelated_commands() {
     let (_s, h) = spawn(transposable(), FormulaRecalc::Targeted);
     let t = snap(&h).tree;
@@ -2123,34 +2134,125 @@ fn a_transposed_sheet_over_a_formula_column_is_not_stale_after_reload_or_unrelat
         rows: vec![0, 1],
     })
     .expect("transpose");
-    let state = |h: &SessionHandle| {
-        let t = snap(h).tree;
-        let (sheet, link) = t.transposed_from(source).expect("link");
-        let _ = sheet;
-        link.state(&t)
-    };
-    assert!(!state(&h).stale, "fresh");
-    h.execute(Command::AddFolder {
-        parent: snap(&h).tree.root(),
-        name: "Later".into(),
-    })
-    .expect("unrelated");
-    assert!(!state(&h).stale, "after an unrelated command");
+    assert!(!link_state(&h, source).stale, "fresh");
+    add_folder(&h, "Later");
+    assert!(!link_state(&h, source).stale, "after an unrelated command");
     let dir = scratch("transpose-stale");
     let path = dir.path().join("t.stf");
     h.save(&path).expect("save");
     h.load(&path).expect("load");
-    assert!(!state(&h).stale, "after save and load");
-    h.execute(Command::AddFolder {
-        parent: snap(&h).tree.root(),
-        name: "Later2".into(),
-    })
-    .expect("unrelated after load");
-    assert!(!state(&h).stale, "after load then an unrelated command");
+    assert!(!link_state(&h, source).stale, "after save and load");
+    add_folder(&h, "Later2");
+    assert!(
+        !link_state(&h, source).stale,
+        "after load then an unrelated command"
+    );
     // Editing the source really makes it stale.
     let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
     h.execute(enter(b, 0, &[11.0])).expect("edit");
-    assert!(state(&h).stale, "an edited source is stale");
+    assert!(link_state(&h, source).stale, "an edited source is stale");
+}
+
+/// (#430) A link already stale in the file stays stale: the trust applies only
+/// to a link up to date before the first pass.
+#[test]
+fn a_link_stale_in_the_file_stays_stale_after_load() {
+    let (_s, h) = spawn(transposable(), FormulaRecalc::Targeted);
+    let source = node(&snap(&h).tree, "[Book1]Sheet1");
+    h.execute(Command::TransposeRows {
+        source,
+        rows: vec![0, 1],
+    })
+    .expect("transpose");
+    let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+    h.execute(enter(b, 0, &[11.0])).expect("edit");
+    assert!(link_state(&h, source).stale, "stale before saving");
+    let dir = scratch("transpose-stale-in-file");
+    let path = dir.path().join("t.stf");
+    h.save(&path).expect("save");
+    h.load(&path).expect("load");
+    assert!(link_state(&h, source).stale, "stale after load");
+}
+
+/// (#430) A file whose formula values differ from what the formula gives: the
+/// link was up to date in the file, but the first pass really changes the
+/// input D, so the link is stale.
+#[test]
+fn a_link_whose_formula_input_really_changes_on_load_is_stale() {
+    let mut p = transposable();
+    let source = p.tree().resolve("[Book1]Sheet1").expect("sheet");
+    // No session: D keeps its stored (empty) values, the link reads them.
+    p.transpose_rows(source, &[0, 1]).expect("transpose");
+    let dir = scratch("transpose-differing");
+    let path = dir.path().join("t.stf");
+    stokesforge_persistence::save(&p, &path).expect("save");
+    let (_s, h) = spawn(
+        Project::new("Other").expect("project"),
+        FormulaRecalc::Targeted,
+    );
+    h.load(&path).expect("load");
+    let t = snap(&h).tree;
+    assert_eq!(
+        nums(&t, colat(&t, "[Book1]Sheet1", "D")),
+        some(&[110.0, 220.0, 330.0]),
+        "D recomputed on load"
+    );
+    assert!(link_state(&h, source).stale, "inputs changed on load");
+}
+
+/// (#430) The trust is one pass only, and in both modes: Full rewrites the
+/// formula columns on every pass, so after the load an unrelated command
+/// makes the link stale again (accepted limit, the oracle only).
+#[test]
+fn the_link_trust_after_load_is_one_pass_only() {
+    // A Full session restamps at every pass, so the file is written by a
+    // Targeted one (link up to date in it) and loaded by a Full one.
+    let (_t, writer) = spawn(transposable(), FormulaRecalc::Targeted);
+    let source = node(&snap(&writer).tree, "[Book1]Sheet1");
+    writer
+        .execute(Command::TransposeRows {
+            source,
+            rows: vec![0, 1],
+        })
+        .expect("transpose");
+    let dir = scratch("transpose-one-pass");
+    let path = dir.path().join("t.stf");
+    writer.save(&path).expect("save");
+    let (_s, h) = spawn(Project::new("Other").expect("project"), FormulaRecalc::Full);
+    h.load(&path).expect("load");
+    assert!(!link_state(&h, source).stale, "trusted on the load pass");
+    add_folder(&h, "Later");
+    assert!(
+        link_state(&h, source).stale,
+        "Full restamps on the next pass (accepted limit)"
+    );
+}
+
+/// (#430) Regression check: after a load, editing a cell of another sheet and
+/// undoing it leaves the link up to date (Targeted).
+#[test]
+fn a_link_stays_up_to_date_after_load_and_an_unrelated_edit_undone() {
+    let mut p = transposable();
+    let root = p.root();
+    let book2 = add_book(&mut p, root, "Book2");
+    let s2 = first_sheet(&p, book2);
+    add_col(&mut p, s2, "Z", &[1.0, 2.0]);
+    let (_s, h) = spawn(p, FormulaRecalc::Targeted);
+    let source = node(&snap(&h).tree, "[Book1]Sheet1");
+    h.execute(Command::TransposeRows {
+        source,
+        rows: vec![0, 1],
+    })
+    .expect("transpose");
+    let dir = scratch("transpose-after-load-edit");
+    let path = dir.path().join("t.stf");
+    h.save(&path).expect("save");
+    h.load(&path).expect("load");
+    let z = colat(&snap(&h).tree, "[Book2]Sheet1", "Z");
+    h.execute(enter(z, 0, &[9.0])).expect("edit elsewhere");
+    assert!(!link_state(&h, source).stale, "after the edit");
+    h.undo().expect("undo");
+    assert!(!link_state(&h, source).stale, "after the undo");
 }
 
 /// Control of the bug above: a calculation that reads a formula column is not

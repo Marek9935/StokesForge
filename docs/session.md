@@ -183,7 +183,7 @@ the growth of its source is undone.
 | | |
 |---|---|
 | where the memo lives | in the actor, next to the `Project` (`Recalculator`): neither history nor `.stf` |
-| what empties it | `Load` (the values of a file are not taken on trust) and `NewProject` |
+| what empties it | `Load` (the values of a file are not taken on trust, except that analysis calculations and up-to-date transposed links are trusted on the first pass after it, #316 and #430) and `NewProject` |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
 | what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` and `b23` (two twin sessions, same trees at each step; `b23` draws the structural gestures) |
