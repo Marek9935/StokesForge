@@ -236,8 +236,9 @@ pub enum Command {
         /// One item per root, in the order of the gesture.
         items: Vec<CopyInsertion>,
     },
-    /// Adds a graph carrying `spec`. `name: None` → first free "GraphN".
-    /// `spec` is required, as in `Project::add_graph`: a graph without a spec
+    /// Adds a graph carrying `spec`. `name: None` → "<Book> plot" (workbook of the
+    /// first series, then "<Book> plot 2"…) or first free "GraphN" without
+    /// series. `spec` is required, as in `Project::add_graph`: a graph without a spec
     /// describes nothing more than an empty window, so make it explicit here
     /// too (`PlotSpec::default()` for an empty graph).
     AddGraph {

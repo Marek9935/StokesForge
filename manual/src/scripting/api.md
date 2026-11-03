@@ -294,7 +294,7 @@ To learn about templates and what the import does, see [Importing data](../guide
 
 - `y` is a column handle, or a list of column handles. A list creates one series per column, grouped together.
 - `x` is the column for the horizontal axis. Without it, each series uses the nearest X column to the left of its Y column. If the sheet has no X column, the row number is used. `x` can also be a list with one handle per series.
-- `name` names the graph. Without it, StokesForge uses Graph1, Graph2…
+- `name` names the graph. Without it, StokesForge names the graph after the workbook of the first series: Book1 plot, Book1 plot 2… (numbered after the highest existing number)
 - `parent` is the folder that will hold the graph.
 - `graph` adds the series to an existing graph instead of creating one. With `graph`, `name` and `parent` are not allowed.
 

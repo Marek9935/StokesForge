@@ -549,7 +549,7 @@ impl Tree {
     /// first version of this fix) would have allocated a buffer of size N
     /// even when stopping at the first window visited, which a
     /// node-by-node visit does not do.
-    fn visit_windows(&self, mut on_window: impl FnMut(NodeId) -> bool) {
+    pub(crate) fn visit_windows(&self, mut on_window: impl FnMut(NodeId) -> bool) {
         let mut stack = vec![self.root];
         while let Some(current) = stack.pop() {
             let Some(node) = self.node(current) else {
