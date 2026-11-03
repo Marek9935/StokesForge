@@ -812,7 +812,7 @@ saving and figure export.
                   plot_left, plot_top, fixed_size, layer_placement, layers; lengths in `unit`)
     pyst.insert_rows(worksheet, at, count=1) -> None
     pyst.delete_rows(worksheet, at, count=1) -> None
-    pyst.set_column_type(column, column_type) -> None ('numeric', 'datetime', 'mixed')
+    pyst.set_column_type(column, column_type) -> None ('numeric', 'datetime', 'mixed'; refused on a formula column)
     pyst.move(handle, parent, index=None) -> None (index among the other children; default: last)
     pyst.duplicate(handle, name=None) -> Handle (the copy, in the same parent)
     pyst.set_note(note, text) -> None

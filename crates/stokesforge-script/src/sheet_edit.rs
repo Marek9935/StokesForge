@@ -144,10 +144,11 @@ pub(crate) fn delete_rows(
 /// Changes a column's type: `'numeric'`, `'datetime'` or `'mixed'` (text
 /// columns are `'mixed'`). **The conversion can lose values** (a text turned
 /// into `'numeric'` does not read back); `pyst.undo()` restores type and
-/// values. Role, unit and name stay. A formula column refuses the conversion.
+/// values. Role, unit and name stay. A formula column or a calculation output
+/// keeps its type (#431).
 ///
-/// Raises `InvalidValueError` for an unknown type or a handle that is not
-/// a column; `BrokenReferenceError` for a stale handle.
+/// Raises `InvalidValueError` for an unknown type, a handle that is not
+/// a column, or a formula column or calculation output (read-only column); `BrokenReferenceError` for a stale handle.
 #[pyfunction]
 #[pyo3(signature = (column, column_type))]
 pub(crate) fn set_column_type(py: Python<'_>, column: &Handle, column_type: &str) -> PyResult<()> {

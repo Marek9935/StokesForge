@@ -181,7 +181,7 @@ describes its effects.
 | `graph_size(graph, *, unit="cm")` | reads the size of a graph (#399): dict `width`, `height`, `plot_widths`, `plot_heights`, `plot_left`, `plot_top`, `fixed_size`, `layer_placement`, `layers`, lengths in `unit` (`cm`, `mm`, `pt`, `in`); never writes |
 | `insert_rows(worksheet, at, count=1)` | inserts empty rows at row `at` (0 = at the top) in all columns of the sheet; `at` beyond the last row: `InvalidValueError` |
 | `delete_rows(worksheet, at, count=1)` | deletes `count` rows from `at` in the columns of the sheet; `undo()` gives the cells back |
-| `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column refuses |
+| `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column or a calculation output raises `InvalidValueError` (read-only column, #431) |
 | `move(handle, parent, index=None)` | moves under `parent` at `index` among the other children (default: last; same parent = reorder); the handle stays valid; unsuitable parent, cycle, name taken or index out of range: `InvalidValueError` |
 | `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused |
 | `set_note(note, text)` | replaces the whole text of a note |
