@@ -8,13 +8,18 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 |---|---|
 | `issues/<n>.json` | one record per issue or package: colour, last_colour, kind, parent, subs, name, state, wait_kind, waiting, what, since, owner, done_at, legacy |
 | `tests/<n>-<k>.json` | one trial entry: title, where, steps, expect, try, commit, date, colour, name, status (`todo`/`ok`/`retour`), comment, reviewed |
-| `qcm/<id>/meta.json` | `{issue, title, progress, finished}` of a questionnaire |
+| `qcm/<id>/meta.json` | `{issue, title, created, cards, finished, finished_at}` of a questionnaire (`id` = `<issue>-<k>`) |
+| `qcm/<id>/data.js`, `answers/<code>.json` | the decisions (injected into the form template when served) and one record per answered card |
 | `ended/<session>` | touched by the `SessionEnd` hook |
 | `control.json` | result of the last `scripts/suivi.py check` |
 
 ## The colour rule
 
 An issue holds its colour while (a) the Claude session that owns it is alive, or (b) one of its questionnaires is open, or (c) one of its trial entries with a `try` field is still `todo`. Otherwise it is **paused**: colour free, worktree kept. On resume it gets its previous colour back if free, else the first free. "Held" is computed when read (a crash pauses by itself). `scripts/suivi.py status [--json]` (or `chantier.sh --status`) prints it; `check` lists inconsistencies and writes `control.json` (the page footer « Vérifié il y a … »). Commands: `claim`, `set --state questions|code|essai|fusion --what … [--wait you|dep|ag --waiting …]`, `pause`, `done`, `release-line`, `check`.
+
+## Decision forms, local (#441)
+
+The start and follow-up forms are posed here, not published: `python3 scripts/suivi.py qcm pose <n> data.js --title "…"` (checks and counts the cards, creates `qcm/<n>-<k>/`, prints the id and `http://127.0.0.1:8441/qcm/<id>`). The form appears in « En attente » with its progress; the user answers there (each answer is a file), then presses « J'ai fini » at the bottom of the summary, which sets `finished` and frees the colour unless something else holds it. Agents read the answers with `suivi.py qcm answers <id> [--json]` and list forms with `qcm list [--open] [--issue n]`. Template and card rules: `stokesforge-bug-report/references/decision-form.md`. The published Artifact form stays as the fallback (user away from the PC, or asked).
 
 ## Trial checklist (#423)
 
@@ -38,7 +43,7 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 
 ## Server
 
-`scripts/suivi.py serve [--port 8441] [--state DIR]`: single-threaded `http.server` on 127.0.0.1 (exit 1 if the port is taken). `GET /` page, `GET /api/state` (aggregate, ETag), `POST /api/tests/<id>` (status, comment; needs header `X-Suivi: 1`, same-origin `Origin`, own `Host`; ids `[A-Za-z0-9_.-]+` not starting with a dot; body at most 256 KB). `/qcm/<id>` is served by lot C. The user installs it once with `scripts/suivi-install.sh` (user unit `stokesforge-suivi.service`; `scripts/suivi-uninstall.sh` removes it and keeps `.suivi/`). The server keeps the code it started with: after a merge that changes `scripts/suivi.py`, run `systemctl --user restart stokesforge-suivi`. The page file is re-read at each request.
+`scripts/suivi.py serve [--port 8441] [--state DIR]`: single-threaded `http.server` on 127.0.0.1 (exit 1 if the port is taken). `GET /` page, `GET /api/state` (aggregate, ETag), `POST /api/tests/<id>` (status, comment; needs header `X-Suivi: 1`, same-origin `Origin`, own `Host`; ids `[A-Za-z0-9_.-]+` not starting with a dot; body at most 256 KB). `GET /qcm/<id>` serves the form template with the QCM's `data.js` injected (404 if unknown), `GET /api/qcm/<id>/answers`, `POST /api/qcm/<id>/answer` (one card record) and `POST /api/qcm/<id>/finish` follow the same checks as the tests POST. The user installs it once with `scripts/suivi-install.sh` (user unit `stokesforge-suivi.service`; `scripts/suivi-uninstall.sh` removes it and keeps `.suivi/`). The server keeps the code it started with: after a merge that changes `scripts/suivi.py`, run `systemctl --user restart stokesforge-suivi`. The page file is re-read at each request.
 
 ## Migration and `legacy`
 

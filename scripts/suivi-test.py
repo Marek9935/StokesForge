@@ -514,7 +514,7 @@ class TestImportOnline(Base):
         self.assertFalse(os.path.exists(os.path.join(self.root, "x.json")))
 
 
-class TestServer(Base):
+class ServerBase(Base):
     def setUp(self):
         super().setUp()
         self.claim(1, "--name", "One")
@@ -561,6 +561,7 @@ class TestServer(Base):
         with open(self.entry) as f:
             return f.read()
 
+class TestServer(ServerBase):
     def test_post_without_the_custom_header_is_403_and_writes_nothing(self):
         before = self.entry_text()
         self.assertEqual(self.post(headers={"Content-Type": "text/plain"})[0], 403)
@@ -643,20 +644,165 @@ class TestServer(Base):
     def test_open_qcm_and_page(self):
         os.makedirs(os.path.join(self.state, "qcm", "q1"))
         with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
-            json.dump({"issue": 1, "title": "Form", "progress": {"answered": 2, "total": 5}}, f)
+            json.dump({"issue": 1, "title": "Form", "cards": 5}, f)
         st = json.loads(self.req("GET", "/api/state")[2])
-        self.assertEqual([(q["id"], q["issue"]) for q in st["qcms"]], [("q1", 1)])
+        self.assertEqual([(q["id"], q["issue"], q["progress"]) for q in st["qcms"]], [("q1", 1, {"answered": 0, "total": 5})])
         self.assertEqual(st["pending"], 2)
         status, headers, body = self.req("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn(b"<title>Suivi StokesForge</title>", body)
-        self.assertEqual(self.req("GET", "/qcm/q1")[0], 404)
+        self.assertEqual(self.req("GET", "/qcm/nope")[0], 404)
 
     def test_port_in_use_exits_1(self):
         r = subprocess.run([sys.executable, "-I", SUIVI, "serve", "--port", str(self.port), "--state", self.state],
                            cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(r.returncode, 1)
         self.assertIn("already in use", r.stderr)
+
+
+DATA = ("const TITRE='T';\nconst SEC={};\nconst ISSUES={a:{n:1,name:'One',colour:'\U0001F7E6'}};\nconst INTRO='';\n"
+        "const D=[\n{c:'R1',p:1,t:'Q1',is:'a',o:[O('Yes',['x'],'','p','m'),O('No')]},\n"
+        "{c:'R2',p:2,t:'Q2',is:'a',o:[O('A'),O('B')]},\n];\n")
+TEMPLATE = os.path.join(HERE, os.pardir, ".claude", "skills", "stokesforge-bug-report", "references", "decision-form.html")
+
+
+def node_check(js):
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "page.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(js)
+        return subprocess.run(["node", "--check", p], capture_output=True, text=True)
+
+
+class TestQcm(ServerBase):
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.run_cli("pause", "1").returncode, 0)     # only a form may hold the colour of #1
+        os.remove(self.entry)
+        self.data = os.path.join(self.tmp.name, "data.js")
+        with open(self.data, "w", encoding="utf-8") as f:
+            f.write(DATA)
+
+    def pose(self, issue=1, data=None):
+        r = self.run_cli("qcm", "pose", str(issue), data or self.data, "--title", "My <form>")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.split()[0]
+
+    def answer(self, qid, code="R1", body=None, headers="ok"):
+        h = {"X-Suivi": "1", "Content-Type": "application/json"} if headers == "ok" else headers
+        b = {"code": code, "priorite": 1, "question": "Q1", "issue": 1, "statut": "tranche", "choix": "Yes",
+             "recommande": True, "commentaire": "ok then", "date": "2026-11-03T10:00:00"} if body is None else body
+        return self.req("POST", "/api/qcm/%s/answer" % qid, h, b)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pose_injects_the_data_block_and_title(self):
+        qid = self.pose()
+        self.assertEqual(qid, "1-1")
+        self.assertEqual(self.pose(), "1-2")
+        status, headers, body = self.req("GET", "/qcm/1-1")
+        self.assertEqual(status, 200)
+        text = body.decode()
+        self.assertIn("{c:'R2',p:2,t:'Q2'", text)
+        self.assertIn("<title>My &lt;form&gt;</title>", text)
+        # lang: fr
+        self.assertEqual(text.count("DONNÉES — début"), 1)
+        self.assertEqual(self.req("GET", "/qcm/9-9")[0], 404)
+        self.assertEqual(self.req("GET", "/qcm/..%2fx")[0], 400)
+        meta = jload(os.path.join(self.state, "qcm", "1-1", "meta.json"))
+        self.assertEqual((meta["issue"], meta["cards"], meta["finished"]), (1, 2, False))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pose_refuses_a_syntax_error_and_writes_nothing(self):
+        bad = os.path.join(self.tmp.name, "bad.js")
+        with open(bad, "w") as f:
+            f.write(DATA.replace("const INTRO='';", "const INTRO=;"))
+        r = self.run_cli("qcm", "pose", "1", bad)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("syntax error", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm")))
+
+    def test_pose_refuses_data_without_cards(self):
+        empty = os.path.join(self.tmp.name, "empty.js")
+        with open(empty, "w") as f:
+            f.write("const D=[];\n")
+        r = self.run_cli("qcm", "pose", "1", empty)
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm")))
+
+    def test_answer_is_written_and_read_back_by_answers(self):
+        qid = self.pose()
+        self.assertEqual(self.answer(qid)[0], 200)
+        f = os.path.join(self.state, "qcm", qid, "answers", "R1.json")
+        self.assertEqual(jload(f)["choix"], "Yes")
+        r = self.run_cli("qcm", "answers", qid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("R1 [recommended] Q1 -> Yes -- ok then", r.stdout)
+        self.assertIn("1/2 answered, open", r.stdout)
+        j = json.loads(self.run_cli("qcm", "answers", qid, "--json").stdout)
+        self.assertEqual(j["answers"]["R1"]["commentaire"], "ok then")
+        got = json.loads(self.req("GET", "/api/qcm/%s/answers" % qid)[2])
+        self.assertEqual((got["finished"], list(got["answers"])), (False, ["R1"]))
+        self.assertEqual(self.req("GET", "/api/qcm/9-9/answers")[0], 404)
+
+    def test_answer_guards(self):
+        qid = self.pose()
+        self.assertEqual(self.answer(qid, headers={"Content-Type": "application/json"})[0], 403)
+        self.assertEqual(self.answer(qid, body={"code": "../x"})[0], 400)
+        self.assertEqual(self.answer(qid, body={"code": ".hid"})[0], 400)
+        self.assertEqual(self.answer(qid, body={"nocode": 1})[0], 400)
+        self.assertEqual(self.answer("9-9")[0], 404)
+        h = {"X-Suivi": "1", "Origin": "http://evil.example"}
+        self.assertEqual(self.req("POST", "/api/qcm/%s/answer" % qid, h, {"code": "R1"})[0], 403)
+        big = {"code": "R1", "commentaire": "x" * 300000}
+        self.assertEqual(self.answer(qid, body=big)[0], 413)
+        self.assertEqual(os.listdir(os.path.join(self.state, "qcm", qid, "answers")), [])
+
+    def test_finish_marks_the_form_and_frees_the_colour(self):
+        qid = self.pose()
+        self.assertEqual(self.held(C[0]), ["qcm"])
+        self.assertEqual(self.req("POST", "/api/qcm/%s/finish" % qid, {}, {})[0], 403)
+        self.assertEqual(self.held(C[0]), ["qcm"])
+        self.assertEqual(self.req("POST", "/api/qcm/%s/finish" % qid, {"X-Suivi": "1"}, {})[0], 200)
+        meta = jload(os.path.join(self.state, "qcm", qid, "meta.json"))
+        self.assertTrue(meta["finished"])
+        self.assertRegex(meta["finished_at"], r"^\d{4}-\d{2}-\d{2}T")
+        self.assertEqual(self.held(C[0]), [])
+        self.assertEqual(json.loads(self.req("GET", "/api/state")[2])["qcms"], [])
+
+    def test_finish_keeps_the_colour_while_another_form_is_open(self):
+        a, b = self.pose(), self.pose()
+        self.req("POST", "/api/qcm/%s/finish" % a, {"X-Suivi": "1"}, {})
+        self.assertEqual(self.held(C[0]), ["qcm"])
+
+    def test_open_form_is_listed_with_progress(self):
+        qid = self.pose()
+        self.answer(qid)
+        self.answer(qid, code="R2", body={"code": "R2", "statut": "plus_tard"})
+        q = json.loads(self.req("GET", "/api/state")[2])["qcms"]
+        self.assertEqual([(x["id"], x["issue"], x["progress"]) for x in q], [(qid, 1, {"answered": 1, "total": 2})])
+        out = self.run_cli("qcm", "list", "--open").stdout
+        self.assertIn("%s\tissue #1\t1/2\topen\tMy <form>" % qid, out)
+        self.assertEqual(self.run_cli("qcm", "list", "--issue", "2").stdout, "")
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestFormTemplate(unittest.TestCase):
+    def script(self, html):
+        return re.search(r"<script>(.*)</script>", html, re.S).group(1)
+
+    def test_template_script_parses_alone_and_with_injected_data(self):
+        with open(TEMPLATE, encoding="utf-8") as f:
+            html = f.read()
+        r = node_check(self.script(html))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = node_check(self.script(suivi.inject_qcm(DATA, "T")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_template_keeps_both_storage_modes_and_the_sketch_helpers(self):
+        with open(TEMPLATE, encoding="utf-8") as f:
+            html = f.read()
+        for needle in ("claude.use('db')", "/api/qcm/", "X-Suivi", "const slots=", ".mslot", "const flow=", "const sheet=", "const tree="):
+            self.assertIn(needle, html)
 
 
 class TestPage(unittest.TestCase):
@@ -671,6 +817,11 @@ class TestPage(unittest.TestCase):
                 f.write(js)
             r = subprocess.run(["node", "--check", p], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_legacy_row_highlights_no_state_step(self):
+        with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("h.includes('legacy')?-1:STATES.findIndex", html)
 
     def test_polls_only_while_visible(self):
         with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:

@@ -193,10 +193,10 @@ function colourBox(c){
   if(c.package&&c.package.subs&&c.package.subs.length){
     const ch=el('div','chips');c.package.subs.forEach(s=>ch.appendChild(el('code','','#'+s.n+(s.title?' '+s.title:''))));b.appendChild(ch);
   }
-  const s=el('div','steps');const i=STATES.findIndex(([k])=>k===c.state);
-  STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(j<i?' done':j===i?' cur':''),l)));
-  b.appendChild(s);
   const h=c.held_by||[];
+  const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===c.state);   // legacy: the state is unknown, highlight no step
+  STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(i<0?'':j<i?' done':j===i?' cur':''),l)));
+  b.appendChild(s);
   const why=h.filter(k=>HELD[k]).map(k=>HELD[k]);
   if(why.length)b.appendChild(el('div','what','Couleur tenue : '+why.join(' · ')));
   if(h.includes('legacy'))b.appendChild(el('span','legacy','état à confirmer par sa session'));

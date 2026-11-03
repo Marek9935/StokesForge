@@ -29,9 +29,9 @@ Before offering options on an architecture choice, give the figures the user dec
 
 ## How to ask
 
-- **The decisions of a work package** (start form and follow-up form), even a single question: the multiple-choice form, below.
+- **The decisions of a work package** (start form and follow-up form), even a single question: the multiple-choice form, below, **posed locally**: `scripts/suivi.py qcm pose <n> data.js --title "…"` (#441). It appears in the « En attente » tab of the tracking page (`http://127.0.0.1:8441/`) and opens at `/qcm/<id>`.
 - **`AskUserQuestion`** only for a quick question outside a work package's decisions (a yes/no on process): one question, 2 to 4 options, recommendation first with « (Recommandé) » ("(Recommended)" in the interaction language), advantage and drawback in each description.
-- **The multiple-choice form** is a published Artifact page built from [`decision-form.html`](decision-form.html). Never a list of questions in the terminal.
+- **The multiple-choice form** is built from [`decision-form.html`](decision-form.html), one template with two storage modes: served by `suivi.py serve` on `127.0.0.1` (answers go to files, « J'ai fini » marks it finished), or published as an Artifact (answers go to the `decisions` collection). The **published Artifact form is the fallback**: the user is away from the PC (phone, other machine), the tracking server is down, or they ask for it. Never a list of questions in the terminal.
 
 The page is written in the **interaction language** (`CLAUDE.md`, "Interaction language"). The template `decision-form.html` is in French and exempt from the French guard; when the interaction language is not French, translate its wording when filling it. Interface texts appear in English, as on screen.
 
@@ -47,17 +47,18 @@ Bullets: one idea each, under 12 words when possible, the user's vocabulary (ges
 
 ## Building and publishing the form
 
-1. Copy `decision-form.html` to the scratchpad; replace only the block between `DONNÉES — début` and `DONNÉES — fin` (`TITRE`, `SEC`, `D`), and the `<title>`.
+1. Write only the data, in a `data.js` in the scratchpad: what goes between `DONNÉES — début` and `DONNÉES — fin` (`TITRE`, `SEC`, `ISSUES`, `INTRO`, `D`). Never copy or edit the template for a local form: `suivi.py` injects the data into it and sets the `<title>`. For the Artifact fallback, copy `decision-form.html` to the scratchpad and replace that block and the `<title>` by hand.
 2. A decision: `{c, p, t, l, k, is, ctx:[…], av:{pts:[…], m}, o:[O(name, bullets, sketch, plus, minus), …]}`; the first option of `o` is the recommendation. `k` is the kind: `look`, `gesture`, `syntax`, `other` (default) or `tech`. `is` is the key of the issue in `ISSUES = {key: {n, name, colour}}` (the colour square of `scripts/chantier.sh`); the card shows « 🟦 #413 name » at the top. Order of the cards: look, gesture, syntax and other first (by priority), then the `tech` cards grouped last under « en général tu prends la recommandation », with the existing « take all recommendations » button.
    Start form of a **package** (a parent with sub-issues, #419): one form for the whole package; the first card is the list and order of the sub-issues (the user removes, adds or reorders), then the cards grouped by sub-issue, each with `is` pointing to an `ISSUES` entry named `#<parent> › #<sub> <name>` (same colour square for all).
    `INTRO` (HTML, optional) is a block shown above the cards: the issues of the batch with their squares, and a `flow(...)` diagram when a sequence helps (strings are steps, `'→'` an arrow, `[text, 'you'|'ag'|'ok'|'bad']` a coloured step).
-3. Sketches use the helpers at the top of the script: `f` (field; `err`, `ok`, `warn`, `off`, `ph`), `b` (button; `pri`, `def`, `dan`, `off`), `tip`, `row`, `lab`, `dim`, `cap`, `pair`, `grid`, `win`, `sbar`, `slider`, `sheet`, `tree` (Project Manager rows: depth, text, state). Add a helper to the template rather than hand-written HTML in the data.
-4. `node --check` the extracted script, then publish with `capabilities: {db: {}}`: answers go to the `decisions` collection (code, issue, choix, recommande, commentaire, statut) and stay in the browser if the database is missing.
-5. A new batch of decisions is a **new** artifact (new file): its answers are the record of that batch.
+3. Sketches use the helpers at the top of the script: `f` (field; `err`, `ok`, `warn`, `off`, `ph`), `b` (button; `pri`, `def`, `dan`, `off`), `tip`, `row`, `lab`, `dim`, `cap`, `pair`, `grid`, `win`, `sbar`, `slider`, `sheet`, `tree` (Project Manager rows: depth, text, state), `slots` (the six work-package colours: rows `[square, title, state, waiting, kind you|dep|ag, since]`, `[square]` alone = free). Add a helper to the template rather than hand-written HTML in the data.
+4. **Local (default)**: `python3 scripts/suivi.py qcm pose <issue> data.js --title "…"` runs `node --check` on the page with the data injected, evaluates the data, counts the cards, refuses on an error, creates `../_stokesforge/.suivi/qcm/<issue>-<k>/` and prints the id and the URL. The issue holds its colour while the form is open. `?view=sum` opens the summary directly.
+5. **Fallback (Artifact)**: `node --check` the extracted script, then publish with `capabilities: {db: {}}`: answers go to the `decisions` collection (code, issue, choix, recommande, commentaire, statut) and stay in the browser if the database is missing.
+6. A new batch of decisions is a **new** form (`pose` again, or a new artifact): its answers are the record of that batch.
 
 ## After the answers
 
-1. Read them: `ArtifactData`, `action: list`, `collection: decisions`.
+1. Read them: `python3 scripts/suivi.py qcm answers <id> [--json]` (usable after a `/clear`; `qcm list --open` finds the id). The user's « J'ai fini » at the bottom of the summary marks the form finished and frees the issue's colour if nothing else holds it; do not read the answers before, unless asked. Artifact fallback: `ArtifactData`, `action: list`, `collection: decisions`.
 2. Cross-check them against each other and against `CLAUDE.md` and `docs/`: look for **inconsistencies**.
 3. For each choice that is not the recommendation: state its drawback and propose an adjustment that keeps its intent.
 4. An « Autre » that needs context: fetch it in the code, then ask again.

@@ -436,8 +436,10 @@ Steps, in order:
  2. `scripts/suivi.py status`: who holds which colour. Colours are claimed by this
     script and freed by `--release`, `--pause`, `--done`; never edit .suivi by hand.
  3. One start decision form for all open decisions, cards tagged with the issue's
-    square (stokesforge-bug-report/references/decision-form.md). A package: one
-    form for all of it, first card = the sub-issue list and order above.
+    square (stokesforge-bug-report/references/decision-form.md), posed locally:
+    `scripts/suivi.py qcm pose <n> data.js --title "..."`; the user answers in the
+    "En attente" tab; read it with `suivi.py qcm answers <id>`. Artifact form only
+    as fallback. A package: one form, first card = the sub-issue list and order.
  4. At each change of state: `scripts/suivi.py set <n> --state
     questions|code|essai|fusion --what "..." [--wait you|dep|ag --waiting "..."]`.
  5. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").

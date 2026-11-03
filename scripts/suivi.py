@@ -10,7 +10,9 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
                            wait_kind, what, since, owner{session,pid,pid_start,at},
                            done_at
     ended/<session_id>     empty files touched by the SessionEnd hook
-    qcm/<id>/meta.json     {issue, finished}   (written by the QCM server)
+    qcm/<id>/data.js       the decisions (injected into the form template when served)
+    qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
+    qcm/<id>/answers/<code>.json   one record per card (written by the page's POST)
     tests/<n>-<k>.json     trial entry: title, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
                            page's POST and by `test add|merged`)
@@ -33,19 +35,22 @@ until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, serve (the local page, 127.0.0.1 only),
-test add|merged|list, import-online.
+test add|merged|list, qcm pose|answers|list, import-online.
 """
 import argparse
 import datetime
 import errno
 import glob
 import hashlib
+import html
 import http.server
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 COLOURS = ["🟦", "🟩", "🟧", "🟪", "🟥", "🟨"]
@@ -811,6 +816,130 @@ def cmd_import_online(a):
     return 1 if bad else 0
 
 
+# ------------------------------------------------------------------- QCM
+TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, ".claude", "skills",
+                        "stokesforge-bug-report", "references", "decision-form.html")
+# lang: fr
+DATA_START = "/* DONNÉES — début"
+DATA_END = "/* DONNÉES — fin */"
+
+
+def read_template():
+    try:
+        with open(TEMPLATE, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        raise Fail("cannot read the form template %s: %s" % (os.path.normpath(TEMPLATE), e))
+
+
+def inject_qcm(data, title):
+    """The template with `data` between the DONNÉES markers and `title` in <title>."""
+    t = read_template()
+    i = t.find(DATA_START)
+    j = t.find(DATA_END)
+    k = t.find("*/", i)
+    if i < 0 or j < 0 or k < 0 or j < i:
+        raise Fail("the template has lost its DONNÉES markers")
+    if "</script" in data.lower():
+        raise Fail("data.js must not contain </script")
+    t = t[:i] + DATA_START + " */\n" + data.strip("\n") + "\n" + t[j:]
+    if title:
+        t = re.sub(r"<title>.*?</title>", lambda m: "<title>%s</title>" % html.escape(title, quote=False), t, count=1)
+    return t
+
+
+def node_run(code, label):
+    if not shutil.which("node"):
+        raise Fail("node is required to check a form but is not installed")
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "check.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(code)
+        r = subprocess.run(["node", p], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise Fail("%s does not run:\n%s" % (label, r.stderr.strip()))
+    return r.stdout
+
+
+def check_form(data):
+    """Syntax-check the page script built with `data`, evaluate the data, return the number of cards."""
+    page = inject_qcm(data, "")
+    m = re.search(r"<script>(.*)</script>", page, re.S)
+    if not m:
+        raise Fail("the template has no script")
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "page.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(m.group(1))
+        if not shutil.which("node"):
+            raise Fail("node is required to check a form but is not installed")
+        r = subprocess.run(["node", "--check", p], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            raise Fail("the form script has a syntax error:\n%s" % r.stderr.strip())
+    head = read_template()
+    head = head[head.index("<script>") + len("<script>"):head.index(DATA_START)]
+    out = node_run(head + "\n" + data + "\nprocess.stdout.write(String(D.length));", "data.js")
+    try:
+        n = int(out)
+    except ValueError:
+        raise Fail("data.js defines no D array")
+    if n < 1:
+        raise Fail("data.js defines no card")
+    return n
+
+
+def cmd_qcm_pose(a):
+    try:
+        with open(a.data, encoding="utf-8") as f:
+            data = f.read()
+    except OSError as e:
+        raise Fail("cannot read %s: %s" % (a.data, e))
+    cards = check_form(data)
+    base = os.path.join(suivi_dir(), "qcm")
+    ks = [int(x.rsplit("-", 1)[1]) for x in (os.listdir(base) if os.path.isdir(base) else [])
+          if re.fullmatch(r"%d-\d+" % a.issue, x)]
+    qid = "%d-%d" % (a.issue, max(ks, default=0) + 1)
+    d = qcm_dir(qid)
+    os.makedirs(os.path.join(d, "answers"))
+    with open(os.path.join(d, "data.js"), "w", encoding="utf-8") as f:
+        f.write(data)
+    write_json(os.path.join(d, "meta.json"), {"issue": a.issue, "title": a.title or "", "created": today().isoformat(),
+                                              "cards": cards, "finished": False})
+    print(qid)
+    print("http://127.0.0.1:%d/qcm/%s" % (int(os.environ.get("SF_SUIVI_PORT", "8441")), qid))
+    return 0
+
+
+def cmd_qcm_answers(a):
+    meta = read_json(os.path.join(qcm_dir(a.id), "meta.json")) if safe_id(a.id) else None
+    if not isinstance(meta, dict):
+        raise Fail("no such QCM: %s" % a.id)
+    answers = load_answers(a.id)
+    if a.json:
+        print(json.dumps({"id": a.id, "meta": meta, "answers": answers}, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    pr = qcm_progress(a.id, meta)
+    print("QCM %s (issue #%s) %s: %d/%d answered, %s" % (a.id, meta.get("issue"), meta.get("title", ""), pr["answered"],
+                                                          pr["total"], "finished" if meta.get("finished") else "open"))
+    for code in sorted(answers, key=natural):
+        r = answers[code]
+        status = "later" if r.get("statut") == "plus_tard" else ("recommended" if r.get("recommande") else "chosen")
+        line = "%s [%s] %s -> %s" % (code, status, r.get("question", ""), r.get("choix", ""))
+        if r.get("commentaire"):
+            line += " -- " + r["commentaire"]
+        print(line)
+    return 0
+
+
+def cmd_qcm_list(a):
+    for q in all_qcms():
+        if (a.open and q["finished"]) or (a.issue is not None and str(q["issue"]) != str(a.issue)):
+            continue
+        print("%s\tissue #%s\t%d/%d\t%s\t%s" % (q["id"], q["issue"], q["progress"]["answered"], q["progress"]["total"],
+                                                 "finished" if q["finished"] else "open", q["title"]))
+    return 0
+
+
 # ------------------------------------------------------------------ server
 MAX_BODY = 256 * 1024
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suivi-page.html")
@@ -819,16 +948,39 @@ CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline
        "frame-ancestors 'none'")
 
 
-def open_qcms():
+def qcm_dir(qid):
+    return os.path.join(suivi_dir(), "qcm", qid)
+
+
+def load_answers(qid):
+    out = {}
+    for p in sorted(glob.glob(os.path.join(qcm_dir(qid), "answers", "*.json"))):
+        code = os.path.basename(p)[:-5]
+        r = read_json(p)
+        if safe_id(code) and isinstance(r, dict):
+            out[code] = r
+    return out
+
+
+def qcm_progress(qid, meta):
+    answered = sum(1 for r in load_answers(qid).values() if r.get("statut") != "plus_tard")
+    return {"answered": answered, "total": meta.get("cards") or 0}
+
+
+def all_qcms():
     out = []
-    for p in sorted(glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json"))):
+    for p in sorted(glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json")), key=natural):
         qid = os.path.basename(os.path.dirname(p))
         m = read_json(p)
-        if not safe_id(qid) or not isinstance(m, dict) or m.get("finished"):
+        if not safe_id(qid) or not isinstance(m, dict):
             continue
-        out.append({"id": qid, "issue": m.get("issue"), "title": m.get("title", ""),
-                    "progress": m.get("progress", ""), "since": m.get("since", "")})
+        out.append({"id": qid, "issue": m.get("issue"), "title": m.get("title", ""), "finished": bool(m.get("finished")),
+                    "progress": qcm_progress(qid, m), "since": m.get("created", "")})
     return out
+
+
+def open_qcms():
+    return [q for q in all_qcms() if not q["finished"]]
 
 
 def build_state():
@@ -919,27 +1071,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/qcm/"):
             if not safe_id(path[len("/qcm/"):]):
                 return self.fail(400, "bad id")
-            return self.fail(404, "QCM pages are not served yet")      # lot C
+            return self.qcm_page(path[len("/qcm/"):])
+        m = re.fullmatch(r"/api/qcm/([^/]+)/answers", path)
+        if m:
+            qid = m.group(1)
+            meta = read_json(os.path.join(qcm_dir(qid), "meta.json")) if safe_id(qid) else None
+            if not isinstance(meta, dict):
+                return self.fail(404, "no such QCM")
+            body = {"finished": bool(meta.get("finished")), "answers": load_answers(qid)}
+            return self.send(200, json.dumps(body, ensure_ascii=False), "application/json; charset=utf-8")
         self.fail(404, "not found")
+
+    def qcm_page(self, qid):
+        meta = read_json(os.path.join(qcm_dir(qid), "meta.json"))
+        if not isinstance(meta, dict):
+            return self.fail(404, "no such QCM")
+        try:
+            with open(os.path.join(qcm_dir(qid), "data.js"), encoding="utf-8") as f:
+                data = f.read()
+            html = inject_qcm(data, meta.get("title", ""))
+        except (OSError, Fail) as e:
+            return self.fail(500, "QCM unreadable: %s" % e)
+        self.send(200, html, "text/html; charset=utf-8")
 
     def do_HEAD(self):
         self.do_GET()
 
-    def do_POST(self):
-        if not self.guard(write=True):
-            return
-        path = self.route()
-        if not path.startswith("/api/tests/"):
-            return self.fail(404, "not found")
-        tid = path[len("/api/tests/"):]
-        if not safe_id(tid):
-            return self.fail(400, "bad id")
+    def read_body(self):
+        """The JSON body, or None after an error reply."""
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            return self.fail(400, "bad Content-Length")
+            self.fail(400, "bad Content-Length")
+            return None
         if length < 0:
-            return self.fail(400, "bad Content-Length")
+            self.fail(400, "bad Content-Length")
+            return None
         if length > MAX_BODY:
             left = min(length, 4 * MAX_BODY)       # drain, or the client sees a reset instead of the 413
             while left > 0:
@@ -947,11 +1114,53 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not chunk:
                     break
                 left -= len(chunk)
-            return self.fail(413, "body larger than %d bytes" % MAX_BODY)
+            self.fail(413, "body larger than %d bytes" % MAX_BODY)
+            return None
         try:
-            body = json.loads(self.rfile.read(length) or b"null")
+            return json.loads(self.rfile.read(length) or b"null")
         except ValueError:
-            return self.fail(400, "body is not JSON")
+            self.fail(400, "body is not JSON")
+            return None
+
+    def do_POST(self):
+        if not self.guard(write=True):
+            return
+        path = self.route()
+        if path.startswith("/api/tests/"):
+            return self.post_test(path[len("/api/tests/"):])
+        m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish)", path)
+        if m:
+            return self.post_qcm(m.group(1), m.group(2))
+        self.fail(404, "not found")
+
+    def post_qcm(self, qid, what):
+        if not safe_id(qid):
+            return self.fail(400, "bad id")
+        mp = os.path.join(qcm_dir(qid), "meta.json")
+        body = self.read_body()
+        if body is None:
+            return
+        meta = read_json(mp)
+        if not isinstance(meta, dict):
+            return self.fail(404, "no such QCM")
+        if what == "finish":
+            meta["finished"] = True
+            meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+            write_json(mp, meta)
+            return self.send(200, json.dumps({"ok": True}), "application/json")
+        if not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"]):
+            return self.fail(400, "expected an object with a safe string code")
+        if not all(isinstance(v, (str, int, bool, type(None))) for v in body.values()):
+            return self.fail(400, "answer fields must be plain values")
+        write_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"), body)
+        self.send(200, json.dumps({"ok": True}), "application/json")
+
+    def post_test(self, tid):
+        if not safe_id(tid):
+            return self.fail(400, "bad id")
+        body = self.read_body()
+        if body is None:
+            return
         if not isinstance(body, dict) or not ({"status", "comment"} & set(body)):
             return self.fail(400, "expected an object with status and/or comment")
         if "status" in body and body["status"] not in TEST_STATUSES:
@@ -1051,6 +1260,22 @@ def parser():
             q.add_argument("commit")
         else:
             q.add_argument("--issue", type=int)
+    q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)
+    for name, fn, h in (("pose", cmd_qcm_pose, "check data.js, create the form qcm/<n>-<k>, print its id and URL"),
+                        ("answers", cmd_qcm_answers, "the answers recorded so far (readable, or --json)"),
+                        ("list", cmd_qcm_list, "list the forms")):
+        x = q.add_parser(name, help=h, allow_abbrev=False)
+        x.set_defaults(fn=fn)
+        if name == "pose":
+            x.add_argument("issue", type=int)
+            x.add_argument("data")
+            x.add_argument("--title", default="")
+        elif name == "answers":
+            x.add_argument("id")
+            x.add_argument("--json", action="store_true")
+        else:
+            x.add_argument("--open", action="store_true")
+            x.add_argument("--issue", type=int)
     p = add("import-online", cmd_import_online, "import the tests/* documents of an ArtifactData export, once")
     p.add_argument("out_dir")
     return ap
