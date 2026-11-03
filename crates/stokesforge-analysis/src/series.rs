@@ -96,14 +96,17 @@ pub fn interpolate(xs: &[f64], ys: &[f64], at: f64) -> Option<f64> {
     }
     // First index whose X >= at.
     let hi = xs[..n].partition_point(|&v| v < at);
+    // On a stored X (the first of an equal block) return the stored Y itself:
+    // `y0 + (y1 - y0) * 1` is not `y1` when the difference rounds (#427).
+    if xs[hi] == at {
+        return Some(ys[hi]);
+    }
     if hi == 0 {
         return Some(ys[0]);
     }
+    // Here `x0 < at < x1`, so `x1 > x0`.
     let (x0, x1) = (xs[hi - 1], xs[hi]);
     let (y0, y1) = (ys[hi - 1], ys[hi]);
-    if x1 == x0 {
-        return Some(y1);
-    }
     Some(y0 + (y1 - y0) * (at - x0) / (x1 - x0))
 }
 
@@ -143,6 +146,34 @@ mod tests {
         let c = clean(&[1.0, 2.0, 3.0], &[1.0, 2.0]);
         assert_eq!(c.series.len(), 2);
         assert_eq!(c.skipped, 0);
+    }
+
+    #[test]
+    fn interpolate_returns_the_stored_value_on_a_grid_point() {
+        // y0 + (y1 - y0) * 1 would give 0 here (#427).
+        assert_eq!(interpolate(&[0.0, 1.0], &[1e20, 1.0], 1.0), Some(1.0));
+        assert_eq!(
+            interpolate(&[0.0, 1.0, 2.0], &[1e20, 1.0, 5.0], 1.0),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn interpolate_on_equal_x_returns_the_first_of_the_block() {
+        let (x, y) = ([0.0, 1.0, 1.0, 2.0], [0.0, 3.0, 6.0, 9.0]);
+        assert_eq!(interpolate(&x, &y, 1.0), Some(3.0));
+    }
+
+    #[test]
+    fn interpolate_is_exact_on_a_flat_segment() {
+        for k in 0..=100 {
+            let at = f64::from(k) / 100.0;
+            assert_eq!(
+                interpolate(&[0.0, 1.0], &[0.1, 0.1], at),
+                Some(0.1),
+                "k={k}"
+            );
+        }
     }
 
     #[test]
