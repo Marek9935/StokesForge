@@ -385,7 +385,7 @@ columns keeps its "No columns" empty state and has no entry row.
 - Gutter: a dimmed `*` (`theme::gutter_dim_text_color`) with the tooltip « Type
   here to add a row »; inert (no row selection, no drag, no context menu, absent
   from the row extents). The cells are empty and behave as ordinary cells except
-  that Ctrl and Shift act as a plain click there.
+  that Ctrl acts as a plain click there (Shift extends, see below).
 - Typing a value and committing writes through the ordinary undoable
   `SetCells` (one history entry, no `InsertRows`, no macro): `commit_cell` is
   called with `row == row_count`, which the command already extends. The cursor
@@ -397,9 +397,22 @@ columns keeps its "No columns" empty state and has no entry row.
   **in its handler, once the commit is accepted**: a refused commit (read-only
   formula column) or one the actor rejected leaves the cursor in place. The grid
   no longer selects the next row before the command runs.
-- Ctrl+A and column selections never contain the entry row (`is_selected`). A
-  range started on a data row stops at the last data row (`extend_selection`,
-  Shift+Down, drag); a range started on the entry row may reach it.
+- The entry row is **never part of a range** (`is_selected`, `extend_selection`).
+  Ctrl+A and column selections skip it. From a data row, Shift+click, Shift+drag
+  and Shift+Down onto the entry row stop at the last data row and keep the anchor.
+  From the entry row, Shift+click on a data row or Shift+Up moves the anchor to
+  the last data row of its column: the range covers the clicked row .. the last
+  data row. From the entry row to the entry row, or on a sheet without rows,
+  Shift does nothing. A plain click selects the entry cell alone (to type).
+- **Fast Enter** (#440): an Enter, Tab or Escape pressed in the same input batch
+  as the character that opens the edit, or in the field's opening frame, ends it
+  like a later one. `start_grid_typing` hands a same-batch Enter/Tab to
+  `inplace_edit::defer_end` (the grid shortcuts of that frame are skipped), and
+  `inplace_edit::finish` applies it on the opening frame; for a field opened by
+  typing (`Opening::KeepCursor`) that frame also reads Enter/Tab/Escape directly.
+  Other fields (`SelectAll`) still ignore keys on the opening frame, so the Enter
+  that opened them cannot close them. A same-batch Escape is consumed earlier by
+  the grid (it lifts the selection), so it is not deferred.
 - After an Undo that removes the row written from the entry row,
   `revalidate_selection` brings a cursor that is now below the entry row back
   onto it.

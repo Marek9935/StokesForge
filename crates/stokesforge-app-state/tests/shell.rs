@@ -5363,6 +5363,95 @@ fn down_stops_on_the_entry_row() {
     assert_eq!(state.row_count(sheet1), 5, "navigation creates nothing");
 }
 
+/// Which of `rows` of `column` the selection of `sheet` contains.
+fn selected_rows(state: &AppState, sheet: NodeId, column: NodeId, rows: &[usize]) -> Vec<usize> {
+    let selection = state.selection(sheet).expect("a selection");
+    rows.iter()
+        .copied()
+        .filter(|&row| selection.contains(state.tree(), sheet, column, row))
+        .collect()
+}
+
+/// #440: Shift from a data row onto the entry row (click, drag or Shift+Down)
+/// extends down to the last data row, keeps the anchor and never selects the
+/// entry row.
+#[test]
+fn shift_from_a_data_row_to_the_entry_row_extends_to_the_last_data_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 2);
+
+    state.extend_selection(sheet1, time_col, state.entry_row(sheet1));
+
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[1, 2, 3, 4, 5]),
+        [2, 3, 4]
+    );
+    let anchor = state
+        .selection(sheet1)
+        .and_then(|selection| selection.anchor(state.tree(), sheet1));
+    assert_eq!(anchor, Some(GridCursor::Data(time_col, 2)));
+
+    state.select_cell(sheet1, time_col, 3);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[2, 3, 4, 5]),
+        [3, 4]
+    );
+}
+
+/// #440: from the entry row, Shift+click on a data row (or Shift+Up) selects that
+/// row .. the last data row; the entry row is not in the selection.
+#[test]
+fn shift_from_the_entry_row_selects_down_to_the_last_data_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+
+    state.select_cell(sheet1, time_col, 5);
+    state.extend_selection(sheet1, time_col, 2);
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[1, 2, 3, 4, 5]),
+        [2, 3, 4]
+    );
+
+    state.select_cell(sheet1, time_col, 5);
+    state.move_selection(sheet1, MoveDirection::Up, true);
+    assert_eq!(selected_rows(&state, sheet1, time_col, &[3, 4, 5]), [4]);
+    state.move_selection(sheet1, MoveDirection::Up, true);
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[2, 3, 4, 5]),
+        [3, 4]
+    );
+
+    // Shift toward the entry row from the entry row changes nothing.
+    state.select_cell(sheet1, time_col, 5);
+    state.extend_selection(sheet1, time_col, 5);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    assert_eq!(selected_rows(&state, sheet1, time_col, &[4, 5]), [5]);
+}
+
+/// #440: with no data row, Shift from the entry row does nothing.
+#[test]
+fn shift_from_the_entry_row_of_an_empty_sheet_does_nothing() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (sheet, columns) = new_workbook(&mut state);
+    state.select_cell(sheet, columns[0], 0);
+
+    state.extend_selection(sheet, columns[0], 0);
+    state.move_selection(sheet, MoveDirection::Up, true);
+    state.move_selection(sheet, MoveDirection::Down, true);
+
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(columns[0], 0)));
+    assert_eq!(selected_rows(&state, sheet, columns[0], &[0]), [0]);
+}
+
 /// Committing in the entry row creates exactly one row and lands on the new entry row.
 #[test]
 fn committing_in_the_entry_row_creates_one_row_and_moves_to_the_next_entry_row() {

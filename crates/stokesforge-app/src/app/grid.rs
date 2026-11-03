@@ -2335,13 +2335,18 @@ fn grid_keyboard(
         } else if ui.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE)) {
             state.deselect_all(sheet);
         }
-        start_grid_typing(ui, state, sheet);
+        if start_grid_typing(ui, state, sheet) {
+            // The keys of this batch belong to the edit just opened (deferred to
+            // its first frame), not to the selection.
+            return;
+        }
         navigate_grid_selection(ui, state, actions, sheet);
         grid_clipboard_shortcuts(ui, state, actions, sheet);
     }
 }
 
-fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
+/// Returns whether typing opened an edit this frame.
+fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) -> bool {
     // Typing on a selected cell or header field (single click, not yet
     // being edited) starts the edit by replacing all its content with what is
     // typed — standard spreadsheet behavior, the same for both. Triggers only for
@@ -2360,21 +2365,45 @@ fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
             })
             .collect()
     });
-    if !typed.is_empty() {
+    if typed.is_empty() {
+        return false;
+    }
+    let opened =
         if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
             state.begin_edit(column, row);
             if let Some(edit) = state.editing_mut() {
                 edit.buffer = typed;
                 edit.typed = true;
             }
+            true
         } else if let Some((column, field)) = state.selected_header_field(sheet) {
             state.begin_header_edit(column, field);
             if let Some(edit) = state.header_editing_mut() {
                 edit.buffer = typed;
                 edit.typed = true;
             }
+            true
+        } else {
+            false
+        };
+    if opened {
+        // Enter or Tab pressed in the same batch as the character (a fast typist,
+        // a slow frame): the field is painted only next frame, which applies the
+        // key as if it came later (#440).
+        let (enter, tab, shift) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::Enter),
+                input.key_pressed(egui::Key::Tab),
+                input.modifiers.shift,
+            )
+        });
+        if enter {
+            inplace_edit::defer_end(ui.ctx(), inplace_edit::EditEnd::Enter { shift });
+        } else if tab {
+            inplace_edit::defer_end(ui.ctx(), inplace_edit::EditEnd::Tab { shift });
         }
     }
+    opened
 }
 
 fn navigate_grid_selection(
@@ -2811,14 +2840,12 @@ fn display_cell_widget(
     }
     let modifiers = ui.input(|i| i.modifiers);
     // The entry row is a place to type, not a cell to build a selection from: Ctrl
-    // and Shift act as a plain click there (a range never starts from it by
-    // modifier; a drag from a data row stops at the last data row, see
-    // `AppState::extend_selection`).
+    // acts as a plain click there. Shift extends a range anchored on a data row
+    // (`AppState::extend_selection` stops it at the last data row and never selects
+    // the entry row); anchored on the entry row it does nothing.
     let in_entry_row = row >= state.entry_row(sheet);
-    let (command, shift) = (
-        modifiers.command && !in_entry_row,
-        modifiers.shift && !in_entry_row,
-    );
+    let command = modifiers.command && !in_entry_row;
+    let shift = modifiers.shift;
     if response.drag_started() && command {
         // Ctrl+drag: a new rectangle, the previous ones stay (#159).
         state.add_cell_selection(sheet, column, row);
@@ -3358,6 +3385,78 @@ mod tests {
         assert!(bench.state.editing().is_some(), "typing opens the editor");
         enter(&mut bench);
         assert_commit_pushed(&bench, 4, "7");
+    }
+
+    fn enter_key() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// A character and Enter in the same input batch (a fast typist, a slow frame)
+    /// or in the next frame (the field's opening frame): Enter still validates and
+    /// advances, on a data cell and on the entry row (#440).
+    #[test]
+    fn enter_typed_right_after_a_character_commits_and_advances() {
+        for (same_batch, entry_row) in [(true, false), (false, false), (true, true), (false, true)]
+        {
+            let mut bench = Bench::new();
+            let row = if entry_row {
+                let position = entry_cell_of_first_column(&bench);
+                click_at(&mut bench, position);
+                4
+            } else {
+                bench.click_on("101");
+                0
+            };
+            if same_batch {
+                bench.image(vec![egui::Event::Text("7".into()), enter_key()]);
+            } else {
+                bench.image(vec![egui::Event::Text("7".into())]);
+                bench.image(vec![enter_key()]);
+            }
+            bench.image(Vec::new());
+            assert_commit_pushed(&bench, row, "7");
+            assert!(
+                bench.state.editing().is_none(),
+                "no edit left open (same batch: {same_batch}, entry row: {entry_row})"
+            );
+        }
+    }
+
+    /// Shift+click on an entry cell, from a data row: the range stops at the last
+    /// data row, the anchor stays and nothing is selected in the entry row (#440).
+    #[test]
+    fn shift_click_on_the_entry_row_extends_to_the_last_data_row() {
+        let mut bench = Bench::new();
+        bench.click_on("102");
+        let position = entry_cell_of_first_column(&bench);
+        let shift = egui::Modifiers::SHIFT;
+        bench.image(vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::ModifiersChanged(shift),
+        ]);
+        for pressed in [true, false] {
+            bench.image(vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: shift,
+            }]);
+        }
+        bench.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        bench.image(Vec::new());
+        let selection = bench.state.selection(bench.sheet).expect("a selection");
+        let tree = bench.state.tree();
+        let first = bench.columns[0];
+        let rows: Vec<usize> = (0..=4)
+            .filter(|&row| selection.contains(tree, bench.sheet, first, row))
+            .collect();
+        assert_eq!(rows, [1, 2, 3]);
     }
 
     /// An empty sheet (a new workbook) is editable: its entry row is row 0.

@@ -241,7 +241,7 @@ Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next colum
 
 ### Add a row
 
-Below the last row, the grid always shows an empty **entry row**, marked `*` in the row-number column (hover it: *Type here to add a row*). It is there in a new workbook too, which has no rows yet. Click a cell of the entry row and type a value, then press <kbd>Enter</kbd>: the row is created, and the cursor moves to the next entry row. One **Undo** removes the row. The entry row is not data: it is not saved, not plotted, and **Select All** does not include it.
+Below the last row, the grid always shows an empty **entry row**, marked `*` in the row-number column (hover it: *Type here to add a row*). It is there in a new workbook too, which has no rows yet. Click a cell of the entry row and type a value, then press <kbd>Enter</kbd>: the row is created, and the cursor moves to the next entry row. One **Undo** removes the row. The entry row is not data: it is not saved, not plotted, and **Select All** does not include it. A range extended with <kbd>Shift</kbd> (click, drag or arrows) stops at the last row and never includes the entry row.
 
 A decimal comma is accepted: `1,5` is read as 1.5. The status bar tells you when it did so. An empty cell is a missing value. Dates and times are read when the column is **Date/Time**.
 

@@ -3842,29 +3842,43 @@ impl AppState {
     /// extend_column_selection`]/[`AppState::extend_row_selection`]/
     /// [`AppState::extend_header_row_selection`].
     ///
-    /// The entry row ([`AppState::entry_row`]) is never swept into a range
-    /// started on a real row: the target stops at the last data row. A range
-    /// anchored on the entry row itself may reach it.
+    /// The entry row ([`AppState::entry_row`]) is never part of a range (#440).
+    /// From an anchor on a real row, a target on or below the entry row stops at
+    /// the last data row (the anchor stays). From an anchor on the entry row, a
+    /// target on a data row moves the anchor to the last data row of its column:
+    /// the range then covers the target row .. the last data row. From the entry
+    /// row to the entry row (or on a sheet without rows) nothing changes.
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         let row_count = self.row_count(sheet);
-        let anchored_on_data = self
+        let anchor = self
             .selection
             .get(&sheet)
-            .and_then(|selection| selection.anchor(&self.snapshot.tree, sheet))
-            .is_some_and(|anchor| matches!(anchor, GridCursor::Data(_, r) if r < row_count));
+            .and_then(|selection| selection.anchor(&self.snapshot.tree, sheet));
+        let rangeable = self.selection.get(&sheet).is_some_and(|selection| {
+            !selection.is_columns() && !selection.is_full_rows() && !selection.is_header_rows()
+        });
+        if rangeable {
+            if let Some(GridCursor::Data(anchor_column, anchor_row)) = anchor {
+                if anchor_row >= row_count {
+                    // Anchored on the entry row.
+                    if row >= row_count {
+                        return;
+                    }
+                    let mut selection = Selection::cell(anchor_column, row_count - 1);
+                    selection.extend_row_to(GridCursor::Data(column, row));
+                    self.selection.insert(sheet, selection);
+                    return;
+                }
+            }
+        }
+        let anchored_on_data = matches!(anchor, Some(GridCursor::Data(_, r)) if r < row_count);
         let row = if anchored_on_data {
             row.min(row_count.saturating_sub(1))
         } else {
             row
         };
         match self.selection.get_mut(&sheet) {
-            Some(selection)
-                if !selection.is_columns()
-                    && !selection.is_full_rows()
-                    && !selection.is_header_rows() =>
-            {
-                selection.extend_row_to(GridCursor::Data(column, row))
-            }
+            Some(selection) if rangeable => selection.extend_row_to(GridCursor::Data(column, row)),
             _ => self.select_cell(sheet, column, row),
         }
     }
