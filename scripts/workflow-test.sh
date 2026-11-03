@@ -271,7 +271,7 @@ export SF_ISSUES_JSON="$tmp/none.json"
 
 # --release: merged and clean, nothing else removed first; one fixed French line.
 exclude="$(git rev-parse --absolute-git-dir)/info/exclude"
-printf 'junk.log\ntarget/\n' >> "$exclude"
+printf 'junk.log\ntarget/\n__pycache__/\n' >> "$exclude"
 kept() { [ -d "$S/feature$1" ] && git rev-parse --verify -q "feature/$1-x" > /dev/null; }
 wtadd 40; git -C "$S/feature40" -c user.name=t -c user.email=t@t commit -q --allow-empty -m unmerged
 wtadd 41; touch "$S/feature41/new.txt"
@@ -314,11 +314,12 @@ git branch -q -d feature/30b-x   # detached worktree: its branch was not the one
 # lang: fr begin
 eq "$("$here/chantier.sh" --no-trial --release 30d)" "Couleur 🟧 libérée." "last worktree of the issue frees the colour"
 # lang: fr end
-# target/ is the one ignored folder that does not block.
+# target/ and __pycache__/ (build and Python caches) are the ignored folders that do not block.
 SF_ISSUE_TITLE="Target" "$here/chantier.sh" 44 > /dev/null
 mkdir "$S/feature44/target"; touch "$S/feature44/target/x"
-"$here/chantier.sh" --no-trial --release 44 | grep -q '^Couleur .* libérée\.$' || fail "release with target/"
-[ ! -e "$S/feature44" ] || fail "target/ blocked the release"
+mkdir "$S/feature44/__pycache__"; touch "$S/feature44/__pycache__/x.pyc"
+"$here/chantier.sh" --no-trial --release 44 | grep -q '^Couleur .* libérée\.$' || fail "release with target/ and __pycache__/"
+[ ! -e "$S/feature44" ] || fail "target/ or __pycache__/ blocked the release"
 for k in 40 41 42 43; do git worktree remove --force "$S/feature$k"; done
 git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d-x feature/44-target 2> /dev/null || true
 

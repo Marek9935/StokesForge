@@ -253,7 +253,7 @@ release_wt() {
         printf 'release: %s has modified or untracked files, nothing removed:\n%s\n' "$wt" "$dirty" >&2
         return 1
     fi
-    ignored="$(git -C "$wt" status --porcelain --ignored | grep '^!! ' | grep -vx '!! target/' || true)"
+    ignored="$(git -C "$wt" status --porcelain --ignored | grep '^!! ' | grep -vx '!! target/' | grep -vE '^!! (.*/)?__pycache__/$' || true)"
     if [ -n "$ignored" ]; then
         printf 'release: %s has ignored files other than target/, nothing removed:\n%s\n' "$wt" "$ignored" >&2
         return 1
