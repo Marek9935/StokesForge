@@ -2710,6 +2710,10 @@ fn edit_cell_widget(
     column: NodeId,
     row: usize,
 ) {
+    // A number that an f64 cannot hold (`1e400`, `1e-400`) is refused where it is
+    // typed (#429): decided in `app-state`, the grid tints the cell and keeps it open.
+    let refusal = state.cell_edit_refusal();
+    let rect = ui.available_rect_before_wrap();
     let Some(edit) = state.editing_mut() else {
         return;
     };
@@ -2718,6 +2722,9 @@ fn edit_cell_widget(
     } else {
         inplace_edit::Opening::SelectAll
     };
+    if refusal.is_some() {
+        paint_refusal_tint(ui, rect);
+    }
     // The shared in-place edit contract (#224): focus and selection on opening,
     // Enter, Tab and Escape **consumed** here (before the shortcut block of
     // `grid_contents`, which would reread them and move the selection a second
@@ -2734,12 +2741,28 @@ fn edit_cell_widget(
         inplace_edit::FocusLoss::Ends,
         None,
     );
+    if let Some(message) = refusal.as_deref() {
+        crate::field_state::show_bubble(
+            &shown.response,
+            &crate::field_state::FieldIssue::refused(message),
+        );
+    }
     let Some(end) = shown.end else {
         return;
     };
     if end == inplace_edit::EditEnd::Cancel {
         state.cancel_edit();
         return;
+    }
+    // Enter or Tab on a refused number: the cell stays open. A click elsewhere
+    // closes without writing anything (as the header does).
+    match inplace_edit::resolve(end, false, refusal.is_some()) {
+        inplace_edit::Resolution::Stay => return,
+        inplace_edit::Resolution::Close { write: false, .. } => {
+            state.cancel_edit();
+            return;
+        }
+        inplace_edit::Resolution::Close { .. } => {}
     }
     let (enter, tab, shift) = match end {
         inplace_edit::EditEnd::Enter { shift } => (true, false, shift),
@@ -6022,6 +6045,77 @@ mod tests {
         });
         assert!(!framed, "no red frame in the grid");
         assert_no_grid_line_under(&bench, tint);
+    }
+
+    /// #429: a number an f64 cannot hold, typed in a data cell (or in the entry
+    /// row), tints the cell like a refused header entry; Enter keeps it open and
+    /// sends nothing, so no row is created.
+    #[test]
+    fn a_refused_number_in_a_cell_tints_it_and_keeps_it_open() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let column = bench.columns[0];
+        let entry = bench.state.entry_row(bench.sheet);
+        for row in [0, entry] {
+            let rows = bench.state.row_count(bench.sheet);
+            bench.seen.clear();
+            bench.state.begin_edit(column, row);
+            bench.state.editing_mut().expect("editing").buffer = "1e400".to_string();
+            for _ in 0..4 {
+                bench.image(Vec::new());
+            }
+            assert!(bench.state.cell_edit_refusal().is_some(), "refused text");
+            let field = edited_field_bounds(&bench);
+            let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+            let fill = theme::field_refused_fill();
+            let tint = shapes.iter().find_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                _ => None,
+            });
+            let tint = tint.expect("the tint of the cell");
+            assert!(
+                (tint.left() - field.left()).abs() < 0.5
+                    && (tint.right() - field.right()).abs() < 0.5,
+                "tint {tint:?}, cell {field:?}"
+            );
+            let framed = shapes.iter().any(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) => {
+                    rect.stroke.color == theme::field_refused_color() && rect.stroke.width > 0.0
+                }
+                _ => false,
+            });
+            assert!(!framed, "no red frame in the grid");
+
+            bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+            assert!(bench.state.editing().is_some(), "row {row}: still open");
+            assert!(
+                !bench.seen.iter().any(|action| matches!(
+                    action,
+                    Action::CommitCell { .. } | Action::CommitCellAndAdvance { .. }
+                )),
+                "row {row}: nothing committed"
+            );
+            assert_eq!(bench.state.row_count(bench.sheet), rows, "row {row}");
+            bench.state.cancel_edit();
+        }
+    }
+
+    /// #429: a valid number still commits with Enter.
+    #[test]
+    fn a_valid_number_in_a_cell_still_commits() {
+        let mut bench = Bench::new();
+        let column = bench.columns[0];
+        bench.state.begin_edit(column, 0);
+        bench.state.editing_mut().expect("editing").buffer = "1e300".to_string();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(bench.state.editing().is_none());
+        assert!(bench
+            .seen
+            .iter()
+            .any(|action| matches!(action, Action::CommitCellAndAdvance { .. })));
     }
 
     /// No line of the grid crosses `tint`: a translucent fill over a line would

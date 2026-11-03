@@ -593,6 +593,65 @@ pub mod import {
 }
 
 /// Errors of a calculated-column formula (`stokesforge-core::formula`).
+/// A number typed by hand that an `f64` cannot hold (#429): shared by the
+/// formula literals and the data cells.
+pub mod number {
+    use stokesforge_core::number_format::NumberOutOfRange;
+
+    use crate::tr;
+
+    /// The sentence of a [`NumberOutOfRange`].
+    pub fn error_message(error: &NumberOutOfRange) -> String {
+        let number = shorten_number(&error.text);
+        if error.too_large {
+            tr!("error-number-too-large", number = number.as_str())
+        } else {
+            tr!("error-number-too-small", number = number.as_str())
+        }
+    }
+
+    /// A literal longer than 20 characters (a 400-digit number) is cut to its
+    /// first 12 characters followed by an ellipsis.
+    fn shorten_number(text: &str) -> String {
+        if text.chars().count() > 20 {
+            let head: String = text.chars().take(12).collect();
+            format!("{head}\u{2026}")
+        } else {
+            text.to_string()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn samples() -> [NumberOutOfRange; 2] {
+            [
+                NumberOutOfRange {
+                    text: "1e400".into(),
+                    too_large: true,
+                },
+                NumberOutOfRange {
+                    text: "1e-400".into(),
+                    too_large: false,
+                },
+            ]
+        }
+
+        #[test]
+        fn each_side_has_its_sentence_and_no_jargon() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            for error in samples() {
+                let message = error_message(&error);
+                crate::errors::tests_support::check(&error, &message);
+                assert!(message.contains(&error.text), "{message}");
+            }
+            assert!(error_message(&samples()[0]).contains("too large"));
+            assert!(error_message(&samples()[1]).contains("too small"));
+        }
+    }
+}
+
 pub mod formula {
     use stokesforge_core::FormulaError;
 
@@ -668,12 +727,10 @@ pub mod formula {
             FormulaError::NoPairedX => tr!("error-formula-no-paired-x"),
             FormulaError::NoPoint => tr!("error-formula-no-point"),
             FormulaError::NumberOutOfRange { text, too_large } => {
-                let number = shorten_number(text);
-                if *too_large {
-                    tr!("error-formula-number-too-large", number = number.as_str())
-                } else {
-                    tr!("error-formula-number-too-small", number = number.as_str())
-                }
+                super::number::error_message(&stokesforge_core::number_format::NumberOutOfRange {
+                    text: text.clone(),
+                    too_large: *too_large,
+                })
             }
             FormulaError::UnknownSheet(name) => {
                 tr!("error-formula-unknown-sheet", name = name.as_str())
@@ -697,17 +754,6 @@ pub mod formula {
             ),
             FormulaError::RemoteOutsideColumnFunction => tr!("error-formula-remote-outside"),
             FormulaError::RemoteXColumn => tr!("error-formula-remote-x"),
-        }
-    }
-
-    /// A literal longer than 20 characters (a 400-digit number) is cut to its
-    /// first 12 characters followed by an ellipsis.
-    fn shorten_number(text: &str) -> String {
-        if text.chars().count() > 20 {
-            let head: String = text.chars().take(12).collect();
-            format!("{head}\u{2026}")
-        } else {
-            text.to_string()
         }
     }
 

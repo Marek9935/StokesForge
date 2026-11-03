@@ -209,9 +209,10 @@ without a message, see `docs/persistence.md`).
   27.2, `erf(-0)` is -0); `mean`, `sum` and `std` of a whole column or a range
   use compensated sums (the mean of ten 0.1 is 0.1, the `std` of a constant
   column is 0) and no longer lose a representable result to an intermediate
-  overflow (`mean` of two 1.7e308); a number typed in a formula beyond the
-  `f64` range (`1e400`) or too small to be stored (`1e-400`) is refused with a
-  sentence, while a stored formula holding one still loads.
+  overflow (`mean` of two 1.7e308); a number typed in a formula or a cell
+  beyond the `f64` range (`1e400`) or too small to be stored (`1e-400`) is refused with a
+  sentence (the cell stays open; pasted and imported values are not checked),
+  while a stored formula holding one still loads.
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that

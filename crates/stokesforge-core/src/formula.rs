@@ -294,11 +294,10 @@ impl std::fmt::Display for FormulaError {
             }
             FormulaError::NumberOutOfRange { text, too_large } => write!(
                 f,
-                "the number {text} is too {} for a 64-bit float",
-                if *too_large {
-                    "large"
-                } else {
-                    "small to be stored"
+                "{}",
+                crate::number_format::NumberOutOfRange {
+                    text: text.clone(),
+                    too_large: *too_large
                 }
             ),
             FormulaError::UnknownSheet(name) => write!(f, "no sheet named {name}"),
@@ -669,18 +668,10 @@ fn number_end(chars: &[char], start: usize) -> usize {
 /// `0.000`) are accepted.
 fn check_number_range(literal: &[char]) -> Result<(), FormulaError> {
     let text: String = literal.iter().collect();
-    let Ok(value) = text.parse::<f64>() else {
-        // Not a number (`.`, `1.2.3`): the parser says what is wrong.
-        return Ok(());
-    };
-    let mantissa = text.split(['e', 'E']).next().unwrap_or("");
-    let too_large = value.is_infinite();
-    let too_small = value == 0.0 && mantissa.chars().any(|c| ('1'..='9').contains(&c));
-    if too_large || too_small {
-        Err(FormulaError::NumberOutOfRange { text, too_large })
-    } else {
-        Ok(())
-    }
+    crate::number_format::check_range(&text).map_err(|error| FormulaError::NumberOutOfRange {
+        text: error.text,
+        too_large: error.too_large,
+    })
 }
 
 /// Tokens of all fragments, in order: a text fragment is
