@@ -610,6 +610,41 @@ pub mod number {
         }
     }
 
+    /// A pasted block refused as a whole because of one number (#429).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct PasteOutOfRange {
+        /// The first value beyond the range, in reading order.
+        pub number: NumberOutOfRange,
+        /// Its destination row as the grid shows it (1-based).
+        pub row: usize,
+    }
+
+    impl std::fmt::Display for PasteOutOfRange {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "nothing was pasted: {} (row {})", self.number, self.row)
+        }
+    }
+
+    impl std::error::Error for PasteOutOfRange {}
+
+    /// The sentence of a [`PasteOutOfRange`].
+    pub fn paste_error_message(error: &PasteOutOfRange) -> String {
+        let number = shorten_number(&error.number.text);
+        if error.number.too_large {
+            tr!(
+                "error-paste-number-too-large",
+                number = number.as_str(),
+                row = error.row
+            )
+        } else {
+            tr!(
+                "error-paste-number-too-small",
+                number = number.as_str(),
+                row = error.row
+            )
+        }
+    }
+
     /// A literal longer than 20 characters (a 400-digit number) is cut to its
     /// first 12 characters followed by an ellipsis.
     fn shorten_number(text: &str) -> String {
@@ -648,6 +683,19 @@ pub mod number {
             }
             assert!(error_message(&samples()[0]).contains("too large"));
             assert!(error_message(&samples()[1]).contains("too small"));
+        }
+
+        #[test]
+        fn a_refused_paste_names_the_number_and_the_row() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            for number in samples() {
+                let error = PasteOutOfRange { number, row: 7 };
+                let message = paste_error_message(&error);
+                crate::errors::tests_support::check(&error, &message);
+                assert!(message.starts_with("Nothing was pasted."), "{message}");
+                assert!(message.contains("(row 7)"), "{message}");
+                assert!(message.contains(&error.number.text), "{message}");
+            }
         }
     }
 }

@@ -9442,13 +9442,80 @@ impl AppState {
             self.fail(tr!("error-paste-no-cell"));
             return;
         };
-        let clipboard = if self.clipboard_text.as_deref() == Some(text.as_str()) {
+        let internal = if self.clipboard_text.as_deref() == Some(text.as_str()) {
             self.grid_clipboard.clone()
         } else {
             None
+        };
+        let external = internal.is_none();
+        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(&text));
+        if external {
+            if let Some(error) = self.external_paste_range_error(sheet, anchor, &clipboard) {
+                self.fail(errors::number::paste_error_message(&error));
+                return;
+            }
         }
-        .unwrap_or_else(|| external_clipboard_from_text(&text));
         self.apply_paste(sheet, anchor, &clipboard, false);
+    }
+
+    /// The first number of an **external** text paste that a column reading
+    /// numbers cannot hold (#429, S1), in reading order; `None` when the block
+    /// is fine. Scans the whole block before any write, so a refusal pastes
+    /// nothing, creates no row and leaves no history entry. A paste of
+    /// StokesForge's own clipboard never comes here (its texts are stored
+    /// values), nor does a header field paste.
+    fn external_paste_range_error(
+        &self,
+        sheet: NodeId,
+        anchor: GridCursor,
+        clipboard: &GridClipboard,
+    ) -> Option<errors::number::PasteOutOfRange> {
+        let GridCursor::Data(anchor_column, anchor_row) = anchor else {
+            return None;
+        };
+        let single;
+        let rows: Vec<&[String]> = match clipboard {
+            GridClipboard::Text(text) => {
+                single = [text.clone()];
+                vec![&single[..]]
+            }
+            GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => {
+                rows.iter().map(Vec::as_slice).collect()
+            }
+            _ => return None,
+        };
+        let order = self.column_order(sheet);
+        let first = order.iter().position(|&id| id == anchor_column)?;
+        for (i, row) in rows.iter().enumerate() {
+            for (offset, text) in row.iter().enumerate() {
+                // Columns beyond the sheet are dropped by the paste.
+                let Some(&column) = order.get(first + offset) else {
+                    break;
+                };
+                let Some(kind) = self
+                    .snapshot
+                    .tree
+                    .node(column)
+                    .and_then(Node::as_column)
+                    .map(Column::column_type)
+                else {
+                    continue;
+                };
+                if text.trim().is_empty()
+                    || (kind == ColumnType::DateTime
+                        && stokesforge_core::datetime::parse_datetime(text.trim()).is_some())
+                {
+                    continue;
+                }
+                if let Err(number) = stokesforge_core::number_format::check_range(text) {
+                    return Some(errors::number::PasteOutOfRange {
+                        number,
+                        row: anchor_row + i + 1,
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// False, with a status message, if the selection of `sheet` is

@@ -221,6 +221,7 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "The formula found no point to compute from: the column or the range is empty, or the value asked for is outside the X data. Check the bounds" | Every cell of the result is empty. Check the bounds, the X values and the data of the column. |
 | "The number … is too large. The largest is about 1.8e308" | A number typed in a formula or a cell is beyond what a double stores (`1e400`). The field stays open: write a smaller number. |
 | "The number … is too small to be stored. The smallest is about 4.9e-324; write 0 for zero" | A non-zero number typed in a formula or a cell would be stored as 0 (`1e-400`). Write a larger number, or `0`. |
+| "Nothing was pasted. The number … (row …) is too large / too small to be stored…" | A block pasted from another program holds a number beyond what a double stores (`1e400`) or that would be stored as 0 (`1e-400`). The whole block is refused. Fix the value named in the message, or replace it by `0`, then paste again. |
 
 See [Analysis](../guide/analysis.md) and [Columns computed by a formula](../guide/projects-and-workbooks.md#columns-computed-by-a-formula).
 
