@@ -2044,9 +2044,14 @@ fn grid_table_body(
     row_count: usize,
     row_extents: &mut Vec<RowExtent>,
 ) {
-    body.rows(ROW_HEIGHT, row_count, |mut row| {
+    // One more row than the model has: the entry row (`AppState::entry_row`).
+    body.rows(ROW_HEIGHT, row_count + 1, |mut row| {
         let index = row.index();
         row.col(|ui| {
+            if index == row_count {
+                entry_row_number_widget(ui);
+                return;
+            }
             let rect = ui.max_rect();
             row_extents.push((index, rect.top(), rect.bottom()));
             row_number_widget(ui, state, actions, sheet, index);
@@ -2330,13 +2335,18 @@ fn grid_keyboard(
         } else if ui.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE)) {
             state.deselect_all(sheet);
         }
-        start_grid_typing(ui, state, sheet);
+        if start_grid_typing(ui, state, sheet) {
+            // The keys of this batch belong to the edit just opened (deferred to
+            // its first frame), not to the selection.
+            return;
+        }
         navigate_grid_selection(ui, state, actions, sheet);
         grid_clipboard_shortcuts(ui, state, actions, sheet);
     }
 }
 
-fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
+/// Returns whether typing opened an edit this frame.
+fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) -> bool {
     // Typing on a selected cell or header field (single click, not yet
     // being edited) starts the edit by replacing all its content with what is
     // typed — standard spreadsheet behavior, the same for both. Triggers only for
@@ -2355,21 +2365,45 @@ fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
             })
             .collect()
     });
-    if !typed.is_empty() {
+    if typed.is_empty() {
+        return false;
+    }
+    let opened =
         if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
             state.begin_edit(column, row);
             if let Some(edit) = state.editing_mut() {
                 edit.buffer = typed;
                 edit.typed = true;
             }
+            true
         } else if let Some((column, field)) = state.selected_header_field(sheet) {
             state.begin_header_edit(column, field);
             if let Some(edit) = state.header_editing_mut() {
                 edit.buffer = typed;
                 edit.typed = true;
             }
+            true
+        } else {
+            false
+        };
+    if opened {
+        // Enter or Tab pressed in the same batch as the character (a fast typist,
+        // a slow frame): the field is painted only next frame, which applies the
+        // key as if it came later (#440).
+        let (enter, tab, shift) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::Enter),
+                input.key_pressed(egui::Key::Tab),
+                input.modifiers.shift,
+            )
+        });
+        if enter {
+            inplace_edit::defer_end(ui.ctx(), inplace_edit::EditEnd::Enter { shift });
+        } else if tab {
+            inplace_edit::defer_end(ui.ctx(), inplace_edit::EditEnd::Tab { shift });
         }
     }
+    opened
 }
 
 fn navigate_grid_selection(
@@ -2442,32 +2476,9 @@ fn navigate_grid_selection(
     if enter && shift {
         state.move_selection(sheet, MoveDirection::Up, false);
     } else if enter {
-        // Enter on the last row of the worksheet, cell already empty and never edited
-        // in this keystroke: `move_selection` alone would do nothing (`Down` is bounded
-        // to `row_count - 1`, see its doc). Same gesture as `CommitCellAndAdvance` on a
-        // cell that was just filled — adds the row, then immediately selects the cell
-        // that will correspond to it (it will be created before the next render, see
-        // `cell_widget`).
-        let data_cursor = state
-            .selection(sheet)
-            .and_then(Selection::grid_cursor)
-            .and_then(|cursor| match cursor {
-                GridCursor::Data(column, row) => Some((column, row)),
-                GridCursor::Header(..) => None,
-            });
-        let at_last_row = data_cursor.is_some_and(|(_, row)| row + 1 >= state.row_count(sheet));
-        if at_last_row {
-            if let Some((column, row)) = data_cursor {
-                actions.push(Action::InsertRows {
-                    sheet,
-                    at: row + 1,
-                    count: 1,
-                });
-                state.select_cell(sheet, column, row + 1);
-            }
-        } else {
-            state.move_selection(sheet, MoveDirection::Down, false);
-        }
+        // Down is bounded to the entry row (`AppState::entry_row`): on the last data
+        // row, Enter moves onto it and creates nothing.
+        state.move_selection(sheet, MoveDirection::Down, false);
     }
 }
 
@@ -2624,6 +2635,28 @@ fn row_number_widget(
     response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
 }
 
+/// Gutter cell of the entry row: a dimmed `*` and a tooltip, inert — no row
+/// selection, no drag, no context menu, not part of the row extents.
+fn entry_row_number_widget(ui: &mut egui::Ui) {
+    let rect = ui.available_rect_before_wrap();
+    ui.painter()
+        .rect_filled(rect, 0.0, gutter_fill(false, false));
+    let response = ui.interact(
+        rect,
+        ui.id().with("stokesforge_entry_row_number"),
+        egui::Sense::hover(),
+    );
+    ui.put(
+        rect,
+        egui::Label::new(
+            egui::RichText::new(tr!("grid-entry-row-marker"))
+                .color(crate::theme::gutter_dim_text_color()),
+        )
+        .selectable(false),
+    );
+    response.on_hover_text(tr!("grid-entry-row-hint"));
+}
+
 /// Paints a cell and collects the actions it produces.
 ///
 /// Only one cell at a time carries a real buffer (the one of
@@ -2642,8 +2675,8 @@ fn row_number_widget(
 /// which the Enter key also causes — never on each keystroke: otherwise the
 /// history would count one entry per character. Losing focus through Enter
 /// pushes [`Action::CommitCellAndAdvance`] rather than [`Action::
-/// CommitCell`]: it is the one that adds a row when we were on the last one of
-/// the column.
+/// CommitCell`]: it moves the cursor down once the commit is accepted. In the
+/// entry row ([`AppState::entry_row`]) the commit creates the row.
 fn cell_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2720,17 +2753,14 @@ fn edit_cell_widget(
     if let Some(text) = pending {
         state.cancel_edit();
         if enter && !shift {
-            // `CommitCellAndAdvance` already adds a row when `row` was the last of the
-            // column; selecting `row + 1` without waiting for that command (applied after
-            // this frame's render) to have created the row is safe: either it already
-            // existed, or it is about to.
+            // The handler of `CommitCellAndAdvance` selects the row below once the
+            // commit is accepted: a refused commit leaves the cursor where it was.
             actions.push(Action::CommitCellAndAdvance {
                 column,
                 row,
                 text,
                 sheet,
             });
-            state.select_cell(sheet, column, row + 1);
         } else {
             actions.push(Action::CommitCell { column, row, text });
             if enter {
@@ -2809,7 +2839,13 @@ fn display_cell_widget(
         return;
     }
     let modifiers = ui.input(|i| i.modifiers);
-    let (command, shift) = (modifiers.command, modifiers.shift);
+    // The entry row is a place to type, not a cell to build a selection from: Ctrl
+    // acts as a plain click there. Shift extends a range anchored on a data row
+    // (`AppState::extend_selection` stops it at the last data row and never selects
+    // the entry row); anchored on the entry row it does nothing.
+    let in_entry_row = row >= state.entry_row(sheet);
+    let command = modifiers.command && !in_entry_row;
+    let shift = modifiers.shift;
     if response.drag_started() && command {
         // Ctrl+drag: a new rectangle, the previous ones stay (#159).
         state.add_cell_selection(sheet, column, row);
@@ -3072,11 +3108,16 @@ mod tests {
         /// column `c` (1..=3) is given by `value`: wide numbers make the measured
         /// content of a cell grow beyond the default width.
         fn with_values(rows: u32, value: impl Fn(u32, u32) -> f64) -> Self {
+            Self::with_shape(3, rows, value)
+        }
+
+        /// Like `with_values`, with `column_count` columns.
+        fn with_shape(column_count: u32, rows: u32, value: impl Fn(u32, u32) -> f64) -> Self {
             let mut project = Project::new("Keyboard").unwrap();
             let root = project.root();
             let book = project.add_empty_workbook(root, None).unwrap();
             let sheet = project.add_worksheet(book, None).unwrap();
-            let columns = (1..=3)
+            let columns = (1..=column_count)
                 .map(|c| {
                     let values: Vec<f64> = (1..=rows).map(|r| value(c, r)).collect();
                     project
@@ -3266,6 +3307,243 @@ mod tests {
                 .selection(self.sheet)
                 .and_then(Selection::grid_cursor)
         }
+    }
+
+    // --- Entry row (#440) ---------------------------------------------------
+
+    /// Vertical distance between two painted rows.
+    fn row_pitch(bench: &Bench) -> f32 {
+        bench.center_of("104").unwrap().y - bench.center_of("103").unwrap().y
+    }
+
+    /// Centre of the entry cell of the first column (nothing is painted in it):
+    /// one row below the last painted value.
+    fn entry_cell_of_first_column(bench: &Bench) -> egui::Pos2 {
+        let last = bench.center_of("104").unwrap();
+        egui::pos2(last.x, last.y + row_pitch(bench))
+    }
+
+    fn click_at(bench: &mut Bench, position: egui::Pos2) {
+        bench.image(vec![egui::Event::PointerMoved(position)]);
+        for pressed in [true, false] {
+            bench.image(vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        bench.image(Vec::new());
+    }
+
+    /// The grid pushed `CommitCellAndAdvance` for the first column at `row` (the
+    /// bench applies no action: the effect on the model is tested in `shell.rs`).
+    fn assert_commit_pushed(bench: &Bench, row: usize, text: &str) {
+        assert!(
+            bench.seen.iter().any(|action| matches!(action,
+                Action::CommitCellAndAdvance { column, row: r, text: t, .. }
+                if *column == bench.columns[0] && *r == row && t == text)),
+            "seen: {:?}",
+            bench.seen
+        );
+    }
+
+    /// Enter pressed in the open editor.
+    fn enter(bench: &mut Bench) {
+        bench.image(Vec::new());
+        bench.image(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        bench.image(Vec::new());
+    }
+
+    #[test]
+    fn the_entry_row_shows_a_star_in_the_gutter_below_the_last_row() {
+        let bench = Bench::new();
+        let star = bench.center_of("*").expect("the entry gutter shows a star");
+        let last = bench.center_of("4").expect("gutter of the last row");
+        assert!(star.y > last.y, "the star is below the last row number");
+    }
+
+    /// Typing in the entry cell and pressing Enter creates the row; the cursor lands
+    /// on the new entry row.
+    #[test]
+    fn typing_in_the_entry_row_creates_the_row() {
+        let mut bench = Bench::new();
+        let position = entry_cell_of_first_column(&bench);
+        click_at(&mut bench, position);
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[0], 4)),
+            "the click selects the entry cell"
+        );
+        bench.image(vec![egui::Event::Text("7".into())]);
+        assert!(bench.state.editing().is_some(), "typing opens the editor");
+        enter(&mut bench);
+        assert_commit_pushed(&bench, 4, "7");
+    }
+
+    fn enter_key() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// A character and Enter in the same input batch (a fast typist, a slow frame)
+    /// or in the next frame (the field's opening frame): Enter still validates and
+    /// advances, on a data cell and on the entry row (#440).
+    #[test]
+    fn enter_typed_right_after_a_character_commits_and_advances() {
+        for (same_batch, entry_row) in [(true, false), (false, false), (true, true), (false, true)]
+        {
+            let mut bench = Bench::new();
+            let row = if entry_row {
+                let position = entry_cell_of_first_column(&bench);
+                click_at(&mut bench, position);
+                4
+            } else {
+                bench.click_on("101");
+                0
+            };
+            if same_batch {
+                bench.image(vec![egui::Event::Text("7".into()), enter_key()]);
+            } else {
+                bench.image(vec![egui::Event::Text("7".into())]);
+                bench.image(vec![enter_key()]);
+            }
+            bench.image(Vec::new());
+            assert_commit_pushed(&bench, row, "7");
+            assert!(
+                bench.state.editing().is_none(),
+                "no edit left open (same batch: {same_batch}, entry row: {entry_row})"
+            );
+        }
+    }
+
+    /// Shift+click on an entry cell, from a data row: the range stops at the last
+    /// data row, the anchor stays and nothing is selected in the entry row (#440).
+    #[test]
+    fn shift_click_on_the_entry_row_extends_to_the_last_data_row() {
+        let mut bench = Bench::new();
+        bench.click_on("102");
+        let position = entry_cell_of_first_column(&bench);
+        let shift = egui::Modifiers::SHIFT;
+        bench.image(vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::ModifiersChanged(shift),
+        ]);
+        for pressed in [true, false] {
+            bench.image(vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: shift,
+            }]);
+        }
+        bench.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        bench.image(Vec::new());
+        let selection = bench.state.selection(bench.sheet).expect("a selection");
+        let tree = bench.state.tree();
+        let first = bench.columns[0];
+        let rows: Vec<usize> = (0..=4)
+            .filter(|&row| selection.contains(tree, bench.sheet, first, row))
+            .collect();
+        assert_eq!(rows, [1, 2, 3]);
+    }
+
+    /// An empty sheet (a new workbook) is editable: its entry row is row 0.
+    #[test]
+    fn an_empty_sheet_shows_and_takes_an_entry_row() {
+        let mut bench = Bench::with_shape(2, 0, |_, _| 0.0);
+        let star = bench.center_of("*").expect("star on an empty sheet");
+        assert!(bench.state.row_count(bench.sheet) == 0);
+        let position = egui::pos2(
+            bench.center_of("A(Y)").expect("header of column A").x,
+            star.y,
+        );
+        click_at(&mut bench, position);
+        assert_eq!(bench.cursor(), Some(GridCursor::Data(bench.columns[0], 0)));
+        bench.image(vec![egui::Event::Text("7".into())]);
+        enter(&mut bench);
+        bench.image(Vec::new());
+        assert_commit_pushed(&bench, 0, "7");
+    }
+
+    /// Ctrl+A selects the data, never the entry row.
+    #[test]
+    fn select_all_does_not_paint_the_entry_row() {
+        let mut bench = Bench::new();
+        bench.state.select_all(bench.sheet);
+        bench.image(Vec::new());
+        let fill = bench
+            .context
+            .global_style()
+            .visuals
+            .selection
+            .bg_fill
+            .linear_multiply(0.35);
+        let star_y = bench.center_of("*").unwrap().y;
+        let last_y = bench.center_of("104").unwrap().y;
+        let filled_at = |y: f32| {
+            bench
+                .last_frame
+                .as_ref()
+                .unwrap()
+                .shapes
+                .iter()
+                .any(|painted| match &painted.shape {
+                    egui::Shape::Rect(rect) => {
+                        rect.fill == fill && (rect.rect.center().y - y).abs() < 2.0
+                    }
+                    _ => false,
+                })
+        };
+        assert!(filled_at(last_y), "control: the last data row is filled");
+        assert!(!filled_at(star_y), "the entry row is not selected");
+    }
+
+    #[test]
+    fn clicking_the_entry_gutter_changes_nothing() {
+        let mut bench = Bench::new();
+        bench.click_on("102");
+        let before = bench.cursor();
+        bench.click_on("*");
+        assert_eq!(bench.cursor(), before);
+        assert!(!bench.state.is_row_selected(bench.sheet, 4));
+        assert!(bench
+            .state
+            .selection(bench.sheet)
+            .is_some_and(|s| !s.is_full_rows()));
+    }
+
+    #[test]
+    fn a_sheet_without_columns_keeps_its_empty_state_and_has_no_entry_row() {
+        let bench = Bench::with_shape(0, 0, |_, _| 0.0);
+        assert!(bench.texts().iter().any(|t| t.contains("No columns")));
+        assert!(bench.center_of("*").is_none());
+    }
+
+    /// Enter (not editing) on the last data row goes to the entry row and inserts
+    /// no row.
+    #[test]
+    fn enter_on_the_last_row_moves_to_the_entry_row_without_inserting() {
+        let mut bench = Bench::new();
+        bench.click_on("104");
+        enter(&mut bench);
+        assert!(!bench
+            .seen
+            .iter()
+            .any(|action| matches!(action, Action::InsertRows { .. })));
+        assert_eq!(bench.state.row_count(bench.sheet), 4);
+        assert_eq!(bench.cursor(), Some(GridCursor::Data(bench.columns[0], 4)));
     }
 
     // --- Keyboard focus (#38) ---------------------------------------------

@@ -200,6 +200,9 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
+  the stored value, like Excel: `round(1.005, 2)` is 1.01 (it was 1), and
+  `round(2.675, 2)` is 2.68.
 - Formulas (#429): `logx` of an exact power is exact (`floor(logx(1000, 10))` is
   3, `logx(243, 3)` is 5); `erf` and `erfc` keep their relative precision
   everywhere (within 2 ulps on the Boost.Math tables, `erfc` subnormal up to

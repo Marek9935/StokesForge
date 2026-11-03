@@ -291,31 +291,135 @@ fn root(x: f64, n: f64) -> f64 {
     }
 }
 
-/// Rounding to `n` decimals like Excel: half away from zero, `n` negative
-/// allowed (`round(1234, -2) = 1200`), `n` truncated toward zero.
+/// Fixed-size text buffer: `core::fmt::Write` without heap allocation.
+struct StackText {
+    bytes: [u8; 40],
+    len: usize,
+}
+
+impl StackText {
+    fn new() -> Self {
+        Self {
+            bytes: [0; 40],
+            len: 0,
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
+    }
+}
+
+impl std::fmt::Write for StackText {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.len + s.len();
+        if end > self.bytes.len() {
+            return Err(std::fmt::Error);
+        }
+        self.bytes[self.len..end].copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+/// Rounding to `n` decimals like Excel: half away from zero on the shortest
+/// decimal representation of the stored value (`round(1.005, 2)` = 1.01,
+/// where the binary value is 1.00499999999999989...). `n` negative allowed
+/// (`round(1234, -2) = 1200`), `n` truncated toward zero.
+///
+/// One intended difference from Excel, which keeps 15 significant digits:
+/// here all the shortest digits (up to 17) count, so
+/// `round(0.49999999999999994, 0)` = 0 and `round(x, n)` with `n` past the
+/// last digit of `x` returns `x` unchanged.
 fn round(x: f64, n: f64) -> f64 {
+    use std::fmt::Write;
     if x.is_nan() || n.is_nan() {
         return f64::NAN;
     }
     let n = n.trunc();
-    if !x.is_finite() || n > 400.0 {
+    if !x.is_finite() || n > 400.0 || x == 0.0 {
         return x;
     }
     if n < -400.0 {
         return 0.0;
     }
-    if n >= 0.0 {
-        let factor = libm::pow(10.0, n);
-        let scaled = x * factor;
-        if !scaled.is_finite() {
+    // Bounded to [-400, 400] just above: the conversion is exact.
+    let n = n as i32;
+
+    // Shortest digits d1..dk and decimal exponent E of |x| = d1.d2..dk e E.
+    let mut text = StackText::new();
+    if write!(text, "{:e}", x.abs()).is_err() {
+        return x;
+    }
+    let Some((mantissa, exponent)) = text.as_str().split_once('e') else {
+        return x;
+    };
+    let Ok(exponent) = exponent.parse::<i32>() else {
+        return x;
+    };
+    let mut digits = [0u8; 20];
+    let mut k = 0usize;
+    for b in mantissa.bytes().filter(u8::is_ascii_digit) {
+        if k == digits.len() {
             return x;
         }
-        libm::round(scaled) / factor
-    } else {
-        // Divide then multiply back: exact for 1234 -> 1200 (0.01 is not).
-        let factor = libm::pow(10.0, -n);
-        libm::round(x / factor) * factor
+        digits[k] = b - b'0';
+        k += 1;
     }
+    // Digits kept: the integer part (E + 1 of them) plus `n` decimals.
+    let kept = exponent + 1 + n;
+    if kept >= k as i32 {
+        return x;
+    }
+    if kept < 0 {
+        return 0.0_f64.copysign(x);
+    }
+    let kept = kept as usize;
+    let round_up = digits[kept] >= 5;
+    if kept == 0 {
+        return if round_up {
+            // One unit of the last kept place: 10^-n.
+            let mut out = StackText::new();
+            if write!(out, "1e{}", -n).is_err() {
+                return x;
+            }
+            out.as_str().parse::<f64>().map_or(x, |v| v.copysign(x))
+        } else {
+            0.0_f64.copysign(x)
+        };
+    }
+    let mut count = kept;
+    if round_up {
+        let mut i = kept;
+        loop {
+            if i == 0 {
+                // Carry out of the first digit: 99.5 -> 100 (one digit more).
+                digits[0] = 1;
+                digits[1..=kept].fill(0);
+                count = kept + 1;
+                break;
+            }
+            i -= 1;
+            if digits[i] == 9 {
+                digits[i] = 0;
+            } else {
+                digits[i] += 1;
+                break;
+            }
+        }
+    }
+    // The rounded value is the integer D (the kept digits, plus one on a
+    // carry) times 10^-n; `parse` rounds it correctly to the nearest f64.
+    let mut out = StackText::new();
+    for &d in &digits[..count] {
+        if out.write_char(char::from(b'0' + d)).is_err() {
+            return x;
+        }
+    }
+    if write!(out, "e{}", -n).is_err() {
+        return x;
+    }
+    out.as_str().parse::<f64>().map_or(x, |v| v.copysign(x))
 }
 
 /// Remainder with the **sign of the divisor** (Python, Excel):
@@ -465,6 +569,40 @@ mod tests {
         assert_eq!(call("round", &[7.14159, 2.9]), 7.14);
         assert_eq!(call("round", &[1250.0, -2.7]), 1300.0);
         assert!(call("round", &[f64::NAN, 1.0]).is_nan());
+    }
+
+    #[test]
+    fn round_works_on_the_shortest_decimal_representation() {
+        let r = |x: f64, n: f64| call("round", &[x, n]);
+        assert_eq!(r(1.005, 2.0), 1.01);
+        assert_eq!(r(0.285, 2.0), 0.29);
+        assert_eq!(r(1.255, 2.0), 1.26);
+        assert_eq!(r(-2.675, 2.0), -2.68);
+        assert_eq!(r(0.499_999_999_999_999_94, 0.0), 0.0);
+        assert_eq!(
+            r(0.300_000_000_000_000_04, 17.0).to_bits(),
+            0.300_000_000_000_000_04_f64.to_bits()
+        );
+        assert_eq!(r(2.5, 0.0), 3.0);
+        assert_eq!(r(0.5, 0.0), 1.0);
+        assert_eq!(r(-2.5, 0.0), -3.0);
+        // Carry through the 9s, up to one digit more.
+        assert_eq!(r(9.995, 2.0), 10.0);
+        assert_eq!(r(-9.995, 2.0), -10.0);
+        assert_eq!(r(99.5, 0.0), 100.0);
+        // Negative `n`.
+        assert_eq!(r(5.0, -1.0), 10.0);
+        assert_eq!(r(0.5, -1.0), 0.0);
+        assert_eq!(r(1250.0, -2.0), 1300.0);
+        // Signed zero.
+        assert_eq!(r(-0.001, 2.0).to_bits(), (-0.0_f64).to_bits());
+        // Extreme `n` and non-finite values.
+        assert_eq!(r(1.0, 1e300), 1.0);
+        assert_eq!(r(1.0, -1e300), 0.0);
+        assert_eq!(r(f64::INFINITY, 2.0), f64::INFINITY);
+        assert_eq!(r(f64::NEG_INFINITY, -2.0), f64::NEG_INFINITY);
+        assert!(r(1.5, f64::NAN).is_nan());
+        assert_eq!(r(1.797_693_134_862_315_7e308, -308.0), f64::INFINITY);
     }
 
     #[test]

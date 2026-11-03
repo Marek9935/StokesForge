@@ -6,9 +6,9 @@
 //! the **literal** formula texts and the **literal** values below, computed by
 //! hand. The data of the sheet are `A` (X) = 0 1 2 3, `B` = 1 2 4 8, `C` = 3 5 7 9.
 //!
-//! Left out on purpose, because it is an open bug: `round` on a tie (#428)
-//! (`at` on a grid point, #427, `logx` of powers, `erf` and `mean` of 0.1s,
-//! #429, are pinned elsewhere). Regenerating the witness changes the formula texts, not the values
+//! No family is left out: `at` on a grid point (#427), `round` on a tie
+//! (#428), `logx` of powers, `erf` and `mean` of 0.1s (#429) are pinned
+//! elsewhere. Regenerating the witness changes the formula texts, not the values
 //! here: this test then fails until the table is edited by hand.
 
 use std::path::PathBuf;

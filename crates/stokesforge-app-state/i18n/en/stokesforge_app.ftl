@@ -1158,7 +1158,7 @@ formula-help-abs = Absolute value
 formula-help-sign = Sign: -1, 0 or 1
 formula-help-floor = Largest integer not above x
 formula-help-ceil = Smallest integer not below x
-formula-help-round = x rounded to n decimals
+formula-help-round = x rounded to n decimals, half away from zero (round(1.005, 2) is 1.01)
 formula-help-mod = Remainder of x divided by y, with the sign of y (mod(-1e-20, 3) is 3)
 formula-help-sin = Sine, x in radians
 formula-help-cos = Cosine, x in radians
@@ -1220,6 +1220,8 @@ workbook-send-to-graph-menu = Send to Graph
 # Workbook: grid, sheet tabs, empty states
 workbook-column-add = Add Column
 workbook-grid-no-columns = No columns in this sheet. Right-click here and choose Add Column
+grid-entry-row-marker = *
+grid-entry-row-hint = Type here to add a row
 workbook-no-worksheets = This workbook has no sheets. Use Add Sheet in the sheet tabs
 workbook-worksheet-add = Add Sheet
 action-rename-sheet = Rename

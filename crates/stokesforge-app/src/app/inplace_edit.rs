@@ -124,6 +124,27 @@ pub(super) fn begin(ctx: &egui::Context, id: egui::Id) -> bool {
     fresh
 }
 
+/// An end of entry (Enter, Tab) pressed in the very frame in which typing
+/// opened a field: the field is only painted the next frame, which applies it.
+#[derive(Clone, Copy)]
+struct Deferred(EditEnd, u64);
+
+/// Remembers `end` for the field that typing has just opened (see
+/// [`Deferred`]); [`finish`] applies it on the field's opening frame.
+pub(super) fn defer_end(ctx: &egui::Context, end: EditEnd) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("inplace_deferred"), Deferred(end, pass)));
+}
+
+fn take_deferred(ctx: &egui::Context) -> Option<EditEnd> {
+    let id = egui::Id::new("inplace_deferred");
+    let pass = ctx.cumulative_pass_nr();
+    let taken = ctx.data(|data| data.get_temp::<Deferred>(id));
+    ctx.data_mut(|data| data.remove::<Deferred>(id));
+    let Deferred(end, at) = taken?;
+    (pass.saturating_sub(at) <= 2).then_some(end)
+}
+
 /// Reads the end of the entry of an already painted field (`response`): focus
 /// and selection on opening, Enter, Tab, Escape, loss of focus. `fresh` comes
 /// from [`begin`], the `TextEdit` carried [`KEYS`] and the identifier
@@ -173,13 +194,24 @@ pub(super) fn finish(
     let consume = |key: &egui::KeyboardShortcut| {
         ctx.input_mut(|input| input.consume_shortcut(key));
     };
-    let end = if !fresh && (focused || lost) && escape {
+    // A field opened by typing (`KeepCursor`) is not yet focused on its opening
+    // frame, but an Enter, Tab or Escape pressed right after the character must
+    // still end it: otherwise a fast typist loses the key and the next entry
+    // overwrites the field (#440).
+    let armed = !fresh || opening == Opening::KeepCursor;
+    let deferred = if fresh { take_deferred(&ctx) } else { None };
+    let end = if let Some(end) = deferred {
+        if end == EditEnd::Cancel {
+            consume(&super::shortcuts::KEY_ESCAPE);
+        }
+        Some(end)
+    } else if armed && (focused || lost || fresh) && escape {
         consume(&super::shortcuts::KEY_ESCAPE);
         Some(EditEnd::Cancel)
-    } else if !fresh && focused && tab {
+    } else if armed && (focused || fresh) && tab {
         consume(&super::shortcuts::KEY_TAB);
         Some(EditEnd::Tab { shift })
-    } else if !fresh && lost && (enter || loss == FocusLoss::Ends) {
+    } else if armed && (lost || (fresh && enter)) && (enter || loss == FocusLoss::Ends) {
         if enter {
             consume(&super::shortcuts::KEY_ENTER);
             Some(EditEnd::Enter { shift })
@@ -369,6 +401,40 @@ mod tests {
         let mut bench = Bench::new(Opening::SelectAll);
         bench.open();
         bench.image(vec![key(egui::Key::Enter)]);
+        assert_eq!(bench.ends, [ENTER]);
+    }
+
+    /// A field opened by typing is not focused on its opening frame: the key
+    /// pressed right after the character must still end it (#440).
+    #[test]
+    fn enter_tab_and_escape_in_the_opening_frame_end_a_typed_field() {
+        for (pressed, end) in [
+            (egui::Key::Enter, ENTER),
+            (egui::Key::Tab, TAB),
+            (egui::Key::Escape, EditEnd::Cancel),
+        ] {
+            let mut bench = Bench::new(Opening::KeepCursor);
+            bench.image(vec![key(pressed)]);
+            assert_eq!(bench.ends, [end], "{pressed:?}");
+        }
+    }
+
+    /// The opening frame of a field opened by a menu or a double-click ignores the
+    /// keys: the Enter that opened it must not close it at once.
+    #[test]
+    fn the_opening_frame_of_a_select_all_field_ignores_enter() {
+        let mut bench = Bench::new(Opening::SelectAll);
+        bench.image(vec![key(egui::Key::Enter)]);
+        assert!(bench.ends.is_empty());
+    }
+
+    /// Enter given in the frame of the typing that opened the field is applied
+    /// on the field's opening frame.
+    #[test]
+    fn a_deferred_enter_ends_the_field_on_its_opening_frame() {
+        let mut bench = Bench::new(Opening::KeepCursor);
+        defer_end(&bench.context, ENTER);
+        bench.image(Vec::new());
         assert_eq!(bench.ends, [ENTER]);
     }
 
