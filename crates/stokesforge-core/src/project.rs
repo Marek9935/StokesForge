@@ -662,8 +662,9 @@ impl Project {
         self.insert_node(sheet, index, &name, NodeKind::Column(column))
     }
 
-    /// Adds a graph carrying `spec`. `name: None` → first free
-    /// "GraphN".
+    /// Adds a graph carrying `spec`. `name: None` → named after the
+    /// workbook of its first series ("Book1 plot", "Book1 plot 2"…, see
+    /// [`Project::next_graph_name`]), or first free "GraphN" without series.
     ///
     /// Unlike `add_workbook`/`add_matrix`/`add_note`, the content
     /// is a required parameter — same choice as [`Project::add_column`]
@@ -680,7 +681,10 @@ impl Project {
         name: Option<&str>,
         spec: PlotSpec,
     ) -> CoreResult<NodeId> {
-        let name = self.window_name(name, "Graph");
+        let name = match name {
+            Some(name) => name.to_string(),
+            None => self.next_graph_name(parent, &spec),
+        };
         let index = self.tree.children(parent)?.len();
         self.insert_node(
             parent,
@@ -1243,6 +1247,91 @@ impl Project {
             candidate = format!("{prefix}{n}");
         }
         candidate
+    }
+
+    /// Name of a new graph created under `parent` without an explicit name:
+    /// "<Book> plot", then "<Book> plot 2", "<Book> plot 3"… numbered after
+    /// the highest number already used (gaps are not filled), where `<Book>`
+    /// is the workbook of the `y` column of the first series of `spec`.
+    ///
+    /// A candidate is free when no window of the project bears it (case
+    /// insensitive) and no child of `parent`, of any kind, does. Falls back
+    /// to the first free "GraphN" when the spec has no series, when the
+    /// column is gone or not under a workbook, or when a candidate is not a
+    /// valid name (too long). The word "plot" is not translated, like the
+    /// generated "GraphN"/"BookN". Never fails.
+    pub fn next_graph_name(&self, parent: NodeId, spec: &PlotSpec) -> String {
+        self.book_plot_name(parent, spec)
+            .unwrap_or_else(|| self.next_window_name("Graph"))
+    }
+
+    fn book_plot_name(&self, parent: NodeId, spec: &PlotSpec) -> Option<String> {
+        let (_, series) = spec.iter_series().next()?;
+        let sheet = self.tree.parent(series.y).ok()??;
+        let book = self.tree.parent(sheet).ok()??;
+        let node = self.tree.node(book)?;
+        if !matches!(node.kind(), NodeKind::Workbook { .. }) {
+            return None;
+        }
+        let base = format!("{} plot", node.name());
+        let siblings = self.tree.children(parent).ok()?;
+        // Highest number already used by a window "<base>", "<base> N" or
+        // "<base>N" (case insensitive); numbering continues after it and
+        // never fills a gap. Other suffixes are ignored.
+        let base_lower: String = base.chars().flat_map(char::to_lowercase).collect();
+        let mut highest: Option<u64> = None;
+        let mut overflow = false;
+        self.tree.visit_windows(|id| {
+            let Some(window) = self.tree.node(id) else {
+                return false;
+            };
+            let lower: String = window.name().chars().flat_map(char::to_lowercase).collect();
+            let Some(suffix) = lower.strip_prefix(base_lower.as_str()) else {
+                return false;
+            };
+            let digits = suffix.trim_start_matches(' ');
+            let number = if suffix.is_empty() {
+                Some(1)
+            } else if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+                match digits.parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => {
+                        overflow = true;
+                        return true;
+                    }
+                }
+            } else {
+                None
+            };
+            if let Some(n) = number {
+                highest = Some(highest.map_or(n, |h| h.max(n)));
+            }
+            false
+        });
+        if overflow {
+            return None;
+        }
+        let mut n: u64 = match highest {
+            None => 1,
+            Some(h) => h.checked_add(1)?,
+        };
+        loop {
+            let candidate = if n == 1 {
+                base.clone()
+            } else {
+                format!("{base} {n}")
+            };
+            crate::name::check_name(&candidate).ok()?;
+            let taken = self.tree.find_window(&candidate).is_some()
+                || siblings
+                    .iter()
+                    .filter_map(|child| self.tree.node(*child))
+                    .any(|child| same_name_ignoring_case(child.name(), &candidate));
+            if !taken {
+                return Some(candidate);
+            }
+            n = n.checked_add(1)?;
+        }
     }
 
     // -- internal --

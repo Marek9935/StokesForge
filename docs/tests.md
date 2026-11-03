@@ -216,7 +216,7 @@ formulas, and saves and reloads them through the `.stf` side field.
 
 | Test | What it holds |
 |---|---|
-| `stokesforge-robustness/tests/b22_targeted_recalc.rs` | **the oracle**: two twin sessions, one targeted, the other in full recalculation (`FormulaRecalc::Full`, the code from before #193), receive the same randomly drawn steps (transposes and their refresh included, #412: the links of transposed sheets are compared by shape through `tests/common/mod.rs`, shared with `b23`, until #430 is fixed); same answers and same trees required after each step. Plus, at each step: the version ↔ content doctrine **in the actor** (recalculation writes, macros, reloads included), and the "targeted" witness — an unrelated command changes the version of no column. A final coverage check requires formulas that are computed, not computed and spared, and **at least twenty passes per kind of step**: a gesture that is always refused would prove nothing. The draw is replayable identically: no target is chosen in the order of `Tree::iter` (hash table with a random seed) |
+| `stokesforge-robustness/tests/b22_targeted_recalc.rs` | **the oracle**: two twin sessions, one targeted, the other in full recalculation (`FormulaRecalc::Full`, the code from before #193), receive the same randomly drawn steps (transposes and their refresh included, #412: the links of transposed sheets are compared by shape through `tests/common/mod.rs`, shared with `b23`: the `Full` side restamps formula columns on every pass, #430); same answers and same trees required after each step. Plus, at each step: the version ↔ content doctrine **in the actor** (recalculation writes, macros, reloads included), and the "targeted" witness — an unrelated command changes the version of no column. A final coverage check requires formulas that are computed, not computed and spared, and **at least twenty passes per kind of step**: a gesture that is always refused would prove nothing. The draw is replayable identically: no target is chosen in the order of `Tree::iter` (hash table with a random seed) |
 | `stokesforge-session/tests/recalc_targeted.rs` | one named case per component of the fingerprint (stored formula, sheet membership and version of the sources, length of the result, own version, outcome), the gestures that make them change (move within the sheet or to another, deletion then undo, cycle created elsewhere, deletion of cells in a formula column, aborted macro, duplicated sheet…), stability of a chain and of a cycle, forgetting of the memo by `Load` and `NewProject` on a coincidence of identifiers and versions that is **manufactured and checked**. Each "not rewritten" assertion has its witness in full mode |
 | `stokesforge-session/src/lib.rs` (`tests`), `src/recalc.rs` (`tests`) | interruptible recalculation (#239): Stop cancels the command and allows redo (stop set in advance on the next recalculation, hence deterministic), Stop after a command **without effect** undoes nothing (`History::execute_recorded`), the death of the actor (panic simulated by `Request::PanicForTest`, or in the middle of a recalculation) frees the gauge and makes `actor_alive` false (#310), late Stop without effect on the next one, stop between two columns then next pass that finishes without rewriting what is already written. `stokesforge-app-state/tests/shell.rs` (`heavy`): the same gesture seen from the interface on a heavy project, with its witness without Stop, and the question "save?" asked at close during the recalculation |
 | Axis direction and axis settings (#344) | `AxisSpec::orient`: table (auto or explicit × inverted × order of the bounds, bounds missing or not finite, idempotence) in `stokesforge-plot/src/axis.rs`; identical rendering before and after `orient` (`an_oriented_axis_is_drawn_like_the_original_axis`, `stokesforge-render/tests/geometry.rs`); opening a file with `inverted` and bounds (-1, 10): bounds (10, -1), `inverted` true, empty history, file untouched (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`); `pyst.set_graph` (`set_graph_orients_the_axes_from_the_order_of_the_bounds`, `stokesforge-script/tests/set_graph.rs`); axes page (`stokesforge-app/src/app/plot_settings.rs`, module `tests`): no more "Inverted axis" / "Auto range" / "Closed frame" boxes, "Advanced" block closed then opened on click (title or arrow), input of a bound under Auto = two bounds fixed in **one** history entry, From > To inverts the axis, Auto button = data while keeping the direction, From shows the high bound of an inverted axis; proven mutants (`orient` without swapping the bounds, `load_project` without `orient_graphs`, input that does not fix, Auto button that loses the direction, click on the arrow of "Advanced" counted twice) |
@@ -607,7 +607,26 @@ arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the C
 own commit. To keep pushes orderly, merge and push `main` under the lock
 `scripts/main-lock.sh take "<square> #<n>"` … `release`. The scripts of this workflow
 (`chantier.sh`, `try.sh`, `main-lock.sh`, `workflow-lib.sh`) are tested by
-`scripts/workflow-test.sh`, run by the `fmt` job.
+`scripts/workflow-test.sh`, run by the `fmt` job, and the colour rule by `scripts/suivi-test.py`
+(same job). Besides the colours, briefing and locks, `workflow-test.sh` covers
+(#441) `lance` recording the owner session (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`) and a rerun in
+a new session keeping the colour, one record per issue (sibling worktrees `feature<n>b`, detached HEAD),
+`chantier.sh --status [--json]` (six colours in order, `since`/`days` with the
+`SF_TODAY` seam, colourless worktrees, paused issues), `--pause` of a package (refused while a
+worktree exists, frees the colour, keeps the list, `--start` takes the first free again) and of a plain
+issue (worktree kept, previous colour back on resume), the
+package `since` date surviving a rerun, `suivi.py check` clean at the end, and `--release` (one fixed line; refuses an
+unmerged branch, modified or untracked files, ignored files other than `target/`,
+a run from a worktree or off `main`; never `-D` nor `--force`).
+
+`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|list`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
+of `scripts/suivi.py`: a live owner holds (pid exists, same start time, no newer `ended/<sid>`); a
+dead pid, a reused pid or an ended session pauses; an open QCM or a `todo` trial entry with a `try`
+field holds, a finished QCM, an `ok` entry or one without `try` does not; resume takes the previous
+colour when free, else the first free; the seventh claim fails; parallel claims get distinct colours
+(lock); the `session-end` hook always exits 0 and writes nothing on bad input; `migrate` is
+idempotent; the `release-line` reasons and `check`. Each case was proved by a mutation (drop the
+clause, see the test fail, restore).
 
 **Reading the result.**
 
@@ -1201,6 +1220,15 @@ One layer, one file, one witness tested by mutation:
   deleted; modified: only a value edit), update (new version,
   deleted column recreated), life of the link (rename, deletion, copy). Mutants:
   `stale` forced to false, fingerprint of the rows ignored, `prune_transposes` removed.
+- `stokesforge-session/tests/formula_structure.rs` (#430, trust of the links on the first
+  pass after a load): up to date after save, load and unrelated commands (stale again once
+  the source is edited); stale in the file stays stale; formula values that differ from the
+  file's make it stale; one pass only (loaded in `Full`, stale again after the next
+  command); unrelated edit undone after a load. Mutants: call dropped from
+  `run_after_load`, "up to date before the pass" dropped, content comparison dropped,
+  trust on every `run`, trust limited to `Targeted`. `b23`: a reload keeps the
+  state (stale, modified) of every link of the targeted twin. Its draw never
+  transposes a sheet holding a formula column, so it does not witness the trust itself.
 - `stokesforge-commands/tests/transpose.rs`: one undoable entry per command, refusal without
   an entry, `AnalyzeRows` group undone as a block; `tests/labels.rs` and
   `stokesforge-app-state/tests/history_text.rs`: the two labels.

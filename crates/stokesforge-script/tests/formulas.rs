@@ -137,14 +137,19 @@ assert pyst.values(second) == (11., 21.), pyst.values(second)
 }
 
 #[test]
-#[ignore = "bug: #431: pyst.set_column_type accepts a formula column (docstring: refused); silently reverted by the recalc, one useless history entry"]
 fn set_column_type_on_a_formula_column_is_refused() {
     let bench = bench();
-    let before = bench.session.snapshot().unwrap().revision;
     script(
         &bench,
         r#"
 col = formula_column('A * 2', name='Twice')
+"#,
+    );
+    let before = bench.session.snapshot().unwrap();
+    script(
+        &bench,
+        r#"
+col = pyst.children(S1)[-1]
 for kind in ('mixed', 'datetime', 'numeric'):
     try:
         pyst.set_column_type(col, kind)
@@ -156,7 +161,10 @@ assert pyst.info(col)['column']['formula'] == 'A * 2'
 assert pyst.values(col) == (2., 4., 6., 8.)
 "#,
     );
-    assert!(bench.session.snapshot().unwrap().revision > before);
+    // The refusals left no history entry and no change.
+    let after = bench.session.snapshot().unwrap();
+    assert_eq!(after.history.undo_label, before.history.undo_label);
+    assert_eq!(*after.tree, *before.tree);
 }
 
 #[test]

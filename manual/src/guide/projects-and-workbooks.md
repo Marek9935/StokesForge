@@ -206,7 +206,7 @@ A column has a type. The grid shows it by alignment: numbers on the right, text 
 
 When you type text that is not a number into a **Numeric** column, the column becomes **Mixed**: the text is kept and the other numbers stay numbers. Undo restores the type and the value together. If you then overwrite all the text, the column returns to **Numeric**.
 
-To change a type by hand, select the columns and choose **Type** in the right-click menu of the letter (or **Workbook ▸ Columns ▸ Type**), then **Numeric** or **Mixed**.
+To change a type by hand, select the columns and choose **Type** in the right-click menu of the letter (or **Workbook ▸ Columns ▸ Type**), then **Numeric** or **Mixed**. The entries are greyed on a column computed by a formula or produced by a calculation: remove the formula, or detach the column from the calculation, to change its type. In a selection that also holds other columns, only those change.
 
 Converting to **Numeric** erases the cells that are not numbers. Undo brings them back.
 

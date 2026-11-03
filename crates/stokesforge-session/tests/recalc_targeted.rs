@@ -464,8 +464,8 @@ fn deleting_a_source_gives_ref_then_undo_restores_the_formula() {
 }
 
 /// An input into a formula column is refused (`FormulaColumnReadOnly`), but
-/// two commands modify it all the same without touching its sources: changing
-/// its type and deleting cells in it. The recalculation must undo them, as
+/// deleting cells in it modifies it all the same without touching its sources
+/// (changing its type is refused too, #431). The recalculation must undo it, as
 /// before #193 — this is the "version of the column itself" component of the
 /// fingerprint, the only one that changes here.
 #[test]
@@ -489,12 +489,11 @@ fn a_formula_column_modified_directly_is_recalculated() {
         some(&[2.0, 4.0, 6.0])
     );
 
-    handle
-        .execute(Command::SetColumnType {
-            column: f.c,
-            column_type: ColumnType::Numeric,
-        })
-        .expect("change the type of C");
+    let retype = handle.execute(Command::SetColumnType {
+        column: f.c,
+        column_type: ColumnType::Numeric,
+    });
+    assert!(retype.is_err(), "the type of a formula column is refused");
     let s = take_snapshot(&handle);
     assert_eq!(numbers(&s, f.c), some(&[2.0, 4.0, 6.0]));
     assert_eq!(
@@ -503,12 +502,11 @@ fn a_formula_column_modified_directly_is_recalculated() {
             .and_then(|node| node.as_column())
             .map(Column::column_type),
         Some(ColumnType::Mixed),
-        "the recalculation gives C back the type its formula imposes"
+        "C keeps the type its formula imposes"
     );
 
     // Undoing the deletion reinserts a cell in C, which goes to four rows; the
     // recalculation brings it back to the length of A (#194).
-    handle.undo().expect("undo the type change");
     handle.undo().expect("undo the deletion");
     assert_eq!(
         numbers(&take_snapshot(&handle), f.c),

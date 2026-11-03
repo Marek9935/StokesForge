@@ -26,8 +26,8 @@ use crate::icons;
 use stokesforge_app_state::column_move::{target_order, ColumnMove};
 use stokesforge_app_state::selection::{GridCursor, Selection};
 use stokesforge_app_state::state::{
-    Action, AppState, ColumnDragPayload, GridMenu, GridZone, HeaderField, MoveDirection,
-    RowDragPayload,
+    Action, AppState, ColumnDragPayload, ColumnTypeLock, GridMenu, GridZone, HeaderField,
+    MoveDirection, RowDragPayload,
 };
 use stokesforge_app_state::tr;
 
@@ -1051,9 +1051,25 @@ pub(super) fn column_type_role_menus(
         // non-numeric text cleared when switching to `Numeric`, as for any
         // direct entry in a numeric column.
         ui.menu_button(tr!("column-type"), |ui| {
+            // Greyed, with its reason, only when no targeted column can change
+            // type; otherwise the action skips the ones that cannot (#431).
+            let lock = state.column_type_lock(target_columns);
             for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
-                if menu_choice(ui, column_type == Some(candidate), type_label(candidate)).clicked()
-                {
+                let selected = column_type == Some(candidate);
+                let label = type_label(candidate);
+                let clicked = match lock {
+                    None => menu_choice(ui, selected, label).clicked(),
+                    Some(lock) => {
+                        let reason = match lock {
+                            ColumnTypeLock::Formula => tr!("disabled-column-type-formula"),
+                            ColumnTypeLock::Calculated => tr!("disabled-column-type-calculated"),
+                        };
+                        ui.add_enabled(false, |ui: &mut egui::Ui| menu_choice(ui, selected, label))
+                            .on_disabled_hover_text(reason)
+                            .clicked()
+                    }
+                };
+                if clicked {
                     if Some(candidate) != column_type {
                         actions.push(Action::SetColumnsType {
                             columns: target_columns.to_vec(),

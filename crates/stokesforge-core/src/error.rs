@@ -52,7 +52,7 @@ pub enum CoreError {
         /// Actual version of the column at the time of the refusal.
         found: u64,
     },
-    /// Computed columns (v1) — `Command::SetCells` refused because
+    /// Computed columns (v1) — `Command::SetCells` or `Command::SetColumnType` (#431) refused because
     /// `column` carries a formula (`ColumnMeta::formula.is_some()`): its
     /// values are recalculated automatically by `stokesforge-session::actor`,
     /// a direct cell write makes no sense there. The refusal comes
