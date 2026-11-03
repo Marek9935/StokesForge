@@ -9797,11 +9797,14 @@ impl AppState {
                     let refused = self.paste_header_text(column, field, value);
                     if field == HeaderField::Formula && source.formula.is_some() {
                         // `None` alone is ambiguous (column gone, refused x'):
-                        // it is accepted only if nothing failed.
+                        // it is accepted only if the column now carries a
+                        // formula.
                         *outcome = match &refused {
                             Some(_) => FormulaPaste::Refused,
-                            None if self.last_action_failed() => FormulaPaste::NotWritten,
-                            None => FormulaPaste::Accepted,
+                            None if self.column_meta(column).formula.is_some() => {
+                                FormulaPaste::Accepted
+                            }
+                            None => FormulaPaste::NotWritten,
                         };
                     }
                     refusal = refusal.or(refused);
@@ -9849,7 +9852,7 @@ impl AppState {
     /// caller sets it, **after** the writes of the whole paste (the other
     /// fields are pasted, the status bar keeps the refusal). `None` does not
     /// mean written: it is also returned for a column gone and for a refused
-    /// x' (both already reported); the caller checks `last_action_failed`.
+    /// x' (both already reported); the caller reads the column back.
     fn paste_header_text(
         &mut self,
         column: NodeId,

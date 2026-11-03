@@ -86,6 +86,18 @@ fn world() -> World {
             )
             .unwrap();
     }
+    // `Sheet1!C` carries an x' that no user can type (infinite): a copy of it
+    // pastes an x' that the destination refuses.
+    let c = project.tree().children(sheet1).unwrap()[2];
+    project
+        .set_column_meta(
+            c,
+            ColumnMeta {
+                x_prime: Some(f64::INFINITY),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let session = Session::spawn(project, None).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let state = AppState::new_with_preferences(
@@ -449,6 +461,32 @@ fn a_refused_formula_among_accepted_ones_ends_on_its_sentence_only() {
         status.starts_with("[error]") && status.contains("no sheet named"),
         "{status}"
     );
+    assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
+}
+
+#[test]
+fn an_accepted_formula_after_a_refused_x_prime_keeps_its_computed_values() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, sheet3) = (w.sheet1, w.sheet3);
+    // `Sheet1!C` holds an x' that is not a finite number (see `world`): it is
+    // refused at the destination while the next column's formula is accepted.
+    let c = w.columns(sheet1)[2];
+    let clip = w.copy_columns(sheet1, &[c, src[0].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(sheet3, 2);
+    // An error already on the status bar must not count as a failure of the
+    // paste.
+    w.state.dispatch(Action::SetColumnXPrime {
+        column: dst[1],
+        text: "abc".to_string(),
+    });
+    assert!(w.status().starts_with("[error]"), "{}", w.status());
+    w.paste_header_on(sheet3, dst[0], &clip);
+    assert_eq!(w.letters(dst[1]).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(dst[1])[0], Some(3104.0), "computed, not pasted");
+    // The refused x' is reported, then overwritten by the notice of the
+    // other column's pasted values; the read-only error must never appear.
+    let status = w.status();
     assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
 }
 
