@@ -21,9 +21,9 @@ An issue holds its colour while (a) the Claude session that owns it is alive, or
 
 The start and follow-up forms are posed here, not published: `python3 scripts/suivi.py qcm pose <n> data.js --title "…"` (checks and counts the cards, creates `qcm/<n>-<k>/`, prints the id and `http://127.0.0.1:8441/qcm/<id>`). The form appears in « En attente » with its progress; the user answers there (each answer is a file), then presses « J'ai fini » at the bottom of the summary, which sets `finished` and frees the colour unless something else holds it. Agents read the answers with `suivi.py qcm answers <id> [--json]` and list forms with `qcm list [--open] [--issue n]`. Template and card rules: `stokesforge-bug-report/references/decision-form.md`. The published Artifact form stays as the fallback (user away from the PC, or asked).
 
-## Trial checklist (#423)
+## Trial checklist
 
-Before asking for `scripts/try.sh <n>`, write the entries of a visible change in one go. The user does not guess what to test.
+(#423) Before asking for `scripts/try.sh <n>`, write the entries of a visible change in one go. The user does not guess what to test.
 
 1. Write a JSON file: one object, or a list, with `title`, `where` (menu or window steps, English labels as on screen), `steps` (2 to 4 short French imperatives from a state the user can reach), `expect` (what is seen, not what the code does), `try` (`scripts/try.sh <n>`). One behaviour per entry: each decided gesture, each edge case (refusal and its message), the routes a bench test cannot see (save and reopen, detached window, `STOKESFORGE_LANG=en-XA` when texts changed).
 2. `python3 scripts/suivi.py test add <n> entries.json` creates `tests/<n>-<k>.json`, status `todo`.
