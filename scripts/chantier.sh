@@ -418,7 +418,7 @@ for n in "${issues[@]}"; do
 done
 
 if [ "$dry" = 1 ]; then echo "(dry run: nothing created)"; fi
-echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the To-test page and notifications:"
+echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the tracking page and notifications:"
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
@@ -427,7 +427,7 @@ tags=""
 for x in "${names[@]}"; do tags="${tags:+$tags · }$x"; done
 # The user tells parallel terminals apart by this tag, without reading (#418).
 echo "Start EVERY message to the user with: $tags"
-echo "To-test page: $SF_TO_TEST_URL"
+echo "Tracking page: $SF_TO_TEST_URL"
 cat <<'BRIEFING'
 Several issues: one worktree each, one session. Never work in another worktree.
 Steps, in order:
@@ -444,7 +444,7 @@ Steps, in order:
  6. Visible change: `scripts/try.sh <n>` opens the branch on the user's screen;
     their OK is the go-ahead (stokesforge-verification, step 6).
  7. Merge under `scripts/main-lock.sh` from the main checkout (same step 6), read the CI.
- 8. Add the To-test entry (stokesforge-verification, step 8).
+ 8. Add the trial entries (suivi.py test add / merged) (stokesforge-verification, step 8).
  9. Clean up: `scripts/chantier.sh --release <n>` (worktree and branch; copy its one
     line in the report). A package stopping with no worktree: `--pause <parent>`;
     after its last sub-issue: `--done <parent>`.

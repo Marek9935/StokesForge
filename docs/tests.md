@@ -618,7 +618,7 @@ package `since` date surviving a rerun, `suivi.py check` clean at the end, and `
 unmerged branch, modified or untracked files, ignored files other than `target/`,
 a run from a worktree or off `main`; never `-D` nor `--force`).
 
-`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder) pins the rule
+`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|list`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
 of `scripts/suivi.py`: a live owner holds (pid exists, same start time, no newer `ended/<sid>`); a
 dead pid, a reused pid or an ended session pauses; an open QCM or a `todo` trial entry with a `try`
 field holds, a finished QCM, an `ok` entry or one without `try` does not; resume takes the previous

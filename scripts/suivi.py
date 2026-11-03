@@ -11,7 +11,9 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
                            done_at
     ended/<session_id>     empty files touched by the SessionEnd hook
     qcm/<id>/meta.json     {issue, finished}   (written by the QCM server)
-    tests/<n>-<k>.json     {status, try}       (written by the To-test page)
+    tests/<n>-<k>.json     trial entry: title, where, steps, expect, try, commit, date,
+                           status (todo|ok|retour), comment, reviewed (written by the
+                           page's POST and by `test add|merged`)
     control.json           result of the last `check`
 
 THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
@@ -26,12 +28,19 @@ directory lock ../_stokesforge/.colour.lock (same lock as chantier.sh). Reads ta
 no lock. Test seams: SF_SUIVI_DIR, SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
 SF_SUIVI_SLOW (seconds slept inside a claim's critical section).
 
+A record migrated from the old layout carries `legacy: true`: it counts as held
+until the issue is claimed, paused or done (its session is unknown).
+
 Commands: claim, status, set, pause, done, release-line, check, migrate,
-members, is-package, session-end.
+members, is-package, session-end, serve (the local page, 127.0.0.1 only),
+test add|merged|list, import-online.
 """
 import argparse
 import datetime
+import errno
 import glob
+import hashlib
+import http.server
 import json
 import os
 import re
@@ -73,6 +82,8 @@ def colour_line(kind, *a):
         return "paquet #%s, prochaine sous-issue ; après la dernière : scripts/chantier.sh --done %s" % (a[0], a[0])
     if kind == "reason-qcm":
         return "un QCM de l'issue est ouvert"
+    if kind == "reason-legacy":
+        return "état à confirmer par sa session"
     if kind == "reason-trial":
         return "un essai de l'issue est en attente"
     raise ValueError(kind)
@@ -244,6 +255,8 @@ def held_by(r):
         why.append("qcm")
     if trial_pending(r["issue"]):
         why.append("essai")
+    if r.get("legacy"):
+        why.append("legacy")
     return why
 
 
@@ -299,7 +312,7 @@ def current_owner():
 def new_record(n):
     return {"issue": n, "kind": "issue", "parent": None, "subs": [], "name": "", "colour": None,
             "last_colour": None, "state": "questions", "waiting": "", "wait_kind": "", "what": "",
-            "since": None, "owner": None, "done_at": None}
+            "since": None, "owner": None, "done_at": None, "legacy": False}
 
 
 def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False, avoid=()):
@@ -320,6 +333,7 @@ def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False,
         r["since"] = today().isoformat()
     r["colour"] = colour
     r["done_at"] = None
+    r["legacy"] = False
     if package or subs is not None:
         r["kind"] = "package"
     if subs is not None:
@@ -389,6 +403,7 @@ def cmd_pause(a):
         r = need(recs, a.issue)
         was = r.get("colour")
         r["owner"] = None
+        r["legacy"] = False
         if not held_by(r):
             free_colour(r)
         save(r)
@@ -403,7 +418,8 @@ def cmd_pause(a):
 
 
 def why_text(r):
-    return ", ".join({"agent": "agent", "qcm": colour_line("reason-qcm"), "essai": colour_line("reason-trial")}[w]
+    return ", ".join({"agent": "agent", "qcm": colour_line("reason-qcm"), "essai": colour_line("reason-trial"),
+                      "legacy": colour_line("reason-legacy")}[w]
                      for w in held_by(r))
 
 
@@ -415,6 +431,7 @@ def cmd_done(a):
         colour = r.get("colour")
         r["done_at"] = today().isoformat()
         r["owner"] = None
+        r["legacy"] = False
         free_colour(r)
         save(r)
         if had and colour:
@@ -460,6 +477,7 @@ def cmd_release_line(a):
         if a.mark_done and not blocking:
             r["done_at"] = today().isoformat()
             r["owner"] = None
+            r["legacy"] = False
             free_colour(r)
             save(r)
         print(colour_line("kept", colour, reason) if reason else colour_line("freed", colour))
@@ -521,12 +539,12 @@ def build_status():
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": r.get("kind", "issue"), "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": r.get("subs", []),
-                           "worktrees": group_wts(r["issue"]), "since": since, "days": days})
+                           "what": r.get("what", ""), "worktrees": group_wts(r["issue"]), "since": since, "days": days})
         elif not held_by(r):
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": "issue", "parent": r["parent"], "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": [],
-                           "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
+                           "what": r.get("what", ""), "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
     done.sort(key=lambda d: (d["done_at"], d["issue"]), reverse=True)
     return {"colours": colours, "paused": sorted(paused, key=lambda p: p["issue"]),
             "colourless": sorted(colourless), "done": done}
@@ -609,7 +627,8 @@ def cmd_migrate(a):
             since = datetime.date.fromtimestamp(os.path.getmtime(p)).isoformat()
             if n not in recs:
                 r = new_record(n)
-                r.update(kind="package", subs=subs, colour=colour, last_colour=colour, since=since)
+                r.update(kind="package", subs=subs, colour=colour, last_colour=colour, since=since,
+                         legacy=bool(colour))
                 recs[n] = r
                 save(r)
                 made.append(n)
@@ -622,7 +641,9 @@ def cmd_migrate(a):
                 continue
             colour = open(f, encoding="utf-8").read().strip() or None
             r = new_record(n)
-            r.update(parent=member_of.get(n), colour=colour, last_colour=colour,
+            # Other sessions may be running with no owner recorded: hold the colour until
+            # the issue is claimed, paused or done (the worktree is live, we just listed it).
+            r.update(parent=member_of.get(n), colour=colour, last_colour=colour, legacy=bool(colour),
                      since=datetime.date.fromtimestamp(os.path.getmtime(f)).isoformat())
             recs[n] = r
             save(r)
@@ -648,6 +669,327 @@ def cmd_session_end(a):
             pass
         os.utime(p, None)
     except Exception:
+        pass
+    return 0
+
+
+# ------------------------------------------------------------ trial entries
+ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
+TEST_FIELDS = {"title": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
+               "date": str, "colour": str, "name": str}
+TEST_STATUSES = ("todo", "ok", "retour")
+
+
+def safe_id(s):
+    """An id that is one plain file name: no slash, no leading dot."""
+    return bool(s) and ID_RE.fullmatch(s) is not None and not s.startswith(".")
+
+
+def tests_dir():
+    return os.path.join(suivi_dir(), "tests")
+
+
+def test_path(tid):
+    return os.path.join(tests_dir(), tid + ".json")
+
+
+def load_tests(issue=None):
+    out = []
+    for p in sorted(glob.glob(os.path.join(tests_dir(), "*.json"))):
+        tid = os.path.basename(p)[:-5]
+        t = read_json(p)
+        if not safe_id(tid) or not isinstance(t, dict):
+            continue
+        if issue is not None and not tid.startswith("%s-" % issue):
+            continue
+        out.append(dict(t, id=tid))
+    return out
+
+
+def natural(tid):
+    return [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", tid)]
+
+
+def check_entry(e):
+    if not isinstance(e, dict):
+        raise Fail("a trial entry must be a JSON object")
+    for k, v in e.items():
+        if k not in TEST_FIELDS:
+            raise Fail("unknown field %r (allowed: %s)" % (k, ", ".join(sorted(TEST_FIELDS))))
+        if not isinstance(v, TEST_FIELDS[k]):
+            raise Fail("field %r must be a %s" % (k, TEST_FIELDS[k].__name__))
+        if isinstance(v, list) and not all(isinstance(x, str) for x in v):
+            raise Fail("field %r must be a list of strings" % k)
+
+
+def cmd_test_add(a):
+    try:
+        with open(a.file, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail("cannot read %s: %s" % (a.file, e))
+    entries = data if isinstance(data, list) else [data]
+    for e in entries:
+        check_entry(e)
+    rec = load_all().get(a.issue) or {}
+    ids = []
+    with Lock():
+        used = [int(m.group(1)) for t in load_tests(a.issue)
+                for m in [re.fullmatch(r"%d-(\d+)" % a.issue, t["id"])] if m]
+        k = max(used, default=0)
+        for e in entries:
+            k += 1
+            t = dict(e)
+            t.setdefault("colour", rec.get("colour") or rec.get("last_colour") or "")
+            t.setdefault("name", rec.get("name", ""))
+            t.setdefault("date", today().isoformat())
+            t.update(n=a.issue, status="todo")
+            write_json(test_path("%d-%d" % (a.issue, k)), t)
+            ids.append("%d-%d" % (a.issue, k))
+    print(" ".join(ids))
+    return 0
+
+
+def cmd_test_merged(a):
+    if not re.fullmatch(r"[0-9a-fA-F]{4,40}", a.commit):
+        raise Fail("not a commit hash: %r" % a.commit)
+    n = 0
+    with Lock():
+        for t in load_tests(a.issue):
+            if "try" not in t:
+                continue
+            tid = t.pop("id")
+            t.pop("try")
+            t["commit"] = a.commit
+            write_json(test_path(tid), t)
+            n += 1
+    print("%d entr%s merged" % (n, "y" if n == 1 else "ies"))
+    return 0
+
+
+def cmd_test_list(a):
+    for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
+        print("%s\t%s\t%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
+                                "\t(try)" if t.get("try") else ""))
+    return 0
+
+
+def cmd_import_online(a):
+    """Copy the `tests/*` documents of an ArtifactData export into the local state, once."""
+    src = os.path.join(a.out_dir, "tests")
+    if not os.path.isdir(src):
+        raise Fail("no tests/ folder in %s" % a.out_dir)
+    new = same = kept = 0
+    bad = []
+    with Lock():
+        for p in sorted(glob.glob(os.path.join(src, "*.json"))):
+            doc = read_json(p)
+            stem = os.path.basename(p)[:-5]
+            if not isinstance(doc, dict):
+                bad.append(stem)
+                continue
+            tid = str(doc["id"]) if "id" in doc else stem
+            data = doc["data"] if isinstance(doc.get("data"), dict) else doc
+            if not safe_id(tid) or not safe_id(stem):
+                bad.append(tid)
+                continue
+            data = {k: v for k, v in data.items() if k != "id" and not k.startswith("_")}
+            if isinstance(data.get("try"), dict):
+                data.pop("try")
+            dest = test_path(tid)
+            have = read_json(dest)
+            if have is None:
+                write_json(dest, data)
+                new += 1
+            elif have == data:
+                same += 1
+            else:
+                kept += 1      # a local entry wins: it may hold a newer review
+    for b in bad:
+        sys.stderr.write("suivi: skipped unsafe or unreadable document %r\n" % b)
+    print("imported %d, unchanged %d, kept local %d, rejected %d" % (new, same, kept, len(bad)))
+    return 1 if bad else 0
+
+
+# ------------------------------------------------------------------ server
+MAX_BODY = 256 * 1024
+PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suivi-page.html")
+CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; connect-src 'self'; base-uri 'none'; form-action 'none'; "
+       "frame-ancestors 'none'")
+
+
+def open_qcms():
+    out = []
+    for p in sorted(glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json"))):
+        qid = os.path.basename(os.path.dirname(p))
+        m = read_json(p)
+        if not safe_id(qid) or not isinstance(m, dict) or m.get("finished"):
+            continue
+        out.append({"id": qid, "issue": m.get("issue"), "title": m.get("title", ""),
+                    "progress": m.get("progress", ""), "since": m.get("since", "")})
+    return out
+
+
+def build_state():
+    s = build_status()
+    tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
+    qcms = open_qcms()
+    return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
+            "done": s["done"][:10], "qcms": qcms, "tests": tests,
+            "control": read_json(os.path.join(suivi_dir(), "control.json")),
+            "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "suivi"
+    protocol_version = "HTTP/1.0"      # one request per connection: a single thread never waits on an idle client
+    timeout = 5
+
+    def log_message(self, *args):
+        pass
+
+    # -- plumbing
+    def send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=()):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", CSP)
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def fail(self, code, msg):
+        self.send(code, msg + "\n")
+
+    def allowed_origins(self):
+        port = self.server.server_address[1]
+        return ("http://127.0.0.1:%d" % port, "http://localhost:%d" % port)
+
+    def guard(self, write=False):
+        """Host (DNS rebinding), Origin (cross-site pages) and the custom header on writes."""
+        port = self.server.server_address[1]
+        if self.headers.get("Host") not in ("127.0.0.1:%d" % port, "localhost:%d" % port):
+            self.fail(403, "forbidden host")
+            return False
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in self.allowed_origins():
+            self.fail(403, "forbidden origin")
+            return False
+        if write and self.headers.get("X-Suivi") != "1":
+            self.fail(403, "missing X-Suivi header")
+            return False
+        return True
+
+    def route(self):
+        return self.path.split("?", 1)[0]
+
+    # -- methods
+    def do_OPTIONS(self):
+        if not self.guard():
+            return
+        self.send(204, extra=[("Allow", "GET, POST, OPTIONS")])
+
+    def do_GET(self):
+        if not self.guard():
+            return
+        path = self.route()
+        if path == "/":
+            try:
+                with open(PAGE, "rb") as f:
+                    page = f.read()
+            except OSError:
+                return self.fail(500, "page missing: %s" % PAGE)
+            return self.send(200, page, "text/html; charset=utf-8")
+        if path == "/api/state":
+            try:
+                body = json.dumps(build_state(), ensure_ascii=False, sort_keys=True).encode("utf-8")
+            except Exception as e:     # a half-written folder must not kill the server
+                return self.fail(500, "state unreadable: %s" % e)
+            etag = '"%s"' % hashlib.sha1(body).hexdigest()[:20]
+            if self.headers.get("If-None-Match") == etag:
+                return self.send(304, extra=[("ETag", etag)])
+            return self.send(200, body, "application/json; charset=utf-8", [("ETag", etag)])
+        if path.startswith("/qcm/"):
+            if not safe_id(path[len("/qcm/"):]):
+                return self.fail(400, "bad id")
+            return self.fail(404, "QCM pages are not served yet")      # lot C
+        self.fail(404, "not found")
+
+    def do_HEAD(self):
+        self.do_GET()
+
+    def do_POST(self):
+        if not self.guard(write=True):
+            return
+        path = self.route()
+        if not path.startswith("/api/tests/"):
+            return self.fail(404, "not found")
+        tid = path[len("/api/tests/"):]
+        if not safe_id(tid):
+            return self.fail(400, "bad id")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return self.fail(400, "bad Content-Length")
+        if length < 0:
+            return self.fail(400, "bad Content-Length")
+        if length > MAX_BODY:
+            left = min(length, 4 * MAX_BODY)       # drain, or the client sees a reset instead of the 413
+            while left > 0:
+                chunk = self.rfile.read(min(65536, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+            return self.fail(413, "body larger than %d bytes" % MAX_BODY)
+        try:
+            body = json.loads(self.rfile.read(length) or b"null")
+        except ValueError:
+            return self.fail(400, "body is not JSON")
+        if not isinstance(body, dict) or not ({"status", "comment"} & set(body)):
+            return self.fail(400, "expected an object with status and/or comment")
+        if "status" in body and body["status"] not in TEST_STATUSES:
+            return self.fail(400, "status must be one of %s" % ", ".join(TEST_STATUSES))
+        if "comment" in body and not isinstance(body["comment"], str):
+            return self.fail(400, "comment must be a string")
+        t = read_json(test_path(tid))
+        if not isinstance(t, dict):
+            return self.fail(404, "no such trial entry")
+        for k in ("status", "comment"):
+            if k in body:
+                t[k] = body[k]
+        t["reviewed"] = datetime.datetime.now().isoformat(timespec="seconds")
+        write_json(test_path(tid), t)
+        self.send(200, json.dumps({"ok": True}), "application/json")
+
+    def other(self):
+        if self.guard():
+            self.send(405, "method not allowed\n", extra=[("Allow", "GET, POST, OPTIONS")])
+
+    do_PUT = do_DELETE = do_PATCH = other
+
+
+def cmd_serve(a):
+    port = a.port if a.port is not None else int(os.environ.get("SF_SUIVI_PORT", "8441"))
+    if a.state:
+        os.environ["SF_SUIVI_DIR"] = os.path.abspath(a.state)
+    state = suivi_dir()
+    try:
+        srv = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            raise Fail("port %d is already in use (another suivi.py serve? see `ss -ltnp`)" % port)
+        raise Fail("cannot listen on 127.0.0.1:%d: %s" % (port, e))
+    print("suivi: listening on http://127.0.0.1:%d/ (state %s)" % (srv.server_address[1], state), flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
         pass
     return 0
 
@@ -692,6 +1034,25 @@ def parser():
     p = add("is-package", cmd_is_package, "exit 0 if the issue is a package")
     p.add_argument("issue", type=int)
     add("session-end", cmd_session_end, "SessionEnd hook: reads {session_id, reason} on stdin")
+    p = add("serve", cmd_serve, "serve the local tracking page on 127.0.0.1 only")
+    p.add_argument("--port", type=int, help="default 8441 (env SF_SUIVI_PORT); 0 = any free port")
+    p.add_argument("--state", help="state folder (default: ../_stokesforge/.suivi)")
+    t = add("test", None, "trial entries (tests/<n>-<k>.json)").add_subparsers(dest="tcmd", required=True)
+    for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
+                        ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
+                        ("list", cmd_test_list, "list the entries")):
+        q = t.add_parser(name, help=h, allow_abbrev=False)
+        q.set_defaults(fn=fn)
+        if name == "add":
+            q.add_argument("issue", type=int)
+            q.add_argument("file")
+        elif name == "merged":
+            q.add_argument("issue", type=int)
+            q.add_argument("commit")
+        else:
+            q.add_argument("--issue", type=int)
+    p = add("import-online", cmd_import_online, "import the tests/* documents of an ArtifactData export, once")
+    p.add_argument("out_dir")
     return ap
 
 

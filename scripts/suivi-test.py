@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Tests of scripts/suivi.py (#441): the colour rule, claim, resume, the hook.
+"""Tests of scripts/suivi.py (#441): the colour rule, claim, resume, the hook, the local server,
+the trial-entry commands, the install scripts.
 
     python3 scripts/suivi-test.py
 
 Everything runs in a throwaway repository and a throwaway state folder; the real
 ../_stokesforge/.suivi is never touched.
 """
+import http.client
 import importlib.util
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +25,15 @@ spec = importlib.util.spec_from_file_location("suivi", SUIVI)
 suivi = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(suivi)
 C = suivi.COLOURS  # blue green orange purple red yellow
+
+
+def slurp(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def jload(path):
+    return json.loads(slurp(path))
 
 
 class Base(unittest.TestCase):
@@ -372,6 +385,299 @@ class TestMigrate(Base):
         self.assertEqual(before, after)
         # A migrated issue resumes with its colour.
         self.assertEqual(self.claim(5), C[3])
+
+
+class TestMigrateLegacy(Base):
+    """Orchestrators already running when the new layout lands have no owner: keep their colours."""
+
+    def migrate_two(self):
+        for name, colour in (("feature5", C[3]), ("feature6", C[4])):
+            self.worktree(name)
+            gd = subprocess.run(["git", "-C", os.path.join(self.root, name), "rev-parse", "--absolute-git-dir"],
+                                capture_output=True, text=True).stdout.strip()
+            with open(os.path.join(gd, "stokesforge-colour"), "w") as f:
+                f.write(colour + "\n")
+        self.assertEqual(self.run_cli("migrate").returncode, 0)
+
+    def test_migrated_issue_with_a_live_worktree_holds_its_colour_without_an_owner(self):
+        self.migrate_two()
+        self.assertTrue(self.rec(5)["legacy"])
+        self.assertIsNone(self.rec(5)["owner"])
+        self.assertEqual(self.held(C[3]), ["legacy"])
+        # A new claim cannot take a legacy colour.
+        self.assertEqual(self.claim(7), C[0])
+        self.claim(8)
+        self.claim(9)
+        self.assertEqual(self.claim(10), C[5])
+
+    def test_claim_pause_and_done_end_the_hold(self):
+        self.migrate_two()
+        self.assertEqual(self.claim(5), C[3])
+        self.assertEqual(self.held(C[3]), ["agent"])
+        self.assertFalse(self.rec(5)["legacy"])
+        self.assertIn("Dossier #6 en pause", self.run_cli("pause", "6").stdout)   # lang: fr
+        self.assertEqual(self.held(C[4]), [])
+        self.run_cli("pause", "5")
+        self.assertEqual(self.held(C[3]), [])
+
+    def test_done_ends_the_hold(self):
+        self.migrate_two()
+        self.run_cli("done", "5")
+        self.assertEqual(self.held(C[3]), [])
+
+    def test_check_does_not_free_it_and_status_json_says_so(self):
+        self.migrate_two()
+        e = self.status()["colours"][C.index(C[4])]
+        self.assertEqual((e["free"], e["held_by"]), (False, ["legacy"]))
+
+
+class TestTestCommands(Base):
+    def entries(self, tmp, data):
+        p = os.path.join(tmp, "e.json")
+        with open(p, "w") as f:
+            json.dump(data, f)
+        return p
+
+    def test_add_merged_list(self):
+        self.claim(7, "--name", "Seven")
+        with tempfile.TemporaryDirectory() as tmp:
+            one = {"title": "A", "where": ["File", "Open"], "steps": ["Do"], "expect": "See", "try": "scripts/try.sh 7"}
+            r = self.run_cli("test", "add", "7", self.entries(tmp, [one, {"title": "B", "try": "scripts/try.sh 7"}]))
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, "7-1 7-2"), r.stderr)
+            r = self.run_cli("test", "add", "7", self.entries(tmp, one))
+            self.assertEqual(r.stdout.strip(), "7-3")
+        t = jload(os.path.join(self.state, "tests", "7-1.json"))
+        self.assertEqual((t["status"], t["n"], t["name"], t["colour"], t["date"]), ("todo", 7, "Seven", C[0], "2026-11-03"))
+        self.assertEqual(self.held(C[0]), ["agent", "essai"])
+        out = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertEqual(len(out.strip().splitlines()), 3)
+        self.assertIn("(try)", out)
+        r = self.run_cli("test", "merged", "7", "abcdef12")
+        self.assertIn("3 entries", r.stdout)
+        t = jload(os.path.join(self.state, "tests", "7-1.json"))
+        self.assertEqual((t["commit"], "try" in t), ("abcdef12", False))
+        self.assertEqual(self.held(C[0]), ["agent"])
+
+    def test_rejects_unknown_fields_and_bad_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self.run_cli("test", "add", "7", self.entries(tmp, {"title": "A", "status": "ok"}))
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("unknown field", r.stderr)
+            r = self.run_cli("test", "add", "7", self.entries(tmp, {"steps": "not a list"}))
+            self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+        self.assertNotEqual(self.run_cli("test", "merged", "7", "../x").returncode, 0)
+
+
+class TestImportOnline(Base):
+    def export(self, tmp, docs):
+        os.makedirs(os.path.join(tmp, "tests"))
+        os.makedirs(os.path.join(tmp, "chantiers"))
+        with open(os.path.join(tmp, "chantiers", "9.json"), "w") as f:
+            json.dump({"id": "9", "data": {"colour": C[0]}}, f)
+        for stem, doc in docs.items():
+            with open(os.path.join(tmp, "tests", stem + ".json"), "w") as f:
+                json.dump(doc, f)
+
+    def files(self):
+        d = os.path.join(self.state, "tests")
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    def test_import_is_complete_idempotent_and_only_tests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.export(tmp, {
+                "1-1": {"id": "1-1", "data": {"status": "ok", "comment": "fine", "reviewed": "2026-11-01", "title": "A"}},
+                "1-2": {"data": {"status": "todo", "title": "B"}},
+                "2-1": {"id": "2-1", "status": "retour", "comment": "no", "title": "C", "_version": 3}})
+            r = self.run_cli("import-online", tmp)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(self.files(), ["1-1.json", "1-2.json", "2-1.json"])
+            t = jload(os.path.join(self.state, "tests", "1-1.json"))
+            self.assertEqual((t["status"], t["comment"], t["reviewed"]), ("ok", "fine", "2026-11-01"))
+            self.assertNotIn("_version", jload(os.path.join(self.state, "tests", "2-1.json")))
+            self.assertFalse(os.path.exists(os.path.join(self.state, "chantiers")))
+            before = {f: slurp(os.path.join(self.state, "tests", f)) for f in self.files()}
+            again = self.run_cli("import-online", tmp)
+            self.assertIn("imported 0, unchanged 3", again.stdout)
+            self.assertEqual(before, {f: slurp(os.path.join(self.state, "tests", f)) for f in self.files()})
+
+    def test_unsafe_ids_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.export(tmp, {"ok-1": {"id": "../x", "data": {"title": "evil"}},
+                              "3-1": {"id": ".hidden", "data": {}},
+                              "3-2": {"id": "3-2", "data": {"title": "fine"}}})
+            r = self.run_cli("import-online", tmp)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rejected 2", r.stdout)
+        self.assertEqual(self.files(), ["3-2.json"])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "x.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "x.json")))
+
+
+class TestServer(Base):
+    def setUp(self):
+        super().setUp()
+        self.claim(1, "--name", "One")
+        self.run_cli("set", "1", "--state", "code", "--what", "doing", "--wait", "you", "--waiting", "your OK")
+        self.claim(2, "--name", "Two")
+        os.makedirs(os.path.join(self.state, "tests"))
+        self.entry = os.path.join(self.state, "tests", "1-1.json")
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "todo", "try": "scripts/try.sh 1"}, f)
+        self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
+                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop)
+        line = self.proc.stdout.readline()
+        m = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
+        self.assertTrue(m, line)
+        self.port = int(m.group(1))
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait(5)
+        self.proc.stdout.close()
+        self.proc.stderr.close()
+
+    def req(self, method, path, headers=None, body=None, host="default"):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+        c.putheader("Host", "127.0.0.1:%d" % self.port if host == "default" else host)
+        for k, v in (headers or {}).items():
+            c.putheader(k, v)
+        data = body if isinstance(body, bytes) else (json.dumps(body).encode() if body is not None else b"")
+        if method == "POST":
+            c.putheader("Content-Length", str(len(data)))
+        c.endheaders(data)
+        r = c.getresponse()
+        out = (r.status, dict(r.getheaders()), r.read())
+        c.close()
+        return out
+
+    def post(self, path="/api/tests/1-1", body=None, headers="ok", host="default"):
+        h = {"X-Suivi": "1", "Content-Type": "application/json"} if headers == "ok" else headers
+        return self.req("POST", path, h, {"status": "ok", "comment": "c"} if body is None else body, host)
+
+    def entry_text(self):
+        with open(self.entry) as f:
+            return f.read()
+
+    def test_post_without_the_custom_header_is_403_and_writes_nothing(self):
+        before = self.entry_text()
+        self.assertEqual(self.post(headers={"Content-Type": "text/plain"})[0], 403)
+        self.assertEqual(self.entry_text(), before)
+
+    def test_foreign_origin_is_403(self):
+        before = self.entry_text()
+        h = {"X-Suivi": "1", "Origin": "http://evil.example"}
+        self.assertEqual(self.post(headers=h)[0], 403)
+        self.assertEqual(self.entry_text(), before)
+        h["Origin"] = "http://localhost:%d" % self.port
+        self.assertEqual(self.post(headers=h)[0], 200)
+
+    def test_foreign_host_is_403(self):
+        for host in ("evil.example", "evil.example:%d" % self.port, "127.0.0.1:1", "127.0.0.1"):
+            self.assertEqual(self.req("GET", "/api/state", host=host)[0], 403, host)
+            self.assertEqual(self.post(host=host)[0], 403, host)
+        self.assertEqual(self.req("GET", "/api/state", host="localhost:%d" % self.port)[0], 200)
+
+    def test_unsafe_ids_are_400(self):
+        for tid in ("../x", ".hidden", "a%2Fb", "a/b", ".."):
+            self.assertEqual(self.post("/api/tests/" + tid)[0], 400, tid)
+        self.assertEqual(self.req("GET", "/qcm/../x")[0], 400)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "x.json")))
+
+    def test_big_body_is_413(self):
+        before = self.entry_text()
+        status = self.post(body=b'{"comment":"%s"}' % (b"x" * (256 * 1024 + 10)))[0]
+        self.assertEqual(status, 413)
+        self.assertEqual(self.entry_text(), before)
+
+    def test_options_grants_no_cross_origin_access(self):
+        status, headers, _ = self.req("OPTIONS", "/api/tests/1-1", {"Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+        status, headers, _ = self.req("OPTIONS", "/api/tests/1-1")
+        self.assertEqual(status, 204)
+        self.assertEqual([k for k in headers if k.lower().startswith("access-control-")], [])
+        _, headers, _ = self.req("GET", "/api/state")
+        self.assertEqual([k for k in headers if k.lower().startswith("access-control-")], [])
+
+    def test_listens_on_loopback_only(self):
+        listening = []
+        for f in ("/proc/net/tcp", "/proc/net/tcp6"):
+            with open(f) as fh:
+                for line in fh.read().splitlines()[1:]:
+                    cols = line.split()
+                    addr, port = cols[1].split(":")
+                    if cols[3] == "0A" and int(port, 16) == self.port:
+                        listening.append((f, addr))
+        self.assertEqual(listening, [("/proc/net/tcp", "0100007F")])
+
+    def test_valid_post_updates_the_file_and_the_state(self):
+        status, _, _ = self.post(body={"status": "retour", "comment": "no good"})
+        self.assertEqual(status, 200)
+        t = json.loads(self.entry_text())
+        self.assertEqual((t["status"], t["comment"], t["title"]), ("retour", "no good", "T"))
+        self.assertRegex(t["reviewed"], r"^\d{4}-\d{2}-\d{2}T")
+        self.assertEqual([x for x in os.listdir(os.path.dirname(self.entry)) if x.startswith(".")], [])
+        st = json.loads(self.req("GET", "/api/state")[2])
+        self.assertEqual([(x["id"], x["status"]) for x in st["tests"]], [("1-1", "retour")])
+        self.assertEqual(self.post(body={"status": "nonsense"})[0], 400)
+        self.assertEqual(self.post("/api/tests/9-9")[0], 404)
+
+    def test_etag_and_304(self):
+        status, headers, body = self.req("GET", "/api/state")
+        self.assertEqual(status, 200)
+        tag = headers["ETag"]
+        self.assertEqual(self.req("GET", "/api/state", {"If-None-Match": tag})[0], 304)
+        self.post(body={"comment": "new"})
+        status, headers2, _ = self.req("GET", "/api/state", {"If-None-Match": tag})
+        self.assertEqual(status, 200)
+        self.assertNotEqual(headers2["ETag"], tag)
+
+    def test_state_colours_match_status_json(self):
+        st = json.loads(self.req("GET", "/api/state")[2])
+        self.assertEqual(st["colours"], self.status()["colours"])
+        self.assertEqual(st["paused"], self.status()["paused"])
+        self.assertEqual(st["pending"], 1)
+
+    def test_open_qcm_and_page(self):
+        os.makedirs(os.path.join(self.state, "qcm", "q1"))
+        with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "Form", "progress": {"answered": 2, "total": 5}}, f)
+        st = json.loads(self.req("GET", "/api/state")[2])
+        self.assertEqual([(q["id"], q["issue"]) for q in st["qcms"]], [("q1", 1)])
+        self.assertEqual(st["pending"], 2)
+        status, headers, body = self.req("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn(b"<title>Suivi StokesForge</title>", body)
+        self.assertEqual(self.req("GET", "/qcm/q1")[0], 404)
+
+    def test_port_in_use_exits_1(self):
+        r = subprocess.run([sys.executable, "-I", SUIVI, "serve", "--port", str(self.port), "--state", self.state],
+                           cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already in use", r.stderr)
+
+
+class TestPage(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_script_parses(self):
+        with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:
+            html = f.read()
+        js = re.search(r"<script>(.*)</script>", html, re.S).group(1)
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "page.js")
+            with open(p, "w") as f:
+                f.write(js)
+            r = subprocess.run(["node", "--check", p], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_polls_only_while_visible(self):
+        with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("visibilitychange", html)
+        self.assertIn("document.visibilityState==='visible'", html)
+        self.assertIn("stopPolling()", html)
 
 
 class TestHelp(Base):

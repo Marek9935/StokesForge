@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Suivi StokesForge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one readable column, two tabs; a colour square + issue number leads every row so the eye finds a work package without reading. */
+
+/* Layout: one readable column; colour square + number leads every row so the eye finds a work package without reading. */
+:root{
+  --bg:#f3f5f7; --panel:#ffffff; --fg:#17202b; --muted:#5a6675; --line:#d6dce3;
+  --accent:#1f5f8b; --accent-soft:#e2eef7; --accent-fg:#ffffff;
+  --ok:#1d7a46; --ok-soft:#e1f3e8; --warn:#9a5b00; --warn-soft:#fbefd9; --bad:#b3261e; --bad-soft:#fbe4e2;
+  --c-blue:#2f6fde; --c-green:#2e9e57; --c-orange:#e07b16; --c-purple:#8a4fd1; --c-red:#d23b32; --c-yellow:#e5b800;
+  --font:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12171d; --panel:#1b222b; --fg:#e8edf2; --muted:#9aa7b5; --line:#2e3844;
+  --accent:#6fb1e3; --accent-soft:#1d3346; --accent-fg:#0d1620;
+  --ok:#5fcf8c; --ok-soft:#173327; --warn:#f0b452; --warn-soft:#3a2c14; --bad:#f08a82; --bad-soft:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12171d; --panel:#1b222b; --fg:#e8edf2; --muted:#9aa7b5; --line:#2e3844;
+  --accent:#6fb1e3; --accent-soft:#1d3346; --accent-fg:#0d1620;
+  --ok:#5fcf8c; --ok-soft:#173327; --warn:#f0b452; --warn-soft:#3a2c14; --bad:#f08a82; --bad-soft:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:17px;line-height:1.5;margin:0}
+.wrap{max-width:760px;margin-inline:auto;padding-block:20px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+h1{font-size:1.7rem;margin:0;text-wrap:balance}
+h2{font-size:1.15rem;margin:0;display:flex;align-items:center;gap:10px}
+.count{display:inline-flex;min-width:2rem;justify-content:center;padding:1px 10px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-size:1rem}
+.sub{color:var(--muted);margin:4px 0 0}
+section{display:flex;flex-direction:column;gap:12px}
+.sq{flex:none;width:30px;height:30px;border-radius:7px;background:var(--muted)}
+.sq.blue{background:var(--c-blue)} .sq.green{background:var(--c-green)} .sq.orange{background:var(--c-orange)}
+.sq.purple{background:var(--c-purple)} .sq.red{background:var(--c-red)} .sq.yellow{background:var(--c-yellow)}
+.num{font-weight:700;font-variant-numeric:tabular-nums}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.head{display:flex;align-items:center;gap:12px;min-width:0}
+.head .t{min-width:0;overflow-wrap:anywhere}
+.steps{display:flex;flex-wrap:wrap;gap:6px}
+.st{padding:2px 10px;border-radius:99px;border:2px solid var(--line);color:var(--muted);font-size:.9rem}
+.st.done{border-color:var(--ok);color:var(--ok)}
+.st.cur{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
+.wait{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.wait.dep{background:var(--accent-soft);color:var(--accent)}
+.wait.ag{background:var(--bg);color:var(--muted);border:1px solid var(--line);font-weight:400}
+.what{color:var(--muted)}
+.rows{display:flex;flex-direction:column;gap:12px}
+.slot{display:flex;flex-direction:column;gap:8px}
+.free{display:flex;align-items:center;gap:12px;padding:10px 16px}
+.free .sq{opacity:.4}
+.since{color:var(--muted);font-size:.85rem}
+.since.late{color:var(--warn);font-weight:700}
+.flag{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips code{font-family:var(--mono);font-size:.92rem;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--fg)}
+.where{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.where code{font-family:var(--mono);font-size:.92rem;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--fg)}
+.where .sep{color:var(--muted)}
+.lbl{font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
+.expect{border-left:4px solid var(--ok);padding-left:12px}
+.meta{color:var(--muted);font-size:.85rem}
+.acts{display:flex;flex-wrap:wrap;gap:10px}
+button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font-weight:700}
+button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.ok{border-color:var(--ok);color:var(--ok)}
+button.ok.on{background:var(--ok);color:var(--panel)}
+button.back{border-color:var(--bad);color:var(--bad)}
+button.back.on{background:var(--bad);color:var(--panel)}
+button.save{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;border:2px solid var(--line);background:var(--bg);color:var(--fg);resize:vertical}
+.box.isok{opacity:.75}
+.box.isback{border-color:var(--bad)}
+.banner{border:2px solid var(--warn);background:var(--warn-soft);color:var(--fg);border-radius:12px;padding:12px 16px;font-weight:700}
+.empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
+details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
+.note{color:var(--muted);font-size:.9rem}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.tabs{display:flex;gap:8px;border-bottom:2px solid var(--line);position:sticky;top:0;background:var(--bg);padding-top:8px;z-index:2}
+.tab{border:0;border-bottom:4px solid transparent;border-radius:0;background:none;padding:10px 14px;color:var(--muted);display:inline-flex;gap:8px;align-items:center}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.tab .count{font-size:.9rem;padding:0 8px;min-width:1.6rem}
+.tab .count.hot{background:var(--warn-soft);color:var(--warn)}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.panel[hidden]{display:none}
+.panel{display:flex;flex-direction:column;gap:28px}
+a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8px 14px;border:2px solid var(--accent);color:var(--accent);font-weight:700}
+.legacy{align-self:flex-start;padding:3px 12px;border-radius:99px;border:2px dashed var(--warn);color:var(--warn);font-weight:700}
+.free{border-style:dashed}
+.problem{color:var(--bad);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Suivi StokesForge</h1>
+      <p class="sub" id="sub">Chargement…</p>
+    </div>
+    <button type="button" id="refresh">Actualiser</button>
+  </header>
+  <div class="tabs" role="tablist" aria-label="Pages">
+    <button class="tab" role="tab" id="tab-attente" aria-controls="p-attente" type="button">En attente <span class="count" id="n-pending">–</span></button>
+    <button class="tab" role="tab" id="tab-suivi" aria-controls="p-suivi" type="button">Suivi</button>
+  </div>
+
+  <div class="panel" id="p-attente" role="tabpanel" aria-labelledby="tab-attente">
+    <div class="banner" id="banner" hidden></div>
+    <section aria-labelledby="h-qcm">
+      <h2 id="h-qcm">Questionnaires <span class="count" id="n-qcm">–</span></h2>
+      <div id="qcm" class="rows"></div>
+    </section>
+    <section aria-labelledby="h-todo">
+      <h2 id="h-todo">À tester <span class="count" id="n-todo">–</span></h2>
+      <div id="todo" class="rows"></div>
+    </section>
+    <section aria-labelledby="h-back">
+      <h2 id="h-back">Retours envoyés <span class="count" id="n-back">–</span></h2>
+      <div id="back" class="rows"></div>
+    </section>
+    <details id="done-wrap"><summary>Testé et OK (<span id="n-done">0</span>)</summary><div id="done" class="rows"></div></details>
+  </div>
+
+  <div class="panel" id="p-suivi" role="tabpanel" aria-labelledby="tab-suivi" hidden>
+    <section aria-labelledby="h-cur">
+      <h2 id="h-cur">Couleurs <span class="count" id="n-cur">–</span></h2>
+      <div id="cur" class="rows"></div>
+    </section>
+    <details id="paused-wrap"><summary>En pause (<span id="n-paused">0</span>)</summary><div id="paused" class="rows"></div></details>
+    <details id="finished-wrap"><summary>Terminés, les 10 derniers (<span id="n-finished">0</span>)</summary><div id="finished" class="rows"></div></details>
+    <div id="foot" class="note"></div>
+  </div>
+  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « C’est bon », tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
+</div>
+<script>
+const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
+const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
+const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
+const HELD={agent:'Un agent y travaille',qcm:'Un questionnaire attend tes réponses',essai:'Un essai attend tes cases'};
+const $=id=>document.getElementById(id);
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+let S=null,etag=null,timer=null,openBack=null,failed=false;
+const drafts={};
+function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
+
+/* ---- shared pieces ---- */
+function head(x,extra){
+  const h=el('div','head');
+  const sq=el('span','sq '+(COL[x.colour]||''));sq.setAttribute('aria-hidden','true');h.appendChild(sq);
+  const t=el('div','t');t.appendChild(el('span','num','#'+(x.n??x.issue??'?')+' '));t.appendChild(document.createTextNode(x.name||''));
+  if(extra){t.appendChild(el('div','what',extra));}
+  h.appendChild(t);return h;
+}
+function dayText(iso,days,prefix){
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));if(!m)return null;
+  const d=new Date(+m[1],+m[2]-1,+m[3]);
+  return (prefix||'depuis le ')+d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+(days>0?' · '+days+' j':'');
+}
+function sinceEl(iso,days,prefix){
+  const t=dayText(iso,days,prefix);if(!t)return null;
+  return el('div','since'+(days>=7?' late':''),t);
+}
+function waitEl(c){
+  const kind=c.wait_kind||'';
+  const txt=typeof c.waiting==='string'?c.waiting:'';
+  if(kind==='you')return el('span','wait','T’attend : '+(txt||'ta réponse'));
+  if(kind==='dep')return el('span','wait dep','Attend : '+(txt||'une autre étape'));
+  if(kind==='ag')return el('span','wait ag',txt||'Un agent travaille');
+  const h=c.held_by||[];
+  if(h.includes('qcm'))return el('span','wait','T’attend : tes réponses au questionnaire');
+  if(h.includes('essai'))return el('span','wait','T’attend : tes cases dans À tester');
+  if(h.includes('agent'))return el('span','wait ag','Un agent travaille');
+  return null;
+}
+function agoText(iso){
+  const t=Date.parse(iso);if(isNaN(t))return '';
+  const m=Math.max(0,Math.round((Date.now()-t)/60000));
+  if(m<1)return 'à l’instant';if(m<60)return 'il y a '+m+' min';
+  if(m<1440)return 'il y a '+Math.round(m/60)+' h';return 'il y a '+Math.round(m/1440)+' j';
+}
+
+/* ---- Suivi tab ---- */
+function colourBox(c){
+  const b=el('div','box');
+  const w=(c.worktrees||[]).length;
+  b.appendChild(head({colour:c.colour,n:c.issue,name:c.name},c.what||''));
+  if(c.package&&c.package.subs&&c.package.subs.length){
+    const ch=el('div','chips');c.package.subs.forEach(s=>ch.appendChild(el('code','','#'+s.n+(s.title?' '+s.title:''))));b.appendChild(ch);
+  }
+  const s=el('div','steps');const i=STATES.findIndex(([k])=>k===c.state);
+  STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(j<i?' done':j===i?' cur':''),l)));
+  b.appendChild(s);
+  const h=c.held_by||[];
+  const why=h.filter(k=>HELD[k]).map(k=>HELD[k]);
+  if(why.length)b.appendChild(el('div','what','Couleur tenue : '+why.join(' · ')));
+  if(h.includes('legacy'))b.appendChild(el('span','legacy','état à confirmer par sa session'));
+  const wt=waitEl(c);if(wt)b.appendChild(wt);
+  if(w){const ch=el('div','chips');c.worktrees.forEach(n=>ch.appendChild(el('code','',n)));b.appendChild(ch);}
+  const sn=sinceEl(c.since,c.days);if(sn)b.appendChild(sn);
+  if((c.issues||[]).length>1)b.appendChild(el('span','flag','deux chantiers sur la même couleur : '+c.issues.map(n=>'#'+n).join(', ')));
+  return b;
+}
+function renderSuivi(){
+  const cur=$('cur');cur.replaceChildren();
+  let taken=0;
+  S.colours.forEach(c=>{
+    const slot=el('div','slot');
+    if(c.free){
+      const f=el('div','empty free');const sq=el('span','sq '+COL[c.colour]);sq.setAttribute('aria-hidden','true');
+      f.appendChild(sq);f.appendChild(el('span','','libre'));slot.appendChild(f);
+    }else{taken++;slot.appendChild(colourBox(c));}
+    cur.appendChild(slot);
+  });
+  $('n-cur').textContent=taken+' prises sur 6';
+  const cl=S.colourless||[];
+  if(cl.length){
+    cur.appendChild(el('div','lbl','Dossiers sans couleur'));
+    const ch=el('div','chips');cl.forEach(n=>ch.appendChild(el('code','',n)));cur.appendChild(ch);
+  }
+  const pb=$('paused');pb.replaceChildren();$('n-paused').textContent=S.paused.length;
+  if(!S.paused.length)pb.appendChild(el('div','empty','Rien en pause.'));
+  S.paused.forEach(p=>{
+    const b=el('div','box');
+    b.appendChild(head({colour:p.last_colour,n:p.issue,name:(p.kind==='package'?'Paquet · ':'')+p.name},p.what||'Rien noté sur ce qui reste.'));
+    b.appendChild(el('div','meta',(p.worktrees&&p.worktrees.length?'Dossier de travail : oui ('+p.worktrees.join(', ')+')':'Dossier de travail : non')));
+    const sn=sinceEl(p.since,p.days,'en pause depuis le ');if(sn)b.appendChild(sn);
+    pb.appendChild(b);
+  });
+  const fb=$('finished');fb.replaceChildren();$('n-finished').textContent=S.done.length;
+  if(!S.done.length)fb.appendChild(el('div','empty','Rien de terminé pour l’instant.'));
+  S.done.forEach(d=>{
+    const b=el('div','box isok');b.appendChild(head({n:d.issue,name:d.name},null));
+    b.appendChild(el('div','since',dayText(d.done_at,0,'terminé le ')||''));fb.appendChild(b);
+  });
+  const c=S.control;const foot=$('foot');foot.replaceChildren();
+  foot.appendChild(el('div','',c&&c.at?'Vérifié '+agoText(c.at)+(c.by?' par '+c.by:''):'Pas encore vérifié'));
+  (c&&c.problems||[]).forEach(p=>foot.appendChild(el('div','problem',p)));
+}
+
+/* ---- En attente tab ---- */
+function qcmBox(q){
+  const b=el('div','box');b.appendChild(head({n:q.issue,name:q.title||('Questionnaire '+q.id),colour:colourOf(q.issue)},null));
+  if(q.progress)b.appendChild(el('div','meta','Avancement : '+(typeof q.progress==='object'?(q.progress.answered||0)+' / '+(q.progress.total||'?'):q.progress)));
+  const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
+  return b;
+}
+function colourOf(n){
+  const c=S.colours.find(x=>!x.free&&(x.issues||[]).includes(n));if(c)return c.colour;
+  const p=S.paused.find(x=>x.issue===n);return p?p.last_colour:'';
+}
+function testBox(x){
+  const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
+  b.appendChild(head(x,x.title||''));
+  if(Array.isArray(x.where)&&x.where.length){
+    b.appendChild(el('div','lbl','Où'));
+    const w=el('div','where');x.where.forEach((p,i)=>{if(i)w.appendChild(el('span','sep','›'));w.appendChild(el('code','',p));});b.appendChild(w);
+  }
+  if(Array.isArray(x.steps)&&x.steps.length){
+    b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(el('li','',s)));b.appendChild(o);
+  }
+  if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
+  if(x.try){b.appendChild(el('div','lbl','Avant, lance (pas encore fusionné)'));b.appendChild(el('code','',x.try));}
+  const m=[];if(x.date)m.push(String(x.date).slice(0,10));if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
+  if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
+  const editing=openBack&&openBack.id===x.id;
+  if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
+  const a=el('div','acts');
+  const ok=el('button','ok'+(x.status==='ok'?' on':''),x.status==='ok'?'✓ OK':'✓ C’est bon');ok.type='button';ok.id='ok-'+x.id;
+  ok.onclick=()=>send(x,{status:x.status==='ok'?'todo':'ok'});
+  const bk=el('button','back'+(x.status==='retour'?' on':''),'Retour');bk.type='button';bk.id='bk-'+x.id;
+  bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
+  const cm=el('button','',x.comment?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
+  cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
+  a.appendChild(ok);a.appendChild(bk);a.appendChild(cm);b.appendChild(a);
+  if(editing){
+    const retour=openBack.mode==='retour';
+    const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
+    t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':'Une remarque, une idée, une précision';
+    t.oninput=()=>{drafts[x.id]=t.value;};
+    const r=el('div','acts');
+    const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';
+    sv.onclick=()=>{const v=t.value.trim();if(retour&&!v){t.focus();return;}openBack=null;delete drafts[x.id];send(x,retour?{status:'retour',comment:v}:{comment:v});};
+    const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];renderTests();};
+    r.appendChild(sv);r.appendChild(cn);b.appendChild(t);b.appendChild(r);
+  }
+  return b;
+}
+function renderTests(){
+  if(!S)return;
+  const by=s=>S.tests.filter(x=>(x.status||'todo')===s).sort((a,z)=>String(z.date||'').localeCompare(String(a.date||'')));
+  const todo=by('todo'),back=by('retour'),done=by('ok');
+  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;
+  $('n-qcm').textContent=S.qcms.length;
+  const fill=(id,arr,mk,empty)=>{const box=$(id);box.replaceChildren();
+    if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(mk(x)));};
+  fill('qcm',S.qcms,qcmBox,'Aucun questionnaire ne t’attend.');
+  fill('todo',todo,testBox,'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
+  fill('back',back,testBox,'Aucun retour en attente.');
+  fill('done',done,testBox,'');
+  const bn=$('banner');
+  if(todo.length>=5){bn.hidden=false;bn.textContent=todo.length+' choses attendent ton essai. Tester maintenant aide les prochaines décisions.';}else bn.hidden=true;
+}
+function render(){
+  if(!S)return;
+  const n=S.pending;const pc=$('n-pending');pc.textContent=n;pc.className='count'+(n?' hot':'');
+  const taken=S.colours.filter(c=>!c.free).length;
+  $('sub').textContent=(n?n+' chose'+(n>1?'s':'')+' à faire':'Rien ne t’attend')+' · '+taken+' couleur'+(taken>1?'s':'')+' prise'+(taken>1?'s':'')+' sur 6';
+  renderTests();renderSuivi();
+}
+
+/* ---- tabs ---- */
+function setTab(name,remember){
+  if(name!=='attente'&&name!=='suivi')name='attente';
+  ['attente','suivi'].forEach(k=>{
+    const on=k===name;$('p-'+k).hidden=!on;
+    const t=$('tab-'+k);t.setAttribute('aria-selected',on?'true':'false');t.tabIndex=on?0:-1;
+  });
+  if(remember)store('suivi-tab',name);
+}
+['attente','suivi'].forEach(k=>{$('tab-'+k).onclick=()=>setTab(k,true);});
+document.querySelector('.tabs').addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const k=$('tab-attente').getAttribute('aria-selected')==='true'?'suivi':'attente';setTab(k,true);$('tab-'+k).focus();}
+});
+setTab(new URLSearchParams(location.search).get('tab')||store('suivi-tab')||'attente',false);
+
+/* ---- data ---- */
+async function load(){
+  try{
+    const r=await fetch('/api/state',{headers:etag?{'If-None-Match':etag}:{}});
+    if(r.status===304){failed=false;return;}
+    if(!r.ok)throw new Error(r.status);
+    etag=r.headers.get('ETag');S=await r.json();failed=false;
+    // Do not rebuild under a textarea the user is typing in.
+    if(openBack&&document.activeElement&&document.activeElement.tagName==='TEXTAREA'){
+      $('n-pending').textContent=S.pending;return;}
+    render();
+  }catch(e){failed=true;$('sub').textContent='Le serveur ne répond pas. Il tourne ? systemctl --user status stokesforge-suivi';}
+}
+async function send(x,patch){
+  Object.assign(x,patch);renderTests();
+  try{
+    const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';}
+  etag=null;load();
+}
+function startPolling(){if(timer==null)timer=setInterval(load,2000);}
+function stopPolling(){if(timer!=null){clearInterval(timer);timer=null;}}
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){etag=null;load();startPolling();}else stopPolling();
+});
+$('refresh').onclick=()=>{etag=null;load();};
+load();
+if(document.visibilityState==='visible')startPolling();
+</script>
+</body>
+</html>

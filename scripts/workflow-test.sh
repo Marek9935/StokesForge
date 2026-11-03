@@ -40,7 +40,7 @@ grep -q '^  🟦 #5 Fix axis label  worktree ' "$tmp/out" || fail "tag: $(cat "$
 grep -q 'scripts/try.sh <n>' "$tmp/out" || fail "briefing steps"
 grep -q 'one worktree each, one session' "$tmp/out" || fail "briefing: several issues"
 grep -qx 'Start EVERY message to the user with: 🟦 #5 Fix axis label' "$tmp/out" || fail "briefing: message tag"
-grep -qx 'To-test page: http://127.0.0.1:8441/' "$tmp/out" || fail "briefing: To-test link"
+grep -qx 'Tracking page: http://127.0.0.1:8441/' "$tmp/out" || fail "briefing: tracking page link"
 grep -q 'scripts/suivi.py status' "$tmp/out" || fail "briefing: suivi status step"
 # A one-word domain before a colon keeps the next words.
 SF_ISSUE_TITLE="Workflow: every message of an orchestrator" "$here/chantier.sh" --dry-run 6 > "$tmp/out6"; grep -q "^  🟦 #6 Workflow every message  worktree " "$tmp/out6" || fail "domain prefix name: $(cat "$tmp/out6")"

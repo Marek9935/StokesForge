@@ -8,7 +8,7 @@
 # in these helpers.
 
 SF_COLOURS=(🟦 🟩 🟧 🟪 🟥 🟨)
-# The To-test page, served locally by the work-package server (#441).
+# The tracking page, served locally by the work-package server (#441).
 SF_TO_TEST_URL="http://127.0.0.1:8441/"
 
 # Main checkout (absolute), whichever worktree we run from.
