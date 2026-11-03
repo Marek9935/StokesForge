@@ -1,0 +1,1295 @@
+#!/usr/bin/env python3
+"""Work-package colours and who holds them (#441). Standard library only.
+
+    python3 -I scripts/suivi.py <command> ...
+
+The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
+
+    issues/<n>.json        one record per issue: colour, last_colour, kind
+                           (issue|package), parent, subs, name, state, waiting,
+                           wait_kind, what, since, owner{session,pid,pid_start,at},
+                           done_at
+    ended/<session_id>     empty files touched by the SessionEnd hook
+    qcm/<id>/data.js       the decisions (injected into the form template when served)
+    qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
+    qcm/<id>/answers/<code>.json   one record per card (written by the page's POST)
+    tests/<n>-<k>.json     trial entry: title, where, steps, expect, try, commit, date,
+                           status (todo|ok|retour), comment, reviewed (written by the
+                           page's POST and by `test add|merged`)
+    control.json           result of the last `check`
+
+THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
+owns it is alive, or (b) one of its QCMs is open, or (c) one of its trial entries
+(with a `try` field) is still todo. Otherwise it is PAUSED: the colour is free,
+the worktree stays. On resume (`claim`) the issue gets its previous colour back if
+nobody took it, else the first free one. "Held" is computed when read, never
+stored: a crash pauses an issue with no process left to write.
+
+Writes go through a temporary file and os.replace. Colour allocation takes the
+directory lock ../_stokesforge/.colour.lock (same lock as chantier.sh). Reads take
+no lock. Test seams: SF_SUIVI_DIR, SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
+SF_SUIVI_SLOW (seconds slept inside a claim's critical section).
+
+A record migrated from the old layout carries `legacy: true`: it counts as held
+until the issue is claimed, paused or done (its session is unknown).
+
+Commands: claim, status, set, pause, done, release-line, check, migrate,
+members, is-package, session-end, serve (the local page, 127.0.0.1 only),
+test add|merged|list, qcm pose|answers|list, import-online.
+"""
+import argparse
+import datetime
+import errno
+import glob
+import hashlib
+import html
+import http.server
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+COLOURS = ["🟦", "🟩", "🟧", "🟪", "🟥", "🟨"]
+STATES = ["questions", "code", "essai", "fusion"]
+WAIT_KINDS = ["you", "dep", "ag"]
+
+
+class Fail(Exception):
+    pass
+
+
+# --------------------------------------------------------------- fixed lines
+# The lines printed by pause, done and release-line: the user reads them in the
+# orchestrator's report, copied as they are.
+# lang: fr begin
+def colour_line(kind, *a):
+    if kind == "freed":
+        return "Couleur %s libérée." % a[0]
+    if kind == "kept":
+        return "Couleur %s reste prise : %s" % (a[0], a[1])
+    if kind == "nocolour":
+        return "Ce dossier ne tenait aucune couleur."
+    if kind == "paused":
+        return "Paquet #%s en pause : couleur %s libérée." % (a[0], a[1])
+    if kind == "paused-issue":
+        return "Dossier #%s en pause : couleur %s libérée." % (a[0], a[1])
+    if kind == "paused-already":
+        return "#%s déjà en pause (aucune couleur prise)." % a[0]
+    if kind == "done-paused":
+        return "Paquet #%s terminé (il n'avait plus de couleur)." % a[0]
+    if kind == "done-issue":
+        return "Dossier #%s terminé (il n'avait plus de couleur)." % a[0]
+    if kind == "reason-package":
+        return "paquet #%s, prochaine sous-issue ; après la dernière : scripts/chantier.sh --done %s" % (a[0], a[0])
+    if kind == "reason-qcm":
+        return "un QCM de l'issue est ouvert"
+    if kind == "reason-legacy":
+        return "état à confirmer par sa session"
+    if kind == "reason-trial":
+        return "un essai de l'issue est en attente"
+    raise ValueError(kind)
+# lang: fr end
+
+
+# ------------------------------------------------------------------- paths
+def git(*args, cwd=None):
+    r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def main_dir():
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    return os.path.dirname(common) if common else ""
+
+
+def suivi_dir():
+    env = os.environ.get("SF_SUIVI_DIR")
+    if env:
+        return os.path.abspath(env)
+    m = main_dir()
+    if not m:
+        raise Fail("not inside the StokesForge repository (and SF_SUIVI_DIR is not set)")
+    return os.path.abspath(os.path.join(os.path.dirname(m), "_stokesforge", ".suivi"))
+
+
+def lock_dir():
+    return os.path.join(os.path.dirname(suivi_dir()), ".colour.lock")
+
+
+def worktrees():
+    """Paths of the linked worktrees (every one but the main checkout)."""
+    m = main_dir()
+    if not m:
+        return []
+    out = git("-C", m, "worktree", "list", "--porcelain")
+    paths = [l[len("worktree "):] for l in out.splitlines() if l.startswith("worktree ")]
+    return [p for p in paths if os.path.realpath(p) != os.path.realpath(m)]
+
+
+def issue_of(path):
+    """Issue number of a worktree: folder feature<n><letters>, else the branch."""
+    mt = re.match(r"^feature(\d+)[a-z]*$", os.path.basename(path))
+    if mt:
+        return int(mt.group(1))
+    br = git("-C", path, "symbolic-ref", "--short", "HEAD")
+    mt = re.match(r"^feature/(\d+)-", br)
+    return int(mt.group(1)) if mt else None
+
+
+def today():
+    t = os.environ.get("SF_TODAY")
+    return datetime.date.fromisoformat(t) if t else datetime.date.today()
+
+
+# ------------------------------------------------------------------ storage
+def write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = os.path.join(os.path.dirname(path), ".%s.tmp.%d" % (os.path.basename(path), os.getpid()))
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def load_all():
+    recs = {}
+    for p in sorted(glob.glob(os.path.join(suivi_dir(), "issues", "*.json"))):
+        r = read_json(p)
+        if isinstance(r, dict) and str(r.get("issue", "")).isdigit():
+            r["issue"] = int(r["issue"])
+            recs[r["issue"]] = r
+    return recs
+
+
+def save(r):
+    write_json(os.path.join(suivi_dir(), "issues", "%d.json" % r["issue"]), r)
+
+
+class Lock:
+    """The colour lock (mkdir is atomic; waits up to 10 s)."""
+
+    def __enter__(self):
+        d = lock_dir()
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        for _ in range(int(float(os.environ.get("SF_SUIVI_LOCK_WAIT", "10")) * 10)):
+            try:
+                os.mkdir(d)
+                return self
+            except FileExistsError:
+                time.sleep(0.1)
+        try:
+            age = int(time.time() - os.stat(d).st_mtime)
+        except OSError:
+            age = -1
+        raise Fail("lock %s is held (age %d s); remove it if no script is running" % (d, age))
+
+    def __exit__(self, *exc):
+        try:
+            os.rmdir(lock_dir())
+        except OSError:
+            pass
+
+
+# -------------------------------------------------------------- held / owner
+def pid_start(pid):
+    """Start time (field 22 of /proc/<pid>/stat), None if gone or a zombie."""
+    try:
+        with open("/proc/%d/stat" % int(pid)) as f:
+            s = f.read()
+        rest = s[s.rindex(")") + 2:].split()
+        if rest[0] == "Z":
+            return None
+        return int(rest[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def owner_alive(r):
+    o = r.get("owner")
+    if not o:
+        return False
+    st = pid_start(o.get("pid", -1))
+    if st is None or st != o.get("pid_start"):
+        return False
+    sid = str(o.get("session", ""))
+    if sid and "/" not in sid:
+        try:
+            if os.stat(os.path.join(suivi_dir(), "ended", sid)).st_mtime > float(o.get("at", 0)):
+                return False
+        except OSError:
+            pass
+    return True
+
+
+def qcm_open(n):
+    for p in glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json")):
+        m = read_json(p)
+        if isinstance(m, dict) and str(m.get("issue")) == str(n) and not m.get("finished"):
+            return True
+    return False
+
+
+def trial_pending(n):
+    for p in glob.glob(os.path.join(suivi_dir(), "tests", "%s-*.json" % n)):
+        t = read_json(p)
+        if isinstance(t, dict) and t.get("status") == "todo" and t.get("try"):
+            return True
+    return False
+
+
+def held_by(r):
+    """Why the issue holds its colour: a list of 'agent', 'qcm', 'essai' (empty = paused)."""
+    if r.get("done_at") or not r.get("colour"):
+        return []
+    why = []
+    if owner_alive(r):
+        why.append("agent")
+    if qcm_open(r["issue"]):
+        why.append("qcm")
+    if trial_pending(r["issue"]):
+        why.append("essai")
+    if r.get("legacy"):
+        why.append("legacy")
+    return why
+
+
+def group_of(r):
+    return r.get("parent") or r["issue"]
+
+
+def pick_colour(recs, r, avoid=()):
+    """Previous colour if free, else the first free; None if all six are held."""
+    taken = {x["colour"] for x in recs.values() if group_of(x) != group_of(r) and held_by(x)}
+    taken |= set(avoid)
+    prev = r.get("colour") or r.get("last_colour")
+    if prev in COLOURS and prev not in taken:
+        return prev
+    return next((c for c in COLOURS if c not in taken), None)
+
+
+def all_taken():
+    return Fail("6 work packages in progress (%s): finish or remove one first (git worktree list)" % "".join(COLOURS))
+
+
+# ------------------------------------------------------------------- claim
+def find_claude_pid():
+    pid = os.getppid()
+    for _ in range(12):
+        try:
+            with open("/proc/%d/comm" % pid) as f:
+                comm = f.read().strip()
+            with open("/proc/%d/stat" % pid) as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return None
+        if "claude" in comm.lower():
+            return pid
+        if ppid <= 1:
+            return None
+        pid = ppid
+    return None
+
+
+def current_owner():
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not sid:
+        return None
+    pid = os.environ.get("CLAUDE_PID")
+    pid = int(pid) if pid and pid.isdigit() else find_claude_pid()
+    start = pid_start(pid) if pid else None
+    if start is None:
+        return None
+    return {"session": sid, "pid": pid, "pid_start": start, "at": time.time()}
+
+
+def new_record(n):
+    return {"issue": n, "kind": "issue", "parent": None, "subs": [], "name": "", "colour": None,
+            "last_colour": None, "state": "questions", "waiting": "", "wait_kind": "", "what": "",
+            "since": None, "owner": None, "done_at": None, "legacy": False}
+
+
+def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False, avoid=()):
+    """Claim issue n in `recs` (memory only). Returns the changed records."""
+    changed = []
+    if parent is not None:
+        p, pc = claim_into(recs, parent, owner, package=True, avoid=avoid)
+        changed += pc
+        r = recs.get(n) or new_record(n)
+        r["parent"] = parent
+        colour = p["colour"]
+    else:
+        r = recs.get(n) or new_record(n)
+        colour = pick_colour(recs, r, avoid)
+        if colour is None:
+            raise all_taken()
+    if r.get("colour") != colour or not held_by(r):
+        r["since"] = today().isoformat()
+    r["colour"] = colour
+    r["done_at"] = None
+    r["legacy"] = False
+    if package or subs is not None:
+        r["kind"] = "package"
+    if subs is not None:
+        r["subs"] = subs
+    if name:
+        r["name"] = name
+    if owner:
+        r["owner"] = owner
+    recs[n] = r
+    return r, changed + [r]
+
+
+def cmd_claim(a):
+    owner = current_owner()
+    if owner is None and not a.dry_run:
+        sys.stderr.write("suivi: no Claude session (CLAUDE_CODE_SESSION_ID / CLAUDE_PID): "
+                         "#%d will not be held by an agent\n" % a.issue)
+    subs = None
+    if a.sub:
+        subs = []
+        for s in a.sub:
+            m, _, t = s.partition("=")
+            subs.append({"n": int(m), "title": t})
+    avoid = a.avoid.split() if a.avoid else []
+    if a.dry_run:
+        recs = load_all()
+        r, _ = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid)
+        print(r["colour"])
+        return 0
+    with Lock():
+        recs = load_all()
+        time.sleep(float(os.environ.get("SF_SUIVI_SLOW", "0")))   # test seam: widens the race window
+        r, changed = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid)
+        for x in changed:
+            save(x)
+    print(r["colour"])
+    return 0
+
+
+# --------------------------------------------------------------------- set
+def need(recs, n):
+    if n not in recs:
+        raise Fail("no work package #%d (run scripts/chantier.sh %d first)" % (n, n))
+    return recs[n]
+
+
+def cmd_set(a):
+    with Lock():
+        recs = load_all()
+        r = need(recs, a.issue)
+        for key, val in (("state", a.state), ("what", a.what), ("waiting", a.waiting), ("wait_kind", a.wait)):
+            if val is not None:
+                r[key] = val
+        save(r)
+    return 0
+
+
+# ------------------------------------------------------------ pause / done
+def free_colour(r):
+    r["last_colour"] = r.get("colour") or r.get("last_colour")
+    r["colour"] = None
+
+
+def cmd_pause(a):
+    with Lock():
+        recs = load_all()
+        r = need(recs, a.issue)
+        was = r.get("colour")
+        r["owner"] = None
+        r["legacy"] = False
+        if not held_by(r):
+            free_colour(r)
+        save(r)
+        label = "paused" if r.get("kind") == "package" else "paused-issue"
+        if r.get("colour"):
+            print(colour_line("kept", r["colour"], why_text(r)))
+        elif was:
+            print(colour_line(label, a.issue, was))
+        else:
+            print(colour_line("paused-already", a.issue))
+    return 0
+
+
+def why_text(r):
+    return ", ".join({"agent": "agent", "qcm": colour_line("reason-qcm"), "essai": colour_line("reason-trial"),
+                      "legacy": colour_line("reason-legacy")}[w]
+                     for w in held_by(r))
+
+
+def cmd_done(a):
+    with Lock():
+        recs = load_all()
+        r = need(recs, a.issue)
+        had = bool(held_by(r))
+        colour = r.get("colour")
+        r["done_at"] = today().isoformat()
+        r["owner"] = None
+        r["legacy"] = False
+        free_colour(r)
+        save(r)
+        if had and colour:
+            print(colour_line("freed", colour))
+        else:
+            print(colour_line("done-paused" if r.get("kind") == "package" else "done-issue", a.issue))
+    return 0
+
+
+def cmd_is_package(a):
+    r = load_all().get(a.issue)
+    return 0 if r and r.get("kind") == "package" else 1
+
+
+def cmd_members(a):
+    recs = load_all()
+    ids = [a.issue] + [x["issue"] for x in recs.values() if x.get("parent") == a.issue]
+    ids += [s["n"] for s in (recs.get(a.issue) or {}).get("subs", [])]
+    print(" ".join(str(i) for i in sorted(set(ids))))
+    return 0
+
+
+def cmd_release_line(a):
+    """The line printed after a worktree of issue n was removed (call it AFTER the removal)."""
+    with Lock():
+        recs = load_all()
+        r = recs.get(a.issue)
+        if r is None or not (r.get("colour") or r.get("last_colour")):
+            print(colour_line("nocolour"))
+            return 0
+        colour = r.get("colour") or r.get("last_colour")
+        sibs = [os.path.basename(w) for w in worktrees() if issue_of(w) == a.issue]
+        reason = None
+        blocking = False
+        if sibs:
+            reason, blocking = ", ".join(sibs), True
+        elif qcm_open(a.issue):
+            reason, blocking = colour_line("reason-qcm"), True
+        elif trial_pending(a.issue):
+            reason, blocking = colour_line("reason-trial"), True
+        elif r.get("parent") and r["parent"] in recs and held_by(recs[r["parent"]]):
+            reason = colour_line("reason-package", r["parent"])
+        if a.mark_done and not blocking:
+            r["done_at"] = today().isoformat()
+            r["owner"] = None
+            r["legacy"] = False
+            free_colour(r)
+            save(r)
+        print(colour_line("kept", colour, reason) if reason else colour_line("freed", colour))
+    return 0
+
+
+# ------------------------------------------------------------------ status
+def days_since(iso):
+    try:
+        d = datetime.date.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return iso, 0
+    return iso, (today() - d).days
+
+
+def build_status():
+    recs = load_all()
+    wts = worktrees()
+    by_issue = {}
+    colourless = []
+    for w in wts:
+        n = issue_of(w)
+        if n in recs:
+            by_issue.setdefault(n, []).append(os.path.basename(w))
+        else:
+            colourless.append(os.path.basename(w))
+    members = {}
+    for r in recs.values():
+        members.setdefault(group_of(r), []).append(r)
+
+    def group_wts(g):
+        return sorted(w for m in members.get(g, []) for w in by_issue.get(m["issue"], []))
+
+    colours = []
+    for c in COLOURS:
+        held = [r for r in recs.values() if r.get("colour") == c and held_by(r)]
+        if not held:
+            colours.append({"colour": c, "free": True})
+            continue
+        groups = sorted({group_of(r) for r in held})
+        g = groups[0]
+        gh = [r for r in held if group_of(r) == g]
+        parent = recs.get(g)
+        pkg = parent if parent and parent.get("kind") == "package" else None
+        lead = next((r for r in gh if r["issue"] != g), gh[0])
+        since, days = days_since(min(r.get("since") or "9999" for r in gh))
+        why = sorted({w for r in gh for w in held_by(r)})
+        colours.append({
+            "colour": c, "free": False, "issue": g, "issues": groups,
+            "package": {"parent": g, "subs": pkg.get("subs", [])} if pkg else None,
+            "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
+            "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
+            "held_by": why, "worktrees": group_wts(g), "since": since, "days": days})
+    paused, done = [], []
+    for r in recs.values():
+        if r.get("done_at"):
+            done.append({"issue": r["issue"], "name": r.get("name", ""), "done_at": r["done_at"]})
+        elif not held_by(r) and r.get("parent") is None:
+            since, days = days_since(r.get("since"))
+            paused.append({"issue": r["issue"], "kind": r.get("kind", "issue"), "name": r.get("name", ""),
+                           "last_colour": r.get("colour") or r.get("last_colour"), "subs": r.get("subs", []),
+                           "what": r.get("what", ""), "worktrees": group_wts(r["issue"]), "since": since, "days": days})
+        elif not held_by(r):
+            since, days = days_since(r.get("since"))
+            paused.append({"issue": r["issue"], "kind": "issue", "parent": r["parent"], "name": r.get("name", ""),
+                           "last_colour": r.get("colour") or r.get("last_colour"), "subs": [],
+                           "what": r.get("what", ""), "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
+    done.sort(key=lambda d: (d["done_at"], d["issue"]), reverse=True)
+    return {"colours": colours, "paused": sorted(paused, key=lambda p: p["issue"]),
+            "colourless": sorted(colourless), "done": done}
+
+
+def cmd_status(a):
+    s = build_status()
+    if a.json:
+        json.dump(s, sys.stdout, ensure_ascii=False, indent=1)
+        print()
+        return 0
+    for e in s["colours"]:
+        if e["free"]:
+            print(e["colour"], "free")
+            continue
+        if e["package"]:
+            who = "package #%d (%s)" % (e["package"]["parent"], ", ".join("#%d" % x["n"] for x in e["package"]["subs"]))
+        else:
+            who = "#%d" % e["issue"]
+        flag = "  CONFLICT: " + ", ".join("#%d" % i for i in e["issues"]) if len(e["issues"]) > 1 else ""
+        parts = [e["colour"], who, e["name"], "[%s]" % e["state"] if e["state"] else "",
+                 "held by " + "+".join(e["held_by"]), " ".join(e["worktrees"]),
+                 "since", e["since"], "(%d d)" % e["days"] + flag]
+        print(" ".join(p for p in parts if p))
+    if s["colourless"]:
+        print("no colour:", " ".join(s["colourless"]))
+    for p in s["paused"]:
+        what = "package #%d" % p["issue"] if p["kind"] == "package" else "#%d" % p["issue"]
+        print("paused: %s %s since %s (%d d) %s" % (what, p["name"], p["since"], p["days"], " ".join(p["worktrees"])))
+    return 0
+
+
+# ------------------------------------------------------------------- check
+def cmd_check(a):
+    recs = load_all()
+    wts = worktrees()
+    problems = []
+    seen = {}
+    for r in recs.values():
+        if held_by(r):
+            seen.setdefault(r["colour"], set()).add(group_of(r))
+    for c, groups in seen.items():
+        if len(groups) > 1:
+            problems.append("colour %s is held by %s" % (c, ", ".join("#%d" % g for g in sorted(groups))))
+    wt_issues = {issue_of(w) for w in wts}
+    for r in recs.values():
+        if r.get("kind") != "package" and not r.get("done_at") and r["issue"] not in wt_issues:
+            problems.append("issue #%d has a record but no worktree and is not done" % r["issue"])
+    for w in wts:
+        if issue_of(w) not in recs:
+            problems.append("worktree %s has no record" % os.path.basename(w))
+    owner = os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
+    write_json(os.path.join(suivi_dir(), "control.json"),
+               {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": owner, "problems": problems})
+    for p in problems:
+        print(p)
+    return 1 if problems else 0
+
+
+# ----------------------------------------------------------------- migrate
+def cmd_migrate(a):
+    """Create the records of the old layout (git-dir colour files, .packages), once."""
+    with Lock():
+        recs = load_all()
+        made = []
+        pdir = os.path.join(os.path.dirname(suivi_dir()), ".packages")
+        member_of = {}
+        for p in sorted(glob.glob(os.path.join(pdir, "*"))):
+            if not os.path.isfile(p) or not os.path.basename(p).isdigit():
+                continue
+            n = int(os.path.basename(p))
+            lines = open(p, encoding="utf-8").read().split("\n")
+            colour = lines[0].strip() or None
+            subs = []
+            for l in lines[1:]:
+                m, _, t = l.partition("\t")
+                if m.isdigit():
+                    subs.append({"n": int(m), "title": t})
+                    member_of[int(m)] = n
+            since = datetime.date.fromtimestamp(os.path.getmtime(p)).isoformat()
+            if n not in recs:
+                r = new_record(n)
+                r.update(kind="package", subs=subs, colour=colour, last_colour=colour, since=since,
+                         legacy=bool(colour))
+                recs[n] = r
+                save(r)
+                made.append(n)
+        for w in worktrees():
+            n = issue_of(w)
+            if n is None or n in recs:
+                continue
+            f = os.path.join(git("-C", w, "rev-parse", "--absolute-git-dir"), "stokesforge-colour")
+            if not os.path.isfile(f):
+                continue
+            colour = open(f, encoding="utf-8").read().strip() or None
+            r = new_record(n)
+            # Other sessions may be running with no owner recorded: hold the colour until
+            # the issue is claimed, paused or done (the worktree is live, we just listed it).
+            r.update(parent=member_of.get(n), colour=colour, last_colour=colour, legacy=bool(colour),
+                     since=datetime.date.fromtimestamp(os.path.getmtime(f)).isoformat())
+            recs[n] = r
+            save(r)
+            made.append(n)
+    print("migrated: %s" % (" ".join("#%d" % n for n in made) or "nothing to do"))
+    return 0
+
+
+# ------------------------------------------------------------- session-end
+def cmd_session_end(a):
+    """SessionEnd hook: touch ended/<session_id>. Never fails, takes no lock."""
+    try:
+        data = json.loads(sys.stdin.read())
+        sid = str(data["session_id"])
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", sid) or sid in (".", ".."):
+            return 0
+        d = os.path.join(suivi_dir(), "ended")
+        if not os.path.isdir(os.path.dirname(d)):
+            return 0
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, sid)
+        with open(p, "a"):
+            pass
+        os.utime(p, None)
+    except Exception:
+        pass
+    return 0
+
+
+# ------------------------------------------------------------ trial entries
+ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
+TEST_FIELDS = {"title": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
+               "date": str, "colour": str, "name": str}
+TEST_STATUSES = ("todo", "ok", "retour")
+
+
+def safe_id(s):
+    """An id that is one plain file name: no slash, no leading dot."""
+    return bool(s) and ID_RE.fullmatch(s) is not None and not s.startswith(".")
+
+
+def tests_dir():
+    return os.path.join(suivi_dir(), "tests")
+
+
+def test_path(tid):
+    return os.path.join(tests_dir(), tid + ".json")
+
+
+def load_tests(issue=None):
+    out = []
+    for p in sorted(glob.glob(os.path.join(tests_dir(), "*.json"))):
+        tid = os.path.basename(p)[:-5]
+        t = read_json(p)
+        if not safe_id(tid) or not isinstance(t, dict):
+            continue
+        if issue is not None and not tid.startswith("%s-" % issue):
+            continue
+        out.append(dict(t, id=tid))
+    return out
+
+
+def natural(tid):
+    return [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", tid)]
+
+
+def check_entry(e):
+    if not isinstance(e, dict):
+        raise Fail("a trial entry must be a JSON object")
+    for k, v in e.items():
+        if k not in TEST_FIELDS:
+            raise Fail("unknown field %r (allowed: %s)" % (k, ", ".join(sorted(TEST_FIELDS))))
+        if not isinstance(v, TEST_FIELDS[k]):
+            raise Fail("field %r must be a %s" % (k, TEST_FIELDS[k].__name__))
+        if isinstance(v, list) and not all(isinstance(x, str) for x in v):
+            raise Fail("field %r must be a list of strings" % k)
+
+
+def cmd_test_add(a):
+    try:
+        with open(a.file, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail("cannot read %s: %s" % (a.file, e))
+    entries = data if isinstance(data, list) else [data]
+    for e in entries:
+        check_entry(e)
+    rec = load_all().get(a.issue) or {}
+    ids = []
+    with Lock():
+        used = [int(m.group(1)) for t in load_tests(a.issue)
+                for m in [re.fullmatch(r"%d-(\d+)" % a.issue, t["id"])] if m]
+        k = max(used, default=0)
+        for e in entries:
+            k += 1
+            t = dict(e)
+            t.setdefault("colour", rec.get("colour") or rec.get("last_colour") or "")
+            t.setdefault("name", rec.get("name", ""))
+            t.setdefault("date", today().isoformat())
+            t.update(n=a.issue, status="todo")
+            write_json(test_path("%d-%d" % (a.issue, k)), t)
+            ids.append("%d-%d" % (a.issue, k))
+    print(" ".join(ids))
+    return 0
+
+
+def cmd_test_merged(a):
+    if not re.fullmatch(r"[0-9a-fA-F]{4,40}", a.commit):
+        raise Fail("not a commit hash: %r" % a.commit)
+    n = 0
+    with Lock():
+        for t in load_tests(a.issue):
+            if "try" not in t:
+                continue
+            tid = t.pop("id")
+            t.pop("try")
+            t["commit"] = a.commit
+            write_json(test_path(tid), t)
+            n += 1
+    print("%d entr%s merged" % (n, "y" if n == 1 else "ies"))
+    return 0
+
+
+def cmd_test_list(a):
+    for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
+        print("%s\t%s\t%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
+                                "\t(try)" if t.get("try") else ""))
+    return 0
+
+
+def cmd_import_online(a):
+    """Copy the `tests/*` documents of an ArtifactData export into the local state, once."""
+    src = os.path.join(a.out_dir, "tests")
+    if not os.path.isdir(src):
+        raise Fail("no tests/ folder in %s" % a.out_dir)
+    new = same = kept = 0
+    bad = []
+    with Lock():
+        for p in sorted(glob.glob(os.path.join(src, "*.json"))):
+            doc = read_json(p)
+            stem = os.path.basename(p)[:-5]
+            if not isinstance(doc, dict):
+                bad.append(stem)
+                continue
+            tid = str(doc["id"]) if "id" in doc else stem
+            data = doc["data"] if isinstance(doc.get("data"), dict) else doc
+            if not safe_id(tid) or not safe_id(stem):
+                bad.append(tid)
+                continue
+            data = {k: v for k, v in data.items() if k != "id" and not k.startswith("_")}
+            if isinstance(data.get("try"), dict):
+                data.pop("try")
+            dest = test_path(tid)
+            have = read_json(dest)
+            if have is None:
+                write_json(dest, data)
+                new += 1
+            elif have == data:
+                same += 1
+            else:
+                kept += 1      # a local entry wins: it may hold a newer review
+    for b in bad:
+        sys.stderr.write("suivi: skipped unsafe or unreadable document %r\n" % b)
+    print("imported %d, unchanged %d, kept local %d, rejected %d" % (new, same, kept, len(bad)))
+    return 1 if bad else 0
+
+
+# ------------------------------------------------------------------- QCM
+TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, ".claude", "skills",
+                        "stokesforge-bug-report", "references", "decision-form.html")
+# lang: fr
+DATA_START = "/* DONNÉES — début"
+DATA_END = "/* DONNÉES — fin */"
+
+
+def read_template():
+    try:
+        with open(TEMPLATE, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        raise Fail("cannot read the form template %s: %s" % (os.path.normpath(TEMPLATE), e))
+
+
+def inject_qcm(data, title):
+    """The template with `data` between the DONNÉES markers and `title` in <title>."""
+    t = read_template()
+    i = t.find(DATA_START)
+    j = t.find(DATA_END)
+    k = t.find("*/", i)
+    if i < 0 or j < 0 or k < 0 or j < i:
+        raise Fail("the template has lost its DONNÉES markers")
+    if "</script" in data.lower():
+        raise Fail("data.js must not contain </script")
+    t = t[:i] + DATA_START + " */\n" + data.strip("\n") + "\n" + t[j:]
+    if title:
+        t = re.sub(r"<title>.*?</title>", lambda m: "<title>%s</title>" % html.escape(title, quote=False), t, count=1)
+    return t
+
+
+def node_run(code, label):
+    if not shutil.which("node"):
+        raise Fail("node is required to check a form but is not installed")
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "check.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(code)
+        r = subprocess.run(["node", p], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise Fail("%s does not run:\n%s" % (label, r.stderr.strip()))
+    return r.stdout
+
+
+def check_form(data):
+    """Syntax-check the page script built with `data`, evaluate the data, return the number of cards."""
+    page = inject_qcm(data, "")
+    m = re.search(r"<script>(.*)</script>", page, re.S)
+    if not m:
+        raise Fail("the template has no script")
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "page.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(m.group(1))
+        if not shutil.which("node"):
+            raise Fail("node is required to check a form but is not installed")
+        r = subprocess.run(["node", "--check", p], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            raise Fail("the form script has a syntax error:\n%s" % r.stderr.strip())
+    head = read_template()
+    head = head[head.index("<script>") + len("<script>"):head.index(DATA_START)]
+    out = node_run(head + "\n" + data + "\nprocess.stdout.write(String(D.length));", "data.js")
+    try:
+        n = int(out)
+    except ValueError:
+        raise Fail("data.js defines no D array")
+    if n < 1:
+        raise Fail("data.js defines no card")
+    return n
+
+
+def cmd_qcm_pose(a):
+    try:
+        with open(a.data, encoding="utf-8") as f:
+            data = f.read()
+    except OSError as e:
+        raise Fail("cannot read %s: %s" % (a.data, e))
+    cards = check_form(data)
+    base = os.path.join(suivi_dir(), "qcm")
+    ks = [int(x.rsplit("-", 1)[1]) for x in (os.listdir(base) if os.path.isdir(base) else [])
+          if re.fullmatch(r"%d-\d+" % a.issue, x)]
+    qid = "%d-%d" % (a.issue, max(ks, default=0) + 1)
+    d = qcm_dir(qid)
+    os.makedirs(os.path.join(d, "answers"))
+    with open(os.path.join(d, "data.js"), "w", encoding="utf-8") as f:
+        f.write(data)
+    write_json(os.path.join(d, "meta.json"), {"issue": a.issue, "title": a.title or "", "created": today().isoformat(),
+                                              "cards": cards, "finished": False})
+    print(qid)
+    print("http://127.0.0.1:%d/qcm/%s" % (int(os.environ.get("SF_SUIVI_PORT", "8441")), qid))
+    return 0
+
+
+def cmd_qcm_answers(a):
+    meta = read_json(os.path.join(qcm_dir(a.id), "meta.json")) if safe_id(a.id) else None
+    if not isinstance(meta, dict):
+        raise Fail("no such QCM: %s" % a.id)
+    answers = load_answers(a.id)
+    if a.json:
+        print(json.dumps({"id": a.id, "meta": meta, "answers": answers}, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    pr = qcm_progress(a.id, meta)
+    print("QCM %s (issue #%s) %s: %d/%d answered, %s" % (a.id, meta.get("issue"), meta.get("title", ""), pr["answered"],
+                                                          pr["total"], "finished" if meta.get("finished") else "open"))
+    for code in sorted(answers, key=natural):
+        r = answers[code]
+        status = "later" if r.get("statut") == "plus_tard" else ("recommended" if r.get("recommande") else "chosen")
+        line = "%s [%s] %s -> %s" % (code, status, r.get("question", ""), r.get("choix", ""))
+        if r.get("commentaire"):
+            line += " -- " + r["commentaire"]
+        print(line)
+    return 0
+
+
+def cmd_qcm_list(a):
+    for q in all_qcms():
+        if (a.open and q["finished"]) or (a.issue is not None and str(q["issue"]) != str(a.issue)):
+            continue
+        print("%s\tissue #%s\t%d/%d\t%s\t%s" % (q["id"], q["issue"], q["progress"]["answered"], q["progress"]["total"],
+                                                 "finished" if q["finished"] else "open", q["title"]))
+    return 0
+
+
+# ------------------------------------------------------------------ server
+MAX_BODY = 256 * 1024
+PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suivi-page.html")
+# img-src data: lets the inline SVG tab icon load; nothing else is fetched as an image.
+CSP = ("default-src 'none'; img-src data:; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; connect-src 'self'; base-uri 'none'; form-action 'none'; "
+       "frame-ancestors 'none'")
+
+
+def qcm_dir(qid):
+    return os.path.join(suivi_dir(), "qcm", qid)
+
+
+def load_answers(qid):
+    out = {}
+    for p in sorted(glob.glob(os.path.join(qcm_dir(qid), "answers", "*.json"))):
+        code = os.path.basename(p)[:-5]
+        r = read_json(p)
+        if safe_id(code) and isinstance(r, dict):
+            out[code] = r
+    return out
+
+
+def qcm_progress(qid, meta):
+    answered = sum(1 for r in load_answers(qid).values() if r.get("statut") != "plus_tard")
+    return {"answered": answered, "total": meta.get("cards") or 0}
+
+
+def all_qcms():
+    out = []
+    for p in sorted(glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json")), key=natural):
+        qid = os.path.basename(os.path.dirname(p))
+        m = read_json(p)
+        if not safe_id(qid) or not isinstance(m, dict):
+            continue
+        out.append({"id": qid, "issue": m.get("issue"), "title": m.get("title", ""), "finished": bool(m.get("finished")),
+                    "progress": qcm_progress(qid, m), "since": m.get("created", "")})
+    return out
+
+
+def open_qcms():
+    return [q for q in all_qcms() if not q["finished"]]
+
+
+def build_state():
+    s = build_status()
+    tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
+    qcms = open_qcms()
+    return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
+            "done": s["done"][:10], "qcms": qcms, "tests": tests,
+            "control": read_json(os.path.join(suivi_dir(), "control.json")),
+            "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "suivi"
+    protocol_version = "HTTP/1.0"      # one request per connection: a single thread never waits on an idle client
+    timeout = 5
+
+    def log_message(self, *args):
+        pass
+
+    # -- plumbing
+    def send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=()):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", CSP)
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def fail(self, code, msg):
+        self.send(code, msg + "\n")
+
+    def allowed_origins(self):
+        port = self.server.server_address[1]
+        return ("http://127.0.0.1:%d" % port, "http://localhost:%d" % port)
+
+    def guard(self, write=False):
+        """Host (DNS rebinding), Origin (cross-site pages) and the custom header on writes."""
+        port = self.server.server_address[1]
+        if self.headers.get("Host") not in ("127.0.0.1:%d" % port, "localhost:%d" % port):
+            self.fail(403, "forbidden host")
+            return False
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in self.allowed_origins():
+            self.fail(403, "forbidden origin")
+            return False
+        if write and self.headers.get("X-Suivi") != "1":
+            self.fail(403, "missing X-Suivi header")
+            return False
+        return True
+
+    def route(self):
+        return self.path.split("?", 1)[0]
+
+    # -- methods
+    def do_OPTIONS(self):
+        if not self.guard():
+            return
+        self.send(204, extra=[("Allow", "GET, POST, OPTIONS")])
+
+    def do_GET(self):
+        if not self.guard():
+            return
+        path = self.route()
+        if path == "/":
+            try:
+                with open(PAGE, "rb") as f:
+                    page = f.read()
+            except OSError:
+                return self.fail(500, "page missing: %s" % PAGE)
+            return self.send(200, page, "text/html; charset=utf-8")
+        if path == "/api/state":
+            try:
+                body = json.dumps(build_state(), ensure_ascii=False, sort_keys=True).encode("utf-8")
+            except Exception as e:     # a half-written folder must not kill the server
+                return self.fail(500, "state unreadable: %s" % e)
+            etag = '"%s"' % hashlib.sha1(body).hexdigest()[:20]
+            if self.headers.get("If-None-Match") == etag:
+                return self.send(304, extra=[("ETag", etag)])
+            return self.send(200, body, "application/json; charset=utf-8", [("ETag", etag)])
+        if path.startswith("/qcm/"):
+            if not safe_id(path[len("/qcm/"):]):
+                return self.fail(400, "bad id")
+            return self.qcm_page(path[len("/qcm/"):])
+        m = re.fullmatch(r"/api/qcm/([^/]+)/answers", path)
+        if m:
+            qid = m.group(1)
+            meta = read_json(os.path.join(qcm_dir(qid), "meta.json")) if safe_id(qid) else None
+            if not isinstance(meta, dict):
+                return self.fail(404, "no such QCM")
+            body = {"finished": bool(meta.get("finished")), "answers": load_answers(qid)}
+            return self.send(200, json.dumps(body, ensure_ascii=False), "application/json; charset=utf-8")
+        self.fail(404, "not found")
+
+    def qcm_page(self, qid):
+        meta = read_json(os.path.join(qcm_dir(qid), "meta.json"))
+        if not isinstance(meta, dict):
+            return self.fail(404, "no such QCM")
+        try:
+            with open(os.path.join(qcm_dir(qid), "data.js"), encoding="utf-8") as f:
+                data = f.read()
+            html = inject_qcm(data, meta.get("title", ""))
+        except (OSError, Fail) as e:
+            return self.fail(500, "QCM unreadable: %s" % e)
+        self.send(200, html, "text/html; charset=utf-8")
+
+    def do_HEAD(self):
+        self.do_GET()
+
+    def read_body(self):
+        """The JSON body, or None after an error reply."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.fail(400, "bad Content-Length")
+            return None
+        if length < 0:
+            self.fail(400, "bad Content-Length")
+            return None
+        if length > MAX_BODY:
+            left = min(length, 4 * MAX_BODY)       # drain, or the client sees a reset instead of the 413
+            while left > 0:
+                chunk = self.rfile.read(min(65536, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+            self.fail(413, "body larger than %d bytes" % MAX_BODY)
+            return None
+        try:
+            return json.loads(self.rfile.read(length) or b"null")
+        except ValueError:
+            self.fail(400, "body is not JSON")
+            return None
+
+    def do_POST(self):
+        if not self.guard(write=True):
+            return
+        path = self.route()
+        if path.startswith("/api/tests/"):
+            return self.post_test(path[len("/api/tests/"):])
+        m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish)", path)
+        if m:
+            return self.post_qcm(m.group(1), m.group(2))
+        self.fail(404, "not found")
+
+    def post_qcm(self, qid, what):
+        if not safe_id(qid):
+            return self.fail(400, "bad id")
+        mp = os.path.join(qcm_dir(qid), "meta.json")
+        body = self.read_body()
+        if body is None:
+            return
+        meta = read_json(mp)
+        if not isinstance(meta, dict):
+            return self.fail(404, "no such QCM")
+        if what == "finish":
+            meta["finished"] = True
+            meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+            write_json(mp, meta)
+            return self.send(200, json.dumps({"ok": True}), "application/json")
+        if not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"]):
+            return self.fail(400, "expected an object with a safe string code")
+        if not all(isinstance(v, (str, int, bool, type(None))) for v in body.values()):
+            return self.fail(400, "answer fields must be plain values")
+        write_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"), body)
+        self.send(200, json.dumps({"ok": True}), "application/json")
+
+    def post_test(self, tid):
+        if not safe_id(tid):
+            return self.fail(400, "bad id")
+        body = self.read_body()
+        if body is None:
+            return
+        if not isinstance(body, dict) or not ({"status", "comment"} & set(body)):
+            return self.fail(400, "expected an object with status and/or comment")
+        if "status" in body and body["status"] not in TEST_STATUSES:
+            return self.fail(400, "status must be one of %s" % ", ".join(TEST_STATUSES))
+        if "comment" in body and not isinstance(body["comment"], str):
+            return self.fail(400, "comment must be a string")
+        t = read_json(test_path(tid))
+        if not isinstance(t, dict):
+            return self.fail(404, "no such trial entry")
+        for k in ("status", "comment"):
+            if k in body:
+                t[k] = body[k]
+        t["reviewed"] = datetime.datetime.now().isoformat(timespec="seconds")
+        write_json(test_path(tid), t)
+        self.send(200, json.dumps({"ok": True}), "application/json")
+
+    def other(self):
+        if self.guard():
+            self.send(405, "method not allowed\n", extra=[("Allow", "GET, POST, OPTIONS")])
+
+    do_PUT = do_DELETE = do_PATCH = other
+
+
+def cmd_serve(a):
+    port = a.port if a.port is not None else int(os.environ.get("SF_SUIVI_PORT", "8441"))
+    if a.state:
+        os.environ["SF_SUIVI_DIR"] = os.path.abspath(a.state)
+    state = suivi_dir()
+    try:
+        srv = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            raise Fail("port %d is already in use (another suivi.py serve? see `ss -ltnp`)" % port)
+        raise Fail("cannot listen on 127.0.0.1:%d: %s" % (port, e))
+    print("suivi: listening on http://127.0.0.1:%d/ (state %s)" % (srv.server_address[1], state), flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+# -------------------------------------------------------------------- main
+def parser():
+    ap = argparse.ArgumentParser(prog="suivi.py", description=__doc__.split("\n\n")[0], allow_abbrev=False)
+    sp = ap.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, help_):
+        p = sp.add_parser(name, help=help_, allow_abbrev=False)
+        p.set_defaults(fn=fn)
+        return p
+
+    p = add("claim", cmd_claim, "take (or resume) an issue for this session; prints its colour")
+    p.add_argument("issue", type=int)
+    p.add_argument("--parent", type=int)
+    p.add_argument("--name")
+    p.add_argument("--package", action="store_true")
+    p.add_argument("--sub", action="append", metavar="N=TITLE", help="a sub-issue (makes the issue a package)")
+    p.add_argument("--dry-run", action="store_true", help="print the colour it would take, write nothing")
+    p.add_argument("--avoid", help="colours to treat as taken (dry run promises)")
+    p = add("status", cmd_status, "the six colours, paused issues, worktrees without a record")
+    p.add_argument("--json", action="store_true")
+    p = add("set", cmd_set, "state of an issue")
+    p.add_argument("issue", type=int)
+    p.add_argument("--state", choices=STATES)
+    p.add_argument("--what")
+    p.add_argument("--wait", choices=WAIT_KINDS)
+    p.add_argument("--waiting")
+    p = add("pause", cmd_pause, "drop the owner (the colour is freed unless a QCM or a trial holds it)")
+    p.add_argument("issue", type=int)
+    p = add("done", cmd_done, "the issue is finished: colour freed")
+    p.add_argument("issue", type=int)
+    p = add("release-line", cmd_release_line, "the line to report after a worktree of the issue was removed")
+    p.add_argument("issue", type=int)
+    p.add_argument("--mark-done", action="store_true", help="also mark the issue done if nothing holds it")
+    add("check", cmd_check, "list inconsistencies (exit 1 if any)")
+    add("migrate", cmd_migrate, "create records from the old colour files, once")
+    p = add("members", cmd_members, "the issue and its sub-issues")
+    p.add_argument("issue", type=int)
+    p = add("is-package", cmd_is_package, "exit 0 if the issue is a package")
+    p.add_argument("issue", type=int)
+    add("session-end", cmd_session_end, "SessionEnd hook: reads {session_id, reason} on stdin")
+    p = add("serve", cmd_serve, "serve the local tracking page on 127.0.0.1 only")
+    p.add_argument("--port", type=int, help="default 8441 (env SF_SUIVI_PORT); 0 = any free port")
+    p.add_argument("--state", help="state folder (default: ../_stokesforge/.suivi)")
+    t = add("test", None, "trial entries (tests/<n>-<k>.json)").add_subparsers(dest="tcmd", required=True)
+    for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
+                        ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
+                        ("list", cmd_test_list, "list the entries")):
+        q = t.add_parser(name, help=h, allow_abbrev=False)
+        q.set_defaults(fn=fn)
+        if name == "add":
+            q.add_argument("issue", type=int)
+            q.add_argument("file")
+        elif name == "merged":
+            q.add_argument("issue", type=int)
+            q.add_argument("commit")
+        else:
+            q.add_argument("--issue", type=int)
+    q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)
+    for name, fn, h in (("pose", cmd_qcm_pose, "check data.js, create the form qcm/<n>-<k>, print its id and URL"),
+                        ("answers", cmd_qcm_answers, "the answers recorded so far (readable, or --json)"),
+                        ("list", cmd_qcm_list, "list the forms")):
+        x = q.add_parser(name, help=h, allow_abbrev=False)
+        x.set_defaults(fn=fn)
+        if name == "pose":
+            x.add_argument("issue", type=int)
+            x.add_argument("data")
+            x.add_argument("--title", default="")
+        elif name == "answers":
+            x.add_argument("id")
+            x.add_argument("--json", action="store_true")
+        else:
+            x.add_argument("--open", action="store_true")
+            x.add_argument("--issue", type=int)
+    p = add("import-online", cmd_import_online, "import the tests/* documents of an ArtifactData export, once")
+    p.add_argument("out_dir")
+    return ap
+
+
+def main(argv=None):
+    a = parser().parse_args(argv)
+    try:
+        return a.fn(a)
+    except Fail as e:
+        print("suivi: %s" % e, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

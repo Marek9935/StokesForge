@@ -55,6 +55,7 @@ jobs:
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
       - run: scripts/workflow-test.sh
+      - run: python3 scripts/suivi-test.py
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 

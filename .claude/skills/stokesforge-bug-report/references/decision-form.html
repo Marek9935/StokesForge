@@ -1,4 +1,5 @@
 <title>Arbitrages StokesForge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 32'%3E%3Crect x='1' y='1' width='14' height='14' rx='3' fill='%232f6fdb'/%3E%3Crect x='17' y='1' width='14' height='14' rx='3' fill='%232e9e57'/%3E%3Crect x='33' y='1' width='14' height='14' rx='3' fill='%23e8892b'/%3E%3Crect x='1' y='17' width='14' height='14' rx='3' fill='%238a4fd6'/%3E%3Crect x='17' y='17' width='14' height='14' rx='3' fill='%23d6453d'/%3E%3Crect x='33' y='17' width='14' height='14' rx='3' fill='%23e6c229'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
@@ -129,6 +130,15 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .mtree .sel{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent)}
 .mtree .act{font-weight:700} .mtree .off{color:var(--muted)} .mtree .bad{color:var(--bad);font-weight:700}
 .mtree .edit .mf{min-width:120px;padding:0 6px}
+/* Lignes de couleurs : [carré, titre, état, attente, genre you|dep|ag, depuis] ; [carré] seul = libre */
+.mslots{display:flex;flex-direction:column;gap:4px;max-width:520px}
+.mslot{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);font-size:.95rem}
+.mslot.free{color:var(--muted);background:var(--bg);border-style:dashed}
+.mslot .sq{font-size:1.1rem}.mslot .ti{font-weight:700}
+.mslot .wt{padding:0 8px;border-radius:99px;font-size:.85rem;font-weight:700}
+.mslot .wt.you{background:var(--warn-soft);color:var(--warn)}.mslot .wt.dep{background:var(--accent-soft);color:var(--accent)}.mslot .wt.ag{background:var(--line);color:var(--muted)}
+.mslot .since{margin-left:auto;color:var(--muted);font-size:.85rem}
+.fin{display:flex;flex-direction:column;gap:6px;margin-block:10px}
 #intro{display:flex;flex-direction:column;gap:8px;padding-block:8px}
 .itag{font-weight:700;border:2px solid var(--muted);border-radius:6px;padding:1px 8px;white-space:nowrap}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -168,6 +178,8 @@ const sheet=cols=>`<div class="msh">${cols.map(([l,t,c=''])=>`<div class="msc ${
 const flow=(...s)=>`<div class="mflow">${s.map(x=>x==='→'?'<span class="mfa">→</span>':Array.isArray(x)?`<span class="mfb ${x[1]}">${x[0]}</span>`:`<span class="mfb">${x}</span>`).join('')}</div>`;
 // Arbre du Project Manager : lignes [profondeur, texte, c] ; c = sel (sélectionnée) | act (fenêtre active) | off (fenêtre fermée) | bad | edit (champ de renommage)
 const tree=rows=>`<div class="mtree">${rows.map(([d,t,c=''])=>`<span class="${c}" style="padding-left:${10+d*18}px">${c.includes('edit')?f(t):t}</span>`).join('')}</div>`;
+// Lignes de couleurs : [carré, titre, état, attente, genre you|dep|ag, depuis] ; [carré] seul = libre
+const slots=rows=>`<div class="mslots">${rows.map(([sq,ti,st,wt,kd='ag',since])=>ti===undefined?`<div class="mslot free"><span class="sq">${sq}</span><span>libre</span></div>`:`<div class="mslot"><span class="sq">${sq}</span><span class="ti">${ti}</span>${st?`<span>${st}</span>`:''}${wt?`<span class="wt ${kd}">${wt}</span>`:''}${since?`<span class="since">${since}</span>`:''}</div>`).join('')}</div>`;
 // Une option : nom, puces « après », schéma « après », avantage, défaut. La première est la recommandation.
 const O=(t,pts,m,plus,moins)=>({t,pts:pts||[],m:m||'',plus:plus||'',moins:moins||''});
 
@@ -310,7 +322,11 @@ const ORDER=D.slice().sort((a,z)=>(isTech(a)-isTech(z))||(a.p-z.p));
 const gid=d=>isTech(d)?'t':d.p;
 const gname=d=>isTech(d)?'Choix techniques · en général tu prends la recommandation':PN[d.p];
 const itag=d=>{const x=ISSUES[d.is];return x?'<span class="itag">'+esc(x.colour)+' #'+x.n+' '+esc(x.name)+'</span>':'';};
-const KEY='sf-dec-'+ORDER.map(d=>d.c).join(',');
+// Deux modes : local (page servie par scripts/suivi.py sur 127.0.0.1, chemin /qcm/<id>) ou en ligne (claude.ai, capacité db).
+const QID=((location.pathname.match(/^\/qcm\/([A-Za-z0-9_.-]+)\/?$/)||[])[1])||null;
+const LOCAL=!!QID&&(location.hostname==='127.0.0.1'||location.hostname==='localhost');
+const KEY='sf-dec-'+(QID?QID+'-':'')+ORDER.map(d=>d.c).join(',');
+let finished=false, finMsg='';
 let ans={}, cur=0, view='card', confirmAll=false, store=null, sync='';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -325,9 +341,13 @@ function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)
 function save(d){
   lsSet(KEY,JSON.stringify(ans)); lsSet(KEY+'-pos',String(cur));
   const a=ans[d.c];
-  if(store&&a){ store.doc('decisions/'+d.c).set({code:d.c,priorite:d.p,question:d.t,issue:(ISSUES[d.is]||{}).n||null,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString()})
+  if(LOCAL&&a){
+    fetch('/api/qcm/'+QID+'/answer',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(record(d,a))})
+      .then(r=>{if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
+  } else if(store&&a){ store.doc('decisions/'+d.c).set(record(d,a))
     .then(()=>{sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()}); }
 }
+const record=(d,a)=>({code:d.c,priorite:d.p,question:d.t,issue:(ISSUES[d.is]||{}).n||null,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString()});
 function paintSync(){const e=document.querySelector('.sync'); if(e)e.textContent=sync;}
 function stat(d){const a=ans[d.c]; return !a?'':a.skip?'skip':'done';}
 function paintTop(){
@@ -374,6 +394,7 @@ function summary(){
   if(rest){ if(!confirmAll) h+='<button class="sec" id="accAll">Prendre la recommandation pour les '+rest+' restantes…</button>';
     else h+='<div class="confirm"><b>Appliquer la recommandation aux '+rest+' décisions restantes ?</b><span>Tu pourras encore changer chacune ensuite.</span><div class="row2"><button class="primary" id="accAllOk">Oui, appliquer</button><button class="sec" id="accAllNo">Annuler</button></div></div>'; }
   h+='<div><button class="link" id="copy">Copier le résumé</button> <span class="sync" id="copied"></span></div>';
+  if(LOCAL)h+='<div class="fin"><button class="primary" id="finish"'+(finished?' disabled':'')+'>'+(finished?'Envoyé':'J’ai fini')+'</button><span class="sync" id="finmsg">'+esc(finMsg)+'</span></div>';
   let last=0;
   ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+='<div class="grp">'+gname(d)+'</div>';}
     const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
@@ -403,6 +424,9 @@ function render(){
     if(g('accAll'))g('accAll').onclick=()=>{confirmAll=true;render();};
     if(g('accAllNo'))g('accAllNo').onclick=()=>{confirmAll=false;render();};
     if(g('accAllOk'))g('accAllOk').onclick=()=>{ORDER.forEach(d=>{const a=ans[d.c];if(!a||a.skip){ans[d.c]={i:0,note:(a&&a.note)||''};save(d);}});confirmAll=false;render();};
+    if(g('finish'))g('finish').onclick=()=>{ if(finished)return; g('finish').disabled=true;
+      fetch('/api/qcm/'+QID+'/finish',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'})
+        .then(r=>{if(!r.ok)throw 0;finished=true;finMsg='';render();}).catch(()=>{finMsg='Envoi impossible : le serveur de suivi répond-il ?';render();}); };
     g('copy').onclick=()=>{const txt=ORDER.map(d=>d.c+' — '+d.t+' : '+(ans[d.c]?label(d,ans[d.c])+(ans[d.c].note?' ('+ans[d.c].note+')':''):'pas vue')).join('\n');
       const ok=()=>g('copied').textContent='Copié';
       try{navigator.clipboard.writeText(txt).then(ok,()=>g('copied').textContent='Copie refusée');}catch(e){g('copied').textContent='Copie refusée';}};
@@ -412,9 +436,19 @@ $('prev').onclick=()=>go(cur-1);
 $('next').onclick=()=>{ if(cur===ORDER.length-1){view='sum';render();window.scrollTo(0,0);} else go(cur+1); };
 $('skip').onclick=()=>{const d=ORDER[cur];const a=ans[d.c];if(!a||a.i===undefined||a.skip){ans[d.c]={skip:true,note:(a&&a.note)||''};save(d);}go(cur+1);};
 $('goSum').onclick=()=>{view='sum';confirmAll=false;render();window.scrollTo(0,0);};
+if(/[?&]view=sum\b/.test(location.search))view='sum';
 render();
+// Mode local : relit les réponses déjà enregistrées par le serveur (rechargement, autre onglet).
+if(LOCAL)(async()=>{ try{
+  const r=await fetch('/api/qcm/'+QID+'/answers'); if(!r.ok)return; const j=await r.json();
+  finished=!!j.finished;
+  Object.keys(j.answers||{}).forEach(code=>{const x=j.answers[code]; const d=D.find(q=>q.c===code); if(!x||!d||ans[d.c])return;
+    if(x.statut==='plus_tard')ans[d.c]={skip:true,note:x.commentaire||''};
+    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]={i,note:x.commentaire||''}; } });
+  render();
+}catch(e){} })();
 // Base partagée (capacité db) : lue après coup, jamais bloquante ; Claude relit la collection « decisions ».
-(async()=>{ try{
+if(!LOCAL)(async()=>{ try{
   const db=await (window.claude&&window.claude.use?window.claude.use('db'):null); if(!db)return; store=db;
   const snap=await db.collection('decisions').get();
   snap.docs.forEach(s=>{const x=s.data(); const d=D.find(q=>q.c===s.id); if(!x||!d||ans[d.c])return;

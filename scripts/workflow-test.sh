@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Tests of the parallel-orchestrator workflow scripts (#413, #417): colours and
-# briefing, try.sh target, main lock, driver run folders. Everything runs
-# in a throwaway repository; nothing touches the real worktrees.
+# Tests of the parallel-orchestrator workflow scripts (#413, #417, #441): colours
+# (scripts/suivi.py records) and briefing, try.sh target, main lock, driver run
+# folders. Everything runs in a throwaway repository and a throwaway state folder
+# (the sandbox's own ../_stokesforge/.suivi); nothing touches the real worktrees.
 #
 #   scripts/workflow-test.sh
 set -euo pipefail
@@ -17,7 +18,17 @@ git -C "$main" init -q -b main
 git -C "$main" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 cd "$main"
 add_wt() { git worktree add -q "$tmp/_stokesforge/feature$1" -b "feature/$1-x" --no-track main; }
-colour_of() { cat "$(git -C "$tmp/_stokesforge/feature$1" rev-parse --absolute-git-dir)/stokesforge-colour"; }
+suivi() { python3 -I "$here/suivi.py" "$@"; }
+# Field $2 of the record of issue $1 (empty for null); nested owner.session via owner_sid.
+rec() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1]))[sys.argv[2]]; print("" if v is None else v)' "$tmp/_stokesforge/.suivi/issues/$1.json" "$2"; }
+colour_of() { rec "$1" colour; }
+owner_sid() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["owner"]["session"])' "$tmp/_stokesforge/.suivi/issues/$1.json"; }
+# Edit a field of a record (to age it).
+setrec() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d[sys.argv[2]]=sys.argv[3]; json.dump(d,open(p,"w"))' "$tmp/_stokesforge/.suivi/issues/$1.json" "$2" "$3"; }
+# Remove the worktree of issue $1 by hand and mark the issue done (as --release does).
+rmwt() { git worktree remove "$tmp/_stokesforge/feature$1"; suivi done "$1" > /dev/null; }
+# This test plays the Claude session that owns the issues.
+export CLAUDE_CODE_SESSION_ID=sid-1 CLAUDE_PID=$$ SF_TODAY=2026-11-03
 
 # Colours: first free, kept, freed on removal. No session is started.
 export SF_NO_FETCH=1
@@ -29,7 +40,8 @@ grep -q '^  🟦 #5 Fix axis label  worktree ' "$tmp/out" || fail "tag: $(cat "$
 grep -q 'scripts/try.sh <n>' "$tmp/out" || fail "briefing steps"
 grep -q 'one worktree each, one session' "$tmp/out" || fail "briefing: several issues"
 grep -qx 'Start EVERY message to the user with: 🟦 #5 Fix axis label' "$tmp/out" || fail "briefing: message tag"
-grep -q '^To-test page: https://claude.ai/artifact/' "$tmp/out" || fail "briefing: To-test link"
+grep -qx 'Tracking page: http://127.0.0.1:8441/' "$tmp/out" || fail "briefing: tracking page link"
+grep -q 'scripts/suivi.py status' "$tmp/out" || fail "briefing: suivi status step"
 # A one-word domain before a colon keeps the next words.
 SF_ISSUE_TITLE="Workflow: every message of an orchestrator" "$here/chantier.sh" --dry-run 6 > "$tmp/out6"; grep -q "^  🟦 #6 Workflow every message  worktree " "$tmp/out6" || fail "domain prefix name: $(cat "$tmp/out6")"
 SF_ISSUE_TITLE="Workflow: launch a work package" "$here/chantier.sh" --dry-run 6 > "$tmp/out6b"; grep -q "^  🟦 #6 Workflow launch  worktree " "$tmp/out6b" || fail "small word dropped after the domain"
@@ -40,21 +52,26 @@ grep -q 'claude -n\|--add-dir' "$tmp/out" && fail "dry-run still mentions a clau
 export SF_ISSUE_TITLE="Fix axis label"
 "$here/chantier.sh" 1 > "$tmp/run1"
 grep -q '^  🟦 #1 Fix axis label' "$tmp/run1" || fail "real run tag: $(cat "$tmp/run1")"
+eq "$(owner_sid 1)" sid-1 "lance records the owner session"
 # Rerun (after a /clear): same colour, same worktree, nothing new.
 n_before="$(git worktree list | wc -l)"
 "$here/chantier.sh" 1 > "$tmp/rerun1"
 grep -q '^  🟦 #1 Fix axis label' "$tmp/rerun1" || fail "rerun colour: $(cat "$tmp/rerun1")"
 eq "$(git worktree list | wc -l)" "$n_before" "rerun creates nothing"
+# A rerun in a NEW session (after /clear): same colour, new owner.
+CLAUDE_CODE_SESSION_ID=sid-2 "$here/chantier.sh" 1 > "$tmp/rerun2"
+grep -q '^  🟦 #1 Fix axis label' "$tmp/rerun2" || fail "new session keeps the colour: $(cat "$tmp/rerun2")"
+eq "$(owner_sid 1)" sid-2 "rerun records the new owner"
 "$here/chantier.sh" 2 > /dev/null
 eq "$(colour_of 1)" 🟦 "A colour"
 eq "$(colour_of 2)" 🟩 "B colour"
 eq "$(git -C "$tmp/_stokesforge/feature1" rev-parse --abbrev-ref '@{u}' 2>&1 | head -c 5)" fatal "no upstream"
-git worktree remove "$tmp/_stokesforge/feature1"
+rmwt 1
 "$here/chantier.sh" 3 > /dev/null
 eq "$(colour_of 3)" 🟦 "freed colour is reused"
 "$here/chantier.sh" 3 > /dev/null
 eq "$(colour_of 3)" 🟦 "colour kept on rerun"
-[ -f "$tmp/_stokesforge/feature3/stokesforge-colour" ] && fail "colour file in the worktree root"
+[ ! -e "$tmp/_stokesforge/feature3/stokesforge-colour" ] && [ -f "$tmp/_stokesforge/.suivi/issues/3.json" ] || fail "colour lives in .suivi only"
 unset SF_ISSUE_TITLE
 
 # (Colours 🟦 and 🟩 are held by the worktrees 3 and 2 here; the package takes the next one.)
@@ -83,29 +100,30 @@ eq "$(cat "$tmp/order")" "  1. #231 Old form|  2. #220 Second step (#217)|  3. #
 grep -q 'first card of the start form' "$tmp/pkg" || fail "briefing: list is the first card"
 grep -q -- '--start 231' "$tmp/pkg" || fail "briefing: --start hint"
 [ ! -e "$tmp/_stokesforge/feature217" ] && [ ! -e "$tmp/_stokesforge/feature219" ] || fail "worktree created without --start"
-eq "$(head -n 1 "$tmp/_stokesforge/.packages/217")" 🟧 "package colour reserved"
+eq "$(rec 217 colour)" 🟧 "package colour reserved"
+eq "$(rec 217 kind)" package "package record"
 "$here/chantier.sh" 217 --start 219 > "$tmp/pkg2"
 eq "$(colour_of 219)" 🟧 "sub-issue gets the package colour"
 grep -qF 'Start EVERY message to the user with: 🟧 #217 › #219 Rejected fields' "$tmp/pkg2" || fail "sub-issue tag: $(cat "$tmp/pkg2")"
 [ ! -e "$tmp/_stokesforge/feature220" ] || fail "other sub-issue created"
 # The colour stays reserved between two sub-issues; a plain issue takes the next one.
-git worktree remove "$tmp/_stokesforge/feature219"
+rmwt 219
 "$here/chantier.sh" 88 > /dev/null
 eq "$(colour_of 88)" 🟪 "package colour still reserved"
-git worktree remove "$tmp/_stokesforge/feature88"; git branch -q -D feature/88-plain-issue
+rmwt 88; git branch -q -D feature/88-plain-issue
 "$here/chantier.sh" 217 --start 220 > /dev/null
 eq "$(colour_of 220)" 🟧 "second sub-issue, same colour"
 if "$here/chantier.sh" 217 --start 99 2> /dev/null; then fail "--start of a non sub-issue accepted"; fi
 if "$here/chantier.sh" --done 217 2> "$tmp/errd"; then fail "--done accepted with a worktree left"; fi
 grep -q 'still has worktrees' "$tmp/errd" || fail "--done message"
-git worktree remove "$tmp/_stokesforge/feature220"
+rmwt 220
 "$here/chantier.sh" --done 217 > /dev/null
-[ ! -e "$tmp/_stokesforge/.packages/217" ] || fail "--done keeps the reservation"
-"$here/chantier.sh" 88 > /dev/null
-eq "$(colour_of 88)" 🟧 "colour free after --done"
-git worktree remove "$tmp/_stokesforge/feature88"
+[ -n "$(rec 217 done_at)" ] || fail "--done does not mark the package"
+SF_ISSUE_TITLE_89="Plain issue" "$here/chantier.sh" 89 > /dev/null
+eq "$(colour_of 89)" 🟧 "colour free after --done"
+rmwt 89
 # A plain issue (no sub-issue) behaves as before.
-"$here/chantier.sh" --dry-run 88 > "$tmp/out88"; grep -q '^  🟧 #88 Plain issue  worktree ' "$tmp/out88" || fail "plain issue changed"
+SF_ISSUE_TITLE_89="Plain issue" "$here/chantier.sh" --dry-run 89 > "$tmp/out89"; grep -q '^  🟧 #89 Plain issue  worktree ' "$tmp/out89" || fail "plain issue changed"
 unset SF_ISSUE_BODY_217 SF_ISSUE_TITLE_217 SF_ISSUE_TITLE_88
 export SF_ISSUES_JSON="$tmp/none.json"
 
@@ -116,16 +134,13 @@ grep -qF '🟪 #8 Frames follow  worktree' <<< "$out" || fail "two-issue tag 8: 
 SF_ISSUE_TITLE_7="Graph size: width and height fields" SF_ISSUE_TITLE_8="Frames follow the axes" "$here/chantier.sh" 7 8 > /dev/null
 [ -d "$tmp/_stokesforge/feature7" ] && [ -d "$tmp/_stokesforge/feature8" ] || fail "two issues, two worktrees"
 eq "$(colour_of 7)$(colour_of 8)" 🟧🟪 "two-issue colours"
-for k in 7 8; do git worktree remove "$tmp/_stokesforge/feature$k"; done
-for k in 11 12 13; do add_wt "$k"; done
-printf '%s\n' 🟧 > "$(git -C "$tmp/_stokesforge/feature11" rev-parse --absolute-git-dir)/stokesforge-colour"
-printf '%s\n' 🟪 > "$(git -C "$tmp/_stokesforge/feature12" rev-parse --absolute-git-dir)/stokesforge-colour"
-printf '%s\n' 🟥 > "$(git -C "$tmp/_stokesforge/feature13" rev-parse --absolute-git-dir)/stokesforge-colour"
-add_wt 14; printf '%s\n' 🟨 > "$(git -C "$tmp/_stokesforge/feature14" rev-parse --absolute-git-dir)/stokesforge-colour"
+for k in 7 8; do rmwt "$k"; done
+for k in 11 12 13 14; do add_wt "$k"; suivi claim "$k" > /dev/null; done
+eq "$(colour_of 11)$(colour_of 12)$(colour_of 13)$(colour_of 14)" 🟧🟪🟥🟨 "six colours held"
 if SF_ISSUE_TITLE="Seventh" "$here/chantier.sh" 9 2> "$tmp/err7"; then fail "seventh work package accepted"; fi
 grep -q '6 work packages in progress (🟦🟩🟧🟪🟥🟨)' "$tmp/err7" || fail "seventh message: $(cat "$tmp/err7")"
 [ ! -e "$tmp/_stokesforge/feature9" ] || fail "seventh worktree created"
-for k in 11 12 13 14; do git worktree remove "$tmp/_stokesforge/feature$k"; done
+for k in 11 12 13 14; do rmwt "$k"; done
 
 # try.sh targets the worktree's own target folder; unknown issue points to main.
 out="$("$here/try.sh" --dry-run 2)"
@@ -142,6 +157,174 @@ if "$here/main-lock.sh" take "B #2" 2> /dev/null; then fail "second take succeed
 
 "$here/main-lock.sh" release > /dev/null
 eq "$("$here/main-lock.sh" status)" free "lock released"
+
+# Colours per issue, --status, --pause, --release (#441). feature2 (green) and
+# feature3 (blue) are alive here; the first free colour is orange.
+S="$tmp/_stokesforge"
+# Branches left by the package tests above (their worktrees are gone).
+git branch -q -D feature/219-rejected-fields-show-why feature/220-second-step-217 feature/89-plain-issue 2> /dev/null || true
+wtadd() { git worktree add -q "$S/feature$1" -b "feature/$1-x" --no-track main; }
+unset SF_ISSUE_TITLE
+export SF_ISSUE_TITLE_30="Thirty things" SF_ISSUE_TITLE_31="Thirty-one" SF_ISSUE_TITLE_88="Plain issue"
+
+# Folder name first: feature426b is #426, feature4260 is #4260, a detached HEAD still has its issue.
+eq "$(. "$here/workflow-lib.sh"; sf_issue_of "$S/feature426b")" 426 "issue of feature426b"
+eq "$(. "$here/workflow-lib.sh"; sf_issue_of "$S/feature4260")" 4260 "feature4260 is not #426"
+git worktree add -q "$S/odd" -b feature/77-y --no-track main
+eq "$(. "$here/workflow-lib.sh"; sf_issue_of "$S/odd")" 77 "branch fallback"
+git worktree remove "$S/odd"
+
+# Several worktrees of one issue share one colour, a colourless one gets it on rerun.
+for k in 30 30b 30d; do wtadd "$k"; done
+"$here/chantier.sh" 30 > /dev/null
+eq "$(colour_of 30)" 🟧 "siblings share the record's colour"
+wtadd 30c
+"$here/chantier.sh" 30 > /dev/null
+eq "$(colour_of 30)" 🟧 "added sibling: same colour on rerun"
+[ "$(ls "$S/.suivi/issues" | grep -c '^30')" = 1 ] || fail "one record for the four worktrees of #30"
+"$here/chantier.sh" 31 > /dev/null
+eq "$(colour_of 31)" 🟪 "next plain issue takes the next colour"
+git -C "$S/feature30b" checkout -q --detach
+wtadd 50
+setrec 30 since 2026-10-20
+for k in 2 3 31; do setrec "$k" since 2026-11-01; done
+"$here/chantier.sh" --status --json > "$tmp/st.json"
+python3 -I - "$tmp/st.json" << 'PY' || fail "--status --json: $(cat "$tmp/st.json")"
+import json, sys
+d = json.load(open(sys.argv[1]))
+c = d["colours"]
+assert [e["colour"] for e in c] == ["🟦", "🟩", "🟧", "🟪", "🟥", "🟨"], c
+assert c[0]["issue"] == 3 and c[1]["issue"] == 2 and c[3]["issue"] == 31, c
+assert c[2]["issue"] == 30 and c[2]["since"] == "2026-10-20" and c[2]["days"] == 14, c[2]
+assert sorted(c[2]["worktrees"]) == ["feature30", "feature30b", "feature30c", "feature30d"], c[2]
+assert c[3]["since"] == "2026-11-01" and c[3]["days"] == 2, c[3]
+assert c[4]["free"] and c[5]["free"], c
+assert d["colourless"] == ["feature50"], d["colourless"]
+assert d["paused"] == [], d
+assert c[2]["held_by"] == ["agent"] and c[2]["name"] == "Thirty things", c[2]
+PY
+"$here/chantier.sh" --status > "$tmp/st.txt"
+grep -q '^🟧 #30 ' "$tmp/st.txt" && grep -q '^🟥 free' "$tmp/st.txt" || fail "--status text: $(cat "$tmp/st.txt")"
+# --pause works on any issue: colour freed, worktree kept, previous colour back on resume.
+# lang: fr begin
+eq "$("$here/chantier.sh" --pause 31)" "Dossier #31 en pause : couleur 🟪 libérée." "--pause of a plain issue"
+# lang: fr end
+[ -d "$S/feature31" ] || fail "--pause removed the worktree"
+"$here/chantier.sh" --status --json | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["colours"][3]["free"] and [p["issue"] for p in d["paused"]] == [31] and d["paused"][0]["worktrees"] == ["feature31"], d' || fail "--status after --pause 31"
+"$here/chantier.sh" 31 > /dev/null
+eq "$(colour_of 31)" 🟪 "resume gets the previous colour"
+git worktree remove "$S/feature50"; git branch -q -d feature/50-x
+
+# Package 217: a rerun keeps the "since" date; --pause frees the colour and keeps the list.
+export SF_ISSUES_JSON="$tmp/issues.json" SF_ISSUE_BODY_217=$'Work:\n- #231 old form\n- #220\n- #219'
+export SF_ISSUE_TITLE_217="Parent work: many sub-issues"
+"$here/chantier.sh" 217 --start 219 > /dev/null
+eq "$(colour_of 219)" 🟥 "package colour"
+setrec 217 since 2026-10-25
+"$here/chantier.sh" 217 --start 219 > /dev/null
+eq "$(rec 217 since)" 2026-10-25 "package rerun keeps its since date"
+"$here/chantier.sh" --status --json | python3 -I -c '
+import json, sys
+e = json.load(sys.stdin)["colours"][4]
+assert e["package"]["parent"] == 217 and e["since"] == "2026-10-25" and e["days"] == 9, e
+assert [s["n"] for s in e["package"]["subs"]][:2] == [231, 220], e
+assert e["worktrees"] == ["feature219"], e' || fail "--status package"
+if "$here/chantier.sh" --pause 217 2> "$tmp/errp"; then fail "--pause accepted with a worktree left"; fi
+grep -q 'still has worktrees' "$tmp/errp" || fail "--pause message"
+eq "$(rec 217 colour)" 🟥 "colour kept after a refused --pause"
+# lang: fr begin
+out="$("$here/chantier.sh" --no-trial --release 219)"
+eq "$out" "Couleur 🟥 reste prise : paquet #217, prochaine sous-issue ; après la dernière : scripts/chantier.sh --done 217" "release of a sub-issue"
+# lang: fr end
+"$here/chantier.sh" --dry-run --pause 217 > /dev/null
+eq "$(rec 217 colour)" 🟥 "--dry-run --pause changes nothing"
+# lang: fr begin
+eq "$("$here/chantier.sh" --pause 217)" "Paquet #217 en pause : couleur 🟥 libérée." "--pause of a package"
+# lang: fr end
+eq "$(rec 217 colour)" "" "paused: no colour"
+eq "$(rec 217 last_colour)" 🟥 "paused: previous colour remembered"
+python3 -I -c 'import json,sys; assert json.load(open(sys.argv[1]))["subs"][0]["n"] == 231' "$S/.suivi/issues/217.json" || fail "paused package keeps its sub-issue list"
+"$here/chantier.sh" 88 > /dev/null
+eq "$(colour_of 88)" 🟥 "a paused package frees its colour"
+"$here/chantier.sh" --status --json | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+assert [p["issue"] for p in d["paused"]] == [217] and d["colours"][4]["issue"] == 88, d' || fail "--status paused"
+"$here/chantier.sh" 217 --start 220 > "$tmp/pkg3"
+grep -qF '🟨 #217 › #220' "$tmp/pkg3" && ! grep -qF '?' "$tmp/pkg3" || fail "start after pause: $(cat "$tmp/pkg3")"
+eq "$(rec 217 colour)" 🟨 "package no longer paused (🟥 is taken: first free)"
+# lang: fr begin
+out="$("$here/chantier.sh" --no-trial --release 220)"
+case "$out" in "Couleur 🟨 reste prise : paquet #217"*) ;; *) fail "release 220: $out" ;; esac
+out="$("$here/chantier.sh" --done 217)"
+eq "$out" "Couleur 🟨 libérée." "--done line"
+"$here/chantier.sh" 217 > /dev/null
+"$here/chantier.sh" --pause 217 > /dev/null
+eq "$("$here/chantier.sh" --done 217)" "Paquet #217 terminé (il n'avait plus de couleur)." "--done on a paused package"
+# lang: fr end
+rmwt 88
+unset SF_ISSUE_BODY_217 SF_ISSUE_TITLE_217
+export SF_ISSUES_JSON="$tmp/none.json"
+
+# --release: merged and clean, nothing else removed first; one fixed French line.
+exclude="$(git rev-parse --absolute-git-dir)/info/exclude"
+printf 'junk.log\ntarget/\n' >> "$exclude"
+kept() { [ -d "$S/feature$1" ] && git rev-parse --verify -q "feature/$1-x" > /dev/null; }
+wtadd 40; git -C "$S/feature40" -c user.name=t -c user.email=t@t commit -q --allow-empty -m unmerged
+wtadd 41; touch "$S/feature41/new.txt"
+wtadd 42
+wtadd 43; touch "$S/feature43/junk.log"
+for k in 40 41 43; do
+    if out="$("$here/chantier.sh" --release "$k" 2> "$tmp/errr")"; then fail "--release $k accepted"; fi
+    kept "$k" || fail "--release $k removed something"
+    [ -z "$out" ] || fail "--release $k printed [$out]"
+    cp "$tmp/errr" "$tmp/errr$k"
+done
+grep -q 'not merged' "$tmp/errr40" || fail "unmerged refusal: $(cat "$tmp/errr40")"
+grep -q 'new.txt' "$tmp/errr41" || fail "untracked file not listed: $(cat "$tmp/errr41")"
+grep -q 'junk.log' "$tmp/errr43" || fail "ignored file not listed: $(cat "$tmp/errr43")"
+# Nothing is ever forced: the script has no -D and no --force.
+grep -v '^ *#' "$here/chantier.sh" | grep -E 'branch -D|--force' && fail "chantier.sh forces a removal" || true
+if (cd "$S/feature42" && "$here/chantier.sh" --release 42 > /dev/null 2> "$tmp/errw"); then fail "--release from a worktree accepted"; fi
+grep -q 'main checkout' "$tmp/errw" || fail "from a worktree message"
+git checkout -q -b elsewhere
+if "$here/chantier.sh" --release 42 > /dev/null 2> "$tmp/errb"; then fail "--release off main accepted"; fi
+git checkout -q main; git branch -q -d elsewhere
+kept 42 || fail "refused releases removed feature42"
+"$here/chantier.sh" --dry-run --no-trial --release 42 > "$tmp/dry"
+kept 42 && grep -q 'would run: git worktree remove' "$tmp/dry" || fail "--dry-run --release"
+# V2: no trial entry -> refused, nothing removed; one entry -> accepted.
+if "$here/chantier.sh" --release 3 > /dev/null 2> "$tmp/errt"; then fail "--release without a trial entry accepted"; fi
+grep -q 'no trial entry' "$tmp/errt" && [ -e "$S/feature3" ] || fail "--release without a trial entry: $(cat "$tmp/errt")"
+printf '{"title":"t","steps":["s"],"expect":"e"}' > "$tmp/t3.json"
+python3 -I "$here/suivi.py" test add 3 "$tmp/t3.json" > /dev/null
+# lang: fr begin
+out="$("$here/chantier.sh" --release 3 2> "$tmp/errr")"
+eq "$out" "Couleur 🟦 libérée." "release 3 line"
+[ ! -e "$S/feature3" ] && ! git rev-parse --verify -q feature/3-fix-axis-label > /dev/null || fail "release 3 left something"
+out="$("$here/chantier.sh" --no-trial --release 30 2> /dev/null)"
+case "$out" in "Couleur 🟧 reste prise : "*feature30b*) ;; *) fail "release 30: $out" ;; esac
+# lang: fr end
+[ ! -e "$S/feature30" ] || fail "release 30 kept the worktree"
+for k in 30b 30c; do "$here/chantier.sh" --no-trial --release "$k" > /dev/null; done
+git branch -q -d feature/30b-x   # detached worktree: its branch was not the one released
+# lang: fr begin
+eq "$("$here/chantier.sh" --no-trial --release 30d)" "Couleur 🟧 libérée." "last worktree of the issue frees the colour"
+# lang: fr end
+# target/ is the one ignored folder that does not block.
+SF_ISSUE_TITLE="Target" "$here/chantier.sh" 44 > /dev/null
+mkdir "$S/feature44/target"; touch "$S/feature44/target/x"
+"$here/chantier.sh" --no-trial --release 44 | grep -q '^Couleur .* libérée\.$' || fail "release with target/"
+[ ! -e "$S/feature44" ] || fail "target/ blocked the release"
+for k in 40 41 42 43; do git worktree remove --force "$S/feature$k"; done
+git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d-x feature/44-target 2> /dev/null || true
+
+# No inconsistency left (duplicate colour, record without worktree, worktree without record).
+suivi check > "$tmp/check.out" || fail "suivi check: $(cat "$tmp/check.out")"
+[ -f "$S/.suivi/control.json" ] || fail "check writes control.json"
 
 # Driver: two checkouts get two run folders.
 for r in r1 r2; do

@@ -24,8 +24,8 @@ FRENCH_CHANGELOG_UP_TO = (1, 0, 0)
 EXEMPT_PREFIXES = ("docs/archive/", "test/import/")
 EXEMPT_FILES = {
     ".claude/skills/stokesforge-bug-report/references/decision-form.html",
-    # Live page source (the user reads French on it), republished to claude.ai.
-    ".claude/skills/stokesforge-verification/references/to-test-page.html",
+    # Local tracking page (the user reads French on it), served by scripts/suivi.py.
+    "scripts/suivi-page.html",
     "scripts/french-guard-test.py",
 }
 THRESHOLD = 2
