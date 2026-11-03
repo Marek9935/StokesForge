@@ -200,6 +200,9 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
+  the stored value, like Excel: `round(1.005, 2)` is 1.01 (it was 1), and
+  `round(2.675, 2)` is 2.68.
 - A transposed sheet whose source holds a formula column is no longer shown stale
   right after opening a file where it was up to date (#430).
 - Peak Decomposition window (#384): the preview no longer overflows the window

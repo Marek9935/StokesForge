@@ -1155,7 +1155,7 @@ formula-help-abs = Valeur absolue
 formula-help-sign = Signe : -1, 0 ou 1
 formula-help-floor = Plus grand entier non supérieur à x
 formula-help-ceil = Plus petit entier non inférieur à x
-formula-help-round = x arrondi à n décimales
+formula-help-round = x arrondi à n décimales, moitié loin de zéro (round(1.005, 2) vaut 1,01)
 formula-help-mod = Reste de la division de x par y, du signe de y (mod(-1e-20, 3) vaut 3)
 formula-help-sin = Sinus, x en radians
 formula-help-cos = Cosinus, x en radians
@@ -1217,6 +1217,8 @@ workbook-send-to-graph-menu = Envoyer vers un graphique
 # Classeur : grille, onglets de feuilles, états vides
 workbook-column-add = Ajouter une colonne
 workbook-grid-no-columns = Aucune colonne dans cette feuille. Clic droit ici, puis Ajouter une colonne
+grid-entry-row-marker = *
+grid-entry-row-hint = Saisir ici pour ajouter une ligne
 workbook-no-worksheets = Ce classeur n'a aucune feuille. Utiliser Ajouter une feuille dans les onglets
 workbook-worksheet-add = Ajouter une feuille
 action-rename-sheet = Renommer
