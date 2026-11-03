@@ -405,7 +405,7 @@ To turn a computed column into ordinary data, right-click its letter and choose 
 
 When you use **Copy with Header** on a formula column, StokesForge asks whether to copy its **Values** or its **Formulas**.
 
-Pasting a Formulas copy writes the formula; the column's values are recomputed.
+Pasting a Formulas copy writes the formula; the column's values are recomputed. It does the same when you paste on any data cell of the column, not only on its **F(x)=** field.
 
 ## Linked sheets
 

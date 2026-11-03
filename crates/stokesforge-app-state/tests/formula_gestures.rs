@@ -403,32 +403,107 @@ fn a_formulas_paste_anchored_on_the_formula_field_does_not_end_on_an_error() {
 }
 
 #[test]
-fn a_formulas_paste_on_data_cells_writes_values_and_keeps_the_read_only_rule() {
+fn a_formulas_paste_on_data_cells_replaces_the_formula_like_a_header_paste() {
+    // Was `..._writes_values_and_keeps_the_read_only_rule`: since #432 S1 a
+    // Formulas copy on a data cell acts as on the column's F(x)= field, so the
+    // entry row of an ordinary column and a data cell of a formula column now
+    // both end with the pasted formula and no error.
     let mut w = world();
     let src = sources(&mut w);
     let sheet3 = w.sheet3;
     let clip = w.copy_formula_column(w.sheet1, src[0].1);
-    // Entry row (one past the last row) of an ordinary column: values added.
-    let b = w.columns(sheet3)[1];
-    let rows = w.values(b).len();
-    w.state.select_cell(sheet3, b, rows);
+    let b = w.new_columns(sheet3, 1)[0];
+    let entry = w.state.entry_row(sheet3);
+    w.state.select_cell(sheet3, b, entry);
     w.state.dispatch(Action::Paste {
         sheet: sheet3,
         text: clip.clone(),
     });
-    assert_eq!(w.letters(b), None, "the header is dropped");
-    assert_eq!(w.values(b)[rows], Some(3104.0), "values added below");
-    assert!(w.values(b).len() > rows, "rows are created");
+    assert_eq!(w.letters(b).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(b).len(), entry, "no row is created");
     assert!(!w.status().starts_with("[error]"), "{}", w.status());
-    // A data cell of a formula column: still read-only.
     let f = w.formula_column(sheet3, "max(A)");
     w.state.select_cell(sheet3, f, 0);
     w.state.dispatch(Action::Paste {
         sheet: sheet3,
         text: clip,
     });
-    assert_eq!(w.letters(f).as_deref(), Some("max(A)"));
-    assert!(w.status().contains(FORMULA_READ_ONLY), "{}", w.status());
+    assert_eq!(w.letters(f).as_deref(), Some("max(B)"));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+/// `Sheet3` gets a formula column C (`A*2`), copied as Formulas; returns it with
+/// the clipboard text and one empty column D.
+fn doubled_c(w: &mut World) -> (NodeId, String, NodeId) {
+    let sheet3 = w.sheet3;
+    let c = w.formula_column(sheet3, "A*2");
+    let clip = w.copy_formula_column(sheet3, c);
+    let d = w.new_columns(sheet3, 1)[0];
+    (c, clip, d)
+}
+
+fn paste_on_cell(w: &mut World, column: NodeId, row: usize, clip: &str) {
+    let sheet = w.sheet3;
+    w.state.select_cell(sheet, column, row);
+    w.state.dispatch(Action::Paste {
+        sheet,
+        text: clip.to_string(),
+    });
+}
+
+#[test]
+fn a_formulas_paste_on_a_data_cell_writes_the_formula_and_recomputes_from_row_one() {
+    let mut w = world();
+    let (c, clip, d) = doubled_c(&mut w);
+    let before = w.state.tree().clone();
+    paste_on_cell(&mut w, d, 4, &clip);
+    assert_eq!(w.letters(d).as_deref(), Some("A*2"));
+    assert_eq!(w.values(d), w.values(c));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    w.state.dispatch(Action::Undo);
+    assert_eq!(*w.state.tree(), before, "one Undo undoes the whole paste");
+}
+
+#[test]
+fn a_formulas_paste_on_the_entry_row_writes_the_formula_without_extra_rows() {
+    let mut w = world();
+    let (c, clip, d) = doubled_c(&mut w);
+    let entry = w.state.entry_row(w.sheet3);
+    paste_on_cell(&mut w, d, entry, &clip);
+    assert_eq!(w.letters(d).as_deref(), Some("A*2"));
+    assert_eq!(w.values(d), w.values(c), "same length as C");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_formulas_paste_of_two_columns_on_a_data_cell_keeps_the_plain_values_from_row_one() {
+    let mut w = world();
+    let sheet3 = w.sheet3;
+    let b = w.columns(sheet3)[1];
+    let c = w.formula_column(sheet3, "A*2");
+    let clip = w.copy_columns(sheet3, &[b, c], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(sheet3, 2);
+    paste_on_cell(&mut w, dst[0], 3, &clip);
+    assert_eq!(w.letters(dst[0]), None);
+    assert_eq!(w.values(dst[0]), w.values(b), "B's values from row 1");
+    assert_eq!(w.letters(dst[1]).as_deref(), Some("A*2"));
+    assert_eq!(w.values(dst[1]), w.values(c));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_values_paste_on_a_data_cell_is_unchanged() {
+    let mut w = world();
+    let sheet3 = w.sheet3;
+    let c = w.formula_column(sheet3, "A*2");
+    let clip = w.copy_columns(sheet3, &[c], FullColumnsCopy::Values);
+    let d = w.new_columns(sheet3, 1)[0];
+    paste_on_cell(&mut w, d, 4, &clip);
+    assert_eq!(w.letters(d), None, "no formula");
+    let values = w.values(d);
+    assert_eq!(values.len(), 9, "values start at row 4");
+    assert_eq!(values[4], w.values(c)[0]);
+    assert_eq!(values[0], None);
 }
 
 #[test]

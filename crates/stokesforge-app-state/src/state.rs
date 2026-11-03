@@ -9468,8 +9468,10 @@ impl AppState {
     /// - [`GridClipboard::FullColumns`] pastes the header from the field
     ///   anchored field (nothing above) and the body without shifting if the
     ///   anchor is a field; drops the header and shifts the body onto the
-    ///   anchor if it is a cell; in absolute, everything falls back on its
-    ///   original rank whatever the anchor.
+    ///   anchor if it is a cell, except a Formulas copy (some column carries a
+    ///   formula), which on a cell, entry row included, acts as on the
+    ///   Formula field of that column (#432); in absolute, everything falls
+    ///   back on its original rank whatever the anchor.
     ///
     /// Paste of data rows (#311): an **absent** box (shorter row) keeps the
     /// existing value, a present and empty box is a missing value; columns
@@ -9748,6 +9750,17 @@ impl AppState {
         // Starting field of the header to write: all of them in absolute, from
         // the anchored field (nothing above) in relative if the anchor is a
         // field, none (header dropped) in relative if the anchor is a cell.
+        //
+        // A Formulas copy (some column carries a formula; a Values copy has
+        // none) pasted on a data cell, entry row included, behaves as if it
+        // were pasted on the Formula field of that column (#432, S1).
+        let formulas_copy = columns.iter().any(|c| c.formula.is_some());
+        let anchor = match anchor {
+            GridCursor::Data(column, _) if !absolute && formulas_copy => {
+                GridCursor::Header(column, HeaderField::Formula)
+            }
+            other => other,
+        };
         let header_from: Option<usize> = if absolute {
             Some(0)
         } else {
