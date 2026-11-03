@@ -205,6 +205,9 @@ without a message, see `docs/persistence.md`).
   `round(2.675, 2)` is 2.68.
 - A transposed sheet whose source holds a formula column is no longer shown stale
   right after opening a file where it was up to date (#430).
+- Pasting a Formulas copy of a column no longer ends on the error "This column is
+  computed by a formula": the frozen values are not written into a column whose
+  formula was just pasted (#432).
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that

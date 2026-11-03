@@ -172,6 +172,31 @@ impl World {
         });
     }
 
+    /// Ctrl+Shift+C on several columns of `sheet`, then the confirmed `kind`;
+    /// returns the clipboard text.
+    fn copy_columns(&mut self, sheet: NodeId, columns: &[NodeId], kind: FullColumnsCopy) -> String {
+        self.state.select_column(sheet, columns[0]);
+        for &column in &columns[1..] {
+            self.state.toggle_column_selection(sheet, column);
+        }
+        let _ = self.state.copy_full_columns(sheet);
+        if self.state.pending_full_copy().is_some() {
+            self.state.dispatch(Action::ConfirmFullColumnsCopy(kind));
+        }
+        self.state
+            .take_object_clipboard_text()
+            .expect("the copy is published")
+    }
+
+    /// `count` new empty columns at the end of `sheet`.
+    fn new_columns(&mut self, sheet: NodeId, count: usize) -> Vec<NodeId> {
+        for _ in 0..count {
+            self.state.dispatch(Action::AddColumn { sheet });
+        }
+        let all = self.columns(sheet);
+        all[all.len() - count..].to_vec()
+    }
+
     fn undo_all_and_redo_all(&mut self) {
         let before = self.state.tree().clone();
         let mut steps = 0;
@@ -294,15 +319,21 @@ fn a_formulas_paste_is_one_history_entry() {
     let before = w.state.tree().clone();
     w.paste_header_on(sheet3, dst, &clip);
     assert!(w.letters(dst).is_some());
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    let pasted = w.state.tree().clone();
     w.state.dispatch(Action::Undo);
     assert_eq!(*w.state.tree(), before, "one Undo restores the column");
     w.state.dispatch(Action::Redo);
     assert!(w.letters(dst).is_some());
+    assert_eq!(
+        *w.state.tree(),
+        pasted,
+        "Redo brings back formula and values"
+    );
     w.undo_all_and_redo_all();
 }
 
 #[test]
-#[ignore = "bug: #432: a successful paste of a formulas copy ends with the error status `This column is computed by a formula` (the pasted frozen values are then written into the new formula column and refused)"]
 fn a_successful_formulas_paste_does_not_end_on_an_error() {
     let mut w = world();
     let src = sources(&mut w);
@@ -313,6 +344,112 @@ fn a_successful_formulas_paste_does_not_end_on_an_error() {
     w.paste_header_on(sheet3, dst, &clip);
     assert!(w.letters(dst).is_some());
     assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_formulas_paste_of_several_columns_keeps_the_values_of_the_ordinary_ones() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, sheet3) = (w.sheet1, w.sheet3);
+    let ordinary = w.columns(sheet1)[1];
+    let clip = w.copy_columns(sheet1, &[ordinary, src[0].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(sheet3, 2);
+    let before = w.state.tree().clone();
+    w.paste_header_on(sheet3, dst[0], &clip);
+    assert_eq!(w.letters(dst[0]), None);
+    assert_eq!(w.values(dst[0])[0], Some(10.0), "frozen values go in");
+    assert_eq!(w.letters(dst[1]).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(dst[1])[0], Some(3104.0), "computed, not pasted");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    let pasted = w.state.tree().clone();
+    w.state.dispatch(Action::Undo);
+    assert_eq!(*w.state.tree(), before, "one Undo restores both columns");
+    w.state.dispatch(Action::Redo);
+    assert_eq!(
+        *w.state.tree(),
+        pasted,
+        "Redo brings back formula and values"
+    );
+}
+
+#[test]
+fn a_formulas_paste_anchored_on_the_formula_field_does_not_end_on_an_error() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let sheet3 = w.sheet3;
+    let clip = w.copy_formula_column(w.sheet1, src[0].1);
+    let dst = w.new_columns(sheet3, 1)[0];
+    w.state
+        .select_header_field(sheet3, dst, HeaderField::Formula);
+    w.state.dispatch(Action::Paste {
+        sheet: sheet3,
+        text: clip,
+    });
+    assert_eq!(w.letters(dst).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(dst)[0], Some(3104.0));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_formulas_paste_on_data_cells_writes_values_and_keeps_the_read_only_rule() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let sheet3 = w.sheet3;
+    let clip = w.copy_formula_column(w.sheet1, src[0].1);
+    // Entry row (one past the last row) of an ordinary column: values added.
+    let b = w.columns(sheet3)[1];
+    let rows = w.values(b).len();
+    w.state.select_cell(sheet3, b, rows);
+    w.state.dispatch(Action::Paste {
+        sheet: sheet3,
+        text: clip.clone(),
+    });
+    assert_eq!(w.letters(b), None, "the header is dropped");
+    assert_eq!(w.values(b)[rows], Some(3104.0), "values added below");
+    assert!(w.values(b).len() > rows, "rows are created");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    // A data cell of a formula column: still read-only.
+    let f = w.formula_column(sheet3, "max(A)");
+    w.state.select_cell(sheet3, f, 0);
+    w.state.dispatch(Action::Paste {
+        sheet: sheet3,
+        text: clip,
+    });
+    assert_eq!(w.letters(f).as_deref(), Some("max(A)"));
+    assert!(w.status().contains(FORMULA_READ_ONLY), "{}", w.status());
+}
+
+#[test]
+fn a_values_paste_onto_a_formula_column_replaces_the_formula_by_the_values() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, sheet3) = (w.sheet1, w.sheet3);
+    let clip = w.copy_columns(sheet1, &[src[0].1], FullColumnsCopy::Values);
+    let dst = w.formula_column(sheet3, "max(A)");
+    assert_eq!(w.values(dst)[0], Some(3004.0));
+    w.paste_header_on(sheet3, dst, &clip);
+    assert_eq!(w.letters(dst), None, "the formula is removed");
+    assert_eq!(w.values(dst)[0], Some(3104.0), "the frozen values are in");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_refused_formula_among_accepted_ones_ends_on_its_sentence_only() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, far) = (w.sheet1, w.far_sheet);
+    let clip = w.copy_columns(sheet1, &[src[0].1, src[2].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(far, 2);
+    w.paste_header_on(far, dst[0], &clip);
+    assert_eq!(w.letters(dst[0]).as_deref(), Some("max(Sheet3!B)"));
+    assert_eq!(w.values(dst[0])[0], Some(7104.0));
+    assert_eq!(w.letters(dst[1]), None, "Book9 has no `Blanc 2`");
+    let status = w.status();
+    assert!(
+        status.starts_with("[error]") && status.contains("no sheet named"),
+        "{status}"
+    );
+    assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
 }
 
 #[test]
