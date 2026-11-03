@@ -98,6 +98,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 |---|---|---|---|---|
 | Column | Colonne | Series of values of one type | Champ, Variable | O |
 | Row | Ligne | Row of cells of a sheet | Enregistrement | O |
+| Entry row | Ligne de saisie | Empty row the grid always shows below the last row of a sheet, marked `*` in the gutter (« Type here to add a row » / « Saisir ici pour ajouter une ligne »); typing in it creates the row. Not data: not saved, not plotted | Ligne vide, New row, Ligne d'ajout | O |
 | x' (x prime) | x' | Numeric value specific to a column (special header row), abscissa of a "line" series; is not translated | X2, Temps, Instant (le temps n'est qu'un cas d'usage) | — |
 | Line | Ligne | Row of text **of a file** (import) | Row | G |
 | Cell | Cellule | One value in a column and a row | Case | G |

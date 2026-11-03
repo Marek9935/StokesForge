@@ -1141,45 +1141,45 @@ const TABLE: &[Row] = &[
     ("pow", &[-1.0, f64::INFINITY], 1.0, 0),
 ];
 
-/// Excel (decimal) expectations of `round`: the binary product `x * 10^n` loses
-/// them (`round(2.675, 2)`).
+/// Excel (decimal) expectations of `round`, exact (0 ulp): the binary product
+/// `x * 10^n` would lose them (`round(1.005, 2)`).
 const ROUND_DECIMAL: &[Row] = &[
-    ("round", &[2.5, 0.0], 3.0, 1),
-    ("round", &[-2.5, 0.0], -3.0, 1),
-    ("round", &[0.5, 0.0], 1.0, 1),
-    ("round", &[-0.5, 0.0], -1.0, 1),
-    ("round", &[1.5, 0.0], 2.0, 1),
-    ("round", &[-1.5, 0.0], -2.0, 1),
-    ("round", &[0.49999999999999994, 0.0], 0.0, 1),
-    ("round", &[1234.5678, 2.0], 1234.57, 1),
-    ("round", &[1234.5678, -2.0], 1200.0, 1),
-    ("round", &[1250.0, -2.0], 1300.0, 1),
-    ("round", &[-1250.0, -2.0], -1300.0, 1),
-    ("round", &[1234.0, -2.0], 1200.0, 1),
-    ("round", &[5.0, -1.0], 10.0, 1),
-    ("round", &[-5.0, -1.0], -10.0, 1),
-    ("round", &[2.5, 1.0], 2.5, 1),
-    ("round", &[1.0e+308, 2.0], 1.0e+308, 1),
-    ("round", &[1.0e-300, 2.0], 0.0, 1),
-    ("round", &[123456789.12345679, 5.0], 123456789.12346, 1),
-    ("round", &[0.5, -1.0], 0.0, 1),
-    ("round", &[1.45, 1.0], 1.5, 1),
-    ("round", &[2.675, 2.0], 2.68, 1),
-    ("round", &[1.005, 2.0], 1.01, 1),
-    ("round", &[0.285, 2.0], 0.29, 1),
-    ("round", &[1.255, 2.0], 1.26, 1),
-    ("round", &[8.345, 2.0], 8.35, 1),
-    ("round", &[-2.675, 2.0], -2.68, 1),
-    ("round", &[1.15, 1.0], 1.2, 1),
-    ("round", &[0.30000000000000004, 15.0], 0.3, 1),
-    ("round", &[7.0, 0.0], 7.0, 1),
-    ("round", &[2.5, 0.9], 3.0, 1),
-    ("round", &[1234.5678, 2.9], 1234.57, 1),
-    ("round", &[1234.5678, -2.9], 1200.0, 1),
-    ("round", &[1.0e+22, 2.0], 1.0e+22, 1),
-    ("round", &[5.0e-324, 400.0], 5.0e-324, 1),
-    ("round", &[1.0, 500.0], 1.0, 1),
-    ("round", &[1.0, -500.0], 0.0, 1),
+    ("round", &[2.5, 0.0], 3.0, 0),
+    ("round", &[-2.5, 0.0], -3.0, 0),
+    ("round", &[0.5, 0.0], 1.0, 0),
+    ("round", &[-0.5, 0.0], -1.0, 0),
+    ("round", &[1.5, 0.0], 2.0, 0),
+    ("round", &[-1.5, 0.0], -2.0, 0),
+    ("round", &[0.49999999999999994, 0.0], 0.0, 0),
+    ("round", &[1234.5678, 2.0], 1234.57, 0),
+    ("round", &[1234.5678, -2.0], 1200.0, 0),
+    ("round", &[1250.0, -2.0], 1300.0, 0),
+    ("round", &[-1250.0, -2.0], -1300.0, 0),
+    ("round", &[1234.0, -2.0], 1200.0, 0),
+    ("round", &[5.0, -1.0], 10.0, 0),
+    ("round", &[-5.0, -1.0], -10.0, 0),
+    ("round", &[2.5, 1.0], 2.5, 0),
+    ("round", &[1.0e+308, 2.0], 1.0e+308, 0),
+    ("round", &[1.0e-300, 2.0], 0.0, 0),
+    ("round", &[123456789.12345679, 5.0], 123456789.12346, 0),
+    ("round", &[0.5, -1.0], 0.0, 0),
+    ("round", &[1.45, 1.0], 1.5, 0),
+    ("round", &[2.675, 2.0], 2.68, 0),
+    ("round", &[1.005, 2.0], 1.01, 0),
+    ("round", &[0.285, 2.0], 0.29, 0),
+    ("round", &[1.255, 2.0], 1.26, 0),
+    ("round", &[8.345, 2.0], 8.35, 0),
+    ("round", &[-2.675, 2.0], -2.68, 0),
+    ("round", &[1.15, 1.0], 1.2, 0),
+    ("round", &[0.30000000000000004, 15.0], 0.3, 0),
+    ("round", &[7.0, 0.0], 7.0, 0),
+    ("round", &[2.5, 0.9], 3.0, 0),
+    ("round", &[1234.5678, 2.9], 1234.57, 0),
+    ("round", &[1234.5678, -2.9], 1200.0, 0),
+    ("round", &[1.0e+22, 2.0], 1.0e+22, 0),
+    ("round", &[5.0e-324, 400.0], 5.0e-324, 0),
+    ("round", &[1.0, 500.0], 1.0, 0),
+    ("round", &[1.0, -500.0], 0.0, 0),
 ];
 
 /// Runs every row of `rows` whose function is in `names` through a formula
@@ -1294,12 +1294,6 @@ fn pow_matches_reference_values() {
 }
 
 #[test]
-fn round_matches_binary_exact_reference_values() {
-    assert_table(&["round"]);
-}
-
-#[test]
-#[ignore = "bug: #428: round(1.005, 2) = 1 not 1.01 (x * 10^n is binary, not Excel decimal), functions.rs:272-295"]
 fn round_matches_excel_decimal_reference_values() {
     let (failures, _) = table_failures(ROUND_DECIMAL, &["round"]);
     assert!(
@@ -1380,12 +1374,12 @@ fn min_max_sign_of_an_empty_cell_stay_empty() {
     }
 }
 
-/// `mod` result stays inside `[0, b)` for a positive divisor.
+/// The exact remainder 3 - 1e-20 rounds to 3 in f64, so `mod` returns the divisor
+/// itself, like Python and Excel (decided in #412).
 #[test]
-#[ignore = "design: pending decision (#412 follow-up), mod(-1e-20, 3) = 3 (like Excel and Python), functions.rs:299-307"]
-fn mod_with_a_tiny_negative_dividend_stays_below_the_divisor() {
+fn mod_of_a_tiny_negative_dividend_rounds_to_the_divisor_like_python_and_excel() {
     let (v, _) = run("mod(A, 3)", &[float_column(&[-1e-20])], 1);
-    assert!(v[0] >= 0.0 && v[0] < 3.0, "mod(-1e-20, 3) = {}", v[0]);
+    assert_eq!(v[0], 3.0);
 }
 
 #[test]

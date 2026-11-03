@@ -237,7 +237,11 @@ To restore the default, right-click the letter and choose **Reset Width**. Chang
 2. Type the new value, or press <kbd>F2</kbd> or double-click to edit the current value.
 3. Press <kbd>Enter</kbd> to confirm, or <kbd>Esc</kbd> to cancel.
 
-Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row of a column adds a row.
+Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row moves to the entry row.
+
+### Add a row
+
+Below the last row, the grid always shows an empty **entry row**, marked `*` in the row-number column (hover it: *Type here to add a row*). It is there in a new workbook too, which has no rows yet. Click a cell of the entry row and type a value, then press <kbd>Enter</kbd>: the row is created, and the cursor moves to the next entry row. One **Undo** removes the row. The entry row is not data: it is not saved, not plotted, and **Select All** does not include it. A range extended with <kbd>Shift</kbd> (click, drag or arrows) stops at the last row and never includes the entry row.
 
 A decimal comma is accepted: `1,5` is read as 1.5. The status bar tells you when it did so. An empty cell is a missing value. Dates and times are read when the column is **Date/Time**.
 
@@ -312,7 +316,7 @@ A name followed by `(` is a function, in capitals or lowercase (`EXP(B)` is `exp
 | Powers, logarithms | `sqrt(x)`, `root(x, n)` (`root(-8, 3)` is -2), `exp(x)`, `ln(x)`, `log(x)` (base 10, same as `log10(x)`), `log2(x)`, `logx(x, b)` (base `b`), `pow(x, y)` |
 | Absolute value, sign | `abs(x)`, `sign(x)` |
 | Trigonometry | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh`, `pi()` |
-| Rounding | `round(x, n)` (half away from zero, `n` may be negative: `round(1234, -2)` is 1200), `floor(x)`, `ceil(x)`, `mod(a, b)` (sign of `b`: `mod(-7, 3)` is 2) |
+| Rounding | `round(x, n)` (half away from zero on the number as displayed: `round(1.005, 2)` is 1.01, like Excel; `n` may be negative: `round(1234, -2)` is 1200), `floor(x)`, `ceil(x)`, `mod(a, b)` (sign of `b`: `mod(-7, 3)` is 2; a tiny negative `a` can give `b` itself, like Python and Excel: `mod(-1e-20, 3)` is 3) |
 | Two values | `min(a, b)`, `max(a, b)` (row by row; with one column or three values, see below) |
 | Whole column | `at(B, x)`, `max(B)`, `min(B)`, `mean(B)`, `sum(B)`, `std(B)`, `integral(B)`, and their range forms: see below |
 | Conditions | `if(condition, a, b)`: `a` when the condition is true (not 0), otherwise `b` |

@@ -154,8 +154,8 @@ fn sheet_tabs(
 /// sub-navigation between sheets — compact tabs at the **bottom** of the grid
 /// (deliberate choice, not a preexisting convention of the crate: no other tab
 /// of this kind existed to imitate). The "Insert/Delete 1 row" buttons are
-/// gone: adding a row is now done by pressing Enter on the last cell of a column
-/// ([`Action::CommitCellAndAdvance`]), deletion by the Delete key on the
+/// gone: adding a row is now done by typing in the entry row below the last row
+/// ([`Action::CommitCellAndAdvance`], #440), deletion by the Delete key on the
 /// selection ([`Action::DeleteSelectedCells`]).
 pub(super) fn book_contents(
     ui: &mut egui::Ui,
