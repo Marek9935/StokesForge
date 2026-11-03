@@ -2309,6 +2309,17 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
 }
 
+/// What a full-column paste did with the Formula field of one target (#432).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormulaPaste {
+    /// No formula was pasted here, or the write did not take place.
+    NotWritten,
+    /// The pasted formula is stored: the column is recomputed.
+    Accepted,
+    /// The formula was refused (its sentence is set at the end of the paste).
+    Refused,
+}
+
 /// Column targeted by `cursor`, whatever its kind — [`GridCursor`]
 /// does not expose this accessor outside [`crate::selection`]; its callers
 /// in this module (the paste, see [`AppState::apply_paste`]) rebuild it
@@ -9626,8 +9637,10 @@ impl AppState {
     /// - [`GridClipboard::FullColumns`] pastes the header from the field
     ///   anchored field (nothing above) and the body without shifting if the
     ///   anchor is a field; drops the header and shifts the body onto the
-    ///   anchor if it is a cell; in absolute, everything falls back on its
-    ///   original rank whatever the anchor.
+    ///   anchor if it is a cell, except a Formulas copy (some column carries a
+    ///   formula), which on a cell, entry row included, acts as on the
+    ///   Formula field of that column (#432); in absolute, everything falls
+    ///   back on its original rank whatever the anchor.
     ///
     /// Paste of data rows (#311): an **absent** box (shorter row) keeps the
     /// existing value, a present and empty box is a missing value; columns
@@ -9635,7 +9648,8 @@ impl AppState {
     ///
     /// A formula column naturally refuses the write of data
     /// (`CoreError::FormulaColumnReadOnly`): reported by the status, without
-    /// blocking the other columns already pasted. A paste that touches several
+    /// blocking the other columns already pasted. A full-column paste does not
+    /// try it on the columns whose formula it has just written (#432). A paste that touches several
     /// columns or several fields stays grouped in a single history entry.
     fn apply_paste(
         &mut self,
@@ -9884,7 +9898,9 @@ impl AppState {
     }
 
     /// [`GridClipboard::FullColumns`]: see [`AppState::apply_paste`] for the
-    /// rule; depends on `anchor` (field or cell) and on `absolute`.
+    /// rule; depends on `anchor` (field or cell) and on `absolute`. The body
+    /// of a column whose Formula field this paste wrote and the formula
+    /// accepted is not written (it is recomputed).
     fn paste_full_columns(
         &mut self,
         anchor: GridCursor,
@@ -9903,6 +9919,17 @@ impl AppState {
         // Starting field of the header to write: all of them in absolute, from
         // the anchored field (nothing above) in relative if the anchor is a
         // field, none (header dropped) in relative if the anchor is a cell.
+        //
+        // A Formulas copy (some column carries a formula; a Values copy has
+        // none) pasted on a data cell, entry row included, behaves as if it
+        // were pasted on the Formula field of that column (#432, S1).
+        let formulas_copy = columns.iter().any(|c| c.formula.is_some());
+        let anchor = match anchor {
+            GridCursor::Data(column, _) if !absolute && formulas_copy => {
+                GridCursor::Header(column, HeaderField::Formula)
+            }
+            other => other,
+        };
         let header_from: Option<usize> = if absolute {
             Some(0)
         } else {
@@ -9932,10 +9959,16 @@ impl AppState {
             return;
         }
         let mut refusal = None;
+        // Per target, what this paste did with the Formula field. Only
+        // `Accepted` skips the body below; `Refused` is kept explicit for the
+        // callers that will treat a refused formula differently (#433).
+        let mut formula_outcomes = vec![FormulaPaste::NotWritten; targets.len()];
         if let Some(from) = header_from {
             for field_index in from..HeaderField::COUNT {
                 let field = HeaderField::from_index(field_index);
-                for (&column, source) in targets.iter().zip(columns) {
+                for ((&column, source), outcome) in
+                    targets.iter().zip(columns).zip(&mut formula_outcomes)
+                {
                     let value = match field {
                         HeaderField::XPrime => source.x_prime.clone(),
                         HeaderField::LongName => source.long_name.clone(),
@@ -9944,12 +9977,26 @@ impl AppState {
                         HeaderField::Formula => source.formula.clone().unwrap_or_default(),
                     };
                     let refused = self.paste_header_text(column, field, value);
+                    if field == HeaderField::Formula && source.formula.is_some() {
+                        // `None` alone is ambiguous (column gone, refused x'):
+                        // it is accepted only if the column now carries a
+                        // formula.
+                        *outcome = match &refused {
+                            Some(_) => FormulaPaste::Refused,
+                            None if self.column_meta(column).formula.is_some() => {
+                                FormulaPaste::Accepted
+                            }
+                            None => FormulaPaste::NotWritten,
+                        };
+                    }
                     refusal = refusal.or(refused);
                 }
             }
         }
-        for (&column, source) in targets.iter().zip(columns) {
-            if source.data.is_empty() {
+        for ((&column, source), outcome) in targets.iter().zip(columns).zip(&formula_outcomes) {
+            // The column whose formula this paste just wrote is recomputed:
+            // its frozen values would only be refused as read-only.
+            if source.data.is_empty() || *outcome == FormulaPaste::Accepted {
                 continue;
             }
             let Some(kind) = self
@@ -9985,7 +10032,9 @@ impl AppState {
     /// the status bar says so right away. Formula refused (unknown letter,
     /// self-read, `#REF`): the **sentence** of the refusal is returned, and the
     /// caller sets it, **after** the writes of the whole paste (the other
-    /// fields are pasted, the status bar keeps the refusal).
+    /// fields are pasted, the status bar keeps the refusal). `None` does not
+    /// mean written: it is also returned for a column gone and for a refused
+    /// x' (both already reported); the caller reads the column back.
     fn paste_header_text(
         &mut self,
         column: NodeId,

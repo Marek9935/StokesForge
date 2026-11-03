@@ -212,6 +212,10 @@ without a message, see `docs/persistence.md`).
   `round(2.675, 2)` is 2.68.
 - A transposed sheet whose source holds a formula column is no longer shown stale
   right after opening a file where it was up to date (#430).
+- Pasting a Formulas copy of a column no longer ends on the error "This column is
+  computed by a formula": the frozen values are not written into a column whose
+  formula was just pasted. Pasting a Formulas copy on a data cell of a column now writes
+  the formula into the column, like on its F(x)= field, instead of shifted frozen values (#432).
 - Formulas (#429): `logx` of an exact power is exact (`floor(logx(1000, 10))` is
   3, `logx(243, 3)` is 5); `erf` and `erfc` keep their relative precision
   everywhere (within 2 ulps on the Boost.Math tables, `erfc` subnormal up to
