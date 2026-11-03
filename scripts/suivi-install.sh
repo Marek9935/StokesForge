@@ -15,6 +15,11 @@ if ss -ltn | grep -Eq "[:.]$port[[:space:]]" && ! systemctl --user is-active --q
     exit 1
 fi
 
+# System python, not whatever env is active: the unit must survive a conda change.
+py=/usr/bin/python3
+[ -x "$py" ] || py="$(command -v python3)"
+# Drop the links of an earlier install (it may have used another target).
+systemctl --user disable stokesforge-suivi.service > /dev/null 2>&1 || true
 mkdir -p "$unit_dir"
 cat > "$unit" <<UNIT
 [Unit]
@@ -22,16 +27,23 @@ Description=StokesForge work-package tracking page (scripts/suivi.py serve)
 Documentation=file://$main/.claude/skills/stokesforge-verification/references/suivi.md
 StartLimitIntervalSec=60
 StartLimitBurst=5
+# Started with the GNOME session, stopped at logout (like the dictation services).
+PartOf=graphical-session.target
+After=graphical-session.target
 
 [Service]
 Type=simple
 WorkingDirectory=$main
-ExecStart=$(command -v python3) -I $main/scripts/suivi.py serve --port $port
+ExecStart=$py -I $main/scripts/suivi.py serve --port $port
 Restart=on-failure
 RestartSec=3
+# Lowest priority: the page must never slow down a build or the app.
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 UNIT
 systemctl --user daemon-reload
 systemctl --user enable --now stokesforge-suivi.service
