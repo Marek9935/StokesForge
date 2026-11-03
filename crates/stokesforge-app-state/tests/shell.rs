@@ -2521,6 +2521,288 @@ fn pasting_a_thousands_looking_number_does_not_notice() {
     assert!(!status_text(&state).contains("decimal comma"));
 }
 
+// -- #429: a number a cell cannot hold is refused when typed --
+
+/// Opens `(column, row)` and types `text` in the buffer, as the grid does.
+fn type_in_cell(state: &mut AppState, column: NodeId, row: usize, text: &str) {
+    state.begin_edit(column, row);
+    state.editing_mut().expect("editing").buffer = text.to_string();
+}
+
+#[test]
+fn a_numeric_cell_refuses_a_number_beyond_the_f64_range() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let before = cell(&state, time_col, 1);
+
+    type_in_cell(&mut state, time_col, 1, "1e400");
+    let refusal = state.cell_edit_refusal().expect("refused");
+    assert!(
+        refusal.contains("1e400") && refusal.contains("too large"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("NumberOutOfRange"), "{refusal}");
+
+    state.dispatch(Action::CommitCell {
+        column: time_col,
+        row: 1,
+        text: "1e400".to_string(),
+    });
+    assert_eq!(cell(&state, time_col, 1), before);
+    assert!(!state.can_undo(), "no history entry");
+    assert!(state.status().expect("a message").is_error());
+    assert!(status_text(&state).contains("too large"));
+
+    type_in_cell(&mut state, time_col, 1, "1e-400");
+    assert!(state
+        .cell_edit_refusal()
+        .expect("refused")
+        .contains("too small"));
+    type_in_cell(&mut state, time_col, 1, "1e300");
+    assert_eq!(state.cell_edit_refusal(), None);
+    type_in_cell(&mut state, time_col, 1, "");
+    assert_eq!(state.cell_edit_refusal(), None, "an empty cell clears");
+    type_in_cell(&mut state, time_col, 1, "inf");
+    assert_eq!(
+        state.cell_edit_refusal(),
+        None,
+        "a word is not a range error"
+    );
+}
+
+#[test]
+fn a_mixed_cell_refuses_a_number_too_small_to_be_stored() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    type_in_cell(&mut state, note, 0, "1e-400");
+    assert!(state
+        .cell_edit_refusal()
+        .expect("refused")
+        .contains("too small"));
+    let before = cell(&state, note, 0);
+    state.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: "1e-400".to_string(),
+    });
+    assert_eq!(cell(&state, note, 0), before);
+}
+
+#[test]
+fn a_datetime_cell_refuses_a_number_beyond_the_range_but_keeps_dates() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.dispatch(Action::SetColumnType {
+        column: time_col,
+        column_type: ColumnType::DateTime,
+    });
+    type_in_cell(&mut state, time_col, 0, "1e400");
+    assert!(state
+        .cell_edit_refusal()
+        .expect("refused")
+        .contains("too large"));
+    type_in_cell(&mut state, time_col, 0, "2026-10-15");
+    assert_eq!(state.cell_edit_refusal(), None);
+}
+
+/// A text `1e400` that a file stored stays editable: reopening it gives the
+/// displayed text, which is not a new entry.
+#[test]
+fn a_stored_text_1e400_reopened_is_not_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    // As a file import stores it: the single reading rule, outside the typing check.
+    let (values, _) = stokesforge_core::ValueBlock::from_texts(ColumnType::Mixed, &["1e400"]);
+    session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: note,
+            start: 0,
+            values,
+            expected_version: None,
+        })
+        .expect("text stored");
+    state.refresh();
+    assert_eq!(state.cell_text(note, 0), "1e400");
+    state.begin_edit(note, 0);
+    assert_eq!(state.editing().expect("editing").buffer, "1e400");
+    assert_eq!(state.cell_edit_refusal(), None);
+}
+
+// -- #429 (S1): a pasted text holding an unrepresentable number is refused whole --
+
+/// Pastes `text` with the cursor on `(column, row)`.
+fn paste_text_at(state: &mut AppState, sheet: NodeId, column: NodeId, row: usize, text: &str) {
+    state.select_cell(sheet, column, row);
+    state.dispatch(Action::Paste {
+        sheet,
+        text: text.to_string(),
+    });
+}
+
+fn assert_refused_paste(state: &AppState, sentence: &str, row: usize) {
+    assert!(state.status().expect("a message").is_error());
+    let status = status_text(state);
+    assert!(
+        status.starts_with("Nothing was pasted.")
+            && status.contains(sentence)
+            && status.contains(&format!("(row {row})")),
+        "{status}"
+    );
+    assert!(!state.can_undo(), "no history entry");
+}
+
+#[test]
+fn a_paste_with_a_too_small_number_pastes_nothing_in_a_numeric_column() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let before: Vec<Cell> = (0..5).map(|row| cell(&state, time_col, row)).collect();
+    paste_text_at(&mut state, sheet1, time_col, 0, "0.1\n1e-400\n0.3");
+    let after: Vec<Cell> = (0..5).map(|row| cell(&state, time_col, row)).collect();
+    assert_eq!(after, before);
+    assert_eq!(column_type(&state, time_col), ColumnType::Numeric);
+    assert_refused_paste(&state, "1e-400", 2);
+    assert!(status_text(&state).contains("too small to be stored"));
+}
+
+#[test]
+fn a_paste_with_a_huge_number_is_refused_in_a_mixed_column_too() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    let before = cell(&state, note, 0);
+    paste_text_at(&mut state, sheet1, note, 0, "1e400");
+    assert_eq!(cell(&state, note, 0), before);
+    assert_refused_paste(&state, "1e400", 1);
+    assert!(status_text(&state).contains("too large"));
+}
+
+#[test]
+fn a_block_with_only_its_last_cell_out_of_range_pastes_nothing_anywhere() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let signal = column_id(&state, sheet1, "Signal");
+    let before: Vec<Cell> = (0..5)
+        .flat_map(|row| [cell(&state, time_col, row), cell(&state, signal, row)])
+        .collect();
+    paste_text_at(&mut state, sheet1, time_col, 1, "1\t2\n3\t4\n5\t1e400");
+    let after: Vec<Cell> = (0..5)
+        .flat_map(|row| [cell(&state, time_col, row), cell(&state, signal, row)])
+        .collect();
+    assert_eq!(after, before);
+    assert_refused_paste(&state, "1e400", 4);
+}
+
+#[test]
+fn a_refused_paste_on_the_entry_row_creates_no_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let entry = state.entry_row(sheet1);
+    assert_eq!(entry, 5);
+    paste_text_at(&mut state, sheet1, time_col, entry, "1\n1e400");
+    assert_eq!(state.row_count(sheet1), 5);
+    assert_refused_paste(&state, "1e400", 7);
+}
+
+#[test]
+fn a_paste_of_words_zero_and_subnormals_is_accepted() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    paste_text_at(&mut state, sheet1, time_col, 0, "inf\n0e400\n1e-310");
+    assert!(state.can_undo(), "pasted");
+    assert!(!status_text(&state).contains("Nothing was pasted"));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1e-310));
+}
+
+#[test]
+fn a_pasted_date_in_a_datetime_column_is_not_a_range_error() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.dispatch(Action::SetColumnType {
+        column: time_col,
+        column_type: ColumnType::DateTime,
+    });
+    paste_text_at(&mut state, sheet1, time_col, 0, "2026-10-15\n2026-10-16");
+    assert!(!status_text(&state).contains("Nothing was pasted"));
+    paste_text_at(&mut state, sheet1, time_col, 0, "1e400");
+    assert!(status_text(&state).contains("Nothing was pasted"));
+}
+
+/// An internal copy of a stored text pastes as before: its texts are stored
+/// values, not typed ones.
+#[test]
+fn an_internal_copy_of_a_stored_text_1e400_is_not_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    let (values, _) = stokesforge_core::ValueBlock::from_texts(ColumnType::Mixed, &["1e400"]);
+    session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: note,
+            start: 0,
+            values,
+            expected_version: None,
+        })
+        .expect("text stored");
+    state.refresh();
+    state.select_cell(sheet1, note, 0);
+    let text = state.copy_selection(sheet1).expect("copied");
+    state.select_cell(sheet1, note, 2);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(state.cell_text(note, 2), "1e400");
+}
+
+/// A refused number advances nowhere and adds no row, in the last data row as in
+/// the entry row (#440).
+#[test]
+fn a_refused_number_adds_no_row_and_leaves_the_cursor() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    for row in [4, 5] {
+        state.select_cell(sheet1, time_col, row);
+        state.dispatch(Action::CommitCellAndAdvance {
+            column: time_col,
+            row,
+            text: "1e400".to_string(),
+            sheet: sheet1,
+        });
+        assert_eq!(state.row_count(sheet1), 5, "row {row}");
+        assert_eq!(
+            cursor(&state, sheet1),
+            Some(GridCursor::Data(time_col, row)),
+            "row {row}"
+        );
+    }
+}
+
 /// Letters displayed for a column's formula (#321: the formula is
 /// stored by identifiers, the letters are only a display).
 fn formula_letters(state: &AppState, column: NodeId) -> Option<String> {

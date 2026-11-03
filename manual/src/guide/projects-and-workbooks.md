@@ -243,7 +243,7 @@ Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next colum
 
 Below the last row, the grid always shows an empty **entry row**, marked `*` in the row-number column (hover it: *Type here to add a row*). It is there in a new workbook too, which has no rows yet. Click a cell of the entry row and type a value, then press <kbd>Enter</kbd>: the row is created, and the cursor moves to the next entry row. One **Undo** removes the row. The entry row is not data: it is not saved, not plotted, and **Select All** does not include it. A range extended with <kbd>Shift</kbd> (click, drag or arrows) stops at the last row and never includes the entry row.
 
-A decimal comma is accepted: `1,5` is read as 1.5. The status bar tells you when it did so. An empty cell is a missing value. Dates and times are read when the column is **Date/Time**.
+A decimal comma is accepted: `1,5` is read as 1.5. The status bar tells you when it did so. A number typed in a cell beyond about 1.8e308, or non-zero but too small to be stored (under about 4.9e-324), is refused with the same message as in a formula and the cell stays open; a pasted block that holds such a number is refused as a whole (nothing is pasted, and the status bar names the number and its row); imported values are not checked. An empty cell is a missing value. Dates and times are read when the column is **Date/Time**.
 
 ### Select cells
 
@@ -302,6 +302,7 @@ If you misspell a function name, the message proposes the nearest one (`sqr(A)` 
 
 - Columns are written with their letters: `A`, `B`, `AA`. Capitals or lowercase both work.
 - Numbers: `2`, `0.5`, `1e-3`.
+  A number beyond about 1.8e308, or non-zero but too small to be stored (under about 4.9e-324), is refused when you enter the formula, with a message that gives the limit. Write `0` for zero.
 - Operators: `+`, `-`, `*`, `/`, `^` (power), and a minus sign in front of a value (`-A`).
 - Parentheses: `(A+B)/2`. `^` is done first, then `*` and `/`, then `+` and `-`. `^` reads from the right (`2^3^2` is 512) and binds tighter than a minus sign (`-2^2` is -4).
 - Comparisons: `<`, `<=`, `>`, `>=`, `==`, `!=`. They give 1 when true and 0 when false, and are done last.

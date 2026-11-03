@@ -239,13 +239,37 @@ impl Func {
             // Base ≤ 0 or = 1: NaN (ln b = 0 would give ±inf or 0/0); x ≤ 0:
             // `ln` already gives NaN (−inf for 0, which we keep like `ln`).
             Func::Logx if b.is_nan() || b <= 0.0 || b == 1.0 => f64::NAN,
-            Func::Logx => libm::log(a) / libm::log(b),
+            Func::Logx => logx(a, b),
             Func::Root => root(a, b),
             Func::Round => round(a, b),
             Func::Mod => modulo(a, b),
             Func::Pi => std::f64::consts::PI,
         }
     }
+}
+
+/// Logarithm of `a` in base `b` (`b` > 0, `b` != 1, already checked).
+///
+/// Bases 10 and 2 go through `log10`/`log2` (exact on powers). Otherwise
+/// `ln(a) / ln(b)` is used. In every case, when `b^k == a` holds exactly for
+/// the integer `k` nearest to the result, the result is `k`: `logx(243, 3)` is
+/// 5 and `floor(logx(1000, 10))` is 3. A value only close to a power is not
+/// snapped.
+fn logx(a: f64, b: f64) -> f64 {
+    let r = if b == 10.0 {
+        libm::log10(a)
+    } else if b == 2.0 {
+        libm::log2(a)
+    } else {
+        libm::log(a) / libm::log(b)
+    };
+    if r.is_finite() {
+        let k = r.round();
+        if libm::pow(b, k) == a {
+            return k;
+        }
+    }
+    r
 }
 
 /// `n`-th root. Odd integer `n` with `x < 0` keeps the real root
@@ -412,67 +436,20 @@ fn modulo(a: f64, b: f64) -> f64 {
     }
 }
 
-/// Complementary error function, precise in the tail: `1 − erf(x)` would lose
-/// all its digits from `x ≈ 6` (`erfc(6) ≈ 2e-17`).
+/// Complementary error function: `libm::erfc` (same bits on every platform).
+/// It keeps its relative precision in the tail, where `1 - erf(x)` would lose
+/// every digit (`erfc(6)` is about 2e-17), and returns the subnormal results
+/// up to `x` of about 27.2. Checked against the Boost.Math tables
+/// (`tests/erf_boost.rs`).
 pub fn erfc(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    if x < 0.0 {
-        return 2.0 - erfc(-x);
-    }
-    if x < 2.5 {
-        return 1.0 - erf(x);
-    }
-    if x > 27.0 {
-        return 0.0;
-    }
-    // Same continued fraction as `erf`, without subtracting it from 1.
-    let mut f = 0.0;
-    for k in (1..=60).rev() {
-        f = (k as f64 / 2.0) / (x + f);
-    }
-    libm::exp(-x * x) / (std::f64::consts::PI.sqrt() * (x + f))
+    libm::erfc(x)
 }
 
-/// Error function (Abramowitz & Stegun 7.1.26 refined by a series for
-/// small arguments): absolute error < 1e-12 on ℝ.
+/// Error function: `libm::erf` (same bits on every platform), odd, with
+/// `erf(-0)` equal to `-0`. Checked against the Boost.Math tables
+/// (`tests/erf_boost.rs`).
 pub fn erf(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    let ax = x.abs();
-    let v = if ax < 3.0 {
-        // Maclaurin series: erf(x) = 2/√π Σ (-1)^n x^(2n+1) / (n! (2n+1)).
-        let mut term = ax;
-        let mut sum = ax;
-        let x2 = ax * ax;
-        let mut n = 0.0_f64;
-        loop {
-            n += 1.0;
-            term *= -x2 / n;
-            let add = term / (2.0 * n + 1.0);
-            sum += add;
-            if add.abs() < 1e-17 * sum.abs() || n > 200.0 {
-                break;
-            }
-        }
-        sum * 2.0 / std::f64::consts::PI.sqrt()
-    } else if ax > 6.0 {
-        1.0
-    } else {
-        // Continued fraction of erfc for large arguments.
-        let mut f = 0.0;
-        for k in (1..=60).rev() {
-            f = (k as f64 / 2.0) / (ax + f);
-        }
-        1.0 - libm::exp(-ax * ax) / (std::f64::consts::PI.sqrt() * (ax + f))
-    };
-    if x < 0.0 {
-        -v
-    } else {
-        v
-    }
+    libm::erf(x)
 }
 
 #[cfg(test)]
@@ -481,6 +458,24 @@ mod tests {
 
     fn call(name: &str, args: &[f64]) -> f64 {
         Func::from_name(name).expect(name).apply(args)
+    }
+
+    /// Bases 10 and 2 are the `log10` / `log2` of libm, bit for bit (#429).
+    #[test]
+    fn logx_in_base_10_and_2_is_log10_and_log2_bitwise() {
+        for i in 1..400 {
+            let x = f64::from(i) * 0.37 + 0.001;
+            assert_eq!(
+                call("logx", &[x, 10.0]).to_bits(),
+                libm::log10(x).to_bits(),
+                "logx({x}, 10)"
+            );
+            assert_eq!(
+                call("logx", &[x, 2.0]).to_bits(),
+                libm::log2(x).to_bits(),
+                "logx({x}, 2)"
+            );
+        }
     }
 
     /// Position of each variant: an exhaustive `match`, so that a new

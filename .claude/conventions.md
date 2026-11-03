@@ -165,6 +165,7 @@ through `crates/stokesforge-app-state/src/errors.rs`:
 
 - one function `error_message(&Erreur) -> String` per family
   (`errors::model`, `commands`, `session`, `file`, `import`, `formula`,
+  `number` (a typed number out of the `f64` range, shared by formulas and cells, #429),
   `render`, `export`, `script` under the `python` feature);
 - each variant → one key `error-<family>-<cause>` of the `en` catalog, its
   fields as named arguments (`tr!("error-file-corrupt", path = …, detail = …)`);

@@ -444,11 +444,10 @@ assert not bad, bad[:10]
     );
 }
 
-/// What the differential check cannot yet assert: the relative error of `erf`
-/// and `erfc` in the tail, and `sum`, `mean`, `std` at the tolerance a compensated
-/// summation would give (2 ulps from `math.fsum`).
+/// What the differential check holds to a tighter bound: the relative error of
+/// `erf` and `erfc` in the tail, and `sum`, `mean`, `std` at the tolerance a
+/// compensated summation gives (2 ulps from `math.fsum`) (#429).
 #[test]
-#[ignore = "bug: #429: erf/erfc lose their relative precision away from 0, and sum/mean/std are only held to a loose 2000 ulps bound"]
 fn erf_erfc_and_the_aggregates_meet_their_target_tolerance() {
     let bench = bench();
     script(

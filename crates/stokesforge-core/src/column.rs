@@ -443,9 +443,11 @@ impl ValueBlock {
     /// ([`crate::datetime::parse_datetime`]) is read first, as a POSIX
     /// timestamp. What cannot be read stays trimmed `Text` — `inf`, `nan` and
     /// `1e400` included: a typed or pasted infinity would silently skew
-    /// automatic axes, integrals and fits (type conversion through
-    /// the header, [`Column::set_column_type`], keeps its rule C2: a written
-    /// `inf` is an intended infinity there).
+    /// automatic axes, integrals and fits. Typing refuses such a number before
+    /// this rule runs ([`crate::number_format::check_range`], #429); paste does
+    /// not, and keeps it as text. Type conversion through the header
+    /// ([`Column::set_column_type`]) keeps its rule C2: a written `inf` is an
+    /// intended infinity there.
     ///
     /// - `Numeric` / `DateTime`: `Float` block if all cells can be read
     ///   ; otherwise a `Mixed` block where each cell read becomes a `Number` (a

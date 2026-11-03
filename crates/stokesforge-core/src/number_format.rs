@@ -44,13 +44,61 @@ const POSITIONAL_MAX_EXP: i32 = 5;
 /// Reserved for number fields and cells: formulas and value lists
 /// keep the point, the comma separates there.
 pub fn parse_input(text: &str) -> Option<f64> {
-    let trimmed = text.trim();
-    let value = if trimmed.matches(',').count() == 1 && !trimmed.contains('.') {
-        trimmed.replacen(',', ".", 1).parse::<f64>().ok()?
-    } else {
-        trimmed.parse::<f64>().ok()?
-    };
+    let value = read_input(text)?;
     value.is_finite().then_some(value)
+}
+
+/// The trimmed text read as an `f64` with the comma rule of [`parse_input`],
+/// infinities and `NaN` included.
+fn read_input(text: &str) -> Option<f64> {
+    normalised_input(text).parse::<f64>().ok()
+}
+
+/// The trimmed text, its lone comma read as a point (rule of [`parse_input`]).
+fn normalised_input(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.matches(',').count() == 1 && !trimmed.contains('.') {
+        trimmed.replacen(',', ".", 1)
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// A number typed by hand that looks valid but that an `f64` cannot hold
+/// (#429): beyond about 1.8e308 (`too_large`), or non-zero but under about
+/// 4.9e-324 (it would be stored as 0). Shared by the formula literals and the
+/// data cells; the sentence is built by `stokesforge-app-state`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the number {text} is too {} for a 64-bit float", if *too_large { "large" } else { "small to be stored" })]
+pub struct NumberOutOfRange {
+    /// The text as typed (trimmed, comma as typed).
+    pub text: String,
+    /// True beyond the largest `f64`, false under the smallest.
+    pub too_large: bool,
+}
+
+/// Input-time check of a number typed by hand: refused when it reads as
+/// infinity although its mantissa has a digit (`1e400`), or as 0 although its
+/// mantissa has a non-zero digit (`1e-400`). Subnormals, a written zero
+/// (`0e400`, `0.000`), a text that is not a number and the words `inf` and
+/// `nan` are accepted here: other rules decide about them. The comma is
+/// read as in [`parse_input`].
+pub fn check_range(text: &str) -> Result<(), NumberOutOfRange> {
+    let normalised = normalised_input(text);
+    let Ok(value) = normalised.parse::<f64>() else {
+        return Ok(());
+    };
+    let mantissa = normalised.split(['e', 'E']).next().unwrap_or("");
+    let too_large = !value.is_finite() && mantissa.chars().any(|c| c.is_ascii_digit());
+    let too_small = value == 0.0 && mantissa.chars().any(|c| ('1'..='9').contains(&c));
+    if too_large || too_small {
+        Err(NumberOutOfRange {
+            text: text.trim().to_owned(),
+            too_large,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 /// True if `text` (trimmed) has exactly the form `\d{1,3},\d{3}`: an input
@@ -207,6 +255,49 @@ fn trim_zeros(mut text: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn refused(text: &str) -> Option<bool> {
+        check_range(text).err().map(|error| error.too_large)
+    }
+
+    #[test]
+    fn a_number_beyond_the_f64_range_is_too_large() {
+        let long = "9".repeat(400);
+        for text in ["1e400", "-1e400", "1.8e308", long.as_str(), " 1e400 "] {
+            assert_eq!(refused(text), Some(true), "{text}");
+        }
+        assert_eq!(check_range(" 1e400 ").unwrap_err().text, "1e400");
+    }
+
+    #[test]
+    fn a_non_zero_number_stored_as_zero_is_too_small() {
+        // `1,5e-400`: the comma is read as a point, like `parse_input`.
+        for text in ["1e-400", "2e-324", "1,5e-400", "-1e-400"] {
+            assert_eq!(refused(text), Some(false), "{text}");
+        }
+    }
+
+    #[test]
+    fn what_an_f64_holds_or_what_is_not_a_number_is_not_refused_by_the_range() {
+        for text in [
+            "1e-310",
+            "0e400",
+            "0.000",
+            "-0",
+            "0",
+            "inf",
+            "-inf",
+            "Infinity",
+            "nan",
+            "1e",
+            "abc",
+            "",
+            "1.7976931348623157e308",
+            "5e-324",
+        ] {
+            assert_eq!(refused(text), None, "{text}");
+        }
+    }
 
     #[test]
     fn three_significant_digits() {

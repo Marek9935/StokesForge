@@ -593,6 +593,113 @@ pub mod import {
 }
 
 /// Errors of a calculated-column formula (`stokesforge-core::formula`).
+/// A number typed by hand that an `f64` cannot hold (#429): shared by the
+/// formula literals and the data cells.
+pub mod number {
+    use stokesforge_core::number_format::NumberOutOfRange;
+
+    use crate::tr;
+
+    /// The sentence of a [`NumberOutOfRange`].
+    pub fn error_message(error: &NumberOutOfRange) -> String {
+        let number = shorten_number(&error.text);
+        if error.too_large {
+            tr!("error-number-too-large", number = number.as_str())
+        } else {
+            tr!("error-number-too-small", number = number.as_str())
+        }
+    }
+
+    /// A pasted block refused as a whole because of one number (#429).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct PasteOutOfRange {
+        /// The first value beyond the range, in reading order.
+        pub number: NumberOutOfRange,
+        /// Its destination row as the grid shows it (1-based).
+        pub row: usize,
+    }
+
+    impl std::fmt::Display for PasteOutOfRange {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "nothing was pasted: {} (row {})", self.number, self.row)
+        }
+    }
+
+    impl std::error::Error for PasteOutOfRange {}
+
+    /// The sentence of a [`PasteOutOfRange`].
+    pub fn paste_error_message(error: &PasteOutOfRange) -> String {
+        let number = shorten_number(&error.number.text);
+        if error.number.too_large {
+            tr!(
+                "error-paste-number-too-large",
+                number = number.as_str(),
+                row = error.row
+            )
+        } else {
+            tr!(
+                "error-paste-number-too-small",
+                number = number.as_str(),
+                row = error.row
+            )
+        }
+    }
+
+    /// A literal longer than 20 characters (a 400-digit number) is cut to its
+    /// first 12 characters followed by an ellipsis.
+    fn shorten_number(text: &str) -> String {
+        if text.chars().count() > 20 {
+            let head: String = text.chars().take(12).collect();
+            format!("{head}\u{2026}")
+        } else {
+            text.to_string()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn samples() -> [NumberOutOfRange; 2] {
+            [
+                NumberOutOfRange {
+                    text: "1e400".into(),
+                    too_large: true,
+                },
+                NumberOutOfRange {
+                    text: "1e-400".into(),
+                    too_large: false,
+                },
+            ]
+        }
+
+        #[test]
+        fn each_side_has_its_sentence_and_no_jargon() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            for error in samples() {
+                let message = error_message(&error);
+                crate::errors::tests_support::check(&error, &message);
+                assert!(message.contains(&error.text), "{message}");
+            }
+            assert!(error_message(&samples()[0]).contains("too large"));
+            assert!(error_message(&samples()[1]).contains("too small"));
+        }
+
+        #[test]
+        fn a_refused_paste_names_the_number_and_the_row() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            for number in samples() {
+                let error = PasteOutOfRange { number, row: 7 };
+                let message = paste_error_message(&error);
+                crate::errors::tests_support::check(&error, &message);
+                assert!(message.starts_with("Nothing was pasted."), "{message}");
+                assert!(message.contains("(row 7)"), "{message}");
+                assert!(message.contains(&error.number.text), "{message}");
+            }
+        }
+    }
+}
+
 pub mod formula {
     use stokesforge_core::FormulaError;
 
@@ -667,6 +774,12 @@ pub mod formula {
             }
             FormulaError::NoPairedX => tr!("error-formula-no-paired-x"),
             FormulaError::NoPoint => tr!("error-formula-no-point"),
+            FormulaError::NumberOutOfRange { text, too_large } => {
+                super::number::error_message(&stokesforge_core::number_format::NumberOutOfRange {
+                    text: text.clone(),
+                    too_large: *too_large,
+                })
+            }
             FormulaError::UnknownSheet(name) => {
                 tr!("error-formula-unknown-sheet", name = name.as_str())
             }
@@ -729,6 +842,14 @@ pub mod formula {
                 FormulaError::ColumnExpected { name: "max" },
                 FormulaError::NoPairedX,
                 FormulaError::NoPoint,
+                FormulaError::NumberOutOfRange {
+                    text: "1e400".into(),
+                    too_large: true,
+                },
+                FormulaError::NumberOutOfRange {
+                    text: "1e-400".into(),
+                    too_large: false,
+                },
                 FormulaError::UnknownSheet("Sheet9".into()),
                 FormulaError::UnknownWorkbook("Book9".into()),
                 FormulaError::WorkbookWithoutSheet("Book2".into()),
@@ -741,7 +862,8 @@ pub mod formula {
                 FormulaError::RemoteOutsideColumnFunction,
                 FormulaError::RemoteXColumn,
             ];
-            let mut seen = [false; 21];
+            let mut seen = [false; 22];
+            let mut ranges = [false; 2];
             let mut suggested = [false; 2];
             for sample in &samples {
                 let index = match sample {
@@ -764,19 +886,24 @@ pub mod formula {
                     FormulaError::ColumnExpected { .. } => 10,
                     FormulaError::NoPairedX => 11,
                     FormulaError::NoPoint => 12,
-                    FormulaError::UnknownSheet(_) => 13,
-                    FormulaError::UnknownWorkbook(_) => 14,
-                    FormulaError::WorkbookWithoutSheet(_) => 15,
-                    FormulaError::AmbiguousWorkbook(_) => 16,
-                    FormulaError::AmbiguousName(_) => 17,
-                    FormulaError::UnknownColumnIn { .. } => 18,
-                    FormulaError::RemoteOutsideColumnFunction => 19,
-                    FormulaError::RemoteXColumn => 20,
+                    FormulaError::NumberOutOfRange { too_large, .. } => {
+                        ranges[usize::from(*too_large)] = true;
+                        13
+                    }
+                    FormulaError::UnknownSheet(_) => 14,
+                    FormulaError::UnknownWorkbook(_) => 15,
+                    FormulaError::WorkbookWithoutSheet(_) => 16,
+                    FormulaError::AmbiguousWorkbook(_) => 17,
+                    FormulaError::AmbiguousName(_) => 18,
+                    FormulaError::UnknownColumnIn { .. } => 19,
+                    FormulaError::RemoteOutsideColumnFunction => 20,
+                    FormulaError::RemoteXColumn => 21,
                 };
                 seen[index] = true;
             }
             assert!(seen.iter().all(|&s| s), "a variant has no example");
             assert!(suggested.iter().all(|&s| s), "a suggestion has no example");
+            assert!(ranges.iter().all(|&s| s), "a range side has no example");
             samples
         }
 
@@ -785,6 +912,26 @@ pub mod formula {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
+        }
+
+        #[test]
+        fn a_long_number_is_shortened_in_the_sentence() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let long = format!("1{}", "0".repeat(400));
+            let message = error_message(&FormulaError::NumberOutOfRange {
+                text: long,
+                too_large: true,
+            });
+            assert!(
+                message.starts_with("The number 100000000000\u{2026} is too large"),
+                "{message}"
+            );
+            let twenty = "9".repeat(20);
+            let message = error_message(&FormulaError::NumberOutOfRange {
+                text: twenty.clone(),
+                too_large: true,
+            });
+            assert!(message.contains(&twenty), "{message}");
         }
 
         #[test]
