@@ -606,7 +606,14 @@ arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the C
 own commit. To keep pushes orderly, merge and push `main` under the lock
 `scripts/main-lock.sh take "<square> #<n>"` … `release`. The scripts of this workflow
 (`chantier.sh`, `try.sh`, `main-lock.sh`, `workflow-lib.sh`) are tested by
-`scripts/workflow-test.sh`, run by the `fmt` job.
+`scripts/workflow-test.sh`, run by the `fmt` job. Besides the colours, briefing and locks, it covers
+(#441) one colour per issue (sibling worktrees `feature<n>b`, detached HEAD),
+`chantier.sh --status [--json]` (six colours in order, `since`/`days` with the
+`SF_TODAY` seam, colourless worktrees, paused packages), `--pause` (refused while a
+worktree exists, frees the colour, keeps the list, `--start` reserves again), the
+package `since` date surviving a rerun, and `--release` (one fixed line; refuses an
+unmerged branch, modified or untracked files, ignored files other than `target/`,
+a run from a worktree or off `main`; never `-D` nor `--force`).
 
 **Reading the result.**
 

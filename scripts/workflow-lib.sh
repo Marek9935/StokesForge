@@ -43,34 +43,80 @@ sf_colour_of() {
 # Work packages with sub-issues (#419): ../_stokesforge/.packages/<parent> holds
 # the package colour on line 1, then one "<n><TAB><title>" line per sub-issue.
 # The colour stays reserved between two sub-issues, until `chantier.sh --done`.
+# An empty line 1 means the package is PAUSED (`chantier.sh --pause`, #441): it
+# keeps its sub-issue list but holds no colour. The file's mtime is the "since"
+# date of the colour (or of the pause).
 sf_pkg_dir() { printf '%s/.packages\n' "$(sf_wt_root)"; }
 
-# Colour reserved for package <parent>, empty if none.
+# Colour reserved for package <parent>, empty if none or paused.
 sf_pkg_colour() {
     local f
     f="$(sf_pkg_dir)/$1"
     [ -f "$f" ] && head -n 1 "$f" || true
 }
 
+# Write package file $1 with colour $2 (may be empty = paused) and the lines of
+# file $3. Skipped when nothing changes; when the colour is unchanged the mtime
+# ("since") is kept even if the sub-issue list changed.
+sf_pkg_write() {
+    local f="$1" colour="$2" list="$3" new ref
+    new="$(mktemp)"
+    { printf '%s\n' "$colour"; cat "$list"; } > "$new"
+    if [ -f "$f" ] && cmp -s "$f" "$new"; then rm -f "$new"; return 0; fi
+    mkdir -p "$(dirname "$f")"
+    if [ -f "$f" ] && [ -n "$colour" ] && [ "$(head -n 1 "$f")" = "$colour" ]; then
+        ref="$(mktemp)"
+        touch -r "$f" "$ref"
+        cat "$new" > "$f"
+        touch -r "$ref" "$f"
+        rm -f "$ref"
+    else
+        cat "$new" > "$f"
+    fi
+    rm -f "$new"
+}
+
 # Reserve (or keep) the colour of package <parent>; $2 = file of "<n><TAB><title>"
-# lines. Prints the colour. Call with the colour lock held.
+# lines. Prints the colour. Call with the colour lock held. A paused package gets
+# the first free colour again.
 sf_pkg_reserve() {
     local parent="$1" list="$2" colour
     colour="$(sf_pkg_colour "$parent")"
     [ -n "$colour" ] || colour="$(sf_first_free)"
     [ -n "$colour" ] || return 1
-    mkdir -p "$(sf_pkg_dir)"
-    { printf '%s\n' "$colour"; cat "$list"; } > "$(sf_pkg_dir)/$parent"
+    sf_pkg_write "$(sf_pkg_dir)/$parent" "$colour" "$list"
     printf '%s\n' "$colour"
 }
 
-# Colours held by the live worktrees and the reserved packages, one per line.
-sf_used_colours() {
-    local wt f
-    sf_worktrees | while read -r wt; do sf_colour_of "$wt"; done | sed '/^$/d'
+# Parents of the package files, paused ones included, one per line.
+sf_pkgs() {
+    local f
     for f in "$(sf_pkg_dir)"/*; do
-        if [ -f "$f" ]; then head -n 1 "$f"; fi
-    done | sed '/^$/d'
+        if [ -f "$f" ]; then basename "$f"; fi
+    done
+}
+
+# Members of package <parent> as " <parent> <sub> <sub> " (for a `case` test).
+sf_pkg_members() {
+    printf ' %s %s \n' "$1" "$(tail -n +2 "$(sf_pkg_dir)/$1" | cut -f1 | tr '\n' ' ')"
+}
+
+# Paths of the worktrees that belong to package <parent> (itself or a sub-issue).
+sf_pkg_worktrees() {
+    local members wt i
+    members="$(sf_pkg_members "$1")"
+    sf_worktrees | while read -r wt; do
+        [ -n "$wt" ] || continue
+        i="$(sf_issue_of "$wt")"
+        case "$members" in *" $i "*) printf '%s\n' "$wt" ;; esac
+    done
+}
+
+# Colours held by the live worktrees and the reserved (not paused) packages, one per line.
+sf_used_colours() {
+    local wt p
+    sf_worktrees | while read -r wt; do sf_colour_of "$wt"; done | sed '/^$/d'
+    sf_pkgs | while read -r p; do sf_pkg_colour "$p"; done | sed '/^$/d'
 }
 
 # First colour of SF_COLOURS that nobody holds; empty if all six are taken.
@@ -82,9 +128,57 @@ sf_first_free() {
     done
 }
 
-# Issue number of a worktree (from its branch feature/<n>-<topic>), empty if none.
+# Issue number of a worktree, empty if none. The folder name comes first
+# (feature<n>, feature<n><letters> for a second worktree of the same issue, so
+# feature426b is #426; feature4260 is #4260), the branch feature/<n>-<topic> is the
+# fallback. A detached HEAD therefore still yields its issue.
 sf_issue_of() {
+    local base
+    base="$(basename "$1")"
+    if [[ "$base" =~ ^feature([0-9]+)[a-z]*$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
     git -C "$1" symbolic-ref --short HEAD 2> /dev/null | sed -n 's|^feature/\([0-9][0-9]*\)-.*|\1|p'
+}
+
+# Worktrees of issue <n>, one path per line.
+sf_issue_worktrees() {
+    local wt
+    sf_worktrees | while read -r wt; do
+        [ -n "$wt" ] || continue
+        [ "$(sf_issue_of "$wt")" = "$1" ] && printf '%s\n' "$wt" || true
+    done
+}
+
+# Colour already held by a worktree of issue <n>, empty if none.
+sf_issue_colour() {
+    local wt c
+    while read -r wt; do
+        [ -n "$wt" ] || continue
+        c="$(sf_colour_of "$wt")"
+        if [ -n "$c" ]; then printf '%s\n' "$c"; return 0; fi
+    done < <(sf_issue_worktrees "$1")
+}
+
+# Colour issue <n> should have: that of worktree $3 (if given), else one already
+# held by a worktree of the issue, else the package colour $2, else the first free.
+sf_colour_for_issue() {
+    local n="$1" pkg="${2:-}" own="" c=""
+    [ -z "${3:-}" ] || own="$(sf_colour_of "$3")"
+    c="${own:-$(sf_issue_colour "$n")}"
+    c="${c:-$pkg}"
+    c="${c:-$(sf_first_free)}"
+    printf '%s\n' "$c"
+}
+
+# Write colour $2 to every colourless worktree of issue <n>. Colour lock held.
+sf_colour_spread() {
+    local wt
+    while read -r wt; do
+        [ -n "$wt" ] || continue
+        [ -n "$(sf_colour_of "$wt")" ] || printf '%s\n' "$2" > "$(sf_colour_file "$wt")"
+    done < <(sf_issue_worktrees "$1")
 }
 
 # Run "$@" holding the directory lock $1 (mkdir is atomic; waits up to 10 s).

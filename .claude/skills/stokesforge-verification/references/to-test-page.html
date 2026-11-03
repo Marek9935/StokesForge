@@ -40,7 +40,18 @@ section{display:flex;flex-direction:column;gap:12px}
 .st.done{border-color:var(--ok);color:var(--ok)}
 .st.cur{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
 .wait{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.wait.dep{background:var(--accent-soft);color:var(--accent)}
+.wait.ag{background:var(--bg);color:var(--muted);border:1px solid var(--line);font-weight:400}
 .what{color:var(--muted)}
+.rows{display:flex;flex-direction:column;gap:12px}
+.slot{display:flex;flex-direction:column;gap:8px}
+.free{display:flex;align-items:center;gap:12px;padding:10px 16px}
+.free .sq{opacity:.4}
+.since{color:var(--muted);font-size:.85rem}
+.since.late{color:var(--warn);font-weight:700}
+.flag{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips code{font-family:var(--mono);font-size:.92rem;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--fg)}
 .where{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .where code{font-family:var(--mono);font-size:.92rem;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--fg)}
 .where .sep{color:var(--muted)}
@@ -72,7 +83,7 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
   </header>
   <div class="banner" id="banner" hidden></div>
   <section aria-labelledby="h-cur">
-    <h2 id="h-cur">En cours <span class="count" id="n-cur">–</span></h2>
+    <h2 id="h-cur">Couleurs <span class="count" id="n-cur">–</span></h2>
     <div id="cur"></div>
   </section>
   <section aria-labelledby="h-todo">
@@ -98,21 +109,76 @@ function head(x,extra){
   if(extra){t.appendChild(el('div','what',extra));}
   h.appendChild(t);return h;
 }
-let tests=[],chantiers=[],db=null,openBack=null,loaded={c:false,t:false};
+let tests=[],chantiers=[],control=null,db=null,openBack=null,loaded={c:false,t:false};
+const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
+const byN=(a,z)=>(a.n||0)-(z.n||0);
+const held=c=>chantiers.filter(x=>x.colour===c&&x.state!=='pause').sort(byN);
+const taken=()=>ORDER.filter(c=>held(c).length).length;
 
+function dayDiff(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));if(!m)return null;
+  const d=new Date(+m[1],+m[2]-1,+m[3]),n=new Date();const t=new Date(n.getFullYear(),n.getMonth(),n.getDate());
+  return {d,days:Math.max(0,Math.round((t-d)/86400000))};}
+function sinceEl(iso,prefix){
+  const x=dayDiff(iso);if(!x)return null;
+  const day=x.d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+  return el('div','since'+(x.days>=7?' late':''),(prefix||'depuis le ')+day+(x.days>0?' · '+x.days+' j':''));
+}
+function waitEl(c){
+  const kind=c.wait_kind||(c.waiting?'you':'');
+  const txt=typeof c.waiting==='string'&&c.waiting?c.waiting:'';
+  if(kind==='you'){if(!c.waiting)return null;return el('span','wait','T’attend : '+(txt||'ta réponse'));}
+  if(kind==='dep'){if(!c.waiting)return null;return el('span','wait dep','Attend : '+(txt||'une autre étape'));}
+  if(kind==='ag')return el('span','wait ag',txt||'Un agent travaille');
+  return null;
+}
+function chantierBox(c){
+  const b=el('div','box');b.appendChild(head(c,c.what||''));
+  const s=el('div','steps');const i=STATES.findIndex(([k])=>k===c.state);
+  STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(j<i?' done':j===i?' cur':''),l)));
+  b.appendChild(s);
+  const w=waitEl(c);if(w)b.appendChild(w);
+  const sn=sinceEl(c.since);if(sn)b.appendChild(sn);
+  return b;
+}
+function agoText(iso){
+  const t=Date.parse(iso);if(isNaN(t))return '';
+  const m=Math.max(0,Math.round((Date.now()-t)/60000));
+  if(m<1)return 'à l’instant';if(m<60)return 'il y a '+m+' min';
+  if(m<1440)return 'il y a '+Math.round(m/60)+' h';return 'il y a '+Math.round(m/1440)+' j';
+}
 function renderCur(){
-  const box=$('cur');box.replaceChildren();
-  const list=chantiers.slice().sort((a,z)=>(z.waiting?1:0)-(a.waiting?1:0)||(a.n||0)-(z.n||0));
-  $('n-cur').textContent=list.length;
-  if(!list.length){box.appendChild(el('div','empty','Aucun chantier en cours. Un chantier apparaît ici dès qu’un orchestrateur le lance.'));return;}
-  list.forEach(c=>{
-    const b=el('div','box');b.appendChild(head(c,c.what||''));
-    const s=el('div','steps');const i=STATES.findIndex(([k])=>k===c.state);
-    STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(j<i?' done':j===i?' cur':''),l)));
-    b.appendChild(s);
-    if(c.waiting)b.appendChild(el('span','wait','T’attend : '+(c.waiting===true?'ta réponse':c.waiting)));
-    box.appendChild(b);
+  const box=$('cur');box.replaceChildren();box.className='rows';
+  $('n-cur').textContent=taken()+' prises sur 6';
+  ORDER.forEach(c=>{
+    const docs=held(c);const slot=el('div','slot');
+    if(!docs.length){
+      const f=el('div','empty free');const sq=el('span','sq '+COL[c]);sq.setAttribute('aria-hidden','true');
+      f.appendChild(sq);f.appendChild(el('span','','libre'));slot.appendChild(f);
+    }else{
+      docs.forEach(d=>slot.appendChild(chantierBox(d)));
+      if(docs.length>1)slot.appendChild(el('span','flag','deux chantiers sur la même couleur'));
+    }
+    box.appendChild(slot);
   });
+  const stray=chantiers.filter(x=>x.state!=='pause'&&!ORDER.includes(x.colour)).sort(byN);
+  if(stray.length){box.appendChild(el('div','lbl','Chantiers sans couleur reconnue'));stray.forEach(d=>box.appendChild(chantierBox(d)));}
+  const paused=chantiers.filter(x=>x.state==='pause'&&!ORDER.includes(x.colour)).sort(byN);
+  if(paused.length){
+    box.appendChild(el('div','lbl','En pause, sans couleur'));
+    paused.forEach(d=>{
+      const b=el('div','box');b.appendChild(head(d,d.what||''));
+      const w=waitEl(d);if(w)b.appendChild(w);
+      const sn=sinceEl(d.since,'en pause depuis le ');if(sn)b.appendChild(sn);
+      box.appendChild(b);
+    });
+  }
+  const cl=control&&Array.isArray(control.colourless)?control.colourless:[];
+  if(cl.length){
+    box.appendChild(el('div','lbl','Dossiers sans couleur'));
+    const ch=el('div','chips');cl.forEach(n=>ch.appendChild(el('code','',n)));box.appendChild(ch);
+  }
+  const foot=control&&control.at?'Vérifié '+agoText(control.at)+(control.by?' par '+control.by:''):'Pas encore vérifié';
+  box.appendChild(el('div','note',foot));
 }
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
@@ -163,7 +229,7 @@ function renderTests(){
 }
 function render(){renderCur();renderTests();
   const n=tests.filter(x=>(x.status||'todo')==='todo').length;
-  $('sub').textContent=(loaded.c&&loaded.t)?(n?n+' essai'+(n>1?'s':'')+' à faire · '+chantiers.length+' chantier'+(chantiers.length>1?'s':'')+' en cours':'Tout est testé · '+chantiers.length+' chantier'+(chantiers.length>1?'s':'')+' en cours'):($('sub').textContent);
+  $('sub').textContent=(loaded.c&&loaded.t)?(n?n+' essai'+(n>1?'s':'')+' à faire':'Tout est testé')+' · '+taken()+' couleur'+(taken()>1?'s':'')+' prise'+(taken()>1?'s':'')+' sur 6':($('sub').textContent);
 }
 async function write(x,patch){
   Object.assign(x,patch);render();
@@ -178,6 +244,7 @@ render();
     db=await (window.claude&&window.claude.use?window.claude.use('db'):null);
     if(!db){clearTimeout(timer);$('sub').textContent='Base indisponible ici : ouvre la page connecté à claude.ai.';return;}
     db.collection('chantiers').onSnapshot(s=>{chantiers=s.docs.map(d=>Object.assign({id:d.id},d.data()));loaded.c=true;if(loaded.t)clearTimeout(timer);render();},()=>{loaded.c=true;render();});
+    db.collection('controle').onSnapshot(s=>{const d=s.docs.find(x=>x.id==='dernier');control=d?d.data():null;render();},()=>{});
     db.collection('tests').onSnapshot(s=>{tests=s.docs.map(d=>Object.assign({id:d.id},d.data()));loaded.t=true;if(loaded.c)clearTimeout(timer);render();},()=>{loaded.t=true;render();});
   }catch(e){clearTimeout(timer);$('sub').textContent='Base indisponible ici.';}
 })();
