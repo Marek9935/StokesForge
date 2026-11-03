@@ -19,7 +19,7 @@ There are two ways to start.
 
 1. In a workbook, select the columns you want to plot. Click a column letter, or use <kbd>Ctrl</kbd>+click to add more columns.
 2. Right-click a selected column letter and choose **Plot**, then a plot type. You can also use the **Plot** entry of the **Workbook** menu.
-3. The new graph opens in its own window.
+3. The new graph opens in its own window. It is named after the workbook: "Book1 plot", then "Book1 plot 2" for the next one. Numbering continues after the highest existing number: if you delete "Book1 plot 2" but keep "Book1 plot 3", the next graph is "Book1 plot 4".
 
 When a workbook is in front, the **Tools** toolbar also has three buttons for the same job: **Line**, **Scatter** and **Bar**. Their tooltip reads "Plots the selected columns in a new graph".
 

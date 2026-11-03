@@ -2122,6 +2122,99 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #431: the Type entries of the Workbook menu are greyed when no targeted
+    /// column can change type (formula, calculation output), and stay live as
+    /// soon as one can.
+    #[test]
+    fn the_type_entries_are_greyed_on_a_formula_or_calculated_column() {
+        use stokesforge_analysis::correct::CorrectOp;
+        use stokesforge_analysis::ops::Operation;
+        use stokesforge_app_state::state::HeaderField;
+        use stokesforge_core::{
+            CalculationDraft, ColumnMeta, OutputDraft, SeriesRef, SeriesResult,
+        };
+        let mut project = Project::new("Types").unwrap();
+        let (_, y) = xy_columns(&mut project);
+        project
+            .add_calculation(CalculationDraft {
+                operation: Operation::Correct {
+                    op: CorrectOp::Subtract,
+                },
+                series: vec![SeriesRef {
+                    x: None,
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![0.0, 1.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: true,
+                auto_recalc: false,
+                low_r2_dialog: false,
+            })
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        app.state.dispatch(Action::AddColumn { sheet });
+        let formula = *app
+            .state
+            .visible_columns(sheet)
+            .last()
+            .map(|c| &c.0)
+            .unwrap();
+        app.state.begin_header_edit(formula, HeaderField::Formula);
+        app.state.header_editing_mut().unwrap().buffer = "A*2".into();
+        app.state.commit_header_edit();
+        app.state.dispatch(Action::AddColumn { sheet });
+        let plain = *app
+            .state
+            .visible_columns(sheet)
+            .last()
+            .map(|c| &c.0)
+            .unwrap();
+        let calculated = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .find(|c| app.state.tree().calculation_of_column(*c).is_some())
+            .expect("a calculation output");
+
+        let tab = Some(Tab::Book(book));
+        let path = [
+            tr!("menu-workbook"),
+            tr!("menu-columns"),
+            tr!("column-type"),
+        ];
+        for (target, enabled, what) in [
+            (vec![formula], false, "formula"),
+            (vec![calculated], false, "calculated"),
+            (vec![formula, calculated], false, "formula and calculated"),
+            (vec![plain], true, "plain"),
+            (vec![formula, plain], true, "formula and plain"),
+        ] {
+            app.state.select_column(sheet, target[0]);
+            for column in &target[1..] {
+                app.state.extend_column_selection(sheet, *column);
+            }
+            let (_, menu) = open_path(&mut app, tab, &path);
+            for label in [tr!("column-type-numeric"), tr!("column-type-mixed")] {
+                assert_eq!(active(&menu, &label).enabled, enabled, "{what}: {label}");
+            }
+        }
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn the_workbook_files_sheets_columns_and_metadata_without_changing_the_actions() {
         use stokesforge_core::{ColumnRole, ColumnType};

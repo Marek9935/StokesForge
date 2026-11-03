@@ -94,6 +94,15 @@ pub use column_use::FullColumnsCopy;
 /// shorter than that stays invisible and synchronous.
 const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Why the type of a column cannot change (#431).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnTypeLock {
+    /// The column is computed by a formula: the recalculation owns its type.
+    Formula,
+    /// The column is produced by an analysis calculation.
+    Calculated,
+}
+
 /// What [`Action::ArrangeLayers`] does to the selected layers (#398, L4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerArrange {
@@ -3531,6 +3540,50 @@ impl AppState {
             .collect()
     }
 
+    /// Why the type of `column` cannot be changed (#431): it is computed by
+    /// a formula, or produced by an analysis calculation. `None` = retypable.
+    /// A formula wins when a column is both.
+    fn column_type_lock_of(&self, column: NodeId) -> Option<ColumnTypeLock> {
+        let tree = self.tree();
+        if tree
+            .node(column)
+            .and_then(|node| node.as_column())
+            .is_some_and(|column| column.meta().formula.is_some())
+        {
+            return Some(ColumnTypeLock::Formula);
+        }
+        tree.calculation_of_column(column)
+            .map(|_| ColumnTypeLock::Calculated)
+    }
+
+    /// Those of the columns `columns` whose type can change (#431): no
+    /// formula, not a calculation output. The Type action touches only these.
+    pub fn columns_with_changeable_type(&self, columns: &[NodeId]) -> Vec<NodeId> {
+        columns
+            .iter()
+            .copied()
+            .filter(|column| self.column_type_lock_of(*column).is_none())
+            .collect()
+    }
+
+    /// Why the Type entries are greyed for `columns` (#431): `Some` only when
+    /// **no** targeted column can change type (and there is one); the formula
+    /// reason wins over the calculation one.
+    pub fn column_type_lock(&self, columns: &[NodeId]) -> Option<ColumnTypeLock> {
+        let locks: Vec<_> = columns
+            .iter()
+            .map(|column| self.column_type_lock_of(*column))
+            .collect();
+        if locks.is_empty() || locks.iter().any(Option::is_none) {
+            return None;
+        }
+        if locks.contains(&Some(ColumnTypeLock::Formula)) {
+            Some(ColumnTypeLock::Formula)
+        } else {
+            Some(ColumnTypeLock::Calculated)
+        }
+    }
+
     /// All the columns of `sheet` (#330), for "reset the whole sheet
     /// to default width".
     pub fn sheet_column_ids(&self, sheet: NodeId) -> Vec<NodeId> {
@@ -4736,6 +4789,44 @@ impl AppState {
         refusal
     }
 
+    /// Why the text being typed in a data cell is refused (#429): a number
+    /// that reads as infinity (`1e400`) or as 0 although it has a non-zero digit
+    /// (`1e-400`). `None` for everything else: an empty text, the displayed text
+    /// as is (a stored text `1e400` reopened stays), a date in a Date/Time
+    /// column, any other text (it widens the column). Only typing is checked:
+    /// paste, import and scripts keep their own rule. The grid keeps the cell
+    /// open and paints the refusal, like [`AppState::header_edit_refusal`].
+    pub fn cell_edit_refusal(&self) -> Option<String> {
+        let edit = self.editing.as_ref()?;
+        self.cell_entry_range_error(edit.column, edit.row, &edit.buffer)
+            .map(|error| errors::number::error_message(&error))
+    }
+
+    /// The range error of `text` typed in `(column, row)`, if any; see
+    /// [`AppState::cell_edit_refusal`].
+    fn cell_entry_range_error(
+        &self,
+        column: NodeId,
+        row: usize,
+        text: &str,
+    ) -> Option<stokesforge_core::number_format::NumberOutOfRange> {
+        if text.trim().is_empty() || text == self.cell_text(column, row) {
+            return None;
+        }
+        let kind = self
+            .snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .map(Column::column_type)?;
+        if kind == ColumnType::DateTime
+            && stokesforge_core::datetime::parse_datetime(text.trim()).is_some()
+        {
+            return None;
+        }
+        stokesforge_core::number_format::check_range(text).err()
+    }
+
     /// The sentence saying why the formula of `column` no longer computes,
     /// when it reads a deleted column (`#REF`, #321), when it is part of a loop
     /// that a file holds (#403), when a column function finds no X paired with
@@ -5425,12 +5516,17 @@ impl AppState {
             Action::SetColumnsType {
                 columns,
                 column_type,
-            } => self.set_columns_grouped(MacroKind::SetColumnsType, &columns, |column| {
-                Command::SetColumnType {
-                    column,
-                    column_type,
-                }
-            }),
+            } => {
+                // Formula and calculated columns keep their type: only the
+                // others change, without an error (#431).
+                let columns = self.columns_with_changeable_type(&columns);
+                self.set_columns_grouped(MacroKind::SetColumnsType, &columns, |column| {
+                    Command::SetColumnType {
+                        column,
+                        column_type,
+                    }
+                });
+            }
             Action::SetColumnsRole { columns, role } => {
                 self.set_columns_role_grouped(&columns, role)
             }
@@ -9105,6 +9201,12 @@ impl AppState {
             self.fail(tr!("error-column-gone"));
             return false;
         };
+        // #429: a number that an f64 cannot hold is refused, nothing is written
+        // (the grid keeps the cell open with the same sentence).
+        if let Some(error) = self.cell_entry_range_error(column, row, &text) {
+            self.fail(errors::number::error_message(&error));
+            return false;
+        }
         // An input that does not fit the column type no longer makes it fail:
         // it **widens** the column to `ColumnType::Mixed`, through
         // `Command::SetCellsPromoting`, which groups the conversion and the
@@ -9409,13 +9511,80 @@ impl AppState {
             self.fail(tr!("error-paste-no-cell"));
             return;
         };
-        let clipboard = if self.clipboard_text.as_deref() == Some(text.as_str()) {
+        let internal = if self.clipboard_text.as_deref() == Some(text.as_str()) {
             self.grid_clipboard.clone()
         } else {
             None
+        };
+        let external = internal.is_none();
+        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(&text));
+        if external {
+            if let Some(error) = self.external_paste_range_error(sheet, anchor, &clipboard) {
+                self.fail(errors::number::paste_error_message(&error));
+                return;
+            }
         }
-        .unwrap_or_else(|| external_clipboard_from_text(&text));
         self.apply_paste(sheet, anchor, &clipboard, false);
+    }
+
+    /// The first number of an **external** text paste that a column reading
+    /// numbers cannot hold (#429, S1), in reading order; `None` when the block
+    /// is fine. Scans the whole block before any write, so a refusal pastes
+    /// nothing, creates no row and leaves no history entry. A paste of
+    /// StokesForge's own clipboard never comes here (its texts are stored
+    /// values), nor does a header field paste.
+    fn external_paste_range_error(
+        &self,
+        sheet: NodeId,
+        anchor: GridCursor,
+        clipboard: &GridClipboard,
+    ) -> Option<errors::number::PasteOutOfRange> {
+        let GridCursor::Data(anchor_column, anchor_row) = anchor else {
+            return None;
+        };
+        let single;
+        let rows: Vec<&[String]> = match clipboard {
+            GridClipboard::Text(text) => {
+                single = [text.clone()];
+                vec![&single[..]]
+            }
+            GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => {
+                rows.iter().map(Vec::as_slice).collect()
+            }
+            _ => return None,
+        };
+        let order = self.column_order(sheet);
+        let first = order.iter().position(|&id| id == anchor_column)?;
+        for (i, row) in rows.iter().enumerate() {
+            for (offset, text) in row.iter().enumerate() {
+                // Columns beyond the sheet are dropped by the paste.
+                let Some(&column) = order.get(first + offset) else {
+                    break;
+                };
+                let Some(kind) = self
+                    .snapshot
+                    .tree
+                    .node(column)
+                    .and_then(Node::as_column)
+                    .map(Column::column_type)
+                else {
+                    continue;
+                };
+                if text.trim().is_empty()
+                    || (kind == ColumnType::DateTime
+                        && stokesforge_core::datetime::parse_datetime(text.trim()).is_some())
+                {
+                    continue;
+                }
+                if let Err(number) = stokesforge_core::number_format::check_range(text) {
+                    return Some(errors::number::PasteOutOfRange {
+                        number,
+                        row: anchor_row + i + 1,
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// False, with a status message, if the selection of `sheet` is

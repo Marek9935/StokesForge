@@ -4,13 +4,12 @@
 #
 # Layout: the main checkout is the repository root; the worktrees of the work
 # packages live in ../_stokesforge/feature<n> (CLAUDE.md, "Worktrees"). A work
-# package's colour is a file in the worktree's git dir
-# (.git/worktrees/feature<n>/stokesforge-colour): `git worktree remove` or
-# `prune` deletes it, which frees the colour.
+# package's colour lives in ../_stokesforge/.suivi (scripts/suivi.py, #441), not
+# in these helpers.
 
 SF_COLOURS=(🟦 🟩 🟧 🟪 🟥 🟨)
-# The To-test page (artifact with a database), shared by every session.
-SF_TO_TEST_URL="https://claude.ai/artifact/UsyyHWZc5cj1enWrRr7yEJ"
+# The tracking page, served locally by the work-package server (#441).
+SF_TO_TEST_URL="http://127.0.0.1:8441/"
 
 # Main checkout (absolute), whichever worktree we run from.
 sf_main_dir() {
@@ -31,60 +30,27 @@ sf_worktrees() {
         done
 }
 
-sf_colour_file() { printf '%s/stokesforge-colour\n' "$(git -C "$1" rev-parse --absolute-git-dir)"; }
-
-# Colour of a worktree, empty if none.
-sf_colour_of() {
-    local f
-    f="$(sf_colour_file "$1")"
-    [ -f "$f" ] && cat "$f" || true
-}
-
-# Work packages with sub-issues (#419): ../_stokesforge/.packages/<parent> holds
-# the package colour on line 1, then one "<n><TAB><title>" line per sub-issue.
-# The colour stays reserved between two sub-issues, until `chantier.sh --done`.
-sf_pkg_dir() { printf '%s/.packages\n' "$(sf_wt_root)"; }
-
-# Colour reserved for package <parent>, empty if none.
-sf_pkg_colour() {
-    local f
-    f="$(sf_pkg_dir)/$1"
-    [ -f "$f" ] && head -n 1 "$f" || true
-}
-
-# Reserve (or keep) the colour of package <parent>; $2 = file of "<n><TAB><title>"
-# lines. Prints the colour. Call with the colour lock held.
-sf_pkg_reserve() {
-    local parent="$1" list="$2" colour
-    colour="$(sf_pkg_colour "$parent")"
-    [ -n "$colour" ] || colour="$(sf_first_free)"
-    [ -n "$colour" ] || return 1
-    mkdir -p "$(sf_pkg_dir)"
-    { printf '%s\n' "$colour"; cat "$list"; } > "$(sf_pkg_dir)/$parent"
-    printf '%s\n' "$colour"
-}
-
-# Colours held by the live worktrees and the reserved packages, one per line.
-sf_used_colours() {
-    local wt f
-    sf_worktrees | while read -r wt; do sf_colour_of "$wt"; done | sed '/^$/d'
-    for f in "$(sf_pkg_dir)"/*; do
-        if [ -f "$f" ]; then head -n 1 "$f"; fi
-    done | sed '/^$/d'
-}
-
-# First colour of SF_COLOURS that nobody holds; empty if all six are taken.
-sf_first_free() {
-    local used c
-    used="$(sf_used_colours)"
-    for c in "${SF_COLOURS[@]}"; do
-        printf '%s\n' "$used" | grep -xF "$c" > /dev/null || { printf '%s\n' "$c"; return 0; }
-    done
-}
-
-# Issue number of a worktree (from its branch feature/<n>-<topic>), empty if none.
+# Issue number of a worktree, empty if none. The folder name comes first
+# (feature<n>, feature<n><letters> for a second worktree of the same issue, so
+# feature426b is #426; feature4260 is #4260), the branch feature/<n>-<topic> is the
+# fallback. A detached HEAD therefore still yields its issue.
 sf_issue_of() {
+    local base
+    base="$(basename "$1")"
+    if [[ "$base" =~ ^feature([0-9]+)[a-z]*$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
     git -C "$1" symbolic-ref --short HEAD 2> /dev/null | sed -n 's|^feature/\([0-9][0-9]*\)-.*|\1|p'
+}
+
+# Worktrees of issue <n>, one path per line.
+sf_issue_worktrees() {
+    local wt
+    sf_worktrees | while read -r wt; do
+        [ -n "$wt" ] || continue
+        [ "$(sf_issue_of "$wt")" = "$1" ] && printf '%s\n' "$wt" || true
+    done
 }
 
 # Run "$@" holding the directory lock $1 (mkdir is atomic; waits up to 10 s).

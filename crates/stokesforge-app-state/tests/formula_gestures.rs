@@ -1015,7 +1015,7 @@ fn new_target(w: &mut World) -> NodeId {
 fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     let mut w = world();
     let target = new_target(&mut w);
-    let cases: [(&str, &str); 9] = [
+    let cases: [(&str, &str); 11] = [
         ("frob(A)", "frob"),
         ("sin(A, B)", "argument"),
         ("sin()", "argument"),
@@ -1025,6 +1025,8 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
         ("max([Nobook]Sheet1!A)", "Nobook"),
         ("max(Sheet3!B, Sheet3!A)", "can only be read by"),
         ("at(Sheet3!B, 1, Sheet3!A)", "without a prefix"),
+        ("1e400*A", "too large"),
+        ("A*1e-400", "too small"),
     ];
     for (text, hint) in cases {
         w.type_formula(target, text);
@@ -1038,6 +1040,25 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     }
 }
 
+/// A number outside the f64 range is refused as soon as it is typed: the
+/// field stays open (`header_edit_refusal`), and a stored text keeps its
+/// number (#429).
+#[test]
+fn a_number_out_of_range_is_refused_while_typing() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    w.state.begin_header_edit(target, HeaderField::Formula);
+    w.state.header_editing_mut().unwrap().buffer = "1e400*A".to_string();
+    let refusal = w.state.header_edit_refusal().expect("refused while typing");
+    assert!(
+        refusal.contains("1e400") && refusal.contains("too large"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("NumberOutOfRange"), "{refusal}");
+    w.state.header_editing_mut().unwrap().buffer = "1e308*A".to_string();
+    assert_eq!(w.state.header_edit_refusal(), None);
+}
+
 /// The manual says a formula with a syntax error is kept and the column has
 /// no values until it is fixed. Pinned: kept, empty, history entry written.
 #[test]
@@ -1046,7 +1067,7 @@ fn a_formula_with_a_syntax_error_is_kept_and_the_column_is_empty() {
     let target = new_target(&mut w);
     let deep = format!("{}A{}", "(".repeat(1001), ")".repeat(1001));
     let very_deep = format!("{}A", "-".repeat(100_000));
-    for text in ["A +", "(A", "1e999999 * A", "A ## B", &deep, &very_deep] {
+    for text in ["A +", "(A", "A ## B", &deep, &very_deep] {
         w.type_formula(target, text);
         let kept = w.letters(target);
         assert_eq!(
@@ -1275,18 +1296,56 @@ fn a_type_change_never_corrupts_a_formula_column() {
 }
 
 #[test]
-#[ignore = "bug: #431: choosing a type for a formula column answers `Change Type of Column E` (success notice, history entry) but the recalculation puts the column back to Mixed: the menu is not disabled and the tick never moves"]
-fn a_type_change_on_a_formula_column_is_refused_or_applied_not_silently_undone() {
+fn a_type_change_on_a_formula_column_is_refused() {
     let mut w = world();
     let sheet1 = w.sheet1;
     let e = w.formula_column(sheet1, "A*2");
+    let before = w.state.snapshot().history.undo_label.clone();
     w.state.dispatch(Action::SetColumnType {
         column: e,
         column_type: ColumnType::Numeric,
     });
-    let applied = column_type_of(&w, e) == ColumnType::Numeric;
-    let refused = w.status().starts_with("[error]");
-    assert!(applied || refused, "{}", w.status());
+    assert!(w.status().starts_with("[error]"), "{}", w.status());
+    assert_eq!(column_type_of(&w, e), ColumnType::Mixed);
+    assert_eq!(w.state.snapshot().history.undo_label, before);
+}
+
+/// #431, Q3: a selection holding a formula column and a plain one changes the
+/// plain one only, with no error and one undo step; a selection of formula
+/// columns only has nothing to change and says why.
+#[test]
+fn a_type_change_on_a_mixed_selection_applies_to_the_plain_columns_only() {
+    let mut w = world();
+    let sheet1 = w.sheet1;
+    let f = w.formula_column(sheet1, "A*2");
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 });
+    let plain = *w.columns(sheet1).last().unwrap();
+    w.state.dispatch(Action::SetColumnsType {
+        columns: vec![plain],
+        column_type: ColumnType::Mixed,
+    });
+    assert_eq!(
+        w.state.columns_with_changeable_type(&[f, plain]),
+        vec![plain]
+    );
+    assert_eq!(w.state.column_type_lock(&[f, plain]), None);
+    assert_eq!(
+        w.state.column_type_lock(&[f]),
+        Some(stokesforge_app_state::state::ColumnTypeLock::Formula)
+    );
+    assert!(w.state.columns_with_changeable_type(&[f]).is_empty());
+    let g = w.formula_column(sheet1, "A*3");
+    let before = w.state.tree().clone();
+    w.state.dispatch(Action::SetColumnsType {
+        columns: vec![plain, f, g],
+        column_type: ColumnType::Numeric,
+    });
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    assert_eq!(column_type_of(&w, plain), ColumnType::Numeric);
+    assert_eq!(column_type_of(&w, f), ColumnType::Mixed);
+    assert_eq!(column_type_of(&w, g), ColumnType::Mixed);
+    w.state.dispatch(Action::Undo);
+    assert_eq!(*w.state.tree(), before, "one undo step");
 }
 
 // -- stale snapshot during a long recalculation --
