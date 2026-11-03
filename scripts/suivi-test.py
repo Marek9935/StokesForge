@@ -830,6 +830,17 @@ class TestPage(unittest.TestCase):
         self.assertIn("document.visibilityState==='visible'", html)
         self.assertIn("stopPolling()", html)
 
+    def test_tab_icon_and_hash_filter(self):
+        form = os.path.join(HERE, os.pardir, ".claude", "skills", "stokesforge-bug-report", "references", "decision-form.html")
+        for path in (os.path.join(HERE, "suivi-page.html"), form):
+            with open(path, encoding="utf-8") as f:
+                self.assertIn('<link rel="icon" href="data:image/svg+xml', f.read())
+        with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("a.href='#attente/issue='+c.issue", html)
+        self.assertIn("/^issue=(\\d+)$/", html)
+        self.assertIn("x.reviewed||x.date", html)
+
 
 class TestHelp(Base):
     def test_help_runs_isolated(self):

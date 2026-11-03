@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Suivi StokesForge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 32'%3E%3Crect x='1' y='1' width='14' height='14' rx='3' fill='%232f6fdb'/%3E%3Crect x='17' y='1' width='14' height='14' rx='3' fill='%232e9e57'/%3E%3Crect x='33' y='1' width='14' height='14' rx='3' fill='%23e8892b'/%3E%3Crect x='1' y='17' width='14' height='14' rx='3' fill='%238a4fd6'/%3E%3Crect x='17' y='17' width='14' height='14' rx='3' fill='%23d6453d'/%3E%3Crect x='33' y='17' width='14' height='14' rx='3' fill='%23e6c229'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
@@ -43,6 +44,9 @@ section{display:flex;flex-direction:column;gap:12px}
 .head .t{min-width:0;overflow-wrap:anywhere}
 .steps{display:flex;flex-wrap:wrap;gap:6px}
 .st{padding:2px 10px;border-radius:99px;border:2px solid var(--line);color:var(--muted);font-size:.9rem}
+a.st,button.st{font:inherit;font-size:.9rem;cursor:pointer;text-decoration:none;background:none;font-weight:inherit}
+a.st:hover,button.st:hover{text-decoration:underline}
+a.st:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .st.done{border-color:var(--ok);color:var(--ok)}
 .st.cur{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
 .wait{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
@@ -93,6 +97,9 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
 a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8px 14px;border:2px solid var(--accent);color:var(--accent);font-weight:700}
 .legacy{align-self:flex-start;padding:3px 12px;border-radius:99px;border:2px dashed var(--warn);color:var(--warn);font-weight:700}
 .free{border-style:dashed}
+.filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.filter .chip{display:inline-flex;align-items:center;gap:8px;padding:4px 6px 4px 14px;border-radius:99px;border:2px solid var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
+.filter button{padding:0 10px;border-radius:99px;border-width:0;background:none;color:var(--accent);font-size:1rem}
 .problem{color:var(--bad);font-weight:700}
 </style>
 </head>
@@ -112,6 +119,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
 
   <div class="panel" id="p-attente" role="tabpanel" aria-labelledby="tab-attente">
     <div class="banner" id="banner" hidden></div>
+    <div class="filter" id="filter" hidden></div>
     <section aria-labelledby="h-qcm">
       <h2 id="h-qcm">Questionnaires <span class="count" id="n-qcm">–</span></h2>
       <div id="qcm" class="rows"></div>
@@ -195,7 +203,13 @@ function colourBox(c){
   }
   const h=c.held_by||[];
   const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===c.state);   // legacy: the state is unknown, highlight no step
-  STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(i<0?'':j<i?' done':j===i?' cur':''),l)));
+  STATES.forEach(([k,l],j)=>{
+    const cls='st'+(i<0?'':j<i?' done':j===i?' cur':'');
+    if(k==='questions'||k==='essai'){
+      const a=el('a',cls,l);a.href='#attente/issue='+c.issue+'/'+(k==='essai'?'essai':'qcm');
+      a.title=k==='essai'?'Voir les essais de #'+c.issue:'Voir les questionnaires de #'+c.issue;s.appendChild(a);
+    }else s.appendChild(el('span',cls,l));
+  });
   b.appendChild(s);
   const why=h.filter(k=>HELD[k]).map(k=>HELD[k]);
   if(why.length)b.appendChild(el('div','what','Couleur tenue : '+why.join(' · ')));
@@ -250,6 +264,7 @@ function qcmBox(q){
   const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
   return b;
 }
+function colourSq(n){const c=colourOf(n);return c?Object.keys(COL).find(k=>COL[k]===COL[c])+' ':'';}
 function colourOf(n){
   const c=S.colours.find(x=>!x.free&&(x.issues||[]).includes(n));if(c)return c.colour;
   const p=S.paused.find(x=>x.issue===n);return p?p.last_colour:'';
@@ -266,7 +281,8 @@ function testBox(x){
   }
   if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
   if(x.try){b.appendChild(el('div','lbl','Avant, lance (pas encore fusionné)'));b.appendChild(el('code','',x.try));}
-  const m=[];if(x.date)m.push(String(x.date).slice(0,10));if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
+  const m=[];if(x.date)m.push(String(x.date).slice(0,10));
+  if(x.status==='ok'||x.status==='retour'){const v=dayText(x.reviewed||'','', x.status==='ok'?'validé le ':'retour envoyé le ');if(v)m.push(v);}if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
   if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
   const editing=openBack&&openBack.id===x.id;
   if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
@@ -293,18 +309,30 @@ function testBox(x){
 }
 function renderTests(){
   if(!S)return;
-  const by=s=>S.tests.filter(x=>(x.status||'todo')===s).sort((a,z)=>String(z.date||'').localeCompare(String(a.date||'')));
-  const todo=by('todo'),back=by('retour'),done=by('ok');
-  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;
+  const stamp=x=>String(x.reviewed||x.date||'');
+  const by=s=>S.tests.filter(x=>(x.status||'todo')===s).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
+  const todoAll=by('todo'),backAll=by('retour'),doneAll=by('ok');
+  $('n-todo').textContent=todoAll.length;$('n-back').textContent=backAll.length;$('n-done').textContent=doneAll.length;
   $('n-qcm').textContent=S.qcms.length;
+  const F=filt,mine=x=>!F||String(x.n??x.issue)===String(F.issue);
+  const qcms=F&&F.what==='essai'?[]:S.qcms.filter(mine);
+  const showT=!(F&&F.what==='qcm');
+  const todo=showT?todoAll.filter(mine):[],back=showT?backAll.filter(mine):[],done=showT?doneAll.filter(mine):[];
+  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;$('n-qcm').textContent=qcms.length;
+  const fe=$('filter');fe.replaceChildren();fe.hidden=!F;
+  if(F){
+    fe.appendChild(el('span','chip','Filtré : '+(colourSq(F.issue)||'')+'#'+F.issue+' · '+(F.what==='essai'?'essais':'questionnaires')));
+    const x=el('button','','✕');x.type='button';x.setAttribute('aria-label','Retirer le filtre');x.title='Retirer le filtre';
+    x.onclick=()=>{location.hash='#attente';};fe.firstChild.appendChild(x);
+  }
   const fill=(id,arr,mk,empty)=>{const box=$(id);box.replaceChildren();
     if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(mk(x)));};
-  fill('qcm',S.qcms,qcmBox,'Aucun questionnaire ne t’attend.');
-  fill('todo',todo,testBox,'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
-  fill('back',back,testBox,'Aucun retour en attente.');
+  fill('qcm',qcms,qcmBox,F?'Aucun questionnaire pour ce chantier.':'Aucun questionnaire ne t’attend.');
+  fill('todo',todo,testBox,F?'Rien à tester pour ce chantier.':'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
+  fill('back',back,testBox,F?'Aucun retour pour ce chantier.':'Aucun retour en attente.');
   fill('done',done,testBox,'');
   const bn=$('banner');
-  if(todo.length>=5){bn.hidden=false;bn.textContent=todo.length+' choses attendent ton essai. Tester maintenant aide les prochaines décisions.';}else bn.hidden=true;
+  if(todoAll.length>=5){bn.hidden=false;bn.textContent=todoAll.length+' choses attendent ton essai. Tester maintenant aide les prochaines décisions.';}else bn.hidden=true;
 }
 function render(){
   if(!S)return;
@@ -315,6 +343,22 @@ function render(){
 }
 
 /* ---- tabs ---- */
+function parseHash(h){
+  const p=String(h||'').replace(/^#/,'').split('/');
+  const tab=p[0]==='suivi'?'suivi':'attente';
+  let f=null;
+  if(tab==='attente'){
+    const m=/^issue=(\d+)$/.exec(p[1]||'');
+    if(m&&(p[2]==='essai'||p[2]==='qcm'))f={issue:+m[1],what:p[2]};
+  }
+  return {tab,filter:f};
+}
+let filt=null;
+function applyHash(){
+  const h=parseHash(location.hash);filt=h.filter;
+  if(location.hash)setTab(h.tab,true);
+  renderTests();
+}
 function setTab(name,remember){
   if(name!=='attente'&&name!=='suivi')name='attente';
   ['attente','suivi'].forEach(k=>{
@@ -323,11 +367,13 @@ function setTab(name,remember){
   });
   if(remember)store('suivi-tab',name);
 }
-['attente','suivi'].forEach(k=>{$('tab-'+k).onclick=()=>setTab(k,true);});
+window.addEventListener('hashchange',applyHash);
+['attente','suivi'].forEach(k=>{$('tab-'+k).onclick=()=>{setTab(k,true);if(location.hash!=='#'+k)history.pushState(null,'','#'+k);filt=null;renderTests();};});
 document.querySelector('.tabs').addEventListener('keydown',e=>{
   if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const k=$('tab-attente').getAttribute('aria-selected')==='true'?'suivi':'attente';setTab(k,true);$('tab-'+k).focus();}
 });
 setTab(new URLSearchParams(location.search).get('tab')||store('suivi-tab')||'attente',false);
+if(location.hash)applyHash();
 
 /* ---- data ---- */
 async function load(){
