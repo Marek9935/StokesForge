@@ -788,7 +788,6 @@ fn direct_writes_into_a_formula_column_never_survive() {
 /// the gesture is accepted, records an undo entry, and the next recalculation
 /// pass silently puts the computed type back.
 #[test]
-#[ignore = "bug: #431: SetColumnType is accepted on a formula column (history.rs ~1230 only refuses calculation outputs); the docstring and SetCells say refuse"]
 fn set_column_type_on_a_formula_column_is_refused() {
     for mode in BOTH {
         let (_s, h) = spawn(book_with_c(), mode);

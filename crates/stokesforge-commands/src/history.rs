@@ -1241,7 +1241,7 @@ impl History {
                 column,
                 column_type,
             } => {
-                check_not_calculated(project, column)?;
+                check_type_changeable(project, column)?;
                 let before_state = project.set_column_type(column, column_type)?;
                 let after_state = column_state(project, column)?;
                 Ok(Entry::Data {
@@ -1744,6 +1744,24 @@ fn check_not_calculated(project: &Project, column: NodeId) -> CommandResult<()> 
         .into());
     }
     Ok(())
+}
+
+/// `Command::SetColumnType` refusal (#431), **before** any mutation: a formula
+/// column keeps the type its recalculation gives it (the next recalculation
+/// would silently put it back), and a calculation output is refused as for a
+/// cell write. Only the command is guarded: `Project::set_column_type` stays
+/// open to the recalculation, which re-types formula columns through it.
+fn check_type_changeable(project: &Project, column: NodeId) -> CommandResult<()> {
+    let is_formula = project
+        .tree()
+        .get(column)
+        .ok()
+        .and_then(|node| node.as_column())
+        .is_some_and(|column| column.meta().formula.is_some());
+    if is_formula {
+        return Err(CoreError::FormulaColumnReadOnly { column }.into());
+    }
+    check_not_calculated(project, column)
 }
 
 /// The two refusals that every cell write — `SetCells` as well as

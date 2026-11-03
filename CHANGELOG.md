@@ -200,6 +200,8 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Column type (#431): the Type entries (right-click on a column letter, Workbook > Columns) are greyed, with the reason as tooltip, on a column computed by a formula or produced by a calculation (they used to answer "Change Type" and be silently undone by the next recalculation). On a selection that also holds other columns, only those change. `pyst.set_column_type` raises `InvalidValueError` on such a column.
+
 - Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
   the stored value, like Excel: `round(1.005, 2)` is 1.01 (it was 1), and
   `round(2.675, 2)` is 2.68.

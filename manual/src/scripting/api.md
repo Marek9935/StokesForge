@@ -213,7 +213,7 @@ pyst.set_column_meta(c, formula="B * 2")
 
 A formula column is calculated by StokesForge. You cannot write its values.
 
-`pyst.set_column_type(column, column_type)` converts a column to `"numeric"`, `"datetime"` or `"mixed"`. Values that the new type cannot hold are lost. A formula column refuses the conversion.
+`pyst.set_column_type(column, column_type)` converts a column to `"numeric"`, `"datetime"` or `"mixed"`. Values that the new type cannot hold are lost. A formula column or a calculation output refuses the conversion: `InvalidValueError` (read-only column).
 
 ### Rows
 
