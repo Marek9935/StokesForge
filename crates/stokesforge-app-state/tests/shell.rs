@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use stokesforge_app_state::history_text::history_text;
-use stokesforge_app_state::selection::Selection;
+use stokesforge_app_state::selection::{GridCursor, Selection};
 use stokesforge_app_state::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
     AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
@@ -5262,10 +5262,10 @@ fn committing_the_last_stored_value_of_a_short_column_mid_sheet_does_not_add_a_r
     assert_eq!(state.cell_text(note, 2), "middle");
 }
 
-/// Conversely, committing the real last row of the sheet with Enter
-/// adds a row indeed — intended behavior, unchanged by the fix.
+/// Enter on the last real row moves the cursor onto the entry row and
+/// creates nothing (#440).
 #[test]
-fn committing_the_last_row_of_the_sheet_adds_a_row() {
+fn committing_the_last_row_of_the_sheet_moves_to_the_entry_row_without_adding_one() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -5279,8 +5279,218 @@ fn committing_the_last_row_of_the_sheet_adds_a_row() {
         sheet: sheet1,
     });
 
-    assert_eq!(state.row_count(sheet1), 6, "last row: a row is added");
+    assert_eq!(state.row_count(sheet1), 5, "no row is added");
     assert_eq!(cell(&state, time_col, 4), Cell::Float(2.5));
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    assert_eq!(state.entry_row(sheet1), 5);
+}
+
+/// A new workbook: 2 columns, 0 rows.
+fn new_workbook(state: &mut AppState) -> (NodeId, Vec<NodeId>) {
+    state.dispatch(Action::AddWorkbook);
+    let (book, _) = *state.books().last().expect("workbook created");
+    let sheet = state.selected_sheet_in(book).expect("initial sheet");
+    let columns = state
+        .visible_columns(sheet)
+        .into_iter()
+        .map(|column| column.0)
+        .collect();
+    (sheet, columns)
+}
+
+fn cursor(state: &AppState, sheet: NodeId) -> Option<GridCursor> {
+    state.selection(sheet).and_then(Selection::grid_cursor)
+}
+
+/// #440: a new workbook is editable. Down from the Formula field reaches the entry
+/// row, committing there creates the row with one history entry, and Undo brings
+/// the cursor back onto the entry row (row 0).
+#[test]
+fn an_empty_sheet_is_filled_through_its_entry_row_and_undo_keeps_the_cursor_valid() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (sheet, columns) = new_workbook(&mut state);
+    let a = columns[0];
+    assert_eq!(state.row_count(sheet), 0);
+    let label_before = state.undo_label();
+
+    state.select_header_field(sheet, a, HeaderField::Formula);
+    state.move_selection(sheet, MoveDirection::Down, false);
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(a, 0)));
+
+    state.dispatch(Action::CommitCellAndAdvance {
+        column: a,
+        row: 0,
+        text: "1.5".to_string(),
+        sheet,
+    });
+    assert_eq!(state.row_count(sheet), 1);
+    assert_eq!(cell(&state, a, 0), Cell::Float(1.5));
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(a, 1)));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet), 0, "one undo entry removes the row");
+    assert_eq!(state.undo_label(), label_before);
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(a, 0)));
+}
+
+/// Tab from the Formula field of the last column enters the data even with 0 rows.
+#[test]
+fn tab_from_the_header_of_an_empty_sheet_enters_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (sheet, columns) = new_workbook(&mut state);
+
+    state.select_header_field(sheet, *columns.last().unwrap(), HeaderField::Formula);
+    state.move_selection_tab(sheet, false);
+
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(columns[0], 0)));
+}
+
+/// Down stops on the entry row, which is one past the last data row.
+#[test]
+fn down_stops_on_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 4);
+
+    state.move_selection(sheet1, MoveDirection::Down, false);
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    state.move_selection(sheet1, MoveDirection::Down, false);
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    assert_eq!(state.row_count(sheet1), 5, "navigation creates nothing");
+}
+
+/// Committing in the entry row creates exactly one row and lands on the new entry row.
+#[test]
+fn committing_in_the_entry_row_creates_one_row_and_moves_to_the_next_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 5);
+
+    state.dispatch(Action::CommitCellAndAdvance {
+        column: time_col,
+        row: 5,
+        text: "7".to_string(),
+        sheet: sheet1,
+    });
+
+    assert_eq!(state.row_count(sheet1), 6);
+    assert_eq!(cell(&state, time_col, 5), Cell::Float(7.0));
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 6)));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet1), 5, "one undo entry");
+}
+
+/// A refused commit (here in a formula column) leaves the sheet and the cursor
+/// alone, in the middle of the sheet as in the entry row.
+#[test]
+fn a_refused_commit_leaves_the_cursor_in_place() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    set_header_field(&mut state, signal, HeaderField::Formula, "A");
+    assert!(
+        formula_letters(&state, signal).is_some(),
+        "a formula column"
+    );
+
+    for row in [2, 5] {
+        state.select_cell(sheet1, signal, row);
+        state.dispatch(Action::CommitCellAndAdvance {
+            column: signal,
+            row,
+            text: "3".to_string(),
+            sheet: sheet1,
+        });
+        assert_eq!(state.row_count(sheet1), 5, "row {row}");
+        assert_eq!(
+            cursor(&state, sheet1),
+            Some(GridCursor::Data(signal, row)),
+            "row {row}"
+        );
+    }
+}
+
+/// Ctrl+A and a column selection never contain the entry row.
+#[test]
+fn select_all_and_column_selection_exclude_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+
+    state.dispatch(Action::SelectAll { sheet: sheet1 });
+    assert!(state.is_selected(sheet1, time_col, 4));
+    assert!(!state.is_selected(sheet1, time_col, 5));
+    state.select_column(sheet1, time_col);
+    assert!(state.is_selected(sheet1, time_col, 4));
+    assert!(!state.is_selected(sheet1, time_col, 5));
+}
+
+/// A range started on a data row stops at the last data row; one started in the
+/// entry row may reach it.
+#[test]
+fn a_range_started_on_a_data_row_stops_before_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+
+    state.select_cell(sheet1, time_col, 2);
+    state.extend_selection(sheet1, time_col, 5);
+    assert!(state.is_selected(sheet1, time_col, 4));
+    assert!(!state.is_selected(sheet1, time_col, 5));
+
+    state.select_cell(sheet1, time_col, 2);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    assert!(!state.is_selected(sheet1, time_col, 5), "Shift+Down stops");
+    assert!(state.is_selected(sheet1, time_col, 4));
+}
+
+/// A block pasted from the entry row extends the sheet, in one history entry.
+#[test]
+fn pasting_from_the_entry_row_extends_the_sheet_in_one_entry() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 5);
+
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\n3\t4\n5\t6\n".to_string(),
+    });
+
+    assert_eq!(state.row_count(sheet1), 8);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet1), 5, "one undo entry");
+}
+
+/// Delete in the entry row is a silent no-op.
+#[test]
+fn delete_in_the_entry_row_does_nothing_and_says_nothing() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let label_before = state.undo_label();
+    state.select_cell(sheet1, time_col, 5);
+
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.row_count(sheet1), 5);
+    assert_eq!(state.undo_label(), label_before);
+    assert!(state.status().is_none_or(|status| !status.is_error()));
 }
 
 // -- 15. Column type conversion --

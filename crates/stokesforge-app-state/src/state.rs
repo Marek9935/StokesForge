@@ -271,12 +271,10 @@ pub enum Action {
     },
     /// Adds a column at the end of `sheet` then selects `row` in it — Tab
     /// on the last column of a data row, symmetric to
-    /// [`Action::CommitCellAndAdvance`] (Enter on the last row of a column)
-    /// but for the column axis: the target column does not exist yet when the
-    /// action is pushed (unlike a row, which is only an index), so the
-    /// selection can only be set once the column is really created, in the
-    /// handling of this action — never before, as `AppState::select_cell`
-    /// does for `CommitCellAndAdvance`.
+    /// [`Action::CommitCellAndAdvance`] (Enter in a cell) but for the column
+    /// axis: the target column does not exist yet when the action is pushed
+    /// (unlike a row, which is only an index), so the selection can only be
+    /// set once the column is really created, in the handling of this action.
     AddColumnAndSelect {
         /// Target sheet.
         sheet: NodeId,
@@ -384,8 +382,9 @@ pub enum Action {
     /// Does not block.
     InterruptScript,
     /// Commits the input of a cell (like [`Action::CommitCell`]) then, if
-    /// `row` was the last row of `column` and the commit succeeded, adds a
-    /// row to `sheet` — Enter on the last cell of a column.
+    /// the commit succeeded, selects the row below in `sheet` — Enter in a
+    /// cell. Adds no row: a commit in the entry row ([`AppState::entry_row`])
+    /// is what creates it.
     CommitCellAndAdvance {
         /// Target column.
         column: NodeId,
@@ -393,7 +392,7 @@ pub enum Action {
         row: usize,
         /// Typed text, not converted.
         text: String,
-        /// Sheet to add a row to if needed.
+        /// Sheet whose cursor moves down.
         sheet: NodeId,
     },
     /// Clears the content of the cells currently selected in `sheet`,
@@ -3743,6 +3742,16 @@ impl AppState {
         row_count_in(&self.snapshot.tree, sheet)
     }
 
+    /// Index of the **entry row** of `sheet`: the empty row the grid always
+    /// shows below the last data row (also when the sheet has 0 rows). It is
+    /// pure interface, not model data — not saved, not plotted, not read by a
+    /// formula — so [`AppState::row_count`] does not count it. Typing in it
+    /// creates the row (a `SetCells` through [`Action::CommitCell`]). The one
+    /// definition: navigation and selection use it, never `row_count` plus one.
+    pub fn entry_row(&self, sheet: NodeId) -> usize {
+        self.row_count(sheet)
+    }
+
     /// Text to display in a cell: [`MISSING_TEXT_DISPLAY`] for an
     /// absent value (`Cell::Text(None)`, including out of bounds — `get`
     /// returns `None` past the end of a text column), `""` for a
@@ -3832,7 +3841,22 @@ impl AppState {
     /// drags remain distinct gestures, see [`AppState::
     /// extend_column_selection`]/[`AppState::extend_row_selection`]/
     /// [`AppState::extend_header_row_selection`].
+    ///
+    /// The entry row ([`AppState::entry_row`]) is never swept into a range
+    /// started on a real row: the target stops at the last data row. A range
+    /// anchored on the entry row itself may reach it.
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
+        let row_count = self.row_count(sheet);
+        let anchored_on_data = self
+            .selection
+            .get(&sheet)
+            .and_then(|selection| selection.anchor(&self.snapshot.tree, sheet))
+            .is_some_and(|anchor| matches!(anchor, GridCursor::Data(_, r) if r < row_count));
+        let row = if anchored_on_data {
+            row.min(row_count.saturating_sub(1))
+        } else {
+            row
+        };
         match self.selection.get_mut(&sheet) {
             Some(selection)
                 if !selection.is_columns()
@@ -4099,8 +4123,8 @@ impl AppState {
     /// and header fields. Left/Right never change
     /// row. Clamped to the grid edges — never wraps to the next
     /// line (see [`AppState::move_selection_tab`] for that) nor adds a
-    /// row (reserved to [`AppState::commit_cell_and_advance`], triggered by
-    /// the confirmation of an entry, not by navigation alone). No effect
+    /// row. Down stops on the entry row ([`AppState::entry_row`]), one past the
+    /// last data row; writing in it is what creates the row. No effect
     /// if `sheet` has a range of columns selected (letter row)
     /// or no selection — transient mutation, like [`AppState::
     /// select_cell`].
@@ -4150,7 +4174,8 @@ impl AppState {
         let Some(index) = order.iter().position(|&id| id == from_column) else {
             return;
         };
-        let last_row = self.row_count(sheet).saturating_sub(1);
+        // The last reachable row is the entry row, one past the last data row.
+        let last_row = self.entry_row(sheet);
         let (to_index, to_row, crossed) = match direction {
             MoveDirection::Up => {
                 let (row, crossed) = from_row.up();
@@ -4217,8 +4242,8 @@ impl AppState {
             return;
         };
         let order = self.column_order(sheet);
-        let row_count = self.row_count(sheet);
-        if order.is_empty() || row_count == 0 {
+        let entry_row = self.entry_row(sheet);
+        if order.is_empty() {
             return;
         }
         let from_column = match from {
@@ -4282,7 +4307,7 @@ impl AppState {
                     if index < last_index {
                         GridCursor::Data(order[index + 1], row)
                     } else {
-                        GridCursor::Data(order[0], (row + 1).min(row_count - 1))
+                        GridCursor::Data(order[0], (row + 1).min(entry_row))
                     }
                 }
             }
@@ -4294,7 +4319,18 @@ impl AppState {
     }
 
     /// True if `(column, row)` is part of the selection of `sheet`.
+    ///
+    /// A selection of whole columns (letter click, Ctrl+A) never contains the
+    /// entry row ([`AppState::entry_row`]).
     pub fn is_selected(&self, sheet: NodeId, column: NodeId, row: usize) -> bool {
+        if row >= self.row_count(sheet)
+            && self
+                .selection
+                .get(&sheet)
+                .is_some_and(Selection::is_columns)
+        {
+            return false;
+        }
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.contains(&self.snapshot.tree, sheet, column, row))
@@ -7257,6 +7293,16 @@ impl AppState {
                 self.header_editing = None;
             }
         }
+        // A cursor below the entry row (undo of a write made in the entry row)
+        // comes back to the entry row of its sheet.
+        for (&sheet, selection) in &mut self.selection {
+            if let Some((column, row)) = selection.single_cell() {
+                let entry_row = row_count_in(tree, sheet);
+                if row > entry_row {
+                    *selection = Selection::cell(column, entry_row);
+                }
+            }
+        }
     }
 
     /// Records an informational message. `pub(crate)` so that the window
@@ -9070,7 +9116,9 @@ impl AppState {
         // up entirely numeric without any of its cells ever having been
         // explicitly "number", typically after fixing an "n/a" left as the
         // only non-numeric value.
-        if kind == ColumnType::Mixed {
+        // Not after a refused write: the conversion would replace the error message
+        // and look like a success.
+        if kind == ColumnType::Mixed && !self.last_action_failed() {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
         // Discreet notice (#311, S-R6): "1,234" is read as 1.234, not one
@@ -9107,25 +9155,21 @@ impl AppState {
         }
     }
 
-    /// Validates a cell input then, if `row` was the last row *displayed* of
-    /// `sheet` and the validation succeeded, adds a row to `sheet` (`at ==
-    /// len` is a valid target for `InsertRows`): Enter on the last cell of a
-    /// column.
-    ///
-    /// Comparing with `row_count(sheet)` (the max of the lengths of **all**
-    /// the columns of the sheet, `Tree::row_count_in`) rather than with the
-    /// length of the internal buffer of `column` alone is essential: a text
-    /// column never filled down to the bottom of the sheet has a buffer
-    /// shorter than the other columns (sparse buffers, see
-    /// `Column::len`/`ColumnValues::get`), so `row + 1 >= column.len()` could
-    /// become true in the *middle* of the table: a phantom row was then
-    /// inserted at the bottom of the whole sheet as soon as a cell of a row
-    /// never written lower in that column was validated.
+    /// Validates a cell input then, if it was accepted, moves the cursor to the
+    /// row below in the same column: Enter in a cell. It never adds a row by
+    /// itself. On the last data row the cursor lands on the entry row
+    /// ([`AppState::entry_row`]); a commit made *in* the entry row creates the
+    /// row (`SetCells`) and the cursor lands on the new entry row. Unchanged
+    /// text on the entry row writes nothing and the cursor stays there. A
+    /// refused commit (read-only formula column…) leaves the cursor where it was.
     fn commit_cell_and_advance(&mut self, column: NodeId, row: usize, text: String, sheet: NodeId) {
-        let was_last_row = row + 1 >= self.row_count(sheet);
-        let accepted = self.commit_cell(column, row, text);
-        if accepted && was_last_row {
-            self.rows(sheet, row + 1, 1, true);
+        // Nothing typed is not a refusal; a write that the actor refused (read-only
+        // formula column…) leaves `applied_revision` where it was.
+        let unchanged = text == self.cell_text(column, row);
+        let revision = self.applied_revision;
+        if self.commit_cell(column, row, text) && (unchanged || self.applied_revision > revision) {
+            let target = (row + 1).min(self.entry_row(sheet));
+            self.select_cell(sheet, column, target);
         }
     }
 

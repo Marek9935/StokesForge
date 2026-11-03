@@ -1217,6 +1217,8 @@ workbook-send-to-graph-menu = Envoyer vers un graphique
 # Classeur : grille, onglets de feuilles, états vides
 workbook-column-add = Ajouter une colonne
 workbook-grid-no-columns = Aucune colonne dans cette feuille. Clic droit ici, puis Ajouter une colonne
+grid-entry-row-marker = *
+grid-entry-row-hint = Saisir ici pour ajouter une ligne
 workbook-no-worksheets = Ce classeur n'a aucune feuille. Utiliser Ajouter une feuille dans les onglets
 workbook-worksheet-add = Ajouter une feuille
 action-rename-sheet = Renommer

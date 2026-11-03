@@ -1218,6 +1218,8 @@ workbook-send-to-graph-menu = Send to Graph
 # Workbook: grid, sheet tabs, empty states
 workbook-column-add = Add Column
 workbook-grid-no-columns = No columns in this sheet. Right-click here and choose Add Column
+grid-entry-row-marker = *
+grid-entry-row-hint = Type here to add a row
 workbook-no-worksheets = This workbook has no sheets. Use Add Sheet in the sheet tabs
 workbook-worksheet-add = Add Sheet
 action-rename-sheet = Rename

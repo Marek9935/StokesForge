@@ -373,20 +373,45 @@ spacing between stacked rows left a thin white line between
 each cell painted with a flat fill, which made it look like it was floating rather than
 really filling its cell.
 
-### Tab in the last column: same gesture as Enter in the last row
+### Entry row (#440)
 
-Enter on the last row of a sheet adds a row and moves the
-selection there (`Action::CommitCellAndAdvance` while editing, or the direct
-keyboard shortcut outside editing) — Tab on the last column of a row of
-data now does the same for columns rather than going back to the
-start of the next row (the old behavior of `move_selection_tab`
-at the edges).
+The grid always shows one **entry row** below the last data row, also when the
+sheet has 0 rows (a new workbook). It is pure interface: not model data, not
+saved, not plotted, not read by a formula. `AppState::row_count` keeps counting
+model rows only; `AppState::entry_row(sheet)` (= `row_count`) is the one
+definition of its index, used by navigation and selection. A sheet with zero
+columns keeps its "No columns" empty state and has no entry row.
 
-The asymmetry between the two axes comes from the identity of the target: a row
-is only an index, so selecting `(colonne existante, row + 1)` *before*
-the add command is applied (it is applied only after the frame is rendered,
-see `StokesForgeApp::ui`, `app.rs`) is safe — the row will exist in time.
-A new column, on the other hand, has no `NodeId` yet until `Command::
+- Gutter: a dimmed `*` (`theme::gutter_dim_text_color`) with the tooltip « Type
+  here to add a row »; inert (no row selection, no drag, no context menu, absent
+  from the row extents). The cells are empty and behave as ordinary cells except
+  that Ctrl and Shift act as a plain click there.
+- Typing a value and committing writes through the ordinary undoable
+  `SetCells` (one history entry, no `InsertRows`, no macro): `commit_cell` is
+  called with `row == row_count`, which the command already extends. The cursor
+  then lands on the new entry row, same column.
+- Down and Enter on the last data row move onto the entry row and **create
+  nothing**; Down on the entry row stays there (`move_selection` bounds Down to
+  `entry_row`). Tab leaves the header into the entry row of an empty sheet.
+- `Action::CommitCellAndAdvance` selects `row + 1` (bounded to the entry row)
+  **in its handler, once the commit is accepted**: a refused commit (read-only
+  formula column) or one the actor rejected leaves the cursor in place. The grid
+  no longer selects the next row before the command runs.
+- Ctrl+A and column selections never contain the entry row (`is_selected`). A
+  range started on a data row stops at the last data row (`extend_selection`,
+  Shift+Down, drag); a range started on the entry row may reach it.
+- After an Undo that removes the row written from the entry row,
+  `revalidate_selection` brings a cursor that is now below the entry row back
+  onto it.
+- Pasting a block anchored on the entry row extends the sheet (`SetCells` again).
+
+### Tab in the last column
+
+Tab on the last column of a row of data adds a column rather than going back to
+the start of the next row (the old behavior of `move_selection_tab` at the
+edges). It is the column-axis counterpart of the entry row.
+
+A new column has no `NodeId` yet until `Command::
 AddColumn` has run: selecting it in advance makes no sense.
 `Action::AddColumnAndSelect { sheet, row }` therefore does both at once
 in its own handling (`AppState::add_column_and_select`): adds the
