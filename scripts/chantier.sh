@@ -49,8 +49,9 @@
 #   scripts/chantier.sh --status [--json]
 # is `scripts/suivi.py status`: the six colours, free or held (issue, why held,
 # worktrees, since, days), then paused issues and worktrees without a record.
-#   scripts/chantier.sh [--dry-run] --release <n>|<n><letters>
-# from the main checkout on `main`: removes ONE merged, clean worktree
+#   scripts/chantier.sh [--dry-run] [--no-trial] --release <n>|<n><letters>
+# from the main checkout on `main`: refuses an issue with no trial entry
+# (`scripts/suivi.py test add`) unless --no-trial (#441, V2), then removes ONE merged, clean worktree
 # (feature<n>, feature426b, ...) and its merged local branch (never --force, never
 # -D), then prints ONE line saying whether the colour is free or still held; the
 # issue is marked done when its last worktree goes and nothing holds it.
@@ -65,13 +66,14 @@ set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
 suivi() { python3 -I "$(dirname "$0")/suivi.py" "$@"; }
 
-usage="usage: chantier.sh [--dry-run] [--start <sub-issue>]... <issue-number>... | --done <parent> | --pause <n> | --release <n>[<letters>] | --status [--json]"
+usage="usage: chantier.sh [--dry-run] [--start <sub-issue>]... <issue-number>... | --done <parent> | --pause <n> | [--no-trial] --release <n>[<letters>] | --status [--json]"
 dry=0
 issues=()
 starts=()
 done_parent=""
 pause_n=""
 release_name=""
+no_trial=0
 status=0
 json=0
 while [ "$#" -gt 0 ]; do
@@ -89,6 +91,7 @@ while [ "$#" -gt 0 ]; do
         [[ "${2:-}" =~ ^[0-9]+[a-z]*$ ]] || { echo "$usage" >&2; exit 2; }
         release_name="$2"
         shift ;;
+    --no-trial) no_trial=1 ;;
     --status) status=1 ;;
     --json) json=1 ;;
     -h | --help) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
@@ -256,6 +259,11 @@ release_wt() {
         return 1
     fi
     issue="$(sf_issue_of "$wt")"
+    # V2 (#441): every delivered issue has at least one trial entry, unless --no-trial.
+    if [ "$no_trial" = 0 ] && [ -z "$(suivi test list --issue "$issue")" ]; then
+        echo "release: #$issue has no trial entry (scripts/suivi.py test add); add one, or pass --no-trial; nothing removed" >&2
+        return 1
+    fi
     if [ "$dry" = 1 ]; then
         echo "would run: git worktree remove $wt"
         [ -z "$branch" ] || echo "would run: git branch -d $branch"

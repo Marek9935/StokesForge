@@ -236,7 +236,7 @@ if "$here/chantier.sh" --pause 217 2> "$tmp/errp"; then fail "--pause accepted w
 grep -q 'still has worktrees' "$tmp/errp" || fail "--pause message"
 eq "$(rec 217 colour)" 🟥 "colour kept after a refused --pause"
 # lang: fr begin
-out="$("$here/chantier.sh" --release 219)"
+out="$("$here/chantier.sh" --no-trial --release 219)"
 eq "$out" "Couleur 🟥 reste prise : paquet #217, prochaine sous-issue ; après la dernière : scripts/chantier.sh --done 217" "release of a sub-issue"
 # lang: fr end
 "$here/chantier.sh" --dry-run --pause 217 > /dev/null
@@ -257,7 +257,7 @@ assert [p["issue"] for p in d["paused"]] == [217] and d["colours"][4]["issue"] =
 grep -qF '🟨 #217 › #220' "$tmp/pkg3" && ! grep -qF '?' "$tmp/pkg3" || fail "start after pause: $(cat "$tmp/pkg3")"
 eq "$(rec 217 colour)" 🟨 "package no longer paused (🟥 is taken: first free)"
 # lang: fr begin
-out="$("$here/chantier.sh" --release 220)"
+out="$("$here/chantier.sh" --no-trial --release 220)"
 case "$out" in "Couleur 🟨 reste prise : paquet #217"*) ;; *) fail "release 220: $out" ;; esac
 out="$("$here/chantier.sh" --done 217)"
 eq "$out" "Couleur 🟨 libérée." "--done line"
@@ -294,25 +294,30 @@ git checkout -q -b elsewhere
 if "$here/chantier.sh" --release 42 > /dev/null 2> "$tmp/errb"; then fail "--release off main accepted"; fi
 git checkout -q main; git branch -q -d elsewhere
 kept 42 || fail "refused releases removed feature42"
-"$here/chantier.sh" --dry-run --release 42 > "$tmp/dry"
+"$here/chantier.sh" --dry-run --no-trial --release 42 > "$tmp/dry"
 kept 42 && grep -q 'would run: git worktree remove' "$tmp/dry" || fail "--dry-run --release"
+# V2: no trial entry -> refused, nothing removed; one entry -> accepted.
+if "$here/chantier.sh" --release 3 > /dev/null 2> "$tmp/errt"; then fail "--release without a trial entry accepted"; fi
+grep -q 'no trial entry' "$tmp/errt" && [ -e "$S/feature3" ] || fail "--release without a trial entry: $(cat "$tmp/errt")"
+printf '{"title":"t","steps":["s"],"expect":"e"}' > "$tmp/t3.json"
+python3 -I "$here/suivi.py" test add 3 "$tmp/t3.json" > /dev/null
 # lang: fr begin
 out="$("$here/chantier.sh" --release 3 2> "$tmp/errr")"
 eq "$out" "Couleur 🟦 libérée." "release 3 line"
 [ ! -e "$S/feature3" ] && ! git rev-parse --verify -q feature/3-fix-axis-label > /dev/null || fail "release 3 left something"
-out="$("$here/chantier.sh" --release 30 2> /dev/null)"
+out="$("$here/chantier.sh" --no-trial --release 30 2> /dev/null)"
 case "$out" in "Couleur 🟧 reste prise : "*feature30b*) ;; *) fail "release 30: $out" ;; esac
 # lang: fr end
 [ ! -e "$S/feature30" ] || fail "release 30 kept the worktree"
-for k in 30b 30c; do "$here/chantier.sh" --release "$k" > /dev/null; done
+for k in 30b 30c; do "$here/chantier.sh" --no-trial --release "$k" > /dev/null; done
 git branch -q -d feature/30b-x   # detached worktree: its branch was not the one released
 # lang: fr begin
-eq "$("$here/chantier.sh" --release 30d)" "Couleur 🟧 libérée." "last worktree of the issue frees the colour"
+eq "$("$here/chantier.sh" --no-trial --release 30d)" "Couleur 🟧 libérée." "last worktree of the issue frees the colour"
 # lang: fr end
 # target/ is the one ignored folder that does not block.
 SF_ISSUE_TITLE="Target" "$here/chantier.sh" 44 > /dev/null
 mkdir "$S/feature44/target"; touch "$S/feature44/target/x"
-"$here/chantier.sh" --release 44 | grep -q '^Couleur .* libérée\.$' || fail "release with target/"
+"$here/chantier.sh" --no-trial --release 44 | grep -q '^Couleur .* libérée\.$' || fail "release with target/"
 [ ! -e "$S/feature44" ] || fail "target/ blocked the release"
 for k in 40 41 42 43; do git worktree remove --force "$S/feature$k"; done
 git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d-x feature/44-target 2> /dev/null || true
