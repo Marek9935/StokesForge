@@ -1123,6 +1123,12 @@ class TestPage(unittest.TestCase):
         self.assertEqual(L(paused)["text"], "En pause")                                                     # lang: fr
         l = L(paused, [], [{"issue": 7}])
         self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
+        # the open form or the pending trial is itself what holds the colour: still nobody at work
+        l = L(dict(card, held_by=["qcm"]), [], [{"issue": 7}])
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
+        l = L(dict(card, held_by=["essai"]), [todo(7)])
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
+        self.assertEqual(L(dict(card, held_by=["legacy"]), [todo(7)])["also"], "")
         l = L(card, [], [{"issue": 7}])
         self.assertEqual((l["text"], l["also"]), ("À toi : répondre au questionnaire", "l’agent travaille"))   # lang: fr
         # a note of kind `you` is the user's turn, alone or joined; other kinds stay muted text

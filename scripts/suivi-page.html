@@ -198,7 +198,7 @@ function cardLine(c,tests,qcms){
   if(you){
     text='À toi : '+parts.join(' · ');
     if(agent)also=idle===null?'session ouverte':stopped?'agent à l’arrêt, rien ne bouge sans toi':'l’agent travaille';
-    else if(!held.length)also='rien ne bouge sans toi';
+    else if(!held.includes('legacy'))also='rien ne bouge sans toi';
   }else if(agent){
     text=idle===null?'Session ouverte':!stopped?'L’agent travaille':
       'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
