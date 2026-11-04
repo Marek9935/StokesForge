@@ -11,7 +11,7 @@ use stokesforge_app_state::tr;
 use stokesforge_core::NodeId;
 use stokesforge_plot::{FreePage, LayerPlacement, LengthUnit, PlotSpec, MIN_FRAME_SIZE};
 use stokesforge_render::{scaled_to_page, GraphBox, MIN_PAGE_EXTENT};
-use stokesforge_render_egui::GraphView;
+use stokesforge_render_egui::{BoundaryFollow, GraphView};
 
 use super::grid::keyboard_focus_outside_grid;
 use super::StokesForgeApp;
@@ -107,6 +107,21 @@ fn set_grid_state(ctx: &egui::Context, graph: NodeId, state: GridState) {
     ctx.data_mut(|data| data.insert_temp(grid_id(graph), state));
 }
 
+fn boundary_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_layout_boundary", graph))
+}
+
+/// Which graphs a drag of the line between two touching graphs moves; per
+/// graph window, never saved, Regular Grid (`Line`) by default.
+fn boundary_follow(ctx: &egui::Context, graph: NodeId) -> BoundaryFollow {
+    ctx.data(|data| data.get_temp(boundary_id(graph)))
+        .unwrap_or_default()
+}
+
+fn set_boundary_follow(ctx: &egui::Context, graph: NodeId, follow: BoundaryFollow) {
+    ctx.data_mut(|data| data.insert_temp(boundary_id(graph), follow));
+}
+
 /// The grid step in points: coarse / fine = 5 mm / 1 mm (cm, mm), 10 pt /
 /// 1 pt, 1/4 in / 1/16 in.
 pub(super) fn grid_step_points(unit: LengthUnit, fine: bool) -> f64 {
@@ -127,6 +142,7 @@ pub(super) fn feed_view(ctx: &egui::Context, view: &mut GraphView, graph: NodeId
     let grid = grid_state(ctx, graph);
     view.set_length_unit(unit);
     view.set_layout_grid(grid.on.then(|| grid_step_points(unit, grid.fine)));
+    view.set_layout_boundary(boundary_follow(ctx, graph));
 }
 
 // ---------------------------------------------------------------------------
@@ -691,6 +707,32 @@ fn arrange_row(
     if grid != before {
         set_grid_state(ctx, graph, grid);
     }
+    ui.separator();
+    let follow = boundary_follow(ctx, graph);
+    let mut chosen = follow;
+    if ui
+        .add(
+            egui::Button::new(tr!("layout-mode-boundary-grid"))
+                .selected(follow == BoundaryFollow::Line),
+        )
+        .on_hover_text(tr!("layout-mode-boundary-grid", "hint"))
+        .clicked()
+    {
+        chosen = BoundaryFollow::Line;
+    }
+    if ui
+        .add(
+            egui::Button::new(tr!("layout-mode-boundary-free"))
+                .selected(follow == BoundaryFollow::Pair),
+        )
+        .on_hover_text(tr!("layout-mode-boundary-free", "hint"))
+        .clicked()
+    {
+        chosen = BoundaryFollow::Pair;
+    }
+    if chosen != follow {
+        set_boundary_follow(ctx, graph, chosen);
+    }
 }
 
 #[cfg(test)]
@@ -709,6 +751,23 @@ mod tests {
         assert_eq!(grid_step_points(LengthUnit::Pt, true), 1.0);
         assert!((grid_step_points(LengthUnit::In, false) - 18.0).abs() < 1e-9);
         assert!((grid_step_points(LengthUnit::In, true) - 4.5).abs() < 1e-9);
+    }
+
+    /// The boundary setting is per graph window, Regular Grid by default, and
+    /// reaches the view through `feed_view`. Witness: one id for every graph.
+    #[test]
+    fn the_boundary_setting_is_per_graph_and_defaults_to_the_regular_grid() {
+        let ctx = egui::Context::default();
+        let (a, b) = (NodeId::from_raw(1), NodeId::from_raw(2));
+        assert_eq!(boundary_follow(&ctx, a), BoundaryFollow::Line);
+        set_boundary_follow(&ctx, a, BoundaryFollow::Pair);
+        assert_eq!(boundary_follow(&ctx, a), BoundaryFollow::Pair);
+        assert_eq!(boundary_follow(&ctx, b), BoundaryFollow::Line);
+        let mut view = GraphView::new();
+        feed_view(&ctx, &mut view, a);
+        assert_eq!(view.layout_boundary(), BoundaryFollow::Pair);
+        feed_view(&ctx, &mut view, b);
+        assert_eq!(view.layout_boundary(), BoundaryFollow::Line);
     }
 
     #[test]

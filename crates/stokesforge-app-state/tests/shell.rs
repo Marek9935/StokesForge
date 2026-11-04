@@ -15578,6 +15578,63 @@ fn setting_the_free_layout_is_one_undoable_step_with_the_page() {
     );
 }
 
+/// #426d prototype: dragging a line between touching graphs writes the frames
+/// of every graph on it in one `SetFreeLayout`: one Undo gives all of them
+/// back. Witness: one command per frame.
+#[test]
+fn a_four_frame_layout_edit_is_undone_in_one_step() {
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreeFrame;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    for _ in 0..3 {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+    }
+    go_free(&mut state, graph);
+    let frames = |state: &AppState| -> Vec<FreeFrame> {
+        let spec = graph_spec(state, graph);
+        (0..4)
+            .map(|i| spec.panels[i].sanitized_free_frame())
+            .collect()
+    };
+    let before = frames(&state);
+    assert_eq!(before.len(), 4);
+    let drawn = stokesforge_app_state::frame_sizes::figure_layout(&graph_spec(&state, graph))
+        .and_then(|layout| layout.free_page_rect())
+        .expect("free page");
+    let moved: Vec<(usize, FreeFrame)> = before
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            (
+                i,
+                FreeFrame {
+                    left: f.left + 3.0,
+                    ..*f
+                },
+            )
+        })
+        .collect();
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: moved.clone(),
+        page: Some(drawn),
+    });
+    assert_eq!(
+        frames(&state),
+        moved.iter().map(|(_, f)| *f).collect::<Vec<_>>()
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(frames(&state), before, "one Undo gives all four back");
+    assert!(state.snapshot().revision > revision);
+}
+
 /// #426d: typing a figure size in Graph Properties on a graph with a page
 /// writes the fitted page and scales the boxes, in the same draft; a graph
 /// without a page stays without one.

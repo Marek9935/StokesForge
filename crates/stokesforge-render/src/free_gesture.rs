@@ -22,6 +22,19 @@ use stokesforge_plot::{
 /// whatever the enlargement of the figure.
 pub const MAGNET_THRESHOLD_POINTS: f64 = 6.0;
 
+/// Page Layout Mode, edge shared by two touching graphs: within this many
+/// **screen points** of the line, a drag moves both graphs (#426d).
+pub const BOUNDARY_BOTH_POINTS: f64 = 2.0;
+
+/// Page Layout Mode, edge shared by two touching graphs: within this many
+/// **screen points** of the line (and beyond [`BOUNDARY_BOTH_POINTS`]), a drag
+/// moves only the graph on the pointer's side.
+pub const BOUNDARY_SIDE_POINTS: f64 = 10.0;
+
+/// Two outer edges count as one shared edge when they are at most this many
+/// **stored points** apart (and the same for the overlap needed along them).
+pub const TOUCH_TOLERANCE_POINTS: f64 = 1.0;
+
 /// What a pixel grabs on a layer of a free figure (#398).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreeHandle {
@@ -386,6 +399,37 @@ pub fn stored_to_figure(layout: &FigureLayout, x: f64, y: f64) -> (f64, f64) {
     )
 }
 
+/// Reach, in stored points, of a graph's two edge bands on the screen: a lone
+/// edge, the centre band of a shared edge (moves both graphs) and its wider
+/// side band (moves the graph on the pointer's side only). Built from the
+/// display scale so that the reach stays the same on screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayoutReach {
+    /// Reach of an edge with no touching neighbour, and of corners.
+    pub edge: f64,
+    /// Half width of the centre band of a shared edge.
+    pub both: f64,
+    /// Half width of the whole band of a shared edge.
+    pub side: f64,
+}
+
+impl LayoutReach {
+    /// The reach for `edge_points` screen points on a lone edge, at the display
+    /// `scale` (screen points per stored point).
+    pub fn at_scale(edge_points: f64, scale: f64) -> Self {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        Self {
+            edge: edge_points.max(0.0) / scale,
+            both: BOUNDARY_BOTH_POINTS / scale,
+            side: BOUNDARY_SIDE_POINTS / scale,
+        }
+    }
+}
+
 /// What a point grabs in the Page Layout Mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutHandle {
@@ -396,6 +440,25 @@ pub enum LayoutHandle {
         /// The edges grabbed; none = move.
         edges: FreeHandle,
     },
+    /// One graph's edge on an edge it shares with a touching graph: only that
+    /// graph is resized.
+    Side {
+        /// Base layer of the box.
+        base: usize,
+        /// The edge grabbed (exactly one).
+        edges: FreeHandle,
+    },
+    /// The line between two touching graphs: both sides move.
+    Boundary {
+        /// The line is vertical (the graphs are side by side), else horizontal.
+        vertical: bool,
+        /// Base of the graph on the left (above) of the line.
+        low: usize,
+        /// Base of the graph on the right (below) of the line.
+        high: usize,
+        /// Base of the graph on the pointer's side (`low` if exactly on the line).
+        near: usize,
+    },
     /// A corner of the page: `right` / `bottom` say which one.
     Page {
         /// The right corner (else the left one).
@@ -405,23 +468,184 @@ pub enum LayoutHandle {
     },
 }
 
-/// The handle under the stored point `(x, y)`, all in points. The page corner
-/// handles come first: a square zone just outside each page corner,
-/// `2 * tolerance` wide. Then the boxes front to back: the edges and corners
-/// within `tolerance` of the outer rectangle resize (corners on both axes),
-/// anywhere else inside the outer rectangle moves.
+/// Whether the edge of `graph` (`vertical`: its left or right edge, `far`: the
+/// right or bottom one) touches an edge of `other` and the point `along` (the
+/// coordinate along the edge) lies in the overlap of the two.
+fn touches(graph: &GraphBox, other: &GraphBox, vertical: bool, far: bool, along: f64) -> bool {
+    let (g, h) = (graph.outer, other.outer);
+    let (gap, lo, hi) = if vertical {
+        let gap = if far {
+            h.left - (g.left + g.width)
+        } else {
+            g.left - (h.left + h.width)
+        };
+        (
+            gap,
+            g.top.max(h.top),
+            (g.top + g.height).min(h.top + h.height),
+        )
+    } else {
+        let gap = if far {
+            h.top - (g.top + g.height)
+        } else {
+            g.top - (h.top + h.height)
+        };
+        (
+            gap,
+            g.left.max(h.left),
+            (g.left + g.width).min(h.left + h.width),
+        )
+    };
+    gap.abs() <= TOUCH_TOLERANCE_POINTS
+        && hi - lo > TOUCH_TOLERANCE_POINTS
+        && along >= lo
+        && along <= hi
+}
+
+/// The resize handle of `graph` at `(x, y)`, if the point is on one of its
+/// edges: a corner first (both axes within `reach.edge`), else the nearest edge
+/// across. An edge shared with a touching graph is a [`LayoutHandle::Boundary`]
+/// within `reach.both` of the shared line and a [`LayoutHandle::Side`] of the
+/// graph on the pointer's side within `reach.side`; a lone edge is a plain
+/// [`LayoutHandle::Box`] edge within `reach.edge`.
+fn edge_hit(
+    boxes: &[GraphBox],
+    graph: &GraphBox,
+    x: f64,
+    y: f64,
+    reach: LayoutReach,
+) -> Option<LayoutHandle> {
+    let o = graph.outer;
+    let (left, top) = (o.left, o.top);
+    let (right, bottom) = (o.left + o.width, o.top + o.height);
+    let wide = reach.edge.max(reach.side);
+    if x < left - wide || x > right + wide || y < top - wide || y > bottom + wide {
+        return None;
+    }
+    let near = |a: f64, b: f64| (a - b).abs() <= reach.edge;
+    let mut edges = FreeHandle {
+        base: graph.base,
+        left: near(x, left),
+        right: near(x, right),
+        top: near(y, top),
+        bottom: near(y, bottom),
+    };
+    // A tiny box: the nearer side wins, never both.
+    edges = FreeHandle {
+        right: edges.right && !(edges.left && (x - left).abs() <= (x - right).abs()),
+        left: edges.left && !(edges.right && (x - right).abs() < (x - left).abs()),
+        bottom: edges.bottom && !(edges.top && (y - top).abs() <= (y - bottom).abs()),
+        top: edges.top && !(edges.bottom && (y - bottom).abs() < (y - top).abs()),
+        ..edges
+    };
+    // A corner of the graph itself always wins.
+    if (edges.left || edges.right) && (edges.top || edges.bottom) {
+        return Some(LayoutHandle::Box {
+            base: graph.base,
+            edges,
+        });
+    }
+    let mut best: Option<(f64, LayoutHandle)> = None;
+    for (vertical, far) in [(true, false), (true, true), (false, false), (false, true)] {
+        let (across, along, edge_at, flag) = match (vertical, far) {
+            (true, false) => (x, y, left, edges.left),
+            (true, true) => (x, y, right, edges.right),
+            (false, false) => (y, x, top, edges.top),
+            (false, true) => (y, x, bottom, edges.bottom),
+        };
+        let neighbour = boxes
+            .iter()
+            .rev()
+            .find(|h| h.base != graph.base && touches(graph, h, vertical, far, along));
+        let candidate = match neighbour {
+            Some(h) => {
+                let h_edge = match (vertical, far) {
+                    (true, false) => h.outer.left + h.outer.width,
+                    (true, true) => h.outer.left,
+                    (false, false) => h.outer.top + h.outer.height,
+                    (false, true) => h.outer.top,
+                };
+                let d = across - (edge_at + h_edge) / 2.0;
+                if d.abs() > reach.side {
+                    continue;
+                }
+                let (low, high) = if far {
+                    (graph.base, h.base)
+                } else {
+                    (h.base, graph.base)
+                };
+                let near_low = d <= 0.0;
+                let handle = if d.abs() <= reach.both {
+                    LayoutHandle::Boundary {
+                        vertical,
+                        low,
+                        high,
+                        near: if near_low { low } else { high },
+                    }
+                } else {
+                    // The edge of the pointer's graph that faces the line.
+                    let edges = FreeHandle {
+                        base: if near_low { low } else { high },
+                        left: vertical && !near_low,
+                        right: vertical && near_low,
+                        top: !vertical && !near_low,
+                        bottom: !vertical && near_low,
+                    };
+                    LayoutHandle::Side {
+                        base: edges.base,
+                        edges,
+                    }
+                };
+                (d.abs(), handle)
+            }
+            None if flag => {
+                let single = FreeHandle {
+                    base: graph.base,
+                    left: vertical && !far,
+                    right: vertical && far,
+                    top: !vertical && !far,
+                    bottom: !vertical && far,
+                };
+                (
+                    (across - edge_at).abs(),
+                    LayoutHandle::Box {
+                        base: graph.base,
+                        edges: single,
+                    },
+                )
+            }
+            None => continue,
+        };
+        if best.is_none_or(|(d, _)| candidate.0 < d) {
+            best = Some(candidate);
+        }
+    }
+    best.map(|(_, handle)| handle)
+}
+
+/// The handle under the stored point `(x, y)`, all in points. Order: the page
+/// corner handles (a square zone just outside each page corner, `2 * edge`
+/// wide); the edges of the `selected` boxes (active first), which win over a box
+/// drawn in front of them; then the boxes front to back, where the edges and
+/// corners resize (see [`LayoutReach`]) and anywhere else inside the outer
+/// rectangle moves. The inside of a selected box never wins over a box in front.
 pub fn layout_handle_at(
     boxes: &[GraphBox],
+    selected: &[usize],
     page: FreePage,
     x: f64,
     y: f64,
-    tolerance: f64,
+    reach: LayoutReach,
 ) -> Option<LayoutHandle> {
-    let tolerance = if tolerance.is_finite() {
-        tolerance.max(0.0)
-    } else {
-        0.0
+    let reach = LayoutReach {
+        edge: if reach.edge.is_finite() {
+            reach.edge.max(0.0)
+        } else {
+            0.0
+        },
+        ..reach
     };
+    let tolerance = reach.edge;
     let zone = 2.0 * tolerance;
     for right in [false, true] {
         for bottom in [false, true] {
@@ -450,6 +674,13 @@ pub fn layout_handle_at(
             }
         }
     }
+    for base in selected {
+        if let Some(graph) = boxes.iter().find(|graph| graph.base == *base) {
+            if let Some(handle) = edge_hit(boxes, graph, x, y, reach) {
+                return Some(handle);
+            }
+        }
+    }
     // Inside first, then the strip that straddles the outside of a boundary:
     // two boxes that touch each keep their own side.
     for slack in [0.0, tolerance] {
@@ -462,26 +693,18 @@ pub fn layout_handle_at(
             if !inside {
                 continue;
             }
-            let near = |a: f64, b: f64| (a - b).abs() <= tolerance;
-            let mut edges = FreeHandle {
-                base: graph.base,
-                left: near(x, left),
-                right: near(x, right),
-                top: near(y, top),
-                bottom: near(y, bottom),
-            };
-            // A tiny box: the nearer side wins, never both.
-            edges = FreeHandle {
-                right: edges.right && !(edges.left && (x - left).abs() <= (x - right).abs()),
-                left: edges.left && !(edges.right && (x - right).abs() < (x - left).abs()),
-                bottom: edges.bottom && !(edges.top && (y - top).abs() <= (y - bottom).abs()),
-                top: edges.top && !(edges.bottom && (y - bottom).abs() < (y - top).abs()),
-                ..edges
-            };
-            return Some(LayoutHandle::Box {
-                base: graph.base,
-                edges,
-            });
+            return Some(
+                edge_hit(boxes, graph, x, y, reach).unwrap_or(LayoutHandle::Box {
+                    base: graph.base,
+                    edges: FreeHandle {
+                        base: graph.base,
+                        left: false,
+                        right: false,
+                        top: false,
+                        bottom: false,
+                    },
+                }),
+            );
         }
     }
     None
@@ -712,6 +935,258 @@ pub fn nudged_box(start: &GraphBox, delta: (f64, f64), page: FreePage) -> FreeFr
         height: frame.height,
         stack: frame.stack,
     }
+}
+
+/// Which graphs a drag of the line between two touching graphs moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoundaryFollow {
+    /// Every graph with an edge on that straight line follows, on both sides.
+    #[default]
+    Line,
+    /// Only the two graphs the pointer is between.
+    Pair,
+}
+
+/// The graphs a both-sides drag moves, frozen at the press.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundaryGroup {
+    /// The line is vertical (the graphs are side by side), else horizontal.
+    pub vertical: bool,
+    /// Position of the line across, in stored points.
+    pub line: f64,
+    /// Bases of the graphs whose far edge (right or bottom) is on the line.
+    pub low: Vec<usize>,
+    /// Bases of the graphs whose near edge (left or top) is on the line.
+    pub high: Vec<usize>,
+}
+
+/// The group a drag of the line between `low` and `high` moves. The line is
+/// half way between the facing edges of the two. With [`BoundaryFollow::Line`]
+/// every box whose right (bottom) edge is within [`TOUCH_TOLERANCE_POINTS`] of
+/// the line joins the low side and every box whose left (top) edge is, the
+/// high side; a box that merely crosses the line, or sits off it, does not
+/// (never transitive: only the line itself counts).
+pub fn boundary_group(
+    boxes: &[GraphBox],
+    vertical: bool,
+    low: usize,
+    high: usize,
+    follow: BoundaryFollow,
+) -> BoundaryGroup {
+    let edges = |graph: &GraphBox| {
+        let o = graph.outer;
+        if vertical {
+            (o.left, o.left + o.width)
+        } else {
+            (o.top, o.top + o.height)
+        }
+    };
+    let find = |base: usize| boxes.iter().find(|graph| graph.base == base);
+    let line = match (find(low), find(high)) {
+        (Some(a), Some(b)) => (edges(a).1 + edges(b).0) / 2.0,
+        _ => 0.0,
+    };
+    match follow {
+        BoundaryFollow::Pair => BoundaryGroup {
+            vertical,
+            line,
+            low: vec![low],
+            high: vec![high],
+        },
+        BoundaryFollow::Line => {
+            let on = |a: f64| (a - line).abs() <= TOUCH_TOLERANCE_POINTS;
+            let mut group = BoundaryGroup {
+                vertical,
+                line,
+                low: Vec::new(),
+                high: Vec::new(),
+            };
+            for graph in boxes {
+                let (start, end) = edges(graph);
+                if on(end) {
+                    group.low.push(graph.base);
+                } else if on(start) {
+                    group.high.push(graph.base);
+                }
+            }
+            group
+        }
+    }
+}
+
+/// The frames after dragging the line of `group` by `delta_across` points
+/// (across the line: x for a vertical one). One position `L` for the line:
+/// `line + delta` rounded, snapped (the magnets to the outer edges of the boxes
+/// outside the group and of the page, else the grid from the page origin; none
+/// with `snap.enabled` false), held inside the page and so that no box of the
+/// group goes under its minimum or over its maximum size, then rounded to a
+/// hundredth once. Every low box ends with its outer right (bottom) edge on
+/// `L` and every high box with its outer left (top) edge on `L`; their far
+/// edges, their other axis and their stacking key stay. Returns `(base,
+/// frame)` per box (low first) and the guides.
+pub fn moved_boundary(
+    boxes: &[GraphBox],
+    group: &BoundaryGroup,
+    delta_across: f64,
+    page: FreePage,
+    snap: Snap,
+) -> (Vec<(usize, FreeFrame)>, Vec<Guide>) {
+    let vertical = group.vertical;
+    let find = |base: &usize| boxes.iter().find(|graph| graph.base == *base);
+    let lows: Vec<&GraphBox> = group.low.iter().filter_map(find).collect();
+    let highs: Vec<&GraphBox> = group.high.iter().filter_map(find).collect();
+    if lows.is_empty() || highs.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    // Outer start and end across, and the gutters at both ends, per axis.
+    let start = |g: &GraphBox| if vertical { g.outer.left } else { g.outer.top };
+    let end = |g: &GraphBox| {
+        if vertical {
+            g.outer.left + g.outer.width
+        } else {
+            g.outer.top + g.outer.height
+        }
+    };
+    let gutters = |g: &GraphBox| {
+        if vertical {
+            (g.gutters.0, g.gutters.2)
+        } else {
+            (g.gutters.1, g.gutters.3)
+        }
+    };
+    let min_outer = |g: &GraphBox| {
+        let (w, h) = g.min_outer();
+        if vertical {
+            w
+        } else {
+            h
+        }
+    };
+    let max_outer = |g: &GraphBox| {
+        let (a, b) = gutters(g);
+        MAX_FRAME_SIZE + a + b
+    };
+    let (page_start, page_end) = if vertical {
+        (page.left, page.left + page.width)
+    } else {
+        (page.top, page.top + page.height)
+    };
+    let delta = if delta_across.is_finite() {
+        round_hundredth(delta_across)
+    } else {
+        0.0
+    };
+    let mut at = group.line + delta;
+    if snap.enabled {
+        let in_group = |g: &&GraphBox| group.low.contains(&g.base) || group.high.contains(&g.base);
+        let mut targets: Vec<f64> = boxes
+            .iter()
+            .filter(|g| !in_group(g))
+            .flat_map(|g| [start(g), end(g)])
+            .collect();
+        targets.extend([page_start, page_end]);
+        let origin = page_start;
+        if snap.threshold > 0.0 {
+            if let Some((offset, _)) = snap_axis(&[at], &targets, snap.threshold) {
+                at += offset;
+            } else if let Some(offset) = grid_offset(&[at], origin, snap.grid) {
+                at += offset;
+            }
+        } else if let Some(offset) = grid_offset(&[at], origin, snap.grid) {
+            at += offset;
+        }
+    }
+    // The bounds hold the whole group; if they cross, the line stays.
+    let mut lower = page_start;
+    let mut upper = page_end;
+    for g in &lows {
+        lower = lower.max(start(g) + min_outer(g));
+        upper = upper.min(start(g) + max_outer(g));
+    }
+    for g in &highs {
+        upper = upper.min(end(g) - min_outer(g));
+        lower = lower.max(end(g) - max_outer(g));
+    }
+    at = if lower > upper {
+        group.line
+    } else {
+        at.max(lower).min(upper)
+    };
+    let guides = if snap.enabled {
+        let in_group = |g: &&GraphBox| group.low.contains(&g.base) || group.high.contains(&g.base);
+        let along = |g: &GraphBox| {
+            if vertical {
+                (g.outer.top, g.outer.top + g.outer.height)
+            } else {
+                (g.outer.left, g.outer.left + g.outer.width)
+            }
+        };
+        let (mut from, mut to) = (f64::INFINITY, f64::NEG_INFINITY);
+        for g in lows.iter().chain(highs.iter()) {
+            let (a, b) = along(g);
+            from = from.min(a);
+            to = to.max(b);
+        }
+        let mut hit: Option<(f64, f64, f64)> = None;
+        for g in boxes.iter().filter(|g| !in_group(g)) {
+            let (a, b) = along(g);
+            for target in [start(g), end(g)] {
+                if hit.is_none() && (target - at).abs() <= 1e-6 {
+                    hit = Some((target, a, b));
+                }
+            }
+        }
+        if hit.is_none() {
+            let (a, b) = if vertical {
+                (page.top, page.top + page.height)
+            } else {
+                (page.left, page.left + page.width)
+            };
+            for target in [page_start, page_end] {
+                if hit.is_none() && (target - at).abs() <= 1e-6 {
+                    hit = Some((target, a, b));
+                }
+            }
+        }
+        hit.map(|(target, a, b)| Guide {
+            vertical,
+            at: target,
+            from: from.min(a),
+            to: to.max(b),
+        })
+        .into_iter()
+        .collect()
+    } else {
+        Vec::new()
+    };
+    let at = round_hundredth(at);
+    let bounded = |size: f64| size.clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE);
+    let mut frames = Vec::with_capacity(lows.len() + highs.len());
+    for g in &lows {
+        let (_, far) = gutters(g);
+        let mut frame = g.frame;
+        if vertical {
+            frame.width = bounded(round_hundredth(at - far - frame.left));
+        } else {
+            frame.height = bounded(round_hundredth(at - far - frame.top));
+        }
+        frames.push((g.base, frame));
+    }
+    for g in &highs {
+        let (near, _) = gutters(g);
+        let mut frame = g.frame;
+        if vertical {
+            let far_edge = frame.left + frame.width;
+            frame.left = round_hundredth(at + near);
+            frame.width = bounded(round_hundredth(far_edge - frame.left));
+        } else {
+            let far_edge = frame.top + frame.height;
+            frame.top = round_hundredth(at + near);
+            frame.height = bounded(round_hundredth(far_edge - frame.top));
+        }
+        frames.push((g.base, frame));
+    }
+    (frames, guides)
 }
 
 /// The page after dragging its `corner` (`(right, bottom)`) by `delta`
@@ -1078,7 +1553,7 @@ mod tests {
         let a = gbox(0, 100.0, 50.0, 200.0, 100.0); // outer 40..310 x 40..190
         let b = gbox(1, 200.0, 50.0, 200.0, 100.0); // overlaps a
         let boxes = [a, b];
-        let at = |x, y| layout_handle_at(&boxes, PAGE, x, y, 4.0);
+        let at = |x, y| layout_handle_at(&boxes, &[], PAGE, x, y, LayoutReach::at_scale(4.0, 1.0));
         // Outside the bottom-right page corner, within 8 pt.
         assert_eq!(
             at(804.0, 604.0),
@@ -1316,5 +1791,541 @@ mod tests {
         // Identity map.
         let same = scaled_to_page(&[a], from, from);
         assert_eq!(same[0].1, a.frame);
+    }
+
+    // ---- Boundaries between touching boxes (#426d) ----
+
+    /// A box whose outer rectangle is given; gutters 10 on every side.
+    fn ob(base: usize, left: f64, top: f64, width: f64, height: f64) -> GraphBox {
+        GraphBox {
+            base,
+            outer: page(left, top, width, height),
+            gutters: (10.0, 10.0, 10.0, 10.0),
+            frame: FreeFrame {
+                left: left + 10.0,
+                top: top + 10.0,
+                width: width - 20.0,
+                height: height - 20.0,
+                stack: 7,
+            },
+        }
+    }
+
+    fn reach(scale: f64) -> LayoutReach {
+        LayoutReach::at_scale(6.0, scale)
+    }
+
+    fn handle(
+        boxes: &[GraphBox],
+        selected: &[usize],
+        x: f64,
+        y: f64,
+        scale: f64,
+    ) -> Option<LayoutHandle> {
+        layout_handle_at(boxes, selected, PAGE, x, y, reach(scale))
+    }
+
+    fn pair() -> [GraphBox; 2] {
+        [
+            ob(0, 0.0, 100.0, 200.0, 100.0),
+            ob(1, 200.0, 100.0, 200.0, 100.0),
+        ]
+    }
+
+    /// Four boxes meeting at (200, 200): 0 top left, 1 top right, 2 bottom
+    /// left, 3 bottom right.
+    fn quad() -> [GraphBox; 4] {
+        [
+            ob(0, 0.0, 100.0, 200.0, 100.0),
+            ob(1, 200.0, 100.0, 200.0, 100.0),
+            ob(2, 0.0, 200.0, 200.0, 100.0),
+            ob(3, 200.0, 200.0, 200.0, 100.0),
+        ]
+    }
+
+    fn is_move(handle: Option<LayoutHandle>, wanted: usize) -> bool {
+        matches!(handle, Some(LayoutHandle::Box { base, edges }) if base == wanted && edges.is_move())
+    }
+
+    /// Bands in screen points: 2 move both, up to 10 move the pointer's side,
+    /// beyond is a plain move. Witness: `<` for `<=`; reach not divided by the
+    /// display scale.
+    #[test]
+    fn the_bands_across_a_shared_edge_are_measured_in_screen_points() {
+        let boxes = pair();
+        for scale in [1.0, 2.0, 0.5] {
+            let both = BOUNDARY_BOTH_POINTS / scale;
+            let side = BOUNDARY_SIDE_POINTS / scale;
+            let at = |d: f64| handle(&boxes, &[], 200.0 + d, 150.0, scale);
+            let boundary = |near| {
+                Some(LayoutHandle::Boundary {
+                    vertical: true,
+                    low: 0,
+                    high: 1,
+                    near,
+                })
+            };
+            assert_eq!(at(-both), boundary(0), "scale {scale}");
+            assert_eq!(at(both), boundary(1), "scale {scale}");
+            assert_eq!(at(0.0), boundary(0));
+            let Some(LayoutHandle::Side { base, edges }) = at(-(both + 0.01)) else {
+                panic!("a side at scale {scale}");
+            };
+            assert!(base == 0 && edges.right && !edges.left, "scale {scale}");
+            assert!(
+                matches!(at(side), Some(LayoutHandle::Side { base: 1, edges }) if edges.left),
+                "scale {scale}"
+            );
+            assert!(matches!(
+                at(-side),
+                Some(LayoutHandle::Side { base: 0, .. })
+            ));
+            assert!(is_move(at(-(side + 0.01)), 0), "scale {scale}");
+            assert!(is_move(at(side + 0.01), 1), "scale {scale}");
+        }
+    }
+
+    /// Horizontal lines work the same way.
+    #[test]
+    fn a_horizontal_shared_edge_has_the_same_bands() {
+        let boxes = [
+            ob(0, 100.0, 0.0, 100.0, 200.0),
+            ob(1, 100.0, 200.0, 100.0, 200.0),
+        ];
+        let at = |d: f64| handle(&boxes, &[], 150.0, 200.0 + d, 1.0);
+        assert_eq!(
+            at(1.0),
+            Some(LayoutHandle::Boundary {
+                vertical: false,
+                low: 0,
+                high: 1,
+                near: 1
+            })
+        );
+        assert!(matches!(at(-5.0), Some(LayoutHandle::Side { base: 0, edges }) if edges.bottom));
+        assert!(matches!(at(5.0), Some(LayoutHandle::Side { base: 1, edges }) if edges.top));
+    }
+
+    /// A corner keeps its single box and diagonal even inside the bands.
+    /// Witness: the bands tested before the corners.
+    #[test]
+    fn a_corner_wins_over_the_bands() {
+        let boxes = pair();
+        // 1 pt across the shared edge, 3 pt from its end.
+        let Some(LayoutHandle::Box { base, edges }) = handle(&boxes, &[], 199.0, 103.0, 1.0) else {
+            panic!("a corner");
+        };
+        assert!(base == 0 && edges.right && edges.top && !edges.left && !edges.bottom);
+        let quad = quad();
+        for (x, y, base, right, bottom) in [
+            (197.0, 197.0, 0, true, true),
+            (203.0, 197.0, 1, false, true),
+            (197.0, 203.0, 2, true, false),
+            (203.0, 203.0, 3, false, false),
+        ] {
+            let Some(LayoutHandle::Box { base: got, edges }) = handle(&quad, &[], x, y, 1.0) else {
+                panic!("a corner at ({x}, {y})");
+            };
+            assert_eq!(got, base);
+            assert_eq!((edges.right, edges.bottom), (right, bottom));
+            assert_eq!((edges.left, edges.top), (!right, !bottom));
+        }
+    }
+
+    /// Away from the corners, the nearer of the two lines wins. Witness:
+    /// always trying the vertical line first.
+    #[test]
+    fn the_nearest_line_wins_in_a_four_box_meeting() {
+        let quad = quad();
+        assert_eq!(
+            handle(&quad, &[], 208.0, 201.0, 1.0),
+            Some(LayoutHandle::Boundary {
+                vertical: false,
+                low: 1,
+                high: 3,
+                near: 3
+            })
+        );
+        assert_eq!(
+            handle(&quad, &[], 201.0, 208.0, 1.0),
+            Some(LayoutHandle::Boundary {
+                vertical: true,
+                low: 2,
+                high: 3,
+                near: 3
+            })
+        );
+    }
+
+    /// An edge with no touching neighbour keeps the plain reach. Witness: the
+    /// band reach applied to every edge.
+    #[test]
+    fn a_lone_edge_keeps_its_plain_reach() {
+        let boxes = [ob(0, 0.0, 100.0, 200.0, 100.0)];
+        let Some(LayoutHandle::Box { edges, .. }) = handle(&boxes, &[], 194.0, 150.0, 1.0) else {
+            panic!("an edge");
+        };
+        assert!(edges.right && !edges.left && !edges.top && !edges.bottom);
+        assert!(is_move(handle(&boxes, &[], 193.5, 150.0, 1.0), 0));
+    }
+
+    /// Only the shared part of a longer edge is a boundary. Witness: the
+    /// overlap ignored.
+    #[test]
+    fn the_unshared_part_of_a_longer_edge_stays_plain() {
+        let boxes = [
+            ob(0, 0.0, 100.0, 200.0, 200.0),
+            ob(1, 200.0, 100.0, 200.0, 100.0),
+        ];
+        assert!(is_move(handle(&boxes, &[], 192.0, 250.0, 1.0), 0));
+        let Some(LayoutHandle::Box { edges, .. }) = handle(&boxes, &[], 195.0, 250.0, 1.0) else {
+            panic!("a plain edge");
+        };
+        assert!(edges.right);
+        assert!(matches!(
+            handle(&boxes, &[], 192.0, 150.0, 1.0),
+            Some(LayoutHandle::Side { base: 0, .. })
+        ));
+    }
+
+    /// Touching tolerance is one stored point; corner-to-corner does not
+    /// count; a real overlap is front to back. Witness: tolerance widened;
+    /// `abs` dropped.
+    #[test]
+    fn touching_means_a_gap_or_overlap_of_at_most_a_point() {
+        let a = ob(0, 0.0, 100.0, 200.0, 100.0);
+        for offset in [0.8, -0.8] {
+            let boxes = [a, ob(1, 200.0 + offset, 100.0, 200.0, 100.0)];
+            assert!(
+                matches!(
+                    handle(&boxes, &[], 200.0 + offset / 2.0, 150.0, 1.0),
+                    Some(LayoutHandle::Boundary { .. })
+                ),
+                "offset {offset}"
+            );
+        }
+        let apart = [a, ob(1, 201.5, 100.0, 200.0, 100.0)];
+        let Some(LayoutHandle::Box { base, edges }) = handle(&apart, &[], 199.0, 150.0, 1.0) else {
+            panic!("a plain edge");
+        };
+        assert!(base == 0 && edges.right);
+        let diagonal = [
+            ob(0, 0.0, 0.0, 100.0, 100.0),
+            ob(1, 100.0, 100.0, 100.0, 100.0),
+        ];
+        let Some(LayoutHandle::Box { edges, .. }) = handle(&diagonal, &[], 99.0, 50.0, 1.0) else {
+            panic!("a plain edge");
+        };
+        assert!(edges.right);
+        let overlapping = [a, ob(1, 170.0, 100.0, 200.0, 100.0)];
+        assert!(is_move(handle(&overlapping, &[], 185.0, 150.0, 1.0), 1));
+    }
+
+    /// A box in front of the line takes the pointer. Witness: the boundary
+    /// search before the front to back pass.
+    #[test]
+    fn a_third_box_over_the_line_takes_the_pointer() {
+        let boxes = [
+            ob(0, 0.0, 100.0, 200.0, 100.0),
+            ob(1, 200.0, 100.0, 200.0, 100.0),
+            ob(2, 150.0, 100.0, 100.0, 100.0),
+        ];
+        assert!(is_move(handle(&boxes, &[], 196.0, 150.0, 1.0), 2));
+    }
+
+    /// The selected box's edges win over a box in front, its inside does not.
+    /// Witness: no selected step; or the selected step returning moves.
+    #[test]
+    fn a_selected_box_keeps_its_edges_under_a_box_in_front() {
+        let boxes = [
+            ob(0, 0.0, 0.0, 300.0, 200.0),
+            ob(1, 100.0, 150.0, 100.0, 100.0),
+        ];
+        let on_edge = handle(&boxes, &[0], 150.0, 199.0, 1.0);
+        let Some(LayoutHandle::Box { base, edges }) = on_edge else {
+            panic!("an edge");
+        };
+        assert!(base == 0 && edges.bottom);
+        assert!(is_move(handle(&boxes, &[0], 150.0, 170.0, 1.0), 1));
+        assert!(is_move(handle(&boxes, &[], 150.0, 199.0, 1.0), 1));
+    }
+
+    fn base_set(list: &[usize]) -> Vec<usize> {
+        let mut sorted = list.to_vec();
+        sorted.sort_unstable();
+        sorted
+    }
+
+    /// `Line` takes every box with an edge on the line; `Pair` the two. Witness:
+    /// the arms swapped; the line test widened.
+    #[test]
+    fn the_group_of_a_line_follows_the_setting() {
+        let mut boxes = quad().to_vec();
+        let group = boundary_group(&boxes, true, 0, 1, BoundaryFollow::Line);
+        assert_eq!(base_set(&group.low), vec![0, 2]);
+        assert_eq!(base_set(&group.high), vec![1, 3]);
+        assert_eq!(group.line, 200.0);
+        // A fifth box with no neighbour, a sixth that crosses the line.
+        boxes.push(ob(4, 100.0, 400.0, 100.0, 100.0));
+        boxes.push(ob(5, 150.0, 500.0, 100.0, 100.0));
+        let group = boundary_group(&boxes, true, 0, 1, BoundaryFollow::Line);
+        assert_eq!(base_set(&group.low), vec![0, 2, 4]);
+        assert_eq!(base_set(&group.high), vec![1, 3]);
+        let pair = boundary_group(&boxes, true, 0, 1, BoundaryFollow::Pair);
+        assert_eq!((pair.low, pair.high), (vec![0], vec![1]));
+        // The pointer picks the row.
+        let row = |y| match handle(&quad(), &[], 200.0, y, 1.0) {
+            Some(LayoutHandle::Boundary { low, high, .. }) => (low, high),
+            other => panic!("a boundary, got {other:?}"),
+        };
+        assert_eq!(row(150.0), (0, 1));
+        assert_eq!(row(250.0), (2, 3));
+        // A bottom row 30 points further right is another line.
+        let mut offset = quad().to_vec();
+        offset[2] = ob(2, 0.0, 200.0, 230.0, 100.0);
+        offset[3] = ob(3, 230.0, 200.0, 200.0, 100.0);
+        let group = boundary_group(&offset, true, 0, 1, BoundaryFollow::Line);
+        assert_eq!((group.low, group.high), (vec![0], vec![1]));
+    }
+
+    fn moved(
+        boxes: &[GraphBox],
+        group: &BoundaryGroup,
+        delta: f64,
+        snap: Snap,
+    ) -> (Vec<(usize, FreeFrame)>, Vec<Guide>) {
+        moved_boundary(boxes, group, delta, PAGE, snap)
+    }
+
+    fn line_of(boxes: &[GraphBox], vertical: bool) -> BoundaryGroup {
+        boundary_group(boxes, vertical, 0, 1, BoundaryFollow::Line)
+    }
+
+    fn outer_right(frame: &FreeFrame) -> f64 {
+        frame.left + frame.width + 10.0
+    }
+
+    /// A move writes every box of the group from one line, and leaves the other
+    /// axis and the stacking key alone.
+    #[test]
+    fn dragging_the_line_moves_both_sides_and_keeps_the_other_axis() {
+        let boxes = quad();
+        let group = line_of(&boxes, true);
+        let (frames, guides) = moved(&boxes, &group, 3.0, snap());
+        assert!(guides.is_empty());
+        assert_eq!(frames.len(), 4);
+        for (base, frame) in &frames {
+            let old = boxes.iter().find(|b| b.base == *base).expect("box").frame;
+            assert_eq!(
+                (frame.top, frame.height, frame.stack),
+                (old.top, old.height, old.stack)
+            );
+            if group.low.contains(base) {
+                assert_eq!(frame.left, old.left);
+                assert_eq!(outer_right(frame), 203.0);
+            } else {
+                assert_eq!(frame.left - 10.0, 203.0);
+                assert_eq!(frame.left + frame.width, old.left + old.width);
+            }
+        }
+    }
+
+    /// Witness: the group's own edges kept as magnet targets.
+    #[test]
+    fn the_magnet_ignores_the_group_and_catches_other_boxes() {
+        let boxes = [
+            ob(0, 0.0, 100.0, 200.0, 100.0),
+            ob(1, 200.0, 100.0, 200.0, 100.0),
+            ob(2, 206.0, 300.0, 100.0, 100.0),
+        ];
+        let group = boundary_group(&boxes, true, 0, 1, BoundaryFollow::Line);
+        assert_eq!(base_set(&group.low), vec![0]);
+        let (frames, guides) = moved(&boxes, &group, 3.0, snap());
+        assert_eq!(outer_right(&frames[0].1), 206.0);
+        assert!(guides.iter().any(|g| g.vertical && g.at == 206.0));
+        let (frames, _) = moved(&boxes[..2], &group, 3.0, snap());
+        assert_eq!(outer_right(&frames[0].1), 203.0, "no other box: free");
+        let (frames, guides) = moved(&boxes, &group, 3.0, no_snap());
+        assert_eq!(outer_right(&frames[0].1), 203.0);
+        assert!(guides.is_empty());
+    }
+
+    /// The grid is measured from the page origin, not from zero.
+    #[test]
+    fn the_line_lands_on_a_grid_line_from_the_page_origin() {
+        let boxes = pair();
+        let group = line_of(&boxes, true);
+        let grid = Snap {
+            grid: Some(50.0),
+            threshold: 0.0,
+            enabled: true,
+        };
+        let shifted = page(17.0, 0.0, 800.0, 600.0);
+        let (frames, _) = moved_boundary(&boxes, &group, 3.0, shifted, grid);
+        assert_eq!(outer_right(&frames[0].1), 217.0);
+        let (frames, _) = moved_boundary(&boxes, &group, 3.0, PAGE, grid);
+        assert_eq!(outer_right(&frames[0].1), 200.0);
+        // With magnets on, a grid still applies when no edge is near.
+        let both = Snap {
+            threshold: 6.0,
+            ..grid
+        };
+        let (frames, _) = moved_boundary(&boxes, &group, 21.0, shifted, both);
+        assert_eq!(outer_right(&frames[0].1), 217.0);
+    }
+
+    /// Transposes a vertical-line fixture into a horizontal one.
+    fn transposed(boxes: &[GraphBox]) -> Vec<GraphBox> {
+        boxes
+            .iter()
+            .map(|b| {
+                ob(
+                    b.base,
+                    b.outer.top,
+                    b.outer.left,
+                    b.outer.height,
+                    b.outer.width,
+                )
+            })
+            .collect()
+    }
+
+    /// The whole line stops at the tightest box of the group, in both
+    /// directions and on both axes. Witness: clamping from the pair only, or
+    /// per box.
+    #[test]
+    fn the_line_stops_where_the_tightest_box_of_the_group_stops() {
+        // Low box 2 is the narrow one on the left (min outer 56 from 100),
+        // high box 3 the narrow one on the right (ends at 300).
+        let vertical = vec![
+            ob(0, 0.0, 100.0, 200.0, 100.0),
+            ob(1, 200.0, 100.0, 200.0, 100.0),
+            ob(2, 100.0, 200.0, 100.0, 100.0),
+            ob(3, 200.0, 200.0, 100.0, 100.0),
+        ];
+        for vertical_line in [true, false] {
+            let boxes = if vertical_line {
+                vertical.clone()
+            } else {
+                transposed(&vertical)
+            };
+            let group = line_of(&boxes, vertical_line);
+            assert_eq!(group.low.len() + group.high.len(), 4);
+            for (delta, wanted) in [(-500.0, 156.0), (500.0, 244.0)] {
+                let (frames, _) = moved(&boxes, &group, delta, no_snap());
+                let (lows, highs): (Vec<_>, Vec<_>) = frames
+                    .iter()
+                    .partition(|(base, _)| group.low.contains(base));
+                let edge = |frame: &FreeFrame, far: bool| match (vertical_line, far) {
+                    (true, true) => frame.left + frame.width + 10.0,
+                    (true, false) => frame.left - 10.0,
+                    (false, true) => frame.top + frame.height + 10.0,
+                    (false, false) => frame.top - 10.0,
+                };
+                for (_, frame) in &lows {
+                    assert!((edge(frame, true) - wanted).abs() < 0.006, "{frame:?}");
+                }
+                for (_, frame) in &highs {
+                    assert!((edge(frame, false) - wanted).abs() < 0.006, "{frame:?}");
+                }
+            }
+        }
+    }
+
+    /// The page edges and the maximum size also stop the line.
+    #[test]
+    fn the_page_edges_and_the_maximum_size_stop_the_line() {
+        // Boxes that stick out of the page: the page holds the line.
+        let boxes = [
+            ob(0, -100.0, 100.0, 300.0, 100.0),
+            ob(1, 200.0, 100.0, 800.0, 100.0),
+        ];
+        let group = line_of(&boxes, true);
+        let (frames, _) = moved(&boxes, &group, -500.0, no_snap());
+        assert_eq!(outer_right(&frames[0].1), 0.0);
+        let (frames, _) = moved(&boxes, &group, 5000.0, no_snap());
+        assert_eq!(frames[1].1.left - 10.0, 800.0);
+        // Maximum size: low box 1500 wide cannot grow beyond 2000 + gutters.
+        let big = Snap {
+            enabled: false,
+            ..snap()
+        };
+        let wide = page(0.0, 0.0, 20_000.0, 600.0);
+        let boxes = [
+            ob(0, 0.0, 100.0, 1500.0, 100.0),
+            ob(1, 1500.0, 100.0, 1800.0, 100.0),
+        ];
+        let group = line_of(&boxes, true);
+        let (frames, _) = moved_boundary(&boxes, &group, 3000.0, wide, big);
+        assert_eq!(frames[0].1.width, MAX_FRAME_SIZE);
+        // And the high box cannot grow past its maximum when the line goes left.
+        let boxes = [
+            ob(0, 0.0, 100.0, 1800.0, 100.0),
+            ob(1, 1800.0, 100.0, 1500.0, 100.0),
+        ];
+        let group = line_of(&boxes, true);
+        let (frames, _) = moved_boundary(&boxes, &group, -3000.0, wide, big);
+        assert_eq!(frames[1].1.width, MAX_FRAME_SIZE);
+    }
+
+    /// Both boxes at their minimum and overlapping a little: the bounds cross,
+    /// the line stays. Witness: `f64::clamp`, which panics.
+    #[test]
+    fn crossing_bounds_leave_the_line_where_it_is() {
+        let boxes = [
+            ob(0, 0.0, 100.0, 56.0, 100.0),
+            ob(1, 55.2, 100.0, 56.0, 100.0),
+        ];
+        let group = boundary_group(&boxes, true, 0, 1, BoundaryFollow::Pair);
+        for delta in [-30.0, 0.0, 30.0] {
+            let (frames, _) = moved(&boxes, &group, delta, no_snap());
+            assert_eq!(frames.len(), 2);
+            for (_, frame) in &frames {
+                assert!(frame.width >= MIN_FRAME_SIZE && frame.width.is_finite());
+            }
+        }
+    }
+
+    /// One rounded line: the two sides meet to the hundredth, the far edges
+    /// stay, and the result is still a boundary. Witness: rounding per box.
+    #[test]
+    fn the_two_sides_meet_after_the_rounding() {
+        let step = Snap {
+            grid: Some(7.777),
+            threshold: 0.0,
+            enabled: true,
+        };
+        for (low_left, high_left, tolerance) in [(0.0, 200.0, 1e-9), (0.1237, 200.3081, 0.005)] {
+            let boxes = [
+                ob(0, low_left, 100.0, 200.0, 100.0),
+                ob(1, high_left, 100.0, 200.0, 100.0),
+            ];
+            let group = boundary_group(&boxes, true, 0, 1, BoundaryFollow::Pair);
+            let (frames, _) = moved(&boxes, &group, 3.337, step);
+            let low_right = outer_right(&frames[0].1);
+            let new_left = frames[1].1.left - 10.0;
+            assert!(
+                (low_right - new_left).abs() <= tolerance,
+                "{low_right} vs {new_left} (tolerance {tolerance})"
+            );
+            let old_far = boxes[1].frame.left + boxes[1].frame.width;
+            assert!((frames[1].1.left + frames[1].1.width - old_far).abs() <= 0.005);
+            assert_eq!(frames[0].1.left, boxes[0].frame.left);
+            // Feed the result back: still a boundary.
+            let fed: Vec<GraphBox> = frames
+                .iter()
+                .zip(&boxes)
+                .map(|((_, f), b)| GraphBox {
+                    outer: page(f.left - 10.0, f.top - 10.0, f.width + 20.0, f.height + 20.0),
+                    frame: *f,
+                    ..*b
+                })
+                .collect();
+            let mid = (low_right + new_left) / 2.0;
+            assert!(matches!(
+                handle(&fed, &[], mid, 150.0, 1.0),
+                Some(LayoutHandle::Boundary { .. })
+            ));
+        }
     }
 }

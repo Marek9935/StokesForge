@@ -2,7 +2,8 @@
 //!
 //! A view state, never saved: while it is on, the figure is a layout table.
 //! Every layer is a **graph box** (its plot area and its axis and title
-//! bands) with eight handles and its size written on it, the figure is a
+//! bands) with its size written on it; the selected boxes show eight handles
+//! and the box under the pointer shows them faintly. The figure is a
 //! **page** whose corners can be pulled, and the primary drag does nothing
 //! else (no pan, no zoom, no object drag). All the geometry is in
 //! `stokesforge_render::free_gesture` (stored page coordinates); this module
@@ -16,8 +17,9 @@ use egui::{
 };
 use stokesforge_plot::{FreeFrame, FreePage, LengthUnit, PlotSpec};
 use stokesforge_render::{
-    figure_to_stored, graph_boxes, layout_handle_at, moved_box, nudged_box, resized_page,
-    scaled_to_page, stored_to_figure, GraphBox, Guide, LayoutHandle, Snap, MAGNET_THRESHOLD_POINTS,
+    boundary_group, figure_to_stored, graph_boxes, layout_handle_at, moved_boundary, moved_box,
+    nudged_box, resized_page, scaled_to_page, stored_to_figure, BoundaryFollow, BoundaryGroup,
+    GraphBox, Guide, LayoutHandle, LayoutReach, Snap, MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::{FramePreview, GraphEvent, GraphView};
@@ -81,6 +83,8 @@ pub(crate) struct LayoutDrag {
     page: FreePage,
     press: Pos2,
     scale: f32,
+    /// The graphs a both-sides drag moves, frozen at the press.
+    boundary: Option<BoundaryGroup>,
     pub(crate) guides: Vec<Guide>,
 }
 
@@ -102,6 +106,10 @@ pub(crate) struct LayoutState {
     pub(crate) drag: Option<LayoutDrag>,
     nudge: Option<Nudge>,
     pub(crate) view: Option<LayoutView>,
+    /// Which graphs a both-sides drag moves (never saved).
+    follow: BoundaryFollow,
+    /// Bases of the graphs under the pointer, to show their handles faintly.
+    hovered: Vec<usize>,
 }
 
 impl LayoutState {
@@ -110,6 +118,7 @@ impl LayoutState {
         self.drag = None;
         self.nudge = None;
         self.view = None;
+        self.hovered.clear();
     }
 
     /// One nudge or grid step in points.
@@ -169,8 +178,68 @@ fn resize_cursor(left_right: bool, top_bottom: bool, same_diagonal: bool) -> Cur
     }
 }
 
+/// How the eight handles of a box are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HandleLook {
+    /// No handles.
+    None,
+    /// Faint: the box under the pointer, already grabbable.
+    Faint,
+    /// Solid: a selected box.
+    Solid,
+}
+
+/// The handles of a box: solid when selected, faint when it is under the
+/// pointer and no drag is in progress, else none.
+pub(crate) fn handle_look(selected: bool, hovered: bool, dragging: bool) -> HandleLook {
+    if selected {
+        HandleLook::Solid
+    } else if hovered && !dragging {
+        HandleLook::Faint
+    } else {
+        HandleLook::None
+    }
+}
+
+/// The graph a click or a drag on `handle` selects: the box itself, or the one
+/// on the pointer's side of a line.
+fn handle_target(handle: &LayoutHandle) -> Option<usize> {
+    match handle {
+        LayoutHandle::Box { base, .. } | LayoutHandle::Side { base, .. } => Some(*base),
+        LayoutHandle::Boundary { near, .. } => Some(*near),
+        LayoutHandle::Page { .. } => None,
+    }
+}
+
+/// The graphs a handle shows faintly under the pointer.
+fn handle_graphs(handle: &LayoutHandle) -> Vec<usize> {
+    match handle {
+        LayoutHandle::Box { base, .. } | LayoutHandle::Side { base, .. } => vec![*base],
+        LayoutHandle::Boundary { low, high, .. } => vec![*low, *high],
+        LayoutHandle::Page { .. } => Vec::new(),
+    }
+}
+
 fn handle_cursor(handle: &LayoutHandle) -> CursorIcon {
     match handle {
+        LayoutHandle::Boundary { vertical, .. } => {
+            if *vertical {
+                CursorIcon::ResizeHorizontal
+            } else {
+                CursorIcon::ResizeVertical
+            }
+        }
+        LayoutHandle::Side { edges, .. } => {
+            if edges.right {
+                CursorIcon::ResizeEast
+            } else if edges.left {
+                CursorIcon::ResizeWest
+            } else if edges.bottom {
+                CursorIcon::ResizeSouth
+            } else {
+                CursorIcon::ResizeNorth
+            }
+        }
         LayoutHandle::Page { right, bottom } => resize_cursor(true, true, right == bottom),
         LayoutHandle::Box { edges, .. } => resize_cursor(
             edges.left || edges.right,
@@ -205,6 +274,7 @@ impl GraphView {
         }
         self.layout.mode = false;
         self.layout.view = None;
+        self.layout.hovered.clear();
     }
 
     /// Whether the Page Layout Mode is on.
@@ -220,6 +290,17 @@ impl GraphView {
     /// The snapping grid step in points, `None` when the grid is off.
     pub fn layout_grid(&self) -> Option<f64> {
         self.layout.grid
+    }
+
+    /// Sets which graphs a drag of the line between two touching graphs moves
+    /// (never saved).
+    pub fn set_layout_boundary(&mut self, follow: BoundaryFollow) {
+        self.layout.follow = follow;
+    }
+
+    /// Which graphs a drag of the line between two touching graphs moves.
+    pub fn layout_boundary(&self) -> BoundaryFollow {
+        self.layout.follow
     }
 
     /// The unit the sizes written on the boxes are shown in.
@@ -375,15 +456,21 @@ impl GraphView {
         Some((boxes, page))
     }
 
-    /// What the overlay and the accessors read, computed once per paint.
-    pub(crate) fn compute_layout_view(&self, spec: &PlotSpec) -> Option<LayoutView> {
-        let (boxes, page) = self.layout_geometry(spec)?;
+    /// The selected layers as base layers, the active one first.
+    fn selected_bases(&self, spec: &PlotSpec) -> Vec<usize> {
         let bases = spec.cell_bases();
         let mut selected = Vec::new();
         if let Some(active) = bases.get(self.active_panel(spec)) {
             selected.push(*active);
         }
         selected.extend(self.extra_layers(spec));
+        selected
+    }
+
+    /// What the overlay and the accessors read, computed once per paint.
+    pub(crate) fn compute_layout_view(&self, spec: &PlotSpec) -> Option<LayoutView> {
+        let (boxes, page) = self.layout_geometry(spec)?;
+        let selected = self.selected_bases(spec);
         Some(LayoutView {
             boxes,
             page,
@@ -397,12 +484,15 @@ impl GraphView {
         pos: Pos2,
         boxes: &[GraphBox],
         page: FreePage,
+        spec: &PlotSpec,
     ) -> Option<LayoutHandle> {
         let (_, layout) = self.figure_memo.as_ref()?;
         let scale = f64::from(self.display_scale().filter(|scale| *scale > 0.0)?);
         let figure = self.figure_position(pos)?;
         let (x, y) = figure_to_stored(layout, f64::from(figure.x), f64::from(figure.y));
-        layout_handle_at(boxes, page, x, y, LAYOUT_TOLERANCE_POINTS / scale)
+        let selected = self.selected_bases(spec);
+        let reach = LayoutReach::at_scale(LAYOUT_TOLERANCE_POINTS, scale);
+        layout_handle_at(boxes, &selected, page, x, y, reach)
     }
 
     /// The gestures of the mode: selection by click, box and page corner drags,
@@ -414,6 +504,7 @@ impl GraphView {
         spec: &PlotSpec,
     ) {
         self.tick_nudge(context);
+        self.layout.hovered.clear();
         let Some((boxes, page)) = self.layout_geometry(spec) else {
             return;
         };
@@ -424,8 +515,10 @@ impl GraphView {
         let pointer = response.interact_pointer_pos();
         if response.clicked() || response.secondary_clicked() {
             let shift = context.input(|input| input.modifiers.shift);
-            if let Some(LayoutHandle::Box { base, .. }) =
-                pointer.and_then(|pos| self.layout_handle_under(pos, &boxes, page))
+            if let Some(base) = pointer
+                .and_then(|pos| self.layout_handle_under(pos, &boxes, page, spec))
+                .as_ref()
+                .and_then(handle_target)
             {
                 if response.clicked() && shift {
                     self.toggle_extra_layer(base, spec);
@@ -444,10 +537,15 @@ impl GraphView {
         }
         let cursor = match &self.layout.drag {
             Some(drag) => Some(handle_cursor(&drag.handle)),
-            None if response.hovered() => response
-                .hover_pos()
-                .and_then(|pos| self.layout_handle_under(pos, &boxes, page))
-                .map(|handle| handle_cursor(&handle)),
+            None if response.hovered() => {
+                let handle = response
+                    .hover_pos()
+                    .and_then(|pos| self.layout_handle_under(pos, &boxes, page, spec));
+                if let Some(handle) = &handle {
+                    self.layout.hovered = handle_graphs(handle);
+                }
+                handle.map(|handle| handle_cursor(&handle))
+            }
             None => None,
         };
         if let Some(icon) = cursor {
@@ -471,15 +569,36 @@ impl GraphView {
             let origin = context
                 .input(|input| input.pointer.press_origin())
                 .unwrap_or(pos - response.drag_delta());
-            let Some(handle) = self.layout_handle_under(origin, boxes, page) else {
+            let Some(handle) = self.layout_handle_under(origin, boxes, page, spec) else {
                 return;
             };
             let Some(scale) = self.display_scale().filter(|scale| *scale > 0.0) else {
                 return;
             };
             self.commit_nudge();
-            if let LayoutHandle::Box { base, .. } = handle {
-                if !self.layer_in_selection(base, spec) {
+            let boundary = match handle {
+                LayoutHandle::Boundary {
+                    vertical,
+                    low,
+                    high,
+                    ..
+                } => Some(boundary_group(
+                    boxes,
+                    vertical,
+                    low,
+                    high,
+                    self.layout.follow,
+                )),
+                _ => None,
+            };
+            if let Some(base) = handle_target(&handle) {
+                let selected = match handle {
+                    LayoutHandle::Boundary { low, high, .. } => {
+                        self.layer_in_selection(low, spec) || self.layer_in_selection(high, spec)
+                    }
+                    _ => self.layer_in_selection(base, spec),
+                };
+                if !selected {
                     self.set_active_panel(base, spec);
                     self.clear_extra_layers();
                 }
@@ -490,6 +609,7 @@ impl GraphView {
                 page,
                 press: origin,
                 scale,
+                boundary,
                 guides: Vec::new(),
             });
         }
@@ -505,7 +625,7 @@ impl GraphView {
             enabled: !shift,
         };
         let (frees, shown_page, guides) = match drag.handle {
-            LayoutHandle::Box { base, edges } => {
+            LayoutHandle::Box { base, edges } | LayoutHandle::Side { base, edges } => {
                 let Some(start) = drag.boxes.iter().find(|graph| graph.base == base) else {
                     return;
                 };
@@ -517,6 +637,14 @@ impl GraphView {
                     .collect();
                 let (frame, guides) = moved_box(start, &edges, delta, drag.page, &others, snap);
                 (vec![(base, frame)], drag.page, guides)
+            }
+            LayoutHandle::Boundary { vertical, .. } => {
+                let Some(group) = &drag.boundary else {
+                    return;
+                };
+                let across = if vertical { delta.0 } else { delta.1 };
+                let (frames, guides) = moved_boundary(&drag.boxes, group, across, drag.page, snap);
+                (frames, drag.page, guides)
             }
             LayoutHandle::Page { right, bottom } => {
                 let new_page = resized_page(drag.page, (right, bottom), delta, snap);
@@ -600,9 +728,12 @@ impl GraphView {
         paint_page_corners(painter, page_rect, dragged_corner, accent);
 
         let in_selection = |graph: &GraphBox| view.selected.contains(&graph.base);
+        let dragging = self.layout.drag.is_some();
         for selected in [false, true] {
             for graph in view.boxes.iter().filter(|g| in_selection(g) == selected) {
-                self.paint_box(painter, graph, selected, accent);
+                let hovered = self.layout.hovered.contains(&graph.base);
+                let look = handle_look(selected, hovered, dragging);
+                self.paint_box(painter, graph, selected, look, accent);
             }
         }
         for guide in self.magnet_guides() {
@@ -654,8 +785,16 @@ impl GraphView {
         }
     }
 
-    /// One graph box: outline, dashed plot area, eight handles, size pill.
-    fn paint_box(&self, painter: &Painter, graph: &GraphBox, selected: bool, accent: Color32) {
+    /// One graph box: outline, dashed plot area, size pill, and the eight
+    /// handles as `look` says.
+    fn paint_box(
+        &self,
+        painter: &Painter,
+        graph: &GraphBox,
+        selected: bool,
+        look: HandleLook,
+        accent: Color32,
+    ) {
         let rect_of = |r: FreePage| {
             Some(Rect::from_two_pos(
                 self.stored_to_screen(r.left, r.top)?,
@@ -708,14 +847,24 @@ impl GraphView {
             (Pos2::new(cx, outer.bottom()), egui::vec2(18.0, 4.0)),
             (Pos2::new(outer.left(), cy), egui::vec2(4.0, 18.0)),
         ];
-        let outline = Stroke::new(1.0, colour);
-        for at in corners {
-            let square = Rect::from_center_size(at, egui::vec2(7.0, 7.0));
-            painter.rect(square, 0.0, Color32::WHITE, outline, StrokeKind::Middle);
-        }
-        for (at, size) in edges {
-            let edge_pill = Rect::from_center_size(at, size);
-            painter.rect(edge_pill, 2.0, Color32::WHITE, outline, StrokeKind::Middle);
+        if look != HandleLook::None {
+            let (fill, line) = if look == HandleLook::Faint {
+                (
+                    Color32::WHITE.gamma_multiply(0.45),
+                    colour.gamma_multiply(0.45),
+                )
+            } else {
+                (Color32::WHITE, colour)
+            };
+            let outline = Stroke::new(1.0, line);
+            for at in corners {
+                let square = Rect::from_center_size(at, egui::vec2(HANDLE_SIZE, HANDLE_SIZE));
+                painter.rect(square, 0.0, fill, outline, StrokeKind::Middle);
+            }
+            for (at, size) in edges {
+                let edge_pill = Rect::from_center_size(at, size);
+                painter.rect(edge_pill, 2.0, fill, outline, StrokeKind::Middle);
+            }
         }
         let text = format!(
             "{} \u{d7} {} {}",
@@ -774,5 +923,21 @@ fn paint_page_corners(
                 Stroke::new(2.5, colour),
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Selected graphs are solid, the hovered one faint, and no faint handle
+    /// shows during a drag. Witness: the drag condition dropped.
+    #[test]
+    fn handles_are_solid_when_selected_and_faint_when_hovered_outside_a_drag() {
+        assert_eq!(handle_look(true, false, false), HandleLook::Solid);
+        assert_eq!(handle_look(true, true, true), HandleLook::Solid);
+        assert_eq!(handle_look(false, true, false), HandleLook::Faint);
+        assert_eq!(handle_look(false, true, true), HandleLook::None);
+        assert_eq!(handle_look(false, false, false), HandleLook::None);
     }
 }

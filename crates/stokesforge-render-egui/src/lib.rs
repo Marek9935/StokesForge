@@ -110,7 +110,7 @@ pub use layout_mode::{LAYOUT_GRAB_MARGIN, LAYOUT_TOLERANCE_POINTS};
 // What the shell reads from the Page Layout Mode (#426d) without declaring an
 // edge to the geometry crates.
 pub use stokesforge_plot::{FreePage, LengthUnit};
-pub use stokesforge_render::{GraphBox, LayoutHandle};
+pub use stokesforge_render::{BoundaryFollow, GraphBox, LayoutHandle};
 // Re-exported so that the UI does not have to declare an edge to
 // `stokesforge-render` to read what the figure drew: this crate is already
 // its screen rendering facade.
