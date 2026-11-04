@@ -341,6 +341,10 @@ status-history-empty = No messages yet. The messages of your actions will appear
 status-history-time = { $time } UTC
 status-level-warning = Warning
 status-level-error = Error
+status-formula-now-reads = { $count ->
+    [one] The formula of column { $column } now reads { $formula }
+   *[other] { $count } formulas now read the columns or sheets that appeared
+}
 status-saved = Saved to { $path }
 status-saved-over-limit = Saved to { $path }, but the file ({ $size } MB) is over the { $limit } MB opening limit. Raise the limit in File > Preferences > General to reopen it
 status-loaded = Loaded from { $path }

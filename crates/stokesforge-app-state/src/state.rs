@@ -3125,6 +3125,10 @@ pub struct AppState {
     /// A comma range just rewritten in the F(x)= field of a column (#433): the
     /// grid takes it once and paints the orange state for 10 s.
     formula_warning: Option<(NodeId, String)>,
+    /// How many formula bindings the status bar has already told (#433): the
+    /// session counts the kept formulas it bound when their column or sheet
+    /// appeared, the snapshot carries the count.
+    seen_bound: u64,
     /// Last structured grid clipboard, set by [`AppState::
     /// copy_selection`]/[`AppState::copy_full_columns`] — pure UI state, like
     /// [`AppState::selection`]: never in the history, never sent to
@@ -3334,6 +3338,7 @@ impl AppState {
             formula_refusal_memo: std::cell::RefCell::new(None),
             formula_issue_memo: std::cell::RefCell::new(None),
             formula_warning: None,
+            seen_bound: 0,
             grid_clipboard: None,
             clipboard_text: None,
             clipboard_dirty: false,
@@ -3393,6 +3398,56 @@ impl AppState {
         view.clipboard_text = self.clipboard_text.clone();
         view.clipboard_dirty = false;
         Ok(view)
+    }
+
+    /// Says in the status bar which column a kept formula now reads, once per
+    /// binding (#433, Q3): the session bound it inside the gesture that made
+    /// the column or sheet appear, and the snapshot counts it. An undo says
+    /// nothing (it unbinds without counting), nor does a new project or a
+    /// loaded file (`reopened`), which only resynchronize the count. A binding
+    /// that was undone before this snapshot (Stop) no longer reads and is
+    /// skipped.
+    fn tell_bound_formulas(&mut self, reopened: bool) {
+        let report = std::sync::Arc::clone(&self.snapshot.bound);
+        let new = report.count.saturating_sub(self.seen_bound);
+        self.seen_bound = report.count;
+        if reopened || new == 0 {
+            return;
+        }
+        let tree = &self.snapshot.tree;
+        let told = usize::try_from(new)
+            .unwrap_or(usize::MAX)
+            .min(report.recent.len());
+        let lines: Vec<(String, String)> = report.recent[report.recent.len() - told..]
+            .iter()
+            .filter_map(|column| {
+                let formula = tree.node(*column)?.as_column()?.meta().formula.as_ref()?;
+                formula.compile().ok()?;
+                Some((
+                    tree.column_letters(*column)?,
+                    tree.formula_letters(*column)?,
+                ))
+            })
+            .collect();
+        match lines.as_slice() {
+            [] => {}
+            [(column, formula)] => {
+                self.notice(tr!(
+                    "status-formula-now-reads",
+                    count = 1,
+                    column = column.as_str(),
+                    formula = formula.as_str()
+                ));
+            }
+            many => {
+                self.notice(tr!(
+                    "status-formula-now-reads",
+                    count = many.len(),
+                    column = "",
+                    formula = ""
+                ));
+            }
+        }
     }
 
     /// Refreshes a viewport's read without touching its selection or
@@ -6393,6 +6448,7 @@ impl AppState {
                 }
                 let reopened = self.snapshot.epoch != snapshot.epoch;
                 self.snapshot = snapshot;
+                self.tell_bound_formulas(reopened);
                 self.revalidate_selection();
                 self.refresh_low_r2_groups();
                 if reopened {

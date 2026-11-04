@@ -111,6 +111,20 @@ removed nodes, so there is nothing to free explicitly; and a restored node
 comes back under its **original identifier**, since `replace_tree` does not
 move the allocator back.
 
+### Folding a follow-up into the gesture: `absorb_into_last` (#433)
+
+`History::absorb_into_last(project, command)` applies a command and folds its
+entry **into the top entry** of the stack, which keeps its label: the entry
+becomes an `Entry::Macro` holding the gesture's entries then the follow-up, so
+the label rule of `Entry::Macro` is no longer "always `HistoryLabel::Macro`":
+it is the group's label from `end_macro`, or the label of the gesture that was
+absorbed into. The actor uses it for the automatic binding of a kept formula
+(a column added, a sheet renamed... makes a name resolve): one undo reverts the
+gesture and the binding, in reverse order (invariant 8). The footprint is the
+union of both, and the byte accounting is rebuilt (`resync_pinned`, the same
+fallback as closing a macro). With an open macro or an empty stack it is
+`execute_recorded`; `Ok(false)` leaves the top entry as it was; an error too.
+
 ### What the hybrid imposes: strict LIFO
 
 Restoring a whole tree overwrites everything written after it. A structural

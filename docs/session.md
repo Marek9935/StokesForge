@@ -195,6 +195,25 @@ the growth of its source is undone.
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
 | what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` and `b23` (two twin sessions, same trees at each step; `b23` draws the structural gestures) |
 
+### Binding a kept formula (#433)
+
+A formula the field kept because a column or a sheet it names was missing is
+bound by the actor when a gesture makes that name resolve (a column added or
+moved in, a sheet or workbook renamed, a duplicate deleted, a paste...). In the
+`Execute` branch, once `execute_recorded` returned `recorded == true`, **before**
+the reply and before the pass, `bind_kept_formulas` asks
+`Tree::next_binding` and writes each binding with `History::absorb_into_last`:
+the binding is part of the gesture's history entry, so Stop undoes both (and
+`BoundReport::retract` takes the report back), undo unbinds, redo replays.
+`Undo`, `Redo` and `AbortMacro` never bind (the state they restore was scanned).
+A `Load` scans the loaded tree with the direct primitives, before
+`run_after_load` (the history is cleared, nothing is undoable). The snapshot
+carries `bound: Arc<BoundReport>` (`count`, monotonic; `recent`, the last 32
+columns): the application says which column the formula now reads once per
+count it has not seen (`status-formula-now-reads`). Rule and fixed point:
+[`invariants.md`](invariants.md), §1 and §11. A client on an older snapshot can
+overwrite a binding with a `SetColumnMeta`; the next command binds again.
+
 ### Interruptible recalculation (#239)
 
 `SessionHandle::execute_interruptible` answers as soon as the command is

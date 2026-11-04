@@ -26,6 +26,14 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A formula kept because a column or a sheet it names does not exist yet
+  computes by itself when that column or sheet appears (#433): add the column,
+  move one in, rename a sheet, delete a duplicate workbook, or open the file.
+  The binding is part of the history entry of that action (one **Undo** takes
+  both) and the status bar says which column the formula now reads. A binding
+  that would make a loop stays framed. Once bound, the formula holds the column
+  by identifier, so moving it later gives no `#REF`.
+
 - A new graph plotted from a workbook is named after it (#434): "Book1 plot",
   then "Book1 plot 2"… (numbered after the highest existing number, a deleted
   graph leaves a gap) instead of Graph1, Graph2. `pyst.plot` without `name`

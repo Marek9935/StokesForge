@@ -761,7 +761,7 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
             sheet: f,
             column: c,
             formula_index,
-        } => column_at(f, c).and_then(|column| {
+        } => column_at(f, c).map(|column| {
             // Letters to identifiers on the snapshot (the two twins carry the
             // same identifiers), through the keeping reading of the field
             // (#433): what cannot be read is stored as typed and framed, never
@@ -770,13 +770,13 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
             // when the column appears (`pending_bindings`, asserted empty
             // after every step).
             let (formula, _) = tree.formula_keeping(column, FORMULAS[formula_index]);
-            Some(Command::SetColumnMeta {
+            Command::SetColumnMeta {
                 column,
                 meta: ColumnMeta {
                     formula: Some(formula),
                     ..Default::default()
                 },
-            })
+            }
         }),
         Step::SetPending {
             sheet: f,

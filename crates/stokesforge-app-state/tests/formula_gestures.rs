@@ -1711,3 +1711,90 @@ mod slow {
         assert!(h.state.tree().formula_letters(reader).is_some());
     }
 }
+
+// -- a kept formula binds when its column appears (#433, Q3) --
+
+/// A kept `A+F` binds when the column F is added: the status bar says which
+/// column the formula now reads, the column computes, and undo and redo say
+/// nothing about it (the session reports a binding once, an undo unbinds
+/// without counting). Witness: no `tell_bound_formulas`, no message; a message
+/// emitted from the tree instead of the count repeats on undo and redo.
+#[test]
+fn a_kept_formula_that_binds_says_which_column_it_now_reads_once() {
+    let mut w = world();
+    let e = new_target(&mut w);
+    w.type_formula(e, "A+F");
+    assert_eq!(w.letters(e).as_deref(), Some("A+F"), "kept: no column F");
+    let missing = |w: &World| {
+        w.state
+            .formula_issue(e)
+            .is_some_and(|issue| issue.contains("Column F does not exist"))
+    };
+    assert!(missing(&w), "framed: {:?}", w.state.formula_issue(e));
+    let sheet1 = w.sheet1;
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 });
+    assert_eq!(
+        w.status(),
+        "The formula of column E now reads A+F",
+        "the message follows the gesture's own"
+    );
+    assert!(!missing(&w), "bound: no longer framed for F");
+    let told = |w: &World| {
+        w.state
+            .status_history()
+            .filter(|message| message.text.contains("now reads"))
+            .count()
+    };
+    // The count says it once: nothing new after a refresh.
+    w.state.refresh();
+    assert_eq!(told(&w), 1);
+    // Undo unbinds and stays silent; so does redo, which only replays it.
+    w.state.dispatch(Action::Undo);
+    assert!(!w.status().contains("now reads"), "{}", w.status());
+    assert!(missing(&w), "unbound again");
+    w.state.dispatch(Action::Redo);
+    assert!(!w.status().contains("now reads"), "{}", w.status());
+    assert!(!missing(&w), "bound again");
+    assert_eq!(told(&w), 1, "told once, whatever the undo and redo");
+}
+
+/// Several bindings in one gesture say how many, in a sentence of their own.
+#[test]
+fn several_bindings_in_one_gesture_are_counted() {
+    let mut w = world();
+    let e = new_target(&mut w);
+    let f = new_target(&mut w);
+    w.type_formula(e, "A+G");
+    w.type_formula(f, "B+G");
+    let sheet1 = w.sheet1;
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 });
+    assert!(
+        w.status().starts_with("2 formulas now read"),
+        "{}",
+        w.status()
+    );
+}
+
+/// A kept formula typed over a column of **data** empties it (the formula is
+/// the source of truth), and one Undo gives the data back, not only the old
+/// meta (#433). Witness: without `values_before` in the `SetColumnMeta` delta
+/// the column comes back empty.
+#[test]
+fn a_kept_formula_typed_over_data_is_undone_with_the_data() {
+    let mut w = world();
+    let sheet1 = w.sheet1;
+    let d = w.columns(sheet1)[3];
+    assert_eq!(
+        w.values(d),
+        [1000.0, 1001.0, 1002.0, 1003.0, 1004.0].map(Some)
+    );
+    w.type_formula(d, "A +");
+    assert_eq!(w.letters(d).as_deref(), Some("A +"));
+    assert!(w.values(d).iter().all(Option::is_none), "emptied");
+    w.state.dispatch(Action::Undo);
+    assert_eq!(w.letters(d), None, "no formula again");
+    assert_eq!(
+        w.values(d),
+        [1000.0, 1001.0, 1002.0, 1003.0, 1004.0].map(Some)
+    );
+}

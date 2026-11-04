@@ -293,7 +293,11 @@ stored: it is recomputed from the parts when the file is open, so the same
 file shows the same frame. A version that did not know the shape reads the same
 file, shows the text and leaves the column empty (its cells are not framed
 there). `crates/stokesforge-persistence/tests/formula_roundtrip.rs`
-(`a_kept_formula_round_trips_…`).
+(`a_kept_formula_round_trips_…`). When the session loads such a file and the
+missing column or sheet is now there, the actor binds the formula before the
+first recalculation, with no history entry (`stokesforge-session/src/actor.rs`,
+`bind_kept_formulas_at_load`; `session.md`, "Binding a kept formula"); nothing
+changes in what is written.
 
 ## Formulas that read another sheet: additive field (#403)
 

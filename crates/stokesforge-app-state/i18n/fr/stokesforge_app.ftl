@@ -343,6 +343,10 @@ status-history-empty = Aucun message pour l'instant. Les messages de vos actions
 status-history-time = { $time } UTC
 status-level-warning = Avertissement
 status-level-error = Erreur
+status-formula-now-reads = { $count ->
+    [one] La formule de la colonne { $column } lit maintenant { $formula }
+   *[other] { $count } formules lisent maintenant les colonnes ou les feuilles apparues
+}
 status-saved = Enregistré dans { $path }
 status-saved-over-limit = Enregistré dans { $path }, mais le fichier ({ $size } Mo) dépasse la limite d'ouverture de { $limit } Mo. Relever la limite dans Fichier > Préférences > Général pour le rouvrir
 status-loaded = Chargé depuis { $path }
