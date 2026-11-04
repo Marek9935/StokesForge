@@ -810,18 +810,6 @@ pub enum Action {
         /// The new size, in points; brought into the bounds.
         size: f64,
     },
-    /// Sets the frame width of a column and/or the frame height of a row in
-    /// one go, as one undo step (#394): what a drag of a handle on the outer
-    /// edge of a cell commits, which may pull a corner (both axes). Same rules
-    /// as [`Action::SetFrameSize`].
-    SetFrameSizes {
-        /// Target graph.
-        graph: NodeId,
-        /// Grid column and its new frame width, in points.
-        column: Option<(usize, f64)>,
-        /// Grid row and its new frame height, in points.
-        row: Option<(usize, f64)>,
-    },
     /// Sets the frame width of every column and the frame height of every row
     /// of a regular grid in one go, as one undo step (#426): what a drag of an
     /// internal boundary or corner in the Page Layout Mode commits. The vectors
@@ -837,35 +825,6 @@ pub enum Action {
         /// The whole figure was scaled (history kind `ResizeFigure`), else a
         /// boundary or a corner was pulled (`ResizeCell`).
         figure: bool,
-    },
-    /// Sets Left and/or Top of the graph, in points (#405): the distance from
-    /// the left (top) edge of the image to the first plot area, what a drag of
-    /// the left or top edge of the figure commits. A graph without stored
-    /// frames is first given the ones it is drawn with. A single undo step
-    /// ([`PlotEditKind::PlaceFigure`]); nothing sent if the values are already
-    /// those or one of them is refused.
-    SetFigureOffsets {
-        /// Target graph.
-        graph: NodeId,
-        /// New Left.
-        left: Option<f64>,
-        /// New Top.
-        top: Option<f64>,
-    },
-    /// Sets the frame (plot area) of layer `panel` in free placement, in
-    /// points, in one go: what a drag of the layer or of one of its edges
-    /// commits (#398). The four numbers are stored as given (brought into
-    /// bounds); the stacking key stays. One undo step, [`PlotEditKind::MoveLayer`]
-    /// when only the position changes, [`PlotEditKind::ResizeLayer`] when the
-    /// size does; nothing sent on the grid, for a missing layer or when the
-    /// frame is already that one.
-    SetFreeFrame {
-        /// Target graph.
-        graph: NodeId,
-        /// Layer of the cell.
-        panel: usize,
-        /// The new frame; its `stack` is ignored.
-        frame: FreeFrame,
     },
     /// Sets several frames of a free graph and its page in one go: what a
     /// gesture of the Page Layout Mode commits (#426). Each `(base layer,
@@ -3155,11 +3114,6 @@ pub struct AppState {
     /// ("Edit Graph Properties"), which would hide the warning, so the warning
     /// is given again when the window closes.
     figure_grew_in_window: bool,
-    /// Revision a snapshot had right after an Undo or Redo of a
-    /// [`PlotEditKind::PlaceFigure`] step (#405): the figure's left and top
-    /// edge moved back or forth, and the shell keeps the plot area still on
-    /// screen by moving the window with them, as it did during the drag.
-    placement_step: Option<stokesforge_session::Revision>,
     /// Colors saved for the user, outside the project (see
     /// [`crate::user_colors`]).
     user_colors: UserColors,
@@ -3378,7 +3332,6 @@ impl AppState {
             plot_settings: None,
             plot_macro_open: false,
             figure_grew_in_window: false,
-            placement_step: None,
             user_colors: UserColors::load(),
             selection: std::collections::HashMap::new(),
             header_editing: None,
@@ -5512,28 +5465,12 @@ impl AppState {
                 index,
                 size,
             } => self.set_frame_sizes(graph, [(axis, index, size)]),
-            Action::SetFrameSizes { graph, column, row } => {
-                let column = column.map(|(index, size)| {
-                    (stokesforge_core::compose::FrameAxis::Column, index, size)
-                });
-                let row = row
-                    .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
-                self.set_frame_sizes(graph, column.into_iter().chain(row))
-            }
             Action::SetGridFrames {
                 graph,
                 widths,
                 heights,
                 figure,
             } => self.set_grid_frames(graph, &widths, &heights, figure),
-            Action::SetFigureOffsets { graph, left, top } => {
-                self.set_figure_offsets(graph, left, top)
-            }
-            Action::SetFreeFrame {
-                graph,
-                panel,
-                frame,
-            } => self.set_free_frame(graph, panel, frame),
             Action::SetFreeLayout {
                 graph,
                 frames,
@@ -7847,31 +7784,10 @@ impl AppState {
                     None => tr!("history-undone-last"),
                 });
                 self.refresh();
-                self.note_placement_step(label.as_ref());
             }
             Ok(None) => self.warn(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
-    }
-
-    /// Remembers that the step just undone or redone placed the figure
-    /// ([`AppState::placement_step_revision`]).
-    fn note_placement_step(&mut self, label: Option<&HistoryLabel>) {
-        self.placement_step = matches!(
-            label,
-            Some(HistoryLabel::EditPlotSpec(
-                PlotEditKind::PlaceFigure | PlotEditKind::MoveLayer | PlotEditKind::ResizeLayer
-            ))
-        )
-        .then_some(self.snapshot.revision);
-    }
-
-    /// The revision a snapshot had right after an Undo or Redo of a
-    /// "Position Plot Area" step (#405), until something else happens: the
-    /// window of the graph then follows the left / top edge of the figure as it
-    /// does while the edge is dragged.
-    pub fn placement_step_revision(&self) -> Option<stokesforge_session::Revision> {
-        self.placement_step
     }
 
     fn redo(&mut self) {
@@ -7883,7 +7799,6 @@ impl AppState {
                     None => tr!("history-redone-last"),
                 });
                 self.refresh();
-                self.note_placement_step(label.as_ref());
             }
             Ok(None) => self.warn(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
@@ -11025,7 +10940,7 @@ impl AppState {
         });
     }
 
-    /// [`Action::SetFrameSize`] and [`Action::SetFrameSizes`]: every size is
+    /// [`Action::SetFrameSize`]: every size is
     /// applied to one spec and committed as one step; nothing is sent if one of
     /// them is refused or if the result is the spec as it is.
     fn set_frame_sizes(
@@ -11173,42 +11088,6 @@ impl AppState {
         });
     }
 
-    /// [`Action::SetFreeFrame`]: the four numbers applied to one spec and
-    /// committed as one step, a move or a resize.
-    fn set_free_frame(&mut self, graph: NodeId, panel: usize, frame: FreeFrame) {
-        use stokesforge_core::compose::{set_free_frame, FreeField};
-        let Some(mut spec) = self.plot_spec(graph) else {
-            return;
-        };
-        let Some(&base) = spec.cell_bases().get(panel) else {
-            return;
-        };
-        let before = spec.panels[base].sanitized_free_frame();
-        for (field, value) in [
-            (FreeField::Left, frame.left),
-            (FreeField::Top, frame.top),
-            (FreeField::Width, frame.width),
-            (FreeField::Height, frame.height),
-        ] {
-            if !set_free_frame(&mut spec, panel, field, value) {
-                return;
-            }
-        }
-        if self
-            .plot_spec(graph)
-            .is_some_and(|previous| previous == spec)
-        {
-            return;
-        }
-        let resized = spec.panels[base].sanitized_free_frame();
-        let kind = if (resized.width, resized.height) == (before.width, before.height) {
-            PlotEditKind::MoveLayer
-        } else {
-            PlotEditKind::ResizeLayer
-        };
-        self.execute(Command::EditPlotSpec { graph, spec, kind });
-    }
-
     /// [`Action::SetFreeLayout`]: every frame and the page applied to one spec
     /// and committed as one step.
     fn set_free_layout(
@@ -11272,29 +11151,6 @@ impl AppState {
             PlotEditKind::MoveLayer
         };
         self.execute(Command::EditPlotSpec { graph, spec, kind });
-    }
-
-    /// [`Action::SetFigureOffsets`]: Left and Top applied to one spec and
-    /// committed as one step.
-    fn set_figure_offsets(&mut self, graph: NodeId, left: Option<f64>, top: Option<f64>) {
-        use stokesforge_core::compose::{set_figure_offset, FigureOffset};
-        let Some(mut spec) = self.plot_spec(graph) else {
-            return;
-        };
-        crate::frame_sizes::fix_new(&mut spec);
-        for (which, value) in [(FigureOffset::Left, left), (FigureOffset::Top, top)] {
-            if value.is_some() && !set_figure_offset(&mut spec, which, value) {
-                return;
-            }
-        }
-        if self.plot_spec(graph).is_some_and(|before| before == spec) {
-            return;
-        }
-        self.execute(Command::EditPlotSpec {
-            graph,
-            spec,
-            kind: PlotEditKind::PlaceFigure,
-        });
     }
 
     /// [`Action::RemovePlotObject`] of a layer: see

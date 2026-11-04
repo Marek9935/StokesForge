@@ -784,16 +784,11 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   (`docs/python-and-scripting.md`).
 - **`Action::SetFrameSize { graph, axis: FrameAxis, index, size }`**
   (`PlotEditKind::ResizeCell`, "Resize Plot Area", one `EditPlotSpec`, one undo
-  step) is the path of the Size fields and (with `SetFrameSizes`) of the drag handles: it fixes a legacy graph,
-  clamps the size to `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and sends nothing if the
-  size is unchanged or outside the grid. `Action::SetFrameSizes { graph, column,
-  row }` commits a column and/or a row in one step (a corner drag); all or
-  nothing.
-- **Drag handles (#394).** The outer boundary of a cell (right and bottom ones;
-  `hit::cell_edge_at`, `docs/rendering.md`) is pulled with the Pointer tool:
-  live preview in `GraphView`, at release `GraphEvent::FrameResized` becomes
-  `Action::SetFrameSizes` (`graph_window.rs`). Dragging by Δ changes the stored
-  frame by Δ.
+  step) fixes a legacy graph, clamps the size to `[MIN_FRAME_SIZE,
+  MAX_FRAME_SIZE]` and sends nothing if the size is unchanged or outside the grid.
+  The mouse handles of the outer boundary of a cell (#394) are gone (#426): a grid
+  is pulled with the mouse only in the Page Layout Mode, which commits
+  `Action::SetGridFrames` (all columns and rows at once).
 - **Advanced › Figure size, Left, Top (#405).** General has a closed **Advanced**
   block (S-L8, `Form::collapsible`) at the bottom with **Figure size**: Grows
   with the axes (default) / Fixed (`PlotSpec::fixed_figure`; reserve of one axis
@@ -804,23 +799,16 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   its reserve, a note under Size says so (`status-figure-grew`, also put in the
   status bar when the change is made). All edits go through the draft
   (`frame_sizes::set_fixed_in_draft`, `set_offset_in_draft`: a legacy draft is
-  given its frames in the same edit). Dragging the **left or top edge of the
-  figure** (Pointer tool) sets Left / Top: `GraphEvent::FramePlaced` becomes
-  `Action::SetFigureOffsets` (`PlotEditKind::PlaceFigure`, one undo step) and,
-  while the gesture lasts (and for the Undo / Redo of its step,
-  `AppState::placement_step_revision`), `GraphView::placing_edges` makes the floating window
-  grow to the left / upward (`FigureFollow::anchor_shift` moves its corner) so the
-  plot area stays still on screen. The handles of the figure's four outer edges
-  straddle the edge by `FIGURE_GRAB_MARGIN` and the figure's interaction area and
-  clip rectangle reach into the window's frame margin (`graph_window.rs`), so they
-  win over nothing: the window's resize zones lie outside its frame. The status
+  given its frames in the same edit). Left and Top are typed here (or set by `pyst`); the mouse
+  handles of the figure's left and top edges (#405) are gone (#426), and with
+  them `Action::SetFigureOffsets`, `PlotEditKind::PlaceFigure` and the window's
+  pulled-edge growth (`anchor_shift`). The status
   warning of a Fixed figure that grew in the window is given again when the
   window closes (`figure_grew_in_window`), the macro's own notice would hide it.
 - **The window follows the figure.** `FigureFollow` (`window_placement.rs`, shell
   only, invariant 2) records the figure size each graph window published
   (`published_figure_size`) and the display scale of its view. When the size
-  changes (a cell added or removed, Undo and Redo, the Size fields, a handle drag
-  in progress, an axis or a title that makes the image grow, `pyst`), a floating
+  changes (a cell added or removed, Undo and Redo, the Size fields, an axis or a title that makes the image grow, `pyst`), a floating
   window grows or shrinks by the difference at the scale it had, top-left fixed,
   to the right and down, clamped to the **visible** part of the workspace (the scroll area's viewport, never the virtual canvas, so the title bar and buttons stay reachable; beyond it the window stops and the figure is contained, and the window follows the CONTAINED figure on the other side too (no blank band; `FigureFollow::resize`, with the scale from before the clamp kept so Undo restores it); `floating_room`, `viewport_room`); a
   detached OS window does the same through `ViewportCommand::InnerSize`, clamped
@@ -876,21 +864,20 @@ hidden and stay stored for the way back. **Figure size = Fixed** applies per
 layer. A click activates the layer drawn under the cursor, found from the drawn plot
 areas, never from grid breakpoints.
 
-**Mouse gestures (#398, batch 2b).** `docs/gestures.md` has the matrix. A plain
-Pointer drag in a layer's plot area moves it, the outer boundary resizes it,
-magnets snap its edges to the other layers' (Shift: none). The pure geometry is
-`stokesforge_render::free_gesture` (`free_handle_at`, `framed_by`, `magnetized`);
-`GraphView::handle_free_drag` runs it (first call: edges and any gesture in
-progress; last call: the move, after the object handlers) and signals one
-`GraphEvent::LayerFramed { panel, frame, resized }` at release, which
-`graph_window.rs` turns into `Action::SetFreeFrame` (one `EditPlotSpec`,
-`PlotEditKind::MoveLayer` when only the position changes, `ResizeLayer` when the
-size does). `FigureFollow` also remembers the image's origin (`free_origin`):
+**Mouse gestures (#398, #426).** `docs/gestures.md` has the matrix. A layer is moved
+and resized with the mouse only in the Page Layout Mode (`layout_mode.rs`, geometry in
+`stokesforge_render::free_gesture`; magnets snap its edges to the other layers',
+Shift: none); the old gestures of the Pointer tool (a plain drag in the plot area
+moves the layer, its outer boundary resizes it) were removed in #426, with their
+cursors, so outside the mode the plot area of a Free layer behaves like a Regular
+graph's: a plain drag does nothing. The mode signals `GraphEvent::LayoutEdited`,
+which `graph_window.rs` turns into `Action::SetFreeLayout` (one `EditPlotSpec`,
+`PlotEditKind::MoveLayer` when only positions change, `ResizeLayer` when a size does,
+`ResizeFigure` when the page does). `FigureFollow` also remembers the image's origin (`free_origin`):
 `observe` returns a step when the origin moves while the size stays, and the
 shell moves the floating window by the shift at the kept scale
 (`FigureFollow::origin_follow`, `shifted_corner`); Undo and Redo go through the
-same path, so no "placement step" is needed in Free (it is still noted for the
-two kinds). A detached OS window follows the same moves
+same path (`AppState::placement_step_revision` is gone, #426). A detached OS window follows the same moves
 (`follow_figure_in_viewport` sends `ViewportCommand::OuterPosition`, kept on the
 monitor); on native Wayland the client does not know where its window is
 (`outer_rect` is `None`): nothing is sent and the window stays where it is.

@@ -1427,7 +1427,6 @@ history-plot-closed-frame = Change Closed Frame
 history-plot-add-cell = Add Layer Beside
 history-plot-remove-cell = Delete Layer
 history-plot-resize-cell = Resize Plot Area
-history-plot-place-figure = Position Plot Area
 history-plot-bring-layer-to-front = Bring Layer to Front
 history-plot-send-layer-to-back = Send Layer to Back
 history-plot-layer-background = Change Layer Background

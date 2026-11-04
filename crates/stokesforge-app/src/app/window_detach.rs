@@ -2679,10 +2679,10 @@ mod tests {
             let spec = stokesforge_core::compose::current_plot_spec(&snapshot, graph).unwrap();
             let mut frame = spec.panels[0].sanitized_free_frame();
             frame.left -= 30.0;
-            app.state.dispatch(Action::SetFreeFrame {
+            app.state.dispatch(Action::SetFreeLayout {
                 graph,
-                panel: 0,
-                frame,
+                frames: vec![(0, frame)],
+                page: None,
             });
             publish(&mut app);
             let command = paint();

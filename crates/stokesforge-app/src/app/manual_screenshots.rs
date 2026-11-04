@@ -315,14 +315,10 @@ const SHOTS: &[Shot] = &[
                 },
             );
             // Left stored (Top stays Auto): both kinds of value are shown.
-            act(
-                h,
-                Action::SetFigureOffsets {
-                    graph,
-                    left: Some(100.0),
-                    top: None,
-                },
-            );
+            if let Some(mut spec) = h.state().app.state.plot_spec(graph) {
+                spec.figure_left = Some(100.0);
+                act(h, Action::SetPlotSpec { graph, spec });
+            }
             act(
                 h,
                 Action::OpenPlotSettings {

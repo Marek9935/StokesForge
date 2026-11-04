@@ -253,6 +253,18 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Behavior change (#426): resizing and moving graphs with the mouse now happens
+  only in the **Page Layout Mode** (**Layout ▸ Page Layout Mode**). The old
+  gestures of the Pointer tool are removed: dragging the outer boundary of a
+  cell (#394), dragging the left or top edge of the figure (#405), and moving or
+  resizing a layer of a Free graph by dragging its plot area or its edges
+  (#398), together with their resize pointers. Outside the mode a plain drag in
+  the plot area of a Free graph now does nothing, as on a Regular graph. Texts,
+  legends, shapes and annotations are still dragged (and their width handles
+  pulled), Shift + click still selects layers, and **Ctrl** or middle-button
+  drag still pans. The fields of Graph Properties, **Undo** and `pyst` are
+  unchanged, and files that store Left, Top or layer frames open and draw the
+  same. The history entry "Position Plot Area" is gone.
 - The axes are named **Bottom / Top / Left / Right** everywhere in the interface
   (Bas / Haut / Gauche / Droite in French), instead of "X (bottom)", "Secondary Y
   (right)"...: axis tabs, context menu, Object Manager (#358).

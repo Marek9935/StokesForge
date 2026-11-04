@@ -1548,3 +1548,60 @@ fn hovering_leaves_the_cache_and_the_model_alone_in_free() {
     assert_eq!(view.view().generation(), generation);
     assert_eq!(spec_of(&fixture), stored);
 }
+
+/// The magnets' guides of a box drag are drawn while the pointer is down and
+/// gone at the release; Shift (no magnets) shows none. Witness: reading the
+/// guides from anything but the mode's own drag.
+#[test]
+fn the_guides_of_a_box_drag_show_while_the_pointer_is_down() {
+    let guides_during = |modifiers: egui::Modifiers| {
+        let fixture = Fixture::free_two_layers();
+        let (context, mut view) = in_mode(&fixture);
+        // Box 1 sits left of box 0: pulling box 0 left until its frame is 3 pt
+        // from the right edge of box 1's frame meets the magnet.
+        let from = middle(&view, 0);
+        let gap = box_of(&view, 0).frame.left
+            - (box_of(&view, 1).frame.left + box_of(&view, 1).frame.width);
+        frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![
+                egui::Event::PointerMoved(from),
+                button(from, true, modifiers),
+            ],
+            0.1,
+            modifiers,
+        );
+        let to = from + egui::vec2(-(gap as f32) + 3.0, 0.0);
+        let mut shown = 0;
+        for (step, time) in [(0.5, 0.15), (1.0, 0.2)] {
+            let pos = from + (to - from) * step;
+            frame(
+                &context,
+                &mut view,
+                &fixture,
+                vec![egui::Event::PointerMoved(pos)],
+                time,
+                modifiers,
+            );
+            shown = view.magnet_guides().len();
+        }
+        let signals = frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![button(to, false, modifiers)],
+            0.3,
+            modifiers,
+        );
+        assert_eq!(signals.len(), 1, "{signals:?}");
+        assert!(
+            view.magnet_guides().is_empty(),
+            "guides end with the gesture"
+        );
+        shown
+    };
+    assert!(guides_during(egui::Modifiers::NONE) > 0, "a guide shows");
+    assert_eq!(guides_during(SHIFT), 0, "Shift: no magnets, no guide");
+}

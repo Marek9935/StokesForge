@@ -123,20 +123,18 @@ pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use free_gesture::{
-    boundary_group, figure_to_stored, framed_by, free_handle_at, graph_boxes, layout_handle_at,
-    magnetized, moved_boundary, moved_box, nudged_box, resized_page, scaled_to_page,
-    stored_to_figure, BoundaryGroup, FreeHandle, GraphBox, Guide, LayoutHandle, LayoutReach,
-    Magnetized, Snap, BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX, EDGE_REACH_PX, INNER_REACH_SHARE,
-    MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
+    boundary_group, figure_to_stored, graph_boxes, layout_handle_at, moved_boundary, moved_box,
+    nudged_box, resized_page, scaled_to_page, stored_to_figure, BoundaryGroup, FreeHandle,
+    GraphBox, Guide, LayoutHandle, LayoutReach, Snap, BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX,
+    EDGE_REACH_PX, INNER_REACH_SHARE, MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT,
+    TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
     grid_corners, grid_handle_at, locked_corner_delta, resized_frames, scaled_axis, scaled_frames,
     splitter, GridCorner, GridHandle,
 };
 pub use hit::{
-    cell_edge_at, component_at, component_at_with_tolerance, figure_edge_at, AxisSide, CellEdge,
-    FigureEdge, PlotComponent, AXIS_LINE_TOLERANCE_POINTS, CELL_EDGE_MAX_TOLERANCE,
-    CELL_EDGE_TOLERANCE_POINTS,
+    component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,
 };
 pub use interact::{
     axis_frame, fit_range, nearest_on_curve, snap_to_curve, snap_to_curve_zone, Gesture,

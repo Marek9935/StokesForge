@@ -327,29 +327,14 @@ impl Workspace<'_> {
         let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
             return;
         };
-        // Pulling the left or top edge of the figure (#405): the window grows
-        // towards that side (its corner moves), so the plot area stays put on
-        // screen. Never past the top-left corner of the workspace.
-        let (mut left, mut top) = self
-            .graph_views
-            .get(&graph)
-            .map_or((false, false), GraphView::placing_edges);
-        // Undo / Redo of such a gesture moves the window back the same way.
-        if self.state.placement_step_revision() == Some(self.state.revision()) {
-            (left, top) = (true, true);
-        }
         // Free placement (#398): the image's origin moved (a layer went past
         // it, or came back), and the window moves by that, whichever gesture,
-        // Undo or Redo caused it; the pulled-edge rule is the grid's.
+        // Undo or Redo caused it.
         let free_shift = FigureFollow::origin_follow(step);
-        if origin.is_some() {
-            (left, top) = (false, false);
-        }
-        if left || top || free_shift != egui::Vec2::ZERO {
+        if free_shift != egui::Vec2::ZERO {
             if let Some(position) = self.window_positions.get_mut(&tab) {
-                let shift = FigureFollow::anchor_shift(step, left, top) + free_shift;
                 *position =
-                    FigureFollow::shifted_corner(self.figure_follow, graph, *position, shift);
+                    FigureFollow::shifted_corner(self.figure_follow, graph, *position, free_shift);
             }
         }
         if let (Some(&position), Some(window)) = (
@@ -1479,10 +1464,11 @@ mod tests {
             bench.app.window_positions[&bench.tab], position,
             "after Redo"
         );
-        bench.app.state.dispatch(Action::SetFrameSizes {
+        bench.app.state.dispatch(Action::SetGridFrames {
             graph: bench.graph,
-            column: Some((0, 380.0)),
-            row: Some((0, 330.0)),
+            widths: vec![380.0],
+            heights: vec![330.0],
+            figure: false,
         });
         bench.settle();
         assert_eq!(
@@ -1535,13 +1521,16 @@ mod tests {
         let other_on_screen = page_x_on_screen(&bench, second.left);
 
         // Layer 0 goes 120 pt left of where the image starts.
-        bench.app.state.dispatch(Action::SetFreeFrame {
+        bench.app.state.dispatch(Action::SetFreeLayout {
             graph: bench.graph,
-            panel: 0,
-            frame: stokesforge_plot::FreeFrame {
-                left: first.left - 120.0 - 100.0,
-                ..first
-            },
+            frames: vec![(
+                0,
+                stokesforge_plot::FreeFrame {
+                    left: first.left - 120.0 - 100.0,
+                    ..first
+                },
+            )],
+            page: None,
         });
         bench.settle();
         assert!(
@@ -1569,7 +1558,8 @@ mod tests {
         bench.session.shutdown().unwrap();
     }
 
-    /// #398: Ctrl+Z pressed in the frame right after the release of a layer drag,
+    /// #398, #426: Ctrl+Z pressed in the frame right after the release of a layer drag
+    /// in the Page Layout Mode,
     /// or in the release frame itself, restores the frame (the report: « ignored
     /// once after a drag »). Not reproduced for the next frame; in the release
     /// frame the shortcut used to reach the history before the drag was
@@ -1594,6 +1584,14 @@ mod tests {
                 graph: bench.graph,
                 spec,
             });
+            bench.settle();
+            // The layer drag exists only in the Page Layout Mode (#426).
+            bench
+                .app
+                .graph_views
+                .get_mut(&bench.graph)
+                .expect("graph view")
+                .set_layout_mode(true);
             bench.settle();
             let frame_of = |bench: &FollowBench| {
                 current_plot_spec(bench.app.state.tree(), bench.graph)

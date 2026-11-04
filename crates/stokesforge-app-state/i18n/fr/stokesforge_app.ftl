@@ -1426,7 +1426,6 @@ history-plot-closed-frame = Modifier le cadre fermé
 history-plot-add-cell = Ajouter un calque à côté
 history-plot-remove-cell = Supprimer le calque
 history-plot-resize-cell = Redimensionner la zone de tracé
-history-plot-place-figure = Positionner la zone de tracé
 history-plot-bring-layer-to-front = Mettre le calque au premier plan
 history-plot-send-layer-to-back = Mettre le calque à l'arrière-plan
 history-plot-layer-background = Modifier le fond du calque
