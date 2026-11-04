@@ -433,8 +433,8 @@ fn reference_integral(x: &[f64], y: &[f64], range: Option<(f64, f64)>) -> Option
     // X values, empty outside (#433).
     if let Some((a, b)) = range {
         if a == b && a.is_finite() {
-            let inside = pairs.first().is_some_and(|p| p.0 <= a)
-                && pairs.last().is_some_and(|p| a <= p.0);
+            let inside =
+                pairs.first().is_some_and(|p| p.0 <= a) && pairs.last().is_some_and(|p| a <= p.0);
             return inside.then_some(0.0);
         }
     }
