@@ -575,6 +575,47 @@ fn a_constant_follows_the_ordinary_columns() {
     );
 }
 
+/// A constant in a sheet without any ordinary data has one row (the floor of
+/// #433), and a second pass rewrites nothing: the floor comes from the same
+/// inputs as the length in the fingerprint, never from the column's own length.
+#[test]
+fn the_one_row_floor_of_a_constant_is_stable_between_passes() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let mut project = Project::new("Demo").expect("valid project");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("workbook");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
+        let f = project
+            .add_column(sheet, None, Some("F"), Column::new(ColumnType::Numeric))
+            .expect("F");
+        let formula = project
+            .tree()
+            .formula_from_letters(f, "1+2")
+            .expect("formula");
+        project
+            .set_column_meta(
+                f,
+                ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            )
+            .expect("meta");
+        let session = Session::spawn_with_recalc(project, None, mode).expect("actor");
+        let handle = session.handle();
+        let first = take_snapshot(&handle);
+        handle.execute(unrelated(&first, 0)).expect("pass 1");
+        let one = take_snapshot(&handle);
+        assert_eq!(numbers(&one, f), some(&[3.0]), "{mode:?}");
+        handle.execute(unrelated(&one, 1)).expect("pass 2");
+        let two = take_snapshot(&handle);
+        assert_eq!(numbers(&two, f), some(&[3.0]), "{mode:?}");
+        if mode == FormulaRecalc::Targeted {
+            assert_eq!(version(&one, f), version(&two, f), "second pass rewrote");
+        }
+    }
+}
+
 /// Plays "lengthen D, which the formula does not read" and returns
 /// `(C after, did C stay at its version?)`.
 fn lengthen_an_unread_column(mode: FormulaRecalc) -> (Vec<Option<f64>>, bool) {
@@ -640,6 +681,36 @@ fn an_unreadable_formula_follows_the_sheet_then_gets_corrected() {
     );
 }
 
+/// A kept formula that does not read leaves **empty** cells on a Mixed column,
+/// not the `---` of a failed calculation (#433): nothing was calculated, the
+/// cell is framed instead. Witness: with the statuses kept, `---` comes back.
+#[test]
+fn a_kept_unreadable_formula_on_a_mixed_column_has_empty_cells_not_dashes() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2 retypes the column as Mixed");
+        assert_eq!(
+            take_snapshot(&handle)
+                .tree
+                .node(f.c)
+                .and_then(|node| node.as_column())
+                .map(Column::column_type),
+            Some(ColumnType::Mixed)
+        );
+        handle
+            .execute(set_formula(&handle, f.c, "A*"))
+            .expect("C unreadable");
+        let s = take_snapshot(&handle);
+        let column = s.tree.node(f.c).and_then(|node| node.as_column()).unwrap();
+        assert_eq!(column.column_type(), ColumnType::Mixed);
+        for row in 0..column.len() {
+            assert_eq!(column.cell(row), MixedCell::Empty, "{mode:?} row {row}");
+        }
+    }
+}
+
 /// A cycle created **by another column** blocks a formula whose text and
 /// sources have not changed content (`Blocked` outcome), and breaking it makes
 /// it calculable.
@@ -658,8 +729,8 @@ fn a_cycle_created_elsewhere_blocks_the_formula_and_is_undone() {
         .execute(set_formula(&handle, f.b, "C+1"))
         .expect("B = C+1: cycle");
     let s = take_snapshot(&handle);
-    assert!(all_not_calculated(&s, f.c), "C is caught in the cycle");
-    assert!(all_not_calculated(&s, f.b), "B too");
+    assert!(all_empty(&s, f.c), "C is caught in the cycle");
+    assert!(all_empty(&s, f.b), "B too");
 
     handle.undo().expect("undo the formula of B");
     assert_eq!(
@@ -679,7 +750,7 @@ fn cycle_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
         .execute(set_formula(&handle, f.b, "C+1"))
         .expect("B = C+1: cycle");
     let before = take_snapshot(&handle);
-    assert!(all_not_calculated(&before, f.b) && all_not_calculated(&before, f.c));
+    assert!(all_empty(&before, f.b) && all_empty(&before, f.c));
     handle.execute(unrelated(&before, 0)).expect("unrelated");
     let after = take_snapshot(&handle);
     version(&before, f.b) == version(&after, f.b) && version(&before, f.c) == version(&after, f.c)
@@ -717,7 +788,7 @@ fn a_cycle_follows_the_length_of_the_sheet() {
     let s = take_snapshot(&handle);
     for member in [f.b, f.c] {
         assert_eq!(numbers(&s, member).len(), 5, "the cycle follows the sheet");
-        assert!(all_not_calculated(&s, member));
+        assert!(all_empty(&s, member));
     }
 }
 
@@ -746,7 +817,7 @@ fn a_blocked_or_unreadable_formula_modified_directly_is_rewritten() {
             .expect("delete a cell of C");
         let s = take_snapshot(&handle);
         assert_eq!(numbers(&s, f.c).len(), 3, "{text}: C follows the sheet");
-        assert!(all_not_calculated(&s, f.c), "{text}");
+        assert!(all_empty(&s, f.c), "{text}");
     }
 }
 
@@ -1086,7 +1157,7 @@ fn a_too_deep_formula_is_a_not_calculated_block_then_gets_corrected() {
             .expect("1002 terms");
         let s = take_snapshot(&handle);
         assert_eq!(numbers(&s, f.c), vec![None, None, None], "{mode:?}");
-        assert!(all_not_calculated(&s, f.c), "{mode:?}");
+        assert!(all_empty(&s, f.c), "{mode:?}");
 
         // Corrected: recalculated, although the column is already "up to date".
         handle
@@ -1109,7 +1180,7 @@ fn a_too_deep_formula_is_a_not_calculated_block_then_gets_corrected() {
                 .execute(set_formula(&handle, f.c, &too_deep))
                 .expect("too deep");
             let s = take_snapshot(&handle);
-            assert!(all_not_calculated(&s, f.c), "{mode:?}");
+            assert!(all_empty(&s, f.c), "{mode:?}");
             assert_eq!(numbers(&s, f.c).len(), 3, "{mode:?}");
         }
 
@@ -1409,12 +1480,12 @@ fn an_x_reading_a_column_it_is_the_x_of_is_a_cycle() {
             ))
             .expect("D = at(B, 2), an X");
         let s = take_snapshot(&handle);
-        assert!(all_not_calculated(&s, f.d), "{mode:?}: blocked");
+        assert!(all_empty(&s, f.d), "{mode:?}: blocked");
         // And the readers of the blocked column are blocked too.
         handle
             .execute(set_formula(&handle, f.c, "B+1"))
             .expect("C = D+1");
-        assert!(all_not_calculated(&take_snapshot(&handle), f.c), "{mode:?}");
+        assert!(all_empty(&take_snapshot(&handle), f.c), "{mode:?}");
     }
 }
 
@@ -1747,8 +1818,8 @@ fn a_loop_across_sheets_stays_not_calculated_and_stable() {
                 .expect("formula installed as a file would hold it");
         }
         let s = take_snapshot(&handle);
-        assert!(all_not_calculated(&s, f.c), "{mode:?}");
-        assert!(all_not_calculated(&s, o.c), "{mode:?}");
+        assert!(all_empty(&s, f.c), "{mode:?}");
+        assert!(all_empty(&s, o.c), "{mode:?}");
         if mode == FormulaRecalc::Targeted {
             handle.execute(unrelated(&s, 2)).expect("unrelated");
             let after = take_snapshot(&handle);
@@ -1902,4 +1973,321 @@ fn a_formula_pasted_with_the_workbook_it_reads_recalculates_against_the_copy() {
     let s = take_snapshot(&handle);
     assert_eq!(numbers(&s, c), some(&[300.0, 300.0, 300.0]));
     assert_eq!(numbers(&s, copied_c), some(&[30.0, 30.0, 30.0]));
+}
+
+// -- a kept formula binds when its missing object appears (#433, Q3) ------------
+
+/// The command that keeps `text` as the formula of `column` through the
+/// keeping reading of the field; `text` must name something that is missing.
+fn keep(handle: &SessionHandle, column: NodeId, text: &str) -> Command {
+    let (formula, error) = take_snapshot(handle).tree.formula_keeping(column, text);
+    assert!(error.is_some(), "{text} must stay kept");
+    Command::SetColumnMeta {
+        column,
+        meta: ColumnMeta {
+            formula: Some(formula),
+            ..Default::default()
+        },
+    }
+}
+
+fn add_column_command(sheet: NodeId, name: &str, values: &[f64]) -> Command {
+    Command::AddColumn {
+        sheet,
+        index: None,
+        name: Some(name.to_string()),
+        column: Column::from_f64(values),
+    }
+}
+
+/// True if the formula of `column` reads (compiles).
+fn reads(snapshot: &Snapshot, column: NodeId) -> bool {
+    snapshot
+        .tree
+        .node(column)
+        .and_then(|node| node.as_column())
+        .and_then(|node| node.meta().formula.as_ref())
+        .is_some_and(|formula| formula.compile().is_ok())
+}
+
+/// The heart of Q3: `C = A+E` is kept while E does not exist; adding the fifth
+/// column binds it **inside the entry of the gesture** (same label, same
+/// number of entries), one undo unbinds, redo binds again from the recorded
+/// entry, and the snapshot reports it once. Witness: a binding written as an
+/// entry of its own adds a slot and changes the undo label; one written outside
+/// the history survives the undo.
+#[test]
+fn a_kept_formula_binds_in_the_entry_of_the_gesture_that_creates_its_column() {
+    for mode in BOTH {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(keep(&handle, f.c, "A+E"))
+            .expect("C kept: E does not exist");
+        let kept = take_snapshot(&handle);
+        assert!(!reads(&kept, f.c));
+        assert!(all_empty(&kept, f.c), "{mode:?}");
+        assert_eq!(kept.bound.count, 0);
+
+        let add = add_column_command(f.sheet, "E", &[100.0, 200.0, 300.0]);
+        let gesture_label = add.label(&kept.tree);
+        handle.execute(add).expect("E appears");
+        let bound = take_snapshot(&handle);
+        assert_eq!(
+            numbers(&bound, f.c),
+            some(&[101.0, 202.0, 303.0]),
+            "{mode:?}"
+        );
+        assert_eq!(bound.tree.formula_letters(f.c).as_deref(), Some("A+E"));
+        assert_eq!(bound.bound.count, 1);
+        assert_eq!(bound.bound.recent, vec![f.c]);
+        assert!(bound.tree.pending_bindings().is_empty());
+        assert_eq!(bound.history.undo_label, Some(gesture_label));
+
+        // One undo takes the gesture and the binding.
+        handle.undo().expect("undo");
+        let undone = take_snapshot(&handle);
+        assert!(!reads(&undone, f.c), "{mode:?}: unbound with the entry");
+        assert_eq!(undone.tree.formula_letters(f.c).as_deref(), Some("A+E"));
+        assert!(all_empty(&undone, f.c));
+        assert_eq!(undone.tree.children(f.sheet).expect("sheet").len(), 4);
+        assert_eq!(undone.bound.count, 1, "undo reports nothing");
+        assert!(undone.tree.pending_bindings().is_empty(), "fixed point");
+
+        handle.redo().expect("redo");
+        let redone = take_snapshot(&handle);
+        assert_eq!(numbers(&redone, f.c), some(&[101.0, 202.0, 303.0]));
+        assert_eq!(redone.bound.count, 1, "redo binds nothing new");
+        assert!(redone.tree.pending_bindings().is_empty());
+
+        // Under the gesture there is only the keeping of C: the binding left
+        // no entry of its own.
+        handle.undo().expect("undo the gesture");
+        handle.undo().expect("undo the keeping");
+        let start_again = take_snapshot(&handle);
+        assert!(!start_again.history.can_undo, "{mode:?}: two entries only");
+    }
+}
+
+/// Once bound, the formula holds the column by identifier like any formula:
+/// moving the column later gives no `#REF` and the same values (Q3).
+#[test]
+fn a_bound_column_can_be_moved_without_a_ref() {
+    for mode in BOTH {
+        let (_session, handle, f) = start(mode);
+        handle.execute(keep(&handle, f.c, "A+E")).expect("kept");
+        handle
+            .execute(add_column_command(f.sheet, "E", &[100.0, 200.0, 300.0]))
+            .expect("E appears");
+        let e = *take_snapshot(&handle)
+            .tree
+            .children(f.sheet)
+            .expect("sheet")
+            .last()
+            .expect("E");
+        handle
+            .execute(Command::Move {
+                id: e,
+                new_parent: f.sheet,
+                index: 0,
+            })
+            .expect("E moves to the front");
+        let moved = take_snapshot(&handle);
+        let text = moved.tree.formula_letters(f.c).expect("text");
+        assert!(!text.contains("#REF"), "{mode:?}: {text}");
+        assert_eq!(text, "B+A", "A and E swapped places by the move");
+        assert_eq!(numbers(&moved, f.c), some(&[101.0, 202.0, 303.0]));
+        assert!(moved.tree.pending_bindings().is_empty());
+    }
+}
+
+/// A column moved **into** the sheet fills the missing letter: `Move` is a
+/// gesture that creates the object too. Witness: scan skipped on `Move`.
+#[test]
+fn moving_a_column_into_the_sheet_binds_a_kept_formula() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle.execute(keep(&handle, f.c, "A+E")).expect("kept");
+        handle
+            .execute(Command::Rename {
+                id: o.y,
+                name: "Remote".to_string(),
+            })
+            .expect("a free name in Sheet1");
+        handle
+            .execute(Command::Move {
+                id: o.y,
+                new_parent: f.sheet,
+                index: 4,
+            })
+            .expect("Sheet3!B joins Sheet1 as its fifth column");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.c), some(&[101.0, 202.0, 303.0]), "{mode:?}");
+        assert_eq!(s.bound.count, 1);
+    }
+}
+
+/// A kept formula that names a sheet binds when a **rename** gives a sheet that
+/// name. Witness: the scan runs only after `AddColumn`.
+#[test]
+fn renaming_a_sheet_binds_a_kept_formula_that_names_it() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(keep(&handle, f.c, "max(Sheet4!B)"))
+            .expect("kept: no Sheet4");
+        assert!(!reads(&take_snapshot(&handle), f.c));
+        let rename = Command::Rename {
+            id: o.sheet,
+            name: "Sheet4".to_string(),
+        };
+        let label = rename.label(&take_snapshot(&handle).tree);
+        handle.execute(rename).expect("rename Sheet3");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.c)[0], Some(300.0), "{mode:?}");
+        assert_eq!(
+            s.history.undo_label,
+            Some(label),
+            "the label stays the gesture's"
+        );
+        handle.undo().expect("undo");
+        assert!(!reads(&take_snapshot(&handle), f.c), "undo unbinds");
+    }
+}
+
+/// Two workbooks of the same name outside the formula's folder make a reference
+/// ambiguous; deleting one clears the ambiguity and binds. Witness: scan only
+/// on `AddColumn`.
+#[test]
+fn deleting_a_duplicate_workbook_binds_a_kept_formula() {
+    for mode in BOTH {
+        let mut project = Project::new("Demo").expect("project");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("Book1");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
+        project
+            .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
+            .expect("A");
+        let c = project
+            .add_column(sheet, None, Some("C"), Column::new(ColumnType::Numeric))
+            .expect("C");
+        let mut folders = Vec::new();
+        for name in ["F1", "F2"] {
+            let folder = project.add_folder(root, name).expect("folder");
+            let book = project.add_workbook(folder, Some("Book2")).expect("Book2");
+            let remote = *project
+                .tree()
+                .children(book)
+                .expect("workbook")
+                .first()
+                .expect("its sheet");
+            project
+                .add_column(remote, None, Some("A"), Column::from_f64(&[7.0]))
+                .expect("A");
+            project
+                .add_column(remote, None, Some("B"), Column::from_f64(&[7.0, 9.0]))
+                .expect("B");
+            folders.push(folder);
+        }
+        let session = Session::spawn_with_recalc(project, None, mode).expect("actor");
+        let handle = session.handle();
+        handle
+            .execute(keep(&handle, c, "max([Book2]Sheet1!B)"))
+            .expect("kept: two Book2");
+        assert!(!reads(&take_snapshot(&handle), c));
+        handle
+            .execute(Command::RemoveNode { id: folders[1] })
+            .expect("delete the second folder");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, c)[0], Some(9.0), "{mode:?}");
+        assert_eq!(s.bound.count, 1);
+    }
+}
+
+/// `A+#REF+E` waits: the binding is all or nothing, so `#REF` (to be replaced
+/// by hand) holds the whole formula back even when `E` appears.
+#[test]
+fn a_formula_with_a_ref_waits_for_all_its_names() {
+    for mode in BOTH {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(keep(&handle, f.c, "A+#REF+E"))
+            .expect("kept");
+        handle
+            .execute(add_column_command(f.sheet, "E", &[100.0, 200.0, 300.0]))
+            .expect("E appears");
+        let s = take_snapshot(&handle);
+        assert!(!reads(&s, f.c), "{mode:?}: no partial binding");
+        assert_eq!(s.bound.count, 0);
+        assert_eq!(
+            s.tree.formula_letters(f.c).as_deref(),
+            Some("A+#REF+E"),
+            "the text stays as typed"
+        );
+    }
+}
+
+/// A binding that would make a loop stays kept (the strict reading says
+/// `Cycle`), and binds once the loop is broken. Witness: no loop check binds a
+/// loop, which the pass would block.
+#[test]
+fn a_binding_that_would_loop_stays_kept_then_binds_when_the_loop_is_broken() {
+    for mode in BOTH {
+        let (_session, handle, f) = start(mode);
+        handle.execute(keep(&handle, f.c, "A+E")).expect("kept");
+        // E appears already reading C: binding C to E would make a loop.
+        let c_part = stokesforge_core::FormulaPart::Column(f.c);
+        let mut column = Column::from_f64(&[1.0, 2.0, 3.0]);
+        column.set_meta(ColumnMeta {
+            formula: Some(stokesforge_core::ColumnFormula::from_parts(vec![
+                c_part,
+                stokesforge_core::FormulaPart::Text("+1".to_string()),
+            ])),
+            ..Default::default()
+        });
+        handle
+            .execute(Command::AddColumn {
+                sheet: f.sheet,
+                index: None,
+                name: Some("E".to_string()),
+                column,
+            })
+            .expect("E appears, reading C");
+        let s = take_snapshot(&handle);
+        assert!(!reads(&s, f.c), "{mode:?}: the loop is not bound");
+        assert_eq!(s.bound.count, 0);
+        assert_eq!(
+            s.tree.formula_for_entry(f.c, "A+E"),
+            Err(stokesforge_core::FormulaError::Cycle)
+        );
+        assert!(s.tree.pending_bindings().is_empty(), "nothing bindable");
+        // Break the loop: E reads A instead.
+        let e = *s.tree.children(f.sheet).expect("sheet").last().expect("E");
+        handle
+            .execute(set_formula(&handle, e, "A*10"))
+            .expect("E corrected");
+        let fixed = take_snapshot(&handle);
+        assert!(reads(&fixed, f.c), "{mode:?}: bound once the loop is gone");
+        assert_eq!(numbers(&fixed, f.c), some(&[11.0, 22.0, 33.0]));
+    }
+}
+
+/// Several kept formulas bind in ascending identifier order, one after the
+/// other: the second is judged on the tree that holds the first. Here `C = A+E`
+/// and `D = C+E`... D reads C, which is bound first (lower identifier), so both
+/// bind in one gesture. Witness: iteration in tree order, or no re-judging.
+#[test]
+fn several_kept_formulas_bind_in_identifier_order_each_on_the_previous_binding() {
+    for mode in BOTH {
+        let (_session, handle, f) = start(mode);
+        handle.execute(keep(&handle, f.d, "A+E")).expect("D kept");
+        handle.execute(keep(&handle, f.c, "B+E")).expect("C kept");
+        assert!(f.c < f.d);
+        handle
+            .execute(add_column_command(f.sheet, "E", &[100.0, 200.0, 300.0]))
+            .expect("E appears");
+        let s = take_snapshot(&handle);
+        assert_eq!(s.bound.recent, vec![f.c, f.d], "{mode:?}: ascending");
+        assert_eq!(numbers(&s, f.c), some(&[110.0, 220.0, 330.0]));
+        assert_eq!(numbers(&s, f.d), some(&[101.0, 202.0, 303.0]));
+    }
 }

@@ -235,7 +235,9 @@ pub enum Entry {
     Macro {
         /// Entries in their order of application.
         entries: Vec<Entry>,
-        /// Label of the group: always [`HistoryLabel::Macro`].
+        /// Label of the group: [`HistoryLabel::Macro`] for a group closed by
+        /// [`History::end_macro`], or the label of the gesture a follow-up
+        /// command was folded into by [`History::absorb_into_last`] (#433).
         label: HistoryLabel,
     },
 }
@@ -557,6 +559,61 @@ impl History {
                 Err(err) => Err(err),
             }
         }
+    }
+
+    /// Applies `command` and folds its entry **into the top entry** of the
+    /// stack, which keeps its label (#433): one undo then reverts the gesture
+    /// and the follow-up together. The actor uses it for the automatic binding
+    /// of a kept formula, which is part of the gesture that created the missing
+    /// column: the entry becomes an [`Entry::Macro`] holding the gesture's
+    /// entries and then the follow-up, undone in reverse order (invariant 8).
+    ///
+    /// `Ok(true)` if the command stored an entry (as
+    /// [`History::execute_recorded`]); `Ok(false)` for an accepted command with
+    /// no effect, the top entry then staying as it was; an error leaves the
+    /// stack as it was. Inside an open macro, or with nothing to absorb into,
+    /// it is [`History::execute_recorded`]. The footprint of the entry is the
+    /// union of both, and the byte accounting is rebuilt
+    /// ([`History::resync_pinned`], the same fallback as closing a macro).
+    pub fn absorb_into_last(
+        &mut self,
+        project: &mut Project,
+        command: Command,
+    ) -> CommandResult<bool> {
+        if self.in_macro() || self.undo.is_empty() {
+            return self.execute_recorded(project, command);
+        }
+        let Some(top) = self.undo.pop() else {
+            return self.execute_recorded(project, command);
+        };
+        // A scratch macro level catches the entry of the command without
+        // touching the stacks (no eviction, no accounting). Its kind is never
+        // read: the label of the result is the one of `top`.
+        self.macros.push((MacroKind::Script, Vec::new()));
+        let outcome = self.execute_recorded(project, command);
+        let followed = self.macros.pop().map(|(_, entries)| entries);
+        let follow_up = match (outcome, followed) {
+            (Ok(true), Some(mut entries)) if entries.len() == 1 => entries.pop(),
+            (Err(err), _) => {
+                self.undo.push(top);
+                return Err(err);
+            }
+            _ => None,
+        };
+        let Some(follow_up) = follow_up else {
+            self.undo.push(top);
+            return Ok(false);
+        };
+        let footprint = union_footprint([&top.footprint, &follow_up.footprint].into_iter());
+        let label = top.entry.label().clone();
+        let mut entries = match top.entry {
+            Entry::Macro { entries, .. } => entries,
+            single => vec![single],
+        };
+        entries.push(follow_up.entry);
+        let entry = Entry::Macro { entries, label };
+        self.push_pinned(Pinned { entry, footprint }, &PriorColumns::new(), project);
+        Ok(true)
     }
 
     /// Undoes the top entry. `Ok(false)` if the stack is empty — that is

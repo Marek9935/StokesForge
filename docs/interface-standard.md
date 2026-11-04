@@ -16,7 +16,7 @@ both and states the rule in one sentence, so nobody has to open an issue. The
 (writing of texts). The letters give the subject: N numbers, D data display,
 T texts, M messages, F windows, G disabled, C choices, L layout,
 K keyboard and mouse, X cross-cutting, P long tasks; `S-R1` to `S-R16` are
-the rulings of the second decision form of #217.
+the rulings of the second decision form of #217, `S-R17` comes from #433.
 
 ## How to read this page
 
@@ -46,7 +46,7 @@ mechanics.
 | S-N4 | `virgule-decimale-acceptee` | "," and "." are accepted in a field that holds a single number; the interface always writes the dot. |
 | S-N5 | `virgule-decimale-cellules` | The same reading applies in Numeric (and Mixed) cells. |
 | S-N6 | `saisie-illisible-refusee` | An unreadable input is refused: red frame, tooltip that states the rule, the old value comes back. |
-| S-N7 | `hors-bornes-ramene` | An out-of-bounds value is brought back to the bound and flagged in orange for 2 s. |
+| S-N7 | `hors-bornes-ramene` | An out-of-bounds value is brought back to the bound and flagged in orange for 2 s (a text the field rewrote: 10 s, S-R17). |
 | S-N8 | `grandeur-une-definition` | A single quantities table gives bounds, step, decimals, unit and offered values. |
 | S-N9 | `barres-outils-listes-editables` | The editable lists of the toolbars (size, thickness: choose 12 or type 15) go through the same building block. |
 | S-N10 | `unite-dans-le-libelle` | The unit is in the label ("Line width (pt)"), never as a suffix of the field. |
@@ -138,10 +138,11 @@ two rules above:
 | S-R10 | `champ-vide-selon-auto` | An emptied field means Auto if it has an Auto, otherwise it is refused. |
 | S-R11 | `apercu-texte-et-nombres-apres-pause` | Previews recompute while typing after a pause, text as well as numbers; the rest applies on Enter. |
 | S-R12 | `fleche-seulement-avec-valeurs` | `▼` only when the quantities table offers values; click in the text = everything selected. |
-| S-R13 | `canal-unique-deux-exceptions` | A single channel per piece of information, with two written exceptions: script error (status bar + console) and reason of the disabled button (footer + tooltip). |
+| S-R13 | `canal-unique-deux-exceptions` | A single channel per piece of information, with written exceptions: script error (status bar + console), reason of the disabled button (footer + tooltip), and the reason of a formula the field kept or rewrote (S-R17: cell frame and tooltip + status bar and its history, #433). |
 | S-R14 | `pied-erreur-avant-raison` | In the footer of a dialog, the error comes before the reason of the disabled button; the reason comes back when the error disappears. |
 | S-R15 | `barre-etat-sans-contenu-permanent` | No permanent content in the status bar (neither revision nor import link). |
 | S-R16 | `opacite-sans-slider` | Opacity is a field, not a slider. |
+| S-R17 | `texte-reecrit-orange-dix-secondes` | A text the field rewrote, typed or pasted (a decimal comma in a range, #433) is kept as rewritten, the cell is orange for 10 s with a tooltip, and the sentence is also in the status bar and its history. |
 
 ## Building blocks and guards
 
@@ -297,6 +298,18 @@ constraint between fields (S-N11) and the Typst error of rich texts (S-T3).
   and is never used for a field refusal.
 - **Refused text** (S-T2): same rule, text kept; a refused rename leaves the
   field open.
+- **The F(x)= field is the exception** (#433): it never refuses. Enter, Tab and
+  a click elsewhere always write what was typed; Esc cancels. A text it cannot
+  read is **kept** and framed in red outside the edit (tooltip with the reason,
+  also in the status bar as an error); while typing, the cell tints red for
+  every wrong text except a syntax error (`A +`), which stays plain until the
+  field is closed. Pasting and `pyst` stay strict: they refuse and write nothing.
+- **Rewritten text** (S-R17, #433): when the field rewrites what was typed
+  without being wrong (`max(B,1,5)` is the range 1 to 5, rewritten
+  `max(B, 1, 5)`), the text is kept as rewritten and the cell is **orange for
+  10 s** (a longer time than the 2 s of a clamped number: there is a sentence to
+  read), with the sentence in a tooltip, in the status bar as a warning and in
+  its history (`field_state::REWRITTEN_SECONDS`, `AppState::take_formula_warning`).
 - **Typst error of a rich text** (S-T3, in place, #240): title, axis titles,
   legend — every field placed by `plot_settings::formula_field` — paints, **once the field is
   left** (not while typing), the red frame and the Typst message in a tooltip

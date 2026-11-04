@@ -220,7 +220,13 @@ fn reference(e: &E, cols: &[Vec<f64>], row: usize, app_primitives: bool) -> (f64
                 '*' => x * y,
                 _ => x / y,
             };
-            (v, sa.combine(sb))
+            let s = sa.combine(sb);
+            // #433: a NaN out of two non-NaN operands with status Ok failed.
+            if v.is_nan() && !x.is_nan() && !y.is_nan() && s == St::Ok {
+                (v, St::Failed)
+            } else {
+                (v, s)
+            }
         }
         E::Pow(a, b) => {
             let (x, sa) = reference(a, cols, row, app_primitives);
@@ -619,28 +625,34 @@ fn division_by_zero_is_infinity_with_status_ok() {
     assert_eq!(s, vec![NumericStatus::Ok; 2]);
 }
 
-/// The manual says a result with no value (`ln(-1)`...) is a failed
-/// calculation. `0/0`, `inf - inf` and `0 * inf` are NaN too, but the
-/// operators do not run the domain check: status Ok, an "empty cell" that is
-/// not "shown as a failed calculation". Design question: #433 point 1.
+/// `0/0`, `inf - inf` and `0 * inf` are NaN out of operands that were fine:
+/// a failed calculation like `ln(-1)` (#433 point 1). `1/0` stays infinity.
 #[test]
-#[ignore = "design: #433 point 1: 0/0 is NaN with status Ok (empty cell), only functions run the domain check, formula.rs:2321-2331"]
 fn nan_from_arithmetic_is_a_failed_calculation_like_ln_of_minus_one() {
     let (v, s) = run("A/A", &[float_column(&[0.0])], 1);
     assert!(v[0].is_nan());
-    assert_eq!(
-        s[0],
-        NumericStatus::Failed,
-        "0/0 reads as an empty cell, not Failed"
-    );
+    assert_eq!(s[0], NumericStatus::Failed, "0/0 is a failed calculation");
 }
 
 #[test]
-#[ignore = "design: #433 point 1: inf - inf is NaN with status Ok, formula.rs:2321-2331"]
 fn nan_from_infinity_arithmetic_is_a_failed_calculation() {
     let (v, s) = run("1e308*10 - 1e308*10", &[float_column(&[0.0])], 1);
     assert!(v[0].is_nan());
     assert_eq!(s[0], NumericStatus::Failed);
+}
+
+#[test]
+fn zero_times_infinity_is_a_failed_calculation() {
+    let (v, s) = run("0*(1e308*10)", &[float_column(&[0.0])], 1);
+    assert!(v[0].is_nan());
+    assert_eq!(s[0], NumericStatus::Failed);
+}
+
+/// An empty operand stays empty (`---` is for a failed operand only).
+#[test]
+fn nan_from_an_empty_operand_is_not_failed_by_arithmetic() {
+    let (_, s) = run("A/B", &[float_column(&[f64::NAN]), float_column(&[1.0])], 1);
+    assert_eq!(s[0], NumericStatus::Missing);
 }
 
 // -- (b) accuracy of the table functions --

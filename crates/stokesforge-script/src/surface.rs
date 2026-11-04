@@ -681,11 +681,14 @@ pub(crate) const COLUMN_META_FIELDS: &[&str] = &[
     "comment",
     "display_format",
     "formula",
+    "keep_data",
 ];
 
 /// Changes only the named fields: role (x, y, x2, y2, x3, y3, x4, y4, z, x_error, y_error,
 /// label, none), long_name, unit, comment, display_format, formula.
-/// Values are str; formula=None removes the formula. The formula is
+/// Values are str; formula=None removes the formula **and its computed
+/// values**, like the interface; `keep_data=True` (only with `formula=None`)
+/// keeps the values as plain data. The formula is
 /// entered in letters: a letter that designates no column of the sheet,
 /// the column itself or `#REF` raise `InvalidValueError`. Type, version
 /// and provenance are preserved. A formula column refuses writes.
@@ -699,6 +702,7 @@ fn set_column_meta(
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let mut changes = Vec::new();
+    let mut keep_data = false;
     if let Some(metadata) = metadata {
         for (key, value) in metadata.iter() {
             let key = key.extract::<String>()?;
@@ -707,6 +711,15 @@ fn set_column_meta(
                     "unknown column metadata field: {key} (accepted: {})",
                     COLUMN_META_FIELDS.join(", ")
                 )));
+            }
+            if key == "keep_data" {
+                // A bool, not a string: refused otherwise (`True` is the only
+                // value that does something).
+                if !value.is_instance_of::<pyo3::types::PyBool>() {
+                    return Err(InvalidValueError::new_err("keep_data must be a bool"));
+                }
+                keep_data = value.extract::<bool>()?;
+                continue;
             }
             let value =
                 if key == "formula" && value.is_none() {
@@ -719,8 +732,17 @@ fn set_column_meta(
             changes.push((key, value));
         }
     }
+    if keep_data
+        && !changes
+            .iter()
+            .any(|(key, value)| key == "formula" && value.is_none())
+    {
+        return Err(InvalidValueError::new_err(
+            "keep_data=True only goes with formula=None",
+        ));
+    }
     let (id, epoch) = (handle.id, handle.epoch);
-    py.detach(|| bridge::set_column_meta(&context, id, epoch, changes))
+    py.detach(|| bridge::set_column_meta(&context, id, epoch, changes, keep_data))
         .map_err(to_py_error)
 }
 
@@ -801,7 +823,8 @@ saving and figure export.
     pyst.rename(handle, name)       -> None
     pyst.remove(handle)             -> None
     pyst.set_values(handle, values) -> None (replacement, length included)
-    pyst.set_column_meta(handle, **metadata) -> None
+    pyst.set_column_meta(handle, **metadata) -> None (formula=None removes the formula and
+                  its values; keep_data=True keeps them as plain data)
     pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
                   (y: a column, or a list of columns = a series group;
                    label=[...] one name per series, group_name='...')
@@ -864,7 +887,7 @@ Known limits of this surface:
 /// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
 /// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
 /// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
-pub const PYST_API_VERSION: &str = "0.4";
+pub const PYST_API_VERSION: &str = "0.5";
 
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///

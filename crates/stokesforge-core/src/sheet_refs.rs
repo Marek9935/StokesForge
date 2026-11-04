@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::compose::paired_x_columns;
 use crate::formula::{
-    ColumnFormula, Formula, FormulaError, SheetAddress, SheetDirectory, SheetScope,
+    ColumnFormula, Formula, FormulaError, FormulaPart, SheetAddress, SheetDirectory, SheetScope,
 };
 use crate::id::NodeId;
 use crate::name::same_name_ignoring_case;
@@ -197,19 +197,115 @@ impl Tree {
 
     /// [`Tree::formula_from_letters`] for a formula **being entered** (#403):
     /// a text that would make `column` read itself, in any sheet of the
-    /// project, is refused with [`FormulaError::Cycle`]. The one entry point of
-    /// the interface and of `pyst`; the loop check is not part of the plain
-    /// reading, which tests use to build the loops of an older file on purpose.
+    /// project, is refused with [`FormulaError::Cycle`], and so is a text that
+    /// does not compile (`A +`, #433). The **strict** path: `pyst`, the
+    /// Formulas paste; the loop check is not part of the plain reading, which
+    /// tests use to build the loops of an older file on purpose. The field
+    /// keeps what it cannot read: [`Tree::formula_keeping`].
     pub fn formula_for_entry(
         &self,
         column: NodeId,
         text: &str,
     ) -> Result<ColumnFormula, FormulaError> {
         let formula = self.formula_from_letters(column, text)?;
+        formula.compile()?;
         if self.formula_loop(column, &formula) {
             return Err(FormulaError::Cycle);
         }
         Ok(formula)
+    }
+
+    /// The **keeping** reading of a formula typed in the field (#433): the
+    /// formula holds what resolved as identifiers and the rest as typed (see
+    /// [`ColumnFormula::from_letters_keeping`]), and the error says why it
+    /// does not compute: the first reading error, else the compile error,
+    /// else [`FormulaError::Cycle`]. Same reading as
+    /// [`Tree::formula_for_entry`], which refuses instead of keeping.
+    pub fn formula_keeping(
+        &self,
+        column: NodeId,
+        text: &str,
+    ) -> (ColumnFormula, Option<FormulaError>) {
+        let (formula, error) = ColumnFormula::from_letters_keeping(
+            text,
+            self.sheet_columns_of(column),
+            column,
+            self.scope_of(column),
+        );
+        if error.is_some() {
+            return (formula, error);
+        }
+        let cycle = self.formula_loop(column, &formula);
+        (formula, cycle.then_some(FormulaError::Cycle))
+    }
+
+    /// The kept formulas that can **now** be read (#433, Q3): a formula the
+    /// field kept because a column or a sheet it names did not exist, and that
+    /// the tree can resolve today. Each is the column and the formula to store
+    /// in its place, in **ascending identifier order** (never the order of
+    /// [`Tree::iter`], which depends on the history: the oracle of `b22` must
+    /// see the same bindings in both sessions).
+    ///
+    /// A column is a candidate if its formula does not compile and a text
+    /// fragment holds a letter, a `[` or a quote (what a name looks like). It
+    /// binds only if the strict reading of the text it **displays**
+    /// ([`Tree::formula_for_entry`]: unknown name, loop, `#REF`, `A +` all
+    /// refuse) succeeds as a whole and keeps every column the formula already
+    /// held: all or nothing, so `#REF+Z` waits for `#REF` to be replaced, and a
+    /// binding that would make a loop stays kept. Each candidate is judged on
+    /// the tree as it is: the actor applies the first, then asks again, which is
+    /// how a binding enters the loop check of the next.
+    ///
+    /// The binder reads letters and names; the calculation never does, and what
+    /// the binder produces is the stored formula, already in the fingerprint
+    /// (invariant 11).
+    pub fn pending_bindings(&self) -> Vec<(NodeId, ColumnFormula)> {
+        self.binding_candidates().collect()
+    }
+
+    /// The first of [`Tree::pending_bindings`], without judging the others.
+    pub fn next_binding(&self) -> Option<(NodeId, ColumnFormula)> {
+        self.binding_candidates().next()
+    }
+
+    fn binding_candidates(&self) -> impl Iterator<Item = (NodeId, ColumnFormula)> + '_ {
+        let mut ids: Vec<NodeId> = self
+            .iter()
+            .filter(|(_, node)| {
+                node.as_column()
+                    .and_then(|column| column.meta().formula.as_ref())
+                    .is_some_and(|formula| {
+                        formula.parts().iter().any(|part| {
+                            matches!(part, FormulaPart::Text(text)
+                                if text.chars().any(|c| c.is_alphabetic() || c == '[' || c == '\''))
+                        })
+                    })
+            })
+            .map(|(id, _)| id)
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter().filter_map(move |id| {
+            let old = self.node(id)?.as_column()?.meta().formula.as_ref()?;
+            if old.compile().is_ok() {
+                return None;
+            }
+            let text = self.formula_letters(id)?;
+            let new = self.formula_for_entry(id, &text).ok()?;
+            let held = new.columns();
+            old.columns()
+                .iter()
+                .all(|column| held.contains(column))
+                .then_some((id, new))
+        })
+    }
+
+    /// The letter(s) `column` has in its sheet, `None` if it is not in one.
+    /// Display only (#433: the sentence of a column that reads itself).
+    pub fn column_letters(&self, column: NodeId) -> Option<String> {
+        self.sheet_columns_of(column)
+            .iter()
+            .position(|id| *id == column)
+            .map(crate::formula::index_to_letters)
     }
 
     /// Text to show for the formula of `column`: the **current** letters
@@ -371,6 +467,7 @@ mod tests {
     use super::*;
     use crate::column::{Column, ColumnMeta};
     use crate::error::CoreError;
+    use crate::formula::FormulaPart;
     use crate::node::{Node, WindowMeta};
     use crate::project::Project;
 
@@ -447,6 +544,152 @@ mod tests {
         fn rename(&mut self, id: NodeId, name: &str) {
             self.project.rename(id, name).unwrap();
         }
+    }
+
+    /// The keeping reading (#433): what resolves is an identifier, the rest
+    /// stays as typed. `A+Z` is `[Column(A), "+Z"]`, so A follows a move and Z
+    /// stays the letter that was typed. Witness: a reading that stores the whole
+    /// text drops the identifier, and the display after the move is `A+Z`.
+    #[test]
+    fn a_kept_reading_keeps_what_resolves_as_identifiers() {
+        let mut fx = Fx::new();
+        let at = fx.s1[2];
+        let (formula, error) = fx.tree().formula_keeping(at, "A+Z");
+        assert_eq!(
+            formula.parts(),
+            [
+                FormulaPart::Column(fx.s1[0]),
+                FormulaPart::Text("+Z".to_string())
+            ]
+        );
+        assert!(matches!(error, Some(FormulaError::UnknownColumn(letter)) if letter == "Z"));
+        let mut meta = fx
+            .tree()
+            .node(at)
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        meta.formula = Some(formula);
+        fx.project.set_column_meta(at, meta).unwrap();
+        assert_eq!(fx.shown(at), "A+Z");
+        // A moves to the end of the sheet: it is now C, and C reads `C+Z`.
+        fx.project.move_node(fx.s1[0], fx.sheet1, 2).unwrap();
+        assert_eq!(fx.shown(at), "C+Z");
+    }
+
+    /// A number that would compute although it is out of range (the lenient rule
+    /// for old files, #429) is split in two fragments, so the kept formula does
+    /// not compute. Witness: without the split the formula compiles.
+    #[test]
+    fn a_kept_number_out_of_range_does_not_compile() {
+        let fx = Fx::new();
+        let at = fx.s1[2];
+        let (formula, error) = fx.tree().formula_keeping(at, "A*1e400");
+        assert!(matches!(
+            error,
+            Some(FormulaError::NumberOutOfRange {
+                too_large: true,
+                ..
+            })
+        ));
+        assert!(formula.compile().is_err(), "must not compute `inf`");
+        assert_eq!(
+            formula.letters(fx.tree().sheet_columns_of(at)),
+            "A*1e400",
+            "display unchanged"
+        );
+    }
+
+    /// The strict entry refuses a text that does not compile. Witness: dropping
+    /// the `compile()?` of `formula_for_entry` accepts `A +`.
+    #[test]
+    fn the_strict_entry_refuses_a_syntax_error_the_keeping_one_keeps() {
+        let fx = Fx::new();
+        let at = fx.s1[2];
+        assert!(fx.tree().formula_for_entry(at, "A +").is_err());
+        let (formula, error) = fx.tree().formula_keeping(at, "A +");
+        assert!(matches!(error, Some(FormulaError::Parse(_))));
+        assert_eq!(formula.columns(), BTreeSet::from([fx.s1[0]]));
+        // A loop is the third kind of error, after reading and compiling.
+        let own = fx.s1[2];
+        let (_, error) = fx.tree().formula_keeping(own, "C+1");
+        assert!(matches!(error, Some(FormulaError::SelfReference(_))));
+    }
+
+    #[test]
+    fn a_kept_reading_keeps_the_own_column_and_broken_text() {
+        let fx = Fx::new();
+        let at = fx.s1[2];
+        let (formula, _) = fx.tree().formula_keeping(at, "C+1");
+        assert_eq!(
+            formula.columns(),
+            BTreeSet::from([at]),
+            "a loop keeps its ids"
+        );
+        for text in ["#REF+1", "frob(A)", "max('Sheet3!B)", "A+[Book9"] {
+            let (formula, error) = fx.tree().formula_keeping(at, text);
+            assert!(error.is_some(), "`{text}`");
+            assert!(
+                formula
+                    .letters(fx.tree().sheet_columns_of(at))
+                    .ends_with(&text[text.len() - 2..]),
+                "`{text}` keeps its text"
+            );
+        }
+    }
+
+    /// The kept formulas that can now be read come back in **ascending
+    /// identifier order**, whatever the order of the tree's table: twelve kept
+    /// formulas wait for column N and all bind when it appears. A formula that
+    /// still names something missing, and one that compiles, are not listed.
+    /// Witness: the order of `Tree::iter` is a hash order, so without the sort
+    /// the list is not ascending.
+    #[test]
+    fn pending_bindings_come_in_identifier_order() {
+        let mut fx = Fx::new();
+        // Sheet1 holds A, B, C; add up to M (13 columns), then keep.
+        let mut ids = fx.s1.clone();
+        ids.extend(columns(&mut fx.project, fx.sheet1, 10));
+        for id in ids.clone().into_iter().skip(1) {
+            let (formula, _) = fx.tree().formula_keeping(id, "A+N");
+            let mut meta = fx
+                .tree()
+                .node(id)
+                .and_then(Node::as_column)
+                .unwrap()
+                .meta()
+                .clone();
+            meta.formula = Some(formula);
+            fx.project.set_column_meta(id, meta).unwrap();
+        }
+        // One that waits for something else, one that compiles.
+        let (waiting, _) = fx.tree().formula_keeping(ids[0], "A+Q");
+        let mut meta = fx
+            .tree()
+            .node(ids[0])
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        meta.formula = Some(waiting);
+        fx.project.set_column_meta(ids[0], meta).unwrap();
+        assert!(fx.tree().pending_bindings().is_empty(), "N does not exist");
+
+        columns(&mut fx.project, fx.sheet1, 1);
+        let pending = fx.tree().pending_bindings();
+        let listed: Vec<NodeId> = pending.iter().map(|(id, _)| *id).collect();
+        let mut expected: Vec<NodeId> = ids.into_iter().skip(1).collect();
+        expected.sort_unstable();
+        assert_eq!(listed, expected, "ascending, the waiting one left out");
+        assert_eq!(
+            fx.tree().next_binding().map(|(id, _)| id),
+            expected.first().copied()
+        );
+        // A bound formula reads N by identifier: the display follows.
+        let (id, formula) = &pending[0];
+        assert!(formula.compile().is_ok());
+        assert_eq!(formula.columns().len(), 2, "A and N by identifier: {id:?}");
     }
 
     #[test]

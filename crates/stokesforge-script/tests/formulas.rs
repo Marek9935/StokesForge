@@ -100,10 +100,51 @@ for text, expected_text, expected in cases:
     );
 }
 
+/// Every badly written formula raises `InvalidValueError` and writes nothing,
+/// `A +` included (#433): `pyst` reads strictly, where the interface field keeps
+/// the text. A comma range stays as typed: no rewrite, no warning.
 #[test]
-fn removing_a_formula_through_pyst_keeps_the_values() {
-    // The interface's "remove formula" drops the values (docs); `pyst` keeps
-    // the calculated values in the column as plain data. Pinned here.
+fn every_badly_written_formula_raises_and_writes_nothing() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = formula_column('A * 2', name='Twice')
+"#,
+    );
+    let before = bench.session.snapshot().unwrap();
+    script(
+        &bench,
+        r#"
+col = pyst.children(S1)[-1]
+for text in ('A +', '(A', 'frob(A)', 'sin(A, B)', 'Twice + 1', 'A * 1e400', '#REF + 1', 'Z * 2'):
+    try:
+        pyst.set_column_meta(col, formula=text)
+    except pyst.InvalidValueError as error:
+        assert str(error), text
+    else:
+        raise AssertionError(text)
+assert pyst.info(col)['column']['formula'] == 'A * 2'
+assert pyst.values(col) == (2., 4., 6., 8.)
+"#,
+    );
+    let after = bench.session.snapshot().unwrap();
+    assert_eq!(after.history.undo_label, before.history.undo_label);
+    assert_eq!(*after.tree, *before.tree, "nothing was written");
+    script(
+        &bench,
+        r#"
+col = pyst.children(S1)[-1]
+pyst.set_column_meta(col, formula='max(B,1,5)')
+assert pyst.info(col)['column']['formula'] == 'max(B,1,5)'
+"#,
+    );
+}
+
+/// `formula=None` removes the formula **and** its values, like the interface
+/// (#433 point 5).
+#[test]
+fn removing_a_formula_through_pyst_removes_the_values_like_the_interface() {
     let bench = bench();
     script(
         &bench,
@@ -112,10 +153,121 @@ col = formula_column('A * 2', name='Twice')
 assert pyst.values(col) == (2., 4., 6., 8.)
 pyst.set_column_meta(col, formula=None)
 assert pyst.info(col)['column']['formula'] in (None, '')
-assert pyst.values(col) == (2., 4., 6., 8.), pyst.values(col)
+assert pyst.values(col) == (), pyst.values(col)
 # The column is writable again.
 pyst.set_values(col, [1., 1.])
 assert pyst.values(col) == (1., 1.)
+"#,
+    );
+}
+
+/// `formula=None` on a column that has **no** formula is a no-op on its data:
+/// the values go away only with a formula that really leaves (#433). Witness:
+/// testing the `formula` key instead of "had a formula" empties the column.
+#[test]
+fn clearing_the_formula_of_a_column_without_one_keeps_its_data() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = pyst.create_column(S1, 'Plain')
+pyst.set_values(col, [1., 2., 3.])
+pyst.set_column_meta(col, formula=None)
+assert pyst.values(col) == (1., 2., 3.), pyst.values(col)
+pyst.set_column_meta(col, formula=None, unit='m')
+assert pyst.values(col) == (1., 2., 3.), pyst.values(col)
+"#,
+    );
+}
+
+/// The removal, alone, is one history entry: undo restores formula and values.
+#[test]
+fn undoing_a_removal_through_pyst_restores_the_formula_and_the_values() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = formula_column('A * 2', name='Twice')
+"#,
+    );
+    script(
+        &bench,
+        r#"
+col = pyst.resolve('[Book1]Sheet1!Twice')
+pyst.set_column_meta(col, formula=None)
+assert pyst.values(col) == ()
+"#,
+    );
+    bench.session.undo().unwrap();
+    script(
+        &bench,
+        r#"
+col = pyst.resolve('[Book1]Sheet1!Twice')
+assert pyst.info(col)['column']['formula'] == 'A * 2'
+assert pyst.values(col) == (2., 4., 6., 8.), pyst.values(col)
+"#,
+    );
+}
+
+#[test]
+fn removing_a_formula_with_keep_data_keeps_the_values() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = formula_column('A * 2', name='Twice')
+pyst.set_column_meta(col, formula=None, keep_data=True)
+assert pyst.info(col)['column']['formula'] in (None, '')
+assert pyst.values(col) == (2., 4., 6., 8.), pyst.values(col)
+pyst.set_values(col, [1., 1.])
+assert pyst.values(col) == (1., 1.)
+"#,
+    );
+}
+
+/// `formula=None` on a column that has no formula touches no data.
+#[test]
+fn removing_the_formula_of_a_plain_column_leaves_its_data() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+a = pyst.resolve('[Book1]Sheet1!A')
+pyst.set_column_meta(a, formula=None)
+assert pyst.values(a) == (1., 2., 3., 4.), pyst.values(a)
+pyst.set_column_meta(a, formula=None, keep_data=False, unit='m')
+assert pyst.values(a) == (1., 2., 3., 4.)
+"#,
+    );
+}
+
+/// `keep_data` is a bool and only goes with `formula=None`; nothing is written.
+#[test]
+fn keep_data_is_refused_without_a_formula_removal_or_when_not_a_bool() {
+    let bench = bench();
+    let before = bench.session.snapshot().unwrap().revision;
+    script(
+        &bench,
+        r#"
+col = formula_column('A * 2', name='Twice')
+"#,
+    );
+    let after_creation = bench.session.snapshot().unwrap().revision;
+    assert!(after_creation > before);
+    script(
+        &bench,
+        r#"
+col = pyst.resolve('[Book1]Sheet1!Twice')
+for kwargs in ({'keep_data': True}, {'keep_data': True, 'unit': 'm'}, {'formula': None, 'keep_data': 'yes'}, {'formula': None, 'keep_data': 1}):
+    try:
+        pyst.set_column_meta(col, **kwargs)
+    except pyst.InvalidValueError:
+        pass
+    else:
+        raise AssertionError(kwargs)
+assert pyst.info(col)['column']['formula'] == 'A * 2'
+assert pyst.values(col) == (2., 4., 6., 8.)
+assert pyst.info(col)['column']['unit'] == ''
 "#,
     );
 }
@@ -132,6 +284,23 @@ assert pyst.values(second) == (3., 5., 7., 9.)
 pyst.set_column_meta(first, formula=None)
 pyst.set_values(first, [10., 20.])
 assert pyst.values(second) == (11., 21.), pyst.values(second)
+"#,
+    );
+}
+
+/// A column read, then its formula removed, then written: the version the
+/// script remembers follows the removal (`retain_written_version`).
+#[test]
+fn reading_removing_then_writing_a_column_goes_through() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = formula_column('A * 2')
+assert pyst.values(col) == (2., 4., 6., 8.)
+pyst.set_column_meta(col, formula=None)
+pyst.set_values(col, [7., 8.])
+assert pyst.values(col) == (7., 8.)
 "#,
     );
 }
@@ -195,13 +364,10 @@ assert pyst.values(dep) == (49., 58., 67., 76.), pyst.values(dep)
     assert_eq!(*redone.tree, *after.tree);
 }
 
-/// Design question (#412): a lone formula column duplicated in its own sheet
-/// reads `#REF` for the local columns it read (`Project::insert_copies`
-/// reserves an id with no node for any reference outside the copy), while a
-/// remote reference to a sheet that was not copied keeps reading the original.
-/// Pinned as it is today.
+/// A lone formula column duplicated in its own sheet reads the same columns
+/// (#433 point 4), and a remote reference keeps reading the original sheet.
 #[test]
-fn duplicating_a_lone_formula_column_voids_its_local_references() {
+fn duplicating_a_lone_formula_column_reads_the_same_columns() {
     let bench = bench();
     script(
         &bench,
@@ -209,8 +375,8 @@ fn duplicating_a_lone_formula_column_voids_its_local_references() {
 col = formula_column('A + max(Sheet3!B)', name='Mix')
 copy = pyst.duplicate(col)
 assert pyst.values(col) == (5., 6., 7., 8.)
-assert pyst.info(copy)['column']['formula'] == '#REF + max(Sheet3!B)', pyst.info(copy)['column']['formula']
-assert all(v is None for v in pyst.values(copy)), pyst.values(copy)
+assert pyst.info(copy)['column']['formula'] == 'A + max(Sheet3!B)', pyst.info(copy)['column']['formula']
+assert pyst.values(copy) == pyst.values(col), pyst.values(copy)
 # A purely remote formula keeps reading the original sheet.
 far = formula_column('max(Sheet3!B)', name='Far')
 far_copy = pyst.duplicate(far)
