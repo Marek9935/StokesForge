@@ -14912,6 +14912,59 @@ fn pulling_a_corner_is_one_undo_step_and_fixes_a_legacy_graph() {
     assert_eq!(state.snapshot().revision, revision, "all or nothing");
 }
 
+/// #426: the Page Layout Mode commits the whole grid as ONE undo step; a legacy
+/// graph is given its drawn frames first; vectors of the wrong length commit
+/// nothing. Witness: one command per axis.
+#[test]
+fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut legacy = graph_spec(&state, graph);
+    legacy.title = "Legacy".to_owned();
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy.clone());
+
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: vec![310.0],
+        heights: vec![210.0],
+        figure: false,
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(
+        (after.frame_widths.clone(), after.frame_heights.clone()),
+        (vec![310.0], vec![210.0])
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy, "one Undo is enough");
+
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: vec![330.0],
+        heights: vec![220.0],
+        figure: true,
+    });
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::ResizeFigure
+        )),
+        "a figure scale is its own kind"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy, "one Undo restores all");
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: vec![310.0, 100.0],
+        heights: vec![210.0],
+        figure: false,
+    });
+    assert_eq!(state.snapshot().revision, revision, "wrong length: nothing");
+}
+
 /// #394: deleting a cell that empties its column removes that column; the
 /// figure shrinks by the column's outer width, and undo brings both back in
 /// one step.

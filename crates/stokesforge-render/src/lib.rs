@@ -130,7 +130,8 @@ pub use free_gesture::{
     MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
-    grid_corners, grid_handle_at, resized_frames, splitter, GridCorner, GridHandle,
+    grid_corners, grid_handle_at, resized_frames, scaled_axis, scaled_frames, splitter, GridCorner,
+    GridHandle,
 };
 pub use hit::{
     cell_edge_at, component_at, component_at_with_tolerance, figure_edge_at, AxisSide, CellEdge,

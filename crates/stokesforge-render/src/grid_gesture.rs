@@ -12,9 +12,10 @@
 //!
 //! A boundary is named by `n`: the one between column (row) `n` and `n + 1`.
 
+use crate::free_gesture::MIN_PAGE_EXTENT;
 use crate::free_gesture::{LayoutReach, BOUNDARY_SIDE_PX};
 use crate::pipeline::FigureLayout;
-use stokesforge_plot::{LayerPlacement, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
+use stokesforge_plot::{LayerPlacement, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
 
 /// What a pixel grabs on a grid: a boundary per axis, a corner carrying both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +253,56 @@ pub fn resized_frames(
     (widths, heights)
 }
 
+/// The sizes of one axis after the figure's edge `far` (right or bottom, else
+/// left or top) is pulled by `delta` points. `bands` is the part of the
+/// figure's extent that is not plot area (axis bands, margins, titles): it
+/// keeps its size, and **one** factor scales every frame so that the
+/// extent follows the pointer. The factor is bounded so that every frame stays
+/// in `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and the extent in
+/// `[MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT]`: the frames keep their proportions
+/// all the way to the stop (a per-frame clamp would not). Rounded to a
+/// hundredth of a point. Untouched if `delta` is not finite or the frames are
+/// empty or already out of range.
+pub fn scaled_axis(sizes: &[f64], bands: f64, delta: f64, far: bool) -> Vec<f64> {
+    let total: f64 = sizes.iter().sum();
+    if !delta.is_finite() || !bands.is_finite() || sizes.is_empty() || total <= 0.0 {
+        return sizes.to_vec();
+    }
+    let wanted = total + if far { delta } else { -delta };
+    let (mut low, mut high) = (
+        (MIN_PAGE_EXTENT - bands) / total,
+        (MAX_FIGURE_EXTENT - bands) / total,
+    );
+    for size in sizes.iter().filter(|size| **size > 0.0) {
+        low = low.max(MIN_FRAME_SIZE / size);
+        high = high.min(MAX_FRAME_SIZE / size);
+    }
+    if low > high {
+        return sizes.to_vec();
+    }
+    let factor = (wanted / total).clamp(low, high);
+    sizes
+        .iter()
+        .map(|size| ((size * factor * 100.0).round() / 100.0).clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE))
+        .collect()
+}
+
+/// The frame widths and heights after pulling the figure's corner
+/// `(right, bottom)` by `delta`: [`scaled_axis`] on each axis, with the bands
+/// `(across, down)` of the figure.
+pub fn scaled_frames(
+    widths: &[f64],
+    heights: &[f64],
+    bands: (f64, f64),
+    corner: (bool, bool),
+    delta: (f64, f64),
+) -> (Vec<f64>, Vec<f64>) {
+    (
+        scaled_axis(widths, bands.0, delta.0, corner.0),
+        scaled_axis(heights, bands.1, delta.1, corner.1),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +493,26 @@ mod tests {
         };
         let (w, h) = resized_frames(&row_only, &[220.0, 130.0], &[140.0, 210.0], (30.0, 10.0));
         assert_eq!((w, h), (vec![220.0, 130.0], vec![150.0, 200.0]));
+    }
+
+    /// One factor scales every frame, bands keep their size, near corners
+    /// scale too, and the stop keeps the proportions. Witness: a per-frame
+    /// clamp.
+    #[test]
+    fn the_figure_scales_every_frame_by_one_factor_and_stops_together() {
+        let w = [200.0, 400.0];
+        // Extent 600 + 100 bands: +70 makes 670 of frames, factor 670/600.
+        let out = scaled_axis(&w, 100.0, 70.0, true);
+        assert_eq!(out, vec![223.33, 446.67]);
+        assert_eq!(
+            scaled_axis(&w, 100.0, 70.0, false),
+            scaled_axis(&w, 100.0, -70.0, true)
+        );
+        // Far inward: the smallest frame stops at 36, the other keeps 2:1.
+        let out = scaled_axis(&w, 100.0, -1e9, true);
+        assert_eq!(out, vec![36.0, 72.0]);
+        let out = scaled_axis(&w, 100.0, 1e9, true);
+        assert_eq!(out, vec![1000.0, 2000.0]);
+        assert_eq!(scaled_axis(&w, 100.0, f64::NAN, true), w.to_vec());
     }
 }

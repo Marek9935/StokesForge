@@ -1160,6 +1160,25 @@ fn annotation_interactions(
             stokesforge_render_egui::GraphEvent::FrameResized { column, row } => {
                 actions.push(Action::SetFrameSizes { graph, column, row });
             }
+            stokesforge_render_egui::GraphEvent::GridFramesEdited {
+                widths,
+                heights,
+                figure,
+            } => {
+                actions.push(Action::SetGridFrames {
+                    graph,
+                    widths,
+                    heights,
+                    figure,
+                });
+            }
+            stokesforge_render_egui::GraphEvent::LayoutEdited { frames, page } => {
+                actions.push(Action::SetFreeLayout {
+                    graph,
+                    frames,
+                    page,
+                });
+            }
             stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
                 actions.push(Action::SetFigureOffsets { graph, left, top });
             }

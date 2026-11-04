@@ -78,6 +78,7 @@
 pub mod backend;
 pub mod cache;
 pub mod feathering;
+mod layout_mode;
 pub mod scaled;
 mod shape_tools;
 pub mod typst_screen;
@@ -105,6 +106,11 @@ use stokesforge_session::Snapshot;
 pub use backend::{EguiBackend, EguiBackendError};
 pub use cache::{CacheKey, Outcome, ShapeCache};
 pub use feathering::Feathering;
+pub use layout_mode::LAYOUT_GRAB_MARGIN;
+// What the shell reads from the Page Layout Mode (#426) without declaring an
+// edge to the geometry crates.
+pub use stokesforge_plot::{FreePage, LayerPlacement, LengthUnit};
+pub use stokesforge_render::{GraphBox, GridCorner, GridHandle, LayoutHandle};
 // Re-exported so that the UI does not have to declare an edge to
 // `stokesforge-render` to read what the figure drew: this crate is already
 // its screen rendering facade.
@@ -208,6 +214,33 @@ pub enum GraphEvent {
         /// The size changed (an edge was pulled), else the layer only moved.
         resized: bool,
     },
+    /// A boundary or a corner of a regular grid was pulled in the Page Layout
+    /// Mode, then released (#426): the new frame widths and heights of the whole
+    /// grid, in points, to commit as **one** change of the model. The sums are
+    /// those the gesture began with (the figure keeps its size). The preview
+    /// stays displayed until the model changes ([`GraphView::hold_preview`]).
+    GridFramesEdited {
+        /// Frame width of every column.
+        widths: Vec<f64>,
+        /// Frame height of every row.
+        heights: Vec<f64>,
+        /// The whole figure was scaled with an L corner (else a boundary or
+        /// a graph corner was pulled).
+        figure: bool,
+    },
+    /// A gesture of the Page Layout Mode ended on a free figure (#426): a graph
+    /// box moved or resized, the page corner pulled, or a burst of arrow-key
+    /// nudges. Every moved frame (by base layer, stack kept) and the page the
+    /// figure keeps, to commit as **one** change of the model. Nothing is
+    /// signalled during the gesture. The preview stays displayed until the
+    /// model changes ([`GraphView::hold_preview`]).
+    LayoutEdited {
+        /// New frame of each moved or resized layer, by base layer.
+        frames: Vec<(usize, FreeFrame)>,
+        /// The page, in stored page coordinates (frozen during a box gesture,
+        /// the new one for a page corner drag).
+        page: Option<stokesforge_plot::FreePage>,
+    },
     /// Double click on a title: edit it in place (issue #53).
     EditText(TextTarget),
     /// Double click on a legend entry: rename the series of layer `panel`
@@ -293,7 +326,7 @@ impl GraphTool {
 /// `base` is the frames the figure was drawn with when the gesture began, so
 /// that a legacy graph (no stored frame) previews exactly what the committing
 /// action will fix.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 struct FramePreview {
     column: Option<(usize, f64)>,
     row: Option<(usize, f64)>,
@@ -304,10 +337,41 @@ struct FramePreview {
     /// The frame a free layer is being moved or resized to (#398): the base
     /// layer of its cell and the frame.
     free: Option<(usize, FreeFrame)>,
+    /// Frame widths and heights the Page Layout Mode is pulling a regular grid
+    /// to (#426), whole vectors.
+    grid: Option<(Vec<f64>, Vec<f64>)>,
+    /// The frames the Page Layout Mode is moving or scaling (#426): base
+    /// layer and frame, several at once for a page corner drag or a nudge of
+    /// a selection.
+    frees: Vec<(usize, FreeFrame)>,
+    /// The page the Page Layout Mode previews (frozen during a box gesture).
+    page: Option<stokesforge_plot::FreePage>,
 }
 
 impl FramePreview {
     fn apply(&self, spec: &mut PlotSpec) {
+        if let Some((widths, heights)) = &self.grid {
+            let bounds = |size: &f64| {
+                size.clamp(
+                    stokesforge_plot::MIN_FRAME_SIZE,
+                    stokesforge_plot::MAX_FRAME_SIZE,
+                )
+            };
+            spec.frame_widths = widths.iter().map(bounds).collect();
+            spec.frame_heights = heights.iter().map(bounds).collect();
+            return;
+        }
+        if !self.frees.is_empty() || self.page.is_some() {
+            for (base, frame) in &self.frees {
+                if let Some(panel) = spec.panels.get_mut(*base) {
+                    panel.free_frame = Some(*frame);
+                }
+            }
+            if let Some(page) = self.page {
+                spec.free_page = Some(page);
+            }
+            return;
+        }
         if let Some((base, frame)) = self.free {
             if let Some(panel) = spec.panels.get_mut(base) {
                 panel.free_frame = Some(frame);
@@ -723,6 +787,8 @@ pub struct GraphView {
     text_drag: Option<TextDrag>,
     /// Preview of the frame sizes of a cell handle being pulled (#394).
     frame_preview: Option<FramePreview>,
+    /// The Page Layout Mode (#426): view state, never saved.
+    layout: layout_mode::LayoutState,
     frame_drag: Option<FrameDrag>,
     /// Move or resize of a layer of a free figure in progress (#398).
     free_drag: Option<FreeDrag>,
@@ -853,6 +919,7 @@ impl GraphView {
             text_width_preview: None,
             text_drag: None,
             frame_preview: None,
+            layout: layout_mode::LayoutState::default(),
             frame_drag: None,
             free_drag: None,
             selected_annotation: None,
@@ -973,6 +1040,7 @@ impl GraphView {
         self.frame_drag = None;
         self.free_drag = None;
         self.frame_preview = None;
+        self.layout.forget_gestures();
         self.shape_drag = None;
         self.shape_preview = None;
     }
@@ -1780,8 +1848,15 @@ impl GraphView {
         // the interaction area reaches that far outside the figure, into the
         // margin the window leaves around it, so the outer edges are grabbed
         // before the window's own border is.
+        // The page corner handles of the Page Layout Mode sit outside the page
+        // (#426): the area reaches farther in the mode.
+        let grab = if self.layout.mode {
+            LAYOUT_GRAB_MARGIN
+        } else {
+            FIGURE_GRAB_MARGIN
+        };
         let response = ui.interact(
-            display_rect.expand(FIGURE_GRAB_MARGIN),
+            display_rect.expand(grab),
             self.id,
             egui::Sense::click_and_drag(),
         );
@@ -1816,9 +1891,20 @@ impl GraphView {
         if spec.layer_placement != stokesforge_plot::LayerPlacement::Free {
             self.extra_layers.clear();
         }
+        // The Page Layout Mode reads the layout as drawn, with the preview of
+        // the gesture of the previous frame, so that its overlay follows the
+        // figure (#426).
+        if self.layout.mode {
+            let drawn = self.figure_layout(&context, snapshot, graph)?;
+            self.reconcile_layout_mode(drawn.placement);
+            self.layout.view = self.compute_layout_view(&spec);
+        } else {
+            self.layout.view = None;
+        }
         self.handle_navigation(&response, &context, &spec);
         let real_gesture = response.dragged()
             && (self.nav_drag.is_some_and(NavDrag::is_pan)
+                || self.layout.drag.is_some()
                 || self.drag_box.is_some()
                 || self.shape_drag.is_some()
                 || self.annotation_drag.is_some()
@@ -1924,7 +2010,15 @@ impl GraphView {
         // painted **over** what precedes — never in the `Vec<Shape>` cached
         // above, on pain of replaying the whole pipeline at each mouse move
         // (`crate::cache`, module header).
-        self.hover = self.paint_overlay(&painter, &response, &snapshot.tree, &spec);
+        if self.layout.mode {
+            self.hover = None;
+            let overlay = ui
+                .painter()
+                .with_clip_rect(display_rect.expand(LAYOUT_GRAB_MARGIN));
+            self.paint_layout_overlay(&overlay, ui.visuals());
+        } else {
+            self.hover = self.paint_overlay(&painter, &response, &snapshot.tree, &spec);
+        }
 
         Ok(outcome.cached)
     }
@@ -2075,6 +2169,13 @@ impl GraphView {
     /// no figure has been drawn yet.
     fn handle_navigation(&mut self, response: &Response, context: &egui::Context, spec: &PlotSpec) {
         if self.last.is_none() {
+            return;
+        }
+        // The Page Layout Mode owns every gesture of the figure (#426): no pan,
+        // no zoom, no object drag.
+        if self.layout.mode {
+            self.nav_drag = None;
+            self.handle_layout_mode(response, context, spec);
             return;
         }
         let nav = self.decide_nav(response, context);
@@ -2518,6 +2619,7 @@ impl GraphView {
             top: drag.top.map(|start| offset(start, delta.y, min_top)),
             base: drag.base,
             free: None,
+            ..FramePreview::default()
         }));
         true
     }
@@ -2674,6 +2776,7 @@ impl GraphView {
             top: None,
             base: (Vec::new(), Vec::new()),
             free: Some((drag.handle.base, result.frame)),
+            ..FramePreview::default()
         }));
         true
     }

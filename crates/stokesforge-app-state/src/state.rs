@@ -822,6 +822,22 @@ pub enum Action {
         /// Grid row and its new frame height, in points.
         row: Option<(usize, f64)>,
     },
+    /// Sets the frame width of every column and the frame height of every row
+    /// of a regular grid in one go, as one undo step (#426): what a drag of an
+    /// internal boundary or corner in the Page Layout Mode commits. The vectors
+    /// are the whole grid; their lengths must match it, else nothing is sent.
+    /// Each size is brought into the bounds of [`Action::SetFrameSize`].
+    SetGridFrames {
+        /// Target graph.
+        graph: NodeId,
+        /// Frame width of every column, in points.
+        widths: Vec<f64>,
+        /// Frame height of every row, in points.
+        heights: Vec<f64>,
+        /// The whole figure was scaled (history kind `ResizeFigure`), else a
+        /// boundary or a corner was pulled (`ResizeCell`).
+        figure: bool,
+    },
     /// Sets Left and/or Top of the graph, in points (#405): the distance from
     /// the left (top) edge of the image to the first plot area, what a drag of
     /// the left or top edge of the figure commits. A graph without stored
@@ -5467,6 +5483,12 @@ impl AppState {
                     .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
                 self.set_frame_sizes(graph, column.into_iter().chain(row))
             }
+            Action::SetGridFrames {
+                graph,
+                widths,
+                heights,
+                figure,
+            } => self.set_grid_frames(graph, &widths, &heights, figure),
             Action::SetFigureOffsets { graph, left, top } => {
                 self.set_figure_offsets(graph, left, top)
             }
@@ -10982,6 +11004,45 @@ impl AppState {
             graph,
             spec,
             kind: PlotEditKind::ResizeCell,
+        });
+    }
+
+    /// [`Action::SetGridFrames`]: both vectors written into one spec and
+    /// committed as one step. A legacy graph is first given the frames it is
+    /// drawn with, so the vectors always have the grid's lengths.
+    fn set_grid_frames(&mut self, graph: NodeId, widths: &[f64], heights: &[f64], figure: bool) {
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        if spec.layer_placement != stokesforge_plot::LayerPlacement::Grid {
+            return;
+        }
+        crate::frame_sizes::fix_new(&mut spec);
+        let bounds = |size: &f64| {
+            size.clamp(
+                stokesforge_plot::MIN_FRAME_SIZE,
+                stokesforge_plot::MAX_FRAME_SIZE,
+            )
+        };
+        if widths.len() != spec.frame_widths.len()
+            || heights.len() != spec.frame_heights.len()
+            || widths.iter().chain(heights).any(|size| !size.is_finite())
+        {
+            return;
+        }
+        spec.frame_widths = widths.iter().map(bounds).collect();
+        spec.frame_heights = heights.iter().map(bounds).collect();
+        if self.plot_spec(graph).is_some_and(|before| before == spec) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: if figure {
+                PlotEditKind::ResizeFigure
+            } else {
+                PlotEditKind::ResizeCell
+            },
         });
     }
 
