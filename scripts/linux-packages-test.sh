@@ -131,6 +131,9 @@ t "desktop: Icon=stokesforge with icon" has 'Icon=stokesforge' "$snap/usr/share/
 t "config: icon entry with its folder" has 'dst: /usr/share/icons/hicolor/48x48/apps/stokesforge.png' "$snap/nfpm.yaml"
 t "mime icon staged under usr/share" test -f "$snap/usr/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png"
 t "config: mime icon entry" has 'dst: /usr/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png' "$snap/nfpm.yaml"
+# The switch is on since the icon is in the distribution (#388, #390): the
+# packages are published, and their failure blocks the release.
+t "publication switch is 1 in linux-packages.env" bash -c 'unset PUBLISH_LINUX_PACKAGES; . "$1"; test "$PUBLISH_LINUX_PACKAGES" = 1' _ "$HERE/linux-packages.env"
 
 tn "publication switch 1 without icon stops" run_pkg "$tmp/d-plain" "$tmp/o-guard" v1.2.3 1
 tn "bad tag refused" run_pkg "$tmp/d-plain" "$tmp/o-bad" v1.2
