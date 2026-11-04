@@ -377,6 +377,7 @@ status-paste-fields-dropped =
        *[other] { $count } header fields did not fit and were not pasted
     }
 status-paste-columns-fields-dropped = { $columns } column(s) and { $fields } header field(s) did not fit and were not pasted
+status-formula-comma-rewritten = Read as the range from { $from } to { $to } and rewritten { $rewritten }. For the number { $decimal }, write it with a point
 status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }
@@ -709,7 +710,7 @@ error-import-whitespace-thousands = A space cannot both separate the columns and
 error-import-file = { $path }: { $detail }
 
 # Formulas
-error-formula-invalid = Invalid formula: { $detail }
+error-formula-syntax = The formula is incomplete or not valid. Check the operators and the parentheses
 error-formula-unknown-column = Column { $letter } does not exist in this sheet
 error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
 error-formula-deleted-column = Column deleted. Replace #REF with a column letter
@@ -756,6 +757,8 @@ error-formula-ambiguous-name = Several objects are named { $name } apart from ca
 error-formula-unknown-column-in = Column { $column } does not exist in sheet { $sheet }
 error-formula-remote-outside = A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column
 error-formula-remote-x = The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)
+error-paste-formula-refused = The formula of column { $column } was not pasted: { $reason }
+error-paste-formulas-refused = The formulas of columns { $columns } were not pasted
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists

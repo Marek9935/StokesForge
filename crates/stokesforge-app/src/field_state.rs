@@ -37,6 +37,10 @@ use stokesforge_app_state::tr;
 /// How long the orange frame of a brought-back value shows, in seconds.
 pub const CLAMPED_SECONDS: f64 = 2.0;
 
+/// How long the orange state of a rewritten text shows, in seconds (S-R17: the
+/// field changed what was typed, which is more to read than a clamped number).
+pub const REWRITTEN_SECONDS: f64 = 10.0;
+
 /// Thickness of the frame of a faulty field, in points.
 const FRAME_WIDTH: f32 = 1.5;
 
@@ -120,19 +124,20 @@ struct Flag {
     until: f64,
 }
 
-/// Remembers `issue` for field `id` for [`CLAMPED_SECONDS`] starting from
-/// `now`, and wakes the interface at its deadline.
-pub fn flag(ctx: &egui::Context, id: egui::Id, issue: FieldIssue, now: f64) {
+/// Remembers `issue` for field `id` for `seconds` ([`CLAMPED_SECONDS`] or
+/// [`REWRITTEN_SECONDS`]) starting from `now`, and wakes the interface at its
+/// deadline.
+pub fn flag(ctx: &egui::Context, id: egui::Id, issue: FieldIssue, now: f64, seconds: f64) {
     ctx.data_mut(|data| {
         data.insert_temp(
             id,
             Flag {
                 issue,
-                until: now + CLAMPED_SECONDS,
+                until: now + seconds,
             },
         );
     });
-    ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLAMPED_SECONDS));
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(seconds));
 }
 
 /// The state still to show for field `id` at time `now`. An expired state
@@ -348,7 +353,7 @@ pub fn edit_text_with_arrow<T>(
         }
         Step::CommitClamped(value, issue) => {
             ctx.data_mut(|data| data.remove::<Draft>(id));
-            flag(&ctx, id, issue, now);
+            flag(&ctx, id, issue, now, CLAMPED_SECONDS);
             committed = Some(value);
         }
         Step::Reject { issue, stay_open } => {
@@ -357,7 +362,7 @@ pub fn edit_text_with_arrow<T>(
                 response.request_focus();
             } else {
                 ctx.data_mut(|data| data.remove::<Draft>(id));
-                flag(&ctx, id, issue, now);
+                flag(&ctx, id, issue, now, CLAMPED_SECONDS);
             }
         }
     }
@@ -485,10 +490,36 @@ mod tests {
     fn a_remembered_state_expires_after_two_seconds() {
         let ctx = egui::Context::default();
         let id = egui::Id::new("field");
-        flag(&ctx, id, FieldIssue::clamped(Bound::Max, "20"), 10.0);
+        flag(
+            &ctx,
+            id,
+            FieldIssue::clamped(Bound::Max, "20"),
+            10.0,
+            CLAMPED_SECONDS,
+        );
         assert!(active(&ctx, id, 11.9).is_some());
         assert!(active(&ctx, id, 12.0).is_none());
         assert!(active(&ctx, id, 12.1).is_none(), "forgetting is final");
+    }
+
+    /// A rewritten text stays orange for 10 s, not 2 (S-R17, #433). Witness: with
+    /// the 2 s constant the state is gone at 2.5 s.
+    #[test]
+    fn a_rewritten_text_stays_orange_for_ten_seconds() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("field");
+        flag(
+            &ctx,
+            id,
+            FieldIssue::Clamped {
+                message: "read as a range".to_string(),
+            },
+            10.0,
+            REWRITTEN_SECONDS,
+        );
+        assert!(active(&ctx, id, 12.5).is_some(), "still there after 2.5 s");
+        assert!(active(&ctx, id, 19.9).is_some());
+        assert!(active(&ctx, id, 20.0).is_none(), "gone after 10 s");
     }
 
     // — The painted shapes: the frame and the bubble are read in the shapes. —

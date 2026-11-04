@@ -375,6 +375,12 @@ pub fn field_clamped_color() -> Color32 {
     Color32::from_rgb(220, 120, 0)
 }
 
+/// Background of a grid cell whose text was **rewritten** by the field (#433,
+/// S-R17): the clamped orange, see-through, like [`field_refused_fill`].
+pub fn field_clamped_fill() -> Color32 {
+    field_clamped_color().gamma_multiply(0.18)
+}
+
 /// Dark and discreet red of the outline of a modal dialog that has just
 /// refused a click ([`crate::app`], `modal_dialog`).
 pub fn blocked_flash_color() -> Color32 {

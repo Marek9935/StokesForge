@@ -536,6 +536,12 @@ fn a_refused_formula_among_accepted_ones_ends_on_its_sentence_only() {
         status.starts_with("[error]") && status.contains("no sheet named"),
         "{status}"
     );
+    // The status names the column whose formula was not pasted (#433).
+    let letters = w.state.tree().column_letters(dst[1]).unwrap();
+    assert!(
+        status.contains(&format!("column {letters} ")),
+        "no column name in `{status}`"
+    );
     assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
 }
 
@@ -588,7 +594,6 @@ fn pasting_a_formula_that_closes_a_loop_is_refused_with_the_loop_sentence() {
 }
 
 #[test]
-#[ignore = "design: #433 point 3: a refused formula in a formulas paste still writes the copied frozen values over the destination's data (the loop paste above overwrites Sheet3!B)"]
 fn a_refused_formulas_paste_leaves_the_destination_data_alone() {
     let mut w = world();
     let _ = sources(&mut w);
@@ -1012,7 +1017,7 @@ fn new_target(w: &mut World) -> NodeId {
 }
 
 #[test]
-fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
+fn badly_written_formulas_are_kept_framed_and_say_why_in_a_sentence() {
     let mut w = world();
     let target = new_target(&mut w);
     let cases: [(&str, &str); 11] = [
@@ -1030,37 +1035,40 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     ];
     for (text, hint) in cases {
         w.type_formula(target, text);
-        assert_eq!(w.letters(target), None, "`{text}` was accepted");
+        // Kept (#433): the text stays, the column is empty, the cell is framed.
+        assert!(w.letters(target).is_some(), "`{text}` was dropped");
+        assert!(w.values(target).iter().all(Option::is_none), "`{text}`");
         let status = w.status();
         assert!(status.starts_with("[error]"), "`{text}`: `{status}`");
         for raw in ["Parse(", "UnknownFunction", "TooDeep", "{", "\\u{"] {
             assert!(!status.contains(raw), "`{text}`: raw text in `{status}`");
         }
         assert!(status.contains(hint), "`{text}`: `{status}` lacks `{hint}`");
+        let issue = w.state.formula_issue(target).expect("framed");
+        assert!(issue.contains(hint), "`{text}`: frame says `{issue}`");
     }
 }
 
-/// A number outside the f64 range is refused as soon as it is typed: the
-/// field stays open (`header_edit_refusal`), and a stored text keeps its
-/// number (#429).
+/// A number outside the f64 range is flagged as soon as it is typed
+/// (`header_edit_issue`), and a stored text keeps its number (#429).
 #[test]
 fn a_number_out_of_range_is_refused_while_typing() {
     let mut w = world();
     let target = new_target(&mut w);
     w.state.begin_header_edit(target, HeaderField::Formula);
     w.state.header_editing_mut().unwrap().buffer = "1e400*A".to_string();
-    let refusal = w.state.header_edit_refusal().expect("refused while typing");
+    let refusal = w.state.header_edit_issue().expect("refused while typing");
     assert!(
         refusal.contains("1e400") && refusal.contains("too large"),
         "{refusal}"
     );
     assert!(!refusal.contains("NumberOutOfRange"), "{refusal}");
     w.state.header_editing_mut().unwrap().buffer = "1e308*A".to_string();
-    assert_eq!(w.state.header_edit_refusal(), None);
+    assert_eq!(w.state.header_edit_issue(), None);
 }
 
-/// The manual says a formula with a syntax error is kept and the column has
-/// no values until it is fixed. Pinned: kept, empty, history entry written.
+/// A formula with a syntax error is kept, the column has no values until it is
+/// fixed, the status says so and the cell is framed (#433).
 #[test]
 fn a_formula_with_a_syntax_error_is_kept_and_the_column_is_empty() {
     let mut w = world();
@@ -1077,22 +1085,28 @@ fn a_formula_with_a_syntax_error_is_kept_and_the_column_is_empty() {
             text.chars().take(10).collect::<String>()
         );
         assert!(w.values(target).iter().all(Option::is_none));
-        assert!(!w.status().starts_with("[error]"));
+        assert!(w.status().starts_with("[error]"), "{}", w.status());
     }
 }
 
 #[test]
-#[ignore = "design: #433 point 2: a kept formula that does not parse (`A +`, `(A`, deeper than 1000) shows no sentence anywhere (formula_issue covers #REF, loop, no X, no point only); unknown function and wrong arity are refused with one"]
 fn a_kept_formula_that_does_not_parse_tells_the_user_why() {
     let mut w = world();
     let target = new_target(&mut w);
     w.type_formula(target, "A +");
     assert!(w.letters(target).is_some());
-    assert!(w.state.formula_issue(target).is_some() || w.status().starts_with("[error]"));
+    let issue = w.state.formula_issue(target).expect("framed");
+    assert!(issue.contains("incomplete or not valid"), "{issue}");
+    assert!(w.status().starts_with("[error]"), "{}", w.status());
+    // The frame holds no parser detail.
+    assert!(
+        !issue.contains("token") && !issue.contains("Parse"),
+        "{issue}"
+    );
 }
 
 #[test]
-fn a_mutual_loop_and_a_self_loop_are_refused_across_sheets() {
+fn a_mutual_loop_and_a_self_loop_are_kept_framed_across_sheets() {
     let mut w = world();
     let sheet1 = w.sheet1;
     let sheet3 = w.sheet3;
@@ -1100,15 +1114,154 @@ fn a_mutual_loop_and_a_self_loop_are_refused_across_sheets() {
     assert!(w.letters(a).is_some());
     let a3 = w.columns(sheet3)[0];
     w.type_formula(a3, "max(Sheet1!E)");
-    assert_eq!(w.letters(a3), None);
+    assert_eq!(w.letters(a3).as_deref(), Some("max(Sheet1!E)"), "kept");
     assert!(w.status().contains("loop"), "{}", w.status());
+    assert!(w.state.formula_issue(a3).unwrap().contains("loop"));
     w.type_formula(a, "max(Sheet1!E)");
     assert!(
-        w.status().contains("own column") || w.status().contains("loop"),
-        "{}",
+        w.status().contains("own column"),
+        "a self reference says so: {}",
         w.status()
     );
-    assert_eq!(w.letters(a).as_deref(), Some("max(Sheet3!A)"), "unchanged");
+    // Shown without the prefix of its own sheet.
+    assert_eq!(w.letters(a).as_deref(), Some("max(E)"), "kept");
+    assert!(w.values(a).iter().all(Option::is_none), "uncomputed");
+}
+
+/// Typing a text the field cannot read keeps it, and one Undo gives back the
+/// old formula **and** its values (#433).
+#[test]
+fn a_kept_formula_is_undone_with_the_old_formula_and_values() {
+    let mut w = world();
+    let (e, _) = chain(&mut w);
+    let before = w.state.tree().clone();
+    assert_eq!(w.values(e), [2.0, 4.0, 6.0, 8.0, 10.0].map(Some));
+    w.type_formula(e, "A +");
+    assert_eq!(w.letters(e).as_deref(), Some("A +"));
+    assert!(w.values(e).iter().all(Option::is_none));
+    w.state.dispatch(Action::Undo);
+    assert_eq!(w.letters(e).as_deref(), Some("A*2"));
+    assert_eq!(w.values(e), [2.0, 4.0, 6.0, 8.0, 10.0].map(Some));
+    assert_eq!(**w.state.tree(), *before, "the whole tree is back");
+}
+
+/// The frame depends on the stored text, not on the rows: a sheet with no row
+/// shows it too (#433).
+#[test]
+fn a_kept_formula_in_a_sheet_of_no_row_is_framed() {
+    let mut w = world();
+    let book1 = w.book1;
+    w.state.dispatch(Action::AddWorksheet { book: book1 });
+    let sheet = *w.state.tree().children(book1).unwrap().last().unwrap();
+    let target = w.formula_column(sheet, "1 +");
+    assert_eq!(w.letters(target).as_deref(), Some("1 +"));
+    let issue = w.state.formula_issue(target).expect("framed with no row");
+    assert!(issue.contains("incomplete or not valid"), "{issue}");
+}
+
+/// A bound formula whose workbook name became ambiguous (a second `Book2` in
+/// another folder, as an old file can hold) computes by identifier and is
+/// **not** framed: the frame re-reads the text only when it does not compile
+/// (#433). Witness: re-reading every formula frames it as ambiguous.
+#[test]
+fn a_formula_that_compiles_is_not_framed_when_its_names_became_ambiguous() {
+    let _language = i18n::test_language(Language::English);
+    let mut project = Project::new("Twins").unwrap();
+    let root = project.root();
+    let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
+    let sheet1 = project.add_worksheet(book, Some("Sheet1")).unwrap();
+    let folder_a = project.add_folder(root, "FolderA").unwrap();
+    let book2 = project.add_empty_workbook(folder_a, Some("Book2")).unwrap();
+    let sheet5 = project.add_worksheet(book2, Some("Sheet5")).unwrap();
+    data(&mut project, sheet1, "A", &[1.0, 2.0]);
+    data(&mut project, sheet5, "A", &[5.0, 7.0]);
+    let target = data(&mut project, sheet1, "F", &[0.0]);
+    let formula = project
+        .tree()
+        .formula_for_entry(target, "max([Book2]Sheet5!A)")
+        .unwrap();
+    project
+        .set_column_meta(
+            target,
+            ColumnMeta {
+                formula: Some(formula),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let folder_b = project.add_folder(root, "FolderB").unwrap();
+    let twin = project.add_empty_workbook(folder_b, Some("Book2")).unwrap();
+    let twin_sheet = project.add_worksheet(twin, Some("Sheet5")).unwrap();
+    data(&mut project, twin_sheet, "A", &[9.0]);
+    assert!(
+        project
+            .tree()
+            .formula_for_entry(target, "max([Book2]Sheet5!A)")
+            .is_err(),
+        "the text read again is ambiguous now"
+    );
+    let session = Session::spawn(project, None).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        dir.path().join("p.stf").display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    assert_eq!(state.formula_issue(target), None);
+}
+
+/// A range written with a decimal comma keeps its range, is rewritten, and the
+/// field says so in orange: a warning on the status bar, never red (#433).
+#[test]
+fn a_comma_range_is_rewritten_and_warned_not_framed() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    w.type_formula(target, "max(B,1,5)");
+    assert_eq!(w.letters(target).as_deref(), Some("max(B, 1, 5)"));
+    let status = w.state.status().unwrap().clone();
+    assert!(!status.is_error(), "{}", status.text);
+    assert!(
+        status.text.contains("from 1 to 5") && status.text.contains("1.5"),
+        "{}",
+        status.text
+    );
+    assert_eq!(w.state.formula_issue(target), None, "not red");
+    assert_eq!(
+        w.state.take_formula_warning(target).as_deref(),
+        Some(status.text.as_str()),
+        "handed to the grid once"
+    );
+    assert_eq!(w.state.take_formula_warning(target), None);
+
+    // Already spaced, or already a range with spaces: nothing to say.
+    w.type_formula(target, "max(B, 1, 5)");
+    assert_eq!(w.state.take_formula_warning(target), None);
+
+    w.type_formula(target, "max(B, 330, 350)");
+    assert_eq!(w.state.take_formula_warning(target), None);
+    w.type_formula(target, "max(B,330,350)");
+    assert_eq!(w.letters(target).as_deref(), Some("max(B, 330, 350)"));
+    assert!(w.state.take_formula_warning(target).is_some());
+}
+
+#[test]
+fn the_comma_rewrite_leaves_other_calls_as_typed_and_red() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    for (text, hint) in [("at(B,1,5)", "whole column"), ("round(B,1,5)", "takes")] {
+        w.type_formula(target, text);
+        assert_eq!(w.letters(target).as_deref(), Some(text), "as typed");
+        assert_eq!(w.state.take_formula_warning(target), None, "`{text}`");
+        let issue = w.state.formula_issue(target).expect("red");
+        assert!(issue.contains(hint), "`{text}`: {issue}");
+        assert!(w.status().starts_with("[error]"), "`{text}`");
+    }
+    for text in ["atan2(1,5)", "if(A>0,1,5)"] {
+        w.type_formula(target, text);
+        assert_eq!(w.letters(target).as_deref(), Some(text), "as typed");
+        assert_eq!(w.state.take_formula_warning(target), None, "`{text}`");
+    }
 }
 
 // -- refresh from the source file --

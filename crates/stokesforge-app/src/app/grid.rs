@@ -1269,6 +1269,37 @@ fn paint_refusal_tint(ui: &egui::Ui, cell: egui::Rect) {
     );
 }
 
+/// The orange state of a formula the field just rewrote (a range written with a
+/// comma, #433, S-R17): the app state hands the sentence over once, the cell
+/// stays orange with a bubble for [`crate::field_state::REWRITTEN_SECONDS`].
+fn rewritten_formula_state(
+    ui: &egui::Ui,
+    state: &mut AppState,
+    column: NodeId,
+    id: egui::Id,
+    rect: egui::Rect,
+    response: &egui::Response,
+) {
+    let now = ui.input(|i| i.time);
+    if let Some(message) = state.take_formula_warning(column) {
+        crate::field_state::flag(
+            ui.ctx(),
+            id,
+            crate::field_state::FieldIssue::Clamped { message },
+            now,
+            crate::field_state::REWRITTEN_SECONDS,
+        );
+    }
+    if let Some(issue) = crate::field_state::active(ui.ctx(), id, now) {
+        ui.painter().rect_filled(
+            refusal_tint_rect(ui, rect),
+            0.0,
+            crate::theme::field_clamped_fill(),
+        );
+        crate::field_state::show_bubble(response, &issue);
+    }
+}
+
 fn refusal_tint_rect(ui: &egui::Ui, cell: egui::Rect) -> egui::Rect {
     let line = ui.visuals().widgets.noninteractive.bg_stroke.width;
     cell.shrink2(egui::vec2(0.0, line))
@@ -1327,10 +1358,10 @@ fn header_field_widget(
             .header_editing()
             .is_some_and(|edit| edit.column == column && edit.field == field);
         if editing_here {
-            // The refusal of the Formula row (unknown letter, column that reads itself,
-            // modified `#REF`) is decided in `app-state`: the grid paints it and keeps
-            // the field open (#321).
-            let refusal = state.header_edit_refusal();
+            // What the Formula row says while typing (unknown letter, column that reads
+            // itself, modified `#REF`) is decided in `app-state`: the grid paints it. The
+            // field always writes what is typed (#433), so it never stays open.
+            let refusal = state.header_edit_issue();
             let help = field == HeaderField::Formula && state.show_column_formula_help();
             let Some(edit) = state.header_editing_mut() else {
                 return;
@@ -1359,9 +1390,9 @@ fn header_field_widget(
                     None,
                 )
             };
-            // A refused entry tints the cell itself (#410): the fill follows the
-            // cell and never crosses its grid lines, unlike a frame. The bubble
-            // with the reason stays.
+            // A text that will not compute tints the cell itself (#410): the fill
+            // follows the cell and never crosses its grid lines, unlike a frame.
+            // The bubble with the reason stays.
             if refusal.is_some() {
                 paint_refusal_tint(ui, rect);
             }
@@ -1384,10 +1415,9 @@ fn header_field_widget(
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
                 Some(end) => {
-                    let refused = state.header_edit_refusal().is_some();
-                    // Enter or Tab on a refused text: the field stays open (tinted cell and
-                    // bubble). A click elsewhere closes without writing anything.
-                    let write = match inplace_edit::resolve(end, false, refused) {
+                    // Enter, Tab and a click elsewhere always write (#433): a text that does
+                    // not read is kept and framed once the field is closed. Escape cancels.
+                    let write = match inplace_edit::resolve(end, false, false) {
                         inplace_edit::Resolution::Stay => return,
                         inplace_edit::Resolution::Close { write, .. } => write,
                     };
@@ -1440,14 +1470,17 @@ fn header_field_widget(
                 .selectable(false)
                 .truncate(),
         );
-        // A formula that reads a deleted column shows `#REF`: tinted cell and bubble
-        // (#321, #410). The sentence comes from `app-state`.
+        // A formula that does not compute (`#REF`, a letter that names no column, a
+        // syntax error, a loop) shows its tinted cell and bubble (#321, #410, #433).
+        // The sentence comes from `app-state`.
         if field == HeaderField::Formula {
             if let Some(message) = issue {
                 crate::field_state::show_bubble(
                     &response,
                     &crate::field_state::FieldIssue::refused(message),
                 );
+            } else {
+                rewritten_formula_state(ui, state, column, id, rect, &response);
             }
         }
         if response.double_clicked() {
@@ -6040,7 +6073,7 @@ mod tests {
         for _ in 0..4 {
             bench.image(Vec::new());
         }
-        assert!(bench.state.header_edit_refusal().is_some(), "refused text");
+        assert!(bench.state.header_edit_issue().is_some(), "refused text");
         let field = edited_field_bounds(&bench);
         let shapes = &bench.last_frame.as_ref().unwrap().shapes;
         let fill = theme::field_refused_fill();
@@ -6061,6 +6094,93 @@ mod tests {
         });
         assert!(!framed, "no red frame in the grid");
         assert_no_grid_line_under(&bench, tint);
+    }
+
+    /// #433: Enter on a text the field cannot read closes the field and writes
+    /// it; the cell keeps its red tint outside the edit. Escape writes nothing.
+    #[test]
+    fn enter_on_an_unreadable_formula_closes_the_field_and_keeps_the_tint() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let column = bench.columns[0];
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        bench.state.header_editing_mut().expect("editing").buffer = "Q+1".to_string();
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(bench.state.header_editing().is_none(), "the field closed");
+        assert_eq!(
+            bench.state.tree().formula_letters(column).as_deref(),
+            Some("Q+1"),
+            "the text is kept"
+        );
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let fill = theme::field_refused_fill();
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        assert!(
+            shapes.iter().any(
+                |painted| matches!(&painted.shape, egui::Shape::Rect(rect) if rect.fill == fill)
+            ),
+            "the cell stays tinted outside the edit"
+        );
+
+        let other = bench.columns[1];
+        bench.state.begin_header_edit(other, HeaderField::Formula);
+        bench.state.header_editing_mut().expect("editing").buffer = "Q+2".to_string();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(bench.state.header_editing().is_none());
+        assert_eq!(
+            bench.state.tree().formula_letters(other),
+            None,
+            "Esc cancels"
+        );
+    }
+
+    /// #433: a comma range rewritten by the field paints the cell orange, not
+    /// red. Witness: without the orange branch the grid paints nothing.
+    #[test]
+    fn a_rewritten_comma_range_paints_the_cell_orange() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let (x, column) = (bench.columns[0], bench.columns[2]);
+        bench.state.dispatch(Action::SetColumnRole {
+            column: x,
+            role: stokesforge_core::ColumnRole::X,
+        });
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        bench.state.header_editing_mut().expect("editing").buffer = "max(B,101,103)".to_string();
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+        assert_eq!(
+            bench.state.tree().formula_letters(column).as_deref(),
+            Some("max(B, 101, 103)")
+        );
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        let orange = theme::field_clamped_fill();
+        let red = theme::field_refused_fill();
+        let has = |fill| {
+            shapes.iter().any(
+                |painted| matches!(&painted.shape, egui::Shape::Rect(rect) if rect.fill == fill),
+            )
+        };
+        assert!(
+            has(orange),
+            "orange cell; issue {:?}; status {:?}",
+            bench.state.formula_issue(column),
+            bench.state.status().map(|s| s.text.clone())
+        );
+        assert!(!has(red), "not red");
     }
 
     /// #429: a number an f64 cannot hold, typed in a data cell (or in the entry

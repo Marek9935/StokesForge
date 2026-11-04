@@ -379,6 +379,7 @@ status-paste-fields-dropped =
        *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
     }
 status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
+status-formula-comma-rewritten = Lu comme la plage de { $from } à { $to } et réécrit { $rewritten }. Pour le nombre { $decimal }, l'écrire avec un point
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
 status-language-not-saved = Impossible d'enregistrer le choix de la langue : { $detail }
@@ -708,7 +709,7 @@ error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les
 error-import-file = { $path } : { $detail }
 
 # Formules
-error-formula-invalid = Formule invalide : { $detail }
+error-formula-syntax = La formule est incomplète ou invalide. Vérifier les opérateurs et les parenthèses
 error-formula-unknown-column = La colonne { $letter } n'existe pas dans cette feuille
 error-formula-self-reference = Une formule ne peut pas faire référence à sa propre colonne ({ $letter })
 error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne
@@ -755,6 +756,8 @@ error-formula-ambiguous-name = Plusieurs objets s'appellent { $name } à la cass
 error-formula-unknown-column-in = La colonne { $column } n'existe pas dans la feuille { $sheet }
 error-formula-remote-outside = Une colonne d'une autre feuille ne peut être lue que par at, max, min, mean, sum, std ou integral. La donner à l'une d'elles comme colonne
 error-formula-remote-x = La colonne X d'un at() sur une autre feuille se lit dans cette feuille. L'écrire sans préfixe (D, pas Sheet3!D)
+error-paste-formula-refused = La formule de la colonne { $column } n'a pas été collée : { $reason }
+error-paste-formulas-refused = Les formules des colonnes { $columns } n'ont pas été collées
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus
