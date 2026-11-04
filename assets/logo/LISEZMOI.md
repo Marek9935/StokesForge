@@ -1,6 +1,6 @@
 # Logo StokesForge : récapitulatif
 
-Date : 3 novembre 2026. Ce document résume ce qui a été discuté, ce qui est voulu, ce qui a été rejeté, et où en est le logo. Ce dossier est rangé dans le dépôt sous `assets/logo/` (#443) ; l'icône d'application n'en est pas encore tirée (#388). Tous droits réservés, hors GPL : voir `LICENSE` (#444).
+Date : 4 novembre 2026. Ce document résume ce qui a été discuté, ce qui est voulu, ce qui a été rejeté, et où en est le logo. Ce dossier est rangé dans le dépôt sous `assets/logo/` (#443) ; l'icône d'application n'en est pas encore tirée (#388). La matière en verre vient de #445. Tous droits réservés, hors GPL : voir `LICENSE` (#444).
 
 ## 1. L'idée
 
@@ -11,7 +11,7 @@ Une **forge** (enclume + marteau) rencontre un **graphe de spectroscopie**. Le m
 - L'axe x se lit en longueur d'onde croissante vers la droite.
 - **Absorption = vert**, à gauche : une bande principale et **un seul épaulement vibronique, à gauche** (côté haute énergie). Pas de second pic, pas de creux.
 - **Émission = orange**, à droite : **image miroir exacte** de l'absorption (règle du miroir), épaulement **à droite**.
-- Les deux maxima se font face ; leur écart est le déplacement de Stokes (34 sur une largeur de 256 dans la version actuelle). Léger recouvrement au pied (transition 0-0).
+- Les deux maxima se font face ; leur écart est le déplacement de Stokes (30 sur une largeur de 256 dans la version actuelle, 36 avant #445). Léger recouvrement au pied (transition 0-0).
 - Le marteau agit sur **l'absorption** (on excite), jamais sur l'émission : l'émission est la conséquence (relaxation, puis émission décalée vers le rouge).
 
 Formes calculées (scripts) : gaussienne principale σ = 7, épaulement σ = 8, amplitude 0,6, décalé de 17 ; l'émission est le miroir exact.
@@ -21,12 +21,13 @@ Formes calculées (scripts) : gaussienne principale σ = 7, épaulement σ = 8, 
 | Élément | Voulu |
 | --- | --- |
 | Enclume | Silhouette d'enclume, **basse** (hauteur réduite à ~72 %), corne **conique courte et droite** à pointe arrondie (pas une coque de bateau). Une seule marche : corne puis table. **Aucune deuxième marche** sous les courbes. |
-| Matière de l'enclume | **Verre sombre « liquide »** (style Liquid Glass d'Apple, mais qui **assombrit** pour faire ressortir le contenu). La lumière des spectres coule **dans** le verre (vert sous l'absorption, orange sous l'émission) et se concentre dans l'arrondi des bords. Les spectres se reflètent dans le verre. **Liquide, pas glossy** : pas de reflets blancs vernis. |
+| Matière de l'enclume | **Verre sombre « liquide »** (style Liquid Glass d'Apple, mais qui **assombrit** pour faire ressortir le contenu). La lumière des spectres coule **dans** le verre (vert sous l'absorption, orange sous l'émission) et se concentre dans l'arrondi des bords. Les spectres se reflètent dans le verre. **Liquide, pas verni** : un filet blanc adouci (65 % de sa force, choix de #445) suit le bord, et le reflet net des deux pics se courbe en arrivant dans l'arrondi. |
 | Jonction courbes / enclume | Les courbes sont **posées directement sur la table**. La ligne de jonction tire vers le **sombre**, pas vers le blanc. Rien ne déborde sous ou à côté des courbes. |
-| Courbes | **Formes pleines sans trait coloré** (le mélange trait + remplissage est rejeté). Vert dense ; orange incandescent (orange chaud au sommet, orange profond au pied). Les sommets restent bien lisibles (pas trop clairs). Une fine lueur suit le haut des courbes, sans halo étalé au pied. |
+| Courbes | **Formes pleines sans trait coloré** (le mélange trait + remplissage est rejeté). Vert dense ; orange incandescent (orange chaud au sommet, orange profond au pied). Les sommets restent bien lisibles (pas trop clairs). Une fine lueur suit le haut des courbes, sans halo étalé au pied. Volume net : formes bombées, sans changer leur contour. |
 | Axe Y | Flèche d'axe planté sur la table, à gauche des courbes. Reste fixe (sinon l'appli « a l'air cassée »). |
-| Marteau | Marteau de forgeron (table de frappe évasée, collet, panne en coin émoussé), tombé depuis la corne, **posé** sur le sommet vert sans s'y enfoncer, **devant** les courbes. Petits éclats orange au contact. Pas de marteaux fantômes de la chute. |
+| Marteau | Marteau de forgeron dessiné en courbes (table de frappe évasée, collet, panne en coin émoussé), le bout du manche **posé sur la corne**, la face **posée** sur le sommet vert sans s'y enfoncer, **devant** les courbes. Petits éclats orange au contact, sans toucher la tête. Pas de marteaux fantômes de la chute. |
 | Lien absorption → émission | **La comète** : un triangle fin qui part de l'impact et finit en **point** sur le sommet orange, dégradé vert → orange. |
+| Ombre et fond | Ombre grise douce sous l'enclume, sans couleur. Fond de tuile en aplat uni (`#f3f1ec` en clair, `#15181a` en sombre). |
 | Thème | Travail principal en **clair**. Une version sombre existe. |
 
 ## 4. Rejeté ou mis de côté
@@ -38,54 +39,66 @@ Formes calculées (scripts) : gaussienne principale σ = 7, épaulement σ = 8, 
 - Petits trous carré / rond dans la table : pas convaincants.
 - Étoiles à quatre branches (à revoir plus tard, éventuellement).
 - Trait coloré + remplissage ; halos qui « bavent » au pied ; bande blanche à la jonction ; reflet diagonal sur l'enclume ; effet glossy.
+- Essayés pour #445 et écartés : verre clair ou moyen (l'enclume se perd sur fond clair), filet blanc à pleine force, ombre colorée sous l'enclume, tuile en dégradé.
 
 ## 5. Gardé en réserve (idées appréciées)
 
 - Ciel étoilé discret en version sombre.
 - Enclume au voile grisâtre (version nuit).
+- Mouvement (#445, sans décision) : `02-iterations/mouvement/` garde une animation de la frappe (`-anime.svg`, boucle de 4,2 s) et une version fixe avec des ondes dans le verre (`-ondes.svg`).
 - Explorations des sous-agents : « Enclume de Jablonski » (diagramme d'énergie dans l'enclume), « L'enclume est le déplacement de Stokes », « Press » (l'axe devient le marteau), médaillon « foyer ».
 
 ## 6. Version actuelle
 
-- `00-final/stokesforge-logo-clair.svg` : version de travail (thème clair).
-- `00-final/stokesforge-logo-sombre.svg` : même logo sur tuile sombre.
-- PNG en 1024, 512, 256, 64 et 32 px à côté.
+- `00-final/stokesforge-logo-clair.svg` et `-sombre.svg` : **versions de référence**, en contours vectoriels.
+- `00-final/stokesforge-logo-clair-filtre.svg` et `-sombre-filtre.svg` : même logo, réfraction calculée à l'affichage par un filtre SVG.
+- PNG en 1024, 512, 256, 64 et 32 px, tirés des versions de référence avec resvg.
+- L'ancien logo plat est dans `02-iterations/avant-liquid-glass/`. C'est aussi la source que les scripts relisent.
 
-Ce SVG utilise des dégradés, des masques et des flous (filtres SVG). Il s'affiche correctement dans les navigateurs et Inkscape ; certains moteurs simples ignorent les filtres (le logo reste lisible mais perd la lueur).
+| Version | Poids | Compressé | Contenu | Moteurs de rendu |
+| --- | --- | --- | --- | --- |
+| Contours | 263 Ko | 58 Ko | formes, dégradés, découpes, flou gaussien ; aucune image | Mesurés concordants à moins de 1/255 d'écart moyen : Chromium, Firefox, librsvg, resvg 0.45.1, Inkscape 1.4 |
+| Filtre | 184 Ko | 128 Ko | `feDisplacementMap`, `feImage` et masques en images de niveaux de gris | Corrects : Chromium, librsvg. **Cassé dans resvg** (déviation en marches d'escalier), lumières perdues dans Inkscape |
 
-## 7. Limites de l'outil et suite (Blender)
+Pas testé : Safari, Illustrator, Figma, KDE (QtSvg).
 
-**Ce que le SVG ne sait pas faire** : une vraie réfraction (la lumière déviée par un bord arrondi, qui déforme ce qu'il y a derrière). Le rendu actuel l'imite avec des dégradés et des flous ; c'est près du maximum en SVG pur.
+## 7. Méthode du verre
 
-**Blender peut-il sortir un SVG ?** Pas pour cet effet. Blender exporte en SVG seulement du **dessin au trait** (Freestyle SVG, Grease Pencil) : contours et aplats, sans matériaux, sans verre, sans lumière. Un rendu « verre liquide » sort de Blender en **image bitmap** (PNG, éventuellement très grande : 2048 ou 4096 px).
+Chaque forme est gonflée numériquement (équation de Poisson, puis un dôme qui sature). Les normales de cette surface donnent, pixel par pixel : la réfraction (loi de Snell), l'absorption selon l'épaisseur (Beer-Lambert, bords plus clairs), la réflexion aux bords (Fresnel) et la lumière directionnelle.
 
-Figma : exporte du SVG, mais ses effets de verre / flou d'arrière-plan sont pixellisés ou perdus à l'export SVG. Icon Composer (Apple) : produit des icônes Apple, pas du SVG.
+**Le SVG sait faire une vraie réfraction**, contrairement à ce que disait une version précédente de ce document : `feDisplacementMap` la fait, et la limite « Chromium seulement » ne vise que son emploi en `backdrop-filter`. Elle ne se voit que si ce qui passe derrière le verre a des contours : un flou n'a rien à déformer. D'où le reflet net.
 
-**Stratégie proposée**
+La version de référence calcule cette réfraction une fois pour toutes, puis trace chaque couche en une pile de contours imbriqués, avec un flou très léger qui dissout les paliers. Ne pas remplacer ce flou par des centaines de couches très transparentes : les arrondis sur 8 bits s'accumulent et font des plaques colorées. À 2048 px et plus, de légers paliers se devinent encore dans le reflet.
 
-1. **SVG = logo de référence** (vectoriel) : la version actuelle, nettoyée, pour la doc, le site, les petites tailles et tous les usages plats.
-2. **Blender = rendu « hero »** en PNG haute définition pour l'icône d'application, l'écran « À propos », le site.
-3. Les deux partagent exactement la même géométrie (mêmes courbes, même enclume) : les scripts Python génèrent les deux.
+Limites : le fichier ne se retouche pas à la main, on change les réglages et on relance le script. L'effet natif d'Apple ne s'obtient que dans Icon Composer, sur Mac ; il attend des calques sans flou ni reflet. Ici il est recréé.
 
-**Plan Blender (à faire par Claude, sans compétence Blender requise)**
-
-- Un script Python `bpy` qui construit toute la scène : enclume extrudée depuis le même contour, matériau verre sombre (Principled BSDF, transmission, rugosité faible), courbes en volumes émissifs vert et orange, marteau, axe, comète ; caméra orthographique de face ; éclairage.
-- Rendu Cycles, fond transparent, sortie PNG 2048 px.
-- Utilisation : installer Blender (gratuit), puis une seule commande : `blender -b -P stokesforge_logo.py`. Le script écrit le PNG.
+**Blender** reste possible pour un rendu « hero » en PNG, mais il ne sort pas de SVG pour cet effet (Freestyle et Grease Pencil ne font que du trait et des aplats), et il n'a pas été utilisé.
 
 ## 8. Contenu de l'archive
 
 | Dossier | Contenu |
 | --- | --- |
-| `00-final/` | Logo actuel (SVG clair et sombre + PNG à plusieurs tailles) |
+| `00-final/` | Logo actuel (SVG clair et sombre, en contours et en filtre, + PNG à plusieurs tailles) |
 | `01-planches/` | Toutes les planches de comparaison (PNG) |
-| `02-iterations/` | Toutes les itérations, par série (v, p, q, r, s, t, u, w, candidats 1 à 6) |
+| `02-iterations/` | Toutes les itérations, par série (v, p, q, r, s, t, u, w, candidats 1 à 6), l'ancien logo (`avant-liquid-glass/`) et les essais de mouvement (`mouvement/`) |
 | `03-explorations-anterieures/` | Premiers logos et explorations (enclume au trait, chutes, etc.) |
 | `04-sous-agents/` | Les explorations des trois sous-agents (géométrique, organique, conceptuel), avec leurs scripts |
 | `05-design-system/` | Textes et jetons du design system en ligne |
 | `06-scripts/` | Les générateurs Python et les scripts de planches |
 
-**Régénérer le logo actuel** (Python 3, depuis `06-scripts/`) :
+**Régénérer le logo actuel** (depuis `06-scripts/` ; Python 3 avec numpy, scipy, Pillow et contourpy, plus `rsvg-convert`). Le résultat est identique à l'octet près :
+
+```bash
+SRC=../02-iterations/avant-liquid-glass/stokesforge-logo-clair.svg
+OPTS="rimw=1,spec=.65,rim=.65,cres=.55,cast=0,ftile=1"
+python3 vector.py $SRC stokesforge-logo-clair.svg --levels 18 --opts $OPTS                # référence, clair
+python3 vector.py $SRC stokesforge-logo-sombre.svg --theme dark --levels 18 --opts $OPTS  # référence, sombre
+python3 glass.py $SRC stokesforge-logo-clair-filtre.svg --opts $OPTS                      # filtre (--theme dark pour le sombre)
+```
+
+Essais de mouvement : ajouter `,anim=1` ou `,ripple=2.4` à `OPTS` de `vector.py`. PNG : `resvg -w 1024 entree.svg sortie.png` (resvg 0.45.1).
+
+**Régénérer l'ancien logo plat** (Python 3, depuis `06-scripts/`) :
 
 ```bash
 SCENE=none LH=112 MODE=plain python3 excite9.py sortie
