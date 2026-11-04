@@ -11,6 +11,15 @@ The GPL allows commercial distributions; the distribution of the program or of
 a modified version must respect its conditions, notably the supply of the
 corresponding source code.
 
+## The logo: all rights reserved
+
+Everything in `assets/logo/` (the logo in all its versions, drafts, boards,
+tokens, generator scripts) is **excluded from the GPL** and under all rights
+reserved (#444, notice in [`assets/logo/LICENSE`](../assets/logo/LICENSE)): no
+use or modification without the author's written permission. No build or package
+uses this directory today. Deriving the application icon from it, which
+the binaries would then embed, is decided with #388.
+
 ## Additional permission: withdrawn, can be requested
 
 Version 1.0.0 carried an extension exception for `pyst` (#129, section 7 of
