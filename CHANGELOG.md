@@ -220,6 +220,8 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Window names (#437): a folder named `Book1`, `Graph1`, `MBook1` or `Note1` next to the place where a window is created no longer refuses the new unnamed window; the automatic name moves on to the next free number.
+
 - Column type (#431): the Type entries (right-click on a column letter, Workbook > Columns) are greyed, with the reason as tooltip, on a column computed by a formula or produced by a calculation (they used to answer "Change Type" and be silently undone by the next recalculation). On a selection that also holds other columns, only those change. `pyst.set_column_type` raises `InvalidValueError` on such a column.
 
 - Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
