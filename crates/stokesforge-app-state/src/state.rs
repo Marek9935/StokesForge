@@ -941,6 +941,43 @@ pub enum Action {
         /// `true` for free placement.
         free: bool,
     },
+    /// Sets the total width or height of the image of a graph, the plot areas
+    /// following in proportion (#426): what the figure size fields of the Page
+    /// Layout Mode strip commit on a regular grid
+    /// ([`crate::frame_sizes::set_total_in_draft`]). With `ratio` (height /
+    /// width), the other axis follows. One undo step
+    /// ([`PlotEditKind::ResizeFigure`]); nothing sent on a free graph (it has
+    /// [`Action::SetFreeLayout`]), for a value the axes cannot fit or when
+    /// nothing changes.
+    SetFigureTotal {
+        /// Target graph.
+        graph: NodeId,
+        /// The axis typed.
+        axis: stokesforge_render::pipeline::SizeAxis,
+        /// The new size, in points; brought into what the axes allow.
+        target: f64,
+        /// Height / width to keep, with the lock closed.
+        ratio: Option<f64>,
+    },
+    /// Sets "Figure size = Fixed" (`true`) or "Grows with the axes" of a graph
+    /// (#426): the same setter as Graph Properties. One undo step; nothing sent
+    /// when it is already so.
+    SetFigureFixed {
+        /// Target graph.
+        graph: NodeId,
+        /// Fixed (`true`) or grows with the axes.
+        fixed: bool,
+    },
+    /// Closes or opens the lock between the width and the height of a graph's
+    /// image (#407, #426). Session state of the graph, shared by Graph
+    /// Properties and the Page Layout Mode strip: no command, no history, no
+    /// `.stf`.
+    SetSizeLock {
+        /// Target graph.
+        graph: NodeId,
+        /// `None` opens the lock.
+        lock: Option<crate::frame_sizes::SizeLock>,
+    },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
     SetLengthUnit(crate::length_unit::LengthUnit),
@@ -2644,11 +2681,6 @@ pub struct PlotEdit {
     /// Series currently chosen in the list, for detailed editing —
     /// pure UI state, never sent to the model.
     pub selected_series: usize,
-    /// The lock between the total width and height of the image (#407):
-    /// `None` = open (the default, and each time the window opens), `Some`
-    /// holds the ratio. Window state like `selected_series`: never sent to
-    /// the model, kept by the realignment of the draft and by Undo.
-    pub size_lock: Option<crate::frame_sizes::SizeLock>,
     /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
     /// True once `selected_panel` has been set from the graph's active layer
@@ -3059,6 +3091,9 @@ pub struct AppState {
     pending_discarded_save: Option<PendingDiscardedSave>,
     /// Sheet whose tab is in name editing.
     renaming_sheet: Option<NodeId>,
+    /// The closed ratio locks between the width and the height of a graph's
+    /// image, per graph, for the session (#426). Never saved.
+    size_locks: std::collections::HashMap<NodeId, crate::frame_sizes::SizeLock>,
     /// Row drop waiting for the choice of the X axis (#166).
     pending_row_drop: Option<PendingRowDrop>,
     object_clipboard_origin: String,
@@ -3306,6 +3341,7 @@ impl AppState {
             discarded_source: None,
             pending_discarded_save: None,
             renaming_sheet: None,
+            size_locks: std::collections::HashMap::new(),
             pending_row_drop: None,
             object_clipboard_origin: format!(
                 "{}:{}",
@@ -3399,6 +3435,7 @@ impl AppState {
         view.snapshot = self.snapshot.clone();
         view.selected_sheets = self.selected_sheets.clone();
         view.renaming_sheet = self.renaming_sheet;
+        view.size_locks = self.size_locks.clone();
         view.selection = self.selection.clone();
         view.editing = self.editing.clone();
         view.header_editing = self.header_editing.clone();
@@ -3418,6 +3455,7 @@ impl AppState {
     /// Synchronizes the tab editor without overwriting the local selection.
     pub fn sync_detached_sheet_editor(&mut self, root: &Self) {
         self.renaming_sheet = root.renaming_sheet;
+        self.size_locks = root.size_locks.clone();
     }
 
     /// Joins the interaction of a detached workbook to the main command
@@ -5080,7 +5118,6 @@ impl AppState {
             graph,
             spec: model.clone(),
             selected_series: 0,
-            size_lock: None,
             selected_panel: 0,
             panel_initialized: false,
             base: model,
@@ -5502,6 +5539,14 @@ impl AppState {
                 frames,
                 page,
             } => self.set_free_layout(graph, &frames, page),
+            Action::SetFigureTotal {
+                graph,
+                axis,
+                target,
+                ratio,
+            } => self.set_figure_total(graph, axis, target, ratio),
+            Action::SetFigureFixed { graph, fixed } => self.set_figure_fixed(graph, fixed),
+            Action::SetSizeLock { graph, lock } => self.set_size_lock(graph, lock),
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
                     self.fail(tr!(
@@ -11007,6 +11052,85 @@ impl AppState {
         });
     }
 
+    /// The closed ratio lock of `graph`, if any (#426).
+    pub fn size_lock(&self, graph: NodeId) -> Option<crate::frame_sizes::SizeLock> {
+        self.size_locks.get(&graph).copied()
+    }
+
+    /// Every closed ratio lock, by graph (#426): the shell publishes them to
+    /// the graph windows, detached ones included.
+    pub fn size_locks(&self) -> &std::collections::HashMap<NodeId, crate::frame_sizes::SizeLock> {
+        &self.size_locks
+    }
+
+    /// Closes (`Some`) or opens (`None`) the ratio lock of `graph`
+    /// ([`Action::SetSizeLock`]).
+    pub fn set_size_lock(&mut self, graph: NodeId, lock: Option<crate::frame_sizes::SizeLock>) {
+        match lock {
+            Some(lock) => {
+                self.size_locks.insert(graph, lock);
+            }
+            None => {
+                self.size_locks.remove(&graph);
+            }
+        }
+    }
+
+    /// The image of `graph` is about to change by the edit being committed:
+    /// its lock keeps the ratio it has instead of taking the new image's.
+    fn adopt_size_lock(&mut self, graph: NodeId) {
+        if let Some(lock) = self.size_locks.get_mut(&graph) {
+            lock.adopt_next();
+        }
+    }
+
+    /// [`Action::SetFigureTotal`].
+    fn set_figure_total(
+        &mut self,
+        graph: NodeId,
+        axis: stokesforge_render::pipeline::SizeAxis,
+        target: f64,
+        ratio: Option<f64>,
+    ) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        if before.layer_placement != stokesforge_plot::LayerPlacement::Grid {
+            return;
+        }
+        let mut spec = before.clone();
+        if crate::frame_sizes::set_total_in_draft(&mut spec, axis, target, ratio).is_none()
+            || spec == before
+        {
+            return;
+        }
+        self.adopt_size_lock(graph);
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::ResizeFigure,
+        });
+    }
+
+    /// [`Action::SetFigureFixed`]: the setter of Graph Properties, on a draft
+    /// given the frames the graph is drawn with.
+    fn set_figure_fixed(&mut self, graph: NodeId, fixed: bool) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let mut spec = before.clone();
+        let drawn = crate::frame_sizes::figure_layout(&spec);
+        let (widths, heights) = drawn.map_or_else(Default::default, |layout| {
+            (layout.frame_widths, layout.frame_heights)
+        });
+        if !crate::frame_sizes::set_fixed_in_draft(&mut spec, (&widths, &heights), fixed)
+            || spec == before
+        {
+            return;
+        }
+        self.execute(Command::SetPlotSpec { graph, spec });
+    }
+
     /// [`Action::SetGridFrames`]: both vectors written into one spec and
     /// committed as one step. A legacy graph is first given the frames it is
     /// drawn with, so the vectors always have the grid's lengths.
@@ -11034,6 +11158,9 @@ impl AppState {
         spec.frame_heights = heights.iter().map(bounds).collect();
         if self.plot_spec(graph).is_some_and(|before| before == spec) {
             return;
+        }
+        if figure {
+            self.adopt_size_lock(graph);
         }
         self.execute(Command::EditPlotSpec {
             graph,
@@ -11133,6 +11260,9 @@ impl AppState {
         }
         if spec == before {
             return;
+        }
+        if page.is_some() {
+            self.adopt_size_lock(graph);
         }
         let kind = if page_resized {
             PlotEditKind::ResizeFigure

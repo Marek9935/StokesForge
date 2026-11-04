@@ -417,6 +417,25 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(workspace_window_rect),
     },
     Shot {
+        name: "graphs-page-layout-mode",
+        setup: |h| {
+            let graph = h.state().ids.graph1;
+            act(
+                h,
+                Action::AddCell {
+                    graph,
+                    panel: 0,
+                    side: CellSide::Right,
+                    columns: Vec::new(),
+                },
+            );
+            show_only(h, Tab::Graph(graph), egui::vec2(900.0, 560.0));
+            h.state_mut().app.toggle_layout_mode(graph, Some(true));
+            settle(h);
+        },
+        crop: Crop::Rect(workspace_window_rect),
+    },
+    Shot {
         name: "analysis-integration",
         setup: |h| {
             open_analysis(h, Preset::Integrate, 0.0, 0.0);

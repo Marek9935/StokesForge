@@ -1117,6 +1117,27 @@ bands, margins, titles, Fixed reserve and Left / Top stay as
   lands within half a point. Tests: `render/tests/figure_layout.rs` ("Total
   image size"), `render-svg/tests/figure_size.rs`, robustness `b13`.
 
+### The Page Layout Mode in the app (#426)
+
+The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometry in
+`render::free_gesture` and `render::grid_gesture`); the app owns what surrounds it
+(`app/page_layout.rs`). Three rules to keep when touching the shell:
+
+- **A view, not the model.** Entering or leaving sends nothing. The only strip
+  control that touches the model is the Grid mode toggle (`SetLayerPlacement`), and a
+  pending nudge burst is committed first (`flush_layout_edit`, which turns the
+  `LayoutEdited` event into its action *before* the toggle's), because a placement
+  change drops the burst.
+- **The figure's rectangle is stable.** The strip's height is reserved from the
+  previous frame, in whole points, so the cache key (`rect`) does not move while the
+  user types or the rows wrap. Rulers and `LAYOUT_GRAB_MARGIN` shrink the contain
+  rectangle, they never change the figure's own layout (invariant 5).
+- **The padlock is the application's** (`AppState::size_lock`, `Action::SetSizeLock`,
+  published to the graph windows each frame, copied by `fork_for_detached_view`):
+  Graph Properties and the strip share it, and `GraphView::set_figure_ratio_lock`
+  makes the L corners keep its ratio. A committed scale of the figure adopts the next
+  image (`SizeLock::adopt_next`), so a rounding never drifts the ratio.
+
 ### Enlarging a graph without blurring the text
 
 `GraphView::paint_scaled` lays the figure out at its own size (`GraphView::figure_layout`, #394) then scales it to

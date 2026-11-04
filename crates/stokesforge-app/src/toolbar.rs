@@ -231,6 +231,8 @@ pub enum ToolbarRequest {
     ExportGraph,
     /// Changes the tool of the foreground graph.
     SetGraphTool(GraphTool),
+    /// Turns the Page Layout Mode of the foreground graph on or off (#426).
+    TogglePageLayoutMode,
     /// Resets the zoom of the foreground graph.
     ResetZoom,
     /// Formats the targeted text of the foreground graph.
@@ -323,6 +325,8 @@ pub enum ToolsContext {
     Graph {
         graph: NodeId,
         tool: GraphTool,
+        /// The Page Layout Mode is on (#426).
+        layout_mode: bool,
     },
     Book {
         book: NodeId,
@@ -564,8 +568,12 @@ fn tool_button(
 /// the context menu already offer.
 fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
     match &env.tools {
-        ToolsContext::None => graph_tools(ui, None, None, requests),
-        ToolsContext::Graph { graph, tool } => graph_tools(ui, Some(*graph), Some(*tool), requests),
+        ToolsContext::None => graph_tools(ui, None, None, false, requests),
+        ToolsContext::Graph {
+            graph,
+            tool,
+            layout_mode,
+        } => graph_tools(ui, Some(*graph), Some(*tool), *layout_mode, requests),
         ToolsContext::Book {
             book,
             sheet,
@@ -636,6 +644,7 @@ fn graph_tools(
     ui: &mut egui::Ui,
     graph: Option<NodeId>,
     tool: Option<GraphTool>,
+    layout_mode: bool,
     requests: &mut Vec<ToolbarRequest>,
 ) {
     let enabled = graph.is_some();
@@ -722,6 +731,16 @@ fn graph_tools(
         requests.push(ToolbarRequest::ResetZoom);
     }
     ui.separator();
+    if tool_button(
+        ui,
+        Icon::PageLayout,
+        tr!("menu-layout-page-mode"),
+        Some(hint(tr!("menu-layout-page-mode", "hint"))),
+        enabled,
+        layout_mode,
+    ) {
+        requests.push(ToolbarRequest::TogglePageLayoutMode);
+    }
     if tool_button(
         ui,
         Icon::Properties,

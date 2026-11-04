@@ -303,6 +303,38 @@ pub fn scaled_frames(
     )
 }
 
+/// The drag `delta` of a figure corner `(right, bottom)` once the ratio lock is
+/// closed (#426): the image `(width, height)` keeps `ratio` = height / width.
+/// The axis that moved most **relatively** leads and the other follows, so the
+/// result changes the extent along both axes by the amounts that keep the
+/// ratio. A `delta` or `ratio` that is not usable is returned untouched.
+pub fn locked_corner_delta(
+    image: (f64, f64),
+    corner: (bool, bool),
+    delta: (f64, f64),
+    ratio: f64,
+) -> (f64, f64) {
+    let usable = image.0 > 0.0
+        && image.1 > 0.0
+        && ratio.is_finite()
+        && ratio > 0.0
+        && delta.0.is_finite()
+        && delta.1.is_finite();
+    if !usable {
+        return delta;
+    }
+    // Signed growth of each extent for this corner.
+    let sign = |far: bool| if far { 1.0 } else { -1.0 };
+    let (grow_x, grow_y) = (sign(corner.0) * delta.0, sign(corner.1) * delta.1);
+    if grow_x.abs() / image.0 >= grow_y.abs() / image.1 {
+        let wanted = (image.0 + grow_x).max(0.0) * ratio - image.1;
+        (delta.0, sign(corner.1) * wanted)
+    } else {
+        let wanted = (image.1 + grow_y).max(0.0) / ratio - image.0;
+        (sign(corner.0) * wanted, delta.1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,5 +546,37 @@ mod tests {
         let out = scaled_axis(&w, 100.0, 1e9, true);
         assert_eq!(out, vec![1000.0, 2000.0]);
         assert_eq!(scaled_axis(&w, 100.0, f64::NAN, true), w.to_vec());
+    }
+
+    /// With the lock closed the axis that moved most relatively leads, for
+    /// every corner. Witness: the horizontal axis always leading.
+    #[test]
+    fn a_locked_corner_keeps_the_ratio_with_the_leading_axis() {
+        // 400 x 200, ratio 0.5.
+        let image = (400.0, 200.0);
+        // Far corner, x leads: +40 wide (10 %) asks +20 high.
+        assert_eq!(
+            locked_corner_delta(image, (true, true), (40.0, 3.0), 0.5),
+            (40.0, 20.0)
+        );
+        // Far corner, y leads: +30 high (15 %) asks +60 wide.
+        assert_eq!(
+            locked_corner_delta(image, (true, true), (5.0, 30.0), 0.5),
+            (60.0, 30.0)
+        );
+        // Near corner: growing means moving left and up (negative deltas).
+        assert_eq!(
+            locked_corner_delta(image, (false, false), (-40.0, 0.0), 0.5),
+            (-40.0, -20.0)
+        );
+        // Mixed corner: top-right, pulled inward along y leads.
+        assert_eq!(
+            locked_corner_delta(image, (true, false), (0.0, 40.0), 0.5),
+            (-80.0, 40.0)
+        );
+        assert_eq!(
+            locked_corner_delta(image, (true, true), (f64::NAN, 1.0), 0.5).1,
+            1.0
+        );
     }
 }

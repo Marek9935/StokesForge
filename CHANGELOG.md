@@ -30,6 +30,16 @@ without a message, see `docs/persistence.md`).
   an optional `.stf` field (an older version that saves the file again drops it
   without a message). Nothing is visible yet.
 
+- Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
+  show a graph as a page with rulers, a grid, handles and a settings strip
+  (figure size with a padlock shared with Graph Properties, position and size of
+  the selected graph, Align, Same Size, Distribute, Snap, **Grid mode**, and
+  when axes are added). Entering or leaving the mode changes nothing in the
+  file; **Grid mode** is the layer placement, one undo step. The padlock of the
+  figure size now belongs to the graph for the session instead of to the
+  Properties window, and two labels of Graph Properties are renamed: the total
+  is **Figure size**, the Advanced choice is **When axes are added**.
+
 - A new graph plotted from a workbook is named after it (#434): "Book1 plot",
   then "Book1 plot 2"… (numbered after the highest existing number, a deleted
   graph leaves a gap) instead of Graph1, Graph2. `pyst.plot` without `name`

@@ -362,14 +362,34 @@ pub(super) fn graph_view_contents(
     actions: &mut Vec<Action>,
 ) {
     let available = ui.available_size_before_wrap();
+    // Page Layout Mode (#426): the view is fed with the unit, the snapping
+    // grid and the ratio lock; the keys come first (Esc may leave the mode).
+    super::page_layout::feed_view(ui.ctx(), view, graph_id);
+    super::page_layout::handle_keys(ui, view, graph_id);
+    let layout_mode = view.layout_mode();
+    super::page_layout::publish_layout_mode(ui.ctx(), graph_id, layout_mode);
+    let controls_height = if layout_mode {
+        super::page_layout::controls_height(ui.ctx(), graph_id)
+    } else {
+        GRAPH_CONTROLS_HEIGHT
+    };
     // The figure takes everything left after its controls. Reserving their
     // full height avoids the same auto-growing mechanism that has
     // already hit the workbook windows: an overrun would make
     // `rect` change every frame, hence cause a cache miss on hover.
-    let (outer, _) = ui.allocate_exact_size(
-        egui::vec2(available.x, (available.y - GRAPH_CONTROLS_HEIGHT).max(0.0)),
+    let (area, _) = ui.allocate_exact_size(
+        egui::vec2(available.x, (available.y - controls_height).max(0.0)),
         egui::Sense::hover(),
     );
+    // In the mode, the rulers take a strip at the top and at the left, and the
+    // figure leaves the room the page corner handles need around it.
+    let strips = layout_mode.then(|| super::page_layout::split_strips(area));
+    let outer = strips.as_ref().map_or(area, |strips| strips.figure);
+    let contain = if layout_mode {
+        outer.shrink(stokesforge_render_egui::LAYOUT_GRAB_MARGIN)
+    } else {
+        outer
+    };
     // The displayed rectangle follows the available space (F11) with the ratio of
     // the figure (`GraphView::figure_layout`, #394: the sum of the cell sizes
     // plus the title band): "contain" scaling, bounded by the
@@ -378,28 +398,33 @@ pub(super) fn graph_view_contents(
     // tick mark is recomputed for the window size (point 3 of
     // `retours-2026-09-24-bugs.md`). The child Ui bounds the
     // interactions without growing the parent window.
-    publish_figure_area(ui.ctx(), graph_id, outer.size());
+    publish_figure_area(ui.ctx(), graph_id, area.size());
     let layout = view.figure_layout(ui.ctx(), snapshot, graph_id).ok();
     let (fig_w, fig_h) = layout.as_ref().map_or(DEFAULT_FIGURE_SIZE, |l| l.size);
-    if let Some(layout) = layout {
+    if let Some(layout) = layout.clone() {
         publish_figure_layout(ui.ctx(), graph_id, layout);
     }
     let scale = if fig_w > 0 && fig_h > 0 {
-        (outer.width() / fig_w as f32)
-            .min(outer.height() / fig_h as f32)
+        (contain.width() / fig_w as f32)
+            .min(contain.height() / fig_h as f32)
             .max(0.0)
     } else {
         0.0
     };
     let rect = egui::Rect::from_center_size(
-        outer.center(),
+        contain.center(),
         egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale),
     );
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     // The grab margin of the figure's edges reaches into the frame margin of
-    // the window (#405): the clip rectangle must let it through.
+    // the window (#405): the clip rectangle must let it through. In the mode
+    // the margin is already inside `outer`.
     let grab = stokesforge_render_egui::FIGURE_GRAB_MARGIN;
-    figure_ui.set_clip_rect(ui.clip_rect().expand(grab).intersect(outer.expand(grab)));
+    if layout_mode {
+        figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
+    } else {
+        figure_ui.set_clip_rect(ui.clip_rect().expand(grab).intersect(outer.expand(grab)));
+    }
     // A transparent background ("None" color, or partial opacity) shows on
     // white: without it, the figure would take the color of the window,
     // which is not that of the export. This white is painted **only here**,
@@ -428,7 +453,8 @@ pub(super) fn graph_view_contents(
             {
                 calculation_handles(ui, view, &snapshot.tree, graph_id, &spec, actions);
             }
-            if !keyboard_focus_outside_grid(ui.ctx())
+            if !layout_mode
+                && !keyboard_focus_outside_grid(ui.ctx())
                 && !super::project_manager::owns_keyboard(ui.ctx())
             {
                 if let Some(spec) =
@@ -479,7 +505,32 @@ pub(super) fn graph_view_contents(
                 }
             }
             shape_properties_ui(ui.ctx(), view, graph_id, actions);
-            if ui.small_button(tr!("plot-view-reset-zoom")).clicked() {
+            if let Some(strips) = &strips {
+                let unit = super::page_layout::length_unit(ui.ctx());
+                super::page_layout::paint_rulers(ui, strips, view, unit);
+                let (controls, _) = ui.allocate_exact_size(
+                    egui::vec2(available.x, controls_height),
+                    egui::Sense::hover(),
+                );
+                let mut strip_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(controls)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                strip_ui.set_clip_rect(ui.clip_rect().intersect(controls));
+                if let Some(spec) =
+                    stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
+                {
+                    super::page_layout::inspector(
+                        &mut strip_ui,
+                        view,
+                        &spec,
+                        layout.as_ref(),
+                        graph_id,
+                        actions,
+                    );
+                }
+            } else if ui.small_button(tr!("plot-view-reset-zoom")).clicked() {
                 view.reset_view();
             }
         }

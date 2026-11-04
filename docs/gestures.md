@@ -63,6 +63,34 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 | Right-click | any object or the area | selects the target and opens its menu |
 | Shift + wheel | — | — |
 
+### The graph in the Page Layout Mode (#426)
+
+`Layout ▸ Page Layout Mode` (view state: no action, no undo step). The mode reads the
+placement of the figure **as drawn**; every gesture below is one undo step, with a live
+preview and no event before the release. Handles: 7x7 squares and 4x18 pills in the
+selection colour, solid on the selected graph, faint on the one under the pointer. The
+bands are 6 + 20 + 20 screen px wide in both placements; every inner reach is
+`min(wanted, E/4)`, `E` the extent of the graph on that axis.
+
+| Gesture | On | Effect |
+|---|---|---|
+| Drag | line between two columns or two rows, **Regular Grid** | the column (row) trades size with its neighbour on the other side of the line; the figure keeps its size; one `SetGridFrames` (`Resize Cell`) |
+| Drag | corner shared by several graphs, Regular Grid | moves every internal line it lies on (middle of a 2x2: column and row together); a corner on one line and on the figure's edge moves that line, one-axis cursor |
+| Drag | L-shaped corner of the figure, either placement | scales the figure (one factor per axis, bands frozen); with the padlock closed the axis that moved most relatively leads and the other follows (`locked_corner_delta`); `Resize Figure` |
+| Drag, arrows | inside a graph, Regular Grid | nothing: no move, no single-graph resize, no nudge |
+| Drag | inside a graph, handles, **Free** | moves / resizes the graph; magnets and the grid snap (**Shift** disables) |
+| Drag | line between two touching graphs, Free | centre band (6 px): both graphs; side band (20 px): the graph on the pointer's side, single arrow |
+| Arrows, Shift + arrows | Free | nudge the selected graphs by one grid step (ten with Shift); a burst is one `SetFreeLayout` 0.7 s after the last key, on leaving the mode or before any strip action |
+| `G` | the mode | turns Snap on or off |
+| Esc | the mode | leaves it (until the root takes the key, the graph window handles it) |
+
+The strip (module page_layout of the app) adds: Figure size with the padlock, X Y W H of the selected
+graph (X and Y greyed on the grid; W and H trade with the right neighbour, the last
+with its left), Align / Same Size / Distribute (greyed with a reason on the grid), Snap
+and ONE Coarse / Fine button (view state, never in the spec), the **Grid mode** toggle
+(`SetLayerPlacement`, one undo step, the label is the state), and *When axes are added*
+(Grows / Fixed). A pending nudge is committed before any of them reaches the model.
+
 ## The analysis window preview
 
 Source: `app/analysis_preview.rs` (preview), `app/analysis_handles.rs`

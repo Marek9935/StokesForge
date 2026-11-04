@@ -772,6 +772,29 @@ fn a_compact_fallback_grid_has_no_handle() {
     );
 }
 
+/// The L page corners scale frames the layout does not have: on a compact
+/// fallback grid they are neither drawn nor grabbable. Witness: the `editable`
+/// check dropped from either the painting or the grab.
+#[test]
+fn a_compact_fallback_grid_has_no_page_corner() {
+    let fixture = Fixture::compact();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let corner = Pos2::new(layout.size.0 as f32 + 4.0, layout.size.1 as f32 + 4.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner + egui::vec2(30.0, 30.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(signals.is_empty(), "{signals:?}");
+    let out = hover_at(&context, &mut view, &fixture, corner, 3.0);
+    assert_eq!(out.cursor, egui::CursorIcon::Default);
+    assert_eq!(l_corners(&out.shapes), 0, "no corner is drawn");
+}
+
 /// On a Regular grid the inside of a graph moves nothing and the arrow keys
 /// nudge nothing: no event, no preview. Witness: the guard removed from
 /// `nudge`.
@@ -962,6 +985,69 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         egui::Modifiers::NONE,
     );
     assert!(signals.is_empty(), "{signals:?}");
+}
+
+/// With the ratio lock closed, an L corner of a Regular figure keeps the image
+/// ratio whichever axis the pointer moved most. Witness: the lock not fed to
+/// the view (the other axis stays as dragged).
+#[test]
+fn a_locked_l_corner_keeps_the_ratio_of_the_regular_image() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
+    let ratio = f64::from(h) / f64::from(w);
+    view.set_figure_ratio_lock(Some(ratio));
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    // The pointer mostly goes right: the height follows.
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner + egui::vec2(60.0, 2.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(
+        matches!(
+            signals.as_slice(),
+            [GraphEvent::GridFramesEdited { figure: true, .. }]
+        ),
+        "{signals:?}"
+    );
+    let after = layout_of(&context, &mut view, &fixture);
+    let kept = f64::from(after.size.1) / f64::from(after.size.0);
+    assert!((kept - ratio).abs() < 0.004, "{kept} vs {ratio}");
+    assert!(after.size.0 >= before.size.0 + 59, "{:?}", after.size);
+}
+
+/// Same for the page corner of a Free figure.
+#[test]
+fn a_locked_page_corner_keeps_the_ratio_of_the_free_page() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let page = view.layout_page().expect("page");
+    view.set_figure_ratio_lock(Some(page.height / page.width));
+    let corner = screen(
+        &view,
+        page.left + page.width + 4.0,
+        page.top + page.height + 4.0,
+    );
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner + egui::vec2(100.0, 1.0),
+        SHIFT,
+    );
+    let (_, new_page) = edited(&signals);
+    let new_page = new_page.expect("a page");
+    assert!(
+        (new_page.height / new_page.width - page.height / page.width).abs() < 1e-3,
+        "{new_page:?} from {page:?}"
+    );
+    assert!(new_page.width > page.width + 90.0);
 }
 
 /// Pulled far inward, the columns and rows stop together at the minimum with

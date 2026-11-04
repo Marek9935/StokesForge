@@ -27,9 +27,9 @@ use stokesforge_plot::{FreeFrame, FreePage, LayerPlacement, LengthUnit, PlotSpec
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_corners, grid_handle_at, layout_handle_at,
-    moved_boundary, moved_box, nudged_box, resized_frames, resized_page, scaled_frames,
-    scaled_to_page, stored_to_figure, BoundaryGroup, GraphBox, GridCorner, GridHandle, Guide,
-    LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
+    locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_frames, resized_page,
+    scaled_frames, scaled_to_page, stored_to_figure, BoundaryGroup, GraphBox, GridCorner,
+    GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::{FramePreview, GraphEvent, GraphView};
@@ -135,6 +135,8 @@ enum DragKind {
         heights: Vec<f64>,
         /// Extent of the figure that is not plot area: `(across, down)`.
         bands: (f64, f64),
+        /// The image `(width, height)` at the press, for the ratio lock.
+        image: (f64, f64),
     },
 }
 
@@ -170,6 +172,9 @@ pub(crate) struct LayoutState {
     pub(crate) drag: Option<LayoutDrag>,
     nudge: Option<Nudge>,
     pub(crate) view: Option<LayoutView>,
+    /// Height / width the page corners keep while the shell's ratio lock is
+    /// closed (fed by the shell, never stored).
+    ratio_lock: Option<f64>,
     /// Bases of the graphs under the pointer, to show their handles faintly.
     hovered: Vec<usize>,
 }
@@ -464,6 +469,17 @@ impl GraphView {
         self.layout.grid
     }
 
+    /// Closes the ratio lock of the figure's corners with `ratio` = height /
+    /// width of the image, or opens it (`None`). Fed by the shell each frame.
+    pub fn set_figure_ratio_lock(&mut self, ratio: Option<f64>) {
+        self.layout.ratio_lock = ratio.filter(|ratio| ratio.is_finite() && *ratio > 0.0);
+    }
+
+    /// Whether a box, boundary or corner drag is in progress.
+    pub fn layout_dragging(&self) -> bool {
+        self.layout.drag.is_some()
+    }
+
     /// The unit the sizes written on the boxes are shown in.
     pub fn set_length_unit(&mut self, unit: LengthUnit) {
         self.layout.unit = unit;
@@ -478,6 +494,25 @@ impl GraphView {
     /// paint); with the preview of the gesture in progress.
     pub fn layout_page(&self) -> Option<FreePage> {
         self.layout.view.as_ref().and_then(|view| view.page)
+    }
+
+    /// The whole image in stored page coordinates, title band included: the
+    /// page of a free figure, the figure of a regular grid (whose origin is the
+    /// top of the first row, so the image starts one title band above it).
+    /// `None` outside the mode or before the first paint.
+    pub fn layout_image(&self) -> Option<FreePage> {
+        let view = self.layout.view.as_ref()?;
+        if let Some(page) = view.page {
+            return Some(page);
+        }
+        let figure = view.figure?;
+        let band = view.grid.as_ref().map_or(0.0, |grid| grid.band);
+        Some(FreePage {
+            left: figure.left,
+            top: figure.top - band,
+            width: figure.width,
+            height: figure.height + band,
+        })
     }
 
     /// The graph boxes back to front, with the preview of the gesture in
@@ -731,6 +766,11 @@ impl GraphView {
     /// `pos`: `(right, bottom)`. The zones sit outside the figure.
     fn figure_corner_under(&self, pos: Pos2, view: &LayoutView) -> Option<(bool, bool)> {
         let figure = view.figure?;
+        // A visible handle must do something: a grid with no frames to edit
+        // (compact fallback) has none.
+        if view.grid.as_ref().is_some_and(|grid| !grid.editable) {
+            return None;
+        }
         let (_, layout) = self.figure_memo.as_ref()?;
         let reach = self.layout_reach()?;
         let at = self.figure_position(pos)?;
@@ -933,6 +973,15 @@ impl GraphView {
                     threshold: MAGNET_THRESHOLD_POINTS / f64::from(drag.scale),
                     enabled: !shift,
                 };
+                let delta = match (handle, self.layout.ratio_lock) {
+                    (LayoutHandle::Page { right, bottom }, Some(ratio)) => locked_corner_delta(
+                        (page.width, page.height),
+                        (*right, *bottom),
+                        delta,
+                        ratio,
+                    ),
+                    _ => delta,
+                };
                 self.drag_free(handle, boxes, *page, boundary.as_ref(), delta, snap);
             }
             DragKind::Figure {
@@ -940,7 +989,12 @@ impl GraphView {
                 widths,
                 heights,
                 bands,
+                image,
             } => {
+                let delta = match self.layout.ratio_lock {
+                    Some(ratio) => locked_corner_delta(*image, *corner, delta, ratio),
+                    None => delta,
+                };
                 let (new_widths, new_heights) =
                     scaled_frames(widths, heights, *bands, *corner, delta);
                 self.set_frame_preview(Some(FramePreview {
@@ -1005,6 +1059,7 @@ impl GraphView {
                         extent.0 - sum(&layout.frame_widths),
                         extent.1 - sum(&layout.frame_heights),
                     ),
+                    image: (f64::from(layout.size.0), f64::from(layout.size.1)),
                 }
             }
             (Some(grid), _) => {
@@ -1210,7 +1265,12 @@ impl GraphView {
                     Some(DragKind::Figure { corner, .. }) => Some(*corner),
                     _ => None,
                 };
-                paint_page_corners(painter, page_rect, dragged_corner, accent);
+                // A grid with no frames to edit has no page corners: a visible
+                // handle must do something.
+                let has_corners = view.grid.as_ref().is_none_or(|grid| grid.editable);
+                if has_corners {
+                    paint_page_corners(painter, page_rect, dragged_corner, accent);
+                }
             }
         }
 

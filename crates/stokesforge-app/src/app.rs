@@ -166,6 +166,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod page_layout;
 mod panel_memory;
 #[cfg(test)]
 mod panel_tests;
@@ -1008,6 +1009,7 @@ impl eframe::App for StokesForgeApp {
         analysis_menu::publish_last_presets(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
         let history = self.collect_shortcuts_deferring_history(&ctx, &mut actions);
+        self.run_layout_mode_requests(&ctx, active_graph(active_tab_kind(active_tab)));
         // Ctrl+C on the active graph, before panels and contents read
         // the `Event::Copy` (#149).
         self.request_active_figure_copy(&ctx, active_tab, &mut actions);

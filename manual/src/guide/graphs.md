@@ -119,7 +119,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 | Tab | What you set |
 |---|---|
-| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**Figure size**) |
+| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
 | **Legend** | **Show legend**, **Position** |
@@ -129,9 +129,9 @@ A new graph has no background color: the figure is transparent when exported, an
 
 ### Graph size
 
-What you set is the size of the **plot area**, the rectangle bounded by the axes. In **General**, the **Size** section sets the plot area width of each column of layers and the plot area height of each row, in the unit chosen in **File ▸ Preferences… ▸ General ▸ Length unit** (centimeters by default; millimeters, points or inches). A graph with one layer has **Plot area width** and **Plot area height**; with several, **Plot area width, column 1**, **Plot area width, column 2**, **Plot area height, row 1** and so on. **Graph size** is the whole graph: the plot areas plus the room taken around them by the margins, the axes with their numbers and titles, and the title of the graph. It has two fields, the width and the height, which you can type in: every plot area grows or shrinks in proportion, and the margins, the axes and the title keep their size, so the graph ends up exactly the size you typed and the plot area fields above follow at once. A size the axes cannot fit is brought back to the nearest one the graph can have: the field turns orange and a bubble tells you the minimum. The padlock beside the two fields is open at first. Click it to keep the proportions of the graph as they are now: typing a width then sets the height to match, and the other way round. Change anything else about the size (a plot area, a drag, **Undo**) and the padlock keeps the proportions of the graph as they have become. The padlock belongs to the window and is not saved in the file; each typed size is one step of **Undo**.
+What you set is the size of the **plot area**, the rectangle bounded by the axes. In **General**, the **Size** section sets the plot area width of each column of layers and the plot area height of each row, in the unit chosen in **File ▸ Preferences… ▸ General ▸ Length unit** (centimeters by default; millimeters, points or inches). A graph with one layer has **Plot area width** and **Plot area height**; with several, **Plot area width, column 1**, **Plot area width, column 2**, **Plot area height, row 1** and so on. **Figure size** is the whole graph: the plot areas plus the room taken around them by the margins, the axes with their numbers and titles, and the title of the graph. It has two fields, the width and the height, which you can type in: every plot area grows or shrinks in proportion, and the margins, the axes and the title keep their size, so the graph ends up exactly the size you typed and the plot area fields above follow at once. A size the axes cannot fit is brought back to the nearest one the graph can have: the field turns orange and a bubble tells you the minimum. The padlock beside the two fields is open at first. Click it to keep the proportions of the graph as they are now: typing a width then sets the height to match, and the other way round. Change anything else about the size (a plot area, a drag, **Undo**) and the padlock keeps the proportions of the graph as they have become. The padlock belongs to the window and is not saved in the file; each typed size is one step of **Undo**.
 
-<img src="../images/graphs-properties-general.png" alt="The General tab of Graph Properties for a graph with two layers side by side: Title, colors, then Size with Layer placement (Regular grid selected), Plot area width for columns 1 and 2, Plot area height, the distance from the left and top edges, Graph size, and the opened Advanced block with Figure size." width="480">
+<img src="../images/graphs-properties-general.png" alt="The General tab of Graph Properties for a graph with two layers side by side: Title, colors, then Size with Layer placement (Regular grid selected), Plot area width for columns 1 and 2, Plot area height, the distance from the left and top edges, Graph size, and the opened Advanced block with When axes are added." width="480">
 
 A new graph is 480 × 360 points (about 17 × 12.7 cm) in all. Adding an axis, or a title, makes the graph bigger around the plot area: the plot area keeps its size, and the whole graph is shown scaled to fit its window. Removing one makes the graph smaller. A plot area can be from 36 points (about 1.3 cm) to 2000 points (about 70 cm) wide or high. Changing one size does not change the others: the graph grows or shrinks by the difference. The plot areas of one column are as wide as each other and line up, and so do those of one row, even when one layer has more axes than its neighbor. Setting the plot area of two graphs to the same numbers lets you place them one over the other at the same scale. The size is part of the file, and the change is one step of the window's single **Undo**.
 
@@ -143,7 +143,7 @@ When the graph gets bigger or smaller, whether by dragging, by the **Size** fiel
 
 #### Keeping the image still when axes come and go
 
-Open **Advanced** at the bottom of **General** and set **Figure size** to **Fixed**. The graph then keeps room for one axis on each side from the start. Add a right axis, a top axis, a mirror axis or an overlaid layer, or remove them again, and neither the image nor the plot area moves: put two such graphs on consecutive slides and the first curves stay where they were. **Grows with the axes**, the default, is what the graph did before: each axis added makes the image bigger.
+Open **Advanced** at the bottom of **General** and set **When axes are added** to **Fixed**. The graph then keeps room for one axis on each side from the start. Add a right axis, a top axis, a mirror axis or an overlaid layer, or remove them again, and neither the image nor the plot area moves: put two such graphs on consecutive slides and the first curves stay where they were. **Grows with the axes**, the default, is what the graph did before: each axis added makes the image bigger.
 
 Fixed is not a hard limit. A second axis on the same side, or a title (of the graph or of a layer), needs more room than was kept: the image grows anyway, the plot area keeps its size, and the status bar and a note under **Size** say so. **Left** and **Top** replace the room kept on their side.
 
@@ -157,7 +157,7 @@ In **Free**, the fields of **Size** belong to one layer, the one chosen in the l
 
 **Background.** In **General ▸ Size**, the **Layer Background** is **Auto** by default: nothing is painted unless the layer covers another one, and then the whole layer, axes and titles included, gets a solid background so that the layer behind does not show through. That background is white if the graph has no background color, otherwise the color of the graph. A graph with no overlap looks exactly as before, and a transparent export stays transparent. Pick a color to give a layer its own background even where nothing overlaps.
 
-**Layout ▸ New Layer Beside** puts the new layer to the right of, or below, the active one, with the same plot area, never on top of another layer: if the place is taken it goes further along. **Layout ▸ Delete Layer** (or **Delete** in the Object Manager) removes a layer without moving the others, and the graph shrinks around what is left. **Figure size = Fixed** (in **Advanced**) then keeps room for one axis on each side of every layer.
+**Layout ▸ New Layer Beside** puts the new layer to the right of, or below, the active one, with the same plot area, never on top of another layer: if the place is taken it goes further along. **Layout ▸ Delete Layer** (or **Delete** in the Object Manager) removes a layer without moving the others, and the graph shrinks around what is left. **When axes are added = Fixed** (in **Advanced**) then keeps room for one axis on each side of every layer.
 
 Choose **Regular grid** to go back. Layers whose rows overlap on the page share a row, from left to right, then each column takes the widest plot area of its layers and each row the tallest, so no plot area shrinks. Switching, and each edit, is one step of **Undo**, and so are **Bring to Front**, **Send to Back** and **Layer Background**. 
 
@@ -169,6 +169,7 @@ While you drag, the edges of the layer snap to the edges of the other layers (th
 
 The **Layout** menu, next to **Graph**, gathers everything that places layers (the right-click on the background of the graph offers the same entries under **Layout**). It exists whenever a graph is in front.
 
+- **Page Layout Mode** turns the mode described below on or off. It has a check mark while it is on, and a toolbar button beside **Properties**.
 - **Layer Placement** chooses **Regular Grid** or **Free**, like the field in Graph Properties. The one in use has a check mark.
 - **New Layer Beside** adds a layer to the **Right** of the active layer or **Below** it.
 - **Align** lines the layers up on the **Bottom**, **Top**, **Vertical Center**, **Left**, **Right** or **Horizontal Center** of the active layer. **Same Width** and **Same Height** give the layers the plot area width or height of the active layer. **Distribute Horizontally** and **Distribute Vertically** spread the layers with equal gaps between them, the two outermost staying where they are. These entries exist only in **Free**; **Align**, **Same Width** and **Same Height** are grayed out with fewer than two layers, and the two **Distribute** entries with fewer than three.
@@ -176,6 +177,25 @@ The **Layout** menu, next to **Graph**, gathers everything that places layers (t
 - **Delete Layer** removes the active layer. It is grayed out for the last layer of a graph.
 
 By default these entries act on every layer, the active layer being the reference. To act on some layers only, hold **Shift** and click the plot area of each layer you want, or its number badge at the top left of the layer. The layers selected get an outline; the active layer stays the reference, and a second **Shift** click on a selected layer takes it out. A click on a layer without **Shift** ends the selection. Each entry is one step of **Undo**, and the selection stays after it so you can chain several.
+
+#### The Page Layout Mode
+
+**Layout ▸ Page Layout Mode** (or the page layout button of the toolbar) shows the graph as a page: a ruler along the top and the left edge in your length unit, a grid, and handles on the graphs. Turning the mode on or off changes nothing in the graph and is not a step of **Undo**; it works the same on a **Regular Grid** and on a **Free** graph. Click a graph to select it: its handles are solid, the graph under the pointer shows them faintly.
+
+<img src="../images/graphs-page-layout-mode.png" alt="A graph with two layers side by side in the Page Layout Mode: rulers along the top and left edges, the selected graph with its handles, and under the figure the settings strip: Figure size with its padlock, Graph 1 with X, Y, W and H, Align, Same Size, Distribute, Snap, Coarse, Grid mode: Regular and When axes are added." width="640">
+
+Under the figure, a strip of settings follows what is selected.
+
+- **Figure size (cm)** is the width and the height of the whole figure, with the padlock of Graph Properties: closed, the two keep their ratio, whether you type them or pull a corner of the figure. The lock is the same one as in **General ▸ Size**.
+- **Graph 1** and its **X**, **Y**, **W**, **H** give the position and the size of the selected graph, plot area and axes included, from the top left corner of the figure. On a regular grid **X** and **Y** are grayed out, because the grid places the graphs, and **W** and **H** trade size with the neighbor on the right (the last column with the one on its left, the same for rows): the figure keeps its size. Below, the size of the plot area.
+- **Align**, **Same Size** and **Distribute** are the entries of the **Layout** menu. They are grayed out on a regular grid, with the reason in the tooltip.
+- **Snap** turns the grid on or off (key **G**), and the next button, **Coarse** or **Fine**, switches the step. Hold **Shift** while dragging to go without. These two are only how you work: they are not saved and not a step of **Undo**.
+- **Grid mode: Regular** or **Grid mode: Free** is the placement of the layers, the same as **Layout ▸ Layer Placement** and the field in Graph Properties: click it to switch, one step of **Undo**, and its label always tells the mode the graph is in.
+- **When axes are added: Grows with the axes** or **Fixed** is the choice of the same name in the **Advanced** block of Graph Properties.
+
+On a regular grid, the line between two graphs has a handle: drag it, and the graph on one side takes the size the other one gives up, for every graph on that line; the figure keeps its size. A corner shared by several graphs moves all the lines it lies on at once. The four L-shaped corners of the figure scale the whole figure. You cannot move a graph or resize it alone on a regular grid, and the arrow keys do nothing there.
+
+In **Free**, drag a graph to move it, drag the handles around it to resize it, or nudge the selected graphs with the arrow keys (**Shift** for ten steps); the magnets and the grid help to line them up. Where two graphs touch, the middle of the line moves both of them, and the strip on each side moves the graph on that side only. The corners of the figure scale the figure and every graph with it. Each gesture is one step of **Undo**. **Esc** leaves the mode.
 
 A graph saved by an older version has no sizes of its own. It keeps its familiar look, and its first change, of any kind, fixes the plot areas it had: from then on an axis or a title you add grows the graph instead of squeezing the plot area.
 

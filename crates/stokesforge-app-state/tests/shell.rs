@@ -14965,6 +14965,120 @@ fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
     assert_eq!(state.snapshot().revision, revision, "wrong length: nothing");
 }
 
+/// #426: the figure size typed in the Page Layout Mode strip is ONE undo step
+/// of its own kind, the other axis follows the closed lock's ratio, and a free
+/// graph is left to `SetFreeLayout`. Witness: the ratio ignored.
+#[test]
+fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    let (width, height) = stokesforge_app_state::frame_sizes::figure_extent(&before).unwrap();
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: width + 100.0,
+        ratio: Some(height / width),
+    });
+    let (new_width, new_height) =
+        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+    assert!((new_width - (width + 100.0)).abs() < 1.0, "{new_width}");
+    assert!(
+        (new_height / new_width - height / width).abs() < 0.003,
+        "{new_width} x {new_height}"
+    );
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::ResizeFigure
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+
+    // Without a lock the other axis stays.
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: width + 100.0,
+        ratio: None,
+    });
+    let (_, kept) =
+        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+    assert!((kept - height).abs() < 1.0);
+    state.dispatch(Action::Undo);
+
+    // A free graph has `SetFreeLayout`: nothing here.
+    state.dispatch(Action::SetLayerPlacement { graph, free: true });
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: width + 100.0,
+        ratio: None,
+    });
+    assert_eq!(state.snapshot().revision, revision);
+}
+
+/// #426: "Fixed" / "Grows with the axes" of the strip is one undo step, and a
+/// second identical request sends nothing.
+#[test]
+fn the_strip_sets_the_figure_fixed_in_one_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    assert!(!before.fixed_figure);
+    state.dispatch(Action::SetFigureFixed { graph, fixed: true });
+    assert!(graph_spec(&state, graph).fixed_figure);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFigureFixed { graph, fixed: true });
+    assert_eq!(state.snapshot().revision, revision, "already fixed");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+}
+
+/// #426: the ratio lock is the session's, per graph: an action sets it, it
+/// changes no model and no history, a detached fork carries it, and a figure
+/// scale committed under a closed lock keeps its ratio instead of taking the
+/// new image's. Witness: `adopt_next` not called.
+#[test]
+fn the_size_lock_is_session_state_shared_with_a_detached_fork() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let spec = graph_spec(&state, graph);
+    let image = stokesforge_app_state::frame_sizes::figure_extent(&spec).unwrap();
+    let lock = stokesforge_app_state::frame_sizes::SizeLock::close(image).expect("lock");
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetSizeLock {
+        graph,
+        lock: Some(lock),
+    });
+    assert_eq!(state.size_lock(graph), Some(lock));
+    assert_eq!(state.snapshot().revision, revision, "no model change");
+    let mut fork = state.fork_for_detached_view().unwrap();
+    assert_eq!(fork.size_lock(graph), Some(lock), "carried to the fork");
+
+    // A scale of the figure adopts the next image: `follow` keeps the ratio.
+    let widths: Vec<f64> = spec.frame_widths.iter().map(|w| w * 1.3).collect();
+    let heights: Vec<f64> = spec.frame_heights.iter().map(|h| h * 1.2).collect();
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths,
+        heights,
+        figure: true,
+    });
+    let new_image =
+        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+    let mut followed = state.size_lock(graph).expect("still closed");
+    followed.follow(new_image);
+    assert!((followed.ratio - lock.ratio).abs() < 1e-12, "ratio kept");
+
+    state.dispatch(Action::SetSizeLock { graph, lock: None });
+    fork.sync_detached_sheet_editor(&state);
+    assert_eq!(fork.size_lock(graph), None);
+}
+
 /// #394: deleting a cell that empties its column removes that column; the
 /// figure shrinks by the column's outer width, and undo brings both back in
 /// one step.

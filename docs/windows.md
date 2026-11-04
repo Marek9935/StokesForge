@@ -155,6 +155,14 @@ minimum 220 x 140. Opening: `open_tab` (`window_stack.rs`), from the Project Man
 second opening on the same entry brings the window to the front without
 duplicating it. Each new window is offset in a cascade.
 
+**Graph in the Page Layout Mode (#426).** The same window, same code
+(`graph_view_contents`), with two ruler strips (`RULER_WIDTH`) around the figure and
+a settings strip under it (`app/page_layout.rs`). The strip's height is reserved from
+what it used at the last frame (`controls_height`, whole points, at least
+`LAYOUT_CONTROLS_HEIGHT`), so the figure's rectangle never moves from frame to frame
+and the cache stays valid; its rows wrap and `keep_together` keeps a label with its
+field or button. The mode adds no window and no dialog.
+
 ## Outside the catalog
 
 - **In-place edits** (title, legend, text of a graph, grid cell,

@@ -237,6 +237,10 @@ fn plot_settings_contents(
 
     let mut commit = false;
     let unit = state.length_unit();
+    // The ratio lock is session state of the graph, shared with the strip of
+    // the Page Layout Mode (#426): the page edits a copy and hands it back.
+    let mut size_lock = state.size_lock(settings.graph);
+    let size_lock_before = size_lock;
     let published = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
     let mut gradient_actions: Vec<Action> = Vec::new();
     // Saved colors, read before borrowing the draft; the
@@ -325,7 +329,7 @@ fn plot_settings_contents(
                             ui,
                             spec,
                             edit.selected_panel,
-                            &mut edit.size_lock,
+                            &mut size_lock,
                             &mut env,
                             layout.as_ref(),
                             unit,
@@ -372,6 +376,9 @@ fn plot_settings_contents(
                 target: request.target,
             },
         });
+    }
+    if size_lock != size_lock_before {
+        state.set_size_lock(settings.graph, size_lock);
     }
     if let Some(current) = state.plot_settings_mut() {
         current.tab = chosen_tab;
@@ -2898,21 +2905,20 @@ mod tests {
         free.state.close_plot_settings();
     }
 
-    /// #407: the lock is window state: closing it changes no spec, and a
-    /// reopened window is unlocked. Witness: the lock stored in the spec or
-    /// kept between openings.
+    /// #407, #426: the lock is session state of the graph, not of the window:
+    /// closing it changes no spec, it survives closing and reopening the
+    /// window (the strip of the Page Layout Mode shares it) and a second click
+    /// opens it. Witness: the lock stored in the spec or kept in the draft.
     #[test]
-    fn the_lock_changes_no_spec_and_is_open_again_in_a_new_window() {
+    fn the_lock_changes_no_spec_and_belongs_to_the_graph() {
         let context = test_support::context();
         let mut harness = sized_harness();
+        let graph = harness.graph;
         harness.open(PlotSettingsTab::Graph, None);
         let original = harness.model();
-        assert!(
-            harness.state.plot_edit().is_none()
-                || harness.state.plot_edit().unwrap().size_lock.is_none()
-        );
+        assert!(harness.state.size_lock(graph).is_none());
         click_lock(&context, &mut harness);
-        let lock = harness.state.plot_edit().unwrap().size_lock;
+        let lock = harness.state.size_lock(graph);
         assert!(
             lock.is_some_and(|lock| (lock.ratio - 0.75).abs() < 1e-9),
             "{lock:?}"
@@ -2922,13 +2928,9 @@ mod tests {
         harness.state.close_plot_settings();
         harness.open(PlotSettingsTab::Graph, None);
         paint_window(&context, &mut harness.state, Vec::new());
-        assert!(harness.state.plot_edit().unwrap().size_lock.is_none());
+        assert_eq!(harness.state.size_lock(graph), lock, "the graph keeps it");
         click_lock(&context, &mut harness);
-        click_lock(&context, &mut harness);
-        assert!(
-            harness.state.plot_edit().unwrap().size_lock.is_none(),
-            "open again"
-        );
+        assert!(harness.state.size_lock(graph).is_none(), "open again");
         assert_eq!(harness.model(), original);
     }
 
