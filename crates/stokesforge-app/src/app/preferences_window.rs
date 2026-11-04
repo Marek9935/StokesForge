@@ -1201,9 +1201,40 @@ mod tests {
         );
     }
 
+    /// What to read when the note of the missing Import folder never shows up.
+    fn missing_note_report(
+        harness: &egui_kittest::Harness<'_, Bench>,
+        note: &str,
+        elapsed: std::time::Duration,
+        frames: u32,
+    ) -> String {
+        let id = egui::Id::new(("preferences_folder_buffer", FolderKind::Import)).with("probe");
+        let probe: Option<FolderProbe> = harness.ctx.data(|data| data.get_temp(id));
+        let probe = match probe {
+            Some(probe) => format!(
+                "text={:?} shown={:?} answer={:?} age={:?}",
+                probe.text,
+                probe.shown,
+                *probe.answer.lock().unwrap_or_else(|err| err.into_inner()),
+                probe.at.elapsed()
+            ),
+            None => "no probe exists".to_owned(),
+        };
+        format!(
+            "the note never appeared: searched {note:?}; elapsed {elapsed:?} over {frames} frames; \
+             folders page on screen: {}; Import default: {:?}; Import probe: {probe}",
+            harness
+                .query_by_label(&tr!("preferences-folders-default"))
+                .is_some(),
+            harness.state().state.default_folder(FolderKind::Import),
+        )
+    }
+
     /// A default that is not a folder gets the note "Folder not found"; one that is
     /// does not. The disk is looked at on a thread: the frames are repeated until
-    /// it has answered.
+    /// it has answered, within a real-time deadline. The failure message reports
+    /// the probe state, because this test failed once on CI with no known cause
+    /// (#447).
     #[test]
     fn a_missing_default_folder_gets_a_note_and_an_existing_one_does_not() {
         let (dir, mut harness) = folders_bench();
@@ -1223,16 +1254,22 @@ mod tests {
                 kind: FolderKind::Export,
                 folder: dir.path().display().to_string(),
             });
-        let mut found = false;
-        for _ in 0..200 {
+        let started = std::time::Instant::now();
+        let deadline = std::time::Duration::from_secs(30);
+        let mut frames = 0_u32;
+        while harness.query_by_label(&note).is_none() {
+            assert!(
+                started.elapsed() < deadline,
+                "{}",
+                missing_note_report(&harness, &note, started.elapsed(), frames)
+            );
             harness.run();
+            frames += 1;
             if harness.query_by_label(&note).is_some() {
-                found = true;
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert!(found, "the note never appeared");
         assert_eq!(
             harness.query_all_by_label(&note).count(),
             1,
