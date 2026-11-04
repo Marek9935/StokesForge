@@ -1122,7 +1122,7 @@ class TestPage(unittest.TestCase):
         paused = dict(card, held_by=[])
         self.assertEqual(L(paused)["text"], "En pause")                                                     # lang: fr
         l = L(paused, [], [{"issue": 7}])
-        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # nobody works
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
         l = L(card, [], [{"issue": 7}])
         self.assertEqual((l["text"], l["also"]), ("À toi : répondre au questionnaire", "l’agent travaille"))   # lang: fr
         # a note of kind `you` is the user's turn, alone or joined; other kinds stay muted text
