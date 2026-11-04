@@ -30,12 +30,12 @@ application decides without drawing it: `state.rs` + `state/` (`AppState`,
 `history_text.rs`, `quantities.rs`, `user_colors.rs`, `object_format.rs`,
 `text_format.rs`, `errors.rs`, `i18n.rs` (with the `i18n/` catalogs) and
 `file_picker.rs`. **`stokesforge-app`** keeps `main.rs`, `app.rs`, `app/`,
-`theme.rs`, `icons.rs`, `field_state.rs`, `number_field.rs`, `toolbar.rs`,
+`theme.rs`, `icons.rs`, `app_logo.rs`, `field_state.rs`, `number_field.rs`, `toolbar.rs`,
 `list_frame.rs`, `tree_lines.rs` and `color_picker.rs`: everything that names an
 egui type, and the offer of the figure to the clipboard (`stokesforge-clipboard`
 pulls in winit, so it cannot move down). In the paths of this document, a module
 without a prefix is in `stokesforge-app/src/` if it is under `app/` or named
-`theme`, `icons`, `field_state`, `number_field`, `toolbar`, `list_frame`,
+`theme`, `icons`, `app_logo`, `field_state`, `number_field`, `toolbar`, `list_frame`,
 `tree_lines`, `color_picker`, and in `stokesforge-app-state/src/` otherwise.
 
 ### Code split: `app.rs` and `src/app/` (#115)
@@ -102,6 +102,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/window_placement.rs` | placement: default sizes, cascade, fixed workspace (`WORKSPACE_SIZE`), `clamp_to_workspace`, logical → screen conversion |
 | `app/window_stack.rs` | stack of floating windows: `open_tab` (the only place that decides to open or focus), egui order and layers, hiding, collapsing, maximizing, `show_workspace` |
 | `app/test_support.rs` | (compiled in test only) test helpers shared by the surfaces: `context`, `image`/`frame_of`, `touche`, `click`, `painted`, `textes`/`text_exact`, `distinct`, `xy_columns` (#128) |
+| `app_logo.rs` | the application identity in the window system (#388): `APP_ID` (`stokesforge`, the name of the desktop entry), `viewport()` (the one door to a `ViewportBuilder`, which sets the `app_id`: every window starts from it, guard `no_viewport_without_identity`), `main_viewport` (identity and icon), and the logo read at run time from `<exe dir>/share/icons/hicolor/256x256/apps/stokesforge.png` (`load`; absent or unreadable gives the empty icon and no logo, an unreadable file adds one stderr line). The logo is never compiled in: official builds only (`scripts/logo-dist.sh`). `StokesForgeApp::set_logo` hands it over; the About window gets a texture created at its first opening |
 | `app/window_detach.rs` | detaching into OS windows: `show_detached_project_manager`, `show_detached_object_manager`, `show_detached_script_console`, `detach_tab`/`reattach_tab`, `show_detached_tabs` and the publication of the snapshot that wakes the viewports (#104, `snapshot_stamp` is its fingerprint), `sync_window_views` (window state sent to the session, #16) |
 | `app/panel_memory.rs` | the layout of the three fixed panels between two launches (#148): startup restore (`apply_startup_panels`), change detection (`sync_panel_layout`), live geometry of the detached windows (`LiveWindow`), flush at exit |
 

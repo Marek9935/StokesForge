@@ -273,6 +273,12 @@ pub struct StokesForgeApp {
     folder_opener: fn(&std::path::Path) -> std::io::Result<()>,
     /// Last title sent to the window (S-R15): `Title` is resent only on change.
     window_title: String,
+    /// The logo of an official build (#388), decoded once at start; `None`
+    /// without it. The About window shows it as a texture.
+    logo: Option<egui::IconData>,
+    /// The texture of `logo`, created the first time About opens, never read
+    /// per frame.
+    about_logo_texture: Option<egui::TextureHandle>,
     /// The toolbars: layout, visibility and drag in progress
     /// (issue #60).
     toolbars: ToolbarState,
@@ -502,6 +508,8 @@ impl StokesForgeApp {
             file_picker: FilePicker::default(),
             folder_opener: open_folder_in_file_manager,
             window_title,
+            logo: None,
+            about_logo_texture: None,
             toolbars: ToolbarState::default(),
             om_detached: false,
             om_collapsed: false,
@@ -684,6 +692,28 @@ impl StokesForgeApp {
     /// (#192), the answer comes back through [`StokesForgeApp::poll_file_picker`].
     fn choose_open_path(&mut self, actions: &mut Vec<Action>) {
         actions.push(Action::PickFile(PickRequest::OpenProject));
+    }
+
+    /// Hands the application the logo read at start (#388).
+    pub fn set_logo(&mut self, logo: Option<egui::IconData>) {
+        self.logo = logo;
+        self.about_logo_texture = None;
+    }
+
+    /// The texture of the logo for About: created at the first call while About
+    /// is open, then reused. `None` for a build without logo.
+    fn about_logo(&mut self, ctx: &egui::Context) -> Option<egui::TextureId> {
+        if !self.state.about_open() {
+            return None;
+        }
+        if self.about_logo_texture.is_none() {
+            let image = crate::app_logo::texture_image(self.logo.as_ref()?);
+            self.about_logo_texture =
+                Some(ctx.load_texture("stokesforge-logo", image, egui::TextureOptions::LINEAR));
+        }
+        self.about_logo_texture
+            .as_ref()
+            .map(egui::TextureHandle::id)
     }
 
     /// Takes up the toolbar layout from the user's preferences. Separate from
@@ -1281,7 +1311,8 @@ impl StokesForgeApp {
         low_r2_list_window(ctx, &self.state, actions);
         keyboard_shortcuts_window(ctx, &self.state, actions);
         formula_functions_window(ctx, &self.state, actions);
-        about_window(ctx, &self.state, actions);
+        let about_logo = self.about_logo(ctx);
+        about_window(ctx, &self.state, about_logo, actions);
         if let Some(language) = preferences_window(ctx, &self.state, actions) {
             self.choose_language(language);
         }

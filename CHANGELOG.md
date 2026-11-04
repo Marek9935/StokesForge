@@ -43,6 +43,20 @@ without a message, see `docs/persistence.md`).
   both) and the status bar says which column the formula now reads. A binding
   that would make a loop stays framed. Once bound, the formula holds the column
   by identifier, so moving it later gives no `#REF`.
+- Application icon (#388): the StokesForge logo is the icon of the window, of
+  the Windows `stokesforge-app.exe` and of its installer, of the menu entry and
+  of the `.stf` files (a landscape sheet with the logo), and sits at the top of
+  the About window. The same picture at every size. It is in the official
+  packages and installers only: the code builds and runs without it, and its
+  notice (`licenses/logo/LICENSE`) allows its use with the unmodified software
+  only (the wording is a draft, to be reviewed before the release). All windows,
+  detached ones included, now carry the application id `stokesforge` that the
+  menu entry matches.
+- RPM and DEB packages are published with each release (#390, #388): the
+  publication switch `PUBLISH_LINUX_PACKAGES` is now 1, so a failure of the
+  package jobs blocks the release. The manual says how to install them and that
+  a per-user `install.sh` copy shadows the package. `install.sh` also installs
+  and removes the icon of the `.stf` type.
 
 - A new graph plotted from a workbook is named after it (#434): "Book1 plot",
   then "Book1 plot 2"… (numbered after the highest existing number, a deleted

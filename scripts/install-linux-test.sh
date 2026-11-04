@@ -89,6 +89,9 @@ APP
     if [ "${3:-}" = icon ]; then
         mkdir -p "$d/share/icons/hicolor/48x48/apps"
         : > "$d/share/icons/hicolor/48x48/apps/stokesforge.png"
+        # The icon of the .stf type (#388): named after the MIME type.
+        mkdir -p "$d/share/icons/hicolor/48x48/mimetypes"
+        : > "$d/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png"
     fi
     ARCH="$d"
 }
@@ -273,6 +276,7 @@ t "update-desktop-database called on the applications folder" grep -qx "update-d
 t "update-mime-database called on the mime folder" grep -qx "update-mime-database $S/mime" "$tmp/tools.log"
 t "gtk-update-icon-cache called on the icon theme" grep -qx "gtk-update-icon-cache -f -t $S/icons/hicolor" "$tmp/tools.log"
 t "icon copied" test -f "$S/icons/hicolor/48x48/apps/stokesforge.png"
+t "mime icon copied" test -f "$S/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png"
 t "desktop: Icon line with an icon" grep -qx 'Icon=stokesforge' "$S/applications/stokesforge.desktop"
 if [ -n "$DESKTOP_VALIDATE" ]; then
     t "desktop-file-validate with icon" "$DESKTOP_VALIDATE" "$S/applications/stokesforge.desktop"

@@ -2,26 +2,53 @@
 //! button for the line a bug report cites. Read-only, hence `modal_read_only`
 //! (Close only, S-F2). The line itself is built by
 //! `stokesforge_app_state::startup::version_line`; the clipboard write is done
-//! by the shell when it applies `Action::CopyVersionLine`.
+//! by the shell when it applies `Action::CopyVersionLine`. The logo of an
+//! official build (#388) sits at the top, centred; a build without logo has no
+//! gap where it would be.
 
 use eframe::egui;
 
 use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
+use crate::app_logo::ABOUT_LOGO_SIZE;
+use crate::theme;
 use stokesforge_app_state::startup::{LICENSE, REPOSITORY_URL, VERSION};
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-/// Paints the window while it is open.
-pub(super) fn about_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
+/// Height of the window without logo: the title, the four rows and the footer.
+/// A window too short hides the Copy button under the footer.
+const BASE_HEIGHT: f32 = 160.0;
+/// Room taken by the logo: its side, the space below it and the item spacing
+/// after it.
+const LOGO_ROOM: f32 = ABOUT_LOGO_SIZE + theme::SPACE_SECTION + 10.0;
+
+/// Paints the window while it is open. `logo` is the texture of the logo, `None`
+/// for a build without one.
+pub(super) fn about_window(
+    ctx: &egui::Context,
+    state: &AppState,
+    logo: Option<egui::TextureId>,
+    actions: &mut Vec<Action>,
+) {
     if !state.about_open() {
         return;
     }
+    let height = BASE_HEIGHT + if logo.is_some() { LOGO_ROOM } else { 0.0 };
     let outcome = modal_read_only(
         ctx,
         egui::Id::new("stokesforge_about"),
         &tr!("about-title"),
-        PlainSize::Content(egui::vec2(360.0, 140.0)),
+        PlainSize::Content(egui::vec2(360.0, height)),
         |ui| {
+            if let Some(texture) = logo {
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Image::new((
+                        texture,
+                        egui::vec2(ABOUT_LOGO_SIZE, ABOUT_LOGO_SIZE),
+                    )));
+                    ui.add_space(theme::SPACE_SECTION);
+                });
+            }
             ui.label(tr!("about-version", version = VERSION));
             ui.label(tr!("about-license", license = LICENSE));
             ui.hyperlink_to(tr!("about-repository"), REPOSITORY_URL);
@@ -48,6 +75,25 @@ mod tests {
     /// the second one with `events`; returns the painted texts and the
     /// actions requested.
     fn frame(open: bool, click_copy: bool) -> (Vec<String>, Vec<Action>) {
+        let (texts, actions, _) = frame_with_logo(open, click_copy, false);
+        (texts, actions)
+    }
+
+    /// What the logo painted: the screen rects of the images that use the
+    /// texture given to the window, and the rect of the version text.
+    struct LogoPaint {
+        images: Vec<egui::Rect>,
+        version: Option<egui::Rect>,
+        /// The text of the Copy button and the area its painting is clipped to.
+        copy: Option<(egui::Rect, egui::Rect)>,
+    }
+
+    /// [`frame`], with a logo texture handed to the window when `logo`.
+    fn frame_with_logo(
+        open: bool,
+        click_copy: bool,
+        logo: bool,
+    ) -> (Vec<String>, Vec<Action>, LogoPaint) {
         let session = stokesforge_session::Session::spawn(
             stokesforge_core::Project::new("About").unwrap(),
             None,
@@ -63,6 +109,14 @@ mod tests {
             egui::Pos2::ZERO,
             egui::vec2(900.0, 700.0),
         ));
+        let texture = logo.then(|| {
+            ctx.load_texture(
+                "test-logo",
+                egui::ColorImage::filled([4, 4], egui::Color32::RED),
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        let texture_id = texture.as_ref().map(egui::TextureHandle::id);
         let mut actions = Vec::new();
         let mut output = egui::FullOutput::default();
         let run = |events: Vec<egui::Event>, actions: &mut Vec<Action>| {
@@ -72,7 +126,7 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_| about_window(&ctx, &state, actions),
+                |_| about_window(&ctx, &state, texture_id, actions),
             )
         };
         for _ in 0..2 {
@@ -90,6 +144,39 @@ mod tests {
                 .collect()
         };
         let painted = texts(&output);
+        let version = tr!("about-version", version = VERSION);
+        let paint = LogoPaint {
+            images: output
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Rect(rect) if Some(rect.fill_texture_id()) == texture_id => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect(),
+            version: output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == version => {
+                        Some(shape.visual_bounding_rect())
+                    }
+                    _ => None,
+                }),
+            copy: output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape)
+                        if shape.galley.job.text == tr!("action-copy-version") =>
+                    {
+                        Some((shape.visual_bounding_rect(), painted.clip_rect))
+                    }
+                    _ => None,
+                }),
+        };
         if click_copy {
             // The Copy button is laid out below the three lines of text.
             let button = tr!("action-copy-version");
@@ -125,7 +212,7 @@ mod tests {
             let _ = run(Vec::new(), &mut actions);
         }
         session.shutdown().unwrap();
-        (painted, actions)
+        (painted, actions, paint)
     }
 
     /// Closed, the window paints nothing; open, it shows its title, the
@@ -152,5 +239,43 @@ mod tests {
         let (_, actions) = frame(true, true);
         assert!(actions.contains(&Action::CopyVersionLine), "{actions:?}");
         assert!(version_line().contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    /// Without a logo (build without `assets/logo/`), no image is painted and
+    /// the texts are those of today.
+    #[test]
+    fn without_a_logo_nothing_is_painted_above_the_texts() {
+        let (texts, _, paint) = frame_with_logo(true, false, false);
+        assert!(paint.images.is_empty());
+        assert_eq!(texts, frame(true, false).0);
+        assert!(texts.contains(&tr!("about-repository")), "{texts:?}");
+    }
+
+    /// The Copy button lies inside the area the window paints, with or without
+    /// a logo: a window too short cuts it under the footer, and a click on what
+    /// is left of it still works, so only its clip rect tells.
+    #[test]
+    fn the_copy_button_is_not_cut_off() {
+        for logo in [false, true] {
+            let (_, _, paint) = frame_with_logo(true, false, logo);
+            let (button, clip) = paint.copy.expect("the Copy button is painted");
+            assert!(
+                clip.contains_rect(button),
+                "logo {logo}: {button:?} cut by {clip:?}"
+            );
+        }
+    }
+
+    /// With a logo, one image is painted, centred above the version text, and
+    /// the Copy button still works.
+    #[test]
+    fn the_logo_is_painted_once_above_the_version_text() {
+        let (_, _, paint) = frame_with_logo(true, false, true);
+        assert_eq!(paint.images.len(), 1, "{:?}", paint.images);
+        let (logo, version) = (paint.images[0], paint.version.expect("the version text"));
+        assert!(logo.max.y <= version.min.y, "{logo:?} above {version:?}");
+        assert!((logo.width() - crate::app_logo::ABOUT_LOGO_SIZE).abs() < 1.0);
+        let (_, actions, _) = frame_with_logo(true, true, true);
+        assert!(actions.contains(&Action::CopyVersionLine), "{actions:?}");
     }
 }

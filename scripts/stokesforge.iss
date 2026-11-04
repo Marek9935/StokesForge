@@ -17,6 +17,10 @@
 #ifndef OutputDir
   #define OutputDir "."
 #endif
+; Official build only (#388): /DLogoDir=<folder holding stokesforge.ico and
+; stokesforge-project.ico>. Without it the installer has no icon of its own and
+; the .stf files keep the system's, as before. SourceDir then also carries
+; stokesforge-project.ico (scripts/logo-dist.sh install ... windows).
 
 [Setup]
 ; Stable identity of the application: never change it, it links updates and
@@ -41,6 +45,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\stokesforge-app.exe
+#ifdef LogoDir
+SetupIconFile={#LogoDir}\stokesforge.ico
+#endif
 ChangesAssociations=yes
 
 [Files]
@@ -56,6 +63,9 @@ Name: "{group}\Uninstall StokesForge"; Filename: "{uninstallexe}"
 Root: HKA; Subkey: "Software\Classes\.stf\OpenWithProgids"; ValueType: string; ValueName: "StokesForge.Project"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\StokesForge.Project"; ValueType: string; ValueName: ""; ValueData: "StokesForge project"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\StokesForge.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\stokesforge-app.exe"" ""%1"""
+#ifdef LogoDir
+Root: HKA; Subkey: "Software\Classes\StokesForge.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\stokesforge-project.ico"
+#endif
 
 [UninstallDelete]
 ; CPython writes __pycache__ at run time: they are not installed files, without

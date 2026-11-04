@@ -35,6 +35,8 @@ The title bar of the application window shows the name of the project. A dot aft
 
 A menu entry that cannot be used now is greyed out. Hover over it to read the reason.
 
+**About StokesForge** opens a small window with the version, the licence and a link to the project page. **Copy** puts the version and the system on the clipboard, ready to paste in a bug report. The StokesForge logo is shown at the top of that window, and is the icon of the application and of `.stf` files; it comes with the official packages and installers only. A build that does not have it shows no logo and the system's generic icon.
+
 When one menu is open, move the pointer over another menu title to open that one without clicking.
 
 The **Workbook** menu is covered in [Projects and workbooks](projects-and-workbooks.md), the **Graph** menu in [Graphs](graphs.md), and the **Analysis** menu in [Analysis](analysis.md).

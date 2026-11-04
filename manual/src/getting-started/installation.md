@@ -63,7 +63,20 @@ Uninstalling removes the program. It does not remove your projects.
 
 ## Install on Linux
 
-The Linux package is an archive with an installer script inside. There is no package for your package manager.
+You can install StokesForge on Linux in two ways: with a package for your package manager (`.rpm` for Fedora and its relatives, `.deb` for Debian and Ubuntu), or with an archive that holds an installer script. Use one of them, not both.
+
+### Install with a package
+
+1. Download `StokesForge-<version>-linux-x86_64.rpm` or `StokesForge-<version>-linux-x86_64.deb`.
+2. Install it with your package manager, for example `sudo dnf install ./StokesForge-<version>-linux-x86_64.rpm` or `sudo apt install ./StokesForge-<version>-linux-x86_64.deb`.
+
+The package puts the program in `/opt/stokesforge`, the command `stokesforge` in `/usr/bin`, and the menu entry, the file type of `.stf` projects and the icons under `/usr/share`. It works for every user of the computer. To update or remove it, use your package manager (`sudo dnf remove stokesforge` or `sudo apt remove stokesforge`); your projects and preferences are not touched.
+
+The package refuses to install over an installation made with `./install.sh --system`, and conversely: remove one before installing the other. A copy installed for your user with `./install.sh` (below) does not conflict with the package, but it **shadows** it: your command in `~/.local/bin` and your menu entry come first. Uninstall that copy if you want the package to be the one you start.
+
+### Install with the archive
+
+The archive has an installer script inside.
 
 1. Download `StokesForge-<version>-linux-x86_64.tar.gz`.
 2. Open a terminal, unpack the archive and run the installer:
@@ -84,7 +97,7 @@ By default the installer works for your user only and asks for no administrator 
 
 - the program in `~/.local/share/stokesforge/<version>/` (or under `$XDG_DATA_HOME` if you set that variable), with a link named `current` to the installed version;
 - the command `stokesforge` in `~/.local/bin`. If that folder is not in your `PATH`, the installer says so; the menu entry works anyway;
-- the menu entry **StokesForge**, and the file type of `.stf` projects, under `~/.local/share`.
+- the menu entry **StokesForge**, the icons (the application's and the one of `.stf` projects) and the file type of `.stf` projects, under `~/.local/share`.
 
 You can delete the unpacked folder once the installer has finished: the program has been copied.
 
@@ -124,7 +137,7 @@ Run the installer again with `--uninstall`. The installed copy can do it, from a
 ~/.local/share/stokesforge/current/install.sh --uninstall
 ```
 
-This removes the program, the command, the menu entry and the file type. For an installation for all users, use `sudo /opt/stokesforge/current/install.sh --system --uninstall`.
+This removes the program, the command, the menu entry, the icons and the file type. For an installation for all users, use `sudo /opt/stokesforge/current/install.sh --system --uninstall`.
 
 Uninstalling never removes your projects, your preferences (`~/.config/stokesforge`) or the recovery copies. The recovery copies are in a `recovery` folder inside `~/.local/share/stokesforge/`; the installer leaves that folder in place.
 
