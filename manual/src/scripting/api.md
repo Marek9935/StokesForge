@@ -205,7 +205,7 @@ pyst.set_column(b, new_data, expected_version=version)
 | `formula` | Text in column letters (for example `"A * 2"`), or `None` to remove the formula and the values it computed, like **Remove Formula** in the interface |
 | `keep_data` | `True`, only together with `formula=None`: keep the computed values as plain data |
 
-An unknown field, a role that does not exist, or a formula that refers to a missing column raises `InvalidValueError`, and nothing is changed.
+An unknown field, a role that does not exist, or a formula that cannot be read (a missing column, a loop, an unknown function, a syntax error such as `A +`) raises `InvalidValueError`, and nothing is changed. The interface keeps such a formula and frames it; a script does not.
 
 ```python
 pyst.set_column_meta(b, role="y", long_name="Absorbance", unit="a.u.")

@@ -327,9 +327,13 @@ The formula is written **in column letters** of the column's sheet
 (`formula="A * 2"`; a column letter is normalized to capitals) and is read the
 same way. The grammar is that of the interface (`^`, functions such as
 `sqrt(A)` or `round(B, 2)`, comparisons and `if`, #401: manual, "Formula
-syntax"). A letter that designates no column of the sheet, the column itself,
-`#REF`, an unknown function or a wrong argument count raise
-`InvalidValueError` without writing anything (#321). The script never handles
+syntax"). **Every badly written formula** raises `InvalidValueError` (raw
+English) without writing anything: a letter that designates no column of the
+sheet, the column itself, a loop, `#REF`, an unknown function, a wrong argument
+count, a number out of range and a syntax error (`A +`, #433). The script reads
+strictly where the interface field keeps the text and frames it. A range with a
+decimal comma (`max(B,1,5)`) stays a range, as typed: no rewrite and no warning
+(#321, #433). The script never handles
 identifiers: the stored text of the formula is not rewritten by another field
 (changing `unit` of a column whose formula displays `#REF` succeeds).
 `type` and `version` stay read-only. A formula column refuses direct writes.

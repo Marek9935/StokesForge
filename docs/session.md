@@ -168,8 +168,11 @@ column, its paired X and their membership in the sheet they must be in. The
 formula stores the sheet identifier of a remote column; the workbook is read
 from the tree, so moving the sheet changes the displayed prefix, not the
 values. A loop across sheets is a `FormulaError::Cycle` (cells empty, never a
-hang) and is refused at input (`Tree::formula_for_entry`), by the interface and
-by `pyst`; a file that already holds one frames the Formula cell. A remote
+hang): `pyst` and a paste refuse it at input (`Tree::formula_for_entry`), the
+interface field keeps it uncomputed and frames the Formula cell
+(`Tree::formula_keeping`, #433), as does a file that already holds one. An
+unreadable or blocked formula leaves **empty** cells (no `---`, which stays for a
+failed calculation): the frame says why. A remote
 column does not lengthen the result: it keeps the length of its own sheet.
 
 **Result length (#194).** A formula column has the length of the longest of the

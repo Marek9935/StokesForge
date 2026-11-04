@@ -183,6 +183,13 @@ through `crates/stokesforge-app-state/src/errors.rs`:
   (`tr!("error-template-export", cause = …)`). `ErrorKind` is
   `#[non_exhaustive]`: this family keeps a fallback `_` (`error-io-other`),
   the only exception to "without `_`".
+- a formula the F(x)= field **keeps** (#433) says why through the same
+  `errors::formula::error_message`, as a failure on the status bar and as the
+  tooltip of the frame (`AppState::formula_issue`, memoised by revision and
+  epoch, the error kept and the sentence built afterwards so that a language
+  change follows). `FormulaError::Parse` is mapped to `error-formula-syntax`,
+  which holds **no `detail`**: the parser's raw text stays in the `Display` for
+  the CLI and `pyst`;
 - the status bar messages (`AppState::notice` / `warn` / `fail`) go through
   `tr!` (keys `status-*` for information or a warning, `error-*`
   for a failure); the guard `no_hardcoded_label` covers `notice`, `warn` and

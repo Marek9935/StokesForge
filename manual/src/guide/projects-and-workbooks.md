@@ -302,7 +302,7 @@ If you misspell a function name, the message proposes the nearest one (`sqr(A)` 
 
 - Columns are written with their letters: `A`, `B`, `AA`. Capitals or lowercase both work.
 - Numbers: `2`, `0.5`, `1e-3`.
-  A number beyond about 1.8e308, or non-zero but too small to be stored (under about 4.9e-324), is refused when you enter the formula, with a message that gives the limit. Write `0` for zero.
+  A number beyond about 1.8e308, or non-zero but too small to be stored (under about 4.9e-324), makes the formula uncalculated: it is kept and framed, with a message that gives the limit. Write `0` for zero.
 - Operators: `+`, `-`, `*`, `/`, `^` (power), and a minus sign in front of a value (`-A`).
 - Parentheses: `(A+B)/2`. `^` is done first, then `*` and `/`, then `+` and `-`. `^` reads from the right (`2^3^2` is 512) and binds tighter than a minus sign (`-2^2` is -4).
 - Comparisons: `<`, `<=`, `>`, `>=`, `==`, `!=`. They give 1 when true and 0 when false, and are done last.
@@ -342,7 +342,7 @@ Some functions read a whole column and give **one value**, the same on every row
 - `at(B, x)` is the value of B at X = `x`, by straight-line interpolation between the two neighboring points. Outside the X values the cell is empty (no extrapolation). `x` can be a column: `at(B, A)` reads `x` row by row. `at(B, x, D)` reads the X values in column D.
 - `max(B)`, `min(B)`, `mean(B)`, `sum(B)` and `std(B)` are computed over the whole column. `std` is the sample standard deviation (divided by n − 1) and needs two values.
 - `integral(B)` is the area under B by the trapezoid method, the same result as [Integration](analysis.md#integration) without a baseline.
-- **Range**: add two X values, in any order, to keep only the points between them: `max(B, 330, 350)`, `mean(B, 400, 500)`, `integral(B, 300, 400)`. The bounds can be columns: `max(B, D, E)` takes, on each row, the points whose X is between D and E of that row. An infinite bound (`1/0`, `-1/0`) means "to the end": `max(B, 330, 1/0)` is the peak from 330 on. Three values are always a range (`max(B, D, E)` is not the maximum of three columns); `max(B, C)` stays the row-by-row maximum of two columns, and `max(max(B, D), E)` the maximum of three.
+- **Range**: add two X values, in any order, to keep only the points between them: `max(B, 330, 350)`, `mean(B, 400, 500)`, `integral(B, 300, 400)`. The bounds can be columns: `max(B, D, E)` takes, on each row, the points whose X is between D and E of that row. An infinite bound (`1/0`, `-1/0`) means "to the end": `max(B, 330, 1/0)` is the peak from 330 on. Three values are always a range (`max(B, D, E)` is not the maximum of three columns); `max(B, C)` stays the row-by-row maximum of two columns, and `max(max(B, D), E)` the maximum of three. **Decimal comma**: `max(B, 1,5)` is the range from 1 to 5, not the number 1.5. When two plain numbers are separated by a comma without a space in such a call (`max(B,330,350)`), StokesForge keeps the range, rewrites the call with spaces (`max(B, 330, 350)`) and shows the **F(x)=** cell in orange for 10 seconds with the reason, which is also in the status bar. For the number 1.5, write it with a point.
 - The first value of these functions is a **column letter**, not a calculation: `max(B*2)` is refused. Compute the new column first, then read it.
 
 The X is the column of role X nearest to the **left** of B, the same rule as the graph. `at`, `integral` and the range forms need it; `max(B)` and the other whole-column statistics do not. If B has no X, the formula is kept, its cells show `---` and its **F(x)=** cell is framed in red with the reason; it computes as soon as an X appears (change a column role, or move the X to the left of B). Rows whose X is empty or text are ignored. Empty cells, text and infinite values in B are ignored too.
@@ -367,7 +367,7 @@ The reference is one value of the function, so the range stays on the right: `at
 - **The X column.** The X of a column of another sheet is the one paired with it **in its own sheet**. In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3` and `x` is calculated in this sheet, row by row; an X column written with its own prefix (`at(B, x, Sheet3!D)`) is refused.
 - **The result.** The result column has the length of its own sheet, whatever the length of the column read. A sheet that holds only formulas of this kind (or constants such as `1+2`) has one row, so the result shows; it takes the length of the sheet as soon as the sheet has data columns.
 - **Renaming and moving.** The formula follows the sheet: renaming `Sheet3`, or moving it to another workbook (the field then shows `[Book2]Sheet3!B`), changes the text of the field and keeps the values. If the sheet or the column is deleted, or the column is moved to another sheet, the formula shows `#REF` in red and its cells are empty; undoing brings the values back.
-- **Loops.** A formula that would read itself, directly or through other formulas of any sheet, is refused when you type it: "Formulas refer to each other in a loop. Remove one of the references".
+- **Loops.** A formula that would read itself, directly or through other formulas of any sheet, is kept but not calculated: its cells are empty and its **F(x)=** cell is framed in red with "Formulas refer to each other in a loop. Remove one of the references". Every column of the loop is framed, and a formula that reads one of them is empty too.
 - **Copies.** A copied sheet keeps reading the other sheets it did not copy. When you copy a workbook, a formula reads the copy of the sheet that was copied with it. Pasted into another project, the reference becomes `#REF`.
 
 If you need functions of the data, you can use a script (see [The pyst API](../scripting/api.md)), or use the [Analysis](analysis.md) tools.
@@ -383,7 +383,7 @@ If you need functions of the data, you can use a script (see [The pyst API](../s
 
 ### Messages
 
-StokesForge refuses a formula, and leaves the field open, when:
+A formula you type is **always kept**: Enter, Tab or a click elsewhere closes the field and the text stays as you wrote it. When StokesForge cannot calculate it, the column is empty, the **F(x)=** cell is framed in red, the reason shows in a tooltip and in the status bar, and **Ctrl+Z** brings back the previous formula and its values. The reason is one of:
 
 - a letter names no column in the sheet;
 - a sheet or a workbook of a reference does not exist, or the sheet has no such column;
@@ -396,9 +396,13 @@ StokesForge refuses a formula, and leaves the field open, when:
 - a function gets the wrong number of values;
 - a column letter is followed by `(` (`A(B/C)`): write `A*(B/C)`;
 - the column of a whole-column function is an expression: `max(B*2)`, `at(B, 1, A+1)`;
-- `pi` is written alone and the sheet has no column PI: write `pi()`.
+- `pi` is written alone and the sheet has no column PI: write `pi()`;
+- a number is too large or too small to be stored;
+- the formula is incomplete or not valid (`A +`, a missing parenthesis): check the operators and the parentheses.
 
-A formula with a syntax error is kept and the column has no values until you fix it.
+While you type, the cell turns red as soon as the text is known to be wrong, except for an incomplete formula: `A +` stays plain until you close the field. The kept text keeps the columns it could read: in `A+Z` with no column Z, the column A still follows moves.
+
+A script (`pyst`) and a paste are stricter than the field: a script that writes a formula the field would keep gets an `InvalidValueError`, and nothing is written; a pasted formula that cannot be read writes nothing into its column (not even the copied values), the other columns of the paste go through, and the status bar names the column that was not pasted. So the **F(x)=** text of a formula that does not calculate cannot be copied into another column.
 
 ### Keep the values, remove the formula
 

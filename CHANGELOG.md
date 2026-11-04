@@ -248,6 +248,21 @@ without a message, see `docs/persistence.md`).
 - `pyst.set_column_meta(formula=None)` removes the formula and the values it
   computed, like the interface; `keep_data=True` keeps them. `pyst` API 0.5
   (alpha) (#433).
+- Formulas (#433): a formula you type in the **F(x)=** field is now always kept
+  (Enter, Tab or a click elsewhere closes the field, Esc cancels). When it
+  cannot be calculated (unknown column or function, wrong argument count, loop,
+  `#REF`, syntax error such as `A +`, number too large) the text stays as typed,
+  the column is empty, the cell is framed in red with the reason, and Ctrl+Z
+  brings the old formula back. A column the formula could read still follows
+  moves. A loop is kept uncalculated, its columns framed. Unreadable and
+  looping formulas leave empty cells instead of `---`. A syntax error has one
+  short sentence ("The formula is incomplete or not valid…"). A range written
+  with a decimal comma (`max(B,1,5)`) keeps its range, is rewritten
+  `max(B, 1, 5)` and shows orange for 10 s with the reason, also in the status
+  bar. Pasting a formula that cannot be read writes nothing into its column
+  (not the copied values either), the other columns go through and the status
+  bar names the column. `pyst` raises `InvalidValueError` for every badly
+  written formula, `A +` included, and writes nothing.
 
 - The axes are named **Bottom / Top / Left / Right** everywhere in the interface
   (Bas / Haut / Gauche / Droite in French), instead of "X (bottom)", "Secondary Y

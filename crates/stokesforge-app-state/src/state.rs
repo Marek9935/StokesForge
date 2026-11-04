@@ -517,9 +517,11 @@ pub enum Action {
     /// of `stokesforge_core::formula` / `stokesforge-session::actor`, outside
     /// the scope of this action. The text is typed in **letters**; it is
     /// converted into column identifiers by
-    /// [`stokesforge_core::Tree::formula_from_letters`] (#321). A refusal
-    /// (unknown letter, self-reference, `#REF`) is reported in the status bar
-    /// and nothing is written.
+    /// [`stokesforge_core::Tree::formula_keeping`] (#321, #433): the field never
+    /// refuses. A text that cannot be read (unknown letter, self-reference,
+    /// `#REF`, syntax error) is stored as typed, the status bar says why and the
+    /// cell is framed ([`AppState::formula_issue`]); a range written with a
+    /// decimal comma is rewritten and warned (S-R17).
     SetColumnFormula {
         /// Target column.
         column: NodeId,
