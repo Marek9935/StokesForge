@@ -15,7 +15,9 @@
 //! Rules shared by all of them: only **finite** values count (`NaN` and `±inf`
 //! are ignored, like the Integration tool); no point means `None` (an empty
 //! cell, `sum` and `integral` included, never 0); the bounds of a range come in
-//! any order and are inclusive.
+//! any order and are inclusive; an infinite bound means "to the end", a `NaN`
+//! bound gives `None`, and an `integral` over a zero-width range (equal finite
+//! bounds) is 0 when there is at least one point (#433).
 //!
 //! Sums are **compensated** (Neumaier), never a plain running sum (#429): the
 //! sum of ten 0.1 is 1, the mean of a constant column is that constant and its
@@ -345,10 +347,10 @@ impl ColumnIndex {
     }
 
     /// `stat` of the Y of the points whose X is in `[lo, hi]` (either order,
-    /// bounds included); `None` when there is no point, a non-finite bound, or
-    /// (`Std`) a single point.
+    /// bounds included; an infinite bound means "to the end"); `None` when
+    /// there is no point, a `NaN` bound, or (`Std`) a single point.
     pub fn stat(&self, stat: Stat, lo: f64, hi: f64) -> Option<f64> {
-        if !(lo.is_finite() && hi.is_finite()) {
+        if lo.is_nan() || hi.is_nan() {
             return None;
         }
         let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
@@ -363,14 +365,23 @@ impl ColumnIndex {
     /// Area under the curve over `[lo, hi]` (either order), clipped to the
     /// data domain, by the trapezoid method: the result of
     /// [`crate::integrate::integrate`] with `Under::Zero` and that range.
-    /// `None` for fewer than two points, a non-finite bound, an empty range
-    /// or a non-finite area.
+    /// An infinite bound means "to the end" (clipped like the data domain); a
+    /// zero-width range between equal finite bounds is `0` when there is at
+    /// least one point. `None` for no point, a `NaN` bound, fewer than two
+    /// points on a range of positive width, an empty range or a non-finite
+    /// area.
     pub fn integral(&self, lo: f64, hi: f64) -> Option<f64> {
         let n = self.xs.len();
-        if n < 2 || !(lo.is_finite() && hi.is_finite()) {
+        if lo.is_nan() || hi.is_nan() {
             return None;
         }
         let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+        if lo == hi && lo.is_finite() {
+            return (n >= 1).then_some(0.0);
+        }
+        if n < 2 {
+            return None;
+        }
         let (lo, hi) = (lo.max(self.xs[0]), hi.min(self.xs[n - 1]));
         if !(hi > lo) {
             return None;
@@ -393,6 +404,11 @@ impl ColumnIndex {
 
     /// Area under the whole curve.
     pub fn integral_all(&self) -> Option<f64> {
+        // One point (equal bounds) is not an area: the zero-width rule is for
+        // written bounds only.
+        if self.xs.len() < 2 {
+            return None;
+        }
         Some(self.integral(*self.xs.first()?, *self.xs.last()?)).flatten()
     }
 }
@@ -631,8 +647,29 @@ mod tests {
         assert_eq!(one.integral_all(), None);
         let two = ColumnIndex::new(&[1.0, 2.0], &[1.0, 1.0]);
         assert_eq!(two.integral(5.0, 6.0), None);
-        assert_eq!(two.integral(1.5, 1.5), None);
         assert_eq!(two.integral(f64::NAN, 2.0), None);
         assert_eq!(two.integral(2.0, 1.0), Some(1.0));
+        assert_eq!(ColumnIndex::new(&[], &[]).integral(2.0, 2.0), None);
+    }
+
+    #[test]
+    fn an_infinite_bound_means_to_the_end_and_a_zero_width_range_is_zero() {
+        let inf = f64::INFINITY;
+        let two = ColumnIndex::new(&[1.0, 3.0], &[1.0, 1.0]);
+        assert_eq!(two.integral(1.5, 1.5), Some(0.0));
+        assert_eq!(two.integral(9.0, 9.0), Some(0.0));
+        assert_eq!(
+            ColumnIndex::new(&[1.0], &[1.0]).integral(5.0, 5.0),
+            Some(0.0)
+        );
+        assert_eq!(two.integral(0.0, inf), Some(2.0));
+        assert_eq!(two.integral(inf, 2.0), Some(1.0));
+        assert_eq!(two.integral(-inf, inf), Some(2.0));
+        assert_eq!(two.integral(inf, inf), None);
+        assert_eq!(two.integral(3.0, inf), None);
+        assert_eq!(two.stat(Stat::Max, 0.0, inf), Some(1.0));
+        assert_eq!(two.stat(Stat::Sum, -inf, inf), Some(2.0));
+        assert_eq!(two.stat(Stat::Sum, inf, inf), None);
+        assert_eq!(two.stat(Stat::Sum, f64::NAN, 1.0), None);
     }
 }

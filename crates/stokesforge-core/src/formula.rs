@@ -28,7 +28,9 @@
 //! once (`stokesforge_analysis::column_values`, `O(log n)` per row). Empty and
 //! text cells, rows whose X is empty or text, and infinite values are ignored;
 //! no point (empty column, empty range, `at` outside the X domain) is an empty
-//! cell — `sum` and `integral` too, never 0.
+//! cell — `sum` and `integral` too, never 0. The bounds of a range: an infinite
+//! bound means "to the end", a `NaN` bound gives an empty cell, and `integral`
+//! over equal finite bounds is 0 when the column has a usable point (#433).
 //!
 //! Precedence, lowest first: comparisons; `+ -`; `* /`; unary sign; `^`
 //! (right-associative, `-2^2 = -4`, `2^3^2 = 512`); call, number, column,
@@ -2257,9 +2259,7 @@ fn compute_call(
         let ctx = Ctx { columns, states };
         let bounds = (eval_expr(lo, 0, &ctx), eval_expr(hi, 0, &ctx));
         let value = match bounds {
-            ((lo, NumericStatus::Ok), (hi, NumericStatus::Ok))
-                if lo.is_finite() && hi.is_finite() =>
-            {
+            ((lo, NumericStatus::Ok), (hi, NumericStatus::Ok)) if !lo.is_nan() && !hi.is_nan() => {
                 match call.func.stat() {
                     Some(stat) => ColumnIndex::new(&xs, &ys).stat(stat, lo, hi),
                     None => integral_of(&xs, &ys, Some((lo, hi))),
@@ -2274,9 +2274,32 @@ fn compute_call(
 
 /// The Integration tool's total (no baseline) over the finite points, on the
 /// whole curve or on a range: the same function, not a copy. `None` where the
-/// tool fails (fewer than two points, empty range) or overflows.
+/// tool fails (fewer than two points, empty range) or overflows. A range with
+/// equal finite bounds is 0 when there is a usable point; an infinite bound is
+/// clipped to the cleaned X domain before the tool is called (it refuses a
+/// non-finite bound, #276).
 fn integral_of(xs: &[f64], ys: &[f64], range: Option<(f64, f64)>) -> Option<f64> {
     let cleaned = clean(xs, ys).series;
+    let mut range = range;
+    if let Some((a, b)) = range {
+        let (mut lo, mut hi) = (a.min(b), a.max(b));
+        if lo == hi && lo.is_finite() {
+            // A zero-width range: no area, as long as there is a usable point.
+            return (!cleaned.x.is_empty()).then_some(0.0);
+        }
+        if !(lo.is_finite() && hi.is_finite()) {
+            // An infinite bound means "to the end": clip it to the data (the
+            // Integration tool refuses a non-finite bound, #276).
+            let xmin = cleaned.x.iter().copied().fold(f64::INFINITY, f64::min);
+            let xmax = cleaned.x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            lo = lo.max(xmin);
+            hi = hi.min(xmax);
+            if !(lo.is_finite() && hi.is_finite() && hi > lo) {
+                return None;
+            }
+        }
+        range = Some((lo, hi));
+    }
     let spec = IntegrateSpec {
         ranges: range.into_iter().collect(),
         under: Under::Zero,

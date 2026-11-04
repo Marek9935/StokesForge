@@ -1242,6 +1242,31 @@ fn zero_over_zero_shows_a_failed_calculation_in_the_cell() {
     }
 }
 
+/// No point in the range: empty cells (not `---`): the NaN operand is not a
+/// failed calculation of the arithmetic.
+#[test]
+fn dividing_by_a_range_with_no_point_stays_empty() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s = first_sheet(&p, book);
+        let x = add_col(&mut p, s, "A", &[1.0, 2.0]);
+        set_x(&mut p, x);
+        add_col(&mut p, s, "B", &[3.0, 4.0]);
+        let c = add_col(&mut p, s, "C", &[]);
+        set_f(&mut p, c, "B/max(B, 100, 200)");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        assert!(nums(&t, c).iter().all(Option::is_none), "{mode:?}");
+        assert!(
+            (0..2).all(|r| column(&t, c).get(r) != Cell::Text(Some("---".into()))),
+            "{mode:?}"
+        );
+    }
+}
+
 // -- 10. a sheet whose only columns are formulas reading remote columns --------
 
 #[test]
