@@ -86,6 +86,18 @@ fn world() -> World {
             )
             .unwrap();
     }
+    // `Sheet1!C` carries an x' that no user can type (infinite): a copy of it
+    // pastes an x' that the destination refuses.
+    let c = project.tree().children(sheet1).unwrap()[2];
+    project
+        .set_column_meta(
+            c,
+            ColumnMeta {
+                x_prime: Some(f64::INFINITY),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let session = Session::spawn(project, None).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let state = AppState::new_with_preferences(
@@ -170,6 +182,31 @@ impl World {
             sheet,
             text: text.to_string(),
         });
+    }
+
+    /// Ctrl+Shift+C on several columns of `sheet`, then the confirmed `kind`;
+    /// returns the clipboard text.
+    fn copy_columns(&mut self, sheet: NodeId, columns: &[NodeId], kind: FullColumnsCopy) -> String {
+        self.state.select_column(sheet, columns[0]);
+        for &column in &columns[1..] {
+            self.state.toggle_column_selection(sheet, column);
+        }
+        let _ = self.state.copy_full_columns(sheet);
+        if self.state.pending_full_copy().is_some() {
+            self.state.dispatch(Action::ConfirmFullColumnsCopy(kind));
+        }
+        self.state
+            .take_object_clipboard_text()
+            .expect("the copy is published")
+    }
+
+    /// `count` new empty columns at the end of `sheet`.
+    fn new_columns(&mut self, sheet: NodeId, count: usize) -> Vec<NodeId> {
+        for _ in 0..count {
+            self.state.dispatch(Action::AddColumn { sheet });
+        }
+        let all = self.columns(sheet);
+        all[all.len() - count..].to_vec()
     }
 
     fn undo_all_and_redo_all(&mut self) {
@@ -294,15 +331,21 @@ fn a_formulas_paste_is_one_history_entry() {
     let before = w.state.tree().clone();
     w.paste_header_on(sheet3, dst, &clip);
     assert!(w.letters(dst).is_some());
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    let pasted = w.state.tree().clone();
     w.state.dispatch(Action::Undo);
     assert_eq!(*w.state.tree(), before, "one Undo restores the column");
     w.state.dispatch(Action::Redo);
     assert!(w.letters(dst).is_some());
+    assert_eq!(
+        *w.state.tree(),
+        pasted,
+        "Redo brings back formula and values"
+    );
     w.undo_all_and_redo_all();
 }
 
 #[test]
-#[ignore = "bug: #432: a successful paste of a formulas copy ends with the error status `This column is computed by a formula` (the pasted frozen values are then written into the new formula column and refused)"]
 fn a_successful_formulas_paste_does_not_end_on_an_error() {
     let mut w = world();
     let src = sources(&mut w);
@@ -313,6 +356,213 @@ fn a_successful_formulas_paste_does_not_end_on_an_error() {
     w.paste_header_on(sheet3, dst, &clip);
     assert!(w.letters(dst).is_some());
     assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_formulas_paste_of_several_columns_keeps_the_values_of_the_ordinary_ones() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, sheet3) = (w.sheet1, w.sheet3);
+    let ordinary = w.columns(sheet1)[1];
+    let clip = w.copy_columns(sheet1, &[ordinary, src[0].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(sheet3, 2);
+    let before = w.state.tree().clone();
+    w.paste_header_on(sheet3, dst[0], &clip);
+    assert_eq!(w.letters(dst[0]), None);
+    assert_eq!(w.values(dst[0])[0], Some(10.0), "frozen values go in");
+    assert_eq!(w.letters(dst[1]).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(dst[1])[0], Some(3104.0), "computed, not pasted");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    let pasted = w.state.tree().clone();
+    w.state.dispatch(Action::Undo);
+    assert_eq!(*w.state.tree(), before, "one Undo restores both columns");
+    w.state.dispatch(Action::Redo);
+    assert_eq!(
+        *w.state.tree(),
+        pasted,
+        "Redo brings back formula and values"
+    );
+}
+
+#[test]
+fn a_formulas_paste_anchored_on_the_formula_field_does_not_end_on_an_error() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let sheet3 = w.sheet3;
+    let clip = w.copy_formula_column(w.sheet1, src[0].1);
+    let dst = w.new_columns(sheet3, 1)[0];
+    w.state
+        .select_header_field(sheet3, dst, HeaderField::Formula);
+    w.state.dispatch(Action::Paste {
+        sheet: sheet3,
+        text: clip,
+    });
+    assert_eq!(w.letters(dst).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(dst)[0], Some(3104.0));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_formulas_paste_on_data_cells_replaces_the_formula_like_a_header_paste() {
+    // Was `..._writes_values_and_keeps_the_read_only_rule`: since #432 S1 a
+    // Formulas copy on a data cell acts as on the column's F(x)= field, so the
+    // entry row of an ordinary column and a data cell of a formula column now
+    // both end with the pasted formula and no error.
+    let mut w = world();
+    let src = sources(&mut w);
+    let sheet3 = w.sheet3;
+    let clip = w.copy_formula_column(w.sheet1, src[0].1);
+    let b = w.new_columns(sheet3, 1)[0];
+    let entry = w.state.entry_row(sheet3);
+    w.state.select_cell(sheet3, b, entry);
+    w.state.dispatch(Action::Paste {
+        sheet: sheet3,
+        text: clip.clone(),
+    });
+    assert_eq!(w.letters(b).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(b).len(), entry, "no row is created");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    let f = w.formula_column(sheet3, "max(A)");
+    w.state.select_cell(sheet3, f, 0);
+    w.state.dispatch(Action::Paste {
+        sheet: sheet3,
+        text: clip,
+    });
+    assert_eq!(w.letters(f).as_deref(), Some("max(B)"));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+/// `Sheet3` gets a formula column C (`A*2`), copied as Formulas; returns it with
+/// the clipboard text and one empty column D.
+fn doubled_c(w: &mut World) -> (NodeId, String, NodeId) {
+    let sheet3 = w.sheet3;
+    let c = w.formula_column(sheet3, "A*2");
+    let clip = w.copy_formula_column(sheet3, c);
+    let d = w.new_columns(sheet3, 1)[0];
+    (c, clip, d)
+}
+
+fn paste_on_cell(w: &mut World, column: NodeId, row: usize, clip: &str) {
+    let sheet = w.sheet3;
+    w.state.select_cell(sheet, column, row);
+    w.state.dispatch(Action::Paste {
+        sheet,
+        text: clip.to_string(),
+    });
+}
+
+#[test]
+fn a_formulas_paste_on_a_data_cell_writes_the_formula_and_recomputes_from_row_one() {
+    let mut w = world();
+    let (c, clip, d) = doubled_c(&mut w);
+    let before = w.state.tree().clone();
+    paste_on_cell(&mut w, d, 4, &clip);
+    assert_eq!(w.letters(d).as_deref(), Some("A*2"));
+    assert_eq!(w.values(d), w.values(c));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    w.state.dispatch(Action::Undo);
+    assert_eq!(*w.state.tree(), before, "one Undo undoes the whole paste");
+}
+
+#[test]
+fn a_formulas_paste_on_the_entry_row_writes_the_formula_without_extra_rows() {
+    let mut w = world();
+    let (c, clip, d) = doubled_c(&mut w);
+    let entry = w.state.entry_row(w.sheet3);
+    paste_on_cell(&mut w, d, entry, &clip);
+    assert_eq!(w.letters(d).as_deref(), Some("A*2"));
+    assert_eq!(w.values(d), w.values(c), "same length as C");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_formulas_paste_of_two_columns_on_a_data_cell_keeps_the_plain_values_from_row_one() {
+    let mut w = world();
+    let sheet3 = w.sheet3;
+    let b = w.columns(sheet3)[1];
+    let c = w.formula_column(sheet3, "A*2");
+    let clip = w.copy_columns(sheet3, &[b, c], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(sheet3, 2);
+    paste_on_cell(&mut w, dst[0], 3, &clip);
+    assert_eq!(w.letters(dst[0]), None);
+    assert_eq!(w.values(dst[0]), w.values(b), "B's values from row 1");
+    assert_eq!(w.letters(dst[1]).as_deref(), Some("A*2"));
+    assert_eq!(w.values(dst[1]), w.values(c));
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_values_paste_on_a_data_cell_is_unchanged() {
+    let mut w = world();
+    let sheet3 = w.sheet3;
+    let c = w.formula_column(sheet3, "A*2");
+    let clip = w.copy_columns(sheet3, &[c], FullColumnsCopy::Values);
+    let d = w.new_columns(sheet3, 1)[0];
+    paste_on_cell(&mut w, d, 4, &clip);
+    assert_eq!(w.letters(d), None, "no formula");
+    let values = w.values(d);
+    assert_eq!(values.len(), 9, "values start at row 4");
+    assert_eq!(values[4], w.values(c)[0]);
+    assert_eq!(values[0], None);
+}
+
+#[test]
+fn a_values_paste_onto_a_formula_column_replaces_the_formula_by_the_values() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, sheet3) = (w.sheet1, w.sheet3);
+    let clip = w.copy_columns(sheet1, &[src[0].1], FullColumnsCopy::Values);
+    let dst = w.formula_column(sheet3, "max(A)");
+    assert_eq!(w.values(dst)[0], Some(3004.0));
+    w.paste_header_on(sheet3, dst, &clip);
+    assert_eq!(w.letters(dst), None, "the formula is removed");
+    assert_eq!(w.values(dst)[0], Some(3104.0), "the frozen values are in");
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+}
+
+#[test]
+fn a_refused_formula_among_accepted_ones_ends_on_its_sentence_only() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, far) = (w.sheet1, w.far_sheet);
+    let clip = w.copy_columns(sheet1, &[src[0].1, src[2].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(far, 2);
+    w.paste_header_on(far, dst[0], &clip);
+    assert_eq!(w.letters(dst[0]).as_deref(), Some("max(Sheet3!B)"));
+    assert_eq!(w.values(dst[0])[0], Some(7104.0));
+    assert_eq!(w.letters(dst[1]), None, "Book9 has no `Blanc 2`");
+    let status = w.status();
+    assert!(
+        status.starts_with("[error]") && status.contains("no sheet named"),
+        "{status}"
+    );
+    assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
+}
+
+#[test]
+fn an_accepted_formula_after_a_refused_x_prime_keeps_its_computed_values() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, sheet3) = (w.sheet1, w.sheet3);
+    // `Sheet1!C` holds an x' that is not a finite number (see `world`): it is
+    // refused at the destination while the next column's formula is accepted.
+    let c = w.columns(sheet1)[2];
+    let clip = w.copy_columns(sheet1, &[c, src[0].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(sheet3, 2);
+    // An error already on the status bar must not count as a failure of the
+    // paste.
+    w.state.dispatch(Action::SetColumnXPrime {
+        column: dst[1],
+        text: "abc".to_string(),
+    });
+    assert!(w.status().starts_with("[error]"), "{}", w.status());
+    w.paste_header_on(sheet3, dst[0], &clip);
+    assert_eq!(w.letters(dst[1]).as_deref(), Some("max(B)"));
+    assert_eq!(w.values(dst[1])[0], Some(3104.0), "computed, not pasted");
+    // The refused x' is reported, then overwritten by the notice of the
+    // other column's pasted values; the read-only error must never appear.
+    let status = w.status();
+    assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
 }
 
 #[test]
@@ -765,7 +1015,7 @@ fn new_target(w: &mut World) -> NodeId {
 fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     let mut w = world();
     let target = new_target(&mut w);
-    let cases: [(&str, &str); 9] = [
+    let cases: [(&str, &str); 11] = [
         ("frob(A)", "frob"),
         ("sin(A, B)", "argument"),
         ("sin()", "argument"),
@@ -775,6 +1025,8 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
         ("max([Nobook]Sheet1!A)", "Nobook"),
         ("max(Sheet3!B, Sheet3!A)", "can only be read by"),
         ("at(Sheet3!B, 1, Sheet3!A)", "without a prefix"),
+        ("1e400*A", "too large"),
+        ("A*1e-400", "too small"),
     ];
     for (text, hint) in cases {
         w.type_formula(target, text);
@@ -788,6 +1040,25 @@ fn refused_formulas_write_nothing_and_say_why_in_a_sentence() {
     }
 }
 
+/// A number outside the f64 range is refused as soon as it is typed: the
+/// field stays open (`header_edit_refusal`), and a stored text keeps its
+/// number (#429).
+#[test]
+fn a_number_out_of_range_is_refused_while_typing() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    w.state.begin_header_edit(target, HeaderField::Formula);
+    w.state.header_editing_mut().unwrap().buffer = "1e400*A".to_string();
+    let refusal = w.state.header_edit_refusal().expect("refused while typing");
+    assert!(
+        refusal.contains("1e400") && refusal.contains("too large"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("NumberOutOfRange"), "{refusal}");
+    w.state.header_editing_mut().unwrap().buffer = "1e308*A".to_string();
+    assert_eq!(w.state.header_edit_refusal(), None);
+}
+
 /// The manual says a formula with a syntax error is kept and the column has
 /// no values until it is fixed. Pinned: kept, empty, history entry written.
 #[test]
@@ -796,7 +1067,7 @@ fn a_formula_with_a_syntax_error_is_kept_and_the_column_is_empty() {
     let target = new_target(&mut w);
     let deep = format!("{}A{}", "(".repeat(1001), ")".repeat(1001));
     let very_deep = format!("{}A", "-".repeat(100_000));
-    for text in ["A +", "(A", "1e999999 * A", "A ## B", &deep, &very_deep] {
+    for text in ["A +", "(A", "A ## B", &deep, &very_deep] {
         w.type_formula(target, text);
         let kept = w.letters(target);
         assert_eq!(
@@ -1025,18 +1296,56 @@ fn a_type_change_never_corrupts_a_formula_column() {
 }
 
 #[test]
-#[ignore = "bug: #431: choosing a type for a formula column answers `Change Type of Column E` (success notice, history entry) but the recalculation puts the column back to Mixed: the menu is not disabled and the tick never moves"]
-fn a_type_change_on_a_formula_column_is_refused_or_applied_not_silently_undone() {
+fn a_type_change_on_a_formula_column_is_refused() {
     let mut w = world();
     let sheet1 = w.sheet1;
     let e = w.formula_column(sheet1, "A*2");
+    let before = w.state.snapshot().history.undo_label.clone();
     w.state.dispatch(Action::SetColumnType {
         column: e,
         column_type: ColumnType::Numeric,
     });
-    let applied = column_type_of(&w, e) == ColumnType::Numeric;
-    let refused = w.status().starts_with("[error]");
-    assert!(applied || refused, "{}", w.status());
+    assert!(w.status().starts_with("[error]"), "{}", w.status());
+    assert_eq!(column_type_of(&w, e), ColumnType::Mixed);
+    assert_eq!(w.state.snapshot().history.undo_label, before);
+}
+
+/// #431, Q3: a selection holding a formula column and a plain one changes the
+/// plain one only, with no error and one undo step; a selection of formula
+/// columns only has nothing to change and says why.
+#[test]
+fn a_type_change_on_a_mixed_selection_applies_to_the_plain_columns_only() {
+    let mut w = world();
+    let sheet1 = w.sheet1;
+    let f = w.formula_column(sheet1, "A*2");
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 });
+    let plain = *w.columns(sheet1).last().unwrap();
+    w.state.dispatch(Action::SetColumnsType {
+        columns: vec![plain],
+        column_type: ColumnType::Mixed,
+    });
+    assert_eq!(
+        w.state.columns_with_changeable_type(&[f, plain]),
+        vec![plain]
+    );
+    assert_eq!(w.state.column_type_lock(&[f, plain]), None);
+    assert_eq!(
+        w.state.column_type_lock(&[f]),
+        Some(stokesforge_app_state::state::ColumnTypeLock::Formula)
+    );
+    assert!(w.state.columns_with_changeable_type(&[f]).is_empty());
+    let g = w.formula_column(sheet1, "A*3");
+    let before = w.state.tree().clone();
+    w.state.dispatch(Action::SetColumnsType {
+        columns: vec![plain, f, g],
+        column_type: ColumnType::Numeric,
+    });
+    assert!(!w.status().starts_with("[error]"), "{}", w.status());
+    assert_eq!(column_type_of(&w, plain), ColumnType::Numeric);
+    assert_eq!(column_type_of(&w, f), ColumnType::Mixed);
+    assert_eq!(column_type_of(&w, g), ColumnType::Mixed);
+    w.state.dispatch(Action::Undo);
+    assert_eq!(*w.state.tree(), before, "one undo step");
 }
 
 // -- stale snapshot during a long recalculation --

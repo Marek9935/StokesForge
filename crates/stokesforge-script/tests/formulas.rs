@@ -137,14 +137,19 @@ assert pyst.values(second) == (11., 21.), pyst.values(second)
 }
 
 #[test]
-#[ignore = "bug: #431: pyst.set_column_type accepts a formula column (docstring: refused); silently reverted by the recalc, one useless history entry"]
 fn set_column_type_on_a_formula_column_is_refused() {
     let bench = bench();
-    let before = bench.session.snapshot().unwrap().revision;
     script(
         &bench,
         r#"
 col = formula_column('A * 2', name='Twice')
+"#,
+    );
+    let before = bench.session.snapshot().unwrap();
+    script(
+        &bench,
+        r#"
+col = pyst.children(S1)[-1]
 for kind in ('mixed', 'datetime', 'numeric'):
     try:
         pyst.set_column_type(col, kind)
@@ -156,7 +161,10 @@ assert pyst.info(col)['column']['formula'] == 'A * 2'
 assert pyst.values(col) == (2., 4., 6., 8.)
 "#,
     );
-    assert!(bench.session.snapshot().unwrap().revision > before);
+    // The refusals left no history entry and no change.
+    let after = bench.session.snapshot().unwrap();
+    assert_eq!(after.history.undo_label, before.history.undo_label);
+    assert_eq!(*after.tree, *before.tree);
 }
 
 #[test]
@@ -316,8 +324,8 @@ for text, distance in worst.items():
 /// Row-wise functions not covered above, against Python's `math`, with one
 /// tolerance per function. Tolerances hold on any libm (Windows included): 4
 /// ulps for the transcendental ones, exact for what IEEE makes exact.
-/// Left out on purpose: `round` ties (#428), `at` on a grid point (#427),
-/// `logx` of powers and `erf` (#429).
+/// Left out on purpose: `at` on a grid point (#427), `logx` of powers and
+/// `erf` (#429).
 #[test]
 fn more_row_wise_functions_agree_with_python_math() {
     let bench = bench();
@@ -390,11 +398,56 @@ assert not failures, failures
     );
 }
 
-/// What the differential check cannot yet assert: the relative error of `erf`
-/// and `erfc` in the tail, and `sum`, `mean`, `std` at the tolerance a compensated
-/// summation would give (2 ulps from `math.fsum`).
+/// `round(x, n)` against Python's `decimal`: round half up (away from zero on
+/// the magnitude) of the shortest representation `repr(x)`, exact equality.
 #[test]
-#[ignore = "bug: #429: erf/erfc lose their relative precision away from 0, and sum/mean/std are only held to a loose 2000 ulps bound"]
+fn round_agrees_with_python_decimal_on_the_shortest_representation() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+import random
+from decimal import Decimal, ROUND_HALF_UP
+
+def add_column(name, data):
+    col = pyst.create_column(S1, name)
+    pyst.set_values(col, data)
+    return col
+
+random.seed(428)
+xs, ns = [], []
+for _ in range(400):
+    n = random.randint(-3, 12)
+    kind = random.randint(0, 2)
+    if kind == 0:
+        x = random.uniform(-1000.0, 1000.0)
+    elif kind == 1:
+        # Ties in decimal: k.5 scaled by 10^-n (1.005, 2.675...)
+        x = (random.randint(-5000, 5000) * 10 + 5) / 10.0 ** (n + 1)
+    else:
+        x = round(random.uniform(-100.0, 100.0), random.randint(1, 6))
+    xs.append(x)
+    ns.append(float(n))
+cx = add_column('X', xs)
+cn = add_column('N', ns)
+names = [pyst.info(c)['name'] for c in pyst.children(S1)]
+lx, ln = chr(ord('A') + names.index('X')), chr(ord('A') + names.index('N'))
+got = pyst.values(formula_column('round(%s, %s)' % (lx, ln)))
+assert len(got) == len(xs), (len(got), len(xs))
+bad = []
+for x, n, g in zip(xs, ns, got):
+    expected = float(Decimal(repr(x)).quantize(Decimal(1).scaleb(-int(n)), rounding=ROUND_HALF_UP))
+    if g != expected:
+        bad.append((x, n, g, expected))
+assert not bad, bad[:10]
+"#,
+    );
+}
+
+/// What the differential check holds to a tighter bound: the relative error of
+/// `erf` and `erfc` in the tail, and `sum`, `mean`, `std` at the tolerance a
+/// compensated summation gives (2 ulps from `math.fsum`) (#429).
+#[test]
 fn erf_erfc_and_the_aggregates_meet_their_target_tolerance() {
     let bench = bench();
     script(

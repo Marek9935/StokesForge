@@ -733,6 +733,104 @@ fn set_column_type_mixed_to_numeric_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
+/// #431: a formula column keeps the type its recalculation gives it, so the
+/// command refuses every type before any mutation, and pushes no history entry.
+#[test]
+fn set_column_type_on_a_formula_column_is_refused() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let formula = f
+        .project
+        .tree()
+        .formula_from_letters(f.a, "B*2")
+        .expect("formula entered");
+    history
+        .execute(
+            &mut f.project,
+            Command::SetColumnMeta {
+                column: f.a,
+                meta: ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("set a formula on A");
+    let before = snapshot(&f.project);
+    let (kind, depth) = (column_type(&f.project, f.a), history.len());
+    let version = |project: &Project| {
+        project
+            .tree()
+            .node(f.a)
+            .and_then(Node::as_column)
+            .map(Column::version)
+    };
+    let version_before = version(&f.project);
+
+    for column_type_asked in [ColumnType::Numeric, ColumnType::DateTime, ColumnType::Mixed] {
+        let err = history
+            .execute(
+                &mut f.project,
+                Command::SetColumnType {
+                    column: f.a,
+                    column_type: column_type_asked,
+                },
+            )
+            .expect_err("a formula column refuses a type change");
+        assert_eq!(
+            err,
+            CommandError::Core(CoreError::FormulaColumnReadOnly { column: f.a }),
+            "{column_type_asked:?}"
+        );
+        assert_eq!(**f.project.tree(), *before);
+        assert_eq!(column_type(&f.project, f.a), kind);
+        assert_eq!(version(&f.project), version_before);
+        assert_eq!(history.len(), depth);
+        assert!(history.can_undo());
+    }
+}
+
+/// #431: the refusal lives in the command, not in the replay: a type change
+/// followed by a formula on the same column undoes and redoes cleanly.
+#[test]
+fn undo_redo_of_a_type_change_before_a_formula_is_not_refused() {
+    let mut f = fixture();
+    let mut history = History::new();
+    history
+        .execute(
+            &mut f.project,
+            Command::SetColumnType {
+                column: f.t,
+                column_type: ColumnType::Numeric,
+            },
+        )
+        .expect("type change on a plain column");
+    let formula = f
+        .project
+        .tree()
+        .formula_from_letters(f.t, "A*2")
+        .expect("formula entered");
+    history
+        .execute(
+            &mut f.project,
+            Command::SetColumnMeta {
+                column: f.t,
+                meta: ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("formula on the retyped column");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(column_type(&f.project, f.t), ColumnType::Mixed);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
 // `set_column_type_numeric_to_text_round_trip` was removed: it targeted
 // `ColumnType::Text`, which no longer exists. `Numeric → Mixed` is not its
 // equivalent — the conversion is lossless (`MixedCell::Number`, not a

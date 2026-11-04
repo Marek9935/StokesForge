@@ -34,8 +34,8 @@
 //! self-referencing, in a cycle, removed; columns added (including with an
 //! already carried version, or cloned from a snapshot), deleted, moved within
 //! the worksheet or to another one; types changed; rows inserted, deleted;
-//! cells deleted (including in a formula column); worksheets transposed (#430
-//! keeps their links compared by shape) and refreshed; worksheets duplicated,
+//! cells deleted (including in a formula column); worksheets transposed (their
+//! links are compared by shape, #430) and refreshed; worksheets duplicated,
 //! pasted, deleted; workbooks pasted; undo, redo, and series of undos followed
 //! by as many redos (the redo of a structural entry is the only path that does
 //! not restamp the versions); macros closed or aborted; save and reload,
@@ -1227,7 +1227,7 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
         let (s_targeted, s_full) = (targeted.snapshot(), full.snapshot());
         // 1. oracle
         // The links of transposed sheets are compared by shape, without version
-        // numbers (`common`, #430).
+        // numbers (`common`: the full side restamps, #430).
         prop_assert!(
             strip_links(&s_targeted.tree) == strip_links(&s_full.tree),
             "step {rank} ({step:?}): the targeted recalculation diverges from the full recalculation\ntargeted calculations: {:?}\nfull calculations: {:?}",

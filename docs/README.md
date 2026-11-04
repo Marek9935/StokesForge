@@ -32,6 +32,7 @@ page that contradicts the code is wrong.
 | reproduce the off-screen measurements of the Matplotlib prototype | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
 | touch the window, shortcuts, the grid | [`application/`](application/README.md) |
 | add or display an icon (color roles, contact sheet) | [`icons.md`](icons.md) |
+| use or change the StokesForge logo (current version in `00-final/`, drafts and generators beside it) | [`assets/logo/LISEZMOI.md`](../assets/logo/LISEZMOI.md) |
 | add or place a menu or right-click entry | [`menus.md`](menus.md) (grammar), then [`application/menus-and-toolbars.md`](application/menus-and-toolbars.md) § Themed menus (#114) |
 | write or change visible text (label, tooltip, message) | [`ui-texts.md`](ui-texts.md) |
 | add a field, a message, a dialog, a confirmation, a greyed-out state, a keyboard or mouse gesture | [`interface-standard.md`](interface-standard.md) (behavior, #217) |

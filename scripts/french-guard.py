@@ -21,11 +21,11 @@ from pathlib import Path
 # CHANGELOG sections `## [X.Y.Z]` up to this version are French and exempt.
 FRENCH_CHANGELOG_UP_TO = (1, 0, 0)
 
-EXEMPT_PREFIXES = ("docs/archive/", "test/import/")
+EXEMPT_PREFIXES = ("assets/logo/", "docs/archive/", "test/import/")
 EXEMPT_FILES = {
     ".claude/skills/stokesforge-bug-report/references/decision-form.html",
-    # Live page source (the user reads French on it), republished to claude.ai.
-    ".claude/skills/stokesforge-verification/references/to-test-page.html",
+    # Local tracking page (the user reads French on it), served by scripts/suivi.py.
+    "scripts/suivi-page.html",
     "scripts/french-guard-test.py",
 }
 THRESHOLD = 2

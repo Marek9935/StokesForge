@@ -58,6 +58,14 @@ pub fn gutter_text_color() -> Color32 {
     GUTTER_TEXT
 }
 
+/// Dimmed gutter text: the `*` of the entry row, which is not data.
+const GUTTER_TEXT_DIM: Color32 = Color32::from_rgb(0x7D, 0x9C, 0x89);
+
+/// Dimmed gutter text color — see [`GUTTER_TEXT_DIM`].
+pub fn gutter_dim_text_color() -> Color32 {
+    GUTTER_TEXT_DIM
+}
+
 /// Weight of the interface bold (`wght` axis of Noto Sans Variable, which goes
 /// from 100 to 900): the 600 "semi-bold" of the tabs mockup (#169).
 const BOLD_WEIGHT: f32 = 600.0;

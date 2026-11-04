@@ -1,0 +1,10 @@
+const { chromium } = require('playwright'); const fs=require('fs');
+(async()=>{const d='ds/project/assets/Logos/';
+const f=n=>'data:image/svg+xml;base64,'+fs.readFileSync(d+n).toString('base64');
+const sq=['stokesforge-icon.svg','stokesforge-mark.svg','stokesforge-mark-dark.svg','explore-axis-hammer.svg','explore-hot-emission.svg','explore-favicon.svg','explore-dark-tile.svg'];
+let h='<body style="margin:0;background:#ccc;font:12px sans-serif">';
+h+=sq.map(n=>`<div style="display:inline-block;padding:6px;background:${n.includes('dark')?'#15181a':'#fff'}"><img width=220 src="${f(n)}"></div>`).join('');
+h+=`<div style="background:#fff;padding:6px"><img height=110 src="${f('stokesforge-lockup.svg')}"> <span style="background:#15181a;display:inline-block"><img height=110 src="${f('stokesforge-lockup-dark.svg')}"></span></div>`;
+h+='<div style="background:#fff;padding:6px">'+sq.map(n=>`<img width=16 src="${f(n)}"> <img width=32 src="${f(n)}"> <img width=48 src="${f(n)}">&nbsp;&nbsp;`).join('')+'</div>';
+const b=await chromium.launch();const p=await b.newPage({viewport:{width:1640,height:600}});await p.setContent(h);
+await p.screenshot({path:'shot2.png',fullPage:true});await b.close();})();

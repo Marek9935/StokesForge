@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use stokesforge_app_state::history_text::history_text;
-use stokesforge_app_state::selection::Selection;
+use stokesforge_app_state::selection::{GridCursor, Selection};
 use stokesforge_app_state::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
     AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
@@ -2519,6 +2519,288 @@ fn pasting_a_thousands_looking_number_does_not_notice() {
         text: "1,234".to_string(),
     });
     assert!(!status_text(&state).contains("decimal comma"));
+}
+
+// -- #429: a number a cell cannot hold is refused when typed --
+
+/// Opens `(column, row)` and types `text` in the buffer, as the grid does.
+fn type_in_cell(state: &mut AppState, column: NodeId, row: usize, text: &str) {
+    state.begin_edit(column, row);
+    state.editing_mut().expect("editing").buffer = text.to_string();
+}
+
+#[test]
+fn a_numeric_cell_refuses_a_number_beyond_the_f64_range() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let before = cell(&state, time_col, 1);
+
+    type_in_cell(&mut state, time_col, 1, "1e400");
+    let refusal = state.cell_edit_refusal().expect("refused");
+    assert!(
+        refusal.contains("1e400") && refusal.contains("too large"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("NumberOutOfRange"), "{refusal}");
+
+    state.dispatch(Action::CommitCell {
+        column: time_col,
+        row: 1,
+        text: "1e400".to_string(),
+    });
+    assert_eq!(cell(&state, time_col, 1), before);
+    assert!(!state.can_undo(), "no history entry");
+    assert!(state.status().expect("a message").is_error());
+    assert!(status_text(&state).contains("too large"));
+
+    type_in_cell(&mut state, time_col, 1, "1e-400");
+    assert!(state
+        .cell_edit_refusal()
+        .expect("refused")
+        .contains("too small"));
+    type_in_cell(&mut state, time_col, 1, "1e300");
+    assert_eq!(state.cell_edit_refusal(), None);
+    type_in_cell(&mut state, time_col, 1, "");
+    assert_eq!(state.cell_edit_refusal(), None, "an empty cell clears");
+    type_in_cell(&mut state, time_col, 1, "inf");
+    assert_eq!(
+        state.cell_edit_refusal(),
+        None,
+        "a word is not a range error"
+    );
+}
+
+#[test]
+fn a_mixed_cell_refuses_a_number_too_small_to_be_stored() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    type_in_cell(&mut state, note, 0, "1e-400");
+    assert!(state
+        .cell_edit_refusal()
+        .expect("refused")
+        .contains("too small"));
+    let before = cell(&state, note, 0);
+    state.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: "1e-400".to_string(),
+    });
+    assert_eq!(cell(&state, note, 0), before);
+}
+
+#[test]
+fn a_datetime_cell_refuses_a_number_beyond_the_range_but_keeps_dates() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.dispatch(Action::SetColumnType {
+        column: time_col,
+        column_type: ColumnType::DateTime,
+    });
+    type_in_cell(&mut state, time_col, 0, "1e400");
+    assert!(state
+        .cell_edit_refusal()
+        .expect("refused")
+        .contains("too large"));
+    type_in_cell(&mut state, time_col, 0, "2026-10-15");
+    assert_eq!(state.cell_edit_refusal(), None);
+}
+
+/// A text `1e400` that a file stored stays editable: reopening it gives the
+/// displayed text, which is not a new entry.
+#[test]
+fn a_stored_text_1e400_reopened_is_not_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    // As a file import stores it: the single reading rule, outside the typing check.
+    let (values, _) = stokesforge_core::ValueBlock::from_texts(ColumnType::Mixed, &["1e400"]);
+    session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: note,
+            start: 0,
+            values,
+            expected_version: None,
+        })
+        .expect("text stored");
+    state.refresh();
+    assert_eq!(state.cell_text(note, 0), "1e400");
+    state.begin_edit(note, 0);
+    assert_eq!(state.editing().expect("editing").buffer, "1e400");
+    assert_eq!(state.cell_edit_refusal(), None);
+}
+
+// -- #429 (S1): a pasted text holding an unrepresentable number is refused whole --
+
+/// Pastes `text` with the cursor on `(column, row)`.
+fn paste_text_at(state: &mut AppState, sheet: NodeId, column: NodeId, row: usize, text: &str) {
+    state.select_cell(sheet, column, row);
+    state.dispatch(Action::Paste {
+        sheet,
+        text: text.to_string(),
+    });
+}
+
+fn assert_refused_paste(state: &AppState, sentence: &str, row: usize) {
+    assert!(state.status().expect("a message").is_error());
+    let status = status_text(state);
+    assert!(
+        status.starts_with("Nothing was pasted.")
+            && status.contains(sentence)
+            && status.contains(&format!("(row {row})")),
+        "{status}"
+    );
+    assert!(!state.can_undo(), "no history entry");
+}
+
+#[test]
+fn a_paste_with_a_too_small_number_pastes_nothing_in_a_numeric_column() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let before: Vec<Cell> = (0..5).map(|row| cell(&state, time_col, row)).collect();
+    paste_text_at(&mut state, sheet1, time_col, 0, "0.1\n1e-400\n0.3");
+    let after: Vec<Cell> = (0..5).map(|row| cell(&state, time_col, row)).collect();
+    assert_eq!(after, before);
+    assert_eq!(column_type(&state, time_col), ColumnType::Numeric);
+    assert_refused_paste(&state, "1e-400", 2);
+    assert!(status_text(&state).contains("too small to be stored"));
+}
+
+#[test]
+fn a_paste_with_a_huge_number_is_refused_in_a_mixed_column_too() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    let before = cell(&state, note, 0);
+    paste_text_at(&mut state, sheet1, note, 0, "1e400");
+    assert_eq!(cell(&state, note, 0), before);
+    assert_refused_paste(&state, "1e400", 1);
+    assert!(status_text(&state).contains("too large"));
+}
+
+#[test]
+fn a_block_with_only_its_last_cell_out_of_range_pastes_nothing_anywhere() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let signal = column_id(&state, sheet1, "Signal");
+    let before: Vec<Cell> = (0..5)
+        .flat_map(|row| [cell(&state, time_col, row), cell(&state, signal, row)])
+        .collect();
+    paste_text_at(&mut state, sheet1, time_col, 1, "1\t2\n3\t4\n5\t1e400");
+    let after: Vec<Cell> = (0..5)
+        .flat_map(|row| [cell(&state, time_col, row), cell(&state, signal, row)])
+        .collect();
+    assert_eq!(after, before);
+    assert_refused_paste(&state, "1e400", 4);
+}
+
+#[test]
+fn a_refused_paste_on_the_entry_row_creates_no_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let entry = state.entry_row(sheet1);
+    assert_eq!(entry, 5);
+    paste_text_at(&mut state, sheet1, time_col, entry, "1\n1e400");
+    assert_eq!(state.row_count(sheet1), 5);
+    assert_refused_paste(&state, "1e400", 7);
+}
+
+#[test]
+fn a_paste_of_words_zero_and_subnormals_is_accepted() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    paste_text_at(&mut state, sheet1, time_col, 0, "inf\n0e400\n1e-310");
+    assert!(state.can_undo(), "pasted");
+    assert!(!status_text(&state).contains("Nothing was pasted"));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1e-310));
+}
+
+#[test]
+fn a_pasted_date_in_a_datetime_column_is_not_a_range_error() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.dispatch(Action::SetColumnType {
+        column: time_col,
+        column_type: ColumnType::DateTime,
+    });
+    paste_text_at(&mut state, sheet1, time_col, 0, "2026-10-15\n2026-10-16");
+    assert!(!status_text(&state).contains("Nothing was pasted"));
+    paste_text_at(&mut state, sheet1, time_col, 0, "1e400");
+    assert!(status_text(&state).contains("Nothing was pasted"));
+}
+
+/// An internal copy of a stored text pastes as before: its texts are stored
+/// values, not typed ones.
+#[test]
+fn an_internal_copy_of_a_stored_text_1e400_is_not_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    let (values, _) = stokesforge_core::ValueBlock::from_texts(ColumnType::Mixed, &["1e400"]);
+    session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: note,
+            start: 0,
+            values,
+            expected_version: None,
+        })
+        .expect("text stored");
+    state.refresh();
+    state.select_cell(sheet1, note, 0);
+    let text = state.copy_selection(sheet1).expect("copied");
+    state.select_cell(sheet1, note, 2);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(state.cell_text(note, 2), "1e400");
+}
+
+/// A refused number advances nowhere and adds no row, in the last data row as in
+/// the entry row (#440).
+#[test]
+fn a_refused_number_adds_no_row_and_leaves_the_cursor() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    for row in [4, 5] {
+        state.select_cell(sheet1, time_col, row);
+        state.dispatch(Action::CommitCellAndAdvance {
+            column: time_col,
+            row,
+            text: "1e400".to_string(),
+            sheet: sheet1,
+        });
+        assert_eq!(state.row_count(sheet1), 5, "row {row}");
+        assert_eq!(
+            cursor(&state, sheet1),
+            Some(GridCursor::Data(time_col, row)),
+            "row {row}"
+        );
+    }
 }
 
 /// Letters displayed for a column's formula (#321: the formula is
@@ -5262,10 +5544,10 @@ fn committing_the_last_stored_value_of_a_short_column_mid_sheet_does_not_add_a_r
     assert_eq!(state.cell_text(note, 2), "middle");
 }
 
-/// Conversely, committing the real last row of the sheet with Enter
-/// adds a row indeed — intended behavior, unchanged by the fix.
+/// Enter on the last real row moves the cursor onto the entry row and
+/// creates nothing (#440).
 #[test]
-fn committing_the_last_row_of_the_sheet_adds_a_row() {
+fn committing_the_last_row_of_the_sheet_moves_to_the_entry_row_without_adding_one() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -5279,8 +5561,307 @@ fn committing_the_last_row_of_the_sheet_adds_a_row() {
         sheet: sheet1,
     });
 
-    assert_eq!(state.row_count(sheet1), 6, "last row: a row is added");
+    assert_eq!(state.row_count(sheet1), 5, "no row is added");
     assert_eq!(cell(&state, time_col, 4), Cell::Float(2.5));
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    assert_eq!(state.entry_row(sheet1), 5);
+}
+
+/// A new workbook: 2 columns, 0 rows.
+fn new_workbook(state: &mut AppState) -> (NodeId, Vec<NodeId>) {
+    state.dispatch(Action::AddWorkbook);
+    let (book, _) = *state.books().last().expect("workbook created");
+    let sheet = state.selected_sheet_in(book).expect("initial sheet");
+    let columns = state
+        .visible_columns(sheet)
+        .into_iter()
+        .map(|column| column.0)
+        .collect();
+    (sheet, columns)
+}
+
+fn cursor(state: &AppState, sheet: NodeId) -> Option<GridCursor> {
+    state.selection(sheet).and_then(Selection::grid_cursor)
+}
+
+/// #440: a new workbook is editable. Down from the Formula field reaches the entry
+/// row, committing there creates the row with one history entry, and Undo brings
+/// the cursor back onto the entry row (row 0).
+#[test]
+fn an_empty_sheet_is_filled_through_its_entry_row_and_undo_keeps_the_cursor_valid() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (sheet, columns) = new_workbook(&mut state);
+    let a = columns[0];
+    assert_eq!(state.row_count(sheet), 0);
+    let label_before = state.undo_label();
+
+    state.select_header_field(sheet, a, HeaderField::Formula);
+    state.move_selection(sheet, MoveDirection::Down, false);
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(a, 0)));
+
+    state.dispatch(Action::CommitCellAndAdvance {
+        column: a,
+        row: 0,
+        text: "1.5".to_string(),
+        sheet,
+    });
+    assert_eq!(state.row_count(sheet), 1);
+    assert_eq!(cell(&state, a, 0), Cell::Float(1.5));
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(a, 1)));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet), 0, "one undo entry removes the row");
+    assert_eq!(state.undo_label(), label_before);
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(a, 0)));
+}
+
+/// Tab from the Formula field of the last column enters the data even with 0 rows.
+#[test]
+fn tab_from_the_header_of_an_empty_sheet_enters_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (sheet, columns) = new_workbook(&mut state);
+
+    state.select_header_field(sheet, *columns.last().unwrap(), HeaderField::Formula);
+    state.move_selection_tab(sheet, false);
+
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(columns[0], 0)));
+}
+
+/// Down stops on the entry row, which is one past the last data row.
+#[test]
+fn down_stops_on_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 4);
+
+    state.move_selection(sheet1, MoveDirection::Down, false);
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    state.move_selection(sheet1, MoveDirection::Down, false);
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    assert_eq!(state.row_count(sheet1), 5, "navigation creates nothing");
+}
+
+/// Which of `rows` of `column` the selection of `sheet` contains.
+fn selected_rows(state: &AppState, sheet: NodeId, column: NodeId, rows: &[usize]) -> Vec<usize> {
+    let selection = state.selection(sheet).expect("a selection");
+    rows.iter()
+        .copied()
+        .filter(|&row| selection.contains(state.tree(), sheet, column, row))
+        .collect()
+}
+
+/// #440: Shift from a data row onto the entry row (click, drag or Shift+Down)
+/// extends down to the last data row, keeps the anchor and never selects the
+/// entry row.
+#[test]
+fn shift_from_a_data_row_to_the_entry_row_extends_to_the_last_data_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 2);
+
+    state.extend_selection(sheet1, time_col, state.entry_row(sheet1));
+
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[1, 2, 3, 4, 5]),
+        [2, 3, 4]
+    );
+    let anchor = state
+        .selection(sheet1)
+        .and_then(|selection| selection.anchor(state.tree(), sheet1));
+    assert_eq!(anchor, Some(GridCursor::Data(time_col, 2)));
+
+    state.select_cell(sheet1, time_col, 3);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[2, 3, 4, 5]),
+        [3, 4]
+    );
+}
+
+/// #440: from the entry row, Shift+click on a data row (or Shift+Up) selects that
+/// row .. the last data row; the entry row is not in the selection.
+#[test]
+fn shift_from_the_entry_row_selects_down_to_the_last_data_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+
+    state.select_cell(sheet1, time_col, 5);
+    state.extend_selection(sheet1, time_col, 2);
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[1, 2, 3, 4, 5]),
+        [2, 3, 4]
+    );
+
+    state.select_cell(sheet1, time_col, 5);
+    state.move_selection(sheet1, MoveDirection::Up, true);
+    assert_eq!(selected_rows(&state, sheet1, time_col, &[3, 4, 5]), [4]);
+    state.move_selection(sheet1, MoveDirection::Up, true);
+    assert_eq!(
+        selected_rows(&state, sheet1, time_col, &[2, 3, 4, 5]),
+        [3, 4]
+    );
+
+    // Shift toward the entry row from the entry row changes nothing.
+    state.select_cell(sheet1, time_col, 5);
+    state.extend_selection(sheet1, time_col, 5);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 5)));
+    assert_eq!(selected_rows(&state, sheet1, time_col, &[4, 5]), [5]);
+}
+
+/// #440: with no data row, Shift from the entry row does nothing.
+#[test]
+fn shift_from_the_entry_row_of_an_empty_sheet_does_nothing() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (sheet, columns) = new_workbook(&mut state);
+    state.select_cell(sheet, columns[0], 0);
+
+    state.extend_selection(sheet, columns[0], 0);
+    state.move_selection(sheet, MoveDirection::Up, true);
+    state.move_selection(sheet, MoveDirection::Down, true);
+
+    assert_eq!(cursor(&state, sheet), Some(GridCursor::Data(columns[0], 0)));
+    assert_eq!(selected_rows(&state, sheet, columns[0], &[0]), [0]);
+}
+
+/// Committing in the entry row creates exactly one row and lands on the new entry row.
+#[test]
+fn committing_in_the_entry_row_creates_one_row_and_moves_to_the_next_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 5);
+
+    state.dispatch(Action::CommitCellAndAdvance {
+        column: time_col,
+        row: 5,
+        text: "7".to_string(),
+        sheet: sheet1,
+    });
+
+    assert_eq!(state.row_count(sheet1), 6);
+    assert_eq!(cell(&state, time_col, 5), Cell::Float(7.0));
+    assert_eq!(cursor(&state, sheet1), Some(GridCursor::Data(time_col, 6)));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet1), 5, "one undo entry");
+}
+
+/// A refused commit (here in a formula column) leaves the sheet and the cursor
+/// alone, in the middle of the sheet as in the entry row.
+#[test]
+fn a_refused_commit_leaves_the_cursor_in_place() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    set_header_field(&mut state, signal, HeaderField::Formula, "A");
+    assert!(
+        formula_letters(&state, signal).is_some(),
+        "a formula column"
+    );
+
+    for row in [2, 5] {
+        state.select_cell(sheet1, signal, row);
+        state.dispatch(Action::CommitCellAndAdvance {
+            column: signal,
+            row,
+            text: "3".to_string(),
+            sheet: sheet1,
+        });
+        assert_eq!(state.row_count(sheet1), 5, "row {row}");
+        assert_eq!(
+            cursor(&state, sheet1),
+            Some(GridCursor::Data(signal, row)),
+            "row {row}"
+        );
+    }
+}
+
+/// Ctrl+A and a column selection never contain the entry row.
+#[test]
+fn select_all_and_column_selection_exclude_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+
+    state.dispatch(Action::SelectAll { sheet: sheet1 });
+    assert!(state.is_selected(sheet1, time_col, 4));
+    assert!(!state.is_selected(sheet1, time_col, 5));
+    state.select_column(sheet1, time_col);
+    assert!(state.is_selected(sheet1, time_col, 4));
+    assert!(!state.is_selected(sheet1, time_col, 5));
+}
+
+/// A range started on a data row stops at the last data row; one started in the
+/// entry row may reach it.
+#[test]
+fn a_range_started_on_a_data_row_stops_before_the_entry_row() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+
+    state.select_cell(sheet1, time_col, 2);
+    state.extend_selection(sheet1, time_col, 5);
+    assert!(state.is_selected(sheet1, time_col, 4));
+    assert!(!state.is_selected(sheet1, time_col, 5));
+
+    state.select_cell(sheet1, time_col, 2);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    state.move_selection(sheet1, MoveDirection::Down, true);
+    assert!(!state.is_selected(sheet1, time_col, 5), "Shift+Down stops");
+    assert!(state.is_selected(sheet1, time_col, 4));
+}
+
+/// A block pasted from the entry row extends the sheet, in one history entry.
+#[test]
+fn pasting_from_the_entry_row_extends_the_sheet_in_one_entry() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 5);
+
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\n3\t4\n5\t6\n".to_string(),
+    });
+
+    assert_eq!(state.row_count(sheet1), 8);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet1), 5, "one undo entry");
+}
+
+/// Delete in the entry row is a silent no-op.
+#[test]
+fn delete_in_the_entry_row_does_nothing_and_says_nothing() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let label_before = state.undo_label();
+    state.select_cell(sheet1, time_col, 5);
+
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.row_count(sheet1), 5);
+    assert_eq!(state.undo_label(), label_before);
+    assert!(state.status().is_none_or(|status| !status.is_error()));
 }
 
 // -- 15. Column type conversion --
@@ -7420,6 +8001,99 @@ fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
     });
     assert_eq!(state.plot_spec(graph).unwrap(), before);
     assert!(state.status().expect("message").is_error());
+}
+
+/// Names of the children of the root, in order.
+fn root_child_names(state: &AppState) -> Vec<String> {
+    let tree = state.tree();
+    tree.node(tree.root())
+        .unwrap()
+        .children()
+        .iter()
+        .map(|id| tree.node(*id).unwrap().name().to_string())
+        .collect()
+}
+
+fn last_root_child_name(state: &AppState) -> String {
+    root_child_names(state).pop().expect("a child")
+}
+
+/// #434: a graph plotted from a workbook is named after it, numbered when
+/// the name is taken; undo frees the name, redo keeps it.
+#[test]
+fn plot_columns_names_the_graph_after_the_workbook() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let book = state.tree().parent(sheet1).unwrap().unwrap();
+    let book_name = state.tree().node(book).unwrap().name().to_string();
+    let signal = column_id(&state, sheet1, "Signal");
+    let plot = |state: &mut AppState| {
+        state.dispatch(Action::PlotColumns {
+            sheet: sheet1,
+            columns: vec![signal],
+            plot_type: PlotType::Line,
+        });
+        last_root_child_name(state)
+    };
+
+    assert_eq!(plot(&mut state), format!("{book_name} plot"));
+    assert_eq!(plot(&mut state), format!("{book_name} plot 2"));
+    state.dispatch(Action::Undo);
+    assert_eq!(plot(&mut state), format!("{book_name} plot 2"));
+    state.dispatch(Action::Undo);
+    state.dispatch(Action::Redo);
+    assert_eq!(last_root_child_name(&state), format!("{book_name} plot 2"));
+}
+
+/// #434: numbering continues after the highest number, a deleted graph
+/// leaves a gap that is not filled.
+#[test]
+fn plot_columns_numbering_does_not_fill_a_deleted_gap() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let book = state.tree().parent(sheet1).unwrap().unwrap();
+    let book_name = state.tree().node(book).unwrap().name().to_string();
+    let signal = column_id(&state, sheet1, "Signal");
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        state.dispatch(Action::PlotColumns {
+            sheet: sheet1,
+            columns: vec![signal],
+            plot_type: PlotType::Line,
+        });
+        let tree = state.tree();
+        ids.push(*tree.node(tree.root()).unwrap().children().last().unwrap());
+    }
+    state.dispatch(Action::DeleteObjects(vec![ids[1]]));
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(last_root_child_name(&state), format!("{book_name} plot 4"));
+}
+
+/// #434: `PlotRows` follows the same rule; an empty `AddGraph` keeps GraphN.
+#[test]
+fn plot_rows_and_empty_graph_names() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, _columns) = kinetics(dir.path());
+    let book = state.tree().parent(sheet).unwrap().unwrap();
+    let book_name = state.tree().node(book).unwrap().name().to_string();
+
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(last_root_child_name(&state), format!("{book_name} plot"));
+
+    state.dispatch(Action::AddGraph);
+    let name = last_root_child_name(&state);
+    assert!(name.starts_with("Graph"), "{name}");
+    assert!(!name.contains(" plot"), "{name}");
 }
 
 /// Plot of a row selection (#166): a fresh graph where each row is

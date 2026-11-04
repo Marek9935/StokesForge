@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use stokesforge_analysis::functions::Func;
 use stokesforge_core::formula::{evaluate, ColumnFormula, Formula, FormulaError};
-use stokesforge_core::{ColumnValues, MixedCell, NodeId, NumericStatus};
+use stokesforge_core::{ColumnValues, FormulaPart, MixedCell, NodeId, NumericStatus};
 
 // -- helpers --
 
@@ -1141,45 +1141,45 @@ const TABLE: &[Row] = &[
     ("pow", &[-1.0, f64::INFINITY], 1.0, 0),
 ];
 
-/// Excel (decimal) expectations of `round`: the binary product `x * 10^n` loses
-/// them (`round(2.675, 2)`).
+/// Excel (decimal) expectations of `round`, exact (0 ulp): the binary product
+/// `x * 10^n` would lose them (`round(1.005, 2)`).
 const ROUND_DECIMAL: &[Row] = &[
-    ("round", &[2.5, 0.0], 3.0, 1),
-    ("round", &[-2.5, 0.0], -3.0, 1),
-    ("round", &[0.5, 0.0], 1.0, 1),
-    ("round", &[-0.5, 0.0], -1.0, 1),
-    ("round", &[1.5, 0.0], 2.0, 1),
-    ("round", &[-1.5, 0.0], -2.0, 1),
-    ("round", &[0.49999999999999994, 0.0], 0.0, 1),
-    ("round", &[1234.5678, 2.0], 1234.57, 1),
-    ("round", &[1234.5678, -2.0], 1200.0, 1),
-    ("round", &[1250.0, -2.0], 1300.0, 1),
-    ("round", &[-1250.0, -2.0], -1300.0, 1),
-    ("round", &[1234.0, -2.0], 1200.0, 1),
-    ("round", &[5.0, -1.0], 10.0, 1),
-    ("round", &[-5.0, -1.0], -10.0, 1),
-    ("round", &[2.5, 1.0], 2.5, 1),
-    ("round", &[1.0e+308, 2.0], 1.0e+308, 1),
-    ("round", &[1.0e-300, 2.0], 0.0, 1),
-    ("round", &[123456789.12345679, 5.0], 123456789.12346, 1),
-    ("round", &[0.5, -1.0], 0.0, 1),
-    ("round", &[1.45, 1.0], 1.5, 1),
-    ("round", &[2.675, 2.0], 2.68, 1),
-    ("round", &[1.005, 2.0], 1.01, 1),
-    ("round", &[0.285, 2.0], 0.29, 1),
-    ("round", &[1.255, 2.0], 1.26, 1),
-    ("round", &[8.345, 2.0], 8.35, 1),
-    ("round", &[-2.675, 2.0], -2.68, 1),
-    ("round", &[1.15, 1.0], 1.2, 1),
-    ("round", &[0.30000000000000004, 15.0], 0.3, 1),
-    ("round", &[7.0, 0.0], 7.0, 1),
-    ("round", &[2.5, 0.9], 3.0, 1),
-    ("round", &[1234.5678, 2.9], 1234.57, 1),
-    ("round", &[1234.5678, -2.9], 1200.0, 1),
-    ("round", &[1.0e+22, 2.0], 1.0e+22, 1),
-    ("round", &[5.0e-324, 400.0], 5.0e-324, 1),
-    ("round", &[1.0, 500.0], 1.0, 1),
-    ("round", &[1.0, -500.0], 0.0, 1),
+    ("round", &[2.5, 0.0], 3.0, 0),
+    ("round", &[-2.5, 0.0], -3.0, 0),
+    ("round", &[0.5, 0.0], 1.0, 0),
+    ("round", &[-0.5, 0.0], -1.0, 0),
+    ("round", &[1.5, 0.0], 2.0, 0),
+    ("round", &[-1.5, 0.0], -2.0, 0),
+    ("round", &[0.49999999999999994, 0.0], 0.0, 0),
+    ("round", &[1234.5678, 2.0], 1234.57, 0),
+    ("round", &[1234.5678, -2.0], 1200.0, 0),
+    ("round", &[1250.0, -2.0], 1300.0, 0),
+    ("round", &[-1250.0, -2.0], -1300.0, 0),
+    ("round", &[1234.0, -2.0], 1200.0, 0),
+    ("round", &[5.0, -1.0], 10.0, 0),
+    ("round", &[-5.0, -1.0], -10.0, 0),
+    ("round", &[2.5, 1.0], 2.5, 0),
+    ("round", &[1.0e+308, 2.0], 1.0e+308, 0),
+    ("round", &[1.0e-300, 2.0], 0.0, 0),
+    ("round", &[123456789.12345679, 5.0], 123456789.12346, 0),
+    ("round", &[0.5, -1.0], 0.0, 0),
+    ("round", &[1.45, 1.0], 1.5, 0),
+    ("round", &[2.675, 2.0], 2.68, 0),
+    ("round", &[1.005, 2.0], 1.01, 0),
+    ("round", &[0.285, 2.0], 0.29, 0),
+    ("round", &[1.255, 2.0], 1.26, 0),
+    ("round", &[8.345, 2.0], 8.35, 0),
+    ("round", &[-2.675, 2.0], -2.68, 0),
+    ("round", &[1.15, 1.0], 1.2, 0),
+    ("round", &[0.30000000000000004, 15.0], 0.3, 0),
+    ("round", &[7.0, 0.0], 7.0, 0),
+    ("round", &[2.5, 0.9], 3.0, 0),
+    ("round", &[1234.5678, 2.9], 1234.57, 0),
+    ("round", &[1234.5678, -2.9], 1200.0, 0),
+    ("round", &[1.0e+22, 2.0], 1.0e+22, 0),
+    ("round", &[5.0e-324, 400.0], 5.0e-324, 0),
+    ("round", &[1.0, 500.0], 1.0, 0),
+    ("round", &[1.0, -500.0], 0.0, 0),
 ];
 
 /// Runs every row of `rows` whose function is in `names` through a formula
@@ -1232,13 +1232,11 @@ fn assert_table(names: &[&str]) {
 }
 
 #[test]
-#[ignore = "bug: #429: erf has 5-235 ulps error on [2, 3) (Maclaurin series cancellation), functions.rs:338-364"]
 fn erf_matches_reference_values() {
     assert_table(&["erf"]);
 }
 
 #[test]
-#[ignore = "bug: #429: erfc = 1 - erf below 2.5 loses digits (up to 615 ulps), 0 above 27 where it is still subnormal; functions.rs:313-333"]
 fn erfc_matches_reference_values() {
     assert_table(&["erfc"]);
 }
@@ -1294,12 +1292,6 @@ fn pow_matches_reference_values() {
 }
 
 #[test]
-fn round_matches_binary_exact_reference_values() {
-    assert_table(&["round"]);
-}
-
-#[test]
-#[ignore = "bug: #428: round(1.005, 2) = 1 not 1.01 (x * 10^n is binary, not Excel decimal), functions.rs:272-295"]
 fn round_matches_excel_decimal_reference_values() {
     let (failures, _) = table_failures(ROUND_DECIMAL, &["round"]);
     assert!(
@@ -1337,7 +1329,6 @@ fn signed_zero_results_of_functions() {
 }
 
 #[test]
-#[ignore = "bug: #429: erf(-0) is +0 (the sign is applied only when x < 0), functions.rs:367"]
 fn erf_of_minus_zero_is_minus_zero() {
     let (v, _) = run("erf(A)", &[float_column(&[-0.0])], 1);
     assert_eq!(v[0].to_bits(), (-0.0f64).to_bits());
@@ -1389,7 +1380,6 @@ fn mod_of_a_tiny_negative_dividend_rounds_to_the_divisor_like_python_and_excel()
 }
 
 #[test]
-#[ignore = "bug: #429: logx = ln(x)/ln(b): logx(1000, 10) = 2.9999999999999996, functions.rs:242"]
 fn logx_of_exact_powers_is_exact() {
     let cases = [
         (1000.0, 10.0, 3.0),
@@ -1397,6 +1387,7 @@ fn logx_of_exact_powers_is_exact() {
         (243.0, 3.0, 5.0),
         (125.0, 5.0, 3.0),
         (1e15, 10.0, 15.0),
+        (8.0, 0.5, -3.0),
     ];
     for (x, base, expected) in cases {
         let (v, _) = run(
@@ -1409,10 +1400,18 @@ fn logx_of_exact_powers_is_exact() {
 }
 
 #[test]
-#[ignore = "bug: #429: floor(logx(1000, 10)) = 2, functions.rs:242"]
 fn floor_of_logx_of_a_power_of_ten_is_the_exponent() {
     let (v, _) = run("floor(logx(A, 10))", &[float_column(&[1000.0])], 1);
     assert_eq!(v[0], 3.0);
+}
+
+/// A value only close to a power is not snapped to the integer.
+#[test]
+fn logx_of_a_value_close_to_a_power_is_not_snapped() {
+    let x = 243.0 * (1.0 + 1e-12);
+    let (v, _) = run("logx(A, B)", &[float_column(&[x]), float_column(&[3.0])], 1);
+    assert_ne!(v[0], 5.0);
+    assert!((v[0] - 5.0).abs() < 1e-11);
 }
 
 // -- (c) number lexing --
@@ -1542,19 +1541,51 @@ fn refused_forms_are_refused_with_an_error() {
     }
 }
 
-/// Literals beyond the range of f64: the doc says nothing. The text `1e400`
-/// is accepted as infinity and `1e-400` as 0 (design question).
+/// Literals beyond the range of f64 are refused at entry (#429): `1e400` would
+/// be infinity and `1e-400` would be 0. What is representable, subnormals
+/// included, and a written zero stay accepted.
 #[test]
-#[ignore = "bug: #429: 1e400 reads as inf and 1e-400 as 0 silently, formula.rs:751"]
-fn out_of_range_literals_are_refused_or_flagged() {
+fn out_of_range_literals_are_refused_at_entry() {
     for text in ["1e400", "1e-400", "-1e400"] {
         let v = outcome(text);
         assert!(v.is_err(), "`{text}` silently read as {v:?}");
     }
+    assert_eq!(
+        parse("1e400").err(),
+        Some(FormulaError::NumberOutOfRange {
+            text: "1e400".into(),
+            too_large: true
+        })
+    );
+    assert_eq!(
+        parse("1e-400").err(),
+        Some(FormulaError::NumberOutOfRange {
+            text: "1e-400".into(),
+            too_large: false
+        })
+    );
+    for (text, expected) in [
+        ("1e-310", 1e-310),
+        ("4.9e-324", 5e-324),
+        ("0e400", 0.0),
+        ("0.000", 0.0),
+        ("1.7976931348623157e308", f64::MAX),
+    ] {
+        assert_eq!(outcome(text), Ok(expected), "`{text}`");
+    }
+}
+
+/// A stored formula keeps a literal outside the range: it loads and computes
+/// (invariants 10 and 12), only the entry refuses it.
+#[test]
+fn a_stored_out_of_range_literal_still_compiles() {
+    let stored = ColumnFormula::from_parts(vec![FormulaPart::Text("1e400".into())]);
+    assert!(stored.compile().is_ok());
+    let stored = ColumnFormula::from_parts(vec![FormulaPart::Text("1e-400".into())]);
+    assert!(stored.compile().is_ok());
 }
 
 #[test]
-#[ignore = "bug: #429: a 400-digit literal reads as inf silently, formula.rs:751"]
 fn very_long_digit_runs_do_not_panic() {
     let long = format!("1{}", "0".repeat(400));
     let v = outcome(&long);

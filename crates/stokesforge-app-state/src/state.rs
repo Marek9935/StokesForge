@@ -94,6 +94,15 @@ pub use column_use::FullColumnsCopy;
 /// shorter than that stays invisible and synchronous.
 const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Why the type of a column cannot change (#431).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnTypeLock {
+    /// The column is computed by a formula: the recalculation owns its type.
+    Formula,
+    /// The column is produced by an analysis calculation.
+    Calculated,
+}
+
 /// What [`Action::ArrangeLayers`] does to the selected layers (#398, L4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerArrange {
@@ -271,12 +280,10 @@ pub enum Action {
     },
     /// Adds a column at the end of `sheet` then selects `row` in it — Tab
     /// on the last column of a data row, symmetric to
-    /// [`Action::CommitCellAndAdvance`] (Enter on the last row of a column)
-    /// but for the column axis: the target column does not exist yet when the
-    /// action is pushed (unlike a row, which is only an index), so the
-    /// selection can only be set once the column is really created, in the
-    /// handling of this action — never before, as `AppState::select_cell`
-    /// does for `CommitCellAndAdvance`.
+    /// [`Action::CommitCellAndAdvance`] (Enter in a cell) but for the column
+    /// axis: the target column does not exist yet when the action is pushed
+    /// (unlike a row, which is only an index), so the selection can only be
+    /// set once the column is really created, in the handling of this action.
     AddColumnAndSelect {
         /// Target sheet.
         sheet: NodeId,
@@ -384,8 +391,9 @@ pub enum Action {
     /// Does not block.
     InterruptScript,
     /// Commits the input of a cell (like [`Action::CommitCell`]) then, if
-    /// `row` was the last row of `column` and the commit succeeded, adds a
-    /// row to `sheet` — Enter on the last cell of a column.
+    /// the commit succeeded, selects the row below in `sheet` — Enter in a
+    /// cell. Adds no row: a commit in the entry row ([`AppState::entry_row`])
+    /// is what creates it.
     CommitCellAndAdvance {
         /// Target column.
         column: NodeId,
@@ -393,7 +401,7 @@ pub enum Action {
         row: usize,
         /// Typed text, not converted.
         text: String,
-        /// Sheet to add a row to if needed.
+        /// Sheet whose cursor moves down.
         sheet: NodeId,
     },
     /// Clears the content of the cells currently selected in `sheet`,
@@ -2318,6 +2326,17 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
 }
 
+/// What a full-column paste did with the Formula field of one target (#432).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormulaPaste {
+    /// No formula was pasted here, or the write did not take place.
+    NotWritten,
+    /// The pasted formula is stored: the column is recomputed.
+    Accepted,
+    /// The formula was refused (its sentence is set at the end of the paste).
+    Refused,
+}
+
 /// Column targeted by `cursor`, whatever its kind — [`GridCursor`]
 /// does not expose this accessor outside [`crate::selection`]; its callers
 /// in this module (the paste, see [`AppState::apply_paste`]) rebuild it
@@ -3538,6 +3557,50 @@ impl AppState {
             .collect()
     }
 
+    /// Why the type of `column` cannot be changed (#431): it is computed by
+    /// a formula, or produced by an analysis calculation. `None` = retypable.
+    /// A formula wins when a column is both.
+    fn column_type_lock_of(&self, column: NodeId) -> Option<ColumnTypeLock> {
+        let tree = self.tree();
+        if tree
+            .node(column)
+            .and_then(|node| node.as_column())
+            .is_some_and(|column| column.meta().formula.is_some())
+        {
+            return Some(ColumnTypeLock::Formula);
+        }
+        tree.calculation_of_column(column)
+            .map(|_| ColumnTypeLock::Calculated)
+    }
+
+    /// Those of the columns `columns` whose type can change (#431): no
+    /// formula, not a calculation output. The Type action touches only these.
+    pub fn columns_with_changeable_type(&self, columns: &[NodeId]) -> Vec<NodeId> {
+        columns
+            .iter()
+            .copied()
+            .filter(|column| self.column_type_lock_of(*column).is_none())
+            .collect()
+    }
+
+    /// Why the Type entries are greyed for `columns` (#431): `Some` only when
+    /// **no** targeted column can change type (and there is one); the formula
+    /// reason wins over the calculation one.
+    pub fn column_type_lock(&self, columns: &[NodeId]) -> Option<ColumnTypeLock> {
+        let locks: Vec<_> = columns
+            .iter()
+            .map(|column| self.column_type_lock_of(*column))
+            .collect();
+        if locks.is_empty() || locks.iter().any(Option::is_none) {
+            return None;
+        }
+        if locks.contains(&Some(ColumnTypeLock::Formula)) {
+            Some(ColumnTypeLock::Formula)
+        } else {
+            Some(ColumnTypeLock::Calculated)
+        }
+    }
+
     /// All the columns of `sheet` (#330), for "reset the whole sheet
     /// to default width".
     pub fn sheet_column_ids(&self, sheet: NodeId) -> Vec<NodeId> {
@@ -3760,6 +3823,16 @@ impl AppState {
         row_count_in(&self.snapshot.tree, sheet)
     }
 
+    /// Index of the **entry row** of `sheet`: the empty row the grid always
+    /// shows below the last data row (also when the sheet has 0 rows). It is
+    /// pure interface, not model data — not saved, not plotted, not read by a
+    /// formula — so [`AppState::row_count`] does not count it. Typing in it
+    /// creates the row (a `SetCells` through [`Action::CommitCell`]). The one
+    /// definition: navigation and selection use it, never `row_count` plus one.
+    pub fn entry_row(&self, sheet: NodeId) -> usize {
+        self.row_count(sheet)
+    }
+
     /// Text to display in a cell: [`MISSING_TEXT_DISPLAY`] for an
     /// absent value (`Cell::Text(None)`, including out of bounds — `get`
     /// returns `None` past the end of a text column), `""` for a
@@ -3849,15 +3922,44 @@ impl AppState {
     /// drags remain distinct gestures, see [`AppState::
     /// extend_column_selection`]/[`AppState::extend_row_selection`]/
     /// [`AppState::extend_header_row_selection`].
+    ///
+    /// The entry row ([`AppState::entry_row`]) is never part of a range (#440).
+    /// From an anchor on a real row, a target on or below the entry row stops at
+    /// the last data row (the anchor stays). From an anchor on the entry row, a
+    /// target on a data row moves the anchor to the last data row of its column:
+    /// the range then covers the target row .. the last data row. From the entry
+    /// row to the entry row (or on a sheet without rows) nothing changes.
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
-        match self.selection.get_mut(&sheet) {
-            Some(selection)
-                if !selection.is_columns()
-                    && !selection.is_full_rows()
-                    && !selection.is_header_rows() =>
-            {
-                selection.extend_row_to(GridCursor::Data(column, row))
+        let row_count = self.row_count(sheet);
+        let anchor = self
+            .selection
+            .get(&sheet)
+            .and_then(|selection| selection.anchor(&self.snapshot.tree, sheet));
+        let rangeable = self.selection.get(&sheet).is_some_and(|selection| {
+            !selection.is_columns() && !selection.is_full_rows() && !selection.is_header_rows()
+        });
+        if rangeable {
+            if let Some(GridCursor::Data(anchor_column, anchor_row)) = anchor {
+                if anchor_row >= row_count {
+                    // Anchored on the entry row.
+                    if row >= row_count {
+                        return;
+                    }
+                    let mut selection = Selection::cell(anchor_column, row_count - 1);
+                    selection.extend_row_to(GridCursor::Data(column, row));
+                    self.selection.insert(sheet, selection);
+                    return;
+                }
             }
+        }
+        let anchored_on_data = matches!(anchor, Some(GridCursor::Data(_, r)) if r < row_count);
+        let row = if anchored_on_data {
+            row.min(row_count.saturating_sub(1))
+        } else {
+            row
+        };
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if rangeable => selection.extend_row_to(GridCursor::Data(column, row)),
             _ => self.select_cell(sheet, column, row),
         }
     }
@@ -4116,8 +4218,8 @@ impl AppState {
     /// and header fields. Left/Right never change
     /// row. Clamped to the grid edges — never wraps to the next
     /// line (see [`AppState::move_selection_tab`] for that) nor adds a
-    /// row (reserved to [`AppState::commit_cell_and_advance`], triggered by
-    /// the confirmation of an entry, not by navigation alone). No effect
+    /// row. Down stops on the entry row ([`AppState::entry_row`]), one past the
+    /// last data row; writing in it is what creates the row. No effect
     /// if `sheet` has a range of columns selected (letter row)
     /// or no selection — transient mutation, like [`AppState::
     /// select_cell`].
@@ -4167,7 +4269,8 @@ impl AppState {
         let Some(index) = order.iter().position(|&id| id == from_column) else {
             return;
         };
-        let last_row = self.row_count(sheet).saturating_sub(1);
+        // The last reachable row is the entry row, one past the last data row.
+        let last_row = self.entry_row(sheet);
         let (to_index, to_row, crossed) = match direction {
             MoveDirection::Up => {
                 let (row, crossed) = from_row.up();
@@ -4234,8 +4337,8 @@ impl AppState {
             return;
         };
         let order = self.column_order(sheet);
-        let row_count = self.row_count(sheet);
-        if order.is_empty() || row_count == 0 {
+        let entry_row = self.entry_row(sheet);
+        if order.is_empty() {
             return;
         }
         let from_column = match from {
@@ -4299,7 +4402,7 @@ impl AppState {
                     if index < last_index {
                         GridCursor::Data(order[index + 1], row)
                     } else {
-                        GridCursor::Data(order[0], (row + 1).min(row_count - 1))
+                        GridCursor::Data(order[0], (row + 1).min(entry_row))
                     }
                 }
             }
@@ -4311,7 +4414,18 @@ impl AppState {
     }
 
     /// True if `(column, row)` is part of the selection of `sheet`.
+    ///
+    /// A selection of whole columns (letter click, Ctrl+A) never contains the
+    /// entry row ([`AppState::entry_row`]).
     pub fn is_selected(&self, sheet: NodeId, column: NodeId, row: usize) -> bool {
+        if row >= self.row_count(sheet)
+            && self
+                .selection
+                .get(&sheet)
+                .is_some_and(Selection::is_columns)
+        {
+            return false;
+        }
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.contains(&self.snapshot.tree, sheet, column, row))
@@ -4690,6 +4804,44 @@ impl AppState {
             refusal: refusal.clone(),
         });
         refusal
+    }
+
+    /// Why the text being typed in a data cell is refused (#429): a number
+    /// that reads as infinity (`1e400`) or as 0 although it has a non-zero digit
+    /// (`1e-400`). `None` for everything else: an empty text, the displayed text
+    /// as is (a stored text `1e400` reopened stays), a date in a Date/Time
+    /// column, any other text (it widens the column). Only typing is checked:
+    /// paste, import and scripts keep their own rule. The grid keeps the cell
+    /// open and paints the refusal, like [`AppState::header_edit_refusal`].
+    pub fn cell_edit_refusal(&self) -> Option<String> {
+        let edit = self.editing.as_ref()?;
+        self.cell_entry_range_error(edit.column, edit.row, &edit.buffer)
+            .map(|error| errors::number::error_message(&error))
+    }
+
+    /// The range error of `text` typed in `(column, row)`, if any; see
+    /// [`AppState::cell_edit_refusal`].
+    fn cell_entry_range_error(
+        &self,
+        column: NodeId,
+        row: usize,
+        text: &str,
+    ) -> Option<stokesforge_core::number_format::NumberOutOfRange> {
+        if text.trim().is_empty() || text == self.cell_text(column, row) {
+            return None;
+        }
+        let kind = self
+            .snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .map(Column::column_type)?;
+        if kind == ColumnType::DateTime
+            && stokesforge_core::datetime::parse_datetime(text.trim()).is_some()
+        {
+            return None;
+        }
+        stokesforge_core::number_format::check_range(text).err()
     }
 
     /// The sentence saying why the formula of `column` no longer computes,
@@ -5386,12 +5538,17 @@ impl AppState {
             Action::SetColumnsType {
                 columns,
                 column_type,
-            } => self.set_columns_grouped(MacroKind::SetColumnsType, &columns, |column| {
-                Command::SetColumnType {
-                    column,
-                    column_type,
-                }
-            }),
+            } => {
+                // Formula and calculated columns keep their type: only the
+                // others change, without an error (#431).
+                let columns = self.columns_with_changeable_type(&columns);
+                self.set_columns_grouped(MacroKind::SetColumnsType, &columns, |column| {
+                    Command::SetColumnType {
+                        column,
+                        column_type,
+                    }
+                });
+            }
             Action::SetColumnsRole { columns, role } => {
                 self.set_columns_role_grouped(&columns, role)
             }
@@ -7279,6 +7436,16 @@ impl AppState {
                 self.header_editing = None;
             }
         }
+        // A cursor below the entry row (undo of a write made in the entry row)
+        // comes back to the entry row of its sheet.
+        for (&sheet, selection) in &mut self.selection {
+            if let Some((column, row)) = selection.single_cell() {
+                let entry_row = row_count_in(tree, sheet);
+                if row > entry_row {
+                    *selection = Selection::cell(column, entry_row);
+                }
+            }
+        }
     }
 
     /// Records an informational message. `pub(crate)` so that the window
@@ -9056,6 +9223,12 @@ impl AppState {
             self.fail(tr!("error-column-gone"));
             return false;
         };
+        // #429: a number that an f64 cannot hold is refused, nothing is written
+        // (the grid keeps the cell open with the same sentence).
+        if let Some(error) = self.cell_entry_range_error(column, row, &text) {
+            self.fail(errors::number::error_message(&error));
+            return false;
+        }
         // An input that does not fit the column type no longer makes it fail:
         // it **widens** the column to `ColumnType::Mixed`, through
         // `Command::SetCellsPromoting`, which groups the conversion and the
@@ -9092,7 +9265,9 @@ impl AppState {
         // up entirely numeric without any of its cells ever having been
         // explicitly "number", typically after fixing an "n/a" left as the
         // only non-numeric value.
-        if kind == ColumnType::Mixed {
+        // Not after a refused write: the conversion would replace the error message
+        // and look like a success.
+        if kind == ColumnType::Mixed && !self.last_action_failed() {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
         // Discreet notice (#311, S-R6): "1,234" is read as 1.234, not one
@@ -9129,25 +9304,21 @@ impl AppState {
         }
     }
 
-    /// Validates a cell input then, if `row` was the last row *displayed* of
-    /// `sheet` and the validation succeeded, adds a row to `sheet` (`at ==
-    /// len` is a valid target for `InsertRows`): Enter on the last cell of a
-    /// column.
-    ///
-    /// Comparing with `row_count(sheet)` (the max of the lengths of **all**
-    /// the columns of the sheet, `Tree::row_count_in`) rather than with the
-    /// length of the internal buffer of `column` alone is essential: a text
-    /// column never filled down to the bottom of the sheet has a buffer
-    /// shorter than the other columns (sparse buffers, see
-    /// `Column::len`/`ColumnValues::get`), so `row + 1 >= column.len()` could
-    /// become true in the *middle* of the table: a phantom row was then
-    /// inserted at the bottom of the whole sheet as soon as a cell of a row
-    /// never written lower in that column was validated.
+    /// Validates a cell input then, if it was accepted, moves the cursor to the
+    /// row below in the same column: Enter in a cell. It never adds a row by
+    /// itself. On the last data row the cursor lands on the entry row
+    /// ([`AppState::entry_row`]); a commit made *in* the entry row creates the
+    /// row (`SetCells`) and the cursor lands on the new entry row. Unchanged
+    /// text on the entry row writes nothing and the cursor stays there. A
+    /// refused commit (read-only formula column…) leaves the cursor where it was.
     fn commit_cell_and_advance(&mut self, column: NodeId, row: usize, text: String, sheet: NodeId) {
-        let was_last_row = row + 1 >= self.row_count(sheet);
-        let accepted = self.commit_cell(column, row, text);
-        if accepted && was_last_row {
-            self.rows(sheet, row + 1, 1, true);
+        // Nothing typed is not a refusal; a write that the actor refused (read-only
+        // formula column…) leaves `applied_revision` where it was.
+        let unchanged = text == self.cell_text(column, row);
+        let revision = self.applied_revision;
+        if self.commit_cell(column, row, text) && (unchanged || self.applied_revision > revision) {
+            let target = (row + 1).min(self.entry_row(sheet));
+            self.select_cell(sheet, column, target);
         }
     }
 
@@ -9362,13 +9533,80 @@ impl AppState {
             self.fail(tr!("error-paste-no-cell"));
             return;
         };
-        let clipboard = if self.clipboard_text.as_deref() == Some(text.as_str()) {
+        let internal = if self.clipboard_text.as_deref() == Some(text.as_str()) {
             self.grid_clipboard.clone()
         } else {
             None
+        };
+        let external = internal.is_none();
+        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(&text));
+        if external {
+            if let Some(error) = self.external_paste_range_error(sheet, anchor, &clipboard) {
+                self.fail(errors::number::paste_error_message(&error));
+                return;
+            }
         }
-        .unwrap_or_else(|| external_clipboard_from_text(&text));
         self.apply_paste(sheet, anchor, &clipboard, false);
+    }
+
+    /// The first number of an **external** text paste that a column reading
+    /// numbers cannot hold (#429, S1), in reading order; `None` when the block
+    /// is fine. Scans the whole block before any write, so a refusal pastes
+    /// nothing, creates no row and leaves no history entry. A paste of
+    /// StokesForge's own clipboard never comes here (its texts are stored
+    /// values), nor does a header field paste.
+    fn external_paste_range_error(
+        &self,
+        sheet: NodeId,
+        anchor: GridCursor,
+        clipboard: &GridClipboard,
+    ) -> Option<errors::number::PasteOutOfRange> {
+        let GridCursor::Data(anchor_column, anchor_row) = anchor else {
+            return None;
+        };
+        let single;
+        let rows: Vec<&[String]> = match clipboard {
+            GridClipboard::Text(text) => {
+                single = [text.clone()];
+                vec![&single[..]]
+            }
+            GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => {
+                rows.iter().map(Vec::as_slice).collect()
+            }
+            _ => return None,
+        };
+        let order = self.column_order(sheet);
+        let first = order.iter().position(|&id| id == anchor_column)?;
+        for (i, row) in rows.iter().enumerate() {
+            for (offset, text) in row.iter().enumerate() {
+                // Columns beyond the sheet are dropped by the paste.
+                let Some(&column) = order.get(first + offset) else {
+                    break;
+                };
+                let Some(kind) = self
+                    .snapshot
+                    .tree
+                    .node(column)
+                    .and_then(Node::as_column)
+                    .map(Column::column_type)
+                else {
+                    continue;
+                };
+                if text.trim().is_empty()
+                    || (kind == ColumnType::DateTime
+                        && stokesforge_core::datetime::parse_datetime(text.trim()).is_some())
+                {
+                    continue;
+                }
+                if let Err(number) = stokesforge_core::number_format::check_range(text) {
+                    return Some(errors::number::PasteOutOfRange {
+                        number,
+                        row: anchor_row + i + 1,
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// False, with a status message, if the selection of `sheet` is
@@ -9421,8 +9659,10 @@ impl AppState {
     /// - [`GridClipboard::FullColumns`] pastes the header from the field
     ///   anchored field (nothing above) and the body without shifting if the
     ///   anchor is a field; drops the header and shifts the body onto the
-    ///   anchor if it is a cell; in absolute, everything falls back on its
-    ///   original rank whatever the anchor.
+    ///   anchor if it is a cell, except a Formulas copy (some column carries a
+    ///   formula), which on a cell, entry row included, acts as on the
+    ///   Formula field of that column (#432); in absolute, everything falls
+    ///   back on its original rank whatever the anchor.
     ///
     /// Paste of data rows (#311): an **absent** box (shorter row) keeps the
     /// existing value, a present and empty box is a missing value; columns
@@ -9430,7 +9670,8 @@ impl AppState {
     ///
     /// A formula column naturally refuses the write of data
     /// (`CoreError::FormulaColumnReadOnly`): reported by the status, without
-    /// blocking the other columns already pasted. A paste that touches several
+    /// blocking the other columns already pasted. A full-column paste does not
+    /// try it on the columns whose formula it has just written (#432). A paste that touches several
     /// columns or several fields stays grouped in a single history entry.
     fn apply_paste(
         &mut self,
@@ -9679,7 +9920,9 @@ impl AppState {
     }
 
     /// [`GridClipboard::FullColumns`]: see [`AppState::apply_paste`] for the
-    /// rule; depends on `anchor` (field or cell) and on `absolute`.
+    /// rule; depends on `anchor` (field or cell) and on `absolute`. The body
+    /// of a column whose Formula field this paste wrote and the formula
+    /// accepted is not written (it is recomputed).
     fn paste_full_columns(
         &mut self,
         anchor: GridCursor,
@@ -9698,6 +9941,17 @@ impl AppState {
         // Starting field of the header to write: all of them in absolute, from
         // the anchored field (nothing above) in relative if the anchor is a
         // field, none (header dropped) in relative if the anchor is a cell.
+        //
+        // A Formulas copy (some column carries a formula; a Values copy has
+        // none) pasted on a data cell, entry row included, behaves as if it
+        // were pasted on the Formula field of that column (#432, S1).
+        let formulas_copy = columns.iter().any(|c| c.formula.is_some());
+        let anchor = match anchor {
+            GridCursor::Data(column, _) if !absolute && formulas_copy => {
+                GridCursor::Header(column, HeaderField::Formula)
+            }
+            other => other,
+        };
         let header_from: Option<usize> = if absolute {
             Some(0)
         } else {
@@ -9727,10 +9981,16 @@ impl AppState {
             return;
         }
         let mut refusal = None;
+        // Per target, what this paste did with the Formula field. Only
+        // `Accepted` skips the body below; `Refused` is kept explicit for the
+        // callers that will treat a refused formula differently (#433).
+        let mut formula_outcomes = vec![FormulaPaste::NotWritten; targets.len()];
         if let Some(from) = header_from {
             for field_index in from..HeaderField::COUNT {
                 let field = HeaderField::from_index(field_index);
-                for (&column, source) in targets.iter().zip(columns) {
+                for ((&column, source), outcome) in
+                    targets.iter().zip(columns).zip(&mut formula_outcomes)
+                {
                     let value = match field {
                         HeaderField::XPrime => source.x_prime.clone(),
                         HeaderField::LongName => source.long_name.clone(),
@@ -9739,12 +9999,26 @@ impl AppState {
                         HeaderField::Formula => source.formula.clone().unwrap_or_default(),
                     };
                     let refused = self.paste_header_text(column, field, value);
+                    if field == HeaderField::Formula && source.formula.is_some() {
+                        // `None` alone is ambiguous (column gone, refused x'):
+                        // it is accepted only if the column now carries a
+                        // formula.
+                        *outcome = match &refused {
+                            Some(_) => FormulaPaste::Refused,
+                            None if self.column_meta(column).formula.is_some() => {
+                                FormulaPaste::Accepted
+                            }
+                            None => FormulaPaste::NotWritten,
+                        };
+                    }
                     refusal = refusal.or(refused);
                 }
             }
         }
-        for (&column, source) in targets.iter().zip(columns) {
-            if source.data.is_empty() {
+        for ((&column, source), outcome) in targets.iter().zip(columns).zip(&formula_outcomes) {
+            // The column whose formula this paste just wrote is recomputed:
+            // its frozen values would only be refused as read-only.
+            if source.data.is_empty() || *outcome == FormulaPaste::Accepted {
                 continue;
             }
             let Some(kind) = self
@@ -9780,7 +10054,9 @@ impl AppState {
     /// the status bar says so right away. Formula refused (unknown letter,
     /// self-read, `#REF`): the **sentence** of the refusal is returned, and the
     /// caller sets it, **after** the writes of the whole paste (the other
-    /// fields are pasted, the status bar keeps the refusal).
+    /// fields are pasted, the status bar keeps the refusal). `None` does not
+    /// mean written: it is also returned for a column gone and for a refused
+    /// x' (both already reported); the caller reads the column back.
     fn paste_header_text(
         &mut self,
         column: NodeId,

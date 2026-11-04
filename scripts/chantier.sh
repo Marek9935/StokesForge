@@ -7,15 +7,22 @@
 # user starts plain `claude` or does `/clear`, then types `lance #<n>`). It starts
 # no session. For each issue, if ../_stokesforge/feature<n> is missing, creates it
 # from an up-to-date origin/main on branch feature/<n>-<slug> (slug from the GitLab
-# title; no upstream tracking, so `main` is never the upstream). The colour is
-# the first free of the six squares, kept until the worktree is removed: rerunning
-# the script (after a `/clear`) finds the worktree and prints the same colour.
+# title; no upstream tracking, so `main` is never the upstream), then CLAIMS the
+# issue for this session with scripts/suivi.py (#441).
+#
+# Colours live in ../_stokesforge/.suivi, one record per issue (scripts/suivi.py;
+# its header states the rule). An issue holds its colour while an agent session
+# owns it, a QCM of the issue is open or a trial entry awaits the user; otherwise
+# it is paused: colour free, worktree kept. A rerun (after /clear) finds the same
+# worktree, becomes the new owner and gets the previous colour back if it is still
+# free, else the first free of the six squares. The other worktrees of the issue
+# (feature426b, feature426d, ...) share the colour of its record.
 # Then prints a short briefing for the agent: the tag "<square> #<n> <short name>"
 # of each issue, its worktree and branch, and the steps to follow.
 #
 # Short name: the first 3 words of the title, in the issue's own language. Several
 # issues: one worktree each, one session. Seven work packages cannot run at once:
-# with the six colours taken the script refuses with a message and a non-zero exit.
+# with the six colours held the script refuses with a message and a non-zero exit.
 #
 # Work package with sub-issues (#419): if open issues name an issue as their
 # parent ("Parent: #N", "Sous-ticket du chantier #N", "Suite du chantier #N",
@@ -25,40 +32,77 @@
 # form. No worktree is created for the package itself: after the form, run
 #   scripts/chantier.sh <parent> --start <sub-issue>
 # once per sub-issue, when it starts (parallel ones may share a call). One colour
-# per package, reserved in ../_stokesforge/.packages/<parent> between two
-# sub-issues; every sub-issue worktree gets it. The tag is
-# "<square> #<parent> › #<sub> <name>" while a sub-issue is in progress.
+# per package (the record of the parent); every sub-issue worktree gets it. Between
+# two sub-issues the package keeps it only while a session owns the parent (the
+# claim made by `lance #<parent>`); after /clear or a crash it is paused like any
+# issue. The tag is "<square> #<parent> › #<sub> <name>" while a sub-issue is in
+# progress.
 #   scripts/chantier.sh --done <parent>
-# releases the reservation after the last merge (refused while a worktree of the
+# marks the package finished after the last merge (refused while a worktree of the
 # package exists).
+#   scripts/chantier.sh --pause <n>
+# drops the owner of any issue or package: its colour is freed unless a QCM or a
+# trial holds it; worktrees are kept (a package: refused while one of its
+# worktrees exists). A later claim takes the previous colour back if free.
+#
+# Colours (#441):
+#   scripts/chantier.sh --status [--json]
+# is `scripts/suivi.py status`: the six colours, free or held (issue, why held,
+# worktrees, since, days), then paused issues and worktrees without a record.
+#   scripts/chantier.sh [--dry-run] [--no-trial] --release <n>|<n><letters>
+# from the main checkout on `main`: refuses an issue with no trial entry
+# (`scripts/suivi.py test add`) unless --no-trial (#441, V2), then removes ONE merged, clean worktree
+# (feature<n>, feature426b, ...) and its merged local branch (never --force, never
+# -D), then prints ONE line saying whether the colour is free or still held; the
+# issue is marked done when its last worktree goes and nothing holds it.
 #
 # Test seams: SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
 # `glab issue view` lookup; SF_ISSUES_JSON (a file with the JSON of `glab issue
 # list`) replaces the sub-issue search, SF_ISSUE_BODY_<n> the parent's description;
-# SF_NO_FETCH=1 skips `git fetch`. --dry-run creates nothing and prints what it
-# would create.
+# SF_NO_FETCH=1 skips `git fetch`, SF_TODAY=YYYY-MM-DD fixes today, SF_SUIVI_DIR
+# moves the state folder. --dry-run creates nothing and prints what it would create
+# (or remove, pause).
 set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
+suivi() { python3 -I "$(dirname "$0")/suivi.py" "$@"; }
 
-usage="usage: chantier.sh [--dry-run] [--start <sub-issue>]... <issue-number>... | --done <parent>"
+usage="usage: chantier.sh [--dry-run] [--start <sub-issue>]... <issue-number>... | --done <parent> | --pause <n> | [--no-trial] --release <n>[<letters>] | --status [--json]"
 dry=0
 issues=()
 starts=()
 done_parent=""
+pause_n=""
+release_name=""
+no_trial=0
+status=0
+json=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
     --dry-run) dry=1 ;;
-    --start | --done)
+    --start | --done | --pause)
         case "${2:-}" in *[!0-9]* | '') echo "$usage" >&2; exit 2 ;; esac
-        if [ "$1" = --start ]; then starts+=("$2"); else done_parent="$2"; fi
+        case "$1" in
+        --start) starts+=("$2") ;;
+        --done) done_parent="$2" ;;
+        *) pause_n="$2" ;;
+        esac
         shift ;;
-    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
+    --release)
+        [[ "${2:-}" =~ ^[0-9]+[a-z]*$ ]] || { echo "$usage" >&2; exit 2; }
+        release_name="$2"
+        shift ;;
+    --no-trial) no_trial=1 ;;
+    --status) status=1 ;;
+    --json) json=1 ;;
+    -h | --help) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
     *[!0-9]* | '') echo "$usage" >&2; exit 2 ;;
     *) issues+=("$1") ;;
     esac
     shift
 done
-[ "${#issues[@]}" -gt 0 ] || [ -n "$done_parent" ] || { echo "$usage" >&2; exit 2; }
+[ "$json" = 0 ] || [ "$status" = 1 ] || { echo "$usage" >&2; exit 2; }
+[ "${#issues[@]}" -gt 0 ] || [ -n "$done_parent$pause_n$release_name" ] || [ "$status" = 1 ] \
+    || { echo "$usage" >&2; exit 2; }
 
 main="$(sf_main_dir)"
 root="$(realpath -m "$(sf_wt_root)")"
@@ -103,24 +147,7 @@ name_of() {
     fi
 }
 
-all_taken() {
-    local all=""
-    for c in "${SF_COLOURS[@]}"; do all="$all$c"; done
-    echo "6 work packages in progress ($all): finish or remove one first (git worktree list)" >&2
-    exit 1
-}
-reserved=""   # colours promised in this run (dry-run only)
-
-# First colour held by no worktree, no reserved package and no earlier dry-run promise.
-free_colour() {
-    local c
-    for c in "${SF_COLOURS[@]}"; do
-        if ! { sf_used_colours; printf '%s\n' $reserved; } | grep -xF "$c" > /dev/null; then
-            printf '%s\n' "$c"
-            return
-        fi
-    done
-}
+reserved=""   # colours promised earlier in this dry run
 
 # Open sub-issues of issue $1, one "<number><TAB><title>" line each, in the order
 # the parent's description first mentions them, then by number (#419).
@@ -192,24 +219,103 @@ PY
     rm -f "$tmpf"
 }
 
-if [ -n "$done_parent" ]; then
-    f="$(sf_pkg_dir)/$done_parent"
-    [ -f "$f" ] || { echo "no colour reserved for package #$done_parent" >&2; exit 1; }
-    members=" $done_parent $(tail -n +2 "$f" | cut -f1 | tr '\n' ' ')"
-    left=""
-    while read -r wt; do
+if [ "$status" = 1 ]; then
+    if [ "$json" = 1 ]; then suivi status --json; else suivi status; fi
+    exit $?
+fi
+
+# --release <name>: one merged, clean worktree and its merged local branch (#441).
+# Every condition is checked before anything is removed. The colour line comes from suivi.py.
+release_wt() {
+    local name="$1" wt="$root/feature$1" known top branch ref issue dirty ignored
+    known="$(sf_worktrees)"   # (not piped into grep -q: pipefail + SIGPIPE)
+    if ! grep -qxF "$wt" <<< "$known" && ! grep -qxF "$(realpath -m "$wt")" <<< "$known"; then
+        echo "release: no worktree $wt" >&2
+        return 1
+    fi
+    top="$(realpath "$(git rev-parse --show-toplevel)")"
+    if [ "$top" != "$(realpath "$main")" ]; then
+        echo "release: run it from the main checkout ($main), not from $top" >&2
+        return 1
+    fi
+    if [ "$(git -C "$main" symbolic-ref --short HEAD 2> /dev/null)" != main ]; then
+        echo "release: the main checkout is not on the branch main" >&2
+        return 1
+    fi
+    branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || true)"
+    ref="${branch:-$(git -C "$wt" rev-parse HEAD)}"
+    if ! git -C "$main" merge-base --is-ancestor "$ref" HEAD; then
+        echo "release: ${branch:-HEAD of $wt} is not merged into main; nothing removed" >&2
+        return 1
+    fi
+    dirty="$(git -C "$wt" status --porcelain)"
+    if [ -n "$dirty" ]; then
+        printf 'release: %s has modified or untracked files, nothing removed:\n%s\n' "$wt" "$dirty" >&2
+        return 1
+    fi
+    ignored="$(git -C "$wt" status --porcelain --ignored | grep '^!! ' | grep -vx '!! target/' | grep -vE '^!! (.*/)?__pycache__/$' || true)"
+    if [ -n "$ignored" ]; then
+        printf 'release: %s has ignored files other than target/, nothing removed:\n%s\n' "$wt" "$ignored" >&2
+        return 1
+    fi
+    issue="$(sf_issue_of "$wt")"
+    # V2 (#441): every delivered issue has at least one trial entry, unless --no-trial.
+    if [ "$no_trial" = 0 ] && [ -z "$(suivi test list --issue "$issue")" ]; then
+        echo "release: #$issue has no trial entry (scripts/suivi.py test add); add one, or pass --no-trial; nothing removed" >&2
+        return 1
+    fi
+    if [ "$dry" = 1 ]; then
+        echo "would run: git worktree remove $wt"
+        [ -z "$branch" ] || echo "would run: git branch -d $branch"
+        return 0
+    fi
+    git -C "$main" worktree remove "$wt" > /dev/null || return 1
+    if [ -n "$branch" ]; then git -C "$main" branch -d "$branch" > /dev/null || return 1; fi
+    suivi release-line "$issue" --mark-done
+}
+
+if [ -n "$release_name" ]; then
+    release_wt "$release_name" || exit 1
+    exit 0
+fi
+
+# Worktrees of a package (itself or a sub-issue), one path per line.
+package_worktrees() {
+    local members wt i
+    members=" $(suivi members "$1") "
+    sf_worktrees | while read -r wt; do
         [ -n "$wt" ] || continue
         i="$(sf_issue_of "$wt")"
-        case "$members" in *" $i "*) left="$left $wt" ;; esac
-    done < <(sf_worktrees)
+        case "$members" in *" $i "*) printf '%s\n' "$wt" ;; esac
+    done
+}
+
+# --pause <n>: drop the owner of any issue or package; the worktrees stay.
+if [ -n "$pause_n" ]; then
+    if suivi is-package "$pause_n"; then
+        left="$(package_worktrees "$pause_n" | paste -sd' ' -)"
+        if [ -n "$left" ]; then
+            echo "package #$pause_n still has worktrees: $left (merge and remove them first)" >&2
+            exit 1
+        fi
+    fi
+    if [ "$dry" = 1 ]; then
+        echo "would pause #$pause_n: drop its owner, keep its worktrees and sub-issue list"
+        exit 0
+    fi
+    suivi pause "$pause_n"
+    exit $?
+fi
+
+if [ -n "$done_parent" ]; then
+    suivi is-package "$done_parent" || { echo "no package #$done_parent" >&2; exit 1; }
+    left="$(package_worktrees "$done_parent" | paste -sd' ' -)"
     if [ -n "$left" ]; then
-        echo "package #$done_parent still has worktrees:$left (merge and remove them first)" >&2
+        echo "package #$done_parent still has worktrees: $left (merge and remove them first)" >&2
         exit 1
     fi
-    colour="$(sf_pkg_colour "$done_parent")"
-    rm -f "$f"
-    echo "package #$done_parent released ($colour free again)"
-    exit 0
+    suivi done "$done_parent"
+    exit $?
 fi
 
 if [ "$dry" = 0 ] && [ -z "${SF_NO_FETCH:-}" ] && git -C "$main" remote | grep -qx origin; then
@@ -218,44 +324,36 @@ fi
 base=main
 git -C "$main" rev-parse --verify -q origin/main > /dev/null && base=origin/main
 
-# Create (or find) the worktree of issue $1 titled $2; $3 = the package colour, if
-# any. Sets wt, colour, branch.
+# Create (or find) the worktree of issue $1 titled $2 and claim the issue for this
+# session. $3 = parent package, $4 = its colour (dry run only). Sets wt, colour, branch.
 ensure_wt() {
-    local n="$1" title="$2" pkgcolour="${3:-}"
+    local n="$1" title="$2" parent="${3:-}" pcolour="${4:-}" args
+    args=(--name "$(name_of "$title")")
+    [ -z "$parent" ] || args+=(--parent "$parent")
     wt="$root/feature$n"
     if [ -d "$wt" ]; then
-        colour="$(sf_colour_of "$wt")"
         branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || echo '?')"
-        if [ -z "$colour" ] && [ "$dry" = 0 ]; then
-            colour="${pkgcolour:-$(sf_first_free)}"
-            [ -n "$colour" ] || all_taken
-            printf '%s\n' "$colour" > "$(sf_colour_file "$wt")"
+        if [ "$dry" = 0 ]; then
+            colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+        else
+            colour="${pcolour:-$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")}" || exit 1
         fi
         return
     fi
-    colour="$pkgcolour"
-    if [ -z "$colour" ]; then
-        colour="$(sf_first_free)"
-        if [ "$dry" = 1 ]; then
-            colour="$(free_colour)"
+    branch="feature/$n-$(slug_of "$title")"
+    if [ "$dry" = 1 ]; then
+        if [ -n "$pcolour" ]; then
+            colour="$pcolour"
+        else
+            colour="$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")" || exit 1
             reserved="$reserved $colour"
         fi
-    fi
-    branch="feature/$n-$(slug_of "$title")"
-    [ -n "$colour" ] || all_taken
-    if [ "$dry" = 1 ]; then
         echo "would run: git worktree add $wt -b $branch --no-track $base"
     else
+        suivi claim --dry-run "$n" "${args[@]}" > /dev/null || exit 1   # refuse before creating anything
         mkdir -p "$root"
-        sf_with_lock "$root/.colour.lock" bash -c '
-            set -e
-            . "$1/workflow-lib.sh"
-            colour="${6:-$(sf_first_free)}"
-            [ -n "$colour" ] || { echo "6 work packages in progress: finish or remove one first" >&2; exit 1; }
-            git -C "$2" worktree add "$3" -b "$4" --no-track "$5"
-            printf "%s\n" "$colour" > "$(sf_colour_file "$3")"
-        ' _ "$(dirname "$0")" "$main" "$wt" "$branch" "$base" "$pkgcolour"
-        colour="$(sf_colour_of "$wt")"
+        git -C "$main" worktree add "$wt" -b "$branch" --no-track "$base"
+        colour="$(suivi claim "$n" "${args[@]}")" || exit 1
     fi
 }
 
@@ -285,28 +383,18 @@ for n in "${issues[@]}"; do
         brs+=("$branch")
         continue
     fi
-    # A package: one colour for all of it, reserved under the colour lock.
-    pcolour="$(sf_pkg_colour "$n")"
-    if [ -z "$pcolour" ]; then
-        if [ "$dry" = 1 ]; then
-            pcolour="$(free_colour)"
-            reserved="$reserved $pcolour"
-        else
-            mkdir -p "$root"
-            printf '%s\n' "${kids[$n]}" > "$root/.pkglist.$$"
-            pcolour="$(sf_with_lock "$root/.colour.lock" bash -c '
-                . "$1/workflow-lib.sh"; sf_pkg_reserve "$2" "$3"' _ "$(dirname "$0")" "$n" "$root/.pkglist.$$")" || true
-            rm -f "$root/.pkglist.$$"
-        fi
-        [ -n "$pcolour" ] || all_taken
-    elif [ "$dry" = 0 ]; then
-        # Rerun: keep the colour, refresh the list.
-        printf '%s\n' "${kids[$n]}" > "$root/.pkglist.$$"
-        sf_with_lock "$root/.colour.lock" bash -c '
-            . "$1/workflow-lib.sh"; sf_pkg_reserve "$2" "$3" > /dev/null' _ "$(dirname "$0")" "$n" "$root/.pkglist.$$"
-        rm -f "$root/.pkglist.$$"
-    fi
+    # A package: one colour for all of it (the record of the parent).
     pname="$(name_of "$title")"
+    subargs=()
+    while IFS=$'\t' read -r m mt; do
+        [ -z "$m" ] || subargs+=(--sub "$m=$mt")
+    done <<< "${kids[$n]}"
+    if [ "$dry" = 1 ]; then
+        pcolour="$(suivi claim --dry-run "$n" --package --name "$pname" --avoid "$reserved")" || exit 1
+        reserved="$reserved $pcolour"
+    else
+        pcolour="$(suivi claim "$n" --package --name "$pname" "${subargs[@]}")" || exit 1
+    fi
     note="Package $pcolour #$n $pname: sub-issues, in this order (first card of the start form; the user removes or adds one):"
     k=0
     in_progress=0
@@ -317,7 +405,7 @@ for n in "${issues[@]}"; do
         [ -d "$root/feature$m" ] && started=1
         mark=""
         if [ "$started" = 1 ]; then
-            ensure_wt "$m" "$mt" "$pcolour"
+            ensure_wt "$m" "$mt" "$n" "$pcolour"
             names+=("$pcolour #$n › #$m $(name_of "$mt")")
             wts+=("$wt")
             brs+=("$branch")
@@ -338,7 +426,7 @@ for n in "${issues[@]}"; do
 done
 
 if [ "$dry" = 1 ]; then echo "(dry run: nothing created)"; fi
-echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the To-test page and notifications:"
+echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the tracking page and notifications:"
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
@@ -347,23 +435,27 @@ tags=""
 for x in "${names[@]}"; do tags="${tags:+$tags · }$x"; done
 # The user tells parallel terminals apart by this tag, without reading (#418).
 echo "Start EVERY message to the user with: $tags"
-echo "To-test page: $SF_TO_TEST_URL"
-cat <<'EOF'
+echo "Tracking page: $SF_TO_TEST_URL"
+cat <<'BRIEFING'
 Several issues: one worktree each, one session. Never work in another worktree.
 Steps, in order:
  1. Read each issue, ALL its comments, the sibling issues, `git worktree list`
     (stokesforge-feature, section 1).
- 2. Register the work package in the `chantiers` collection of the To-test page
-    (link above; procedure in stokesforge-verification/references/to-test-page.md).
+ 2. `scripts/suivi.py status`: who holds which colour. Colours are claimed by this
+    script and freed by `--release`, `--pause`, `--done`; never edit .suivi by hand.
  3. One start decision form for all open decisions, cards tagged with the issue's
-    square (stokesforge-bug-report/references/decision-form.md). A package: one
-    form for all of it, first card = the sub-issue list and order above.
- 4. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").
- 5. Visible change: `scripts/try.sh <n>` opens the branch on the user's screen;
+    square (stokesforge-bug-report/references/decision-form.md), posed locally:
+    `scripts/suivi.py qcm pose <n> data.js --title "..."`; the user answers in the
+    "En attente" tab; read it with `suivi.py qcm answers <id>`. Artifact form only
+    as fallback. A package: one form, first card = the sub-issue list and order.
+ 4. At each change of state: `scripts/suivi.py set <n> --state
+    questions|code|essai|fusion --what "..." [--wait you|dep|ag --waiting "..."]`.
+ 5. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").
+ 6. Visible change: `scripts/try.sh <n>` opens the branch on the user's screen;
     their OK is the go-ahead (stokesforge-verification, step 6).
- 6. Merge under `scripts/main-lock.sh` from the main checkout (same step 6), read the CI.
- 7. Add the To-test entry, delete the `chantiers/<n>` document (step 8). A package:
-    one entry per merged sub-issue; the `chantiers/<parent>` document stays until the last.
- 8. Clean up the worktree and branch (section "Clean up after a merge on main");
-    after the last sub-issue, `scripts/chantier.sh --done <parent>` frees the colour.
-EOF
+ 7. Merge under `scripts/main-lock.sh` from the main checkout (same step 6), read the CI.
+ 8. Add the trial entries (suivi.py test add / merged) (stokesforge-verification, step 8).
+ 9. Clean up: `scripts/chantier.sh --release <n>` (worktree and branch; copy its one
+    line in the report). A package stopping with no worktree: `--pause <parent>`;
+    after its last sub-issue: `--done <parent>`.
+BRIEFING

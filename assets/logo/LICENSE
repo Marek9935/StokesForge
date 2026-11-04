@@ -1,0 +1,19 @@
+Copyright (c) 2026 Aliocha Skrzypczak. All rights reserved.
+
+This notice covers the directory assets/logo/ and everything in it: the
+StokesForge logo in all its versions, and the drafts, boards, explorations,
+design tokens, generator scripts and documents of the work on it. It applies to
+these files in every commit of this repository where they appear.
+
+These files are not covered by the GNU General Public License, which applies to
+the StokesForge code elsewhere in this repository. No license is granted on
+them.
+
+You may not modify, adapt, copy, redistribute or otherwise use these files, or
+create a work derived from them, without the prior written permission of the
+author.
+
+The code of StokesForge stays under GPL-3.0-or-later (see LICENSE at the root of
+the repository); this notice takes nothing from it. A distribution of the code,
+modified or not, leaves this directory out unless the author has given written
+permission.

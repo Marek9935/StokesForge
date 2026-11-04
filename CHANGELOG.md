@@ -26,6 +26,11 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A new graph plotted from a workbook is named after it (#434): "Book1 plot",
+  then "Book1 plot 2"… (numbered after the highest existing number, a deleted
+  graph leaves a gap) instead of Graph1, Graph2. `pyst.plot` without `name`
+  does the same. A graph without series is still named GraphN.
+
 - Project Manager (#425): drag rows to move them. Drop on a folder to put them
   inside it, between two rows to reorder, below the last row to move them to the
   root. A closed folder opens after a second under the pointer, Escape cancels,
@@ -200,6 +205,27 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Column type (#431): the Type entries (right-click on a column letter, Workbook > Columns) are greyed, with the reason as tooltip, on a column computed by a formula or produced by a calculation (they used to answer "Change Type" and be silently undone by the next recalculation). On a selection that also holds other columns, only those change. `pyst.set_column_type` raises `InvalidValueError` on such a column.
+
+- Formulas (#428): `round(x, n)` rounds the shortest decimal representation of
+  the stored value, like Excel: `round(1.005, 2)` is 1.01 (it was 1), and
+  `round(2.675, 2)` is 2.68.
+- A transposed sheet whose source holds a formula column is no longer shown stale
+  right after opening a file where it was up to date (#430).
+- Pasting a Formulas copy of a column no longer ends on the error "This column is
+  computed by a formula": the frozen values are not written into a column whose
+  formula was just pasted. Pasting a Formulas copy on a data cell of a column now writes
+  the formula into the column, like on its F(x)= field, instead of shifted frozen values (#432).
+- Formulas (#429): `logx` of an exact power is exact (`floor(logx(1000, 10))` is
+  3, `logx(243, 3)` is 5); `erf` and `erfc` keep their relative precision
+  everywhere (within 2 ulps on the Boost.Math tables, `erfc` subnormal up to
+  27.2, `erf(-0)` is -0); `mean`, `sum` and `std` of a whole column or a range
+  use compensated sums (the mean of ten 0.1 is 0.1, the `std` of a constant
+  column is 0) and no longer lose a representable result to an intermediate
+  overflow (`mean` of two 1.7e308); a number typed or pasted in a formula or a cell
+  beyond the `f64` range (`1e400`) or too small to be stored (`1e-400`) is refused with a
+  sentence (the cell stays open; a pasted block holding one is refused as a whole; imported values are not checked),
+  while a stored formula holding one still loads.
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that
