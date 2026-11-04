@@ -13,6 +13,7 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 | `removed-tests/` | archive of entries removed by `test remove`; numbers are not reused |
 | `ended/<session>` | touched by the `SessionEnd` hook |
 | `control.json` | result of the last `scripts/suivi.py check` |
+| `ci.json` | last reading of the CI of `main` by the server's watcher (#452): sha, verdict, names, reason, last_red, checked_at, notified |
 
 ## The colour rule
 
@@ -46,7 +47,17 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 
 ## Server
 
-`scripts/suivi.py serve [--port 8441] [--state DIR]`: single-threaded `http.server` on 127.0.0.1 (exit 1 if the port is taken). `GET /` page, `GET /api/state` (aggregate, ETag), `POST /api/tests/<id>` (status, comment; needs header `X-Suivi: 1`, same-origin `Origin`, own `Host`; ids `[A-Za-z0-9_.-]+` not starting with a dot; body at most 256 KB). `GET /qcm/<id>` serves the form template with the QCM's `data.js` injected (404 if unknown), `GET /api/qcm/<id>/answers`, `POST /api/qcm/<id>/answer` (one card record) and `POST /api/qcm/<id>/finish` follow the same checks as the tests POST. The user installs it once with `scripts/suivi-install.sh` (user unit `stokesforge-suivi.service`, started with the GNOME session (`graphical-session.target`, like the dictation services) at the lowest CPU and I/O priority, system `/usr/bin/python3`; rerun it after a change of the script; `scripts/suivi-uninstall.sh` removes it and keeps `.suivi/`). The server keeps the code it started with: after a merge that changes `scripts/suivi.py`, run `systemctl --user restart stokesforge-suivi`. The page file is re-read at each request.
+`scripts/suivi.py serve [--port 8441] [--state DIR]`: single-threaded `http.server` on 127.0.0.1 (exit 1 if the port is taken). `GET /` page, `GET /api/state` (aggregate, ETag), `POST /api/tests/<id>` (status, comment; needs header `X-Suivi: 1`, same-origin `Origin`, own `Host`; ids `[A-Za-z0-9_.-]+` not starting with a dot; body at most 256 KB). `GET /qcm/<id>` serves the form template with the QCM's `data.js` injected (404 if unknown), `GET /api/qcm/<id>/answers`, `POST /api/qcm/<id>/answer` (one card record) and `POST /api/qcm/<id>/finish` follow the same checks as the tests POST. The user installs it once with `scripts/suivi-install.sh` (user unit `stokesforge-suivi.service`, started with the GNOME session (`graphical-session.target`, like the dictation services) at the lowest CPU and I/O priority, system `/usr/bin/python3`; rerun it after a change of the script; `scripts/suivi-uninstall.sh` removes it and keeps `.suivi/`). The server keeps the code it started with: after a merge that changes `scripts/suivi.py`, run `systemctl --user restart stokesforge-suivi`. The page file is re-read at each request. A change to the CI watcher needs the same restart.
+
+## CI watcher (#452)
+
+`serve` also runs a daemon thread that reads the CI of the newest commit of `main` about every 120 s, so nobody polls it by hand. The line "CI rouge / verte / en cours / inconnue sur main" sits above the tabs on both pages, and `/api/state` carries it as `ci` (`verdict`, `names`, `reason`, `sha`, `last_red`; never `checked_at`, which would defeat the ETag). The page file is the display; the verdict is computed by `scripts/suivi.py`:
+
+- Linux: `scripts/ci-status.sh --head` (the head of `main` read through `glab`, not the local clone). Green only when every job of `scripts/gitlab-status.py` `JOBS` except `robustness` is present and SUCCESS. A FAILED job is red, with its name. No pipeline yet is pending, then unknown after an hour. CANCELED, a `glab` failure, a timeout, empty or unreadable output is unknown.
+- Windows: once Linux is green, one public GitHub API read of the check runs `test-windows`, `test-python-windows`, `dist-windows` (60 requests per hour limit; a final verdict of a SHA is not read again). A failed Windows job is red; a failed read is unknown, never green.
+- A red stays in `last_red` (shown while the new head is pending or unknown) until a newer head is green. `notify-send` fires once per red SHA; its absence is ignored.
+- `ci.json` missing, corrupt, or older than 3 polls reads as unknown. The colour rule and the `pending` count do not depend on the CI.
+- Seams for tests: `SF_SUIVI_CI=off` (no thread), `SF_SUIVI_CI_POLL`, `SF_SUIVI_CI_TIMEOUT`, `SF_SUIVI_GITHUB`.
 
 ## Migration and `legacy`
 
