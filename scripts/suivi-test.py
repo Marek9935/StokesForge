@@ -688,6 +688,43 @@ class TestTestCommands(Base):
         self.assertEqual((r["what"], r["waiting"], r["wait_kind"]), ("z", "n2", "dep"))
 
 
+class TestAgentIdle(Base):
+    def setUp(self):
+        super().setUp()
+        self.proj = os.path.join(self.tmp.name, "projects")
+        self.env["SF_CLAUDE_PROJECTS"] = self.proj
+
+    def touch(self, rel, age_min):
+        p = os.path.join(self.proj, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").close()
+        t = time.time() - age_min * 60
+        os.utime(p, (t, t))
+
+    def idle(self):
+        return self.status()["colours"][0].get("agent_idle_min")
+
+    def test_idle_minutes_come_from_the_newest_transcript_stat(self):
+        self.put(1, colour=C[0], owner=self.live_owner("S1"))
+        self.assertIsNone(self.idle())                                         # no file found
+        self.touch("-p/S1.jsonl", 30)
+        self.touch("-q/S2.jsonl", 0)                                           # another session
+        self.assertEqual(self.idle(), 30)
+        self.touch("-p/S1/subagents/a.jsonl", 7)                               # a newer subagent file wins
+        self.assertEqual(self.idle(), 7)
+        self.touch("-p/S1.jsonl", 0)
+        self.assertEqual(self.idle(), 0)
+
+    def test_dead_owner_has_no_idle_time(self):
+        self.touch("-p/S1.jsonl", 3)
+        child = subprocess.Popen(["sleep", "30"])
+        start = suivi.pid_start(child.pid)
+        child.kill()
+        child.wait()
+        self.put(1, colour=C[0], owner={"session": "S1", "pid": child.pid, "pid_start": start, "at": time.time()})
+        self.assertIsNone(self.status()["paused"][0]["agent_idle_min"])      # paused: the owner is gone
+
+
 class TestImportOnline(Base):
     def export(self, tmp, docs):
         os.makedirs(os.path.join(tmp, "tests"))
@@ -779,6 +816,23 @@ class ServerBase(Base):
     def entry_text(self):
         with open(self.entry) as f:
             return f.read()
+
+class TestAgentIdleServed(ServerBase):
+    def test_api_state_carries_agent_idle_min(self):
+        proj = os.path.join(self.tmp.name, "projects", "-p")
+        os.makedirs(proj)
+        self.stop()
+        self.env["SF_CLAUDE_PROJECTS"] = os.path.dirname(proj)
+        p = os.path.join(proj, "S1.jsonl")
+        open(p, "w").close()
+        os.utime(p, (time.time() - 600, time.time() - 600))
+        self.put(1, colour=C[0], name="One", owner=self.live_owner("S1"))
+        self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
+                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.port = int(re.search(r":(\d+)/", self.proc.stdout.readline()).group(1))
+        status, _, body = self.req("GET", "/api/state")
+        self.assertEqual(json.loads(body)["colours"][0]["agent_idle_min"], 10)
+
 
 class TestServer(ServerBase):
     def test_csp_lets_the_inline_tab_icon_load(self):
@@ -1057,23 +1111,47 @@ class TestPage(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_says_whose_turn_it_is(self):
-        card = {"issue": 7, "issues": [7], "package": None, "held_by": ["agent"], "waiting": "", "wait_kind": ""}
+        card = {"issue": 7, "issues": [7], "package": None, "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
         todo = lambda n, st="todo": {"n": n, "status": st}
         L = self.card_line
         self.assertEqual(L(card, [], [{"issue": 7}])["text"], "À toi : répondre au questionnaire")        # lang: fr
         l = L(card, [todo(7), todo(7), todo(7), todo(7, "ok"), todo(8)])
-        self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : cocher 3 essais", "l’agent continue"))   # lang: fr
+        self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : cocher 3 essais", "l’agent travaille"))   # lang: fr
         self.assertEqual(L(card, [todo(7)])["text"], "À toi : cocher 1 essai")                              # lang: fr
         self.assertEqual(L(card, [todo(7, "ok")]), {"user": False, "text": "L’agent travaille", "also": "", "note": ""})   # lang: fr
         paused = dict(card, held_by=[])
         self.assertEqual(L(paused)["text"], "En pause")                                                     # lang: fr
         l = L(paused, [], [{"issue": 7}])
-        self.assertEqual((l["user"], l["also"]), (True, ""))                                                # the agent is not working
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # nobody works
         l = L(card, [], [{"issue": 7}])
-        self.assertEqual((l["text"], l["also"]), ("À toi : répondre au questionnaire", "l’agent continue"))   # lang: fr
-        # an agent note alone never makes it the user's turn
-        l = L(dict(card, wait_kind="you", waiting="my note"))
-        self.assertEqual((l["user"], l["text"], l["note"]), (False, "L’agent travaille", "my note"))        # lang: fr
+        self.assertEqual((l["text"], l["also"]), ("À toi : répondre au questionnaire", "l’agent travaille"))   # lang: fr
+        # a note of kind `you` is the user's turn, alone or joined; other kinds stay muted text
+        l = L(dict(card, wait_kind="you", waiting="run make"))
+        self.assertEqual((l["user"], l["text"], l["note"]), (True, "À toi : run make", ""))                 # lang: fr
+        l = L(dict(card, wait_kind="you", waiting="run make"), [], [{"issue": 7}])
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire · run make")                         # lang: fr
+        for kind in ("dep", "ag"):
+            l = L(dict(card, wait_kind=kind, waiting="my note"))
+            self.assertEqual((l["user"], l["text"], l["note"]), (False, "L’agent travaille", "my note"))    # lang: fr
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_card_line_tells_a_working_agent_from_a_stopped_one(self):
+        base = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": ""}
+        L = self.card_line
+        # lang: fr begin
+        for idle, text in ((4, "L’agent travaille"), (5, "Agent à l’arrêt depuis 5 min"), (59, "Agent à l’arrêt depuis 59 min"),
+                           (125, "Agent à l’arrêt depuis 2 h"), (None, "Session ouverte")):
+            self.assertEqual(L(dict(base, agent_idle_min=idle))["text"], text, idle)
+        self.assertEqual(L(base)["text"], "Session ouverte")                                  # old server: no field   # lang: fr
+        mine = [{"issue": 7}]
+        for idle, also in ((4, "l’agent travaille"), (5, "agent à l’arrêt, rien ne bouge sans toi"),
+                           (0, "l’agent travaille"), (None, "session ouverte")):
+            l = L(dict(base, agent_idle_min=idle), [], mine)
+            self.assertEqual((l["user"], l["also"]), (True, also), idle)
+        # lang: fr end
+        l = L(dict(base, agent_idle_min=4), [], mine)
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire")                       # lang: fr
+        self.assertEqual(L(dict(base, held_by=["legacy"]), [], mine)["also"], "")
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_counts_every_member_of_a_package(self):
