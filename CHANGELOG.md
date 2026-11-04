@@ -24,8 +24,26 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Changed
+
+- Pasting a formula that cannot be read behaves like typing it (#433): it is
+  kept, framed in red with the reason, and its column is emptied (the copied
+  values are never pasted in its place); the other columns of the paste go
+  through, one **Undo** restores everything, and it calculates by itself when
+  the missing column or sheet appears. The status bar says "The formula of
+  column C does not compute: …". A pasted comma range is rewritten and shown
+  in orange exactly like a typed one. Scripts (`pyst`) stay strict.
+- Status bar warnings use one amber colour, further from the error red.
+
 ### Added
 
+- A formula kept because a column or a sheet it names does not exist yet
+  computes by itself when that column or sheet appears (#433): add the column,
+  move one in, rename a sheet, delete a duplicate workbook, or open the file.
+  The binding is part of the history entry of that action (one **Undo** takes
+  both) and the status bar says which column the formula now reads. A binding
+  that would make a loop stays framed. Once bound, the formula holds the column
+  by identifier, so moving it later gives no `#REF`.
 - Application icon (#388): the StokesForge logo is the icon of the window, of
   the Windows `stokesforge-app.exe` and of its installer, of the menu entry and
   of the `.stf` files (a landscape sheet with the logo), and sits at the top of
@@ -253,6 +271,33 @@ without a message, see `docs/persistence.md`).
   bounds and segment baselines.
 
 ### Changed
+
+- Formulas (#433): `0/0`, infinity minus infinity and zero times infinity are
+  a failed calculation (`---`), like `ln(-1)`; `1/0` stays infinity. An infinite
+  bound of a range means "to the end" (`max(B, 330, 1/0)`), and `integral(B, 2, 2)`
+  is 0 when the column has a point. A sheet that holds only constants or
+  formulas of other sheets has one row. A formula column copied alone into its
+  own sheet (`pyst.duplicate`) reads the same columns.
+- Refresh from Source with a shorter file shrinks a sheet that has formula
+  columns; they are recomputed on the new length (#433).
+- `pyst.set_column_meta(formula=None)` removes the formula and the values it
+  computed, like the interface; `keep_data=True` keeps them. `pyst` API 0.5
+  (alpha) (#433).
+- Formulas (#433): a formula you type in the **F(x)=** field is now always kept
+  (Enter, Tab or a click elsewhere closes the field, Esc cancels). When it
+  cannot be calculated (unknown column or function, wrong argument count, loop,
+  `#REF`, syntax error such as `A +`, number too large) the text stays as typed,
+  the column is empty, the cell is framed in red with the reason, and Ctrl+Z
+  brings the old formula back. A column the formula could read still follows
+  moves. A loop is kept uncalculated, its columns framed. Unreadable and
+  looping formulas leave empty cells instead of `---`. A syntax error has one
+  short sentence ("The formula is incomplete or not valid…"). A range written
+  with a decimal comma (`max(B,1,5)`) keeps its range, is rewritten
+  `max(B, 1, 5)` and shows orange for 10 s with the reason, also in the status
+  bar. Pasting a formula that cannot be read writes nothing into its column
+  (not the copied values either), the other columns go through and the status
+  bar names the column. `pyst` raises `InvalidValueError` for every badly
+  written formula, `A +` included, and writes nothing.
 
 - The axes are named **Bottom / Top / Left / Right** everywhere in the interface
   (Bas / Haut / Gauche / Droite in French), instead of "X (bottom)", "Secondary Y

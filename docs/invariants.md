@@ -39,6 +39,18 @@ matching command in `stokesforge-commands` opens a non-undoable write path. No
 test checks this today (`b21` measures the cost and identity on the write path,
 not this corollary): review is what holds it.
 
+One follow-up written by the actor stays inside the rule: the **binding of a kept
+formula** (#433, Q3). A formula the field kept because a column or a sheet it
+names did not exist is bound by the actor as soon as a gesture makes the name
+resolve. The binding is a `SetColumnMeta` command, folded into the history
+entry of that gesture (`History::absorb_into_last`, or a plain recorded command
+inside an open macro): one undo takes the gesture and the binding, redo
+replays the recorded entry, and a Stop undoes both. Nothing is written outside
+a command. The one exception is the scan that follows a **file load**: the
+history has just been cleared and nothing is installed yet, so it uses the
+direct primitives of `core`, like `orient_graphs` (the same status as the
+recalculation).
+
 **To read**: `stokesforge-core/src/project.rs` (head), `stokesforge-session/src/lib.rs`
 (head).
 
@@ -275,6 +287,22 @@ Two consequences that cross the crates:
   (found in review: `AddColumn` of a column coming from a file or from a
   snapshot from before a load), would make a stale formula pass for
   up to date.
+
+**The binder and the fingerprint (#433).** A kept formula is bound by
+`Tree::pending_bindings` / `next_binding` after every recorded command, **before**
+the reply and before the pass, in both modes. The rule: a candidate is a formula
+that does not compile and holds a text fragment with a letter, `[` or a quote;
+it binds only if the strict reading of the text it displays
+(`Tree::formula_for_entry`) succeeds **as a whole** (`#REF+Z` waits), makes no
+loop, and keeps every column the formula already held. Candidates are judged in
+ascending `NodeId` order (never `Tree::iter`, a hash order: `b22` compares two
+sessions), one at a time, the tree being asked again after each binding. The
+fixed point is that `pending_bindings` is empty after every command, undo, redo
+and load included: undo restores a state that was already scanned (strict LIFO,
+invariant 8), redo replays the entry. The scan adds **no fingerprint data**:
+it reads letters and names, the calculation never does, and what it writes is
+the stored formula (identifiers), which is already in the fingerprint. A project
+given to `Session::spawn` is not scanned: the first recorded command does it.
 
 The full recalculation has not disappeared: it is the oracle (`FormulaRecalc::Full`),
 against which `b22` compares the targeted one after each step of a randomly

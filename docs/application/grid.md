@@ -244,16 +244,20 @@ a display, reread on every frame: inserting, deleting or moving columns
 (including the outputs of an analysis) never changes what the formula reads,
 the displayed letter follows the column (`a*2` is written `A*2`). The syntax is `+ - * / ^`, unary minus (and plus), comparisons, parentheses, numbers, column letters and row-wise functions of the table shared with the Fit (`sqrt`, `round`, `if`, `pi()`..., #401; a name followed by `(` is a function, a lone name a column), and the functions of a whole column (#402: `at`, `max`, `min`, `mean`, `sum`, `std`, `integral`, with an optional X range): there is no reference to another sheet (`stokesforge-core/src/formula.rs`). If a column read is no
 longer in the sheet, the cell shows `#REF` and paints a red frame with the
-tooltip "Column deleted. Replace #REF with a column letter". The same frame (`AppState::formula_issue`) says that a column function has no X column paired with the column it reads (cells `---`), or that every cell of the result is empty because the functions found no point. Three
-inputs are **refused**: a letter that designates no column of the
-sheet, the column itself, and a modified `#REF`. Enter or Tab on a refused
-text leave the field open (red frame, tooltip that says why); a click
-elsewhere closes it without writing anything. Validating the displayed text as is (even with
-`#REF`) writes nothing. A **syntax error** is not a refusal: it is
-saved and the column fills with `---`. When pasting a rectangle, the refused
-formula is the only one not pasted: the other fields are, and
-the status bar states the refusal after the writes. The decision is made in
-`stokesforge-app-state` (`header_edit_refusal`, `formula_issue`), the grid only
+tooltip "Column deleted. Replace #REF with a column letter". The same frame (`AppState::formula_issue`) says that a column function has no X column paired with the column it reads (cells `---`), or that every cell of the result is empty because the functions found no point. The Formula field **always writes**
+(#433): Enter, Tab and a click elsewhere keep the text typed, Esc cancels. A text
+that cannot be read (unknown letter, the column itself, a loop, `#REF`, a syntax
+error...) is kept as typed with the identifiers it could resolve, the column is
+empty, the cell is framed in red with the reason (tooltip) and the status bar
+says it as an error; Undo gives back the old formula and values. While typing,
+the cell tints red for each of these except a syntax error. Validating the
+displayed text as is (even with `#REF`) writes nothing. A range written with a
+decimal comma (`max(B,1,5)`) is rewritten `max(B, 1, 5)` and the cell is orange
+for 10 s (S-R17). When pasting a rectangle, a formula that cannot be read is
+kept like a typed one (#433: framed, the column emptied, never the copied
+values), the other fields and columns are pasted and the status bar names the
+columns that do not compute, then the reason of the first. The decision is made in
+`stokesforge-app-state` (`header_edit_issue`, `formula_issue`), the grid only
 paints it.
 
 `stokesforge_commands::Command::label` used to build its history labels on

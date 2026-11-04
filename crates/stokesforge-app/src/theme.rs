@@ -375,6 +375,23 @@ pub fn field_clamped_color() -> Color32 {
     Color32::from_rgb(220, 120, 0)
 }
 
+/// The one warning colour (status bar warnings, import footer, console): amber,
+/// further from the error red than egui's default `rgb(255, 100, 0)`. Light
+/// theme `rgb(185, 110, 0)`, dark theme `rgb(255, 165, 50)`.
+pub fn warning_color(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(255, 165, 50)
+    } else {
+        Color32::from_rgb(185, 110, 0)
+    }
+}
+
+/// Background of a grid cell whose text was **rewritten** by the field (#433,
+/// S-R17): the clamped orange, see-through, like [`field_refused_fill`].
+pub fn field_clamped_fill() -> Color32 {
+    field_clamped_color().gamma_multiply(0.18)
+}
+
 /// Dark and discreet red of the outline of a modal dialog that has just
 /// refused a click ([`crate::app`], `modal_dialog`).
 pub fn blocked_flash_color() -> Color32 {
@@ -518,6 +535,7 @@ fn visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::light();
 
     visuals.hyperlink_color = ACCENT;
+    visuals.warn_fg_color = warning_color(visuals.dark_mode);
     visuals.selection.bg_fill = ACCENT.gamma_multiply(0.35);
     visuals.selection.stroke.color = ACCENT;
 
@@ -556,6 +574,13 @@ mod tests {
             !visuals().dark_mode,
             "the StokesForge theme must stay light"
         );
+    }
+
+    /// The warning colour is the amber token, set on the visuals.
+    #[test]
+    fn the_warning_colour_is_the_amber_token() {
+        assert_eq!(visuals().warn_fg_color, Color32::from_rgb(185, 110, 0));
+        assert_eq!(warning_color(true), Color32::from_rgb(255, 165, 50));
     }
 
     /// #347: the content of a page scroll area ends `SPACE_SECTION` below

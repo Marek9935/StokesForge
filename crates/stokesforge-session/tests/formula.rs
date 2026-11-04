@@ -193,8 +193,9 @@ fn a_dependency_cycle_degrades_to_nan_without_hanging() {
             ColumnType::Mixed,
             "each references the other, so retypes"
         );
+        // Empty cells, no `---` (#433): a loop is kept framed, nothing failed.
         for row in 0..col.len() {
-            assert_eq!(col.cell(row), MixedCell::Text("---".to_string()));
+            assert_eq!(col.cell(row), MixedCell::Empty);
         }
     }
 }
@@ -218,8 +219,9 @@ fn a_cycle_through_functions_degrades_without_hanging() {
     for &column in &[b, c] {
         let node = snapshot.tree.node(column).expect("column");
         let col = node.as_column().expect("the node is a column");
+        // Empty cells, no `---` (#433): a loop is kept framed, nothing failed.
         for row in 0..col.len() {
-            assert_eq!(col.cell(row), MixedCell::Text("---".to_string()));
+            assert_eq!(col.cell(row), MixedCell::Empty);
         }
     }
 }

@@ -42,7 +42,8 @@
 //! content — or `None` when it is no longer in the sheet, because membership
 //! of the sheet is read by the calculation —, the length of the result (#194:
 //! the longest of the columns read, failing that the longest of the sheet's
-//! ordinary columns), the version of the column itself (a direct input into a
+//! ordinary columns, and at least 1 when the formula names no column of its own
+//! sheet, #433), the version of the column itself (a direct input into a
 //! formula column must be overwritten), and the outcome (unreadable formula,
 //! caught in a cycle, calculated). The **displayed** text (the letters) is not
 //! read by the calculation: it does not enter the fingerprint, and moving a
@@ -67,7 +68,7 @@
 //! a formula that reads a column of another sheet comes after the formula that
 //! writes it, and a loop between sheets is a cycle (`NaN` blocks, never a
 //! hang). The length of the result follows the columns read **in the own sheet**
-//! only. The displayed prefix (sheet and workbook names) is not read by the
+//! only (a formula that reads other sheets only has at least one row, #433). The displayed prefix (sheet and workbook names) is not read by the
 //! calculation, so a rename or a move of the sheet rewrites nothing.
 //!
 //! **The paired X is a hidden input (#402).** `at(B, 340)`, `integral(B)` and
@@ -386,7 +387,8 @@ impl Recalculator {
         // (calculated below, column by column; a remote column does not count,
         // #403). Failing that — unreadable formula, caught in a cycle, or
         // without any resolved reference — that of the longest **ordinary**
-        // column of its sheet. Never a length that counts the formula columns
+        // column of its sheet, with a floor of 1 when the formula names no
+        // column of its own sheet (#433). Never a length that counts the formula columns
         // themselves: before #194, `Tree::row_count` counted them, and a
         // formula column once lengthened sustained itself at that length
         // (undoing the lengthening of a source no longer shortened it).
@@ -454,12 +456,9 @@ impl Recalculator {
                         let fingerprint =
                             Fingerprint::new(project, id, source, Outcome::Unparsable, len);
                         if self.is_stale(id, &fingerprint) {
-                            write_formula_column(
-                                project,
-                                id,
-                                vec![f64::NAN; len],
-                                &vec![NumericStatus::Missing; len],
-                            );
+                            // Empty cells, no `---` (#433): a formula that does
+                            // not read is kept and framed, no calculation failed.
+                            write_formula_column(project, id, vec![f64::NAN; len], &[]);
                             self.record(project, id, fingerprint);
                         }
                     }
@@ -524,12 +523,9 @@ impl Recalculator {
             let fingerprint =
                 Fingerprint::new(project, id, entry.source.clone(), Outcome::Blocked, len);
             if self.is_stale(id, &fingerprint) {
-                write_formula_column(
-                    project,
-                    id,
-                    vec![f64::NAN; len],
-                    &vec![NumericStatus::Missing; len],
-                );
+                // Empty cells, no `---` (#433): a loop is kept framed, and what
+                // depends on it has nothing to show.
+                write_formula_column(project, id, vec![f64::NAN; len], &[]);
                 self.record(project, id, fingerprint);
             }
         }
@@ -578,6 +574,18 @@ impl Recalculator {
                 .filter_map(|(column_id, _)| column_len(project, *column_id))
                 .max()
                 .unwrap_or(ordinary_len);
+            // A formula that names no column of its own sheet (constant, or
+            // reading other sheets only) has at least one row (#433): the sheet
+            // would otherwise show nothing. A local reference, even gone to
+            // `#REF`, gets no floor. Still a function of `target_len`'s inputs.
+            let names_own_column = sources
+                .iter()
+                .any(|(column_id, _)| !remote.contains_key(column_id));
+            let target_len = if names_own_column {
+                target_len
+            } else {
+                target_len.max(1)
+            };
             // The X paired with each column whose X is read (#402), with its
             // version: it is not named in the formula, so nothing else would
             // tell that it changed.
@@ -683,7 +691,8 @@ struct Fingerprint {
     /// The outcome of the calculation, and the sources it read.
     outcome: Outcome,
     /// Length of the result: the longest of the columns read, or failing that
-    /// the longest ordinary column of the sheet (#194). For a calculated
+    /// the longest ordinary column of the sheet (#194), at least 1 when the
+    /// formula names no column of its own sheet (#433). For a calculated
     /// formula, it follows from the versions of the sources; for the other
     /// outcomes, it is the only trace of the sheet in the fingerprint.
     target_len: usize,
@@ -715,10 +724,10 @@ impl Fingerprint {
 /// The outcome of a formula calculation, with what it read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Outcome {
-    /// The formula does not parse: `NaN` everywhere, nothing read.
+    /// The formula does not parse: empty cells everywhere (#433), nothing read.
     Unparsable,
-    /// Caught in a cycle, or dependent on a cycle: `NaN` everywhere, nothing
-    /// read. The output type, which depends on the columns named, is fixed
+    /// Caught in a cycle, or dependent on a cycle: empty cells everywhere
+    /// (#433), nothing read. The output type, which depends on the columns named, is fixed
     /// before writing and changing type changes the column's version.
     Blocked,
     /// Calculated. Each column read, with the version of its content — or
