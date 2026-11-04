@@ -62,6 +62,9 @@ mkdist() { # mkdist <dir> [icon]
     if [ "${2:-}" = icon ]; then
         mkdir -p "$d/share/icons/hicolor/48x48/apps"
         : > "$d/share/icons/hicolor/48x48/apps/stokesforge.png"
+        # The icon of the .stf type (#388).
+        mkdir -p "$d/share/icons/hicolor/48x48/mimetypes"
+        : > "$d/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png"
     fi
 }
 
@@ -126,6 +129,8 @@ snap="$tmp/o-icon/snapshot-deb"
 t "icon staged under usr/share" test -f "$snap/usr/share/icons/hicolor/48x48/apps/stokesforge.png"
 t "desktop: Icon=stokesforge with icon" has 'Icon=stokesforge' "$snap/usr/share/applications/stokesforge.desktop"
 t "config: icon entry with its folder" has 'dst: /usr/share/icons/hicolor/48x48/apps/stokesforge.png' "$snap/nfpm.yaml"
+t "mime icon staged under usr/share" test -f "$snap/usr/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png"
+t "config: mime icon entry" has 'dst: /usr/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png' "$snap/nfpm.yaml"
 
 tn "publication switch 1 without icon stops" run_pkg "$tmp/d-plain" "$tmp/o-guard" v1.2.3 1
 tn "bad tag refused" run_pkg "$tmp/d-plain" "$tmp/o-bad" v1.2
@@ -143,7 +148,8 @@ t "stage-integration succeeds in a clean environment" env -i HOME="$tmp/home" PA
 t "stage-integration wrote the desktop file" test -f "$tmp/stage-only/usr/share/applications/stokesforge.desktop"
 t "stage-integration copied the icon" test -f "$tmp/stage-only/usr/share/icons/hicolor/48x48/apps/stokesforge.png"
 t "stage-integration left HOME empty" test -z "$(ls -A "$tmp/home")"
-t "stage-integration wrote only inside the staging folder" test "$(find "$tmp/stage-only" -type f | wc -l)" = 3
+t "stage-integration copied the mime icon" test -f "$tmp/stage-only/usr/share/icons/hicolor/48x48/mimetypes/application-x-stokesforge-project.png"
+t "stage-integration wrote only inside the staging folder" test "$(find "$tmp/stage-only" -type f | wc -l)" = 4
 tn "stage-integration refuses a quote in the Exec path" env -i HOME="$tmp/home" PATH="$MINBIN" \
     "$BASH_BIN" "$HERE/install-linux.sh" --stage-integration "$tmp/stage-q" '/opt/a"b/stokesforge-app' "$tmp/d-icon"
 tn "stage-integration needs three arguments" env -i HOME="$tmp/home" PATH="$MINBIN" \

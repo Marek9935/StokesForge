@@ -77,6 +77,16 @@ PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 
 cd "$REPO_ROOT"
+# The logo (#388): an official build (STOKESFORGE_DIST_LOGO=1) generates the
+# icons BEFORE the build, since the application .ico goes into the executable
+# (crates/stokesforge-app/build.rs), and since DIST is wiped below. Without the
+# variable, the generation does nothing and no icon is requested.
+"$REPO_ROOT/scripts/logo-dist.sh" generate
+EXE_ICON=""
+if [[ "${STOKESFORGE_DIST_LOGO:-0}" == "1" ]]; then
+    EXE_ICON="$("$REPO_ROOT/scripts/logo-dist.sh" app-ico)"
+fi
+export STOKESFORGE_EXE_ICON="$EXE_ICON"
 echo "[dist] release build of stokesforge-app (python feature)"
 cargo build --locked -p stokesforge-app --features python --release --bin stokesforge-app
 echo "[dist] release build of stokesforge-selftest (python feature)"
@@ -107,6 +117,8 @@ rm -rf "$DIST/lib/python/Lib/site-packages/pip" \
        "$DIST/lib/python/DLLs/"_test*.pyd "$DIST/lib/python/DLLs/_ctypes_test.pyd" \
        "$DIST/lib/python/DLLs/_msi.pyd" "$DIST/lib/python/DLLs/_tkinter.pyd" \
        "$DIST/lib/python/DLLs/tcl86t.dll" "$DIST/lib/python/DLLs/tk86t.dll"
+
+"$REPO_ROOT/scripts/logo-dist.sh" install "$DIST" windows
 
 # STOKESFORGE_DIST_SKIP_LICENSES=1: local trial without cargo-about. The
 # package then has no notices: the installer is named "-NO-NOTICES" and is not
@@ -170,8 +182,18 @@ mv "$DIST/lib/python.off" "$DIST/lib/python"
 SETUP="$REPO_ROOT/dist/StokesForge-${VERSION}${SUFFIX}-windows-setup.exe"
 echo "[dist] building installer $VERSION ($ISCC_BIN)"
 rm -f "$SETUP"
+# #388: an official build adds the logo defines (setup icon, .stf icon).
+LOGO_DEFINES=()
+if [[ "${STOKESFORGE_DIST_LOGO:-0}" == "1" ]]; then
+    LOGO_DEFINES=("/DLogoDir=$(cygpath -w "$(dirname "$("$REPO_ROOT/scripts/logo-dist.sh" app-ico)")")")
+fi
 "$ISCC_BIN" /Q "/DAppVersion=$VERSION" "/DSuffix=$SUFFIX" "/DSourceDir=$(cygpath -w "$DIST")" \
-    "/DOutputDir=$(cygpath -w "$REPO_ROOT/dist")" "$(cygpath -w "$REPO_ROOT/scripts/stokesforge.iss")"
+    "/DOutputDir=$(cygpath -w "$REPO_ROOT/dist")" "${LOGO_DEFINES[@]}" "$(cygpath -w "$REPO_ROOT/scripts/stokesforge.iss")"
+# The script must still compile with no logo define (what a build without
+# assets/logo/ does); /O- writes no output.
+"$ISCC_BIN" /Q /O- "/DAppVersion=$VERSION" "/DSourceDir=$(cygpath -w "$DIST")" \
+    "$(cygpath -w "$REPO_ROOT/scripts/stokesforge.iss")" \
+    || { echo "[dist] ERROR: stokesforge.iss does not compile without the logo defines" >&2; exit 1; }
 [[ -s "$SETUP" ]] || { echo "[dist] ERROR: installer missing: $SETUP" >&2; exit 1; }
 echo "[dist] installer: $SETUP ($(du -sm "$SETUP" | cut -f1) MB)"
 
@@ -185,6 +207,14 @@ for expected in stokesforge-app.exe stokesforge-selftest.exe "$DLL" msvcp140.dll
     lib/python/Lib/os.py LICENSE unins000.exe; do
     [[ -e "$INSTALL/$expected" ]] || { echo "[dist] ERROR: $expected missing from the installation" >&2; exit 1; }
 done
+if [[ "${STOKESFORGE_DIST_LOGO:-0}" == "1" ]]; then
+    for expected in share/icons/hicolor/256x256/apps/stokesforge.png stokesforge-project.ico \
+        licenses/logo/LICENSE; do
+        [[ -e "$INSTALL/$expected" ]] || { echo "[dist] ERROR: $expected (logo) missing from the installation" >&2; exit 1; }
+    done
+    reg query 'HKCU\Software\Classes\StokesForge.Project\DefaultIcon' >/dev/null \
+        || { echo "[dist] ERROR: .stf icon missing from the registry" >&2; exit 1; }
+fi
 echo "[dist] self-check from the installation ($INSTALL)"
 clean_env PYTHONPATH=C:/piege PYTHONHOME=C:/piege2 "$INSTALL/stokesforge-selftest.exe"
 reg query 'HKCU\Software\Classes\StokesForge.Project\shell\open\command' >/dev/null \

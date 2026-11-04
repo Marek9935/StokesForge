@@ -73,6 +73,7 @@ fmt:
     - scripts/install-linux-test.sh
     - scripts/glibc-floor-test.sh
     - scripts/linux-packages-test.sh
+    - scripts/logo-dist-test.sh
     - scripts/versions-aligned.sh
     - scripts/release-tag-test.sh
 
@@ -141,6 +142,8 @@ clippy:
   image: rust:1
   <<: *rust-cache
   script:
+    # #388: the code builds and is checked without the logo (not under the GPL).
+    - rm -rf assets/logo
     - rustup component add clippy
     - cargo clippy --workspace --all-targets -- -D warnings
 
@@ -158,6 +161,7 @@ test:
   image: rust:1
   <<: *rust-cache
   script:
+    - rm -rf assets/logo
     - cargo test --workspace
 
 # Reproductions of anomalies of the robustness bench: the `#[ignore]` tests of
