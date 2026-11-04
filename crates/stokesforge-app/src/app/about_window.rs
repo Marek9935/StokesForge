@@ -10,13 +10,14 @@ use eframe::egui;
 
 use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
 use crate::app_logo::ABOUT_LOGO_SIZE;
+use crate::theme;
 use stokesforge_app_state::startup::{LICENSE, REPOSITORY_URL, VERSION};
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
 /// Room taken by the logo: its side, the space below it and the item spacing
 /// after it (a window too short hides the Copy button under the footer).
-const LOGO_ROOM: f32 = ABOUT_LOGO_SIZE + 8.0 + 8.0;
+const LOGO_ROOM: f32 = ABOUT_LOGO_SIZE + theme::SPACE_SECTION + 10.0;
 
 /// Paints the window while it is open. `logo` is the texture of the logo, `None`
 /// for a build without one.
@@ -42,7 +43,7 @@ pub(super) fn about_window(
                         texture,
                         egui::vec2(ABOUT_LOGO_SIZE, ABOUT_LOGO_SIZE),
                     )));
-                    ui.add_space(8.0);
+                    ui.add_space(theme::SPACE_SECTION);
                 });
             }
             ui.label(tr!("about-version", version = VERSION));
