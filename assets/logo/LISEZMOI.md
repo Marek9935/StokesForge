@@ -20,9 +20,9 @@ Formes calculées (scripts) : gaussienne principale σ = 7, épaulement σ = 8, 
 
 | Élément | Voulu |
 | --- | --- |
-| Enclume | Silhouette d'enclume, **basse** (hauteur réduite à ~72 %), corne **conique courte et droite** à pointe arrondie (pas une coque de bateau). Une seule marche : corne puis table. **Aucune deuxième marche** sous les courbes. |
+| Enclume | Silhouette d'enclume, **basse** (hauteur réduite à ~72 %), corne **conique courte et droite** à pointe arrondie (pas une coque de bateau). Une seule marche : corne puis table, aux deux coins hauts légèrement arrondis (#446). **Aucune deuxième marche** sous les courbes. |
 | Matière de l'enclume | **Verre sombre « liquide »** (style Liquid Glass d'Apple, mais qui **assombrit** pour faire ressortir le contenu). La lumière des spectres coule **dans** le verre (vert sous l'absorption, orange sous l'émission) et se concentre dans l'arrondi des bords. Les spectres se reflètent dans le verre. **Liquide, pas verni** : un filet blanc adouci (65 % de sa force, choix de #445) suit le bord, et le reflet net des deux pics se courbe en arrivant dans l'arrondi. |
-| Jonction courbes / enclume | Les courbes sont **posées directement sur la table**. La ligne de jonction tire vers le **sombre**, pas vers le blanc. Rien ne déborde sous ou à côté des courbes. |
+| Jonction courbes / enclume | Les courbes sont **posées directement sur la table**. La ligne de jonction tire vers le **sombre**, pas vers le blanc : un trait fin qui s'efface aux deux bouts, là où les courbes s'arrêtent (#446). Rien ne déborde sous ou à côté des courbes. |
 | Courbes | **Formes pleines sans trait coloré** (le mélange trait + remplissage est rejeté). Vert dense ; orange incandescent (orange chaud au sommet, orange profond au pied). Les sommets restent bien lisibles (pas trop clairs). Une fine lueur suit le haut des courbes, sans halo étalé au pied. Volume net : formes bombées, sans changer leur contour. |
 | Axe Y | Flèche d'axe planté sur la table, à gauche des courbes. Reste fixe (sinon l'appli « a l'air cassée »). |
 | Marteau | Marteau de forgeron dessiné en courbes (table de frappe évasée, collet, panne en coin émoussé), le bout du manche **posé sur la corne**, la face **posée** sur le sommet vert sans s'y enfoncer, **devant** les courbes. Petits éclats orange au contact, sans toucher la tête. Pas de marteaux fantômes de la chute. |
@@ -57,8 +57,8 @@ Formes calculées (scripts) : gaussienne principale σ = 7, épaulement σ = 8, 
 
 | Version | Poids | Compressé | Contenu | Moteurs de rendu |
 | --- | --- | --- | --- | --- |
-| Contours | 263 Ko | 58 Ko | formes, dégradés, découpes, flou gaussien ; aucune image | Mesurés concordants à moins de 1/255 d'écart moyen : Chromium, Firefox, librsvg, resvg 0.45.1, Inkscape 1.4 |
-| Filtre | 184 Ko | 128 Ko | `feDisplacementMap`, `feImage` et masques en images de niveaux de gris | Corrects : Chromium, librsvg. **Cassé dans resvg** (déviation en marches d'escalier), lumières perdues dans Inkscape |
+| Contours | 269 Ko | 59 Ko | formes, dégradés, découpes, flou gaussien ; aucune image | Mesurés concordants à moins de 1/255 d'écart moyen : Chromium, Firefox, librsvg, resvg 0.45.1, Inkscape 1.4 |
+| Filtre | 185 Ko | 129 Ko | `feDisplacementMap`, `feImage` et masques en images de niveaux de gris | Corrects : Chromium, librsvg. **Cassé dans resvg** (déviation en marches d'escalier), lumières perdues dans Inkscape |
 
 Pas testé : Safari, Illustrator, Figma, KDE (QtSvg).
 

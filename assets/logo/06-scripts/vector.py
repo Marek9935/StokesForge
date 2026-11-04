@@ -9,7 +9,7 @@ import argparse
 import numpy as np
 from contourpy import contour_generator, FillType
 from scipy import ndimage as ndi
-from glass import rasterize, Surface, grab, mirror, THEMES, PPU, DX, HX, HY
+from glass import rasterize, Surface, grab, junction, mirror, THEMES, PPU, DX, HX, HY
 
 K = PPU
 
@@ -202,7 +202,6 @@ def build(src_path, theme="light", levels=14, **o):
 <linearGradient id="glass" gradientUnits="userSpaceOnUse" x1="0" y1="160" x2="0" y2="221"><stop offset="0" stop-color="{t['glass'][0]}"/><stop offset=".5" stop-color="{t['glass'][1]}"/><stop offset="1" stop-color="{t['glass'][2]}"/></linearGradient>
 <linearGradient id="edge" gradientUnits="userSpaceOnUse" x1="36" y1="0" x2="236" y2="0"><stop offset="0" stop-color="{t['rimn']}"/><stop offset=".32" stop-color="{t['rimn']}"/><stop offset=".55" stop-color="#7fe6a0"/><stop offset=".72" stop-color="#ffd59a"/><stop offset="1" stop-color="#ffa44d"/></linearGradient>
 <linearGradient id="tint" gradientUnits="userSpaceOnUse" x1="100" y1="0" x2="236" y2="0"><stop offset="0" stop-color="#46b06a" stop-opacity="0"/><stop offset=".3" stop-color="#46b06a"/><stop offset=".72" stop-color="#ff9a3c"/><stop offset="1" stop-color="#ff9a3c" stop-opacity=".3"/></linearGradient>
-<linearGradient id="jun" gradientUnits="userSpaceOnUse" x1="0" y1="160" x2="0" y2="164"><stop offset="0" stop-color="#090b0d" stop-opacity=".92"/><stop offset=".35" stop-color="#090b0d" stop-opacity=".55"/><stop offset="1" stop-color="#090b0d" stop-opacity="0"/></linearGradient>
 <linearGradient id="cg" gradientUnits="userSpaceOnUse" x1="163.5" y1="0" x2="{191-DX}" y2="0"><stop offset="0" stop-color="#3a9155"/><stop offset="1" stop-color="#e0651a"/></linearGradient>
 <linearGradient id="inkg" gradientUnits="userSpaceOnUse" x1="60" y1="60" x2="110" y2="170"><stop offset="0" stop-color="{t['ink2']}"/><stop offset="1" stop-color="{t['ink']}"/></linearGradient>
 <linearGradient id="inkg2" gradientUnits="userSpaceOnUse" x1="0" y1="-130" x2="0" y2="0"><stop offset="0" stop-color="{t['ink2']}"/><stop offset="1" stop-color="{t['ink']}"/></linearGradient>
@@ -243,7 +242,7 @@ def build(src_path, theme="light", levels=14, **o):
 {cast_layer}<g clip-path="url(#ac)">
 <g filter="url(#sg)">{S(body, a_box, 'url(#glass)', 24, True)}{S(rg, a_box, '#4cc074', 16, True)}{S(re_, a_box, '#f4913f', 16, True)}{S(fg, a_box, '#4cc074', 8, True)}{S(fe, a_box, '#f4913f', 8, True)}
 {S(cres, a_box, edge, 8, True)}{S(rim, a_box, edge, 10)}{S(spec, a_box, '#ffffff' if P.get('rimw') else t['spec'], 10)}</g>
-<rect x="96" y="160" width="140" height="4" fill="url(#jun)"/>
+{S(junction(a_box), a_box, '#090b0d', 26)}
 </g>
 <path d="M104 160V66" stroke="url(#inkg)" stroke-width="5"/><path d="M96 74L104 56L112 74Z" fill="url(#inkg)"/>
 <g filter="url(#sk)">{S(sx.light(L1, 14) * P['ink_spec'], k_box, t['spec'], 8, True)}{S(ks(sx) * t['inkd'], k_box, '#000', 8, True)}</g>
