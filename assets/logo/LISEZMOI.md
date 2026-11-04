@@ -1,6 +1,6 @@
 # Logo StokesForge : récapitulatif
 
-Date : 4 novembre 2026. Ce document résume ce qui a été discuté, ce qui est voulu, ce qui a été rejeté, et où en est le logo. Ce dossier est rangé dans le dépôt sous `assets/logo/` (#443) ; l'icône d'application n'en est pas encore tirée (#388). La matière en verre vient de #445. Tous droits réservés, hors GPL : voir `LICENSE` (#444).
+Date : 4 novembre 2026. Ce document résume ce qui a été discuté, ce qui est voulu, ce qui a été rejeté, et où en est le logo. Ce dossier est rangé dans le dépôt sous `assets/logo/` (#443) ; l'icône d'application et l'icône des fichiers `.stf` en sont tirées (#388). La matière en verre vient de #445. Tous droits réservés, hors GPL : voir `LICENSE` (#444).
 
 ## 1. L'idée
 
@@ -53,6 +53,7 @@ Formes calculées (scripts) : gaussienne principale σ = 7, épaulement σ = 8, 
 - `00-final/stokesforge-logo-clair.svg` et `-sombre.svg` : **versions de référence**, en contours vectoriels.
 - `00-final/stokesforge-logo-clair-filtre.svg` et `-sombre-filtre.svg` : même logo, réfraction calculée à l'affichage par un filtre SVG.
 - PNG en 1024, 512, 256, 64 et 32 px, tirés des versions de référence avec resvg.
+- `00-final/stokesforge-icone-clair.svg` : **icône d'application** (#388), le même dessin de référence sans tuile, fond transparent, recentré (marge de 8 sur 256), le même à toutes les tailles. `00-final/stokesforge-fichier-stf-clair.svg` : **icône des fichiers `.stf`**, une feuille à l'horizontale, coin plié en haut à droite, le logo dedans. Aucun raster n'en est rangé dans le dépôt : la crate `stokesforge-logo-gen` produit les PNG (16 à 512 px) et les `.ico` à chaque version (`scripts/logo-dist.sh`), après avoir refusé une source hors cadre (fond opaque, dessin décentré, filtre `feDisplacementMap` ou `feImage`).
 - L'ancien logo plat est dans `02-iterations/avant-liquid-glass/`. C'est aussi la source que les scripts relisent.
 
 | Version | Poids | Compressé | Contenu | Moteurs de rendu |
@@ -78,7 +79,7 @@ Limites : le fichier ne se retouche pas à la main, on change les réglages et o
 
 | Dossier | Contenu |
 | --- | --- |
-| `00-final/` | Logo actuel (SVG clair et sombre, en contours et en filtre, + PNG à plusieurs tailles) |
+| `00-final/` | Logo actuel (SVG clair et sombre, en contours et en filtre, + PNG à plusieurs tailles), icône d'application et icône des fichiers `.stf` (SVG clairs) |
 | `01-planches/` | Toutes les planches de comparaison (PNG) |
 | `02-iterations/` | Toutes les itérations, par série (v, p, q, r, s, t, u, w, candidats 1 à 6), l'ancien logo (`avant-liquid-glass/`) et les essais de mouvement (`mouvement/`) |
 | `03-explorations-anterieures/` | Premiers logos et explorations (enclume au trait, chutes, etc.) |
@@ -94,7 +95,11 @@ OPTS="rimw=1,spec=.65,rim=.65,cres=.55,cast=0,ftile=1"
 python3 vector.py $SRC stokesforge-logo-clair.svg --levels 18 --opts $OPTS                # référence, clair
 python3 vector.py $SRC stokesforge-logo-sombre.svg --theme dark --levels 18 --opts $OPTS  # référence, sombre
 python3 glass.py $SRC stokesforge-logo-clair-filtre.svg --opts $OPTS                      # filtre (--theme dark pour le sombre)
+python3 vector.py $SRC stokesforge-icone-clair.svg --levels 18 --opts $OPTS,icon=1,tx=-39.34,ty=-43.2,scale=1.2184      # icône d'application
+python3 vector.py $SRC stokesforge-fichier-stf-clair.svg --levels 18 --opts $OPTS,sheet=1,tx=26.35,ty=24,scale=.74      # icône des fichiers .stf
 ```
+
+Les deux dernières (#388) : `icon=1` retire la tuile et son liseré, `sheet=1` pose le dessin sur une feuille à l'horizontale (coin plié en haut à droite, 232 sur 168), `tx`, `ty` et `scale` remplacent la translation et l'échelle du dessin (par défaut `14 6` et `.9`, ceux de la tuile). Pour l'icône, la marge est de 8 sur 256 (zone dessinée au-dessus de 40/255 d'opacité : x de 8 à 248, y de 21,5 à 234,75) ; la queue de l'ombre, très claire, touche presque les bords sans les dépasser de plus de 7/255. Pour changer la marge, recalculer `scale` (largeur utile divisée par la largeur dessinée) et centrer avec `tx`, `ty`.
 
 Essais de mouvement : ajouter `,anim=1` ou `,ripple=2.4` à `OPTS` de `vector.py`. PNG : `resvg -w 1024 entree.svg sortie.png` (resvg 0.45.1).
 

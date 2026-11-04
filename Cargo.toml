@@ -22,6 +22,7 @@ members = [
     "crates/stokesforge-app",
     "crates/stokesforge-robustness",
     "crates/stokesforge-arch-guard",
+    "crates/stokesforge-logo-gen",
 ]
 
 [workspace.package]

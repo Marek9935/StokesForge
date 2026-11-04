@@ -5272,6 +5272,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "stokesforge-logo-gen"
+version = "1.0.0"
+dependencies = [
+ "image",
+ "resvg 0.45.1",
+ "tempfile",
+]
+
+[[package]]
 name = "stokesforge-persistence"
 version = "1.0.0"
 dependencies = [
