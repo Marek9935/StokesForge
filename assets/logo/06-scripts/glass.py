@@ -147,11 +147,25 @@ def spark_lines():
 def grab(src):
     polys = re.findall(r'<polygon points="([^"]+)" fill="url\(#g[ae]\)"', src)
     anvil = re.search(r'<clipPath id="ac"><path d="([^"]+)" transform="([^"]+)"', src)
+    anvil_d = anvil.group(1).replace("M96 160H236V172", "M98 160H234Q236 160 236 162V172").replace("L96 168Z", "L96 168V162Q96 160 98 160Z")
+    assert anvil_d != anvil.group(1)
     ge = " ".join(f"{float(p.split(',')[0]) - DX:.1f},{p.split(',')[1]}" for p in polys[1].split())
     comet = f"M163.6 74L{191.5-DX} 74.2L{190.5-DX} 65.8L163.4 72.4Z"
-    return dict(ga=polys[0], ge=ge, anvil=anvil.group(1), at=anvil.group(2),
+    return dict(ga=polys[0], ge=ge, anvil=anvil_d, at=anvil.group(2),
                 hamt=f"translate({HX} {HY}) rotate({HA})", ham=hammer_paths(),
                 sparks=spark_lines(), comet=comet)
+
+
+def junction(box, ppu=PPU, height=2.4, x=(98.0, 108.0, 224.0, 234.0)):
+    """Alpha of the dark line under the curves: thin, and fading out at both ends instead
+    of stopping square against the rounded glass."""
+    x0, y0, w, h = box
+    xs = x0 + (np.arange(w * ppu) + .5) / ppu
+    ys = y0 + (np.arange(h * ppu) + .5) / ppu
+    ax = np.interp(xs, x, [0, 1, 1, 0])
+    ax = ax * ax * (3 - 2 * ax)
+    ay = np.interp(ys, [160, 160 + .35 * height, 160 + height], [.92, .5, 0], left=.92, right=0)
+    return ay[:, None] * ax[None, :]
 
 
 def mirror(points, y0=160.0, k=1.0):
@@ -241,7 +255,6 @@ def build(src_path, theme="light", **o):
 <mask id="fadeX" maskUnits="userSpaceOnUse" x="0" y="140" width="256" height="110"><rect x="0" y="140" width="256" height="110" fill="url(#fadeXg)"/></mask>
 <linearGradient id="cg" gradientUnits="userSpaceOnUse" x1="163.5" y1="0" x2="{191-DX}" y2="0"><stop offset="0" stop-color="#3a9155"/><stop offset="1" stop-color="#e0651a"/></linearGradient>
 <linearGradient id="inkg" gradientUnits="userSpaceOnUse" x1="60" y1="60" x2="110" y2="170"><stop offset="0" stop-color="{t['ink2']}"/><stop offset="1" stop-color="{t['ink']}"/></linearGradient>
-<linearGradient id="jun" gradientUnits="userSpaceOnUse" x1="0" y1="160" x2="0" y2="164"><stop offset="0" stop-color="#090b0d" stop-opacity=".92"/><stop offset=".35" stop-color="#090b0d" stop-opacity=".55"/><stop offset="1" stop-color="#090b0d" stop-opacity="0"/></linearGradient>
 <linearGradient id="tint" gradientUnits="userSpaceOnUse" x1="100" y1="0" x2="236" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset=".3" stop-color="#46b06a"/><stop offset=".72" stop-color="#ff9a3c"/><stop offset="1" stop-color="#ff9a3c" stop-opacity=".3"/></linearGradient>
 <clipPath id="ac"><path d="{g['anvil']}" transform="{g['at']}"/></clipPath>
 <clipPath id="above"><rect x="0" y="0" width="256" height="160"/></clipPath>
@@ -257,7 +270,7 @@ def build(src_path, theme="light", **o):
   <feColorMatrix in="m" type="matrix" values="{alpha_b}" result="fa"/>
   <feComposite in="d2b" in2="fa" operator="in" result="r0"/><feComponentTransfer in="r0" result="refl"><feFuncA type="linear" slope="{P['refl']}"/></feComponentTransfer>
   <feMerge><feMergeNode in="refr"/><feMergeNode in="refl"/></feMerge></filter>
-{mask('mBody', gray(a_body), a_box)}{mask('mRim', gray(a_rim), a_box)}{mask('mSpec', gray(a_spec), a_box)}{mask('mCres', gray(a_cres), a_box)}
+{mask('mJun', gray(junction(a_box)), a_box)}{mask('mBody', gray(a_body), a_box)}{mask('mRim', gray(a_rim), a_box)}{mask('mSpec', gray(a_spec), a_box)}{mask('mCres', gray(a_cres), a_box)}
 {mask('mCs', gray(c_spec), c_box)}{mask('mCd', gray(c_shade), c_box)}{mask('mCr', gray(c_rim), c_box)}
 {mask('mKh', gray(k_ham), k_box)}{mask('mKx', gray(k_ax), k_box)}{mask('mKhd', gray(k_hd), k_box)}{mask('mKxd', gray(k_xd), k_box)}
 '''
@@ -279,7 +292,7 @@ def build(src_path, theme="light", **o):
 <rect x="{ax}" y="{ay}" width="{aw}" height="{ah}" fill="{edge}" mask="url(#mCres)" opacity="{P['cres']}"/>
 <rect x="{ax}" y="{ay}" width="{aw}" height="{ah}" fill="{edge}" mask="url(#mRim)" opacity="{P['rim']}"/>
 <rect x="{ax}" y="{ay}" width="{aw}" height="{ah}" fill="{'#ffffff' if P.get('rimw') else t['spec']}" mask="url(#mSpec)" opacity="{P['spec']}"/>
-<rect x="96" y="160" width="140" height="4" fill="url(#jun)"/>
+<rect x="{ax}" y="{ay}" width="{aw}" height="{ah}" fill="#090b0d" mask="url(#mJun)"/>
 </g>
 <path d="M104 160V66" stroke="url(#inkg)" stroke-width="5"/><path d="M96 74L104 56L112 74Z" fill="url(#inkg)"/>
 <rect x="{k_box[0]}" y="{k_box[1]}" width="{k_box[2]}" height="{k_box[3]}" fill="{t['spec']}" mask="url(#mKx)" opacity="{P['ink_spec']}"/>
