@@ -10281,7 +10281,14 @@ impl AppState {
         } else {
             let columns: Vec<String> = refusals.iter().map(|(c, _)| letters(c)).collect();
             let columns = columns.join(", ");
-            tr!("error-paste-formulas-refused", columns = columns.as_str())
+            // Every refused column is named, then the reason of the first.
+            let first = letters(first);
+            tr!(
+                "error-paste-formulas-refused",
+                columns = columns.as_str(),
+                first = first.as_str(),
+                reason = reason.as_str()
+            )
         };
         self.fail(sentence);
     }

@@ -762,7 +762,7 @@ error-formula-unknown-column-in = Column { $column } does not exist in sheet { $
 error-formula-remote-outside = A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column
 error-formula-remote-x = The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)
 error-paste-formula-refused = The formula of column { $column } was not pasted: { $reason }
-error-paste-formulas-refused = The formulas of columns { $columns } were not pasted
+error-paste-formulas-refused = The formulas of columns { $columns } were not pasted. { $first }: { $reason }
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists

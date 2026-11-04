@@ -545,6 +545,33 @@ fn a_refused_formula_among_accepted_ones_ends_on_its_sentence_only() {
     assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
 }
 
+/// Several refused formulas are all named, then the reason of the first (#433).
+/// Witness: a sentence without the reason fails the last assertion.
+#[test]
+fn several_refused_formulas_are_named_then_the_first_reason_is_given() {
+    let mut w = world();
+    let src = sources(&mut w);
+    let (sheet1, far) = (w.sheet1, w.far_sheet);
+    let clip = w.copy_columns(sheet1, &[src[1].1, src[2].1], FullColumnsCopy::Formulas);
+    let dst = w.new_columns(far, 2);
+    w.paste_header_on(far, dst[0], &clip);
+    let (b, c) = (
+        w.state.tree().column_letters(dst[0]).unwrap(),
+        w.state.tree().column_letters(dst[1]).unwrap(),
+    );
+    assert_eq!(w.letters(dst[0]), None);
+    assert_eq!(w.letters(dst[1]), None);
+    let status = w.status();
+    assert!(
+        status.starts_with(&format!(
+            "[error] The formulas of columns {b}, {c} were not pasted. {b}: "
+        )),
+        "{status}"
+    );
+    assert!(status.contains("Several workbooks"), "{status}");
+    assert!(!status.contains("no sheet named"), "only the first reason");
+}
+
 #[test]
 fn an_accepted_formula_after_a_refused_x_prime_keeps_its_computed_values() {
     let mut w = world();
