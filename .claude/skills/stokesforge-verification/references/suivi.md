@@ -27,12 +27,23 @@ The start and follow-up forms are posed here, not published: `python3 scripts/su
 
 (#423) Before asking for `scripts/try.sh <n>`, write the entries of a visible change in one go. The user does not guess what to test.
 
-Entries are **guided routes**, at most 5 unmerged per issue (`test add` refuses beyond; `--force`, justified in the report). One entry is one story of 2 to 3 minutes. Group the checks into routes; keep edge cases and routes a bench test cannot see (refusal and its message, save and reopen, detached window, `STOKESFORGE_LANG=en-XA` when texts changed) inside them. Be didactic.
+Entries are **guided routes**, at most 5 unmerged per issue (`test add` refuses beyond; `--force`, justified in the report). One entry is one story of 2 to 3 minutes. Group what only the user can judge into routes (look, gesture, feel, what the driver cannot show, see Pre-trial below); the detailed edge-case list (refusal and its message, save and reopen, `STOKESFORGE_LANG=en-XA` when texts changed) stays with the pre-trial agent, not in the entries. Be didactic.
 
 1. Write a JSON file: one object, or a list, with `title` (« Parcours 1/3 (3 min) »), optional `intro` (first sentence: what changes), `where` (menu or window steps, English labels as on screen), `steps` (short French imperatives, each « gesture → what you must see »), `expect` (tick OK if every step showed it), `try` (`scripts/try.sh <n>`).
 2. `python3 scripts/suivi.py test add <n> entries.json` creates `tests/<n>-<k>.json`, status `todo`.
 3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Every entry ticked OK (or the user's plain OK) is the merge go-ahead. After a « Retour », fix on the branch and redo the trial: `test remove <n> <id>... [--answered]` (only your own issue or its parent, never a merged entry; an answered entry needs `--answered`, its comment is printed back and named in your report; archived in `removed-tests/`), then `test add`.
 4. At the merge, `scripts/deliver.sh` runs `test merged <n> <commit>` (sets `commit`, removes `try`); it refuses a commit that is unknown, not on `main`, without the issue's branch while it exists, or not citing #<n>. A repeat with the same commit is « already recorded »; another commit needs `--replace <old>` (`test merged <n> <new> --replace <old>`). Any other usable change adds its entry after the merge with `test add` and a `commit` field. `test list [--issue n]` lists them.
+
+## Pre-trial (#452)
+
+Before `test add`, for a visible change, a Sonnet agent (the pre-trial agent) works in the branch's worktree on the invisible screen (`run-stokesforge`):
+
+1. It walks the detailed checks: each edge case of the start form, refusals and their messages, save and reopen, `STOKESFORGE_LANG=en-XA` when texts changed.
+2. It fixes what it finds on the branch, reruns the tests, then **re-verifies the fix in the real app**. Only then the orchestrator writes the entries (`test add`) and asks for `scripts/try.sh <n>`: the user tests only what works.
+3. The detailed list and the captures live outside the worktree (`../_stokesforge/<n>-pre-trial.md`): `chantier.sh --release` refuses untracked files. Captures go with the request to the user.
+4. The message to the user names what the driver cannot show: native Wayland, `rfd` file chooser, detached OS window, OS drag and drop, multi-screen, scale other than 1, real GPU look, and « is it what I wanted ».
+
+The user's trial stays mandatory for a visible change; the pre-trial replaces none of it, and the orchestrator's own re-verification before the merge is not weakened. The limit of 5 entries is unchanged.
 
 A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-report`.
 

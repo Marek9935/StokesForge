@@ -28,8 +28,8 @@
 # parent ("Parent: #N", "Sous-ticket du chantier #N", "Suite du chantier #N",
 # "sub-issue of #N", or a title ending "(#N)", any case), the issue is a PACKAGE.
 # The briefing lists its sub-issues in the order the parent's description first
-# mentions them (then by number): that list is the first card of the single start
-# form. No worktree is created for the package itself: after the form, run
+# mentions them (then by number): that list is the second card of the single start
+# form (the first is the understanding card). No worktree is created for the package itself: after the form, run
 #   scripts/chantier.sh <parent> --start <sub-issue>
 # once per sub-issue, when it starts (parallel ones may share a call). One colour
 # per package (the record of the parent); every sub-issue worktree gets it. Between
@@ -395,7 +395,7 @@ for n in "${issues[@]}"; do
     else
         pcolour="$(suivi claim "$n" --package --name "$pname" "${subargs[@]}")" || exit 1
     fi
-    note="Package $pcolour #$n $pname: sub-issues, in this order (first card of the start form; the user removes or adds one):"
+    note="Package $pcolour #$n $pname: sub-issues, in this order (second card of the start form, after the understanding card; the user removes or adds one):"
     k=0
     in_progress=0
     while IFS=$'\t' read -r m mt; do
@@ -439,25 +439,26 @@ echo "Tracking page: $SF_TO_TEST_URL"
 cat <<'BRIEFING'
 Several issues: one worktree each, one session. Never work in another worktree.
 Steps, in order:
- 1. Read each issue, ALL its comments, the sibling issues, `git worktree list`
-    (stokesforge-feature, section 1).
- 2. `scripts/suivi.py status`: who holds which colour. Colours are claimed by this
-    script and freed by `--release`, `--pause`, `--done`; never edit .suivi by hand.
- 3. One start decision form for all open decisions, cards tagged with the issue's
-    square (stokesforge-bug-report/references/decision-form.md), posed locally:
-    `scripts/suivi.py qcm pose <n> data.js --title "..."`; the user answers in the
-    "En attente" tab; read it with `suivi.py qcm answers <id>`. Artifact form only
-    as fallback. A package: one form, first card = the sub-issue list and order.
- 4. At each change of state: `scripts/suivi.py set <n> --state
-    questions|code|essai|fusion --what "..." [--wait you|dep|ag --waiting "..."]`.
-    A note (--waiting, --wait) is erased by the next `set` that does not restate it.
- 5. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").
- 6. Visible change: `scripts/try.sh <n>` opens the branch on the user's screen;
-    their OK is the go-ahead (stokesforge-verification, step 6).
- 7. Merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock,
-    merge, push, commit on the trial entries); then read the CI.
- 8. Follow-up entries: suivi.py test add; a wrong commit: test merged --replace <old>.
- 9. Clean up: `scripts/chantier.sh --release <n>` (worktree and branch; copy its one
-    line in the report). A package stopping with no worktree: `--pause <parent>`;
-    after its last sub-issue: `--done <parent>`.
+ 1. Read each issue, ALL its comments, the siblings, `git worktree list`
+    (stokesforge-feature, section 1); `scripts/suivi.py status`; never edit .suivi.
+ 2. Agent `perimetre` first: scope and edge cases, each tagged stated by the issue /
+    obvious default / changes behaviour (only the last becomes a card).
+ 3. One start form (stokesforge-bug-report/references/decision-form.md), posed with
+    `scripts/suivi.py qcm pose <n> data.js --title "..."`; read it with `suivi.py qcm
+    answers <id>`; Artifact only as fallback. First card: one-line understanding of the
+    issue; a package: second card = the sub-issue list and order. Lots no answer can
+    change start at pose; name the running lots in the report and in `set --what`.
+ 4. Each change of state: `scripts/suivi.py set <n> --state questions|code|essai|fusion
+    --what "..." [--wait you|dep|ag --waiting "..."]` (a note is erased by the next `set`).
+ 5. Sonnet implements in the worktree (CLAUDE.md, "Delegation"). Visible change: a
+    pre-trial agent walks the detailed checks in the real app, fixes, re-verifies, then
+    `suivi.py test add` (stokesforge-verification/references/suivi.md, Pre-trial); then
+    `scripts/try.sh <n>` opens the branch on the user's screen; their OK is the go-ahead.
+ 6. Merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock,
+    merge, push, trial entries). No CI polling: report, close, release; the watcher of
+    `suivi.py serve` alerts on red. Read the CI only for a tag, a release or a change to
+    CI itself. The next sub-issue does not wait.
+ 7. Follow-up entries: suivi.py test add; a wrong commit: test merged --replace <old>.
+ 8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
+    stopping with no worktree: `--pause <parent>`; after its last sub-issue: `--done`.
 BRIEFING

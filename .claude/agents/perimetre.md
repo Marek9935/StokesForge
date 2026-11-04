@@ -20,4 +20,5 @@ You set the **scope** of a task in the StokesForge repository (Rust workspace, d
 3. **Tests**: one case per line ("input → expected"), where to put it (`tests` module, `crates/<crate>/tests/`, battery `bN`), and the **witness mutation** that must make it fail. Existing tests to move or to reread, and why.
 4. **Pitfalls**: invariants involved (by number), known pitfalls of the domain, order of the steps if it matters.
 5. **Docs and skills** to update ("Cohérence" line of the issue, completed if needed).
-6. **To decide**: only what changes a visible behaviour and what the issue does not decide. Do not decide in place of the user.
+6. **Edge cases**: the cases the request leaves open (last column, empty selection, detached window, mixed column...), one per line, each tagged `stated by the issue`, `obvious default` (say which) or `changes behaviour` (becomes a card of the start form).
+7. **To decide**: only what changes a visible behaviour and what the issue does not decide. Do not decide in place of the user.

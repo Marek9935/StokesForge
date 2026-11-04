@@ -637,7 +637,7 @@ package `since` date surviving a rerun, `suivi.py check` clean at the end, and `
 unmerged branch, modified or untracked files, ignored files other than `target/`,
 a run from a worktree or off `main`; never `-D` nor `--force`).
 
-`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|remove|list` (merge-commit check, `--replace`, the 5-entry limit and `--force`, removal by the owning session and its archive), `set` erasing the agent note, the page's `cardLine`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
+`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the CI watcher (#452: verdict per job list, fake `glab` on `PATH`, red kept until a newer green, staleness, `SF_SUIVI_CI=off`) and the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|remove|list` (merge-commit check, `--replace`, the 5-entry limit and `--force`, removal by the owning session and its archive), `set` erasing the agent note, the page's `cardLine`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
 of `scripts/suivi.py`: a live owner holds (pid exists, same start time, no newer `ended/<sid>`); a
 dead pid, a reused pid or an ended session pauses; an open QCM or a `todo` trial entry with a `try`
 field holds, a finished QCM, an `ok` entry or one without `try` does not; resume takes the previous
@@ -646,10 +646,15 @@ colour when free, else the first free; the seventh claim fails; parallel claims 
 idempotent; the `release-line` reasons and `check`. Each case was proved by a mutation (drop the
 clause, see the test fail, restore).
 
+`scripts/driver-test.py` (#452, stdlib, no display, no Xlib) pins the `run-stokesforge` driver: display reservation by locked file (distinct numbers across threads and processes, a dead holder frees its number), mode choice, process-group `stop`, modifier clicks and the drag event plan. The driver runs on an **invisible screen** (headless mutter and Xwayland, nothing on the user's desktop); `SF_VISIBLE=1` forces the visible one. It handles no OS drag and drop (drags inside the window work). `scripts/time-report-test.py` tests `scripts/time-report.py` (below). Both run in the `fmt` job.
+
+**Nobody polls the CI (#452).** The orchestrator reports at the merge, closes and releases without waiting for the CI. The watcher of `suivi.py serve` (a thread of the local tracking server, about every 120 s) reads the head of `main` and shows "CI rouge / verte / en cours / inconnue" above the tabs of the tracking page, with a `notify-send` once per red SHA; a red `main` is reported and fixed first. The CI is still read by hand for a tag or release and for a change to CI itself. The next sub-issue of a package does not wait. Details and verdict rules: `.claude/skills/stokesforge-verification/references/suivi.md` § CI watcher.
+
 **Reading the result.**
 
 ```sh
 scripts/ci-status.sh [commit]      # HEAD by default; requires a logged-in glab
+scripts/ci-status.sh --head        # the newest commit of main on GitLab, jobs only (what the watcher reads)
 ```
 
 Or in the GitLab interface: `Build > Pipelines`, stage `external`. One line per
@@ -670,10 +675,10 @@ tests in parallel; only the captures (`egui_kittest` + wgpu) exclude each other
 (see below). The job sets `core.longpaths` before the checkout:
 without it, `git clean` fails on `.cargo/registry` ("Filename too long").
 These jobs, like `release-linux` and `publier`, not being in the list of
-`gitlab-status.py`, their result is read on GitHub, not in `ci-status.sh`.
+`gitlab-status.py`, their result is read on GitHub, not in `ci-status.sh`; the watcher
+(#452) reads the Windows jobs there, once per finished SHA, when Linux is green.
 The GitHub API **without login** is limited to 60 requests per hour and per
-address: do not poll it in a loop (a CI wait is done on GitLab,
-`glab`, or at a long interval); beyond that, it answers 403 until the next hour.
+address: do not poll it in a loop; beyond that, it answers 403 until the next hour.
 
 **Tag and mirror.** A tag pushed to GitLab sometimes arrives late on GitHub
 (CI starts there only on its arrival). Force the push: mirror synchronization
@@ -819,6 +824,21 @@ Reporter tests, without network or real token:
 tolerated reproduction (including a failed step under a tolerated conclusion),
 cancelations, absent jobs, excluded PRs/forks, old
 attempts, pagination, pipeline selection and HTTP retries.
+
+## Time report (#452)
+
+`python3 scripts/time-report.py [--since DATE] [--until DATE] [--logs DIR] [--power FILE] [--json]` says where the working time of the Claude sessions goes: per activity (model, tool, cargo test, wait for the user, wait for CI, ...) and per issue. Dates are UTC (`2026-10-31` or `2026-10-31T20:00`). `--logs` defaults to the session logs of this repository's main checkout. Privacy: the logs are private, the tool prints aggregates only (hours, counts, issue numbers), never a prompt, reply, command, title or description; a malformed line is skipped silently.
+
+`--power FILE` is a JSON object `{"suspend": [[start, end], ...], "off": [[start, end], ...]}` in epoch seconds; time spent suspended or off is taken out. Without it the windows are read from `journalctl` (suspend entries, gaps between boots); if neither is available the report says so.
+
+Limits to remember when reading it:
+
+- A background task that ends with no notification is not counted as running; its time falls into another category.
+- "Wait" includes `AskUserQuestion` and the wait of a session just opened.
+- The reason for a wait (form, trial, CI, ...) is a heuristic: the first classifier was right on 25 of 40 sampled waits in the #452 audit. Treat it as an order of magnitude.
+- "cargo test" includes the compilation.
+
+The study was a baseline: re-measure around 2026-11-18 to see what #452 changed.
 
 ## What to know before writing a test
 
