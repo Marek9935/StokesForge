@@ -1,7 +1,10 @@
-import sys, time
+import pathlib, re, subprocess, sys, time
 from Xlib import X, display
 from Xlib.ext import xtest
-d = display.Display(":99")
+# The display is the one `driver.py where` prints for this run folder (SF_RUN_DIR, SF_DISPLAY).
+_driver = pathlib.Path(__file__).resolve().parents[2] / ".claude/skills/run-stokesforge/driver.py"
+_where = subprocess.run([sys.executable, str(_driver), "where"], capture_output=True, text=True, check=True).stdout
+d = display.Display(re.search(r"display=(\S+)", _where).group(1))
 x0, y0 = int(sys.argv[1]), int(sys.argv[2])
 def mv(x, y): xtest.fake_input(d, X.MotionNotify, x=int(x), y=int(y)); d.sync()
 mv(x0, y0); time.sleep(0.5); mv(x0+1, y0); time.sleep(0.4); mv(x0, y0); time.sleep(0.4)

@@ -54,7 +54,7 @@ confirmation on the usual choices covered by the request.
   `.claude/rules.md` specifies the reading scope. The skill `run-stokesforge`
   drives and captures the real application on Linux for interactive checks;
   its X11 path under Xwayland validates neither native Wayland,
-  nor `rfd`, nor drag.
+  nor `rfd`, nor OS drag and drop (drags inside the window work).
 - Behavior standard (#217): fields, messages, dialogs, confirmations,
   disabled state (greyed out), keyboard and mouse follow `docs/interface-standard.md`, the single
   source. Section *planned* (#219–#232): the rule already applies to all
