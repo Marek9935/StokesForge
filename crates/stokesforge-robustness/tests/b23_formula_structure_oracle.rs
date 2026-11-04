@@ -92,6 +92,25 @@ enum Step {
         column: usize,
         formula: usize,
     },
+    /// Keeps `A+<next letter>` in a column: the letter of the column the sheet
+    /// does not have yet (#433). A column added, moved or pasted into the
+    /// sheet, or an undo of a deletion, binds it.
+    SetPending {
+        sheet: usize,
+        column: usize,
+    },
+    /// A column added at the end of a sheet.
+    AddColumn {
+        sheet: usize,
+    },
+    /// A column moved into another sheet (or within its own): it can fill the
+    /// letter a kept formula waits for, or leave one (#433).
+    MoveColumn {
+        sheet: usize,
+        column: usize,
+        target: usize,
+        index: usize,
+    },
     /// `kind`: 0 sheet, 1 workbook, 2 folder, 3 column.
     Rename {
         kind: usize,
@@ -157,6 +176,10 @@ fn step() -> impl Strategy<Value = Step> {
             .prop_map(|(sheet, column, row, count, seed)| Step::Enter { sheet, column, row, count, seed }),
         5 => (i.clone(), i.clone(), 0..FORMULAS.len())
             .prop_map(|(sheet, column, formula)| Step::SetFormula { sheet, column, formula }),
+        3 => (i.clone(), i.clone()).prop_map(|(sheet, column)| Step::SetPending { sheet, column }),
+        3 => i.clone().prop_map(|sheet| Step::AddColumn { sheet }),
+        3 => (i.clone(), i.clone(), i.clone(), 0usize..6)
+            .prop_map(|(sheet, column, target, index)| Step::MoveColumn { sheet, column, target, index }),
         6 => (0usize..4, i.clone(), 0usize..(NAMES.len() + 2))
             .prop_map(|(kind, idx, name)| Step::Rename { kind, idx, name }),
         5 => (0usize..3, i.clone(), i.clone(), 0usize..5)
@@ -182,6 +205,9 @@ fn step_name(step: &Step) -> &'static str {
     match step {
         Step::Enter { .. } => "Enter",
         Step::SetFormula { .. } => "SetFormula",
+        Step::SetPending { .. } => "SetPending",
+        Step::AddColumn { .. } => "AddColumn",
+        Step::MoveColumn { .. } => "MoveColumn",
         Step::Rename { kind: 0, .. } => "RenameSheet",
         Step::Rename { kind: 1, .. } => "RenameWorkbook",
         Step::Rename { kind: 2, .. } => "RenameFolder",
@@ -448,14 +474,49 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
             formula,
         } => {
             let c = column_at(sheet, column)?;
-            // The entry path (loop check included), as the interface does.
-            let f = tree.formula_for_entry(c, FORMULAS[formula]).ok()?;
+            // The keeping reading of the field (#433): what cannot be read is
+            // stored as typed, a loop included; the binder turns it into a
+            // formula when the sheet, the workbook or the column appears.
+            let (f, _) = tree.formula_keeping(c, FORMULAS[formula]);
             Some(Command::SetColumnMeta {
                 column: c,
                 meta: ColumnMeta {
                     formula: Some(f),
                     ..Default::default()
                 },
+            })
+        }
+        Step::SetPending { sheet, column } => {
+            let c = column_at(sheet, column)?;
+            let next = columns_of(tree, pick(&all_sheets, sheet)).len();
+            let letter = char::from(b'A' + u8::try_from(next).ok().filter(|n| *n < 26)?);
+            let (f, _) = tree.formula_keeping(c, &format!("A+{letter}"));
+            Some(Command::SetColumnMeta {
+                column: c,
+                meta: ColumnMeta {
+                    formula: Some(f),
+                    ..Default::default()
+                },
+            })
+        }
+        Step::AddColumn { sheet } => pick(&all_sheets, sheet).map(|sheet| Command::AddColumn {
+            sheet,
+            index: None,
+            name: Some(format!("Added{rank}")),
+            column: Column::from_f64(&[1.0, 2.0, 3.0]),
+        }),
+        Step::MoveColumn {
+            sheet,
+            column,
+            target,
+            index,
+        } => {
+            let id = column_at(sheet, column)?;
+            let new_parent = pick(&all_sheets, target)?;
+            Some(Command::Move {
+                id,
+                new_parent,
+                index: index % (tree.children(new_parent).ok()?.len() + 1),
             })
         }
         Step::Rename { kind, idx, name } => {
@@ -689,6 +750,9 @@ struct Coverage {
     computed: usize,
     ref_cells: usize,
     checked: usize,
+    /// Kept formulas the binder turned into formulas (#433), on the targeted
+    /// session at the end of each sequence.
+    bindings: usize,
     per_step: BTreeMap<&'static str, usize>,
 }
 
@@ -698,6 +762,7 @@ impl Coverage {
         self.computed += other.computed;
         self.ref_cells += other.ref_cells;
         self.checked += other.checked;
+        self.bindings += other.bindings;
         for (k, v) in other.per_step {
             *self.per_step.entry(k).or_default() += v;
         }
@@ -759,6 +824,18 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
                 step
             );
         }
+        // 0b. fixed point of the binder (#433): after every step, undo, redo
+        // and reload included, no kept formula can be read any more.
+        for (tree, which) in [(&st.tree, "targeted"), (&sf.tree, "full")] {
+            prop_assert!(
+                tree.pending_bindings().is_empty(),
+                "step {rank} ({step:?}), {which} session: a kept formula could be bound: {:?}",
+                tree.pending_bindings()
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>()
+            );
+        }
         // 1. twin oracle.
         prop_assert!(
             strip_links(&st.tree) == strip_links(&sf.tree),
@@ -786,6 +863,7 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
             }
         }
     }
+    coverage.bindings = targeted.snapshot().bound.count as usize;
     Ok(coverage)
 }
 
@@ -809,6 +887,10 @@ fn b23_formulas_stay_exact_across_structural_gestures() {
     assert!(total.computed > 500, "{total:?}");
     assert!(total.ref_cells > 20, "{total:?}");
     assert!(total.checked > 500, "{total:?}");
+    if cases >= 64 {
+        // The binder (#433) bound kept formulas.
+        assert!(total.bindings > 10, "{total:?}");
+    }
     if cases >= 64 {
         // Every structural gesture was accepted, with a pass, at least a few times.
         for gesture in [
