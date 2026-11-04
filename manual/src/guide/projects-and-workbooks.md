@@ -347,7 +347,7 @@ Some functions read a whole column and give **one value**, the same on every row
 
 The X is the column of role X nearest to the **left** of B, the same rule as the graph. `at`, `integral` and the range forms need it; `max(B)` and the other whole-column statistics do not. If B has no X, the formula is kept, its cells show `---` and its **F(x)=** cell is framed in red with the reason; it computes as soon as an X appears (change a column role, or move the X to the left of B). Rows whose X is empty or text are ignored. Empty cells, text and infinite values in B are ignored too.
 
-When there is no point to compute from (an empty column, an empty range, a value outside the X values), the cell is empty, for `sum` and `integral` as well (never 0). The one exception is `integral` over a zero-width range (`integral(B, 2, 2)`) in a column that has at least one point: it is 0. If the whole result column is empty for that reason, the **F(x)=** cell is framed in red.
+When there is no point to compute from (an empty column, an empty range, a value outside the X values), the cell is empty, for `sum` and `integral` as well (never 0). The one exception is `integral` over a zero-width range (`integral(B, 2, 2)`) when that X value lies between the smallest and the largest X of the column: it is 0; outside them (`integral(B, 100, 100)` with X from 0 to 2) the cell is empty. If the whole result column is empty for that reason, the **F(x)=** cell is framed in red.
 
 The value is computed once for the whole column, not once per row, so `B / max(B)` stays fast on long columns. It is recalculated when B, its X, or the bounds change, and also when you change the role of a column or move one so that B has another X.
 

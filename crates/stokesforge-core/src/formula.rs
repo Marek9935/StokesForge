@@ -30,7 +30,7 @@
 //! no point (empty column, empty range, `at` outside the X domain) is an empty
 //! cell — `sum` and `integral` too, never 0. The bounds of a range: an infinite
 //! bound means "to the end", a `NaN` bound gives an empty cell, and `integral`
-//! over equal finite bounds is 0 when the column has a usable point (#433).
+//! over equal finite bounds is 0 when the bound lies inside the X values (#433).
 //!
 //! Precedence, lowest first: comparisons; `+ -`; `* /`; unary sign; `^`
 //! (right-associative, `-2^2 = -4`, `2^3^2 = 512`); call, number, column,
@@ -2393,8 +2393,11 @@ fn integral_of(xs: &[f64], ys: &[f64], range: Option<(f64, f64)>) -> Option<f64>
     if let Some((a, b)) = range {
         let (mut lo, mut hi) = (a.min(b), a.max(b));
         if lo == hi && lo.is_finite() {
-            // A zero-width range: no area, as long as there is a usable point.
-            return (!cleaned.x.is_empty()).then_some(0.0);
+            // A zero-width range: no area, as long as the bound lies inside
+            // the cleaned X values (min <= a <= max); outside, nothing is there.
+            let xmin = cleaned.x.iter().copied().fold(f64::INFINITY, f64::min);
+            let xmax = cleaned.x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            return (!cleaned.x.is_empty() && xmin <= lo && lo <= xmax).then_some(0.0);
         }
         if !(lo.is_finite() && hi.is_finite()) {
             // An infinite bound means "to the end": clip it to the data (the

@@ -429,10 +429,13 @@ fn reference_integral(x: &[f64], y: &[f64], range: Option<(f64, f64)>) -> Option
         .map(|(a, b)| (*a, *b))
         .collect();
     pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
-    // Equal finite written bounds: no area, 0 with at least one point (#433).
+    // Equal finite written bounds: no area, 0 when the bound lies inside the
+    // X values, empty outside (#433).
     if let Some((a, b)) = range {
         if a == b && a.is_finite() {
-            return (!pairs.is_empty()).then_some(0.0);
+            let inside = pairs.first().is_some_and(|p| p.0 <= a)
+                && pairs.last().is_some_and(|p| a <= p.0);
+            return inside.then_some(0.0);
         }
     }
     if pairs.len() < 2 {
@@ -620,8 +623,9 @@ fn integral_bounds_outside_the_data_are_clipped_and_empty_ranges_are_empty() {
     assert_eq!(on_xy("integral(B, 2.5, 100)", &x, &y), Some(1.375));
     assert_eq!(on_xy("integral(B, 10, 20)", &x, &y), None);
     assert_eq!(on_xy("integral(B, -20, -10)", &x, &y), None);
-    // A zero-width range holds no area: 0, as long as the column has a point.
+    // A zero-width range holds no area: 0 inside the X values, empty outside.
     assert_eq!(on_xy("integral(B, 2, 2)", &x, &y), Some(0.0));
+    assert_eq!(on_xy("integral(B, 100, 100)", &x, &y), None);
     // An infinite bound means "to the end" (#433).
     assert_eq!(on_xy("integral(B, 0, 1/0)", &x, &y), Some(4.0));
     assert_eq!(on_xy("integral(B, 2.5, 1/0)", &x, &y), Some(1.375));
@@ -992,6 +996,8 @@ fn infinite_and_zero_width_bounds_agree_for_literals_and_columns() {
         ("-1/0", "-1/0", -inf, -inf, None, None),
         ("2", "2", 2.0, 2.0, Some(20.0), Some(0.0)),
         ("2.5", "2.5", 2.5, 2.5, None, Some(0.0)),
+        ("9", "9", 9.0, 9.0, None, None),
+        ("0", "0", 0.0, 0.0, None, None),
     ];
     for (llo, lhi, clo, chi, max, integral) in table {
         let got_max = on_xy(&format!("max(B, {llo}, {lhi})"), &x, &y);
@@ -1016,15 +1022,24 @@ fn infinite_and_zero_width_bounds_agree_for_literals_and_columns() {
     assert_eq!(on_xy("sum(B, -1/0, 2)", &x, &y), Some(30.0));
 }
 
-/// A zero-width integral needs a usable point, wherever it is; a bound beyond
-/// the data on one side is clipped first, so it is empty when nothing is left.
+/// A zero-width integral is 0 only when the bound lies inside the cleaned X
+/// values (`min <= a <= max`); outside them, or with no usable point, it is
+/// empty. A bound beyond the data on one side is clipped first.
 #[test]
-fn a_zero_width_integral_needs_a_usable_point() {
+fn a_zero_width_integral_needs_the_bound_inside_the_x_values() {
+    assert_eq!(on_xy("integral(B, 9, 9)", &[1.0, 2.0], &[5.0, 6.0]), None);
     assert_eq!(
-        on_xy("integral(B, 9, 9)", &[1.0, 2.0], &[5.0, 6.0]),
+        on_xy("integral(B, 1.5, 1.5)", &[1.0, 2.0], &[5.0, 6.0]),
         Some(0.0)
     );
-    assert_eq!(on_xy("integral(B, 2, 2)", &[1.0], &[5.0]), Some(0.0));
+    assert_eq!(
+        on_xy("integral(B, 2, 2)", &[1.0, 2.0], &[5.0, 6.0]),
+        Some(0.0),
+        "the bounds of the span are inside"
+    );
+    // A single point: span [1, 1].
+    assert_eq!(on_xy("integral(B, 2, 2)", &[1.0], &[5.0]), None);
+    assert_eq!(on_xy("integral(B, 1, 1)", &[1.0], &[5.0]), Some(0.0));
     assert_eq!(on_xy("integral(B, 2, 2)", &[], &[]), None);
     assert_eq!(on_xy("integral(B, 2, 2)", &[f64::NAN], &[1.0]), None);
     // Clipped to a single X: nothing left, as before.

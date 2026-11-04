@@ -17,7 +17,7 @@
 //! cell, `sum` and `integral` included, never 0); the bounds of a range come in
 //! any order and are inclusive; an infinite bound means "to the end", a `NaN`
 //! bound gives `None`, and an `integral` over a zero-width range (equal finite
-//! bounds) is 0 when there is at least one point (#433).
+//! bounds) is 0 when the bound lies inside the X values, empty outside (#433).
 //!
 //! Sums are **compensated** (Neumaier), never a plain running sum (#429): the
 //! sum of ten 0.1 is 1, the mean of a constant column is that constant and its
@@ -366,8 +366,8 @@ impl ColumnIndex {
     /// data domain, by the trapezoid method: the result of
     /// [`crate::integrate::integrate`] with `Under::Zero` and that range.
     /// An infinite bound means "to the end" (clipped like the data domain); a
-    /// zero-width range between equal finite bounds is `0` when there is at
-    /// least one point. `None` for no point, a `NaN` bound, fewer than two
+    /// zero-width range between equal finite bounds is `0` when the bound lies
+    /// within the X values (`min <= a <= max`), empty outside. `None` for no point, a `NaN` bound, fewer than two
     /// points on a range of positive width, an empty range or a non-finite
     /// area.
     pub fn integral(&self, lo: f64, hi: f64) -> Option<f64> {
@@ -377,7 +377,7 @@ impl ColumnIndex {
         }
         let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
         if lo == hi && lo.is_finite() {
-            return (n >= 1).then_some(0.0);
+            return (n >= 1 && self.xs[0] <= lo && lo <= self.xs[n - 1]).then_some(0.0);
         }
         if n < 2 {
             return None;
@@ -657,11 +657,11 @@ mod tests {
         let inf = f64::INFINITY;
         let two = ColumnIndex::new(&[1.0, 3.0], &[1.0, 1.0]);
         assert_eq!(two.integral(1.5, 1.5), Some(0.0));
-        assert_eq!(two.integral(9.0, 9.0), Some(0.0));
-        assert_eq!(
-            ColumnIndex::new(&[1.0], &[1.0]).integral(5.0, 5.0),
-            Some(0.0)
-        );
+        assert_eq!(two.integral(9.0, 9.0), None, "outside the X values");
+        assert_eq!(two.integral(3.0, 3.0), Some(0.0), "the span's end");
+        let one = ColumnIndex::new(&[1.0], &[1.0]);
+        assert_eq!(one.integral(5.0, 5.0), None);
+        assert_eq!(one.integral(1.0, 1.0), Some(0.0));
         assert_eq!(two.integral(0.0, inf), Some(2.0));
         assert_eq!(two.integral(inf, 2.0), Some(1.0));
         assert_eq!(two.integral(-inf, inf), Some(2.0));
