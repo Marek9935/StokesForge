@@ -1249,7 +1249,7 @@ def ci_poll(prev, now=None):
         if sha is None:
             out["reason"] = "no head read from GitLab (exit %s)" % rc
             return out
-        if prev.get("sha") == sha and prev.get("verdict") in ("green", "red"):
+        if prev.get("sha") == sha and prev.get("verdict") == "green":   # only green is final: a red CI may be re-run
             for k in ("verdict", "names", "reason"):
                 out[k] = prev.get(k, out[k])
             out["last_red"] = prev.get("last_red")

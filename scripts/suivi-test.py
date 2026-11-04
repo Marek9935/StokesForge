@@ -1231,6 +1231,17 @@ class TestCiHeads(CiBase):
         self.assertEqual(r["verdict"], "green")
         self.assertIsNone(r["last_red"])
 
+    def test_red_rerun_green_on_same_sha_clears_and_notified_once(self):
+        self.jobs(fmt="FAILED")
+        r = self.poll()
+        r = self.poll(r)
+        self.assertEqual(r["verdict"], "red")
+        self.jobs()
+        r = self.poll(r)
+        self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
+        self.assertIsNone(r["last_red"])
+        self.assertEqual(len(self.notified()), 1)
+
     def test_notify_once_per_red_sha(self):
         self.jobs(fmt="FAILED")
         r = None
