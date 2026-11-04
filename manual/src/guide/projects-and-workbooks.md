@@ -375,7 +375,7 @@ If you need functions of the data, you can use a script (see [The pyst API](../s
 ### How a formula works
 
 - The formula is calculated row by row (the whole-column functions above are computed once, then used on every row). An empty cell in a source gives an empty cell in the result.
-- A result that has no value (`ln(-1)`, `sqrt(-1)`, `mod(a, 0)`, `root` of a negative number with an even `n`) is an empty cell, shown as a failed calculation. Dividing by zero is not an error: `1/0` is infinity.
+- A result that has no value (`ln(-1)`, `sqrt(-1)`, `mod(a, 0)`, `root` of a negative number with an even `n`, `0/0`, infinity minus infinity, zero times infinity) is an empty cell, shown as a failed calculation. Dividing a non-zero number by zero is not an error: `1/0` is infinity.
 - The values of the column are read-only. To change them, edit the formula.
 - The formula keeps its columns even if you add, delete or move others. The letters in the **F(x)=** row follow the columns.
 - If a column the formula reads is deleted, the formula shows `#REF` in red. Replace `#REF` with a column letter.

@@ -2022,10 +2022,10 @@ fn eval_expr(expr: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
             let (value, status) = eval_expr(inner, row, ctx);
             (-value, status)
         }
-        Expr::Add(a, b) => combine(a, b, row, ctx, |x, y| x + y),
-        Expr::Sub(a, b) => combine(a, b, row, ctx, |x, y| x - y),
-        Expr::Mul(a, b) => combine(a, b, row, ctx, |x, y| x * y),
-        Expr::Div(a, b) => combine(a, b, row, ctx, |x, y| x / y),
+        Expr::Add(a, b) => arithmetic(a, b, row, ctx, |x, y| x + y),
+        Expr::Sub(a, b) => arithmetic(a, b, row, ctx, |x, y| x - y),
+        Expr::Mul(a, b) => arithmetic(a, b, row, ctx, |x, y| x * y),
+        Expr::Div(a, b) => arithmetic(a, b, row, ctx, |x, y| x / y),
         Expr::Pow(a, b) => eval_pow(a, b, row, ctx),
         Expr::Cmp(op, a, b) => eval_cmp(*op, a, b, row, ctx),
         Expr::Call(func, args) => eval_call(func, args, row, ctx),
@@ -2342,7 +2342,29 @@ fn domain_checked(value: f64, status: NumericStatus) -> (f64, NumericStatus) {
     }
 }
 
-/// Factor common to the four binary operators: computes each operand
+/// The four arithmetic operators: [`combine`], then a `NaN` out of two operands
+/// that were not `NaN` and whose status is `Ok` (`0/0`, `inf-inf`, `0*inf`) is
+/// a failed calculation, like `ln(-1)` (#433). `1/0` stays infinity. Out of
+/// line so `eval_expr`'s frame does not grow (#408).
+fn arithmetic(
+    a: &Expr,
+    b: &Expr,
+    row: usize,
+    ctx: &Ctx,
+    op: impl Fn(f64, f64) -> f64,
+) -> (f64, NumericStatus) {
+    let (av, astatus) = eval_expr(a, row, ctx);
+    let (bv, bstatus) = eval_expr(b, row, ctx);
+    let status = astatus.combine(bstatus);
+    let value = op(av, bv);
+    if av.is_nan() || bv.is_nan() {
+        (value, status)
+    } else {
+        domain_checked(value, status)
+    }
+}
+
+/// Factor common to the binary operators: computes each operand
 /// (value and status), combines the values with `op` (unchanged IEEE
 /// arithmetic) and the statuses with [`NumericStatus::combine`].
 fn combine(
@@ -2645,9 +2667,8 @@ mod tests {
 
     #[test]
     fn division_by_zero_is_ieee_not_an_error() {
-        // Ordinary floating-point behavior, not a degradation case
-        // specific to the module: 0/0 = NaN, x/0 = ±inf, exactly like
-        // any missing or non-finite value already tolerated by the model.
+        // x/0 = ±inf is ordinary floating-point behavior; 0/0 is NaN, which
+        // `arithmetic` turns into a failed calculation (#433).
         let formula = parse("A/B").expect("parse");
         let columns = [float_column(&[1.0, 0.0]), float_column(&[0.0, 0.0])];
         let result = evaluate(&formula, &sheet_values(&columns), 2);

@@ -1216,6 +1216,32 @@ fn renames_recalculate_nothing_keep_values_and_round_trip() {
     }
 }
 
+// -- 9b. arithmetic NaN is a failed calculation (#433 point 1) ---------------------
+
+#[test]
+fn zero_over_zero_shows_a_failed_calculation_in_the_cell() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s = first_sheet(&p, book);
+        add_col(&mut p, s, "A", &[0.0, 1.0]);
+        let c = add_col(&mut p, s, "C", &[]);
+        set_f(&mut p, c, "A/A");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        assert_eq!(
+            column(&t, c).get(0),
+            Cell::Text(Some("---".into())),
+            "{mode:?}"
+        );
+        assert_eq!(nums(&t, c), vec![None, Some(1.0)], "{mode:?}");
+        let oracle = reloaded_full(&h, "zero-over-zero");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
 // -- 10. a sheet whose only columns are formulas reading remote columns --------
 
 #[test]
