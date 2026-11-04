@@ -6728,8 +6728,9 @@ impl AppState {
             return;
         }
         // The rows of the sheet follow the longest of the new contents;
-        // they shrink only if **all** the columns are refreshed
-        // (a hand-typed column is never truncated).
+        // they shrink only if **all** the columns without a formula are
+        // refreshed (a hand-typed column is never truncated). A formula column
+        // has no source and is recomputed on the new length (#433).
         let new_len = refreshed
             .iter()
             .filter_map(|(_, planned)| stokesforge_importer::import_block(&items, *planned))
@@ -6740,7 +6741,18 @@ impl AppState {
             .max()
             .unwrap_or(0);
         let rows = self.row_count(sheet);
-        let all_refreshed = refreshed.len() == self.visible_columns(sheet).len();
+        let all_refreshed = self
+            .visible_columns(sheet)
+            .iter()
+            .filter(|(id, _, _)| {
+                !self
+                    .snapshot
+                    .tree
+                    .node(*id)
+                    .and_then(Node::as_column)
+                    .is_some_and(|column| column.meta().formula.is_some())
+            })
+            .all(|(id, _, _)| refreshed.iter().any(|(refreshed_id, _)| refreshed_id == id));
         if new_len > rows {
             self.execute(Command::InsertRows {
                 sheet,

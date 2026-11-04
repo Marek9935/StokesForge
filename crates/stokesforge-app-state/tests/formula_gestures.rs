@@ -1242,8 +1242,10 @@ fn refreshing_an_imported_sheet_keeps_its_formula_columns_following() {
     let _ = (i.x, i.y);
 }
 
+/// A formula column has no source and is not a reason to keep the rows: the
+/// sheet shrinks with the file and the formulas recompute (#433 point 6).
 #[test]
-fn refreshing_with_a_shorter_file_treats_formula_columns_like_the_others() {
+fn refreshing_with_a_shorter_file_shrinks_the_sheet_and_recomputes_formulas() {
     let mut with = imported(true, true);
     let mut without = imported(false, false);
     for i in [&mut with, &mut without] {
@@ -1252,15 +1254,38 @@ fn refreshing_with_a_shorter_file_treats_formula_columns_like_the_others() {
         i.state.dispatch(Action::RefreshFromSource { sheet });
         assert!(!i.state.status().is_some_and(|s| s.is_error()));
     }
-    let rows_without = without.column(0).1.len();
-    let rows_with = with.column(0).1.len();
-    assert_eq!(rows_without, 1, "no hand-typed column: the sheet shrinks");
-    // With formula columns the sheet is not truncated (a formula column is
-    // not "refreshed"); the imported cells past the file are emptied and the
-    // formulas read them as empty.
-    assert_eq!(with.column(0).1, [Some(5.0), None, None]);
-    assert_eq!(with.column(2).1, [Some(100.0), None, None]);
-    assert_eq!(rows_with, 3);
+    assert_eq!(without.column(0).1, [Some(5.0)]);
+    assert_eq!(with.column(0).1, [Some(5.0)]);
+    assert_eq!(with.column(1).1, [Some(50.0)]);
+    assert_eq!(with.column(2).1, [Some(100.0)]);
+    assert_eq!(with.column(3).1, [Some(105.0)]);
+    for index in [2, 3] {
+        let (id, _) = with.column(index);
+        assert!(
+            with.state.tree().formula_letters(id).is_some(),
+            "formula {index} intact"
+        );
+    }
+    // One Undo restores the whole sheet.
+    with.state.dispatch(Action::Undo);
+    assert_eq!(with.column(0).1, [1.0, 2.0, 3.0].map(Some).to_vec());
+    assert_eq!(with.column(2).1, [20.0, 40.0, 60.0].map(Some).to_vec());
+    assert_eq!(with.column(3).1, [21.0, 42.0, 63.0].map(Some).to_vec());
+    assert_eq!(with.state.row_count(with.sheet), 3);
+}
+
+/// A hand-typed column (no source) still blocks the shrinking.
+#[test]
+fn refreshing_with_a_shorter_file_keeps_the_rows_of_a_hand_typed_column() {
+    let mut i = imported(true, true);
+    let sheet = i.sheet;
+    i.state.dispatch(Action::AddColumn { sheet });
+    i.rewrite("5;50\n");
+    i.state.dispatch(Action::RefreshFromSource { sheet });
+    assert!(!i.state.status().is_some_and(|s| s.is_error()));
+    assert_eq!(i.state.row_count(sheet), 3);
+    assert_eq!(i.column(0).1, [Some(5.0), None, None]);
+    assert_eq!(i.column(2).1, [Some(100.0), None, None]);
 }
 
 // -- column type of a formula column --
