@@ -1271,7 +1271,7 @@ fn dividing_by_a_range_with_no_point_stays_empty() {
 
 #[test]
 // #433 point 8
-fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
+fn a_sheet_holding_only_remote_formulas_has_at_least_one_row() {
     for mode in BOTH {
         let mut p = Project::new("P").expect("project");
         let root = p.root();
@@ -1291,16 +1291,8 @@ fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
             colat(&t, "[Book1]Sheet1", "F1"),
             colat(&t, "[Book1]Sheet1", "F2"),
         );
-        // recalc.rs `ordinary_len`: a sheet without an ordinary column has no
-        // row to broadcast into, so the result is empty. Pinned as a design
-        // question; the interface offers no way to give such a sheet rows other
-        // than typing into an ordinary column.
-        eprintln!(
-            "{mode:?} lengths {} {}",
-            column(&t, f1).len(),
-            column(&t, f2).len()
-        );
-        assert_eq!(column(&t, f1).len(), column(&t, f2).len());
+        assert_eq!(nums(&t, f1), some(&[300.0]), "{mode:?}");
+        assert_eq!(nums(&t, f2), some(&[200.0]), "{mode:?}");
         // Giving the sheet rows makes them appear, with the right values.
         h.execute(Command::AddColumn {
             sheet: node(&t, "[Book1]Sheet1"),
@@ -1312,12 +1304,117 @@ fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
         let t = snap(&h).tree;
         assert_eq!(nums(&t, f1), some(&[300.0; 4]), "{mode:?}");
         assert_eq!(nums(&t, f2), some(&[200.0; 4]), "{mode:?}");
-        // Removing the rows again, undo, redo.
+        // Undo: back to the single row; redo: four again.
         h.undo().expect("undo");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, f1), some(&[300.0]), "{mode:?} after undo");
+        assert_eq!(nums(&t, f2), some(&[200.0]), "{mode:?} after undo");
         h.redo().expect("redo");
         let t = snap(&h).tree;
         assert_eq!(nums(&t, f1), some(&[300.0; 4]), "{mode:?}");
         let oracle = reloaded_full(&h, "only-remote");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
+/// `Book1/Sheet1` holding an empty ordinary column `E` and the one formula
+/// `src` (column `F`); `Sheet3` has A (X) and B per `sheet3_b`.
+fn floor_world(src: &str, sheet3_b: &[f64]) -> Project {
+    let mut p = Project::new("P").expect("project");
+    let root = p.root();
+    let book = add_book(&mut p, root, "Book1");
+    let s1 = first_sheet(&p, book);
+    let s3 = p.add_worksheet(book, Some("Sheet3")).expect("Sheet3");
+    let x = add_col(
+        &mut p,
+        s3,
+        "A",
+        &(0..sheet3_b.len()).map(|i| i as f64).collect::<Vec<_>>(),
+    );
+    set_x(&mut p, x);
+    add_col(&mut p, s3, "B", sheet3_b);
+    add_col(&mut p, s1, "E", &[]);
+    let f = add_col(&mut p, s1, "F", &[]);
+    set_f(&mut p, f, src);
+    p
+}
+
+#[test]
+// #433 point 8
+fn the_one_row_floor_applies_only_to_formulas_naming_no_column_of_their_sheet() {
+    for mode in BOTH {
+        // A constant: one row, although an (empty) ordinary column exists.
+        let (_s, h) = spawn(floor_world("1+2", &[1.0]), mode);
+        let t = snap(&h).tree;
+        assert_eq!(
+            nums(&t, colat(&t, "[Book1]Sheet1", "F")),
+            some(&[3.0]),
+            "{mode:?}"
+        );
+        // A local reference to an empty column: no floor.
+        let (_s, h) = spawn(floor_world("A+1", &[1.0]), mode);
+        let t = snap(&h).tree;
+        assert_eq!(
+            column(&t, colat(&t, "[Book1]Sheet1", "F")).len(),
+            0,
+            "{mode:?}"
+        );
+        // A local reference gone to #REF: no floor either.
+        let mut p = floor_world("A+1", &[1.0]);
+        let t = p.tree().clone();
+        let e = colat(&t, "[Book1]Sheet1", "E");
+        p.remove(e).expect("remove E");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        assert_eq!(t.formula_letters(f).as_deref(), Some("#REF+1"), "{mode:?}");
+        assert_eq!(column(&t, f).len(), 0, "{mode:?}");
+        // Remote, Sheet3 empty: one empty row; undo of the entry: no rows.
+        let mut p = floor_world("1", &[]);
+        let t = p.tree().clone();
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        let c = ColumnMeta {
+            formula: None,
+            ..Default::default()
+        };
+        p.set_column_meta(f, c).expect("clear");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        h.execute(set_meta_formula(&t, f, "max(Sheet3!B)"))
+            .expect("entry");
+        let t = snap(&h).tree;
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        assert_eq!(column(&t, f).len(), 1, "{mode:?}");
+        assert!(nums(&t, f).iter().all(Option::is_none), "{mode:?}");
+        h.undo().expect("undo");
+        let t = snap(&h).tree;
+        assert_eq!(
+            column(&t, colat(&t, "[Book1]Sheet1", "F")).len(),
+            0,
+            "{mode:?}"
+        );
+    }
+}
+
+/// A formula that reads a formula column of its own sheet follows its length
+/// (one row here), whatever that one reads.
+#[test]
+// #433 point 8
+fn a_formula_reading_a_remote_formula_of_its_sheet_has_the_same_single_row() {
+    for mode in BOTH {
+        let mut p = floor_world("max(Sheet3!B)", &[5.0, 7.0]);
+        let t = p.tree().clone();
+        let g = add_col(&mut p, node(&t, "[Book1]Sheet1"), "G", &[]);
+        set_f(&mut p, g, "B*2");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        assert_eq!(
+            nums(&t, colat(&t, "[Book1]Sheet1", "G")),
+            some(&[14.0]),
+            "{mode:?}"
+        );
+        let oracle = reloaded_full(&h, "floor-chain");
         same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
     }
 }

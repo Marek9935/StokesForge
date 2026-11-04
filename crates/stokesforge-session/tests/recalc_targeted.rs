@@ -575,6 +575,47 @@ fn a_constant_follows_the_ordinary_columns() {
     );
 }
 
+/// A constant in a sheet without any ordinary data has one row (the floor of
+/// #433), and a second pass rewrites nothing: the floor comes from the same
+/// inputs as the length in the fingerprint, never from the column's own length.
+#[test]
+fn the_one_row_floor_of_a_constant_is_stable_between_passes() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let mut project = Project::new("Demo").expect("valid project");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("workbook");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
+        let f = project
+            .add_column(sheet, None, Some("F"), Column::new(ColumnType::Numeric))
+            .expect("F");
+        let formula = project
+            .tree()
+            .formula_from_letters(f, "1+2")
+            .expect("formula");
+        project
+            .set_column_meta(
+                f,
+                ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            )
+            .expect("meta");
+        let session = Session::spawn_with_recalc(project, None, mode).expect("actor");
+        let handle = session.handle();
+        let first = take_snapshot(&handle);
+        handle.execute(unrelated(&first, 0)).expect("pass 1");
+        let one = take_snapshot(&handle);
+        assert_eq!(numbers(&one, f), some(&[3.0]), "{mode:?}");
+        handle.execute(unrelated(&one, 1)).expect("pass 2");
+        let two = take_snapshot(&handle);
+        assert_eq!(numbers(&two, f), some(&[3.0]), "{mode:?}");
+        if mode == FormulaRecalc::Targeted {
+            assert_eq!(version(&one, f), version(&two, f), "second pass rewrote");
+        }
+    }
+}
+
 /// Plays "lengthen D, which the formula does not read" and returns
 /// `(C after, did C stay at its version?)`.
 fn lengthen_an_unread_column(mode: FormulaRecalc) -> (Vec<Option<f64>>, bool) {

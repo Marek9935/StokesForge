@@ -176,7 +176,11 @@ column does not lengthen the result: it keeps the length of its own sheet.
 columns it reads in its own sheet; beyond the length of a shorter column, the row is `NaN`. When
 it reads no column — constant, unreadable formula, caught in a cycle — it takes
 the length of the longest **ordinary** column (without a formula) of the sheet,
-never that of another formula column. A formula therefore does not grow with a
+never that of another formula column. A formula that names no column of its own
+sheet (a constant, or whole-column functions of other sheets only) has at least
+one row, so a sheet holding only such formulas is not empty (#433); a formula
+that names a column of its own sheet, even one gone to `#REF`, gets no floor.
+An unreadable formula or one caught in a cycle keeps the ordinary length. A formula therefore does not grow with a
 column it does not read, nor with another formula, and becomes short again when
 the growth of its source is undone.
 
