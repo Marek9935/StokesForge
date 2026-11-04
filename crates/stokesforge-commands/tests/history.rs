@@ -2041,6 +2041,44 @@ fn add_matrix_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
+/// #437: an unnamed matrix or note skips a sibling folder bearing the first
+/// candidate name; undo and redo keep the same id and name.
+#[test]
+fn unnamed_matrix_and_note_skip_a_sibling_folder_of_the_same_name() {
+    for (folder, expected) in [("MBook1", "MBook2"), ("Note1", "Note2")] {
+        let mut project = Project::new("Demo").expect("project Demo");
+        let root = project.root();
+        project.add_folder(root, folder).expect("folder");
+        let before = snapshot(&project);
+        let mut history = History::new();
+        let command = if folder.starts_with("MBook") {
+            Command::AddMatrix {
+                parent: root,
+                name: None,
+            }
+        } else {
+            Command::AddNote {
+                parent: root,
+                name: None,
+                text: String::new(),
+            }
+        };
+        history
+            .execute(&mut project, command)
+            .expect("unnamed creation");
+        let id = project
+            .resolve_path(&format!("[{expected}]"))
+            .expect(expected);
+        let after = snapshot(&project);
+
+        assert_eq!(history.undo(&mut project), Ok(true));
+        assert_eq!(**project.tree(), *before);
+        assert_eq!(history.redo(&mut project), Ok(true));
+        assert_eq!(**project.tree(), *after);
+        assert_eq!(project.resolve_path(&format!("[{expected}]")), Ok(id));
+    }
+}
+
 #[test]
 fn add_note_round_trip_carries_its_text() {
     let mut f = fixture();

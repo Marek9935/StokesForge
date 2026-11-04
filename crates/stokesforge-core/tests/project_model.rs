@@ -161,6 +161,125 @@ fn criterion_2_default_window_names() {
     }
 }
 
+// -- automatic window names vs sibling folders (#437) --
+
+/// Creates one unnamed window of each kind under `parent`, by prefix.
+fn add_unnamed(project: &mut Project, parent: NodeId, prefix: &str) -> Result<NodeId, CoreError> {
+    match prefix {
+        "Book" => project.add_workbook(parent, None),
+        "MBook" => project.add_matrix(parent, None),
+        "Note" => project.add_note(parent, None, ""),
+        "Graph" => project.add_graph(parent, None, Default::default()),
+        other => panic!("unknown prefix {other}"),
+    }
+}
+
+const WINDOW_PREFIXES: [&str; 4] = ["Book", "MBook", "Note", "Graph"];
+
+#[test]
+fn generator_skips_a_sibling_folder() {
+    for prefix in WINDOW_PREFIXES {
+        let mut project = Project::new("Demo").expect("valid name");
+        let root = project.root();
+        project
+            .add_folder(root, &format!("{prefix}1"))
+            .expect("folder");
+        let first = add_unnamed(&mut project, root, prefix).expect("first creation");
+        assert_eq!(name_of(&project, first), format!("{prefix}2"));
+        if prefix == "Book" {
+            let second = add_unnamed(&mut project, root, prefix).expect("second creation");
+            assert_eq!(name_of(&project, second), "Book3");
+        }
+    }
+}
+
+#[test]
+fn generator_skips_a_sibling_folder_ignoring_case() {
+    for (prefix, folder) in [("Book", "book1"), ("Graph", "GRAPH1")] {
+        let mut project = Project::new("Demo").expect("valid name");
+        let root = project.root();
+        project.add_folder(root, folder).expect("folder");
+        let id = add_unnamed(&mut project, root, prefix).expect("creation");
+        assert_eq!(name_of(&project, id), format!("{prefix}2"));
+    }
+}
+
+#[test]
+fn generator_skips_a_window_and_a_sibling_folder_together() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("window");
+    project.add_folder(root, "Book2").expect("folder");
+    let id = project.add_workbook(root, None).expect("creation");
+    assert_eq!(name_of(&project, id), "Book3");
+}
+
+#[test]
+fn generator_ignores_a_folder_of_another_parent() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    let f = project.add_folder(root, "F").expect("folder");
+    project.add_folder(f, "Book1").expect("folder");
+    let id = project.add_workbook(root, None).expect("creation");
+    assert_eq!(name_of(&project, id), "Book1");
+}
+
+#[test]
+fn generator_is_scoped_to_the_target_parent() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    let f = project.add_folder(root, "F").expect("folder");
+    project.add_folder(root, "Book1").expect("folder");
+    let inside = project.add_workbook(f, None).expect("creation in F");
+    assert_eq!(name_of(&project, inside), "Book1");
+    let at_root = project.add_workbook(root, None).expect("creation at root");
+    assert_eq!(name_of(&project, at_root), "Book2");
+}
+
+#[test]
+fn generator_skips_a_folder_in_the_target_parent_for_graphs() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    let f = project.add_folder(root, "F").expect("folder");
+    project.add_folder(f, "Graph1").expect("folder");
+    let id = project
+        .add_graph(f, None, Default::default())
+        .expect("graph");
+    assert_eq!(name_of(&project, id), "Graph2");
+    assert_eq!(project.tree().parent(id).expect("parent"), Some(f));
+}
+
+#[test]
+fn generator_still_skips_a_window_of_another_parent() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    let f = project.add_folder(root, "F").expect("folder");
+    project
+        .add_empty_workbook(f, Some("Book2"))
+        .expect("window");
+    let id = project.add_workbook(root, None).expect("creation");
+    assert_eq!(name_of(&project, id), "Book3");
+}
+
+#[test]
+fn generator_with_a_removed_parent_fails_without_panicking() {
+    for prefix in WINDOW_PREFIXES {
+        let mut project = Project::new("Demo").expect("valid name");
+        let root = project.root();
+        let f = project.add_folder(root, "F").expect("folder");
+        project.remove(f).expect("removal");
+        let before = project.tree().clone();
+        let result = add_unnamed(&mut project, f, prefix);
+        assert!(
+            matches!(result, Err(CoreError::UnknownNode(_))),
+            "{prefix}: {result:?}"
+        );
+        assert_eq!(project.tree().len(), before.len());
+    }
+}
+
 #[test]
 fn criterion_3_spreadsheet_style_column_names() {
     let (mut project, sheet, _) = sheet_with(&[]);
