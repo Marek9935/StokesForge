@@ -450,11 +450,13 @@ Steps, in order:
     as fallback. A package: one form, first card = the sub-issue list and order.
  4. At each change of state: `scripts/suivi.py set <n> --state
     questions|code|essai|fusion --what "..." [--wait you|dep|ag --waiting "..."]`.
+    A note (--waiting, --wait) is erased by the next `set` that does not restate it.
  5. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").
  6. Visible change: `scripts/try.sh <n>` opens the branch on the user's screen;
     their OK is the go-ahead (stokesforge-verification, step 6).
- 7. Merge under `scripts/main-lock.sh` from the main checkout (same step 6), read the CI.
- 8. Add the trial entries (suivi.py test add / merged) (stokesforge-verification, step 8).
+ 7. Merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock,
+    merge, push, commit on the trial entries); then read the CI.
+ 8. Follow-up entries: suivi.py test add; a wrong commit: test merged --replace <old>.
  9. Clean up: `scripts/chantier.sh --release <n>` (worktree and branch; copy its one
     line in the report). A package stopping with no worktree: `--pause <parent>`;
     after its last sub-issue: `--done <parent>`.
