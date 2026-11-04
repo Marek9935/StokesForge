@@ -519,6 +519,12 @@ fn grid_offset(moving: &[f64], origin: f64, step: Option<f64>) -> Option<f64> {
     best
 }
 
+/// The first moved edge of an axis as a slice, empty when the gesture moves no
+/// edge on that axis (a single-edge resize), so that axis gets no grid offset.
+fn first_edge(edges: &[f64]) -> &[f64] {
+    &edges[..edges.len().min(1)]
+}
+
 fn page_as_frame(page: FreePage) -> FreeFrame {
     FreeFrame {
         left: page.left,
@@ -617,19 +623,19 @@ pub fn moved_box(
             // The magnets of the edges of the other boxes and of the page.
             if let Some((offset, _)) = snap_axis(&x_edges, &xs, snap.threshold) {
                 dx += offset;
-            } else if let Some(offset) = grid_offset(&x_edges[..1], page.left, snap.grid) {
+            } else if let Some(offset) = grid_offset(first_edge(&x_edges), page.left, snap.grid) {
                 dx += offset;
             }
             if let Some((offset, _)) = snap_axis(&y_edges, &ys, snap.threshold) {
                 dy += offset;
-            } else if let Some(offset) = grid_offset(&y_edges[..1], page.top, snap.grid) {
+            } else if let Some(offset) = grid_offset(first_edge(&y_edges), page.top, snap.grid) {
                 dy += offset;
             }
         } else {
-            if let Some(offset) = grid_offset(&x_edges[..1], page.left, snap.grid) {
+            if let Some(offset) = grid_offset(first_edge(&x_edges), page.left, snap.grid) {
                 dx += offset;
             }
-            if let Some(offset) = grid_offset(&y_edges[..1], page.top, snap.grid) {
+            if let Some(offset) = grid_offset(first_edge(&y_edges), page.top, snap.grid) {
                 dy += offset;
             }
         }
@@ -1177,6 +1183,47 @@ mod tests {
         );
         // Outer left 53 -> 50, top 67 -> 70 (page origin 0): frame = outer + gutters.
         assert_eq!((f.left, f.top), (110.0, 80.0));
+    }
+
+    #[test]
+    fn a_single_edge_resize_snaps_only_its_own_axis_to_the_grid() {
+        let start = gbox(0, 100.0, 50.0, 200.0, 100.0); // outer 40..310 x 40..190
+        let edge = |left, right, top, bottom| FreeHandle {
+            base: 0,
+            left,
+            right,
+            top,
+            bottom,
+        };
+        for threshold in [6.0, 0.0] {
+            let grid = Snap {
+                grid: Some(10.0),
+                threshold,
+                enabled: true,
+            };
+            let run = |h: FreeHandle, d: (f64, f64)| moved_box(&start, &h, d, PAGE, &[], grid).0;
+            // Frame starts at (100, 50) with size 200 x 100; outer edges snap to multiples of 10.
+            let f = run(edge(false, false, true, false), (7.0, 13.0)); // top 53 -> 50
+            assert_eq!(
+                (f.left, f.width, f.top, f.height),
+                (100.0, 200.0, 60.0, 90.0)
+            );
+            let f = run(edge(false, false, false, true), (7.0, 13.0)); // bottom 203 -> 200
+            assert_eq!(
+                (f.left, f.width, f.top, f.height),
+                (100.0, 200.0, 50.0, 110.0)
+            );
+            let f = run(edge(true, false, false, false), (13.0, 7.0)); // left 53 -> 50
+            assert_eq!(
+                (f.left, f.width, f.top, f.height),
+                (110.0, 190.0, 50.0, 100.0)
+            );
+            let f = run(edge(false, true, false, false), (13.0, 7.0)); // right 323 -> 320
+            assert_eq!(
+                (f.left, f.width, f.top, f.height),
+                (100.0, 210.0, 50.0, 100.0)
+            );
+        }
     }
 
     #[test]
