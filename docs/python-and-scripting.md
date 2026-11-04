@@ -183,7 +183,7 @@ describes its effects.
 | `delete_rows(worksheet, at, count=1)` | deletes `count` rows from `at` in the columns of the sheet; `undo()` gives the cells back |
 | `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column or a calculation output raises `InvalidValueError` (read-only column, #431) |
 | `move(handle, parent, index=None)` | moves under `parent` at `index` among the other children (default: last; same parent = reorder); the handle stays valid; unsuitable parent, cycle, name taken or index out of range: `InvalidValueError` |
-| `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused |
+| `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused; a lone formula column copied in its own sheet reads the same columns (`A+B` stays `A+B`, #433), a copy into another sheet reads `#REF` for its local references |
 | `set_note(note, text)` | replaces the whole text of a note |
 
 **Saving (#331).** `save` and `save_as` go through `SessionHandle::save`, like

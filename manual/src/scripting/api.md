@@ -261,7 +261,7 @@ Names follow the rules of the interface: at most 255 characters, no reserved cha
 |---|---|
 | `pyst.rename(handle, name)` | Renames the object. The handle stays valid. |
 | `pyst.move(handle, parent, index=None)` | Moves the object under `parent`. `index` is the position among the other children; without it, the object goes last. With the same parent, it reorders. A parent that cannot hold the object, a name already taken or an index out of range raises `InvalidValueError`. |
-| `pyst.duplicate(handle, name=None)` | Copies the object with everything it contains, in the same parent, and returns the handle of the copy. A sheet is copied right after the original. Without `name`, the copy is named "*name* copy *N*". The root cannot be copied. |
+| `pyst.duplicate(handle, name=None)` | Copies the object with everything it contains, in the same parent, and returns the handle of the copy. A sheet is copied right after the original. Without `name`, the copy is named "*name* copy *N*". The root cannot be copied. A formula column copied alone reads the same columns as the original (`A + B` stays `A + B`); a formula that reads a column of another sheet keeps reading it. |
 | `pyst.remove(handle)` | Deletes the object and everything it contains. The root cannot be deleted. |
 
 ### Notes

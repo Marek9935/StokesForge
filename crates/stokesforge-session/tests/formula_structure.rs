@@ -210,19 +210,14 @@ fn book_with_c() -> Project {
     p
 }
 
-/// DESIGN QUESTION. A same-project `InsertCopy` of a lone `A+B` column into
-/// its own sheet: `project.rs` (formula remap loop, "reservation with no node")
-/// reserves an identifier for every column outside the copy, even when the copy
-/// is local, so the pasted column reads `#REF+#REF` and is empty. Graph series
-/// do the opposite (a local copy keeps reading the original). The docs say
-/// "reads outside the copy becomes #REF" only for the external case
-/// (`docs/commands-and-history.md`, cross-project paragraph), and say "Within
-/// the same project, the dependencies are not inserted". The interface copies a
-/// column's formula through the grid clipboard (letters), not this path, so the
-/// object-level copy of a lone column is probably unreachable from the UI.
+/// A same-project `InsertCopy` of a lone `A+B` column into its own sheet reads
+/// the same columns (#433 point 4): `A+B` stays `A+B`, with the same values, and
+/// follows an edit of A. Into another sheet it reads `#REF` (core test
+/// `copy_formula_columns.rs`). The interface copies a column's formula through
+/// the grid clipboard (letters); this object-level copy is reachable from
+/// `pyst.duplicate`.
 #[test]
-// #433 point 4
-fn a_local_copy_of_a_lone_formula_column_reads_ref() {
+fn a_local_copy_of_a_lone_formula_column_reads_the_same_columns() {
     for mode in BOTH {
         let (_s, h) = spawn(book_with_c(), mode);
         let t = snap(&h).tree;
@@ -235,20 +230,66 @@ fn a_local_copy_of_a_lone_formula_column_reads_ref() {
         })
         .expect("paste");
         let t = snap(&h).tree;
+        let (c, c2) = (
+            colat(&t, "[Book1]Sheet1", "C"),
+            colat(&t, "[Book1]Sheet1", "C2"),
+        );
+        assert_eq!(t.formula_letters(c2).as_deref(), Some("A+B"), "{mode:?}");
+        assert_eq!(nums(&t, c2), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        assert_eq!(nums(&t, c), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        // Editing A reaches the copy.
+        h.execute(enter(colat(&t, "[Book1]Sheet1", "A"), 1, &[100.0]))
+            .expect("edit A");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, c2), some(&[11.0, 120.0, 33.0]), "{mode:?}");
+        // Undo the edit, then the paste; redo both.
+        h.undo().expect("undo edit");
+        h.undo().expect("undo paste");
+        assert!(snap(&h)
+            .tree
+            .child_by_name(sheet, "C2")
+            .expect("sheet")
+            .is_none());
+        h.redo().expect("redo paste");
+        h.redo().expect("redo edit");
+        let t = snap(&h).tree;
         let c2 = colat(&t, "[Book1]Sheet1", "C2");
+        assert_eq!(nums(&t, c2), some(&[11.0, 120.0, 33.0]), "{mode:?}");
+        let oracle = reloaded_full(&h, "local-copy");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
+/// Into another sheet of the same workbook: the local reads become `#REF`, the
+/// remote part is kept.
+#[test]
+fn a_copy_of_a_lone_formula_column_into_another_sheet_reads_ref() {
+    for mode in BOTH {
+        let mut p = book_with_c();
+        let t = p.tree().clone();
+        let book = node(&t, "[Book1]");
+        let s2 = p.add_worksheet(book, Some("Sheet2")).expect("Sheet2");
+        let s3 = p.add_worksheet(book, Some("Sheet3")).expect("Sheet3");
+        let x = add_col(&mut p, s3, "X", &[0.0, 1.0]);
+        set_x(&mut p, x);
+        add_col(&mut p, s3, "Y", &[5.0, 7.0]);
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        set_f(&mut p, c, "A+max(Sheet3!B)");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        h.execute(Command::InsertCopy {
+            parent: s2,
+            copy: NodeCopy::capture(&t, c).expect("capture"),
+            name: "C2".into(),
+        })
+        .expect("paste");
+        let t = snap(&h).tree;
+        let c2 = colat(&t, "[Book1]Sheet2", "C2");
         assert_eq!(
             t.formula_letters(c2).as_deref(),
-            Some("#REF+#REF"),
+            Some("#REF+max(Sheet3!B)"),
             "{mode:?}"
-        );
-        assert!(
-            all_empty(&t, c2) || nums(&t, c2).iter().all(Option::is_none),
-            "{mode:?}"
-        );
-        // The original is untouched.
-        assert_eq!(
-            nums(&t, colat(&t, "[Book1]Sheet1", "C")),
-            some(&[11.0, 22.0, 33.0])
         );
     }
 }

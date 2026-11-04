@@ -195,13 +195,10 @@ assert pyst.values(dep) == (49., 58., 67., 76.), pyst.values(dep)
     assert_eq!(*redone.tree, *after.tree);
 }
 
-/// Design question (#412): a lone formula column duplicated in its own sheet
-/// reads `#REF` for the local columns it read (`Project::insert_copies`
-/// reserves an id with no node for any reference outside the copy), while a
-/// remote reference to a sheet that was not copied keeps reading the original.
-/// Pinned as it is today.
+/// A lone formula column duplicated in its own sheet reads the same columns
+/// (#433 point 4), and a remote reference keeps reading the original sheet.
 #[test]
-fn duplicating_a_lone_formula_column_voids_its_local_references() {
+fn duplicating_a_lone_formula_column_reads_the_same_columns() {
     let bench = bench();
     script(
         &bench,
@@ -209,8 +206,8 @@ fn duplicating_a_lone_formula_column_voids_its_local_references() {
 col = formula_column('A + max(Sheet3!B)', name='Mix')
 copy = pyst.duplicate(col)
 assert pyst.values(col) == (5., 6., 7., 8.)
-assert pyst.info(copy)['column']['formula'] == '#REF + max(Sheet3!B)', pyst.info(copy)['column']['formula']
-assert all(v is None for v in pyst.values(copy)), pyst.values(copy)
+assert pyst.info(copy)['column']['formula'] == 'A + max(Sheet3!B)', pyst.info(copy)['column']['formula']
+assert pyst.values(copy) == pyst.values(col), pyst.values(copy)
 # A purely remote formula keeps reading the original sheet.
 far = formula_column('max(Sheet3!B)', name='Far')
 far_copy = pyst.duplicate(far)
