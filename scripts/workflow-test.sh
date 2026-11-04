@@ -323,6 +323,144 @@ mkdir "$S/feature44/__pycache__"; touch "$S/feature44/__pycache__/x.pyc"
 for k in 40 41 42 43; do git worktree remove --force "$S/feature$k"; done
 git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d-x feature/44-target 2> /dev/null || true
 
+# deliver.sh (#449): its own sandbox (a bare fake remote, its own .suivi), run before
+# the final `suivi check` because the sandbox records would be flagged there.
+(
+    sb="$tmp/dsb"
+    export SF_SUIVI_DIR="$sb/_stokesforge/.suivi" SF_DELIVER_DELAYS="0 0 0 0"
+    sbsuivi() { python3 -I "$here/suivi.py" "$@"; }
+    dsb() {   # a fresh sandbox: main + remote, feature/7-x with one commit, one entry to try
+        cd /; rm -rf "$sb"; mkdir -p "$sb/_stokesforge"
+        git init -q --bare -b main "$sb/remote.git"
+        git init -q -b main "$sb/StokesForge"
+        cd "$sb/StokesForge"
+        git config user.name t; git config user.email t@t; git config push.followTags true
+        echo base > f; git add f; git commit -q -m init
+        git remote add origin "$sb/remote.git"; git push -q origin main
+        wt="$sb/_stokesforge/feature7"
+        git worktree add -q "$wt" -b feature/7-x --no-track main
+        git -C "$wt" commit -q --allow-empty -m work
+        echo 'Merge #7: add x' > "$sb/msg"
+        printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 7"}' > "$sb/e.json"
+        sbsuivi test add 7 "$sb/e.json" > /dev/null
+    }
+    deliver() { ( cd "${DCWD:-$sb/StokesForge}" && "$here/deliver.sh" "${DN:-7}" "${DMSG:-$sb/msg}" ) > "$sb/out" 2>&1; }
+    main_head() { git -C "$sb/StokesForge" rev-parse main; }
+    remote_head() { git -C "$sb/remote.git" rev-parse main; }
+    entry_field() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],"-"))' "$SF_SUIVI_DIR/tests/$1.json" "$2"; }
+    lock_free() { [ ! -e "$sb/_stokesforge/.main.lock" ] || fail "$1: the main lock is still held"; }
+    untouched() {   # $1 label: main unchanged since $2, entry still to try, no merge in progress
+        eq "$(main_head)" "$2" "$1: main moved"
+        eq "$(entry_field 7-1 commit)" "-" "$1: the entry got a commit"
+        [ -n "$(entry_field 7-1 try)" ] && [ "$(entry_field 7-1 try)" != "-" ] || fail "$1: the entry lost its try"
+        git -C "$sb/StokesForge" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "$1: MERGE_HEAD left" || true
+        lock_free "$1"
+    }
+    refused() { if deliver; then fail "$1: accepted: $(cat "$sb/out")"; fi; untouched "$1" "$base"; }
+
+    # Happy path: one --no-ff merge with the message, pushed, recorded, no tag pushed.
+    dsb
+    git -C "$wt" tag -a v9 -m "local tag" HEAD
+    deliver || fail "happy path: $(cat "$sb/out")"
+    m="$(main_head)"
+    eq "$(git -C "$sb/StokesForge" log -1 --format=%s main)" "Merge #7: add x" "merge message"
+    eq "$(git -C "$sb/StokesForge" rev-list --parents -n 1 main | wc -w)" 3 "merge commit has two parents"
+    eq "$(remote_head)" "$m" "remote at M"
+    eq "$(entry_field 7-1 commit)" "$m" "entry at M"
+    eq "$(entry_field 7-1 try)" "-" "entry lost try"
+    lock_free "happy"
+    eq "$(git -C "$sb/remote.git" tag | wc -l)" 0 "a local tag was pushed"
+    # Follow-up delivery, no new entries: succeeds, the old commit stays.
+    git -C "$wt" merge -q --no-edit main
+    git -C "$wt" commit -q --allow-empty -m more
+    echo 'Merge #7: more' > "$sb/msg2"
+    DMSG="$sb/msg2" deliver || fail "follow-up delivery: $(cat "$sb/out")"
+    eq "$(entry_field 7-1 commit)" "$m" "follow-up kept the old commit"
+    eq "$(remote_head)" "$(main_head)" "follow-up pushed"
+
+    # Refusals: main unchanged, lock free.
+    dsb; base="$(main_head)"
+    echo 'Merge #77: x' > "$sb/bad"; DMSG="$sb/bad" refused "bad message"
+    DMSG="$sb/none" refused "missing file"
+    DN=77 refused "wrong issue"
+    git -C "$sb/StokesForge" checkout -q -b other; refused "not on main"; git -C "$sb/StokesForge" checkout -q main
+    DCWD="$wt" refused "run from a worktree"
+    touch "$sb/StokesForge/dirt"; refused "dirty main"; rm "$sb/StokesForge/dirt"
+    touch "$wt/dirt"; refused "dirty worktree"; rm "$wt/dirt"
+    # An empty branch has nothing to merge.
+    git -C "$wt" reset -q --hard main; refused "empty branch"
+    dsb; base="$(main_head)"
+    # A held lock: refused, the other owner's file intact.
+    mkdir "$sb/_stokesforge/.main.lock"; echo "someone" > "$sb/_stokesforge/.main.lock/owner"
+    if deliver; then fail "held lock: accepted"; fi
+    eq "$(cat "$sb/_stokesforge/.main.lock/owner")" someone "held lock: owner file touched"
+    rm -rf "$sb/_stokesforge/.main.lock"
+    eq "$(main_head)" "$base" "held lock: main moved"
+    # Fetch failure (SF_NO_FETCH=1 is exported and must be ignored).
+    git -C "$sb/StokesForge" remote set-url origin "$sb/nowhere.git"
+    refused "fetch failure"
+    git -C "$sb/StokesForge" remote set-url origin "$sb/remote.git"
+    # Merge failure: a pre-merge-commit hook refuses.
+    printf '#!/bin/sh\nexit 1\n' > "$sb/StokesForge/.git/hooks/pre-merge-commit"; chmod +x "$sb/StokesForge/.git/hooks/pre-merge-commit"
+    refused "merge failure"
+    rm "$sb/StokesForge/.git/hooks/pre-merge-commit"
+
+    # Push: 4 refusals then success; always refused; fixed and rerun; a foreign commit on top.
+    dsb; base="$(main_head)"
+    hook="$sb/remote.git/hooks/pre-receive"
+    printf '#!/bin/sh\nc=$(cat "%s/count" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "%s/count"\n[ $c -gt 4 ]\n' "$sb" "$sb" > "$hook"; chmod +x "$hook"
+    deliver || fail "push after 4 failures: $(cat "$sb/out")"
+    eq "$(remote_head)" "$(main_head)" "push on the 5th try"
+    dsb; base="$(main_head)"
+    printf '#!/bin/sh\nexit 1\n' > "$hook"; chmod +x "$hook"
+    if deliver; then fail "push always refused: accepted"; fi
+    m="$(main_head)"; [ "$m" != "$base" ] || fail "push refused: the merge is not kept locally"
+    eq "$(entry_field 7-1 commit)" "-" "push refused: entry recorded"
+    lock_free "push refused"
+    git -C "$sb/StokesForge" commit -q --allow-empty -m foreign          # a foreign commit on top of unpushed M
+    rm "$hook"
+    deliver || fail "rerun after the hook was fixed: $(cat "$sb/out")"
+    eq "$(entry_field 7-1 commit)" "$m" "rerun records M, not HEAD"
+    eq "$(remote_head)" "$(main_head)" "rerun pushed"
+    eq "$(git -C "$sb/StokesForge" rev-list --merges --first-parent main | wc -l)" 1 "rerun merged again"
+    # Recording fails (the colour lock is held): pushed, rerun records.
+    dsb; base="$(main_head)"
+    mkdir "$sb/_stokesforge/.colour.lock"
+    if SF_SUIVI_LOCK_WAIT=0.2 deliver; then fail "record failure: accepted"; fi
+    eq "$(remote_head)" "$(main_head)" "record failure: not pushed"
+    eq "$(entry_field 7-1 commit)" "-" "record failure: recorded anyway"
+    lock_free "record failure"
+    rmdir "$sb/_stokesforge/.colour.lock"
+    deliver || fail "rerun records: $(cat "$sb/out")"
+    eq "$(entry_field 7-1 commit)" "$(main_head)" "rerun records M"
+    eq "$(git -C "$sb/StokesForge" rev-list --merges --first-parent main | wc -l)" 1 "record rerun merged again"
+
+    # Main moved on the remote: main goes into the branch, exit 3, nothing else moves; rerun merges.
+    dsb
+    git clone -q "$sb/remote.git" "$sb/other"
+    git -C "$sb/other" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "elsewhere"
+    git -C "$sb/other" push -q origin main
+    moved="$(git -C "$sb/other" rev-parse HEAD)"
+    set +e; deliver; rc=$?; set -e
+    eq "$rc" 3 "main moved: exit code"
+    eq "$(main_head)" "$moved" "main moved: main is the fetched one"
+    git -C "$sb/StokesForge" merge-base --is-ancestor main feature/7-x || fail "main moved: the branch lacks main"
+    eq "$(entry_field 7-1 commit)" "-" "main moved: entry recorded"
+    lock_free "main moved"
+    deliver || fail "rerun after exit 3: $(cat "$sb/out")"
+    eq "$(entry_field 7-1 commit)" "$(main_head)" "rerun after exit 3 records M"
+    # Conflict while merging main into the branch.
+    dsb
+    echo branch > "$wt/f"; git -C "$wt" commit -q -am "edit f"
+    git clone -q "$sb/remote.git" "$sb/other"
+    echo other > "$sb/other/f"; git -C "$sb/other" -c user.name=o -c user.email=o@o commit -q -am "edit f elsewhere"
+    git -C "$sb/other" push -q origin main
+    set +e; deliver; rc=$?; set -e
+    eq "$rc" 1 "conflict: exit code"
+    git -C "$wt" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "conflict: MERGE_HEAD left in the worktree" || true
+    lock_free "conflict"
+)
+
 # No inconsistency left (duplicate colour, record without worktree, worktree without record).
 suivi check > "$tmp/check.out" || fail "suivi check: $(cat "$tmp/check.out")"
 [ -f "$S/.suivi/control.json" ] || fail "check writes control.json"

@@ -49,10 +49,11 @@ a.st:hover,button.st:hover{text-decoration:underline}
 a.st:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .st.done{border-color:var(--ok);color:var(--ok)}
 .st.cur{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
+.st.cur.you{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
 .wait{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
-.wait.dep{background:var(--accent-soft);color:var(--accent)}
 .wait.ag{background:var(--bg);color:var(--muted);border:1px solid var(--line);font-weight:400}
 .what{color:var(--muted)}
+.wline{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 .rows{display:flex;flex-direction:column;gap:12px}
 .slot{display:flex;flex-direction:column;gap:8px}
 .free{display:flex;align-items:center;gap:12px;padding:10px 16px}
@@ -67,6 +68,7 @@ a.st:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .where .sep{color:var(--muted)}
 .lbl{font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
+.intro{font-weight:600}
 .expect{border-left:4px solid var(--ok);padding-left:12px}
 .meta{color:var(--muted);font-size:.85rem}
 .acts{display:flex;flex-wrap:wrap;gap:10px}
@@ -150,7 +152,6 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
 const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
 const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
 const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
-const HELD={agent:'Un agent y travaille',qcm:'Un questionnaire attend tes réponses',essai:'Un essai attend tes cases'};
 const $=id=>document.getElementById(id);
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
 let S=null,etag=null,timer=null,openBack=null,failed=false;
@@ -174,17 +175,36 @@ function sinceEl(iso,days,prefix){
   const t=dayText(iso,days,prefix);if(!t)return null;
   return el('div','since'+(days>=7?' late':''),t);
 }
-function waitEl(c){
-  const kind=c.wait_kind||'';
-  const txt=typeof c.waiting==='string'?c.waiting:'';
-  if(kind==='you')return el('span','wait','T’attend : '+(txt||'ta réponse'));
-  if(kind==='dep')return el('span','wait dep','Attend : '+(txt||'une autre étape'));
-  if(kind==='ag')return el('span','wait ag',txt||'Un agent travaille');
-  const h=c.held_by||[];
-  if(h.includes('qcm'))return el('span','wait','T’attend : tes réponses au questionnaire');
-  if(h.includes('essai'))return el('span','wait','T’attend : tes cases dans À tester');
-  if(h.includes('agent'))return el('span','wait ag','Un agent travaille');
-  return null;
+/*CARDLINE-START*/
+/* One line per card, computed: whose turn it is. c = a colour entry or a paused entry; tests and
+   qcms = S.tests and S.qcms. Members: the issue, its package's sub-issues, the colour's issues. */
+function cardLine(c,tests,qcms){
+  const members=new Set([c.issue].concat(c.issues||[],((c.package&&c.package.subs)||c.subs||[]).map(s=>s.n)).filter(n=>n!=null).map(Number));
+  const qcmOpen=(qcms||[]).some(q=>members.has(Number(q.issue)));
+  const todo=(tests||[]).filter(t=>(t.status||'todo')==='todo'&&members.has(Number(t.n!=null?t.n:t.issue))).length;
+  const held=c.held_by||[];
+  const you=qcmOpen||todo>0;
+  const parts=[];
+  if(qcmOpen)parts.push('répondre au questionnaire');
+  if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
+  const agent=held.includes('agent');
+  const note=typeof c.waiting==='string'?c.waiting.trim():'';
+  let text,also='';
+  if(you){text='À toi : '+parts.join(' · ');if(agent)also='l’agent continue';}
+  else if(agent)text='L’agent travaille';
+  else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
+  else text='En pause';
+  return {user:you,text:text,also:also,note:note};
+}
+/*CARDLINE-END*/
+function lineEl(c){
+  const l=cardLine(c,S.tests||[],S.qcms||[]);
+  if(!l.text&&!l.note)return {user:false,node:null};
+  const w=el('div','wline');
+  if(l.text)w.appendChild(el('span','wait'+(l.user?'':' ag'),l.text));
+  if(l.also)w.appendChild(el('span','what',l.also));
+  if(l.note)w.appendChild(el('span','what',l.note));
+  return {user:l.user,node:w};
 }
 function agoText(iso){
   const t=Date.parse(iso);if(isNaN(t))return '';
@@ -202,19 +222,18 @@ function colourBox(c){
     const ch=el('div','chips');c.package.subs.forEach(s=>ch.appendChild(el('code','','#'+s.n+(s.title?' '+s.title:''))));b.appendChild(ch);
   }
   const h=c.held_by||[];
+  const ln=lineEl(c);
   const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===c.state);   // legacy: the state is unknown, highlight no step
   STATES.forEach(([k,l],j)=>{
-    const cls='st'+(i<0?'':j<i?' done':j===i?' cur':'');
+    const cls='st'+(i<0?'':j<i?' done':j===i?(ln.user?' cur you':' cur'):'');
     if(k==='questions'||k==='essai'){
       const a=el('a',cls,l);a.href='#attente/issue='+c.issue+'/'+(k==='essai'?'essai':'qcm');
       a.title=k==='essai'?'Voir les essais de #'+c.issue:'Voir les questionnaires de #'+c.issue;s.appendChild(a);
     }else s.appendChild(el('span',cls,l));
   });
   b.appendChild(s);
-  const why=h.filter(k=>HELD[k]).map(k=>HELD[k]);
-  if(why.length)b.appendChild(el('div','what','Couleur tenue : '+why.join(' · ')));
   if(h.includes('legacy'))b.appendChild(el('span','legacy','état à confirmer par sa session'));
-  const wt=waitEl(c);if(wt)b.appendChild(wt);
+  if(ln.node)b.appendChild(ln.node);
   if(w){const ch=el('div','chips');c.worktrees.forEach(n=>ch.appendChild(el('code','',n)));b.appendChild(ch);}
   const sn=sinceEl(c.since,c.days);if(sn)b.appendChild(sn);
   if((c.issues||[]).length>1)b.appendChild(el('span','flag','deux chantiers sur la même couleur : '+c.issues.map(n=>'#'+n).join(', ')));
@@ -242,6 +261,7 @@ function renderSuivi(){
   S.paused.forEach(p=>{
     const b=el('div','box');
     b.appendChild(head({colour:p.last_colour,n:p.issue,name:(p.kind==='package'?'Paquet · ':'')+p.name},p.what||'Rien noté sur ce qui reste.'));
+    const pl=lineEl(p);if(pl.node)b.appendChild(pl.node);
     b.appendChild(el('div','meta',(p.worktrees&&p.worktrees.length?'Dossier de travail : oui ('+p.worktrees.join(', ')+')':'Dossier de travail : non')));
     const sn=sinceEl(p.since,p.days,'en pause depuis le ');if(sn)b.appendChild(sn);
     pb.appendChild(b);
@@ -272,6 +292,7 @@ function colourOf(n){
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
   b.appendChild(head(x,x.title||''));
+  if(x.intro)b.appendChild(el('div','intro',x.intro));
   if(Array.isArray(x.where)&&x.where.length){
     b.appendChild(el('div','lbl','Où'));
     const w=el('div','where');x.where.forEach((p,i)=>{if(i)w.appendChild(el('span','sep','›'));w.appendChild(el('code','',p));});b.appendChild(w);

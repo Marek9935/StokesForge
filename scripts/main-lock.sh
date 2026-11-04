@@ -9,7 +9,8 @@
 # `owner` file (name and date). It is never broken automatically: flock cannot
 # span two Bash tool calls, and a stale lock is a decision for a human or for the
 # orchestrator that reads `status`. Sequence: take, merge main into the branch,
-# recheck, `--no-ff` merge, push, release (stokesforge-verification, step 6).
+# recheck, `--no-ff` merge, push, release (stokesforge-verification, step 6);
+# scripts/deliver.sh (#449) runs that sequence and takes this lock itself.
 set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
 
