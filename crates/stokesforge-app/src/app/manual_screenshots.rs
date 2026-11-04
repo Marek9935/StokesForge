@@ -183,6 +183,17 @@ fn layer_id(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Id {
     })
 }
 
+/// The workspace between the Project Manager and the Object Manager: what a
+/// maximized window fills (it has no floating layer to measure).
+fn maximized_workspace_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let projects = panel_rect(h, "stokesforge_pm");
+    let objects = panel_rect(h, "stokesforge_object_manager");
+    egui::Rect::from_min_max(
+        egui::pos2(projects.right(), projects.top()),
+        egui::pos2(objects.left(), projects.bottom()),
+    )
+}
+
 fn layer_rect(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Rect {
     let screen = h.ctx.content_rect();
     h.ctx.memory(|memory| {
@@ -433,7 +444,8 @@ const SHOTS: &[Shot] = &[
             h.state_mut().app.toggle_layout_mode(graph, Some(true));
             settle(h);
         },
-        crop: Crop::Rect(workspace_window_rect),
+        // The mode maximizes the window: it fills the workspace.
+        crop: Crop::Rect(maximized_workspace_rect),
     },
     Shot {
         name: "analysis-integration",

@@ -180,7 +180,7 @@ By default these entries act on every layer, the active layer being the referenc
 
 #### The Page Layout Mode
 
-**Layout ▸ Page Layout Mode** (or the page layout button of the toolbar) shows the graph as a page: a ruler along the top and the left edge in your length unit, a grid, and handles on the graphs. Turning the mode on or off changes nothing in the graph and is not a step of **Undo**; it works the same on a **Regular Grid** and on a **Free** graph. Click a graph to select it: its handles are solid, the graph under the pointer shows them faintly.
+**Layout ▸ Page Layout Mode** (or the page layout button of the toolbar) shows the graph as a page: a ruler along the top and the left edge in your length unit, a grid, and handles on the graphs. Turning the mode on or off changes nothing in the graph and is not a step of **Undo**; it works the same on a **Regular Grid** and on a **Free** graph. While the mode is on, the graph window fills the workspace, so that the whole figure and its four corner handles are in view; when you leave the mode the window comes back to the position and size it had (a window that was already maximized stays maximized). Click a graph to select it: its handles are solid, the graph under the pointer shows them faintly.
 
 <img src="../images/graphs-page-layout-mode.png" alt="A graph with two layers side by side in the Page Layout Mode: rulers along the top and left edges, the selected graph with its handles, and under the figure the settings strip: Figure size with its padlock, Graph 1 with X, Y, W and H, Align, Same Size, Distribute, Snap, Coarse, Grid mode: Regular and When axes are added." width="640">
 
@@ -195,7 +195,9 @@ Under the figure, a strip of settings follows what is selected.
 
 On a regular grid, the line between two graphs has a handle: drag it, and the graph on one side takes the size the other one gives up, for every graph on that line; the figure keeps its size. A corner shared by several graphs moves all the lines it lies on at once. The four L-shaped corners of the figure scale the whole figure. You cannot move a graph or resize it alone on a regular grid, and the arrow keys do nothing there.
 
-In **Free**, drag a graph to move it, drag the handles around it to resize it, or nudge the selected graphs with the arrow keys (**Shift** for ten steps); the magnets and the grid help to line them up. Where two graphs touch, the middle of the line moves both of them, and the strip on each side moves the graph on that side only. The corners of the figure scale the figure and every graph with it. Each gesture is one step of **Undo**. **Esc** leaves the mode.
+In **Free**, drag a graph to move it, drag the handles around it to resize it, or nudge the selected graphs with the arrow keys (**Shift** for ten steps); the magnets and the grid help to line them up. Where two graphs touch, the middle of the line moves both of them, and the strip on each side moves the graph on that side only. The corners of the figure scale the figure and every graph with it. Each gesture is one step of **Undo**.
+
+Press <kbd>Esc</kbd> in the graph window to leave the mode. It leaves the mode only from the graph window: with Graph Properties or another window open, <kbd>Esc</kbd> closes that window and the graph stays in the mode, and in a field of the strip the first <kbd>Esc</kbd> gives the field back and the second leaves the mode. **Restore**, closing the graph and **Layout ▸ Page Layout Mode** also leave it.
 
 A graph saved by an older version has no sizes of its own. It keeps its familiar look, and its first change, of any kind, fixes the plot areas it had: from then on an axis or a title you add grows the graph instead of squeezing the plot area.
 

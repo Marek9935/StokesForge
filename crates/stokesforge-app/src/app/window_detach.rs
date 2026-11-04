@@ -339,6 +339,7 @@ fn follow_figure_in_viewport(
     follows: &mut HashMap<NodeId, FigureFollow>,
     graph: NodeId,
     scale: Option<f32>,
+    in_layout_mode: bool,
 ) {
     let Some(size) = super::graph_window::published_figure_size(ctx, graph) else {
         return;
@@ -347,6 +348,11 @@ fn follow_figure_in_viewport(
     let Some(step) = FigureFollow::observe(follows, graph, size, origin, scale) else {
         return;
     };
+    // In the Page Layout Mode the window is maximised (or about to be): the
+    // figure is recorded, the window keeps its size.
+    if in_layout_mode {
+        return;
+    }
     let (inner, maximized, monitor, outer) = ctx.input(|input| {
         let viewport = input.viewport();
         (
@@ -458,6 +464,9 @@ pub(super) struct DetachedTabViewModel {
     /// the figure when its size changes (#394), see
     /// [`FigureFollow`](super::window_placement::FigureFollow).
     pub(super) figure_follow: HashMap<NodeId, FigureFollow>,
+    /// `Tab::Graph`: the maximise the Page Layout Mode forced on the OS window
+    /// (`layout_window::follow_mode_maximize`).
+    pub(super) mode_maximize: super::layout_window::ModeMaximize,
 }
 
 /// What a detached window writes, so that [`StokesForgeApp::ui`](eframe::App::ui) (the only one to
@@ -859,11 +868,16 @@ impl StokesForgeApp {
         if self.detached_tabs.contains_key(&tab) {
             return;
         }
+        if !self.floating_tabs.contains(&tab) {
+            return;
+        }
+        // The Page Layout Mode ends before the view moves to its own window.
+        if let Tab::Graph(graph) = tab {
+            self.leave_layout_mode(graph);
+        }
         if let Some(pos) = self.floating_tabs.iter().position(|t| *t == tab) {
             self.floating_tabs.remove(pos);
             self.cascade_rank.remove(&tab);
-        } else {
-            return;
         }
         if self.maximized_tab == Some(tab) {
             // A maximized tab that was no longer a floating window
@@ -897,6 +911,7 @@ impl StokesForgeApp {
             focused: false,
             expanded_size: None,
             figure_follow: HashMap::new(),
+            mode_maximize: None,
         };
         self.detached_tabs.insert(
             tab,
@@ -931,6 +946,7 @@ impl StokesForgeApp {
         }
         if let Tab::Graph(graph) = tab {
             self.figure_follow.remove(&graph);
+            self.leave_layout_mode(graph);
         }
         if !self.floating_tabs.contains(&tab) {
             self.push_floating_tab(tab);
@@ -944,14 +960,20 @@ impl StokesForgeApp {
         let Some(detached) = self.detached_tabs.remove(&tab) else {
             return;
         };
-        let mut model = detached
-            .view_model
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
-            let mut view = view;
-            view.invalidate_surface();
-            self.graph_views.insert(id, view);
+        {
+            let mut model = detached
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
+                let mut view = view;
+                view.invalidate_surface();
+                self.graph_views.insert(id, view);
+            }
+        }
+        // Closing the window ends the Page Layout Mode.
+        if let Tab::Graph(graph) = tab {
+            self.leave_layout_mode(graph);
         }
     }
 
@@ -989,7 +1011,7 @@ impl StokesForgeApp {
                 })
                 .unwrap_or(0);
             let is_open = open_order.contains(&node) || detached.contains(&node);
-            let mode = if self.maximized_tab.map(tab_node) == Some(node) {
+            let mode = if self.reported_maximized_tab().map(tab_node) == Some(node) {
                 stokesforge_session::WindowMode::Maximized
             } else if is_open {
                 stokesforge_session::WindowMode::Open
@@ -1119,12 +1141,18 @@ impl DetachedTab {
                 .view_state
                 .as_ref()
                 .is_some_and(|view| view.renaming_sheet() != state.renaming_sheet());
+        let mode_differs = model
+            .graph_view
+            .as_ref()
+            .is_some_and(|view| view.layout_mode() != model.mode_maximize.is_some());
         model.snapshot = Some(snapshot.clone());
         if let Some(view_state) = model.view_state.as_mut() {
             view_state.sync_detached_snapshot(snapshot.clone());
             view_state.sync_detached_sheet_editor(state);
         }
-        changed
+        // A mode toggled from the root's menu: the viewport maximises or
+        // restores its window on its next frame.
+        changed || mode_differs
     }
 }
 
@@ -1193,6 +1221,7 @@ impl DetachedTabViewport {
             requests.close = true;
             root_context.request_repaint_of(egui::ViewportId::ROOT);
         }
+        super::page_layout::note_field_focus(ui.ctx());
     }
 
     fn paint_contents(
@@ -1206,6 +1235,14 @@ impl DetachedTabViewport {
         let id = self.id;
         let root_context = &self.root_context;
         let mut header_actions = WindowHeaderActions::default();
+        // Page Layout Mode (#426): the keys come first, before anything is
+        // painted, and the OS window follows the mode.
+        if let Tab::Graph(graph) = tab {
+            let view = model.graph_view.get_or_insert_with(GraphView::default);
+            super::page_layout::handle_keys(ui.ctx(), view, graph, &mut requests.actions);
+            let in_mode = view.layout_mode();
+            super::layout_window::follow_mode_maximize(ui.ctx(), &mut model.mode_maximize, in_mode);
+        }
         // Default stroke (inactive) only — the active outline
         // is no longer recolored here (B7,
         // `retours-2026-09-23-bugs.md`): the
@@ -1262,6 +1299,7 @@ impl DetachedTabViewport {
                             &mut model.figure_follow,
                             id,
                             model.graph_view.as_ref().and_then(GraphView::display_scale),
+                            model.mode_maximize.is_some(),
                         );
                         let view = model.graph_view.get_or_insert_with(GraphView::default);
                         if before != selected_manager_target(view) {

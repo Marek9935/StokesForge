@@ -363,9 +363,9 @@ pub(super) fn graph_view_contents(
 ) {
     let available = ui.available_size_before_wrap();
     // Page Layout Mode (#426): the view is fed with the unit, the snapping
-    // grid and the ratio lock; the keys come first (Esc may leave the mode).
+    // grid and the ratio lock. Its keys are not read here: the root and the
+    // detached viewports read them before any window is painted.
     super::page_layout::feed_view(ui.ctx(), view, graph_id);
-    super::page_layout::handle_keys(ui, view, graph_id);
     let layout_mode = view.layout_mode();
     super::page_layout::publish_layout_mode(ui.ctx(), graph_id, layout_mode);
     let controls_height = if layout_mode {

@@ -162,6 +162,15 @@ what it used at the last frame (`controls_height`, whole points, at least
 `LAYOUT_CONTROLS_HEIGHT`), so the figure's rectangle never moves from frame to frame
 and the cache stays valid; its rows wrap and `keep_together` keeps a label with its
 field or button. The mode adds no window and no dialog.
+It **maximises** the window while it lasts (`app/layout_window.rs`: `layout_entries` keeps
+the tab that was maximised before; `reconcile_layout_modes` leaves the mode of a graph
+whose window is no longer the maximised one, which covers Restore, the Window menu,
+close, delete and project load; a detached viewport maximises its OS window itself,
+`follow_mode_maximize`). The saved window views report the state from before the mode
+(`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at
+the start of the frame (`begin_layout_frame`) and at the top of a detached viewport, never
+inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard
+a frame ago (`note_field_focus`) they stand aside.
 
 ## Outside the catalog
 

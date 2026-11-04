@@ -214,42 +214,62 @@ impl StokesForgeApp {
             self.toggle_layout_mode(graph, None);
         }
     }
-
-    /// Turns the Page Layout Mode of `graph` on or off (`None`: toggles). A
-    /// view state: nothing is sent to the model, whatever the placement.
-    pub(super) fn toggle_layout_mode(&mut self, graph: NodeId, on: Option<bool>) {
-        let now = self
-            .read_graph_view(graph, GraphView::layout_mode)
-            .unwrap_or(false);
-        let want = on.unwrap_or(!now);
-        if want != now {
-            self.with_graph_view(graph, |view| view.set_layout_mode(want));
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Keys
 // ---------------------------------------------------------------------------
 
+fn field_focus_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_layout_field_focus", ctx.viewport_id()))
+}
+
+/// Records, at the **end** of a frame, whether a text field of this viewport
+/// has the keyboard. egui drops the focus on Esc at the start of the pass, so
+/// by the time the keys are read a field that was being typed in no longer
+/// looks focused: this mark of the previous frame is what tells that the Esc is
+/// the field's to give back (S-F7). Called by the root and by each detached
+/// viewport once it has painted.
+pub(super) fn note_field_focus(ctx: &egui::Context) {
+    let focused = ctx.text_edit_focused();
+    let id = field_focus_id(ctx);
+    ctx.data_mut(|data| data.insert_temp(id, focused));
+}
+
+fn field_had_focus(ctx: &egui::Context) -> bool {
+    let id = field_focus_id(ctx);
+    ctx.data(|data| data.get_temp(id)).unwrap_or(false)
+}
+
 /// Esc leaves the mode, `G` turns Snap on or off, the arrows nudge (Shift: ten
-/// steps); consumed, for the foreground graph only and only when no text field
-/// has the keyboard.
-pub(super) fn handle_keys(ui: &egui::Ui, view: &mut GraphView, graph: NodeId) {
-    let ctx = ui.ctx();
+/// steps). Consumed for the foreground graph only, **before** any window is
+/// painted (a workbook painted behind the graph would take the Esc first, #406),
+/// and only when nothing else owns the keys: no modal window, no popup, no text
+/// field with the keyboard (nor one that had it a frame ago: the Esc that
+/// gives a field back is not the Esc that leaves). Called by the root for a
+/// floating graph and at the top of the viewport of a detached one; the edit a
+/// leaving commits is pushed to `actions`. Returns whether the mode was left.
+pub(super) fn handle_keys(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    graph: NodeId,
+    actions: &mut Vec<Action>,
+) -> bool {
     if !view.layout_mode()
         || foreground_graph(ctx) != Some(graph)
+        || super::dialogs::modal_shown(ctx)
         || keyboard_focus_outside_grid(ctx)
+        || field_had_focus(ctx)
         || super::project_manager::owns_keyboard(ctx)
         || egui::Popup::is_any_open(ctx)
     {
-        return;
+        return false;
     }
     use super::shortcuts::{
         KEY_ARROW_DOWN, KEY_ARROW_LEFT, KEY_ARROW_RIGHT, KEY_ARROW_UP, KEY_ESCAPE, KEY_LAYOUT_SNAP,
         KEY_SHIFT_ARROW_DOWN, KEY_SHIFT_ARROW_LEFT, KEY_SHIFT_ARROW_RIGHT, KEY_SHIFT_ARROW_UP,
     };
-    let (escape, snap, steps, now) = ui.input_mut(|input| {
+    let (escape, snap, steps, now) = ctx.input_mut(|input| {
         let escape = input.consume_shortcut(&KEY_ESCAPE);
         let snap = input.consume_shortcut(&KEY_LAYOUT_SNAP);
         let mut steps = (0i32, 0i32);
@@ -272,8 +292,8 @@ pub(super) fn handle_keys(ui: &egui::Ui, view: &mut GraphView, graph: NodeId) {
         (escape, snap, steps, input.time)
     });
     if escape {
-        view.set_layout_mode(false);
-        return;
+        leave_mode(view, graph, actions);
+        return true;
     }
     if snap {
         let mut state = snap_state(ctx, graph);
@@ -283,6 +303,22 @@ pub(super) fn handle_keys(ui: &egui::Ui, view: &mut GraphView, graph: NodeId) {
     }
     if steps != (0, 0) {
         view.nudge(steps, now);
+    }
+    false
+}
+
+/// Leaves the mode of `view`, committing a nudge in progress: the edit is
+/// pushed to `actions` as the one `SetFreeLayout` it is.
+pub(super) fn leave_mode(view: &mut GraphView, graph: NodeId, actions: &mut Vec<Action>) {
+    view.set_layout_mode(false);
+    for event in view.take_events() {
+        if let GraphEvent::LayoutEdited { frames, page } = event {
+            actions.push(Action::SetFreeLayout {
+                graph,
+                frames,
+                page,
+            });
+        }
     }
 }
 
@@ -1181,6 +1217,8 @@ mod tests {
             };
             let (view, graph) = (&mut self.view, self.graph);
             let mut output = self.ctx.run_ui(input, |ui| {
+                // What the root or a detached viewport does around the contents.
+                handle_keys(ui.ctx(), view, graph, &mut actions);
                 super::super::graph_window::graph_view_contents(
                     ui,
                     view,
@@ -1188,6 +1226,7 @@ mod tests {
                     graph,
                     &mut actions,
                 );
+                note_field_focus(ui.ctx());
             });
             output.textures_delta.clear();
             (output, actions)
@@ -1663,8 +1702,7 @@ mod tests {
         }
     }
 
-    /// Until Esc moves to the root (the next lot), it leaves the mode of the
-    /// foreground graph only.
+    /// Esc leaves the mode of the foreground graph only.
     #[test]
     fn escape_leaves_the_mode_of_the_foreground_graph_only() {
         let mut bench = Bench::new(1, false);
@@ -1683,6 +1721,7 @@ mod tests {
         };
         let (view, graph) = (&mut bench.view, bench.graph);
         let mut output = bench.ctx.run_ui(input, |ui| {
+            handle_keys(ui.ctx(), view, graph, &mut Vec::new());
             super::super::graph_window::graph_view_contents(
                 ui,
                 view,
@@ -1698,6 +1737,44 @@ mod tests {
         );
         bench.frame(vec![key(egui::Key::Escape)]);
         assert!(!bench.view.layout_mode());
+        bench.session.shutdown().unwrap();
+    }
+
+    /// A field of the strip with the keyboard: the first Esc gives it back (the
+    /// typed text is dropped, the mode stays), the second Esc leaves the mode.
+    /// egui drops the focus on the Esc itself, so only the mark of the frame
+    /// before tells the two apart. Witness: remove `note_field_focus`.
+    #[test]
+    fn the_first_escape_gives_a_strip_field_back_and_the_second_leaves() {
+        let mut bench = Bench::new(2, false);
+        let before = bench.spec();
+        let image = bench.view.layout_image().expect("image");
+        let unit = bench.state.length_unit();
+        let value = crate::number_field::format_value(
+            shown(unit.from_points(image.width), unit),
+            unit.decimals(),
+        );
+        let (output, _) = bench.frame(Vec::new());
+        let pos = find_text_center(&output.shapes, &value);
+        let ctx = bench.ctx.clone();
+        {
+            let cell = std::cell::RefCell::new(&mut bench);
+            click_at(&ctx, pos, egui::Modifiers::NONE, |_, events| {
+                cell.borrow_mut().frame(events);
+            });
+        }
+        bench.frame(vec![egui::Event::Text("40".into())]);
+        assert!(bench.ctx.text_edit_focused(), "the field has the keyboard");
+        bench.frame(vec![key(egui::Key::Escape)]);
+        bench.frame(Vec::new());
+        assert!(
+            bench.view.layout_mode(),
+            "the first Esc gives the field back"
+        );
+        assert!(!bench.ctx.text_edit_focused());
+        assert_eq!(bench.spec(), before, "the typed text was dropped");
+        bench.frame(vec![key(egui::Key::Escape)]);
+        assert!(!bench.view.layout_mode(), "the second Esc leaves the mode");
         bench.session.shutdown().unwrap();
     }
 }
