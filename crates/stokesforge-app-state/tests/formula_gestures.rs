@@ -1930,3 +1930,110 @@ fn a_comma_warning_dies_with_the_formula_it_was_about() {
     w.type_formula(target, "max(B,1,5)");
     assert!(w.state.status().unwrap().text.contains("from 1 to 5"));
 }
+
+// -- typing and pasting are one gesture (#433) --
+
+/// Ctrl+V of `text` anchored on the F(x)= cell of `column`, no edit mode.
+fn paste_on_formula_field(w: &mut World, sheet: NodeId, column: NodeId, text: &str) {
+    w.state
+        .select_header_field(sheet, column, HeaderField::Formula);
+    w.state.dispatch(Action::Paste {
+        sheet,
+        text: text.to_string(),
+    });
+}
+
+/// What a Formula field shows after a gesture: the stored text, the status, the
+/// frame, and whether the orange is on (taken once, like the grid does).
+fn field_state(w: &mut World, column: NodeId) -> (Option<String>, String, bool, Option<String>) {
+    (
+        w.letters(column),
+        w.status(),
+        w.state.formula_issue(column).is_some(),
+        w.state.take_formula_warning(column),
+    )
+}
+
+/// Typing a text and pasting it on the F(x)= cell give the same stored
+/// formula, status, frame and orange, over a table of texts. Witness: a paste
+/// that bypasses `formula_entry::read` (the strict or the plain keeping
+/// reading) differs on the comma rows.
+#[test]
+fn pasting_a_formula_is_the_same_gesture_as_typing_it() {
+    let texts = [
+        "max(B,1,5)",
+        "max(B,2,4)",
+        "max(B, 1, 5)",
+        "max(B,330,350)",
+        "at(B,1,5)",
+        "A +",
+        "Z*2",
+        "B*2",
+        "frob(A)",
+        "1e400*A",
+    ];
+    for text in texts {
+        let mut w = world();
+        let cols = w.new_columns(w.sheet1, 2);
+        let sheet1 = w.sheet1;
+        w.type_formula(cols[0], text);
+        let typed = field_state(&mut w, cols[0]);
+        paste_on_formula_field(&mut w, sheet1, cols[1], text);
+        let pasted = field_state(&mut w, cols[1]);
+        // The column letter appears in the status of a kept formula.
+        let (tl, pl) = (
+            w.state.tree().column_letters(cols[0]).unwrap(),
+            w.state.tree().column_letters(cols[1]).unwrap(),
+        );
+        let normalise = |status: &str, own: &str| {
+            status
+                .replace(&format!("column {own}"), "column X")
+                .replace(&format!("Column {own}"), "Column X")
+        };
+        assert_eq!(typed.0, pasted.0, "`{text}`: stored text");
+        assert_eq!(typed.2, pasted.2, "`{text}`: frame");
+        assert_eq!(typed.3, pasted.3, "`{text}`: orange sentence");
+        let kept = typed.1.contains("does not compute") || pasted.1.contains("does not compute");
+        if kept {
+            // Typing says the reason; pasting says which column too.
+            assert!(
+                pasted.1.contains(&typed.1.replace("[error] ", "")),
+                "`{text}`: `{}` vs `{}`",
+                typed.1,
+                pasted.1
+            );
+        } else {
+            assert_eq!(
+                normalise(&typed.1, &tl),
+                normalise(&pasted.1, &pl),
+                "`{text}`: status"
+            );
+        }
+    }
+}
+
+/// Several columns can be orange at once (the memory holds one rewrite per
+/// column) and one Undo clears them all (#433). The text a user pastes from
+/// another program onto F(x)= is one cell, so each paste rewrites one column;
+/// the full-column Formulas paste carries letters already spaced.
+#[test]
+fn several_columns_can_be_orange_and_undo_clears_them_all() {
+    let mut w = world();
+    let sheet1 = w.sheet1;
+    let cols = w.new_columns(sheet1, 2);
+    paste_on_formula_field(&mut w, sheet1, cols[0], "max(B,2,4)");
+    paste_on_formula_field(&mut w, sheet1, cols[1], "max(B,1,5)");
+    for (column, want) in [(cols[0], "max(B, 2, 4)"), (cols[1], "max(B, 1, 5)")] {
+        assert_eq!(w.letters(column).as_deref(), Some(want));
+        assert!(w.state.formula_rewrite_holds(column), "{want} is orange");
+    }
+    let status = w.state.status().unwrap().clone();
+    assert!(
+        !status.is_error() && status.text.contains("from 1 to 5"),
+        "{}",
+        status.text
+    );
+    w.state.dispatch(Action::Undo);
+    assert!(!w.state.formula_rewrite_holds(cols[0]));
+    assert!(!w.state.formula_rewrite_holds(cols[1]));
+}

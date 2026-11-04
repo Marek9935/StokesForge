@@ -142,7 +142,7 @@ two rules above:
 | S-R14 | `pied-erreur-avant-raison` | In the footer of a dialog, the error comes before the reason of the disabled button; the reason comes back when the error disappears. |
 | S-R15 | `barre-etat-sans-contenu-permanent` | No permanent content in the status bar (neither revision nor import link). |
 | S-R16 | `opacite-sans-slider` | Opacity is a field, not a slider. |
-| S-R17 | `texte-reecrit-orange-dix-secondes` | A text the field rewrote (a decimal comma in a range, #433) is kept as rewritten, the cell is orange for 10 s with a tooltip, and the sentence is also in the status bar and its history. |
+| S-R17 | `texte-reecrit-orange-dix-secondes` | A text the field rewrote, typed or pasted (a decimal comma in a range, #433) is kept as rewritten, the cell is orange for 10 s with a tooltip, and the sentence is also in the status bar and its history. |
 
 ## Building blocks and guards
 

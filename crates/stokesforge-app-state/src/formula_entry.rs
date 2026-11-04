@@ -4,8 +4,9 @@
 //! The field **always writes** (Enter, Tab, focus loss): a text that does not
 //! read is kept, framed, and the column stays empty until it is corrected
 //! ([`stokesforge_core::Tree::formula_keeping`]). Only the field does this:
-//! `pyst` and the Formulas paste read strictly
-//! ([`stokesforge_core::Tree::formula_for_entry`]) and refuse.
+//! `pyst` reads strictly
+//! ([`stokesforge_core::Tree::formula_for_entry`]) and refuses; a paste goes
+//! through the same reading as typing (`AppState::write_formula_text`).
 //!
 //! The rewrite (Q6): `max(B,1,5)` written by someone who means 1.5 is the range
 //! 1 to 5. The range is kept, the call is rewritten with a space after each

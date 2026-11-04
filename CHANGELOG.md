@@ -31,7 +31,8 @@ without a message, see `docs/persistence.md`).
   values are never pasted in its place); the other columns of the paste go
   through, one **Undo** restores everything, and it calculates by itself when
   the missing column or sheet appears. The status bar says "The formula of
-  column C does not compute: …". Scripts (`pyst`) stay strict.
+  column C does not compute: …". A pasted comma range is rewritten and shown
+  in orange exactly like a typed one. Scripts (`pyst`) stay strict.
 - Status bar warnings use one amber colour, further from the error red.
 
 ### Added
