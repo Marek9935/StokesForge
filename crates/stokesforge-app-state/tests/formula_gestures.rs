@@ -1738,6 +1738,12 @@ fn a_kept_formula_that_binds_says_which_column_it_now_reads_once() {
         "The formula of column E now reads A+F",
         "the message follows the gesture's own"
     );
+    let level = w.state.status().unwrap().level;
+    assert_eq!(
+        level,
+        stokesforge_app_state::state::StatusLevel::Warning,
+        "a warning, kept until the next message"
+    );
     assert!(!missing(&w), "bound: no longer framed for F");
     let told = |w: &World| {
         w.state

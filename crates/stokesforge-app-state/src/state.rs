@@ -3405,7 +3405,8 @@ impl AppState {
         Ok(view)
     }
 
-    /// Says in the status bar which column a kept formula now reads, once per
+    /// Says in the status bar, as a warning kept until the next message (like
+    /// the comma sentence), which column a kept formula now reads, once per
     /// binding (#433, Q3): the session bound it inside the gesture that made
     /// the column or sheet appear, and the snapshot counts it. An undo says
     /// nothing (it unbinds without counting), nor does a new project or a
@@ -3437,7 +3438,7 @@ impl AppState {
         match lines.as_slice() {
             [] => {}
             [(column, formula)] => {
-                self.notice(tr!(
+                self.warn(tr!(
                     "status-formula-now-reads",
                     count = 1,
                     column = column.as_str(),
@@ -3445,7 +3446,7 @@ impl AppState {
                 ));
             }
             many => {
-                self.notice(tr!(
+                self.warn(tr!(
                     "status-formula-now-reads",
                     count = many.len(),
                     column = "",
