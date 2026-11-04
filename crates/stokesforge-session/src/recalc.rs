@@ -456,12 +456,9 @@ impl Recalculator {
                         let fingerprint =
                             Fingerprint::new(project, id, source, Outcome::Unparsable, len);
                         if self.is_stale(id, &fingerprint) {
-                            write_formula_column(
-                                project,
-                                id,
-                                vec![f64::NAN; len],
-                                &vec![NumericStatus::Missing; len],
-                            );
+                            // Empty cells, no `---` (#433): a formula that does
+                            // not read is kept and framed, no calculation failed.
+                            write_formula_column(project, id, vec![f64::NAN; len], &[]);
                             self.record(project, id, fingerprint);
                         }
                     }
@@ -526,12 +523,9 @@ impl Recalculator {
             let fingerprint =
                 Fingerprint::new(project, id, entry.source.clone(), Outcome::Blocked, len);
             if self.is_stale(id, &fingerprint) {
-                write_formula_column(
-                    project,
-                    id,
-                    vec![f64::NAN; len],
-                    &vec![NumericStatus::Missing; len],
-                );
+                // Empty cells, no `---` (#433): a loop is kept framed, and what
+                // depends on it has nothing to show.
+                write_formula_column(project, id, vec![f64::NAN; len], &[]);
                 self.record(project, id, fingerprint);
             }
         }
@@ -730,10 +724,10 @@ impl Fingerprint {
 /// The outcome of a formula calculation, with what it read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Outcome {
-    /// The formula does not parse: `NaN` everywhere, nothing read.
+    /// The formula does not parse: empty cells everywhere (#433), nothing read.
     Unparsable,
-    /// Caught in a cycle, or dependent on a cycle: `NaN` everywhere, nothing
-    /// read. The output type, which depends on the columns named, is fixed
+    /// Caught in a cycle, or dependent on a cycle: empty cells everywhere
+    /// (#433), nothing read. The output type, which depends on the columns named, is fixed
     /// before writing and changing type changes the column's version.
     Blocked,
     /// Calculated. Each column read, with the version of its content — or

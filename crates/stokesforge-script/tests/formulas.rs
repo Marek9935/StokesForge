@@ -100,6 +100,47 @@ for text, expected_text, expected in cases:
     );
 }
 
+/// Every badly written formula raises `InvalidValueError` and writes nothing,
+/// `A +` included (#433): `pyst` reads strictly, where the interface field keeps
+/// the text. A comma range stays as typed: no rewrite, no warning.
+#[test]
+fn every_badly_written_formula_raises_and_writes_nothing() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = formula_column('A * 2', name='Twice')
+"#,
+    );
+    let before = bench.session.snapshot().unwrap();
+    script(
+        &bench,
+        r#"
+col = pyst.children(S1)[-1]
+for text in ('A +', '(A', 'frob(A)', 'sin(A, B)', 'Twice + 1', 'A * 1e400', '#REF + 1', 'Z * 2'):
+    try:
+        pyst.set_column_meta(col, formula=text)
+    except pyst.InvalidValueError as error:
+        assert str(error), text
+    else:
+        raise AssertionError(text)
+assert pyst.info(col)['column']['formula'] == 'A * 2'
+assert pyst.values(col) == (2., 4., 6., 8.)
+"#,
+    );
+    let after = bench.session.snapshot().unwrap();
+    assert_eq!(after.history.undo_label, before.history.undo_label);
+    assert_eq!(*after.tree, *before.tree, "nothing was written");
+    script(
+        &bench,
+        r#"
+col = pyst.children(S1)[-1]
+pyst.set_column_meta(col, formula='max(B,1,5)')
+assert pyst.info(col)['column']['formula'] == 'max(B,1,5)'
+"#,
+    );
+}
+
 /// `formula=None` removes the formula **and** its values, like the interface
 /// (#433 point 5).
 #[test]
@@ -116,6 +157,25 @@ assert pyst.values(col) == (), pyst.values(col)
 # The column is writable again.
 pyst.set_values(col, [1., 1.])
 assert pyst.values(col) == (1., 1.)
+"#,
+    );
+}
+
+/// `formula=None` on a column that has **no** formula is a no-op on its data:
+/// the values go away only with a formula that really leaves (#433). Witness:
+/// testing the `formula` key instead of "had a formula" empties the column.
+#[test]
+fn clearing_the_formula_of_a_column_without_one_keeps_its_data() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+col = pyst.create_column(S1, 'Plain')
+pyst.set_values(col, [1., 2., 3.])
+pyst.set_column_meta(col, formula=None)
+assert pyst.values(col) == (1., 2., 3.), pyst.values(col)
+pyst.set_column_meta(col, formula=None, unit='m')
+assert pyst.values(col) == (1., 2., 3.), pyst.values(col)
 "#,
     );
 }

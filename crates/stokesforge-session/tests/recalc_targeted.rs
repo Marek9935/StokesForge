@@ -681,6 +681,36 @@ fn an_unreadable_formula_follows_the_sheet_then_gets_corrected() {
     );
 }
 
+/// A kept formula that does not read leaves **empty** cells on a Mixed column,
+/// not the `---` of a failed calculation (#433): nothing was calculated, the
+/// cell is framed instead. Witness: with the statuses kept, `---` comes back.
+#[test]
+fn a_kept_unreadable_formula_on_a_mixed_column_has_empty_cells_not_dashes() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2 retypes the column as Mixed");
+        assert_eq!(
+            take_snapshot(&handle)
+                .tree
+                .node(f.c)
+                .and_then(|node| node.as_column())
+                .map(Column::column_type),
+            Some(ColumnType::Mixed)
+        );
+        handle
+            .execute(set_formula(&handle, f.c, "A*"))
+            .expect("C unreadable");
+        let s = take_snapshot(&handle);
+        let column = s.tree.node(f.c).and_then(|node| node.as_column()).unwrap();
+        assert_eq!(column.column_type(), ColumnType::Mixed);
+        for row in 0..column.len() {
+            assert_eq!(column.cell(row), MixedCell::Empty, "{mode:?} row {row}");
+        }
+    }
+}
+
 /// A cycle created **by another column** blocks a formula whose text and
 /// sources have not changed content (`Blocked` outcome), and breaking it makes
 /// it calculable.
@@ -699,8 +729,8 @@ fn a_cycle_created_elsewhere_blocks_the_formula_and_is_undone() {
         .execute(set_formula(&handle, f.b, "C+1"))
         .expect("B = C+1: cycle");
     let s = take_snapshot(&handle);
-    assert!(all_not_calculated(&s, f.c), "C is caught in the cycle");
-    assert!(all_not_calculated(&s, f.b), "B too");
+    assert!(all_empty(&s, f.c), "C is caught in the cycle");
+    assert!(all_empty(&s, f.b), "B too");
 
     handle.undo().expect("undo the formula of B");
     assert_eq!(
@@ -720,7 +750,7 @@ fn cycle_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
         .execute(set_formula(&handle, f.b, "C+1"))
         .expect("B = C+1: cycle");
     let before = take_snapshot(&handle);
-    assert!(all_not_calculated(&before, f.b) && all_not_calculated(&before, f.c));
+    assert!(all_empty(&before, f.b) && all_empty(&before, f.c));
     handle.execute(unrelated(&before, 0)).expect("unrelated");
     let after = take_snapshot(&handle);
     version(&before, f.b) == version(&after, f.b) && version(&before, f.c) == version(&after, f.c)
@@ -758,7 +788,7 @@ fn a_cycle_follows_the_length_of_the_sheet() {
     let s = take_snapshot(&handle);
     for member in [f.b, f.c] {
         assert_eq!(numbers(&s, member).len(), 5, "the cycle follows the sheet");
-        assert!(all_not_calculated(&s, member));
+        assert!(all_empty(&s, member));
     }
 }
 
@@ -787,7 +817,7 @@ fn a_blocked_or_unreadable_formula_modified_directly_is_rewritten() {
             .expect("delete a cell of C");
         let s = take_snapshot(&handle);
         assert_eq!(numbers(&s, f.c).len(), 3, "{text}: C follows the sheet");
-        assert!(all_not_calculated(&s, f.c), "{text}");
+        assert!(all_empty(&s, f.c), "{text}");
     }
 }
 
@@ -1127,7 +1157,7 @@ fn a_too_deep_formula_is_a_not_calculated_block_then_gets_corrected() {
             .expect("1002 terms");
         let s = take_snapshot(&handle);
         assert_eq!(numbers(&s, f.c), vec![None, None, None], "{mode:?}");
-        assert!(all_not_calculated(&s, f.c), "{mode:?}");
+        assert!(all_empty(&s, f.c), "{mode:?}");
 
         // Corrected: recalculated, although the column is already "up to date".
         handle
@@ -1150,7 +1180,7 @@ fn a_too_deep_formula_is_a_not_calculated_block_then_gets_corrected() {
                 .execute(set_formula(&handle, f.c, &too_deep))
                 .expect("too deep");
             let s = take_snapshot(&handle);
-            assert!(all_not_calculated(&s, f.c), "{mode:?}");
+            assert!(all_empty(&s, f.c), "{mode:?}");
             assert_eq!(numbers(&s, f.c).len(), 3, "{mode:?}");
         }
 
@@ -1450,12 +1480,12 @@ fn an_x_reading_a_column_it_is_the_x_of_is_a_cycle() {
             ))
             .expect("D = at(B, 2), an X");
         let s = take_snapshot(&handle);
-        assert!(all_not_calculated(&s, f.d), "{mode:?}: blocked");
+        assert!(all_empty(&s, f.d), "{mode:?}: blocked");
         // And the readers of the blocked column are blocked too.
         handle
             .execute(set_formula(&handle, f.c, "B+1"))
             .expect("C = D+1");
-        assert!(all_not_calculated(&take_snapshot(&handle), f.c), "{mode:?}");
+        assert!(all_empty(&take_snapshot(&handle), f.c), "{mode:?}");
     }
 }
 
@@ -1788,8 +1818,8 @@ fn a_loop_across_sheets_stays_not_calculated_and_stable() {
                 .expect("formula installed as a file would hold it");
         }
         let s = take_snapshot(&handle);
-        assert!(all_not_calculated(&s, f.c), "{mode:?}");
-        assert!(all_not_calculated(&s, o.c), "{mode:?}");
+        assert!(all_empty(&s, f.c), "{mode:?}");
+        assert!(all_empty(&s, o.c), "{mode:?}");
         if mode == FormulaRecalc::Targeted {
             handle.execute(unrelated(&s, 2)).expect("unrelated");
             let after = take_snapshot(&handle);
