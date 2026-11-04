@@ -1236,8 +1236,8 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
     let mut memo_primed = false;
     // A rejected `AbortMacro` can leave the tree half undone with no pass run
     // after it (`TypeMismatch` while undoing a `DeleteRows` over a column a
-    // formula made Mixed, found by #433; the actor skips the pass on that
-    // error). The next command then catches up, rewriting columns that no
+    // formula made Mixed, found by #433 and tracked in #448; the actor skips
+    // the pass on that error). The next command then catches up, rewriting columns that no
     // unrelated command touched: not a targeted-recalculation defect, so
     // property 3 does not judge that one step. Both twins agree (property 1).
     let mut half_undone = false;

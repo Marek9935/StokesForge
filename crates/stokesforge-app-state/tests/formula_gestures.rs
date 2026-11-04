@@ -1238,10 +1238,10 @@ fn a_comma_range_is_rewritten_and_warned_not_framed() {
     w.type_formula(target, "max(B, 1, 5)");
     assert_eq!(w.state.take_formula_warning(target), None);
 
-    w.type_formula(target, "max(B, 330, 350)");
+    w.type_formula(target, "max(B, 2, 4)");
     assert_eq!(w.state.take_formula_warning(target), None);
-    w.type_formula(target, "max(B,330,350)");
-    assert_eq!(w.letters(target).as_deref(), Some("max(B, 330, 350)"));
+    w.type_formula(target, "max(B,2,4)");
+    assert_eq!(w.letters(target).as_deref(), Some("max(B, 2, 4)"));
     assert!(w.state.take_formula_warning(target).is_some());
 }
 
@@ -1797,4 +1797,40 @@ fn a_kept_formula_typed_over_data_is_undone_with_the_data() {
         w.values(d),
         [1000.0, 1001.0, 1002.0, 1003.0, 1004.0].map(Some)
     );
+}
+
+/// The warning of a comma rewrite lives only while the column holds the
+/// rewritten formula (#433): red, undone, replaced or removed, it never shows
+/// later. Witness: without the `formula_rewrite_holds` check a pending sentence
+/// is handed out after the undo.
+#[test]
+fn a_comma_warning_dies_with_the_formula_it_was_about() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    // Red: A is the X, so `max(A,1,5)` has no X; the sentence stays pending.
+    w.type_formula(target, "max(A,1,5)");
+    assert!(w.state.formula_issue(target).is_some(), "red");
+    w.state.dispatch(Action::Undo);
+    assert_eq!(w.state.take_formula_warning(target), None, "undone");
+    // Undone after being valid.
+    w.type_formula(target, "max(B,1,5)");
+    assert!(w.state.formula_rewrite_holds(target));
+    w.state.dispatch(Action::Undo);
+    assert!(!w.state.formula_rewrite_holds(target), "undone");
+    assert_eq!(w.state.take_formula_warning(target), None);
+    // Replaced, then removed.
+    w.type_formula(target, "max(B,1,5)");
+    w.type_formula(target, "B*2");
+    assert!(!w.state.formula_rewrite_holds(target), "replaced");
+    assert_eq!(w.state.take_formula_warning(target), None);
+    w.type_formula(target, "max(B,1,5)");
+    w.state.dispatch(Action::SetColumnFormula {
+        column: target,
+        formula: None,
+    });
+    assert!(!w.state.formula_rewrite_holds(target), "removed");
+    assert_eq!(w.state.take_formula_warning(target), None);
+    // The status sentence of the rewrite itself is not touched.
+    w.type_formula(target, "max(B,1,5)");
+    assert!(w.state.status().unwrap().text.contains("from 1 to 5"));
 }

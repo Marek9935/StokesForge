@@ -104,15 +104,27 @@ pub fn show_issue(ui: &egui::Ui, response: &egui::Response, issue: &FieldIssue) 
         egui::Stroke::new(FRAME_WIDTH, issue.color()),
         egui::StrokeKind::Outside,
     );
-    show_bubble(response, issue);
+    show_bubble(response, issue, None);
 }
 
 /// The bubble of `issue` alone, while the field is hovered or has focus: for a
 /// field that shows its refusal by another means than the frame (the grid
 /// tints the cell, #410).
-pub fn show_bubble(response: &egui::Response, issue: &FieldIssue) {
+///
+/// `shown` is the text of the field when it is elided (#433): it goes on the
+/// first line and the message below, in this one bubble (the label's own
+/// tooltip is off), so the reason is never hidden under a second bubble.
+pub fn show_bubble(response: &egui::Response, issue: &FieldIssue, shown: Option<&str>) {
     if response.hovered() || response.has_focus() {
-        response.show_tooltip_text(issue.message());
+        response.show_tooltip_text(bubble_text(issue, shown));
+    }
+}
+
+/// The text of the bubble: the message, under the full field text if elided.
+pub fn bubble_text(issue: &FieldIssue, shown: Option<&str>) -> String {
+    match shown {
+        Some(text) => format!("{text}\n{}", issue.message()),
+        None => issue.message().to_string(),
     }
 }
 

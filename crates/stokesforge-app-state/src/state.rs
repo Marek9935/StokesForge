@@ -3125,6 +3125,10 @@ pub struct AppState {
     /// A comma range just rewritten in the F(x)= field of a column (#433): the
     /// grid takes it once and paints the orange state for 10 s.
     formula_warning: Option<(NodeId, String)>,
+    /// The formula the field wrote when it rewrote a comma range, kept so the
+    /// orange state lives only while the column still holds it (#433): red,
+    /// undone, replaced or removed, it is gone.
+    rewritten_formula: Option<(NodeId, stokesforge_core::ColumnFormula)>,
     /// How many formula bindings the status bar has already told (#433): the
     /// session counts the kept formulas it bound when their column or sheet
     /// appeared, the snapshot carries the count.
@@ -3338,6 +3342,7 @@ impl AppState {
             formula_refusal_memo: std::cell::RefCell::new(None),
             formula_issue_memo: std::cell::RefCell::new(None),
             formula_warning: None,
+            rewritten_formula: None,
             seen_bound: 0,
             grid_clipboard: None,
             clipboard_text: None,
@@ -4989,9 +4994,53 @@ impl AppState {
         None
     }
 
+    /// True while `column` still holds the formula the field rewrote from a
+    /// comma range and that formula computes (no frame): the only time the
+    /// orange state and its bubble may show (#433). Red, undone, replaced or
+    /// removed, it is false.
+    pub fn formula_rewrite_holds(&self, column: NodeId) -> bool {
+        let Some((target, stored)) = &self.rewritten_formula else {
+            return false;
+        };
+        *target == column
+            && self
+                .snapshot
+                .tree
+                .node(column)
+                .and_then(Node::as_column)
+                .and_then(|node| node.meta().formula.as_ref())
+                == Some(stored)
+            && self.formula_issue(column).is_none()
+    }
+
+    /// Forgets the pending sentence and the rewrite of `column`: a warning for
+    /// a formula that is gone must never appear later.
+    pub fn forget_formula_rewrite(&mut self, column: NodeId) {
+        if self
+            .rewritten_formula
+            .as_ref()
+            .is_some_and(|(c, _)| *c == column)
+        {
+            self.rewritten_formula = None;
+        }
+        if self
+            .formula_warning
+            .as_ref()
+            .is_some_and(|(c, _)| *c == column)
+        {
+            self.formula_warning = None;
+        }
+    }
+
     /// The sentence of the comma range just rewritten in the Formula field of
     /// `column`, once (#433): the grid flags the cell orange for 10 s with it.
+    /// Only while the column still holds the rewritten formula
+    /// ([`AppState::formula_rewrite_holds`]); otherwise it is dropped.
     pub fn take_formula_warning(&mut self, column: NodeId) -> Option<String> {
+        if !self.formula_rewrite_holds(column) {
+            self.forget_formula_rewrite(column);
+            return None;
+        }
         match self.formula_warning.take() {
             Some((target, sentence)) if target == column => Some(sentence),
             other => {
@@ -5716,7 +5765,11 @@ impl AppState {
                 // The conversion from letters to identifiers is done here, above
                 // the command (`SetColumnMeta` never validates references).
                 match formula {
-                    None => self.set_column_meta_field(column, |meta| meta.formula = None),
+                    None => {
+                        self.rewritten_formula = None;
+                        self.formula_warning = None;
+                        self.set_column_meta_field(column, |meta| meta.formula = None);
+                    }
                     Some(text) => {
                         let (formula, outcome) =
                             crate::formula_entry::read(&self.snapshot.tree, column, &text);
@@ -5725,6 +5778,13 @@ impl AppState {
                             crate::formula_entry::Outcome::Clean => {}
                             crate::formula_entry::Outcome::Warned { sentence, .. } => {
                                 self.formula_warning = Some((column, sentence.clone()));
+                                self.rewritten_formula = self
+                                    .snapshot
+                                    .tree
+                                    .node(column)
+                                    .and_then(Node::as_column)
+                                    .and_then(|node| node.meta().formula.clone())
+                                    .map(|stored| (column, stored));
                                 self.warn(sentence);
                             }
                             crate::formula_entry::Outcome::Kept { error } => {

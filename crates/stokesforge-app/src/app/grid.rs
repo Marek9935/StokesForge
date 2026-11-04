@@ -1279,8 +1279,16 @@ fn rewritten_formula_state(
     id: egui::Id,
     rect: egui::Rect,
     response: &egui::Response,
+    shown: Option<&str>,
 ) {
     let now = ui.input(|i| i.time);
+    // The orange lives only while the column holds the rewritten formula: red,
+    // undone, replaced or removed, a running flag and a pending sentence go.
+    if !state.formula_rewrite_holds(column) {
+        crate::field_state::clear(ui.ctx(), id);
+        state.forget_formula_rewrite(column);
+        return;
+    }
     if let Some(message) = state.take_formula_warning(column) {
         crate::field_state::flag(
             ui.ctx(),
@@ -1296,8 +1304,18 @@ fn rewritten_formula_state(
             0.0,
             crate::theme::field_clamped_fill(),
         );
-        crate::field_state::show_bubble(response, &issue);
+        crate::field_state::show_bubble(response, &issue, shown);
     }
+}
+
+/// True if `text` does not fit on one line of `rect` (the label elides it).
+fn text_is_elided(ui: &egui::Ui, text: &str, rect: egui::Rect) -> bool {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
+        .size()
+        .x
+        > rect.width()
 }
 
 fn refusal_tint_rect(ui: &egui::Ui, cell: egui::Rect) -> egui::Rect {
@@ -1401,6 +1419,7 @@ fn header_field_widget(
                 crate::field_state::show_bubble(
                     &shown.response,
                     &crate::field_state::FieldIssue::refused(message),
+                    None,
                 );
             }
             if help {
@@ -1464,23 +1483,29 @@ fn header_field_widget(
         if issue.is_some() {
             paint_refusal_tint(ui, rect);
         }
+        // egui's own tooltip of an elided label is off: the bubble below shows
+        // the full text itself, so only one bubble ever opens (#433).
+        let elided = field == HeaderField::Formula && text_is_elided(ui, &text, rect);
         ui.put(
             rect,
-            egui::Label::new(egui::RichText::new(text))
+            egui::Label::new(egui::RichText::new(text.clone()))
                 .selectable(false)
-                .truncate(),
+                .truncate()
+                .show_tooltip_when_elided(field != HeaderField::Formula),
         );
         // A formula that does not compute (`#REF`, a letter that names no column, a
         // syntax error, a loop) shows its tinted cell and bubble (#321, #410, #433).
         // The sentence comes from `app-state`.
         if field == HeaderField::Formula {
+            let shown = elided.then_some(text.as_str());
             if let Some(message) = issue {
                 crate::field_state::show_bubble(
                     &response,
                     &crate::field_state::FieldIssue::refused(message),
+                    shown,
                 );
             } else {
-                rewritten_formula_state(ui, state, column, id, rect, &response);
+                rewritten_formula_state(ui, state, column, id, rect, &response, shown);
             }
         }
         if response.double_clicked() {
@@ -2794,6 +2819,7 @@ fn edit_cell_widget(
         crate::field_state::show_bubble(
             &shown.response,
             &crate::field_state::FieldIssue::refused(message),
+            None,
         );
     }
     let Some(end) = shown.end else {
@@ -6181,6 +6207,67 @@ mod tests {
             bench.state.status().map(|s| s.text.clone())
         );
         assert!(!has(red), "not red");
+    }
+
+    /// Frames until the comma rewrite of column `column` shows (or not).
+    fn orange_after(bench: &mut Bench, frames: usize) -> bool {
+        for _ in 0..frames {
+            bench.image(Vec::new());
+        }
+        let orange = theme::field_clamped_fill();
+        bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .shapes
+            .iter()
+            .any(|painted| matches!(&painted.shape, egui::Shape::Rect(rect) if rect.fill == orange))
+    }
+
+    /// #433: the orange lives only while the column holds the rewritten
+    /// formula. Undone while it still runs, it goes at once; typed while the
+    /// cell was red and undone, it never appears. Witness: without the
+    /// `formula_rewrite_holds` guard in `rewritten_formula_state` the flag
+    /// stays for its 10 s.
+    #[test]
+    fn the_orange_goes_with_the_formula_it_was_about() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let (x, column) = (bench.columns[0], bench.columns[2]);
+        bench.state.dispatch(Action::SetColumnRole {
+            column: x,
+            role: stokesforge_core::ColumnRole::X,
+        });
+        let type_formula = |bench: &mut Bench, text: &str| {
+            bench.state.begin_header_edit(column, HeaderField::Formula);
+            bench.state.header_editing_mut().expect("editing").buffer = text.to_string();
+            bench.state.commit_header_edit();
+        };
+        type_formula(&mut bench, "max(B,101,103)");
+        assert!(orange_after(&mut bench, 4), "orange while it holds");
+        bench.state.dispatch(Action::Undo);
+        assert!(!orange_after(&mut bench, 3), "undone: no orange");
+
+        // Red first (A is the X of nothing here: reading A as a column fails),
+        // then undone before the cell is ever valid.
+        type_formula(&mut bench, "max(A,1,5)");
+        bench.image(Vec::new());
+        bench.state.dispatch(Action::Undo);
+        assert!(!orange_after(&mut bench, 4), "never appears later");
+    }
+
+    /// #433: one bubble only. The text of an elided formula goes on the first
+    /// line of the reason's bubble (egui's own tooltip of an elided label is
+    /// off). Only the text is tested here: the bench does not see tooltips, so
+    /// that no second bubble opens is not covered by a test.
+    #[test]
+    fn the_bubble_of_an_elided_formula_carries_the_text_then_the_reason() {
+        let issue = crate::field_state::FieldIssue::refused("Reason");
+        assert_eq!(
+            crate::field_state::bubble_text(&issue, Some("max(A, 1, 5)")),
+            "max(A, 1, 5)\nReason"
+        );
+        assert_eq!(crate::field_state::bubble_text(&issue, None), "Reason");
     }
 
     /// #429: a number an f64 cannot hold, typed in a data cell (or in the entry
