@@ -509,6 +509,7 @@ its fingerprint is seen by the "unrelated" property of `b22` and by
 ## Running
 
 ```sh
+scripts/test-all.sh                           # everything, except #[ignore]: nextest + doc tests if cargo-nextest is installed, else cargo test --workspace (no argument)
 cargo test --workspace                        # everything, except #[ignore]
 cargo test -p <crate> --test <file>          # one test file
 cargo test -p stokesforge-robustness -- --ignored  # reproductions and costly benches
@@ -516,6 +517,8 @@ cargo test -p stokesforge-robustness -- --ignored  # reproductions and costly be
 scripts/python-test.sh                        # Python bridge, scripts, robustness, application and CLI
 scripts/python-test.sh -- --ignored           # + the reproductions of the Python boundary
 ```
+
+`scripts/test-all.sh` uses cargo-nextest when `cargo nextest --version` works (install: `cargo install cargo-nextest --locked`), then runs the doc tests, which nextest skips. Under nextest each test is its own process, so an in-process lock no longer excludes anything: `manual_screenshots.rs`, `preferences_proto.rs` and `memory_pinning.rs` hold such locks; if one flakes, give it a nextest test group rather than a retry. Filters stay `cargo test -p <crate> <name>`. The dev profile keeps line tables only (`[profile.dev] debug = "line-tables-only"` in `Cargo.toml`): a panic still prints `file:line`; to inspect variables, build with `CARGO_PROFILE_DEV_DEBUG=true`.
 
 The console tests `script_panel` and the lazy-start tests
 `script_bridge_lazy` (in `stokesforge-app-state/tests/`) also require the Python feature of `stokesforge-app-state`.

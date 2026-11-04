@@ -20,6 +20,7 @@ Exception: the bug reports `retours-2026-09-23-bugs.md` and `retours-2026-09-24-
 
 ```sh
 cargo build --workspace
+scripts/test-all.sh                          # whole workspace: nextest + doc tests if cargo-nextest is installed, else cargo test --workspace (#452)
 cargo test --workspace                       # includes stokesforge-robustness (except #[ignore])
 cargo test -p <crate> <test_name>             # a single test
 cargo test -p stokesforge-robustness -- --ignored  # costly benches
