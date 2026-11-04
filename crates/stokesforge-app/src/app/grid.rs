@@ -6256,6 +6256,32 @@ mod tests {
         assert!(!orange_after(&mut bench, 4), "never appears later");
     }
 
+    /// #433: type `max(B,1,5)`, Enter, retype it, Enter, Ctrl+Z at once: undo
+    /// returns to the same stored formula, yet the orange goes (the first
+    /// warning was about the gesture now undone); Redo shows none either.
+    /// Witness: without `clear_formula_rewrite` in Undo the orange stays.
+    #[test]
+    fn undo_right_after_a_retyped_rewrite_ends_the_orange() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let (x, column) = (bench.columns[0], bench.columns[2]);
+        bench.state.dispatch(Action::SetColumnRole {
+            column: x,
+            role: stokesforge_core::ColumnRole::X,
+        });
+        for _ in 0..2 {
+            bench.state.begin_header_edit(column, HeaderField::Formula);
+            bench.state.header_editing_mut().expect("editing").buffer =
+                "max(B,101,103)".to_string();
+            bench.state.commit_header_edit();
+            assert!(orange_after(&mut bench, 3), "orange after the rewrite");
+        }
+        bench.state.dispatch(Action::Undo);
+        assert!(!orange_after(&mut bench, 3), "undone: no orange");
+        bench.state.dispatch(Action::Redo);
+        assert!(!orange_after(&mut bench, 3), "redone: no orange");
+    }
+
     /// #433: one bubble only. The text of an elided formula goes on the first
     /// line of the reason's bubble (egui's own tooltip of an elided label is
     /// off). Only the text is tested here: the bench does not see tooltips, so

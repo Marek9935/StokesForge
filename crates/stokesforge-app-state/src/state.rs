@@ -5014,6 +5014,12 @@ impl AppState {
             && self.formula_issue(column).is_none()
     }
 
+    /// Forgets any pending or remembered comma rewrite (Undo, Redo).
+    fn clear_formula_rewrite(&mut self) {
+        self.rewritten_formula = None;
+        self.formula_warning = None;
+    }
+
     /// Forgets the pending sentence and the rewrite of `column`: a warning for
     /// a formula that is gone must never appear later.
     pub fn forget_formula_rewrite(&mut self, column: NodeId) {
@@ -5581,8 +5587,17 @@ impl AppState {
             self.dialog_error = None;
         }
         match action {
-            Action::Undo => self.undo(),
-            Action::Redo => self.redo(),
+            // Undo and Redo always end the orange of a comma rewrite (#433):
+            // the same stored formula can come back, but the warning was about
+            // the gesture that is now undone or replayed.
+            Action::Undo => {
+                self.clear_formula_rewrite();
+                self.undo();
+            }
+            Action::Redo => {
+                self.clear_formula_rewrite();
+                self.redo();
+            }
             Action::Save => {
                 self.save();
             }
