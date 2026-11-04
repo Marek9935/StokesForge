@@ -197,19 +197,55 @@ impl Tree {
 
     /// [`Tree::formula_from_letters`] for a formula **being entered** (#403):
     /// a text that would make `column` read itself, in any sheet of the
-    /// project, is refused with [`FormulaError::Cycle`]. The one entry point of
-    /// the interface and of `pyst`; the loop check is not part of the plain
-    /// reading, which tests use to build the loops of an older file on purpose.
+    /// project, is refused with [`FormulaError::Cycle`], and so is a text that
+    /// does not compile (`A +`, #433). The **strict** path: `pyst`, the
+    /// Formulas paste; the loop check is not part of the plain reading, which
+    /// tests use to build the loops of an older file on purpose. The field
+    /// keeps what it cannot read: [`Tree::formula_keeping`].
     pub fn formula_for_entry(
         &self,
         column: NodeId,
         text: &str,
     ) -> Result<ColumnFormula, FormulaError> {
         let formula = self.formula_from_letters(column, text)?;
+        formula.compile()?;
         if self.formula_loop(column, &formula) {
             return Err(FormulaError::Cycle);
         }
         Ok(formula)
+    }
+
+    /// The **keeping** reading of a formula typed in the field (#433): the
+    /// formula holds what resolved as identifiers and the rest as typed (see
+    /// [`ColumnFormula::from_letters_keeping`]), and the error says why it
+    /// does not compute: the first reading error, else the compile error,
+    /// else [`FormulaError::Cycle`]. Same reading as
+    /// [`Tree::formula_for_entry`], which refuses instead of keeping.
+    pub fn formula_keeping(
+        &self,
+        column: NodeId,
+        text: &str,
+    ) -> (ColumnFormula, Option<FormulaError>) {
+        let (formula, error) = ColumnFormula::from_letters_keeping(
+            text,
+            self.sheet_columns_of(column),
+            column,
+            self.scope_of(column),
+        );
+        if error.is_some() {
+            return (formula, error);
+        }
+        let cycle = self.formula_loop(column, &formula);
+        (formula, cycle.then_some(FormulaError::Cycle))
+    }
+
+    /// The letter(s) `column` has in its sheet, `None` if it is not in one.
+    /// Display only (#433: the sentence of a column that reads itself).
+    pub fn column_letters(&self, column: NodeId) -> Option<String> {
+        self.sheet_columns_of(column)
+            .iter()
+            .position(|id| *id == column)
+            .map(crate::formula::index_to_letters)
     }
 
     /// Text to show for the formula of `column`: the **current** letters
@@ -371,6 +407,7 @@ mod tests {
     use super::*;
     use crate::column::{Column, ColumnMeta};
     use crate::error::CoreError;
+    use crate::formula::FormulaPart;
     use crate::node::{Node, WindowMeta};
     use crate::project::Project;
 
@@ -446,6 +483,99 @@ mod tests {
 
         fn rename(&mut self, id: NodeId, name: &str) {
             self.project.rename(id, name).unwrap();
+        }
+    }
+
+    /// The keeping reading (#433): what resolves is an identifier, the rest
+    /// stays as typed. `A+Z` is `[Column(A), "+Z"]`, so A follows a move and Z
+    /// stays the letter that was typed. Witness: a reading that stores the whole
+    /// text drops the identifier, and the display after the move is `A+Z`.
+    #[test]
+    fn a_kept_reading_keeps_what_resolves_as_identifiers() {
+        let mut fx = Fx::new();
+        let at = fx.s1[2];
+        let (formula, error) = fx.tree().formula_keeping(at, "A+Z");
+        assert_eq!(
+            formula.parts(),
+            [
+                FormulaPart::Column(fx.s1[0]),
+                FormulaPart::Text("+Z".to_string())
+            ]
+        );
+        assert!(matches!(error, Some(FormulaError::UnknownColumn(letter)) if letter == "Z"));
+        let mut meta = fx
+            .tree()
+            .node(at)
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        meta.formula = Some(formula);
+        fx.project.set_column_meta(at, meta).unwrap();
+        assert_eq!(fx.shown(at), "A+Z");
+        // A moves to the end of the sheet: it is now C, and C reads `C+Z`.
+        fx.project.move_node(fx.s1[0], fx.sheet1, 2).unwrap();
+        assert_eq!(fx.shown(at), "C+Z");
+    }
+
+    /// A number that would compute although it is out of range (the lenient rule
+    /// for old files, #429) is split in two fragments, so the kept formula does
+    /// not compute. Witness: without the split the formula compiles.
+    #[test]
+    fn a_kept_number_out_of_range_does_not_compile() {
+        let fx = Fx::new();
+        let at = fx.s1[2];
+        let (formula, error) = fx.tree().formula_keeping(at, "A*1e400");
+        assert!(matches!(
+            error,
+            Some(FormulaError::NumberOutOfRange {
+                too_large: true,
+                ..
+            })
+        ));
+        assert!(formula.compile().is_err(), "must not compute `inf`");
+        assert_eq!(
+            formula.letters(fx.tree().sheet_columns_of(at)),
+            "A*1e400",
+            "display unchanged"
+        );
+    }
+
+    /// The strict entry refuses a text that does not compile. Witness: dropping
+    /// the `compile()?` of `formula_for_entry` accepts `A +`.
+    #[test]
+    fn the_strict_entry_refuses_a_syntax_error_the_keeping_one_keeps() {
+        let fx = Fx::new();
+        let at = fx.s1[2];
+        assert!(fx.tree().formula_for_entry(at, "A +").is_err());
+        let (formula, error) = fx.tree().formula_keeping(at, "A +");
+        assert!(matches!(error, Some(FormulaError::Parse(_))));
+        assert_eq!(formula.columns(), BTreeSet::from([fx.s1[0]]));
+        // A loop is the third kind of error, after reading and compiling.
+        let own = fx.s1[2];
+        let (_, error) = fx.tree().formula_keeping(own, "C+1");
+        assert!(matches!(error, Some(FormulaError::SelfReference(_))));
+    }
+
+    #[test]
+    fn a_kept_reading_keeps_the_own_column_and_broken_text() {
+        let fx = Fx::new();
+        let at = fx.s1[2];
+        let (formula, _) = fx.tree().formula_keeping(at, "C+1");
+        assert_eq!(
+            formula.columns(),
+            BTreeSet::from([at]),
+            "a loop keeps its ids"
+        );
+        for text in ["#REF+1", "frob(A)", "max('Sheet3!B)", "A+[Book9"] {
+            let (formula, error) = fx.tree().formula_keeping(at, text);
+            assert!(error.is_some(), "`{text}`");
+            assert!(
+                formula
+                    .letters(fx.tree().sheet_columns_of(at))
+                    .ends_with(&text[text.len() - 2..]),
+                "`{text}` keeps its text"
+            );
         }
     }
 
