@@ -172,6 +172,30 @@ fn an_off_centre_drawing_is_refused() {
     refused(dir.path(), &left, "off-centre");
 }
 
+/// The drawn area is centred, but nearly all the weight is on the left: what
+/// the user saw as a logo too far aside on its sheet.
+#[test]
+fn a_drawing_with_its_weight_aside_is_refused_even_with_a_centred_area() {
+    let dir = tempfile::tempdir().unwrap();
+    let heavy_left = svg(
+        r##"<rect x="24" y="24" width="90" height="208" fill="#336699"/>
+            <rect x="114" y="126" width="118" height="4" fill="#336699"/>"##,
+    );
+    refused(dir.path(), &heavy_left, "off-centre");
+}
+
+/// A thin spike (the horn of the anvil) may reach far aside when the weight is
+/// centred.
+#[test]
+fn a_thin_spike_aside_is_accepted_when_the_weight_is_centred() {
+    let dir = tempfile::tempdir().unwrap();
+    let spike = svg(
+        r##"<rect x="64" y="24" width="128" height="208" fill="#336699"/>
+            <rect x="8" y="126" width="56" height="4" fill="#336699"/>"##,
+    );
+    ok(dir.path(), &spike, &good());
+}
+
 #[test]
 fn an_opaque_outer_ring_is_refused() {
     let dir = tempfile::tempdir().unwrap();

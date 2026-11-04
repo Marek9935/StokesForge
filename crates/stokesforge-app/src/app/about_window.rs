@@ -15,8 +15,11 @@ use stokesforge_app_state::startup::{LICENSE, REPOSITORY_URL, VERSION};
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
+/// Height of the window without logo: the title, the four rows and the footer.
+/// A window too short hides the Copy button under the footer.
+const BASE_HEIGHT: f32 = 160.0;
 /// Room taken by the logo: its side, the space below it and the item spacing
-/// after it (a window too short hides the Copy button under the footer).
+/// after it.
 const LOGO_ROOM: f32 = ABOUT_LOGO_SIZE + theme::SPACE_SECTION + 10.0;
 
 /// Paints the window while it is open. `logo` is the texture of the logo, `None`
@@ -30,7 +33,7 @@ pub(super) fn about_window(
     if !state.about_open() {
         return;
     }
-    let height = 140.0 + if logo.is_some() { LOGO_ROOM } else { 0.0 };
+    let height = BASE_HEIGHT + if logo.is_some() { LOGO_ROOM } else { 0.0 };
     let outcome = modal_read_only(
         ctx,
         egui::Id::new("stokesforge_about"),
@@ -81,6 +84,8 @@ mod tests {
     struct LogoPaint {
         images: Vec<egui::Rect>,
         version: Option<egui::Rect>,
+        /// The text of the Copy button and the area its painting is clipped to.
+        copy: Option<(egui::Rect, egui::Rect)>,
     }
 
     /// [`frame`], with a logo texture handed to the window when `logo`.
@@ -160,6 +165,17 @@ mod tests {
                     }
                     _ => None,
                 }),
+            copy: output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape)
+                        if shape.galley.job.text == tr!("action-copy-version") =>
+                    {
+                        Some((shape.visual_bounding_rect(), painted.clip_rect))
+                    }
+                    _ => None,
+                }),
         };
         if click_copy {
             // The Copy button is laid out below the three lines of text.
@@ -233,6 +249,21 @@ mod tests {
         assert!(paint.images.is_empty());
         assert_eq!(texts, frame(true, false).0);
         assert!(texts.contains(&tr!("about-repository")), "{texts:?}");
+    }
+
+    /// The Copy button lies inside the area the window paints, with or without
+    /// a logo: a window too short cuts it under the footer, and a click on what
+    /// is left of it still works, so only its clip rect tells.
+    #[test]
+    fn the_copy_button_is_not_cut_off() {
+        for logo in [false, true] {
+            let (_, _, paint) = frame_with_logo(true, false, logo);
+            let (button, clip) = paint.copy.expect("the Copy button is painted");
+            assert!(
+                clip.contains_rect(button),
+                "logo {logo}: {button:?} cut by {clip:?}"
+            );
+        }
     }
 
     /// With a logo, one image is painted, centred above the version text, and

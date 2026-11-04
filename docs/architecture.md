@@ -80,7 +80,7 @@ guards.
 | `stokesforge-clipboard` | offers the same content to the system clipboard under several MIME types (the figure of a graph: SVG, PNG, PDF); Wayland, X11, Windows, macOS; independent of the rest of the workspace | [application](application/graph.md) |
 | `stokesforge-robustness` | 23 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
 | `stokesforge-arch-guard` | shared reading of the `Cargo.toml` files for the dependency guards (dev-dependency) | [tests](tests.md) |
-| `stokesforge-logo-gen` | release tool (#388): checks the framing of the two icon SVG (transparent margin, centred, no tile, no `feDisplacementMap`/`feImage`) and writes the PNG trees (16 to 512 px) and the two `.ico`; reproducible bytes; depends on no workspace crate, never linked into the application | [application](application/shell-and-code.md) |
+| `stokesforge-logo-gen` | release tool (#388): checks the framing of the two icon SVG (transparent margin, centred on the visual weight across, no tile, no `feDisplacementMap`/`feImage`) and writes the PNG trees (16 to 512 px) and the two `.ico`; reproducible bytes; depends on no workspace crate, never linked into the application | [application](application/shell-and-code.md) |
 
 ## The three separation lines
 

@@ -5,7 +5,7 @@
 //! release, from the SVG under `assets/logo/00-final/`.
 //!
 //! Before rasterising, [`check_source`] locks the framing the user validated
-//! (transparent background, centred drawing, no tile) and refuses the sources
+//! (transparent background, drawing centred on its visual weight, no tile) and refuses the sources
 //! the rasteriser draws wrongly (`feDisplacementMap`, `feImage`).
 //!
 //! Output is byte-for-byte reproducible: no timestamp, no metadata.
@@ -36,8 +36,11 @@ pub const PROJECT_ICO: &str = "stokesforge-project.ico";
 const CHECK_SIZE: u32 = 256;
 /// A pixel counts as drawn above this alpha (the soft shadow tail does not).
 const DRAWN_ALPHA: u8 = 40;
-/// Largest accepted distance between the centre of the drawn area and the
-/// centre of the image, in pixels of the check resolution.
+/// Largest accepted distance from the centre of the image, in pixels of the
+/// check resolution. Across, what counts is the visual weight of the drawing
+/// (its opacity-weighted centre): the long thin horn of the anvil must not push
+/// the mass of the logo aside. Down, it is the centre of the drawn area: the
+/// anvil is heavy by design and sits low.
 const CENTRE_TOLERANCE: f32 = 4.0;
 /// Elements the rasteriser draws wrongly (`assets/logo/LISEZMOI.md`, section 6).
 const FORBIDDEN: [&str; 2] = ["feDisplacementMap", "feImage"];
@@ -127,24 +130,27 @@ pub fn check_source(svg: &str) -> Result<(), Error> {
     let n = CHECK_SIZE;
     // The outer ring (2 px): a tile or a full-bleed background draws it.
     let on_ring = |x: u32, y: u32| x < 2 || y < 2 || x >= n - 2 || y >= n - 2;
-    let (mut x0, mut y0, mut x1, mut y1) = (n, n, 0, 0);
+    let (mut y0, mut y1, mut drawn) = (n, 0, false);
+    let (mut weight, mut moment) = (0.0_f64, 0.0_f64);
     for (x, y, p) in image.enumerate_pixels() {
+        let alpha = f64::from(p.0[3]);
+        weight += alpha;
+        moment += alpha * (f64::from(x) + 0.5);
         if p.0[3] <= DRAWN_ALPHA {
             continue;
         }
         if on_ring(x, y) {
             return Err(Error::OpaqueRing);
         }
-        x0 = x0.min(x);
         y0 = y0.min(y);
-        x1 = x1.max(x + 1);
         y1 = y1.max(y + 1);
+        drawn = true;
     }
-    if x1 == 0 {
+    if !drawn {
         return Err(Error::Empty);
     }
     let half = n as f32 / 2.0;
-    let dx = (x0 + x1) as f32 / 2.0 - half;
+    let dx = (moment / weight) as f32 - half;
     let dy = (y0 + y1) as f32 / 2.0 - half;
     if dx.abs() > CENTRE_TOLERANCE || dy.abs() > CENTRE_TOLERANCE {
         return Err(Error::OffCentre(dx, dy));

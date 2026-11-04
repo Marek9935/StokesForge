@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img"><title>StokesForge</title>
-<g transform="translate(-39.34 -43.2) scale(1.2184)"><defs>
+<g transform="translate(-31.72 -16.72) scale(1.03)"><defs>
 <linearGradient id="ga" gradientUnits="userSpaceOnUse" x1="0" y1="75" x2="0" y2="160"><stop offset="0" stop-color="#45a866"/><stop offset=".55" stop-color="#2f8450"/><stop offset="1" stop-color="#1c5634"/></linearGradient>
 <linearGradient id="ge" gradientUnits="userSpaceOnUse" x1="0" y1="75" x2="0" y2="160"><stop offset="0" stop-color="#f89f3e"/><stop offset=".35" stop-color="#e5681a"/><stop offset="1" stop-color="#a93a0c"/></linearGradient>
 <linearGradient id="glass" gradientUnits="userSpaceOnUse" x1="0" y1="160" x2="0" y2="221"><stop offset="0" stop-color="#323940"/><stop offset=".5" stop-color="#1d2125"/><stop offset="1" stop-color="#121417"/></linearGradient>
