@@ -113,16 +113,6 @@ fn some(v: &[f64]) -> Vec<Option<f64>> {
     v.iter().copied().map(Some).collect()
 }
 
-fn all_empty(t: &Tree, id: NodeId) -> bool {
-    let c = column(t, id);
-    !c.is_empty()
-        && (0..c.len()).all(|r| match c.get(r) {
-            Cell::Float(v) => v.is_nan(),
-            Cell::Text(Some(s)) => s == "---",
-            Cell::Text(None) => true,
-        })
-}
-
 fn enter(column: NodeId, start: usize, v: &[f64]) -> Command {
     Command::SetCells {
         column,
