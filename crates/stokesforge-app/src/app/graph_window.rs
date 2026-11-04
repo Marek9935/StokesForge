@@ -369,7 +369,7 @@ pub(super) fn graph_view_contents(
     let layout_mode = view.layout_mode();
     super::page_layout::publish_layout_mode(ui.ctx(), graph_id, layout_mode);
     let controls_height = if layout_mode {
-        super::page_layout::LAYOUT_CONTROLS_HEIGHT
+        super::page_layout::controls_height(ui.ctx(), graph_id)
     } else {
         GRAPH_CONTROLS_HEIGHT
     };

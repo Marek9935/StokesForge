@@ -20,8 +20,8 @@ use crate::number_field::number_field;
 /// Width of the rulers, in screen points.
 pub(super) const RULER_WIDTH: f32 = 18.0;
 
-/// Height reserved under the figure for the inspector strip in the mode: two
-/// rows of controls.
+/// Least height reserved under the figure for the inspector strip in the mode:
+/// two rows of controls (more when they wrap, see [`controls_height`]).
 pub(super) const LAYOUT_CONTROLS_HEIGHT: f32 = 62.0;
 
 /// Pixels a labelled ruler tick keeps from the next one, at least.
@@ -92,6 +92,32 @@ impl Default for GridState {
             fine: false,
         }
     }
+}
+
+fn inspector_height_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_layout_inspector_height", graph))
+}
+
+/// The height the inspector used at the last frame, in whole points.
+fn inspector_height(ctx: &egui::Context, graph: NodeId) -> f32 {
+    ctx.data(|data| data.get_temp(inspector_height_id(graph)))
+        .unwrap_or(0.0)
+}
+
+/// Stores the measured height; true if it changed.
+fn set_inspector_height(ctx: &egui::Context, graph: NodeId, height: f32) -> bool {
+    let changed = inspector_height(ctx, graph) != height;
+    if changed {
+        ctx.data_mut(|data| data.insert_temp(inspector_height_id(graph), height));
+    }
+    changed
+}
+
+/// The height reserved under the figure for the inspector: at least
+/// [`LAYOUT_CONTROLS_HEIGHT`], more when its rows wrap. Depends only on the
+/// width of the strip, so the figure's rectangle is stable from frame to frame.
+pub(super) fn controls_height(ctx: &egui::Context, graph: NodeId) -> f32 {
+    LAYOUT_CONTROLS_HEIGHT.max(inspector_height(ctx, graph))
 }
 
 fn grid_id(graph: NodeId) -> egui::Id {
@@ -542,11 +568,46 @@ pub(super) fn inspector(
     let ctx = ui.ctx().clone();
     let active = view.active_panel(spec);
     let extra = view.extra_layers(spec);
-    ui.horizontal(|ui| measures_row(ui, view, graph, actions));
-    ui.horizontal(|ui| {
+    // Both rows wrap in a narrow window; the strip height follows the content.
+    let top = ui.cursor().top();
+    ui.horizontal_wrapped(|ui| measures_row(ui, view, graph, actions));
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         arrange_row(ui, &ctx, spec, graph, active, &extra, actions);
     });
+    // Whole points, so that float noise never moves the figure's rectangle; a
+    // little room under the last row keeps it off the window's border.
+    let used = (ui.min_rect().bottom() - top + ui.spacing().item_spacing.y).ceil();
+    if set_inspector_height(&ctx, graph, used) {
+        ctx.request_repaint();
+    }
+}
+
+/// Starts a new line first if the labels `texts` and `fields` number fields
+/// that follow would not fit on the rest of this one, so that a wrapped row
+/// never splits a label from its field (nested `horizontal` groups do not wrap
+/// in egui). Does nothing at the start of a line.
+fn keep_together(ui: &mut egui::Ui, texts: &[&str], fields: usize) {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let spacing = ui.spacing().item_spacing.x;
+    let text_width: f32 = texts
+        .iter()
+        .map(|text| {
+            ui.painter()
+                .layout_no_wrap((*text).to_owned(), font.clone(), egui::Color32::WHITE)
+                .size()
+                .x
+        })
+        .sum();
+    let needed = text_width
+        + fields as f32 * crate::number_field::FIELD_WIDTH
+        + (texts.len() + fields) as f32 * spacing;
+    let at_line_start = ui.cursor().left() <= ui.min_rect().left() + 1.0;
+    // `available_width` of a wrapped layout is the whole row, not what is left.
+    let left = ui.max_rect().right() - ui.cursor().left();
+    if !at_line_start && left < needed {
+        ui.end_row();
+    }
 }
 
 /// First row of the inspector: figure size, selected box, plot area.
@@ -565,8 +626,12 @@ fn measures_row(ui: &mut egui::Ui, view: &GraphView, graph: NodeId, actions: &mu
             shown(unit.from_points(page.height), unit),
         );
         let quantity = length_quantity(unit, MIN_PAGE_EXTENT, stokesforge_plot::MAX_FIGURE_EXTENT);
+        // The size is two fields and their joints: it moves to the next line as
+        // a whole rather than being cut in the middle.
+        let by = tr!("layout-mode-by");
+        keep_together(ui, &[&by, symbol], 2);
         let width_changed = number_field(ui, ("layout_figure", 0), &mut size.0, &quantity).changed;
-        ui.label(tr!("layout-mode-by"));
+        ui.label(by);
         let height_changed = number_field(ui, ("layout_figure", 1), &mut size.1, &quantity).changed;
         ui.label(symbol);
         if width_changed || height_changed {
@@ -614,6 +679,8 @@ fn measures_row(ui: &mut egui::Ui, view: &GraphView, graph: NodeId, actions: &mu
         .into_iter()
         .enumerate()
         {
+            // A label stays with its field.
+            keep_together(ui, &[&label], 1);
             ui.label(label);
             edited[index] =
                 number_field(ui, ("layout_box", index), &mut fields[index], quantity).changed;
@@ -768,6 +835,65 @@ mod tests {
         assert_eq!(view.layout_boundary(), BoundaryFollow::Pair);
         feed_view(&ctx, &mut view, b);
         assert_eq!(view.layout_boundary(), BoundaryFollow::Line);
+    }
+
+    /// Runs `frames` frames of the inspector in a strip `width` wide, laid out
+    /// as `graph_view_contents` does (the strip is as high as the height it
+    /// reserved), and returns the reserved height seen before each frame.
+    fn reserved_heights(width: f32, frames: usize) -> Vec<f32> {
+        let ctx = egui::Context::default();
+        let graph = NodeId::from_raw(1);
+        let spec = PlotSpec::empty("");
+        let view = GraphView::new();
+        let mut seen = Vec::new();
+        for frame in 0..frames {
+            seen.push(controls_height(&ctx, graph));
+            let input = egui::RawInput {
+                time: Some(frame as f64 * 0.1),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(2000.0, 1000.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                let strip = egui::Rect::from_min_size(
+                    egui::Pos2::new(10.0, 10.0),
+                    egui::vec2(width, controls_height(ui.ctx(), graph)),
+                );
+                let mut strip_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(strip)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                inspector(&mut strip_ui, &view, &spec, graph, &mut Vec::new());
+            });
+            output.textures_delta.clear();
+        }
+        seen.push(controls_height(&ctx, graph));
+        seen
+    }
+
+    /// In a narrow strip the rows wrap and the reserved height grows with
+    /// them; it is the same at every frame once measured. Witness: a fixed
+    /// reserve of 62 fails the first; a height fed back into its own
+    /// measurement fails the second.
+    #[test]
+    fn a_narrow_inspector_reserves_more_height_and_keeps_it_from_frame_to_frame() {
+        let wide = reserved_heights(1600.0, 5);
+        let narrow = reserved_heights(200.0, 5);
+        let (wide_last, narrow_last) = (wide[wide.len() - 1], narrow[narrow.len() - 1]);
+        assert!(narrow_last > wide_last + 20.0, "{narrow:?} vs {wide:?}");
+        assert!(wide_last >= LAYOUT_CONTROLS_HEIGHT);
+        // Measured at the first frame, then identical.
+        for heights in [&wide, &narrow] {
+            assert!(
+                heights[1..].windows(2).all(|pair| pair[0] == pair[1]),
+                "{heights:?}"
+            );
+        }
+        // Whole points: no float noise to move the figure.
+        assert_eq!(narrow_last, narrow_last.round());
     }
 
     #[test]
