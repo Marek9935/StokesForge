@@ -291,7 +291,7 @@ impl Project {
 
     /// Adds a workbook **without** a sheet (persistence, tests).
     pub fn add_empty_workbook(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
-        let name = self.window_name(name, "Book");
+        let name = self.window_name(parent, name, "Book");
         let index = self.tree.children(parent)?.len();
         self.insert_node(
             parent,
@@ -449,7 +449,7 @@ impl Project {
                     if let Some((_, data)) =
                         copy.graph_data().iter().find(|(id, _)| *id == source.id())
                     {
-                        let book_name = self.next_window_name("Book");
+                        let book_name = self.next_window_name(parent, "Book");
                         let book = self.insert_copy(parent, data, &book_name)?;
                         let inserted = self.tree.walk(book)?;
                         for (old, new) in data.nodes().iter().zip(inserted) {
@@ -699,7 +699,7 @@ impl Project {
 
     /// Adds a matrix. `name: None` → first free "MBookN".
     pub fn add_matrix(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
-        let name = self.window_name(name, "MBook");
+        let name = self.window_name(parent, name, "MBook");
         let index = self.tree.children(parent)?.len();
         self.insert_node(
             parent,
@@ -718,7 +718,7 @@ impl Project {
         name: Option<&str>,
         text: &str,
     ) -> CoreResult<NodeId> {
-        let name = self.window_name(name, "Note");
+        let name = self.window_name(parent, name, "Note");
         let index = self.tree.children(parent)?.len();
         self.insert_node(
             parent,
@@ -1230,7 +1230,12 @@ impl Project {
         Ok(format_path(&path))
     }
 
-    /// First `{prefix}{n}` (n ≥ 1) that is the name of no existing window.
+    /// First `{prefix}{n}` (n ≥ 1) that is the name of no window of the
+    /// project and of no child of `parent`, of any kind (folder included),
+    /// ignoring case: the same rule as `Tree::check_name_available`, so the
+    /// name returned is never refused as a duplicate. An unknown `parent` is
+    /// treated as having no children (the caller's own `children(parent)`
+    /// reports the error).
     ///
     /// D1 — no longer collects the list of **all** windows at each
     /// call (nor, below it, the list of **all** nodes of the project, see
@@ -1239,10 +1244,13 @@ impl Project {
     /// and `find_window` tests each candidate directly. In the usual
     /// case — names assigned in order — a single candidate is
     /// tried.
-    pub fn next_window_name(&self, prefix: &str) -> String {
+    pub fn next_window_name(&self, parent: NodeId, prefix: &str) -> String {
+        let siblings = self.tree.children(parent).unwrap_or(&[]);
         let mut n: u64 = self.tree.window_count_with_prefix(prefix) + 1;
         let mut candidate = format!("{prefix}{n}");
-        while self.tree.find_window(&candidate).is_some() {
+        while self.tree.find_window(&candidate).is_some()
+            || self.is_sibling_name(siblings, &candidate)
+        {
             n += 1;
             candidate = format!("{prefix}{n}");
         }
@@ -1262,7 +1270,7 @@ impl Project {
     /// generated "GraphN"/"BookN". Never fails.
     pub fn next_graph_name(&self, parent: NodeId, spec: &PlotSpec) -> String {
         self.book_plot_name(parent, spec)
-            .unwrap_or_else(|| self.next_window_name("Graph"))
+            .unwrap_or_else(|| self.next_window_name(parent, "Graph"))
     }
 
     fn book_plot_name(&self, parent: NodeId, spec: &PlotSpec) -> Option<String> {
@@ -1323,10 +1331,7 @@ impl Project {
             };
             crate::name::check_name(&candidate).ok()?;
             let taken = self.tree.find_window(&candidate).is_some()
-                || siblings
-                    .iter()
-                    .filter_map(|child| self.tree.node(*child))
-                    .any(|child| same_name_ignoring_case(child.name(), &candidate));
+                || self.is_sibling_name(siblings, &candidate);
             if !taken {
                 return Some(candidate);
             }
@@ -1336,11 +1341,21 @@ impl Project {
 
     // -- internal --
 
-    /// Requested window name, or first free "{prefix}N".
-    fn window_name(&self, name: Option<&str>, prefix: &str) -> String {
+    /// Whether one of the `siblings` bears `candidate`, ignoring case.
+    /// Compares in place: no list of names is built (D1).
+    fn is_sibling_name(&self, siblings: &[NodeId], candidate: &str) -> bool {
+        siblings
+            .iter()
+            .filter_map(|child| self.tree.node(*child))
+            .any(|child| same_name_ignoring_case(child.name(), candidate))
+    }
+
+    /// Requested window name, or first free "{prefix}N" for a creation under
+    /// `parent` (see [`Project::next_window_name`]).
+    fn window_name(&self, parent: NodeId, name: Option<&str>, prefix: &str) -> String {
         match name {
             Some(name) => name.to_string(),
-            None => self.next_window_name(prefix),
+            None => self.next_window_name(parent, prefix),
         }
     }
 
@@ -1566,9 +1581,9 @@ mod tests {
         // window already there ("Book2"), the first candidate tried is therefore
         // "Book2" (already taken), then "Book3" (free) — no longer "Book1",
         // which stays a valid name but is no longer searched.
-        assert_eq!(project.next_window_name("Book"), "Book3");
+        assert_eq!(project.next_window_name(root, "Book"), "Book3");
         project.add_empty_workbook(root, Some("Book1")).unwrap();
-        assert_eq!(project.next_window_name("Book"), "Book3");
+        assert_eq!(project.next_window_name(root, "Book"), "Book3");
     }
 
     // -- formulas by identifier (#321) --

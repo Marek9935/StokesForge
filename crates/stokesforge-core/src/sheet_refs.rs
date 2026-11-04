@@ -899,7 +899,7 @@ mod tests {
         let root = fx.project.root();
         fx.project.add_empty_workbook(root, Some("BOOK3")).unwrap();
         // Three windows exist, the generator starts from the count + 1 = Book4...
-        let free = fx.project.next_window_name("Book");
+        let free = fx.project.next_window_name(root, "Book");
         assert!(!free.eq_ignore_ascii_case("book1") && !free.eq_ignore_ascii_case("book2"));
         assert!(!free.eq_ignore_ascii_case("book3"), "{free}");
         // ... and a sheet name is skipped too.

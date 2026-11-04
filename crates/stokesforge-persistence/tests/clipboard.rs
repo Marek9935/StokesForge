@@ -474,3 +474,46 @@ fn an_external_paste_of_a_workbook_and_its_graph_reads_the_pasted_workbook() {
     assert_eq!(series_column(roots[1]), pasted_column);
     assert_ne!(series_column(roots[2]), pasted_column);
 }
+
+/// #437: the hidden workbook embedded by an external paste skips the folder
+/// named `Book1` of the folder it is pasted into, instead of failing.
+#[test]
+fn an_external_graph_paste_skips_a_sibling_folder_for_its_hidden_workbook() {
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let book = source.add_workbook(root, Some("Data")).unwrap();
+    let sheet = source.tree().children(book).unwrap()[0];
+    let column = source
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[3.0, 4.0]))
+        .unwrap();
+    let mut panel = PanelSpec::default();
+    panel.series.push(SeriesSpec::new(column));
+    let graph = source
+        .add_graph(
+            root,
+            Some("Graph1"),
+            PlotSpec::default().with_panels(Panels::one(panel)),
+        )
+        .unwrap();
+    let copy = NodeCopy::capture(source.tree(), graph).unwrap();
+    let (_, copies) = decode_objects(&encode_objects("source", &[copy]).unwrap()).unwrap();
+
+    let mut target = Project::new("Target").unwrap();
+    let root = target.root();
+    let folder = target.add_folder(root, "F").unwrap();
+    target.add_folder(folder, "Book1").unwrap();
+    target
+        .insert_copy(folder, &copies[0].clone().into_external(), "Graph1")
+        .expect("paste must not fail on the sibling folder");
+    let hidden: Vec<_> = target
+        .tree()
+        .children(folder)
+        .unwrap()
+        .iter()
+        .filter_map(|id| target.tree().node(*id))
+        .filter(|node| matches!(node.kind(), NodeKind::Workbook { meta, .. } if meta.hidden))
+        .collect();
+    assert_eq!(hidden.len(), 1);
+    assert_eq!(hidden[0].name(), "Book2");
+}
