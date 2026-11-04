@@ -215,7 +215,8 @@ def build(src_path, theme="light", levels=14, **o):
         n = max(2, round(n * q))
         return stack(arr, box, fill, n, eps=.14, prec=10) if soft else stack(arr, box, fill, n, eps=.05, prec=100)
     ham = f'<g transform="{g["hamt"]}" fill="url(#inkg2)" stroke="url(#inkg2)" stroke-width="1.2" stroke-linejoin="round">{g["ham"]}</g>'
-    tile_rim = '' if P.get('ftile') else '<rect x=".5" y=".5" width="255" height="255" rx="55.5" fill="none" stroke="url(#tilerim)"/>\n'
+    icon = bool(P.get('icon') or P.get('sheet'))
+    tile_rim = '' if (P.get('ftile') or icon) else '<rect x=".5" y=".5" width="255" height="255" rx="55.5" fill="none" stroke="url(#tilerim)"/>\n'
     cast_layer = '' if not P['cast'] else f'<path d="{g["anvil"]}" transform="translate(0 11) {g["at"]}" fill="url(#tint)" opacity="{P["cast"]}" filter="url(#sh)"/>\n'
     A = bool(P.get('anim'))
     T = 'dur="4.2s" repeatCount="indefinite"'
@@ -226,6 +227,14 @@ def build(src_path, theme="light", levels=14, **o):
     an_dot = f'<animate attributeName="r" {T} keyTimes="0;.86;.91;1" values="5.6;5.6;7.6;5.6"/>' if A else ''
     fl_g = f'<polygon points="{g["ga"]}" fill="#d8ffe4" opacity="0"><animate attributeName="opacity" {T} keyTimes="0;.76;.77;.88;1" values="0;0;.38;0;0"/></polygon>' if A else ''
     fl_e = f'<polygon points="{g["ge"]}" fill="#fff0d0" opacity="0"><animate attributeName="opacity" {T} keyTimes="0;.85;.91;1" values="0;0;.34;0"/></polygon>' if A else ''
+    # Application icon (icon=1): no tile, no rim; tx, ty, scale place the drawing (default: the tile's).
+    # Sheet (sheet=1): the same drawing on a landscape sheet with a folded corner (the .stf file icon).
+    tx, ty, scl = P.get('tx', 14), P.get('ty', 6), P.get('scale', .9)
+    xf = f"translate({tx:g} {ty:g}) scale({scl:g})" if icon else "translate(14 6) scale(.9)"
+    back = '' if icon else '<rect width="256" height="256" rx="56" fill="url(#tile)"/>\n'
+    if P.get('sheet'):
+        back = ('<path d="M12 44H204L244 84V212H12Z" fill="#fff" stroke="#b4b9bd" stroke-width="2" stroke-linejoin="round"/>\n'
+                '<path d="M204 44V84H244Z" fill="#e4e7e9" stroke="#b4b9bd" stroke-width="2" stroke-linejoin="round"/>\n')
     def reg(x, y, w, h):
         return f'filterUnits="userSpaceOnUse" x="{x}" y="{y}" width="{w}" height="{h}" color-interpolation-filters="sRGB"'
     filters = f'''<filter id="sh" {reg(-20,130,296,126)}><feGaussianBlur stdDeviation="5.5"/></filter>
@@ -236,8 +245,7 @@ def build(src_path, theme="light", levels=14, **o):
 <filter id="sk" {reg(40,46,132,138)}><feGaussianBlur stdDeviation=".22"/></filter>'''
     defs = defs.replace('</defs>', filters + '<clipPath id="cu"><polygon points="' + g['ga'] + '"/><polygon points="' + g['ge'] + '"/></clipPath></defs>')
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img"><title>StokesForge</title>
-<rect width="256" height="256" rx="56" fill="url(#tile)"/>
-{tile_rim}<g transform="translate(14 6) scale(.9)">{defs}
+{back}{tile_rim}<g transform="{xf}">{defs}
 <path d="{g['anvil']}" transform="translate(0 8) {g['at']}" fill="#000" opacity="{t['shadow']}" filter="url(#sh)"/>
 {cast_layer}<g clip-path="url(#ac)">
 <g filter="url(#sg)">{S(body, a_box, 'url(#glass)', 24, True)}{S(rg, a_box, '#4cc074', 16, True)}{S(re_, a_box, '#f4913f', 16, True)}{S(fg, a_box, '#4cc074', 8, True)}{S(fe, a_box, '#f4913f', 8, True)}

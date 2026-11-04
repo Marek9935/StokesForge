@@ -52,6 +52,7 @@ jobs:
       - run: scripts/install-linux-test.sh
       - run: scripts/glibc-floor-test.sh
       - run: scripts/linux-packages-test.sh
+      - run: scripts/logo-dist-test.sh
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
       - run: scripts/workflow-test.sh
@@ -70,6 +71,21 @@ jobs:
       - run: scripts/nfpm-install.sh
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
       - run: scripts/linux-packages-test.sh --nfpm
+      # #388: the real generator on the real logo sources, as a release runs it
+      # (the opt-in is the one of the release jobs). It also locks the framing:
+      # the official sources pass, the version on a tile is refused.
+      - uses: Swatinem/rust-cache@v2
+      - name: Icons from the real logo
+        run: |
+          STOKESFORGE_DIST_LOGO=1 scripts/logo-dist.sh generate
+          test -s target/logo-dist/stokesforge.ico
+          test -s target/logo-dist/hicolor/256x256/apps/stokesforge.png
+          test -s target/logo-dist/hicolor/256x256/mimetypes/application-x-stokesforge-project.png
+          if target/release/stokesforge-logo-gen --icon assets/logo/00-final/stokesforge-logo-clair.svg \
+              --project assets/logo/00-final/stokesforge-fichier-stf-clair.svg --out target/logo-refused; then
+            echo "the tiled logo must be refused as an icon" >&2
+            exit 1
+          fi
 
   # #362: the user manual (manual/) must build. mdBook is the prebuilt binary
   # of the version pinned in scripts/manual-tools.env (no `cargo install`).
@@ -108,6 +124,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+      # #388: the code builds and is checked without the logo (it is not under
+      # the GPL and only official builds carry it).
+      - name: Without assets/logo
+        run: rm -rf assets/logo
       - run: rustup component add clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -122,6 +142,8 @@ jobs:
       # has no GPU, lavapipe (Mesa) provides software rendering.
       - name: Software Vulkan driver
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+      - name: Without assets/logo
+        run: rm -rf assets/logo
       - run: cargo test --workspace
 
   # Reproductions of anomalies (`#[ignore]` in robustness; none today): they
@@ -188,6 +210,9 @@ jobs:
     # Ubuntu 22.04 = glibc 2.35 (scripts/glibc-floor.env). The day GitHub
     # retires this runner, change the runner and the floor together.
     runs-on: ubuntu-22.04
+    # #388: an official build carries the logo (assets/logo/ is not under the GPL).
+    env:
+      STOKESFORGE_DIST_LOGO: "1"
     # #412: the compiler that built the archive, for the release notes.
     outputs:
       rustc: ${{ steps.rustc.outputs.rustc }}
@@ -237,9 +262,10 @@ jobs:
       - run: scripts/glibc-floor.sh dist/stokesforge-app
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
       # #390: RPM and DEB from the same assembled folder (install.sh left out).
-      # While the packages are not published (switch at 0 in
-      # scripts/linux-packages.env), a failure shows but does not block the
-      # release of the archive and of the Windows installer.
+      # The packages are published (switch at 1 in scripts/linux-packages.env,
+      # #388): a failure blocks the release. With the switch at 0, a failure
+      # would show but not block the release of the archive and of the Windows
+      # installer.
       - name: Publication switch
         id: packages
         run: |
@@ -437,6 +463,10 @@ jobs:
   dist-windows:
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest
+    # #388: an official build carries the logo; this is the only line to change
+    # to build the installer without it on every push.
+    env:
+      STOKESFORGE_DIST_LOGO: "1"
     # #412: the compiler that built the installer, for the release notes.
     outputs:
       rustc: ${{ steps.rustc.outputs.rustc }}

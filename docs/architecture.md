@@ -1,6 +1,6 @@
 # Architecture
 
-Twenty crates, one direction of dependency, and one optional feature
+Twenty-one crates, one direction of dependency, and one optional feature
 (`python`). This page gives the map; the detail of each tier is in
 its own page.
 
@@ -47,6 +47,8 @@ stokesforge-app-state (analysis, commands, core, import, importer, persistence, 
 stokesforge-app    (app-state, analysis, clipboard, commands, core, import, plot,
                render, render-egui, render-svg, session ; python optional) — the
                eframe shell: paints the state, turns keyboard and mouse into actions
+stokesforge-logo-gen (no stokesforge dependency; resvg, image) — release tool:
+               rasterises the icon SVG into PNG and .ico files (#388)
 ```
 
 `stokesforge-robustness` stands apart: it depends on the foundation and the Python bridge, and
@@ -78,6 +80,7 @@ guards.
 | `stokesforge-clipboard` | offers the same content to the system clipboard under several MIME types (the figure of a graph: SVG, PNG, PDF); Wayland, X11, Windows, macOS; independent of the rest of the workspace | [application](application/graph.md) |
 | `stokesforge-robustness` | 23 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
 | `stokesforge-arch-guard` | shared reading of the `Cargo.toml` files for the dependency guards (dev-dependency) | [tests](tests.md) |
+| `stokesforge-logo-gen` | release tool (#388): checks the framing of the two icon SVG (transparent margin, centred on the visual weight across, no tile, no `feDisplacementMap`/`feImage`) and writes the PNG trees (16 to 512 px) and the two `.ico`; reproducible bytes; depends on no workspace crate, never linked into the application | [application](application/shell-and-code.md) |
 
 ## The three separation lines
 
@@ -153,6 +156,7 @@ or in plain text), detailed in [`rendering.md`](rendering.md#typst-r8).
 | `stokesforge-cli` | `stokesforge-cli` | `import`: instruments → `.stf`, new project without a session; `recipes`; `run` (python): script through a session without a window |
 | `stokesforge-selftest` | `stokesforge-script` | replay the end criterion of the foundation from a packaged distribution |
 | `stokesforge-pyhello` | `stokesforge-python` | prove the isolation of the packaged Python stack |
+| `stokesforge-logo-gen` | `stokesforge-logo-gen` | `--icon --project --out`: the icon files of a release (#388), run by `scripts/logo-dist.sh` |
 | `stokesforge-alloc-probe`, `stokesforge-stack-probe` | `stokesforge-robustness` | two out-of-process probes (allocation failure, stack overflow) |
 
 The `scripts/*.sh` at the root assemble and rerun the distributions
@@ -185,9 +189,25 @@ graphics libraries are loaded at run time, so the dependencies are declared by
 hand (sonames for the RPM, packages for the DEB). A `preinst` refuses an
 installation over a `install.sh --system` one (`/opt/stokesforge/current`).
 `PUBLISH_LINUX_PACKAGES` in `scripts/linux-packages.env` is the single publication
-switch: at 0 (until the icon, #388) the packages are built and tested at every
-tag but neither uploaded nor linked to the release; the manual and `CHANGELOG.md`
-change in the commit that sets it to 1. Tests: `docs/tests.md`.
+switch: at 1 since the icon (#388) the packages are uploaded and linked to the
+release, and a failure of their jobs blocks it (at 0 they would be built and
+tested at every tag but neither uploaded nor linked, and a failure would not
+block). Tests: `docs/tests.md`.
+
+**The logo (#388, #444).** Only official builds carry it. `scripts/logo-dist.sh`
+(opt-in `STOKESFORGE_DIST_LOGO=1`, set on `release-linux` and `dist-windows`)
+runs `stokesforge-logo-gen` on `assets/logo/00-final/stokesforge-icone-clair.svg`
+and `stokesforge-fichier-stf-clair.svg`, then installs the result with the notice
+`licenses/logo/LICENSE`: on Linux `share/icons/hicolor/<size>/{apps,mimetypes}/`
+and both `scalable/` SVG (read by `install.sh` and the packages), on Windows the
+256 px PNG and `stokesforge-project.ico` (the icon of the `.stf` files, set by
+`stokesforge.iss`); the application `.ico` goes into `stokesforge-app.exe` through
+`STOKESFORGE_EXE_ICON` read by `crates/stokesforge-app/build.rs` (`winresource`).
+At run time `app_logo.rs` reads `<exe dir>/share/icons/hicolor/256x256/apps/stokesforge.png`
+(window icon, About logo); with no file the application runs unchanged. No
+generated raster is committed, nothing in `crates/` names `assets/logo/`
+(`stokesforge-arch-guard/tests/logo_boundary.rs`) and the CI jobs that build and
+test delete the folder first. Licence: [`license-and-extensions.md`](license-and-extensions.md).
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) is the counterpart of `app-dist.sh`: it

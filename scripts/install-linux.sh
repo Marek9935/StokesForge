@@ -163,7 +163,11 @@ has_icon() { # an icon of the application inside the installed version folder $1
 
 install_icons() { # install_icons <version folder>
     local f rel
-    for f in "$1"/share/icons/hicolor/*/apps/stokesforge.png "$1"/share/icons/hicolor/*/apps/stokesforge.svg; do
+    # The application's icon (apps/) and the one of the .stf type (mimetypes/,
+    # named after the MIME type with its slash turned into a dash, #388).
+    for f in "$1"/share/icons/hicolor/*/apps/stokesforge.png "$1"/share/icons/hicolor/*/apps/stokesforge.svg \
+        "$1"/share/icons/hicolor/*/mimetypes/application-x-stokesforge-project.png \
+        "$1"/share/icons/hicolor/*/mimetypes/application-x-stokesforge-project.svg; do
         [ -f "$f" ] || continue
         rel="${f#"$1"/share/icons/}"
         mkdir -p "$SHARE/icons/$(dirname "$rel")"
@@ -305,7 +309,9 @@ do_uninstall_all() {
     done
     rm -f "$SHARE/applications"/stokesforge.desktop "$SHARE/applications"/stokesforge-*.desktop
     rm -f "$SHARE/mime/packages/stokesforge.xml"
-    rm -f "$SHARE"/icons/hicolor/*/apps/stokesforge.png "$SHARE"/icons/hicolor/*/apps/stokesforge.svg
+    rm -f "$SHARE"/icons/hicolor/*/apps/stokesforge.png "$SHARE"/icons/hicolor/*/apps/stokesforge.svg \
+        "$SHARE"/icons/hicolor/*/mimetypes/application-x-stokesforge-project.png \
+        "$SHARE"/icons/hicolor/*/mimetypes/application-x-stokesforge-project.svg
     refresh_caches
     say "uninstalled; projects and ~/.config/stokesforge are untouched"
 }

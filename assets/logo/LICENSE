@@ -9,11 +9,41 @@ These files are not covered by the GNU General Public License, which applies to
 the StokesForge code elsewhere in this repository. No license is granted on
 them.
 
-You may not modify, adapt, copy, redistribute or otherwise use these files, or
-create a work derived from them, without the prior written permission of the
-author.
+Except for the permission below, you may not modify, adapt, copy, redistribute
+or otherwise use these files, or create a work derived from them, without the
+prior written permission of the author.
+
+Permission for the official builds (DRAFT: this text is to be reviewed by a
+lawyer before the next release tag)
+
+The author permits, free of charge and without asking, the use of the logo
+as part of the StokesForge software **when that software is unmodified**:
+
+1. in the official packages published by the author (archives, installers, RPM
+   and DEB packages): as the icon of the application, of its window, of its
+   executable and of its project files, and in its About window;
+2. in a build that anyone makes from the unmodified source of an official
+   release, with the logo files left as published.
+
+Nothing else is permitted. In particular:
+
+- the logo may not be modified (cropped, recoloured, redrawn, animated, or
+  used as the basis of another drawing);
+- the logo may not be used outside this software: not in another project, not
+  in an extension or plug-in for StokesForge, not in a derived product, not as
+  the mark of a service or of a company;
+- a modified version of StokesForge (its code modified in any way) removes the
+  logo from its builds and packages: the permission above does not extend to
+  it. The code builds and runs without this directory, and it is not needed to
+  use or modify the code.
+
+The name StokesForge and the logo are excluded from the licence of the code:
+under section 7(e) of the GNU GPL version 3, the GPL grants no right to use
+them as trade names, trademarks or service marks. This permission grants no
+trademark right either.
 
 The code of StokesForge stays under GPL-3.0-or-later (see LICENSE at the root of
-the repository); this notice takes nothing from it. A distribution of the code,
-modified or not, leaves this directory out unless the author has given written
-permission.
+the repository); this notice takes nothing from it. Apart from the permission
+above, a distribution of the code, modified or not, leaves this directory out
+unless the author has given written permission. The official packages carry this
+notice as licenses/logo/LICENSE.

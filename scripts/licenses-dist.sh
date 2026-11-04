@@ -37,6 +37,13 @@ if [[ "$PYTHON_VERSION" != "$LICENSE_PYTHON_VERSION" ||
     exit 1
 fi
 
+# The logo is not under the GPL (assets/logo/LICENSE, #444): a package that
+# carries icons carries their notice, written by scripts/logo-dist.sh (#388).
+if [[ -e "$PACKAGE_DIR/share/icons" && ! -s "$PACKAGE_DIR/licenses/logo/LICENSE" ]]; then
+    echo "[licences] ERROR: share/icons without licenses/logo/LICENSE in $PACKAGE_DIR" >&2
+    exit 1
+fi
+
 if [[ "$PLATFORM" == windows ]]; then
     # Layout lib/python/{Lib,DLLs} (scripts/app-dist-windows.sh); CPython's
     # LICENSE.txt is at the prefix root, copied into lib/python.

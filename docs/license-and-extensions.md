@@ -16,9 +16,29 @@ corresponding source code.
 Everything in `assets/logo/` (the logo in all its versions, drafts, boards,
 tokens, generator scripts) is **excluded from the GPL** and under all rights
 reserved (#444, notice in [`assets/logo/LICENSE`](../assets/logo/LICENSE)): no
-use or modification without the author's written permission. No build or package
-uses this directory today. Deriving the application icon from it, which
-the binaries would then embed, is decided with #388.
+use or modification without the author's written permission, except for the
+permission below.
+
+**Official builds only (#388).** The application icon, the icon of the `.stf`
+files and the logo of the About window are derived from the logo, which makes
+the official packages carry it. The permission written in the notice: free use
+as part of the **unmodified** software (official packages, and builds of the
+unmodified official source); modification forbidden; use outside this software
+forbidden (another project, an extension); a modified version removes it;
+name and logo excluded from the GPL under section 7(e) of the GPLv3. **The
+wording is a draft to be reviewed by a lawyer before the next tag.** The root
+`LICENSE` file stays the unmodified GPL text.
+
+The code does not need the logo: nothing in `crates/` names `assets/logo/`
+(guard `stokesforge-arch-guard/tests/logo_boundary.rs`), `cargo build` and
+`cargo test` read nothing there, and the CI jobs `clippy` and `test` delete
+the folder first. Only `scripts/logo-dist.sh` reads it, and only when
+`STOKESFORGE_DIST_LOGO=1` (the jobs `release-linux` and `dist-windows`). It
+generates the PNG and `.ico` files at each release (crate `stokesforge-logo-gen`;
+nothing generated is committed), installs them with the notice as
+`licenses/logo/LICENSE`, and `scripts/licenses-dist.sh` refuses a package with
+`share/icons` and no such notice. Trademark filing (INPI) is the author's own
+step, outside the repository.
 
 ## Additional permission: withdrawn, can be requested
 
@@ -47,7 +67,7 @@ permission goes through a lawyer.
 
 ## Cargo metadata
 
-The workspace declares `GPL-3.0-or-later`; the twenty crates inherit
+The workspace declares `GPL-3.0-or-later`; the twenty-one crates inherit
 `license`. The text is `LICENSE`.
 
 The Apache-2.0 licenses of `vendor/winit` and MIT of
@@ -116,6 +136,8 @@ Each distribution contains:
   in the runtime;
 - `licenses/scipy/LICENSE.txt`, the text of the scipy wheel, which includes the
   licenses of its native components (OpenBLAS, libgfortran, libquadmath…).
+- `licenses/logo/LICENSE`, the notice of the logo, only in an official build
+  that carries it (#388, see above).
 
 The native notices of Python come from the complete archive matching the
 lock, are versioned and their update is described in
