@@ -139,6 +139,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::LayerBackground => tr!("history-plot-layer-background"),
             PlotEditKind::MoveLayer => tr!("history-plot-move-layer"),
             PlotEditKind::ResizeLayer => tr!("history-plot-resize-layer"),
+            PlotEditKind::ResizeFigure => tr!("history-plot-resize-figure"),
             PlotEditKind::AlignLayers => tr!("history-plot-align-layers"),
             PlotEditKind::MatchLayerSize => tr!("history-plot-match-layer-size"),
             PlotEditKind::DistributeLayers => tr!("history-plot-distribute-layers"),

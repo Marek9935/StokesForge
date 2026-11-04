@@ -15449,6 +15449,254 @@ fn moving_or_resizing_a_layer_is_one_undoable_step_in_free() {
     assert_eq!(state.placement_step_revision(), Some(state.revision()));
 }
 
+/// #426: `SetFreeLayout` writes frames and page as ONE undo step; the kind
+/// follows what changed (page size, frame size, position only); Undo gives
+/// back the page and every frame; unchanged or grid = nothing sent.
+/// Witness: two steps, or the page left out of the undo.
+#[test]
+fn setting_the_free_layout_is_one_undoable_step_with_the_page() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::{FreeFrame, FreePage};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let frames_of = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        (
+            spec.panels[0].sanitized_free_frame(),
+            spec.panels[1].sanitized_free_frame(),
+        )
+    };
+    let page_of = |state: &AppState| graph_spec(state, graph).free_page;
+    let label = |state: &AppState| state.snapshot().history.undo_label.clone();
+    let page = FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 900.0,
+        height: 500.0,
+    };
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, FreeFrame::FALLBACK)],
+        page: Some(page),
+    });
+    assert_eq!(state.snapshot().revision, revision, "no step on the grid");
+
+    go_free(&mut state, graph);
+    let (a, b) = frames_of(&state);
+    assert_eq!(page_of(&state), None);
+
+    // A position-only change with the page frozen to the figure as drawn is a
+    // move; the page is stored.
+    let drawn = stokesforge_app_state::frame_sizes::figure_layout(&graph_spec(&state, graph))
+        .and_then(|layout| layout.free_page_rect())
+        .expect("free page");
+    let moved = FreeFrame {
+        left: a.left + 5.0,
+        ..a
+    };
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, moved)],
+        page: Some(drawn),
+    });
+    assert_eq!(frames_of(&state).0, moved);
+    assert_eq!(page_of(&state), Some(drawn));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(frames_of(&state).0, a, "one Undo gives the frame back");
+    assert_eq!(page_of(&state), None, "and the page");
+    state.dispatch(Action::Redo);
+
+    // Page size changed: ResizeFigure, both frames and the page in one step.
+    let (a, b2) = frames_of(&state);
+    assert_eq!(b2, b);
+    let (na, nb) = (
+        FreeFrame {
+            width: a.width / 2.0,
+            ..a
+        },
+        FreeFrame {
+            left: b.left / 2.0,
+            ..b
+        },
+    );
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page: Some(page),
+    });
+    assert_eq!(frames_of(&state), (na, nb));
+    assert_eq!(page_of(&state), Some(page));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ResizeFigure))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(frames_of(&state), (a, b));
+    assert_eq!(page_of(&state), Some(drawn));
+    state.dispatch(Action::Redo);
+
+    // Nothing changes: nothing is sent. A missing layer too.
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page: Some(page),
+    });
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(9, na)],
+        page: None,
+    });
+    assert_eq!(state.snapshot().revision, revision);
+
+    // A frame size change under the same page: ResizeLayer.
+    let wider = FreeFrame {
+        width: na.width + 20.0,
+        ..na
+    };
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, wider)],
+        page: Some(page),
+    });
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ResizeLayer))
+    );
+}
+
+/// #426: dragging a line between touching graphs writes the frames
+/// of every graph on it in one `SetFreeLayout`: one Undo gives all of them
+/// back. Witness: one command per frame.
+#[test]
+fn a_four_frame_layout_edit_is_undone_in_one_step() {
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreeFrame;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    for _ in 0..3 {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+    }
+    go_free(&mut state, graph);
+    let frames = |state: &AppState| -> Vec<FreeFrame> {
+        let spec = graph_spec(state, graph);
+        (0..4)
+            .map(|i| spec.panels[i].sanitized_free_frame())
+            .collect()
+    };
+    let before = frames(&state);
+    assert_eq!(before.len(), 4);
+    let drawn = stokesforge_app_state::frame_sizes::figure_layout(&graph_spec(&state, graph))
+        .and_then(|layout| layout.free_page_rect())
+        .expect("free page");
+    let moved: Vec<(usize, FreeFrame)> = before
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            (
+                i,
+                FreeFrame {
+                    left: f.left + 3.0,
+                    ..*f
+                },
+            )
+        })
+        .collect();
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: moved.clone(),
+        page: Some(drawn),
+    });
+    assert_eq!(
+        frames(&state),
+        moved.iter().map(|(_, f)| *f).collect::<Vec<_>>()
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(frames(&state), before, "one Undo gives all four back");
+    assert!(state.snapshot().revision > revision);
+}
+
+/// #426: typing a figure size in Graph Properties on a graph with a page
+/// writes the fitted page and scales the boxes, in the same draft; a graph
+/// without a page stays without one.
+#[test]
+fn fitting_the_total_of_a_free_graph_with_a_page_writes_the_page() {
+    use stokesforge_app_state::frame_sizes::set_total_in_draft;
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreePage;
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    go_free(&mut state, graph);
+    let mut without = graph_spec(&state, graph);
+    set_total_in_draft(&mut without, SizeAxis::Width, 700.0, None).expect("fit");
+    assert_eq!(without.free_page, None);
+
+    let mut spec = graph_spec(&state, graph);
+    spec.free_page = Some(FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 1200.0,
+        height: 600.0,
+    });
+    let before = spec.panels[1].sanitized_free_frame();
+    set_total_in_draft(&mut spec, SizeAxis::Width, 600.0, None).expect("fit");
+    let page = spec.free_page.expect("page");
+    assert_eq!((page.width, page.height), (600.0, 600.0));
+    assert!(spec.panels[1].sanitized_free_frame().left < before.left);
+}
+
+/// #426: leaving Free placement clears the page and one Undo brings it back.
+/// Witness: the clear removed from `set_grid_placement` (the page survives on
+/// the grid), or the page left out of the undo.
+#[test]
+fn leaving_free_clears_the_page_and_undo_restores_it() {
+    use stokesforge_plot::FreePage;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    go_free(&mut state, graph);
+    let page = FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 640.0,
+        height: 480.0,
+    };
+    let mut spec = graph_spec(&state, graph);
+    spec.free_page = Some(page);
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    assert_eq!(graph_spec(&state, graph).free_page, Some(page));
+
+    state.dispatch(Action::SetLayerPlacement { graph, free: false });
+    assert_eq!(graph_spec(&state, graph).free_page, None);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph).free_page, Some(page));
+}
+
 /// #398 (batch 3a): Align Bottom on a free graph is one undo step
 /// `AlignLayers`; with nothing else selected every layer follows the active
 /// one, and one Undo gives every frame back. On the grid nothing is sent.

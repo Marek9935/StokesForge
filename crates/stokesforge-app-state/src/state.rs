@@ -63,8 +63,8 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, OverlaySpec, PanelSpec, Panels, PlotSpec,
-    PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec, PanelSpec, Panels,
+    PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -850,6 +850,23 @@ pub enum Action {
         panel: usize,
         /// The new frame; its `stack` is ignored.
         frame: FreeFrame,
+    },
+    /// Sets several frames of a free graph and its page in one go: what a
+    /// gesture of the Page Layout Mode commits (#426). Each `(base layer,
+    /// frame)` is stored as given (brought into bounds, stacking key kept);
+    /// `page`, when `Some`, becomes the page of the graph. One undo step:
+    /// [`PlotEditKind::ResizeFigure`] when the page size changes (against the
+    /// stored page, or the figure as drawn when there is none),
+    /// [`PlotEditKind::ResizeLayer`] when a frame size changes, else
+    /// [`PlotEditKind::MoveLayer`]. Nothing sent on the grid, for a missing
+    /// layer or when nothing changes.
+    SetFreeLayout {
+        /// Target graph.
+        graph: NodeId,
+        /// New frame of each moved or resized layer, by base layer.
+        frames: Vec<(usize, FreeFrame)>,
+        /// The new page, if the gesture holds one.
+        page: Option<FreePage>,
     },
     /// Puts the cell of layer `panel` in front of the others in free placement
     /// (#398); an overlay layer acts on its base. Layer numbers are kept. One
@@ -5458,6 +5475,11 @@ impl AppState {
                 panel,
                 frame,
             } => self.set_free_frame(graph, panel, frame),
+            Action::SetFreeLayout {
+                graph,
+                frames,
+                page,
+            } => self.set_free_layout(graph, &frames, page),
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
                     self.fail(tr!(
@@ -10995,6 +11017,68 @@ impl AppState {
             PlotEditKind::MoveLayer
         } else {
             PlotEditKind::ResizeLayer
+        };
+        self.execute(Command::EditPlotSpec { graph, spec, kind });
+    }
+
+    /// [`Action::SetFreeLayout`]: every frame and the page applied to one spec
+    /// and committed as one step.
+    fn set_free_layout(
+        &mut self,
+        graph: NodeId,
+        frames: &[(usize, FreeFrame)],
+        page: Option<FreePage>,
+    ) {
+        use stokesforge_core::compose::{set_free_frame, FreeField};
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        if before.layer_placement != stokesforge_plot::LayerPlacement::Free {
+            return;
+        }
+        let mut spec = before.clone();
+        let mut frame_resized = false;
+        for &(base, frame) in frames {
+            let Some(&known) = spec.cell_bases().get(base) else {
+                return;
+            };
+            let old = spec.panels[known].sanitized_free_frame();
+            for (field, value) in [
+                (FreeField::Left, frame.left),
+                (FreeField::Top, frame.top),
+                (FreeField::Width, frame.width),
+                (FreeField::Height, frame.height),
+            ] {
+                if !set_free_frame(&mut spec, base, field, value) {
+                    return;
+                }
+            }
+            let new = spec.panels[known].sanitized_free_frame();
+            frame_resized |= (new.width, new.height) != (old.width, old.height);
+        }
+        let mut page_resized = false;
+        if let Some(page) = page {
+            let Some(page) = page.sanitized() else {
+                return;
+            };
+            // Without a stored page, the page is the figure as drawn.
+            let old = before.sanitized_free_page().or_else(|| {
+                crate::frame_sizes::figure_layout(&before)
+                    .and_then(|layout| layout.free_page_rect())
+            });
+            page_resized =
+                old.is_none_or(|old| (old.width, old.height) != (page.width, page.height));
+            spec.free_page = Some(page);
+        }
+        if spec == before {
+            return;
+        }
+        let kind = if page_resized {
+            PlotEditKind::ResizeFigure
+        } else if frame_resized {
+            PlotEditKind::ResizeLayer
+        } else {
+            PlotEditKind::MoveLayer
         };
         self.execute(Command::EditPlotSpec { graph, spec, kind });
     }

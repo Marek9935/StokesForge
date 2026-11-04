@@ -239,6 +239,7 @@ same command**, never in a separate step and never at load: any
 (or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
 legacy file as it was. Dragging the left or top edge of the figure (#405) sends
 `Action::SetFreeFrame` (#398, a drag of a layer or of one of its edges) = one `EditPlotSpec`, `PlotEditKind::MoveLayer` ("Move Layer") when the size is unchanged, `ResizeLayer` ("Resize Layer") otherwise; nothing sent on the grid, for a missing layer or an unchanged frame.
+`Action::SetFreeLayout` (#426) = several frames of a free graph and its page in ONE `EditPlotSpec`: `PlotEditKind::ResizeFigure` ("Resize Figure") when the page size changes (against the stored page, or the figure as drawn when there is none), `ResizeLayer` when a frame size changes, else `MoveLayer`; nothing sent on the grid, for a missing layer or when nothing changes; one Undo gives back every frame and the page.
 `Action::SetFigureOffsets` = one `EditPlotSpec` with `PlotEditKind::PlaceFigure`
 ("Position Plot Area"), legacy graphs fixed in the same command. "Figure size",
 Left and Top typed in Graph Properties are part of the window's draft and macro.

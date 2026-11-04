@@ -11,7 +11,9 @@
 
 use crate::hit::CELL_EDGE_MAX_TOLERANCE;
 use crate::pipeline::{FigureLayout, FreeCellRect};
-use stokesforge_plot::{FreeFrame, LayerPlacement, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
+use stokesforge_plot::{
+    FreeFrame, FreePage, LayerPlacement, PlotSpec, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
+};
 
 /// How close, **in screen points**, an edge of a dragged frame must come to an
 /// edge of another layer to snap to it. Converted into points by the caller
@@ -285,6 +287,94 @@ fn guides_of(frame: &FreeFrame, handle: &FreeHandle, others: &[FreeFrame]) -> Ve
         }
     }
     guides
+}
+
+// Page Layout Mode (#426): graph boxes on a page, in stored coordinates.
+
+/// A graph box of the Page Layout Mode: the plot area and its axis and title
+/// bands (the outer rectangle of a cell), in stored page coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GraphBox {
+    /// Base layer of the cell in [`PlotSpec::panels`].
+    pub base: usize,
+    /// The outer rectangle: the exact stored frame expanded by the gutters.
+    pub outer: FreePage,
+    /// Bands between the outer rectangle and the frame: `(left, top, right,
+    /// bottom)`, in points.
+    pub gutters: (f64, f64, f64, f64),
+    /// The stored frame (stack included).
+    pub frame: FreeFrame,
+}
+
+impl GraphBox {
+    /// The frame that gives this box the outer rectangle `outer`: the
+    /// gutters are taken off, the size stays in `[MIN_FRAME_SIZE,
+    /// MAX_FRAME_SIZE]`, the stacking key is kept.
+    pub fn frame_for(&self, outer: FreePage) -> FreeFrame {
+        let (l, t, r, b) = self.gutters;
+        FreeFrame {
+            left: outer.left + l,
+            top: outer.top + t,
+            width: (outer.width - l - r).clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE),
+            height: (outer.height - t - b).clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE),
+            stack: self.frame.stack,
+        }
+    }
+}
+
+/// The graph boxes of a free layout, back to front (the order of
+/// [`FigureLayout::free_cells`]). Empty on the grid. The frame is the exact
+/// stored one; the gutters are measured from the layout in pixels.
+pub fn graph_boxes(spec: &PlotSpec, layout: &FigureLayout) -> Vec<GraphBox> {
+    if layout.placement != LayerPlacement::Free {
+        return Vec::new();
+    }
+    layout
+        .free_cells
+        .iter()
+        .filter_map(|cell| {
+            let frame = spec.panels.get(cell.base)?.sanitized_free_frame();
+            let (ox, oy, ow, oh) = cell.outer;
+            let (fx, fy, fw, fh) = cell.frame;
+            let left = f64::from(fx) - f64::from(ox);
+            let top = f64::from(fy) - f64::from(oy);
+            let right = f64::from(ox) + f64::from(ow) - (f64::from(fx) + f64::from(fw));
+            let bottom = f64::from(oy) + f64::from(oh) - (f64::from(fy) + f64::from(fh));
+            let gutters = (left.max(0.0), top.max(0.0), right.max(0.0), bottom.max(0.0));
+            Some(GraphBox {
+                base: cell.base,
+                outer: FreePage {
+                    left: frame.left - gutters.0,
+                    top: frame.top - gutters.1,
+                    width: frame.width + gutters.0 + gutters.2,
+                    height: frame.height + gutters.1 + gutters.3,
+                },
+                gutters,
+                frame,
+            })
+        })
+        .collect()
+}
+
+/// Every box mapped affinely from the page `from` to the page `to`: its outer
+/// rectangle follows, the frame is [`GraphBox::frame_for`] of it. `(base,
+/// frame)` per box, in the order given.
+pub fn scaled_to_page(boxes: &[GraphBox], from: FreePage, to: FreePage) -> Vec<(usize, FreeFrame)> {
+    let ratio = |new: f64, old: f64| if old > 0.0 { new / old } else { 1.0 };
+    let (sx, sy) = (ratio(to.width, from.width), ratio(to.height, from.height));
+    boxes
+        .iter()
+        .map(|graph| {
+            let o = graph.outer;
+            let mapped = FreePage {
+                left: to.left + (o.left - from.left) * sx,
+                top: to.top + (o.top - from.top) * sy,
+                width: o.width * sx,
+                height: o.height * sy,
+            };
+            (graph.base, graph.frame_for(mapped))
+        })
+        .collect()
 }
 
 #[cfg(test)]

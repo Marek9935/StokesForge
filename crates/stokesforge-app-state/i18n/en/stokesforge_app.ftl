@@ -1406,6 +1406,7 @@ history-plot-send-layer-to-back = Send Layer to Back
 history-plot-layer-background = Change Layer Background
 history-plot-move-layer = Move Layer
 history-plot-resize-layer = Resize Layer
+history-plot-resize-figure = Resize Figure
 history-plot-align-layers = Align Layers
 history-plot-match-layer-size = Match Layer Size
 history-plot-distribute-layers = Distribute Layers

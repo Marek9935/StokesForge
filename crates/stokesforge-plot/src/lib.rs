@@ -105,7 +105,7 @@ pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{LegendPosition, LegendSpec};
 pub use length_unit::LengthUnit;
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
-pub use panel::{FreeFrame, OverlaySpec, PanelSpec, SeriesSlot};
+pub use panel::{FreeFrame, FreePage, OverlaySpec, PanelSpec, SeriesSlot};
 pub use raw::RawVariant;
 pub use saved::{ColorUsage, SavedColors, SavedGradient, MAX_SAVED_COLORS};
 pub use series::{

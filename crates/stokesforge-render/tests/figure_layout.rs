@@ -1229,3 +1229,81 @@ fn fitting_the_height_of_a_free_graph_counts_the_title_band() {
 fn a_legacy_graph_has_no_figure_to_fit() {
     assert!(fit(&grid("", 1, 1), SizeAxis::Width, 500.0).is_none());
 }
+
+// ---- Page of a Free graph (#426) ----
+
+fn with_page(mut spec: PlotSpec, page: (f64, f64, f64, f64)) -> PlotSpec {
+    spec.free_page = Some(stokesforge_plot::FreePage {
+        left: page.0,
+        top: page.1,
+        width: page.2,
+        height: page.3,
+    });
+    spec
+}
+
+/// A page larger than the boxes is the figure; boxes inside it change
+/// nothing. Witness: the page ignored (the figure stays the bounding box).
+#[test]
+fn a_page_is_the_minimum_figure() {
+    let spec = with_page(two_cells(), (0.0, 0.0, 1000.0, 500.0));
+    let layout = layout_of(&spec);
+    assert_eq!(layout.size, (1000, 500));
+    let page = layout.free_page_rect().expect("free");
+    assert_eq!(
+        (page.left, page.top, page.width, page.height),
+        (0.0, 0.0, 1000.0, 500.0)
+    );
+    // Without a page: today's bounding box.
+    assert_eq!(layout_of(&two_cells()).size, (788, 276));
+    assert_eq!(
+        layout_of(&two_cells()).free_page_rect().map(|p| p.width),
+        Some(788.0)
+    );
+    assert_eq!(layout_of(&grid("", 1, 1)).free_page_rect(), None);
+}
+
+/// Content leaving the page grows the figure past it.
+#[test]
+fn content_outside_the_page_grows_the_figure() {
+    // Boxes span x 24..812, y 38..314; the page covers only the left part.
+    let spec = with_page(two_cells(), (24.0, 38.0, 400.0, 100.0));
+    assert_eq!(layout_of(&spec).size, (788, 276));
+}
+
+/// The title band comes on top of the page height.
+#[test]
+fn the_page_excludes_the_title_band() {
+    let mut spec = with_page(two_cells(), (0.0, 0.0, 1000.0, 500.0));
+    spec.title = "T".to_string();
+    let layout = layout_of(&spec);
+    assert!(layout.title_band > 0);
+    assert_eq!(layout.size.1, 500 + layout.title_band);
+    let page = layout.free_page_rect().expect("free");
+    assert_eq!((page.width, page.height), (1000.0, 500.0));
+}
+
+/// Fitting a Free graph with a page: the page takes the target, the boxes
+/// scale with it, the figure lands on the target.
+#[test]
+fn fitting_a_page_scales_the_boxes_with_the_page() {
+    let spec = with_page(two_cells(), (0.0, 0.0, 1000.0, 500.0));
+    let (out, result) = fitted(&spec, SizeAxis::Width, 500.0);
+    assert!(!result.raised);
+    let page = out.free_page.expect("page written");
+    assert_eq!((page.width, page.height, page.left), (500.0, 500.0, 0.0));
+    assert_eq!(result.page, Some(page));
+    assert_eq!(layout_of(&out).size, (500, 500));
+    // The right box (outer 500..788 + 24 = stored 524..812) halves with the page.
+    let frame = out.panels[1].sanitized_free_frame();
+    assert!(frame.left < 600.0 && frame.width < 200.0);
+    // Height with a title: target includes the band.
+    let mut titled = spec.clone();
+    titled.title = "T".to_string();
+    let band = f64::from(layout_of(&titled).title_band);
+    let (out, _) = fitted(&titled, SizeAxis::Height, 400.0);
+    assert_eq!(out.free_page.expect("page").height, 400.0 - band);
+    assert_eq!(f64::from(layout_of(&out).size.1), 400.0);
+    // A graph without a page: no page written.
+    assert_eq!(fitted(&two_cells(), SizeAxis::Width, 900.0).1.page, None);
+}

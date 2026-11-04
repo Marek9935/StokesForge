@@ -26,6 +26,10 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A free graph can store a page (#426), the minimum size of its figure; it is
+  an optional `.stf` field (an older version that saves the file again drops it
+  without a message). Nothing is visible yet.
+
 - A new graph plotted from a workbook is named after it (#434): "Book1 plot",
   then "Book1 plot 2"… (numbered after the highest existing number, a deleted
   graph leaves a gap) instead of Graph1, Graph2. `pyst.plot` without `name`

@@ -122,7 +122,8 @@ pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use free_gesture::{
-    framed_by, free_handle_at, magnetized, FreeHandle, Guide, Magnetized, MAGNET_THRESHOLD_POINTS,
+    framed_by, free_handle_at, graph_boxes, magnetized, scaled_to_page, FreeHandle, GraphBox,
+    Guide, Magnetized, MAGNET_THRESHOLD_POINTS,
 };
 pub use hit::{
     cell_edge_at, component_at, component_at_with_tolerance, figure_edge_at, AxisSide, CellEdge,
