@@ -12,6 +12,8 @@
 //!
 //! This battery checks that they say the same thing. Since #105, the scope is
 //! the parent folder, and ambiguous short paths are refused.
+//! The automatic name generator (`Project::next_window_name`) follows the same
+//! scope (#437).
 
 use stokesforge_core::{CoreError, Node, NodeId, NodeKind, Project, Tree, WindowMeta};
 
@@ -202,4 +204,55 @@ fn b11_the_loader_rejects_what_the_mutation_api_rejects() {
          of invariants must coincide, otherwise a file opens a project that no \
          command can reproduce or repair"
     );
+}
+
+/// #437: the automatic name generator applies the same scope as
+/// `check_name_available`: a sibling folder named like the first candidate
+/// (`Book1`, `Graph1`…) is skipped, never refused as a duplicate.
+#[test]
+fn the_automatic_name_generator_skips_a_sibling_folder_of_the_same_name() {
+    for prefix in ["Book", "MBook", "Note", "Graph"] {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let folder_name = format!("{prefix}1");
+        let folder = project.add_folder(root, &folder_name).unwrap();
+        let id = match prefix {
+            "Book" => project.add_workbook(root, None),
+            "MBook" => project.add_matrix(root, None),
+            "Note" => project.add_note(root, None, ""),
+            _ => project.add_graph(root, None, Default::default()),
+        }
+        .unwrap_or_else(|err| panic!("{prefix}: {err:?}"));
+        let name = project.tree().node(id).unwrap().name().to_string();
+        assert!(!name.eq_ignore_ascii_case(&folder_name), "{prefix}: {name}");
+        // The path resolves back to the new window, not to the folder.
+        let path = project.path_of(id).unwrap();
+        assert_eq!(project.resolve_path(&path).unwrap(), id, "{prefix}: {path}");
+        assert_ne!(id, folder);
+        // The tree is accepted by the loading rules.
+        let nodes: Vec<Node> = project.tree().iter().map(|(_, n)| n.clone()).collect();
+        Tree::from_nodes(project.root(), nodes).unwrap_or_else(|err| panic!("{prefix}: {err:?}"));
+    }
+}
+
+/// #437: a folder of another parent does not shift the generated number.
+#[test]
+fn a_folder_of_another_parent_does_not_shift_the_generated_number() {
+    for prefix in ["Book", "MBook", "Note", "Graph"] {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let other = project.add_folder(root, "Other").unwrap();
+        project.add_folder(other, &format!("{prefix}1")).unwrap();
+        let id = match prefix {
+            "Book" => project.add_workbook(root, None),
+            "MBook" => project.add_matrix(root, None),
+            "Note" => project.add_note(root, None, ""),
+            _ => project.add_graph(root, None, Default::default()),
+        }
+        .unwrap();
+        assert_eq!(
+            project.tree().node(id).unwrap().name(),
+            format!("{prefix}1")
+        );
+    }
 }
