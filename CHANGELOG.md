@@ -237,6 +237,18 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Formulas (#433): `0/0`, infinity minus infinity and zero times infinity are
+  a failed calculation (`---`), like `ln(-1)`; `1/0` stays infinity. An infinite
+  bound of a range means "to the end" (`max(B, 330, 1/0)`), and `integral(B, 2, 2)`
+  is 0 when the column has a point. A sheet that holds only constants or
+  formulas of other sheets has one row. A formula column copied alone into its
+  own sheet (`pyst.duplicate`) reads the same columns.
+- Refresh from Source with a shorter file shrinks a sheet that has formula
+  columns; they are recomputed on the new length (#433).
+- `pyst.set_column_meta(formula=None)` removes the formula and the values it
+  computed, like the interface; `keep_data=True` keeps them. `pyst` API 0.5
+  (alpha) (#433).
+
 - The axes are named **Bottom / Top / Left / Right** everywhere in the interface
   (Bas / Haut / Gauche / Droite in French), instead of "X (bottom)", "Secondary Y
   (right)"...: axis tabs, context menu, Object Manager (#358).

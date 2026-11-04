@@ -167,7 +167,7 @@ describes its effects.
 | `rename(handle, name)` | renames the node, keeping its handle |
 | `remove(handle)` | removes the node and its descendants, except the root |
 | `set_values(handle, values)` | replaces the values and the length of this column only |
-| `set_column_meta(handle, **metadata)` | changes only the named fields, preserving provenance |
+| `set_column_meta(handle, **metadata)` | changes only the named fields, preserving provenance; `formula=None` removes the formula **and its computed values** (like the interface), `keep_data=True` keeps them (#433) |
 | `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | creates a native graph or adds a series to a graph; handle; without `x`, the X column to the left by role, otherwise the row index |
 | `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | adds a graphic object in data coordinates; returns the rank in the panel |
 | `remove_shape(graph, index, *, panel=(0, 0))` | removes the graphic object of this rank |
@@ -316,8 +316,13 @@ copied. Creations return empty objects; for text data, create a `mixed` column,
 then call `set_values`.
 
 `set_column_meta` accepts `role`, `long_name`, `unit`, `comment`,
-`display_format` and `formula`. Values are strings, except `formula=None`, which
-removes the formula; the roles are those of `info`.
+`display_format`, `formula` and `keep_data`. Values are strings, except
+`formula=None`, which removes the formula **and the values it computed**, in one
+history entry (like the interface, #236; the column is then empty and writable),
+and `keep_data`, a bool: `formula=None, keep_data=True` keeps the values as plain
+data. `keep_data=True` without `formula=None`, or a non-bool, raises
+`InvalidValueError` and writes nothing (#433). Removing the formula of a column
+that has none leaves its data alone. The roles are those of `info`.
 The formula is written **in column letters** of the column's sheet
 (`formula="A * 2"`; a column letter is normalized to capitals) and is read the
 same way. The grammar is that of the interface (`^`, functions such as
@@ -677,11 +682,11 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.4"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.5"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
-  (`0.3` to `0.4`); there is no stability promise. `1.0` stabilizes the API.
+  (`0.4` to `0.5`); there is no stability promise. `1.0` stabilizes the API.
 - **From `1.0`**: a pure addition raises the minor; any modified or removed line
   (adding an optional parameter changes the signature line) raises the major
   and resets the minor to 0. The API major may not exceed the major of the crates.
@@ -859,6 +864,7 @@ unit
 comment
 display_format
 formula
+keep_data
 ```
 
 ### Return shapes

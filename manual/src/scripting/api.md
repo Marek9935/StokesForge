@@ -202,13 +202,15 @@ pyst.set_column(b, new_data, expected_version=version)
 | `unit` | Text |
 | `comment` | Text |
 | `display_format` | Text |
-| `formula` | Text in column letters (for example `"A * 2"`), or `None` to remove the formula |
+| `formula` | Text in column letters (for example `"A * 2"`), or `None` to remove the formula and the values it computed, like **Remove Formula** in the interface |
+| `keep_data` | `True`, only together with `formula=None`: keep the computed values as plain data |
 
 An unknown field, a role that does not exist, or a formula that refers to a missing column raises `InvalidValueError`, and nothing is changed.
 
 ```python
 pyst.set_column_meta(b, role="y", long_name="Absorbance", unit="a.u.")
 pyst.set_column_meta(c, formula="B * 2")
+pyst.set_column_meta(c, formula=None, keep_data=True)  # plain values stay
 ```
 
 A formula column is calculated by StokesForge. You cannot write its values.

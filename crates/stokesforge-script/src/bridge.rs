@@ -927,12 +927,15 @@ pub(crate) fn set_values(
 }
 
 /// Changes only the requested fields, preserving import provenance
-/// and other metadata. The type and version stay read-only.
+/// and other metadata. The type and version stay read-only. Removing a formula
+/// removes its computed values with it, like the interface, unless `keep_data`
+/// (#433): the formula and the values then leave in one nested macro.
 pub(crate) fn set_column_meta(
     context: &ScriptContext,
     id: NodeId,
     epoch: u64,
     changes: Vec<(String, Option<String>)>,
+    keep_data: bool,
 ) -> Result<(), HostError> {
     let snapshot = write_snapshot(context, id, epoch)?;
     let column = checked_node(&snapshot, id, epoch)?
@@ -990,9 +993,41 @@ pub(crate) fn set_column_meta(
             }
         }
     }
-    context
-        .session()
-        .execute(Command::SetColumnMeta { column: id, meta })
+    let had_formula = column.meta().formula.is_some();
+    let length = column.len();
+    let session = context.session();
+    if !(had_formula && meta.formula.is_none() && !keep_data && length > 0) {
+        session
+            .execute(Command::SetColumnMeta { column: id, meta })
+            .map_err(HostError::from_session)?;
+        return Ok(());
+    }
+    // The formula really goes away and the column holds values: they go with
+    // it, in one gesture. A nested macro (LIFO inside the `Script` macro,
+    // invariant 8) lets the write be undone if the deletion failed.
+    session
+        .begin_macro(MacroKind::Script)
         .map_err(HostError::from_session)?;
-    Ok(())
+    let result = (|| {
+        session
+            .execute(Command::SetColumnMeta { column: id, meta })
+            .map_err(HostError::from_session)?;
+        session
+            .execute(Command::DeleteCells {
+                columns: vec![id],
+                at: 0,
+                count: length,
+            })
+            .map_err(HostError::from_session)
+    })();
+    match result {
+        Ok(_) => {
+            session.end_macro().map_err(HostError::from_session)?;
+            retain_written_version(context, id, epoch)
+        }
+        Err(error) => {
+            session.abort_macro().map_err(HostError::from_session)?;
+            Err(error)
+        }
+    }
 }

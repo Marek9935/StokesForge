@@ -408,6 +408,8 @@ When you use **Copy with Header** on a formula column, StokesForge asks whether 
 
 Pasting a Formulas copy writes the formula; the column's values are recomputed. It does the same when you paste on any data cell of the column, not only on its **F(x)=** field.
 
+A sheet name in a pasted formula is read again in the destination: `Sheet3!B` pasted into another workbook reads that workbook's `Sheet3`.
+
 ## Linked sheets
 
 Some sheets are created for you from another sheet.
