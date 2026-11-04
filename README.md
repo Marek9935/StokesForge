@@ -46,6 +46,10 @@ always compiled. See
 Copyright © 2026 Aliocha Skrzypczak. This branch is under
 **[GPL-3.0-or-later](LICENSE)**, with no additional permission.
 
+**The logo is excluded from the GPL.** Everything in `assets/logo/` is under
+all rights reserved: no use or modification without the author's written
+permission. See [`assets/logo/LICENSE`](assets/logo/LICENSE).
+
 **Use not covered by the GPL** (for example a proprietary connector for an
 instrument): an additional permission or a separate license can be requested
 from the author, who considers it case by case and grants it, if at all, in

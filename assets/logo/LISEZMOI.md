@@ -1,6 +1,6 @@
 # Logo StokesForge : récapitulatif
 
-Date : 3 novembre 2026. Ce document résume ce qui a été discuté, ce qui est voulu, ce qui a été rejeté, et où en est le logo. Ce dossier est rangé dans le dépôt sous `assets/logo/` (#443) ; l'icône d'application n'en est pas encore tirée (#388).
+Date : 3 novembre 2026. Ce document résume ce qui a été discuté, ce qui est voulu, ce qui a été rejeté, et où en est le logo. Ce dossier est rangé dans le dépôt sous `assets/logo/` (#443) ; l'icône d'application n'en est pas encore tirée (#388). Tous droits réservés, hors GPL : voir `LICENSE` (#444).
 
 ## 1. L'idée
 
