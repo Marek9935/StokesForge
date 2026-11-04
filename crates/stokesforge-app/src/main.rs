@@ -89,8 +89,10 @@ fn main() -> anyhow::Result<()> {
         let _ = preferences.save_first_run_done();
     }
 
+    // The logo of an official build, read once (#388); `None` without it.
+    let logo = stokesforge_app::app_logo::load();
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
+        viewport: stokesforge_app::app_logo::main_viewport(logo.as_ref())
             .with_title(state.window_title())
             .with_inner_size([1100.0, 700.0]),
         event_loop_builder: Some(Box::new(configure_window_backend)),
@@ -122,6 +124,7 @@ fn main() -> anyhow::Result<()> {
             // the `Context` before the first rendering").
             stokesforge_app::theme::install(&cc.egui_ctx);
             let mut app = StokesForgeApp::new(state);
+            app.set_logo(logo);
             app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
             // The remembered layout of the panels, once, before the first frame (#148).
             app.apply_startup_panels(cc.winit_window().map(|w| w.available_monitors().count()));

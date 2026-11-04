@@ -40,6 +40,7 @@
 )]
 
 pub mod app;
+pub mod app_logo;
 pub mod color_picker;
 pub mod field_state;
 pub mod icons;

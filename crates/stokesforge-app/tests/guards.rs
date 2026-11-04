@@ -46,6 +46,11 @@
 //! - `no_free_size_without_justification` (#300, S-F11): an interactive window
 //!   takes a size class; a free size (`InteractiveSize::Free`) requires
 //!   `// FREE-SIZE(#300): <justification>` just before;
+//! - `no_viewport_without_identity` (#388): every `ViewportBuilder` comes from
+//!   `app_logo::viewport()`, so every window has the application id; no
+//!   exemption;
+//! - `the_application_id_is_the_desktop_name` (#388): `APP_ID` is the name of
+//!   the desktop entry and of the icon that `scripts/install-linux.sh` writes;
 //! - `the_window_catalog_and_the_code_agree` (#300, S-F11): every
 //!   `stokesforge_…` identifier passed to a `modal_*` function appears in
 //!   `docs/windows.md`, and conversely; does not check the sizes.
@@ -2460,6 +2465,87 @@ fn the_catalog_guard_sees_a_deviation() {
         assert!(
             catalog_deviations(&with_code(code), catalog, &built_id).is_empty(),
             "false positive: {code}"
+        );
+    }
+}
+
+/// The `ViewportBuilder::default()` of the production code outside
+/// `app_logo.rs`, `path:line` (#388). A window built from it has no
+/// application id: the desktop would not match it to its entry and icon.
+fn bare_viewports(sources: &[SourceFile]) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in sources {
+        if file.path == "app_logo.rs" {
+            continue;
+        }
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if starts_with_at(&source.mask, i, "ViewportBuilder::default") {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn no_viewport_without_identity() {
+    let offenders = bare_viewports(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "start a window from `app_logo::viewport()`, which sets the application id: {offenders:?}"
+    );
+}
+
+/// The witness: a bare builder is seen, in any file; `app_logo.rs`, a comment
+/// and test code pass.
+#[test]
+fn the_viewports_guard_sees_a_bare_builder() {
+    for path in ["app/window_detach.rs", "main.rs"] {
+        assert_eq!(
+            bare_viewports(&[file(
+                path,
+                "fn f() { let v = egui::ViewportBuilder::default().with_title(t); }"
+            )])
+            .len(),
+            1,
+            "not seen in {path}"
+        );
+    }
+    for (path, code) in [
+        (
+            "app_logo.rs",
+            "fn f() { egui::ViewportBuilder::default(); }",
+        ),
+        ("app/a.rs", "fn f() {} // egui::ViewportBuilder::default()"),
+        (
+            "app/a.rs",
+            "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { ViewportBuilder::default(); } }",
+        ),
+    ] {
+        assert!(
+            bare_viewports(&[file(path, code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
+/// `APP_ID` is what ties a window to `stokesforge.desktop` and to its icon.
+#[test]
+fn the_application_id_is_the_desktop_name() {
+    let script = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/install-linux.sh"),
+    )
+    .expect("scripts/install-linux.sh");
+    let id = stokesforge_app::app_logo::APP_ID;
+    for expected in [format!("applications/{id}.desktop"), format!("Icon={id}")] {
+        assert!(
+            script.contains(&expected),
+            "install-linux.sh writes no `{expected}`: the window id and the desktop entry diverged"
         );
     }
 }
