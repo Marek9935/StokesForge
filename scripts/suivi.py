@@ -13,9 +13,11 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     qcm/<id>/data.js       the decisions (injected into the form template when served)
     qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
     qcm/<id>/answers/<code>.json   one record per card (written by the page's POST)
-    tests/<n>-<k>.json     trial entry: title, where, steps, expect, try, commit, date,
+    tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
                            page's POST and by `test add|merged`)
+    removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
+                           outside tests/ so nothing reads it, and its number is never reused)
     control.json           result of the last `check`
 
 THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
@@ -35,7 +37,7 @@ until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, serve (the local page, 127.0.0.1 only),
-test add|merged|list, qcm pose|answers|list, import-online.
+test add|merged|remove|list, qcm pose|answers|list, import-online.
 """
 import argparse
 import datetime
@@ -99,6 +101,12 @@ def colour_line(kind, *a):
 def git(*args, cwd=None):
     r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def git_rc(*args, cwd=None):
+    """(exit code, stdout) of a git command: git() hides the exit code."""
+    r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
+    return r.returncode, r.stdout
 
 
 def main_dir():
@@ -389,9 +397,13 @@ def cmd_set(a):
     with Lock():
         recs = load_all()
         r = need(recs, a.issue)
-        for key, val in (("state", a.state), ("what", a.what), ("waiting", a.waiting), ("wait_kind", a.wait)):
+        # state and what are kept when not passed. waiting and wait_kind are an agent note:
+        # the next `set` erases them unless it restates them (E1, #449).
+        for key, val in (("state", a.state), ("what", a.what)):
             if val is not None:
                 r[key] = val
+        r["waiting"] = a.waiting or ""
+        r["wait_kind"] = a.wait or ""
         save(r)
     return 0
 
@@ -680,9 +692,10 @@ def cmd_session_end(a):
 
 # ------------------------------------------------------------ trial entries
 ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
-TEST_FIELDS = {"title": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
+TEST_FIELDS = {"title": str, "intro": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
                "date": str, "colour": str, "name": str}
 TEST_STATUSES = ("todo", "ok", "retour")
+MAX_UNMERGED = 5      # E2: trial entries with `try` per issue, unless `test add --force`
 
 
 def safe_id(s):
@@ -727,6 +740,20 @@ def check_entry(e):
             raise Fail("field %r must be a list of strings" % k)
 
 
+def removed_dir():
+    return os.path.join(suivi_dir(), "removed-tests")
+
+
+def used_numbers(issue):
+    """Numbers already taken for the issue: live entries and the archive of removed ones."""
+    out = []
+    for t in load_tests(issue):
+        out.append(t["id"])
+    for p in glob.glob(os.path.join(removed_dir(), "%d-*.json" % issue)):
+        out.append(os.path.basename(p)[:-5])
+    return [int(m.group(1)) for tid in out for m in [re.fullmatch(r"%d-(\d+)" % issue, tid)] if m]
+
+
 def cmd_test_add(a):
     try:
         with open(a.file, encoding="utf-8") as f:
@@ -739,9 +766,16 @@ def cmd_test_add(a):
     rec = load_all().get(a.issue) or {}
     ids = []
     with Lock():
-        used = [int(m.group(1)) for t in load_tests(a.issue)
-                for m in [re.fullmatch(r"%d-(\d+)" % a.issue, t["id"])] if m]
-        k = max(used, default=0)
+        unmerged = sum(1 for t in load_tests(a.issue) if "try" in t)
+        incoming = sum(1 for e in entries if "try" in e)
+        if unmerged + incoming > MAX_UNMERGED:
+            if not a.force:
+                raise Fail("#%d would have %d entries to try (%d already + %d new); the limit is %d: group them "
+                           "into fewer guided walk-throughs, or pass --force and justify it in the report"
+                           % (a.issue, unmerged + incoming, unmerged, incoming, MAX_UNMERGED))
+            sys.stderr.write("suivi: --force: %d entries to try on #%d (limit %d); the report must justify it\n"
+                             % (unmerged + incoming, a.issue, MAX_UNMERGED))
+        k = max(used_numbers(a.issue), default=0)
         for e in entries:
             k += 1
             t = dict(e)
@@ -755,20 +789,112 @@ def cmd_test_add(a):
     return 0
 
 
+HEX_RE = re.compile(r"[0-9a-fA-F]{4,40}")
+
+
+def same_commit(stored, ref):
+    """Hex values compare by prefix (either way), case-insensitive; anything else, exactly."""
+    stored = str(stored)
+    if HEX_RE.fullmatch(stored) and HEX_RE.fullmatch(ref):
+        a, b = stored.lower(), ref.lower()
+        return a.startswith(b) or b.startswith(a)
+    return stored == ref
+
+
+def check_merge_commit(issue, commit):
+    """L2: the full hash of `commit`, or Fail. Real commit, on main, containing every
+    feature/<issue>-* branch still there, message citing #<issue>."""
+    rc, out = git_rc("rev-parse", "--verify", "--quiet", commit + "^{commit}")
+    if rc != 0:
+        raise Fail("no such commit in this repository: %s" % commit)
+    full = out.strip()
+    if git_rc("merge-base", "--is-ancestor", full, "main")[0] != 0:
+        raise Fail("commit %s is not on main" % commit)
+    rc, out = git_rc("for-each-ref", "--format=%(refname:short)", "refs/heads/feature/%d-*" % issue)
+    for br in out.split():
+        if git_rc("merge-base", "--is-ancestor", br, full)[0] != 0:
+            raise Fail("commit %s does not contain the branch %s" % (commit, br))
+    rc, msg = git_rc("log", "-1", "--format=%B", full)
+    if not re.search(r"#%d(?!\d)" % issue, msg):
+        raise Fail("the message of commit %s does not cite #%d" % (commit, issue))
+    return full
+
+
 def cmd_test_merged(a):
-    if not re.fullmatch(r"[0-9a-fA-F]{4,40}", a.commit):
+    if not HEX_RE.fullmatch(a.commit):
         raise Fail("not a commit hash: %r" % a.commit)
-    n = 0
+    full = check_merge_commit(a.issue, a.commit)
     with Lock():
-        for t in load_tests(a.issue):
+        ts = load_tests(a.issue)
+        if a.replace is not None:
+            hit = [t for t in ts if "commit" in t and same_commit(t["commit"], a.replace)]
+            if not hit:
+                raise Fail("no entry of #%d carries the commit %r" % (a.issue, a.replace))
+            for t in hit:
+                tid = t.pop("id")
+                t["commit"] = full
+                write_json(test_path(tid), t)
+            print("%d entr%s replaced" % (len(hit), "y" if len(hit) == 1 else "ies"))
+            return 0
+        tries = [t for t in ts if "try" in t]
+        if tries:
+            for t in tries:
+                tid = t.pop("id")
+                t.pop("try")
+                t["commit"] = full
+                write_json(test_path(tid), t)
+            print("%d entr%s merged" % (len(tries), "y" if len(tries) == 1 else "ies"))
+            return 0
+        others = [str(t["commit"]) for t in ts if t.get("commit") and not same_commit(t["commit"], full)]
+        if others:
+            raise Fail("the entries of #%d already carry the commit %s, not %s; to correct it: "
+                       "suivi.py test merged %d %s --replace %s" % (a.issue, others[0], full, a.issue, a.commit, others[0]))
+        if any(t.get("commit") for t in ts):
+            print("already recorded")
+        else:
+            print("no entries")
+    return 0
+
+
+def is_answered(t):
+    return t.get("status", "todo") != "todo" or bool(str(t.get("comment") or "").strip())
+
+
+def cmd_test_remove(a):
+    owner = current_owner()
+    recs = load_all()
+    rec = recs.get(a.issue)
+    if owner is None or rec is None:
+        raise Fail("only the session that owns #%d may remove its trial entries (run scripts/chantier.sh %d first)"
+                   % (a.issue, a.issue))
+    sessions = {str((rec.get("owner") or {}).get("session", ""))}
+    if rec.get("parent") in recs:
+        sessions.add(str((recs[rec["parent"]].get("owner") or {}).get("session", "")))
+    sessions.discard("")
+    if owner["session"] not in sessions:
+        raise Fail("#%d belongs to another session (or to none): scripts/chantier.sh %d claims it" % (a.issue, a.issue))
+    with Lock():
+        picked = []
+        for tid in a.ids:
+            if not re.fullmatch(r"%d-\d+" % a.issue, tid):
+                raise Fail("%r is not an entry of #%d" % (tid, a.issue))
+            t = read_json(test_path(tid))
+            if not isinstance(t, dict):
+                raise Fail("no entry %s" % tid)
             if "try" not in t:
-                continue
-            tid = t.pop("id")
-            t.pop("try")
-            t["commit"] = a.commit
-            write_json(test_path(tid), t)
-            n += 1
-    print("%d entr%s merged" % (n, "y" if n == 1 else "ies"))
+                raise Fail("%s is merged (no `try`): a merged entry is never removed" % tid)
+            picked.append((tid, t))
+        answered = [(tid, t) for tid, t in picked if is_answered(t)]
+        if answered and not a.answered:
+            raise Fail("answered entries need --answered: " + "; ".join(
+                "%s [%s] %r" % (tid, t.get("status", "todo"), t.get("comment", "")) for tid, t in answered))
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        for tid, t in picked:
+            write_json(os.path.join(removed_dir(), tid + ".json"), dict(t, removed_at=stamp))
+            os.unlink(test_path(tid))
+    for tid, t in answered:
+        print("answered %s [%s] %s" % (tid, t.get("status", "todo"), t.get("comment", "")))
+    print("%d entr%s removed" % (len(picked), "y" if len(picked) == 1 else "ies"))
     return 0
 
 
@@ -1250,15 +1376,22 @@ def parser():
     t = add("test", None, "trial entries (tests/<n>-<k>.json)").add_subparsers(dest="tcmd", required=True)
     for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
                         ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
+                        ("remove", cmd_test_remove, "withdraw the session's own unmerged entries (archived)"),
                         ("list", cmd_test_list, "list the entries")):
         q = t.add_parser(name, help=h, allow_abbrev=False)
         q.set_defaults(fn=fn)
         if name == "add":
             q.add_argument("issue", type=int)
             q.add_argument("file")
+            q.add_argument("--force", action="store_true", help="exceed the limit of %d entries to try" % MAX_UNMERGED)
         elif name == "merged":
             q.add_argument("issue", type=int)
             q.add_argument("commit")
+            q.add_argument("--replace", metavar="OLD", help="correct entries that carry the commit OLD")
+        elif name == "remove":
+            q.add_argument("issue", type=int)
+            q.add_argument("ids", nargs="+")
+            q.add_argument("--answered", action="store_true", help="also remove entries ticked or commented")
         else:
             q.add_argument("--issue", type=int)
     q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)
