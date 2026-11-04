@@ -45,11 +45,11 @@ Each line is observed by a command or a page; none is declared
 - [x] RPM and DEB packages (#390): built by `scripts/release-linux-packages.sh`
   (nfpm) from the folder proven by `app-dist.sh`, installed and removed in
   Fedora, Debian 12 and Ubuntu 22.04 containers at every tag
-  (`test-linux-packages`), `rpmlint` / `lintian` without error. **Not published
-  yet**: `PUBLISH_LINUX_PACKAGES=0` in `scripts/linux-packages.env` until the icon
-  (#388) is in the distribution; the commit that sets it to 1 also updates the
-  manual (installation, uninstall, update; a per-user `install.sh` copy shadows
-  the package) and `CHANGELOG.md`. Not yet tried by hand on a desktop
+  (`test-linux-packages`), `rpmlint` / `lintian` without error. **Published**: the
+  icon (#388) is in the distribution, so `PUBLISH_LINUX_PACKAGES=1` in
+  `scripts/linux-packages.env` and a failure of the package jobs blocks the
+  release; the manual (installation, uninstall, update; a per-user `install.sh`
+  copy shadows the package) and `CHANGELOG.md` say so. Not yet tried by hand on a desktop
   (double-click in GNOME Software).
 - [x] `scripts/app-dist.sh` exits 0 on Linux: the window opens and closes,
   `stokesforge-selftest` passes, from the package. CI does this under a virtual
