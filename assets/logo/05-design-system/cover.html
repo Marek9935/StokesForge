@@ -1,0 +1,50 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>StokesForge</title>
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:var(--ground); color:var(--ink); font-family:var(--font-sans); overflow:hidden; }
+  .cover { position:relative; height:288px; overflow:hidden; }
+  .art { position:absolute; top:0; left:480px; width:480px; height:288px; overflow:hidden; }
+  .art svg { display:block; width:480px; height:288px; }
+  .green { fill:var(--forge-green); }
+  .ember { fill:var(--ember); }
+  .anvil { fill:var(--ink); }
+  .tint { fill:var(--hairline); }
+  .cut { stroke:var(--ground); stroke-width:4px; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .blk { rx:var(--radius-md); }
+  .words { position:absolute; left:var(--space-6); bottom:var(--space-6); max-width:440px; }
+  .name { margin:0; font-size:64px; line-height:.95; font-weight:700; letter-spacing:-.02em; color:var(--ink); }
+  .tag { margin:var(--space-2) 0 0 2px; font-size:14px; line-height:20px; color:var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      ink 336×112 bled off the right and bottom (the anvil table) · forge-green 128×120 and ember 176×88 bled off the top · hairline 96×64 tint (surface vanishes in dark) — about 40% of 960×288
+  arrangement one wide anvil slab low, two hue blocks hanging from the top edge, offset like the two spectra
+  pattern     literal motif from the logo: two half-discs (the peaks) sitting on the slab, the ember one shifted right by space-6×2 + space-4 (the Stokes shift), and the shift arrow cut into the slab in ground
+  scales      sides in space-2 multiples; gutters space-4; block corners radius-md; peaks rx = half their width
+-->
+<rect class="green blk" x="32" y="-16" width="128" height="120" rx="8"/>
+<rect class="ember blk" x="304" y="-16" width="176" height="88" rx="8"/>
+<rect class="tint blk" x="32" y="160" width="96" height="64" rx="8"/>
+<rect class="anvil blk" x="144" y="176" width="352" height="128" rx="8"/>
+<path class="green" d="M176 176a56 56 0 0 1 112 0Z"/>
+<path class="ember" d="M240 176a56 56 0 0 1 112 0Z"/>
+<path class="cut" d="M232 208H288M282 202L290 208L282 214"/>
+<circle cx="232" cy="208" r="4" fill="var(--ground)"/>
+</svg>
+</div>
+<div class="words">
+<h1 class="name">StokesForge</h1>
+<p class="tag">Analyse et tracé de données scientifiques, forgés en Rust.</p>
+</div>
+</div>
+</body>
+</html>

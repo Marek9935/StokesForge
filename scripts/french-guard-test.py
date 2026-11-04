@@ -102,11 +102,12 @@ class Detector(unittest.TestCase):
 
     def test_exempt_paths(self):
         ex = guard.is_exempt_path
-        for p in ["crates/x/i18n/fr/a.ftl", "docs/archive/a.md", "test/import/a.csv",
+        for p in ["assets/logo/LISEZMOI.md", "crates/x/i18n/fr/a.ftl", "docs/archive/a.md",
+                  "test/import/a.csv",
                   ".claude/skills/stokesforge-bug-report/references/decision-form.html",
                   "scripts/french-guard-test.py"]:
             self.assertTrue(ex(p), p)
-        for p in ["docs/archived.md", "crates/x/i18n/fr-extra/a", "crates/x/i18n/en/a.ftl",
+        for p in ["assets/logos/a.md", "docs/archived.md", "crates/x/i18n/fr-extra/a", "crates/x/i18n/en/a.ftl",
                   "vendor/a/b.rs", "src/vendor/a.rs", "docs/archive", "scripts/french-guard.py"]:
             self.assertFalse(ex(p), p)
 
