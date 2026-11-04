@@ -862,22 +862,23 @@ plot-size-row-height = Hauteur de la zone de tracé, ligne { $n } ({ $unit })
 plot-size-layer-background = Fond du calque
 plot-size-layer-background-auto = Auto (seulement sur un autre calque)
 plot-size-total = Taille de la figure ({ $unit })
+plot-size-figure-note = Ajouter des axes ou des titres agrandit la figure ; la zone de tracé reste. Avancé > Quand on ajoute des axes = Fixe garde la figure. Pour déplacer ou redimensionner à la souris, utiliser le Mode mise en page.
 plot-size-total-by = ×
 plot-size-total-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) : la valeur a été remontée à ce minimum
-plot-size-total-lowered = Un graphique peut faire { $maximum } ({ $unit }) au plus ici : la valeur a été ramenée à ce maximum
+plot-size-total-lowered = Une figure peut faire { $maximum } ({ $unit }) au plus ici : la valeur a été ramenée à ce maximum
 plot-size-lock-closed = La largeur et la hauteur gardent leur rapport. Cliquer pour déverrouiller
 plot-size-lock-open = La largeur et la hauteur sont indépendantes. Cliquer pour garder leur rapport
 plot-size-left = Zone de tracé, depuis le bord gauche ({ $unit })
 plot-size-top = Zone de tracé, depuis le bord haut ({ $unit })
 plot-size-left-raised = Les axes demandent au moins { $minimum } ({ $unit }) à gauche : la valeur a été remontée à ce minimum
 plot-size-top-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) en haut : la valeur a été remontée à ce minimum
-plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit le graphique, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille. Saisir une taille de graphique redimensionne toutes les zones de tracé en proportion ; les axes et le titre gardent la leur.
+plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit la figure, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille. Saisir une taille de figure redimensionne toutes les zones de tracé en proportion ; les axes et le titre gardent la leur. Les tailles des zones de tracé sont dans Avancé.
 plot-size-placement = Placement des calques
 plot-size-placement-grid = Grille régulière
 plot-size-placement-free = Libre
 plot-size-position-left = Position, gauche ({ $unit })
 plot-size-position-top = Position, haut ({ $unit })
-plot-size-free-note = Les valeurs ci-dessus sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. Le graphique grandit ou rétrécit autour des calques. Saisir une taille de graphique met à l’échelle chaque calque et sa position, depuis le coin en haut à gauche.
+plot-size-free-note = Les valeurs de la zone de tracé dans Avancé sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. La figure grandit ou rétrécit autour des calques. Saisir une taille de figure met à l’échelle chaque calque et sa position, depuis le coin en haut à gauche.
 
 plot-figure-size = Quand on ajoute des axes
     .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l’image. Fixe : la place de quatre axes est gardée d’avance, donc ajouter un axe laisse l’image et la zone de tracé telles quelles

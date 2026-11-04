@@ -39,6 +39,9 @@ without a message, see `docs/persistence.md`).
   figure size now belongs to the graph for the session instead of to the
   Properties window, and two labels of Graph Properties are renamed: the total
   is **Figure size**, the Advanced choice is **When axes are added**.
+  In **General**, **Figure size** now comes first in **Size**; the plot area
+  sizes (and Left and Top, or the four fields of a Free layer) moved into the
+  closed **Advanced** block. Nothing changes in the file.
 
 - A new graph plotted from a workbook is named after it (#434): "Book1 plot",
   then "Book1 plot 2"… (numbered after the highest existing number, a deleted

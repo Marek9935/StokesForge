@@ -1525,7 +1525,7 @@ mod tests {
         assert_eq!(same[0].1, a.frame);
     }
 
-    // ---- Boundaries between touching boxes (#426d) ----
+    // ---- Boundaries between touching boxes (#426) ----
 
     /// A box whose outer rectangle is given; gutters 10 on every side.
     fn ob(base: usize, left: f64, top: f64, width: f64, height: f64) -> GraphBox {

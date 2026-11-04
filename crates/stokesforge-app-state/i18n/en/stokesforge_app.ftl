@@ -863,22 +863,23 @@ plot-size-row-height = Plot area height, row { $n } ({ $unit })
 plot-size-layer-background = Layer Background
 plot-size-layer-background-auto = Auto (only over another layer)
 plot-size-total = Figure size ({ $unit })
+plot-size-figure-note = Adding axes or titles grows the figure; the plot area stays. Advanced > When axes are added = Fixed keeps the figure. To move or resize with the mouse, use Page Layout Mode.
 plot-size-total-by = ×
 plot-size-total-raised = The axes and the title need at least { $minimum } ({ $unit }): the value was raised to it
-plot-size-total-lowered = A graph can be at most { $maximum } ({ $unit }) here: the value was lowered to it
+plot-size-total-lowered = A figure can be at most { $maximum } ({ $unit }) here: the value was lowered to it
 plot-size-lock-closed = Width and height keep their ratio. Click to unlock
 plot-size-lock-open = Width and height are independent. Click to keep their ratio
 plot-size-left = Plot area, from the left edge ({ $unit })
 plot-size-top = Plot area, from the top edge ({ $unit })
 plot-size-left-raised = The axes need at least { $minimum } ({ $unit }) on the left: the value was raised to it
 plot-size-top-raised = The axes and the title need at least { $minimum } ({ $unit }) at the top: the value was raised to it
-plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the graph, never the plot area. The other columns and rows keep their size. Typing a graph size resizes every plot area in proportion; the axes and the title keep theirs.
+plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the figure, never the plot area. The other columns and rows keep their size. Typing a figure size resizes every plot area in proportion; the axes and the title keep theirs. The plot area sizes are in Advanced.
 plot-size-placement = Layer placement
 plot-size-placement-grid = Regular grid
 plot-size-placement-free = Free
 plot-size-position-left = Position, left ({ $unit })
 plot-size-position-top = Position, top ({ $unit })
-plot-size-free-note = The values above belong to the layer chosen in the list. Positions are on the page: they do not change when another layer moves, and they can be negative. The graph grows or shrinks around the layers. Typing a graph size scales every layer and its position about the top left corner.
+plot-size-free-note = The plot area values in Advanced belong to the layer chosen in the list. Positions are on the page: they do not change when another layer moves, and they can be negative. The figure grows or shrinks around the layers. Typing a figure size scales every layer and its position about the top left corner.
 
 plot-figure-size = When axes are added
     .hint = Grows with the axes: an added axis or title makes the image larger. Fixed: room for four axes is kept from the start, so adding an axis leaves the image and the plot area as they are

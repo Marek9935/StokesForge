@@ -1307,3 +1307,46 @@ fn fitting_a_page_scales_the_boxes_with_the_page() {
     // A graph without a page: no page written.
     assert_eq!(fitted(&two_cells(), SizeAxis::Width, 900.0).1.page, None);
 }
+
+// ---- Adding axes on a Free graph (#426) ----
+
+/// A right axis added to a Free graph with no page makes the image bigger and
+/// leaves every plot area where it is and as large as it was. Witness: the
+/// image held (`fixed_figure`) fails the growth assertion.
+#[test]
+fn a_right_axis_grows_a_free_image_and_keeps_the_plot_areas() {
+    let (_, column) = project_with_column();
+    let bare = two_cells();
+    let with_axis = with_right_axis(bare.clone(), column, 1);
+    let (a, b) = (layout_of(&bare), layout_of(&with_axis));
+    assert!(
+        b.size.0 > a.size.0,
+        "{:?} not wider than {:?}",
+        b.size,
+        a.size
+    );
+    assert_eq!(b.size.1, a.size.1);
+    assert_eq!(b.frame_rect(0, 0), a.frame_rect(0, 0));
+    assert_eq!(b.frame_rect(0, 1), a.frame_rect(0, 1));
+}
+
+/// With a page and slack, the image stays while the bands fit inside the page;
+/// once they leave it the image grows past the page. Witness: the union of the
+/// page with the content removed.
+#[test]
+fn with_a_page_a_right_axis_grows_the_image_only_when_the_bands_leave_it() {
+    let (_, column) = project_with_column();
+    // The boxes end at 812; the right axis needs 64 more.
+    let roomy = with_page(two_cells(), (0.0, 0.0, 1000.0, 500.0));
+    let with_axis = with_right_axis(roomy.clone(), column, 1);
+    let (a, b) = (layout_of(&roomy), layout_of(&with_axis));
+    assert_eq!(a.size, (1000, 500));
+    assert_eq!(b.size, a.size, "the slack of the page takes the axis");
+    assert_eq!(b.frame_rect(0, 1), a.frame_rect(0, 1));
+    let tight = with_page(two_cells(), (0.0, 0.0, 830.0, 500.0));
+    let with_axis = with_right_axis(tight.clone(), column, 1);
+    let (a, b) = (layout_of(&tight), layout_of(&with_axis));
+    assert_eq!(a.size.0, 830);
+    assert!(b.size.0 > 830, "the axis leaves the page: {:?}", b.size);
+    assert_eq!(b.frame_rect(0, 1), a.frame_rect(0, 1));
+}

@@ -750,18 +750,21 @@ A graph stores the **plot area** (the frame) of each grid column and row
 and the title band are added around it. Adding an axis or a title grows the
 image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands".
 
-- **Graph Properties > General > Size**: one field per column ("Plot area width
-  (cm)", "Plot area width, column 2 (cm)"…) and per row ("Plot area height…"),
-  in the unit of Preferences > General > Length unit (cm by default, mm, pt, in;
-  `length_unit::LengthUnit`, the file keeps points), and the read-only "Graph
-  size" (the frames plus the bands the figure has now,
-  `FigureLayout::size_with_frames`). The fields edit the draft of the window like
+- **Graph Properties > General > Size** (#426): the "Figure size" first (the
+  frames plus the bands the figure has now, `FigureLayout::size_with_frames`,
+  two fields and the padlock shared with the Page Layout Mode strip), then the
+  Layer Placement. The plot area rows are in the closed **Advanced** block
+  (`plot_area_rows`; the written exception of S-L8): one field per column
+  ("Plot area width (cm)", "Plot area width, column 2 (cm)"…) and per row
+  ("Plot area height…"), in the unit of Preferences > General > Length unit (cm
+  by default, mm, pt, in; `length_unit::LengthUnit`, the file keeps points). The
+  stored model is the same as before the move. The fields edit the draft of the window like
   the others (one undo step for the window); a graph from an old file is first
   given the frames it is drawn with (`frame_sizes::set_size_in_draft`, from the
   published `FigureLayout::frame_widths`), so the other plot areas keep their
   size. The fields are `quantities::frame_size` (36 to 2000 pt, wide enough for
   six digits).
-- **Total size (#407).** **Graph size** is two editable fields `[width] × [height]`
+- **Total size (#407).** **Figure size** is two editable fields `[width] × [height]`
   and a padlock (`total_row`, `type_total` in `plot_settings.rs`;
   `quantities::figure_total`). Typing one calls `frame_sizes::set_total_in_draft`
   (`stokesforge_render::pipeline::fit_figure_size`: every frame in proportion,
@@ -790,10 +793,10 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   is pulled with the mouse only in the Page Layout Mode, which commits
   `Action::SetGridFrames` (all columns and rows at once).
 - **Advanced › Figure size, Left, Top (#405).** General has a closed **Advanced**
-  block (S-L8, `Form::collapsible`) at the bottom with **Figure size**: Grows
-  with the axes (default) / Fixed (`PlotSpec::fixed_figure`; reserve of one axis
-  per side, see `docs/rendering.md`). **Size** has **Plot area, from the left
-  edge** and **from the top edge** (`quantities::figure_offset`, Auto when
+  block (S-L8, `Form::collapsible`) at the bottom with **When axes are added**:
+  Grows with the axes (default) / Fixed (`PlotSpec::fixed_figure`; reserve of one
+  axis per side, see `docs/rendering.md`), after the plot area rows, which also
+  hold **Plot area, from the left edge** and **from the top edge** (`quantities::figure_offset`, Auto when
   empty, never below `FigureLayout::min_left` / `min_top`: a smaller value is
   raised and the field's bubble says why). While a Fixed figure is bigger than
   its reserve, a note under Size says so (`status-figure-grew`, also put in the
@@ -844,10 +847,11 @@ its frames first). Free to grid is `compose::set_grid_placement`: layers whose
 vertical extents overlap share a row, left to right inside a row, then each
 column takes its widest frame and each row its tallest.
 
-In Free, **Size** shows **Position, left**, **Position, top**, **Plot area
-width** and **Plot area height** of the layer chosen in the layer list (which
-stays live on this page, greyed out only on the grid), the read-only **Graph
-size**, and a note. Width and Height are the plot area
+In Free, **Size** shows the **Figure size** first, the Layer Placement, the Layer
+Background and a note; **Advanced** holds **Position, left**, **Position, top**,
+**Plot area width** and **Plot area height** of the layer chosen in the layer
+list (which stays live on this page, greyed out only on the grid)
+(`free_plot_area_rows`, #426). Width and Height are the plot area
 (`quantities::frame_size`, 36 to 2000 pt). The two positions are **stable page
 coordinates** (`frame_sizes::free_fields`): exactly the stored
 `FreeFrame::left` / `top`, in the Preferences unit, so a value is read back as
