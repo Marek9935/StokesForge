@@ -7,15 +7,16 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 | Path | Content |
 |---|---|
 | `issues/<n>.json` | one record per issue or package: colour, last_colour, kind, parent, subs, name, state, wait_kind, waiting, what, since, owner, done_at, legacy |
-| `tests/<n>-<k>.json` | one trial entry: title, where, steps, expect, try, commit, date, colour, name, status (`todo`/`ok`/`retour`), comment, reviewed |
+| `tests/<n>-<k>.json` | one trial entry: title, intro, where, steps, expect, try, commit, date, colour, name, status (`todo`/`ok`/`retour`), comment, reviewed |
 | `qcm/<id>/meta.json` | `{issue, title, created, cards, finished, finished_at}` of a questionnaire (`id` = `<issue>-<k>`) |
 | `qcm/<id>/data.js`, `answers/<code>.json` | the decisions (injected into the form template when served) and one record per answered card |
+| `removed-tests/` | archive of entries removed by `test remove`; numbers are not reused |
 | `ended/<session>` | touched by the `SessionEnd` hook |
 | `control.json` | result of the last `scripts/suivi.py check` |
 
 ## The colour rule
 
-An issue holds its colour while (a) the Claude session that owns it is alive, or (b) one of its questionnaires is open, or (c) one of its trial entries with a `try` field is still `todo`. Otherwise it is **paused**: colour free, worktree kept. On resume it gets its previous colour back if free, else the first free. "Held" is computed when read (a crash pauses by itself). `scripts/suivi.py status [--json]` (or `chantier.sh --status`) prints it; `check` lists inconsistencies and writes `control.json` (the page footer « Vérifié il y a … »). Commands: `claim`, `set --state questions|code|essai|fusion --what … [--wait you|dep|ag --waiting …]`, `pause`, `done`, `release-line`, `check`.
+An issue holds its colour while (a) the Claude session that owns it is alive, or (b) one of its questionnaires is open, or (c) one of its trial entries with a `try` field is still `todo`. Otherwise it is **paused**: colour free, worktree kept. On resume it gets its previous colour back if free, else the first free. "Held" is computed when read (a crash pauses by itself). `scripts/suivi.py status [--json]` (or `chantier.sh --status`) prints it; `check` lists inconsistencies and writes `control.json` (the page footer « Vérifié il y a … »). Any `set` erases `--wait`/`--waiting` unless it restates them. The card's line is computed: orange « À toi : … » from open forms and entries to tick, else grey « L'agent travaille » or « En pause ». Never `--wait you` for a form or a trial; a note is only for what the page cannot know (for example a command the user must run). Commands: `claim`, `set --state questions|code|essai|fusion --what … [--wait dep|ag --waiting …]`, `pause`, `done`, `release-line`, `check`.
 
 ## Decision forms, local (#441)
 
@@ -25,10 +26,12 @@ The start and follow-up forms are posed here, not published: `python3 scripts/su
 
 (#423) Before asking for `scripts/try.sh <n>`, write the entries of a visible change in one go. The user does not guess what to test.
 
-1. Write a JSON file: one object, or a list, with `title`, `where` (menu or window steps, English labels as on screen), `steps` (2 to 4 short French imperatives from a state the user can reach), `expect` (what is seen, not what the code does), `try` (`scripts/try.sh <n>`). One behaviour per entry: each decided gesture, each edge case (refusal and its message), the routes a bench test cannot see (save and reopen, detached window, `STOKESFORGE_LANG=en-XA` when texts changed).
+Entries are **guided routes**, at most 5 unmerged per issue (`test add` refuses beyond; `--force`, justified in the report). One entry is one story of 2 to 3 minutes. Group the checks into routes; keep edge cases and routes a bench test cannot see (refusal and its message, save and reopen, detached window, `STOKESFORGE_LANG=en-XA` when texts changed) inside them. Be didactic.
+
+1. Write a JSON file: one object, or a list, with `title` (« Parcours 1/3 (3 min) »), optional `intro` (first sentence: what changes), `where` (menu or window steps, English labels as on screen), `steps` (short French imperatives, each « gesture → what you must see »), `expect` (tick OK if every step showed it), `try` (`scripts/try.sh <n>`).
 2. `python3 scripts/suivi.py test add <n> entries.json` creates `tests/<n>-<k>.json`, status `todo`.
-3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Every entry ticked OK (or the user's plain OK) is the merge go-ahead. A « Retour » during the trial is fixed on the branch, then the entry goes back to `todo`.
-4. At the merge: `python3 scripts/suivi.py test merged <n> <merge commit>` sets `commit` and removes `try`. Any other usable change adds its entry after the merge with `test add` and a `commit` field. `test list [--issue n]` lists them.
+3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Every entry ticked OK (or the user's plain OK) is the merge go-ahead. After a « Retour », fix on the branch and redo the trial: `test remove <n> <id>... [--answered]` (only your own issue or its parent, never a merged entry; an answered entry needs `--answered`, its comment is printed back and named in your report; archived in `removed-tests/`), then `test add`.
+4. At the merge, `scripts/deliver.sh` runs `test merged <n> <commit>` (sets `commit`, removes `try`); it refuses a commit that is missing, not on `main`, without the issue's branch while it exists, or not citing #<n>. A repeat with the same commit is « already recorded »; another commit needs `--replace <old>` (`test merged <n> <new> --replace <old>`). Any other usable change adds its entry after the merge with `test add` and a `commit` field. `test list [--issue n]` lists them.
 
 A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-report`.
 
