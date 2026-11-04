@@ -695,20 +695,27 @@ impl GraphView {
             ));
         }
         let (cx, cy) = (outer.center().x, outer.center().y);
-        let handles = [
+        // Corners: small squares. Edge midpoints: pills along the edge.
+        let corners = [
             outer.left_top(),
-            Pos2::new(cx, outer.top()),
             outer.right_top(),
-            Pos2::new(outer.right(), cy),
             outer.right_bottom(),
-            Pos2::new(cx, outer.bottom()),
             outer.left_bottom(),
-            Pos2::new(outer.left(), cy),
         ];
-        for at in handles {
-            let square = Rect::from_center_size(at, egui::vec2(HANDLE_SIZE, HANDLE_SIZE));
-            painter.rect_filled(square, 1.0, Color32::WHITE);
-            painter.rect_stroke(square, 1.0, Stroke::new(1.0, colour), StrokeKind::Inside);
+        let edges = [
+            (Pos2::new(cx, outer.top()), egui::vec2(18.0, 4.0)),
+            (Pos2::new(outer.right(), cy), egui::vec2(4.0, 18.0)),
+            (Pos2::new(cx, outer.bottom()), egui::vec2(18.0, 4.0)),
+            (Pos2::new(outer.left(), cy), egui::vec2(4.0, 18.0)),
+        ];
+        let outline = Stroke::new(1.0, colour);
+        for at in corners {
+            let square = Rect::from_center_size(at, egui::vec2(7.0, 7.0));
+            painter.rect(square, 0.0, Color32::WHITE, outline, StrokeKind::Middle);
+        }
+        for (at, size) in edges {
+            let edge_pill = Rect::from_center_size(at, size);
+            painter.rect(edge_pill, 2.0, Color32::WHITE, outline, StrokeKind::Middle);
         }
         let text = format!(
             "{} \u{d7} {} {}",
