@@ -2789,3 +2789,104 @@ fn delete_rows_past_the_data_end_keeps_its_entry_when_it_moves_a_row_series() {
     assert_eq!(series_rows(&f.project, graph), vec![Some(23)]);
     assert_eq!(**f.project.tree(), *after);
 }
+
+// -- absorb_into_last (#433) -----------------------------------------------
+
+fn unit_meta(project: &Project, column: NodeId, unit: &str) -> Command {
+    let mut meta = project
+        .tree()
+        .node(column)
+        .and_then(Node::as_column)
+        .map(|c| c.meta().clone())
+        .expect("column");
+    meta.unit = unit.to_string();
+    Command::SetColumnMeta { column, meta }
+}
+
+/// A follow-up command folded into the top entry: the label is the gesture's,
+/// the stack has the same length, one undo reverts both in reverse order, redo
+/// replays both, and the retained bytes are those of the same two commands
+/// closed in a macro (the footprint is the union, the accounting rebuilt).
+/// Witness: without `resync_pinned` the bytes of the removed column are not
+/// counted, and the figure differs from the macro twin and from zero.
+#[test]
+fn absorb_into_last_keeps_the_label_and_the_retained_bytes() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let remove = Command::RemoveNode { id: f.b };
+    let label = remove.label(f.project.tree());
+    let before = snapshot(&f.project);
+    history.execute(&mut f.project, remove.clone()).unwrap();
+    let follow_up = unit_meta(&f.project, f.a, "mm");
+    assert_eq!(
+        history.absorb_into_last(&mut f.project, follow_up.clone()),
+        Ok(true)
+    );
+    assert_eq!(history.len(), 1, "still one entry");
+    assert_eq!(history.undo_label(), Some(&label));
+    assert!(f.project.tree().node(f.b).is_none());
+
+    // The twin: the same two commands in a macro.
+    let mut twin = fixture();
+    let mut twin_history = History::new();
+    twin_history.begin_macro(MacroKind::Import).unwrap();
+    twin_history.execute(&mut twin.project, remove).unwrap();
+    let twin_follow_up = unit_meta(&twin.project, twin.a, "mm");
+    twin_history
+        .execute(&mut twin.project, twin_follow_up)
+        .unwrap();
+    twin_history.end_macro(&mut twin.project).unwrap();
+    assert!(history.retained_bytes() > 0, "the removed column is kept");
+    assert_eq!(history.retained_bytes(), twin_history.retained_bytes());
+
+    // One undo reverts both, redo replays both.
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert!(f.project.tree().node(f.b).is_none());
+    assert_eq!(
+        f.project
+            .tree()
+            .node(f.a)
+            .and_then(Node::as_column)
+            .map(|c| c.meta().unit.clone()),
+        Some("mm".to_string())
+    );
+
+    // A second absorption stays in the same entry; a command with no effect
+    // and a refused one leave it as it is.
+    let again = unit_meta(&f.project, f.a, "cm");
+    assert_eq!(history.absorb_into_last(&mut f.project, again), Ok(true));
+    assert_eq!(history.len(), 1);
+    let same = Command::Rename {
+        id: f.a,
+        name: "A".to_string(),
+    };
+    assert_eq!(history.absorb_into_last(&mut f.project, same), Ok(false));
+    let refused = Command::SetColumnMeta {
+        column: f.b,
+        meta: ColumnMeta::default(),
+    };
+    assert!(history.absorb_into_last(&mut f.project, refused).is_err());
+    assert_eq!(history.len(), 1);
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before, "all three revert at once");
+    assert!(!history.can_undo());
+}
+
+/// With an empty stack, or inside an open macro, it is a plain recorded
+/// command: nothing to fold into.
+#[test]
+fn absorb_into_last_without_an_entry_or_in_a_macro_is_a_plain_command() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let command = unit_meta(&f.project, f.a, "mm");
+    assert_eq!(history.absorb_into_last(&mut f.project, command), Ok(true));
+    assert_eq!(history.len(), 1);
+
+    history.begin_macro(MacroKind::Import).unwrap();
+    let in_macro = unit_meta(&f.project, f.a, "cm");
+    assert_eq!(history.absorb_into_last(&mut f.project, in_macro), Ok(true));
+    history.end_macro(&mut f.project).unwrap();
+    assert_eq!(history.len(), 2, "the macro is its own entry");
+}

@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::compose::paired_x_columns;
 use crate::formula::{
-    ColumnFormula, Formula, FormulaError, SheetAddress, SheetDirectory, SheetScope,
+    ColumnFormula, Formula, FormulaError, FormulaPart, SheetAddress, SheetDirectory, SheetScope,
 };
 use crate::id::NodeId;
 use crate::name::same_name_ignoring_case;
@@ -237,6 +237,66 @@ impl Tree {
         }
         let cycle = self.formula_loop(column, &formula);
         (formula, cycle.then_some(FormulaError::Cycle))
+    }
+
+    /// The kept formulas that can **now** be read (#433, Q3): a formula the
+    /// field kept because a column or a sheet it names did not exist, and that
+    /// the tree can resolve today. Each is the column and the formula to store
+    /// in its place, in **ascending identifier order** (never the order of
+    /// [`Tree::iter`], which depends on the history: the oracle of `b22` must
+    /// see the same bindings in both sessions).
+    ///
+    /// A column is a candidate if its formula does not compile and a text
+    /// fragment holds a letter, a `[` or a quote (what a name looks like). It
+    /// binds only if the strict reading of the text it **displays**
+    /// ([`Tree::formula_for_entry`]: unknown name, loop, `#REF`, `A +` all
+    /// refuse) succeeds as a whole and keeps every column the formula already
+    /// held: all or nothing, so `#REF+Z` waits for `#REF` to be replaced, and a
+    /// binding that would make a loop stays kept. Each candidate is judged on
+    /// the tree as it is: the actor applies the first, then asks again, which is
+    /// how a binding enters the loop check of the next.
+    ///
+    /// The binder reads letters and names; the calculation never does, and what
+    /// the binder produces is the stored formula, already in the fingerprint
+    /// (invariant 11).
+    pub fn pending_bindings(&self) -> Vec<(NodeId, ColumnFormula)> {
+        self.binding_candidates().collect()
+    }
+
+    /// The first of [`Tree::pending_bindings`], without judging the others.
+    pub fn next_binding(&self) -> Option<(NodeId, ColumnFormula)> {
+        self.binding_candidates().next()
+    }
+
+    fn binding_candidates(&self) -> impl Iterator<Item = (NodeId, ColumnFormula)> + '_ {
+        let mut ids: Vec<NodeId> = self
+            .iter()
+            .filter(|(_, node)| {
+                node.as_column()
+                    .and_then(|column| column.meta().formula.as_ref())
+                    .is_some_and(|formula| {
+                        formula.parts().iter().any(|part| {
+                            matches!(part, FormulaPart::Text(text)
+                                if text.chars().any(|c| c.is_alphabetic() || c == '[' || c == '\''))
+                        })
+                    })
+            })
+            .map(|(id, _)| id)
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter().filter_map(move |id| {
+            let old = self.node(id)?.as_column()?.meta().formula.as_ref()?;
+            if old.compile().is_ok() {
+                return None;
+            }
+            let text = self.formula_letters(id)?;
+            let new = self.formula_for_entry(id, &text).ok()?;
+            let held = new.columns();
+            old.columns()
+                .iter()
+                .all(|column| held.contains(column))
+                .then_some((id, new))
+        })
     }
 
     /// The letter(s) `column` has in its sheet, `None` if it is not in one.
@@ -577,6 +637,59 @@ mod tests {
                 "`{text}` keeps its text"
             );
         }
+    }
+
+    /// The kept formulas that can now be read come back in **ascending
+    /// identifier order**, whatever the order of the tree's table: twelve kept
+    /// formulas wait for column N and all bind when it appears. A formula that
+    /// still names something missing, and one that compiles, are not listed.
+    /// Witness: the order of `Tree::iter` is a hash order, so without the sort
+    /// the list is not ascending.
+    #[test]
+    fn pending_bindings_come_in_identifier_order() {
+        let mut fx = Fx::new();
+        // Sheet1 holds A, B, C; add up to M (13 columns), then keep.
+        let mut ids = fx.s1.clone();
+        ids.extend(columns(&mut fx.project, fx.sheet1, 10));
+        for id in ids.clone().into_iter().skip(1) {
+            let (formula, _) = fx.tree().formula_keeping(id, "A+N");
+            let mut meta = fx
+                .tree()
+                .node(id)
+                .and_then(Node::as_column)
+                .unwrap()
+                .meta()
+                .clone();
+            meta.formula = Some(formula);
+            fx.project.set_column_meta(id, meta).unwrap();
+        }
+        // One that waits for something else, one that compiles.
+        let (waiting, _) = fx.tree().formula_keeping(ids[0], "A+Q");
+        let mut meta = fx
+            .tree()
+            .node(ids[0])
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        meta.formula = Some(waiting);
+        fx.project.set_column_meta(ids[0], meta).unwrap();
+        assert!(fx.tree().pending_bindings().is_empty(), "N does not exist");
+
+        columns(&mut fx.project, fx.sheet1, 1);
+        let pending = fx.tree().pending_bindings();
+        let listed: Vec<NodeId> = pending.iter().map(|(id, _)| *id).collect();
+        let mut expected: Vec<NodeId> = ids.into_iter().skip(1).collect();
+        expected.sort_unstable();
+        assert_eq!(listed, expected, "ascending, the waiting one left out");
+        assert_eq!(
+            fx.tree().next_binding().map(|(id, _)| id),
+            expected.first().copied()
+        );
+        // A bound formula reads N by identifier: the display follows.
+        let (id, formula) = &pending[0];
+        assert!(formula.compile().is_ok());
+        assert_eq!(formula.columns().len(), 2, "A and N by identifier: {id:?}");
     }
 
     #[test]

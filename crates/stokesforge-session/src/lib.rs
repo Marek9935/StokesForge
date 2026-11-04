@@ -172,7 +172,7 @@ pub const NEW_PROJECT_NAME: &str = "Project1";
 pub use error::{SessionError, SessionResult};
 pub use gauge::RecalcEnd;
 pub use recalc::FormulaRecalc;
-pub use snapshot::{HistoryState, Revision, Snapshot};
+pub use snapshot::{BoundReport, HistoryState, Revision, Snapshot};
 
 /// Position and size of a UI window — see "Window geometry" above for what
 /// it is and why it lives here rather than in the model. Directly reuses the
@@ -659,6 +659,66 @@ mod tests {
         assert!(!snapshot.history.can_undo, "the command left the stack");
         assert!(snapshot.history.can_redo, "as after a Ctrl+Z");
         assert!(snapshot.revision > first.revision);
+    }
+
+    /// #433: a Stop during the recalculation of a gesture that made a kept
+    /// formula bind undoes the gesture **and** the binding (one entry), and the
+    /// report of the snapshot does not claim a binding that is gone. Witness: a
+    /// binding written after the pass (or outside the entry) would survive.
+    #[test]
+    fn stop_undoes_the_gesture_and_the_binding_it_made() {
+        // Columns `A` and `C` (letters A and B); the formula of the second
+        // reads `A+C`, a third column that does not exist yet.
+        let (session, sheet, c) = sheet_with_empty_c();
+        let handle = session.handle();
+        let tree = handle.snapshot().expect("snapshot").tree;
+        let (kept, error) = tree.formula_keeping(c, "A+C");
+        assert!(error.is_some(), "kept: column C does not exist yet");
+        handle
+            .execute(Command::SetColumnMeta {
+                column: c,
+                meta: stokesforge_core::ColumnMeta {
+                    formula: Some(kept),
+                    ..Default::default()
+                },
+            })
+            .expect("kept");
+        handle.gauge.stop_next_for_test();
+        handle
+            .execute_interruptible(Command::AddColumn {
+                sheet,
+                index: None,
+                name: Some("Z".into()),
+                column: stokesforge_core::Column::from_f64(&[10.0, 20.0, 30.0]),
+            })
+            .expect("command");
+        assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+        assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Stopped));
+        let stopped = handle.snapshot().expect("snapshot");
+        assert_eq!(stopped.tree.children(sheet).expect("sheet").len(), 2);
+        let formula = stopped.tree.node(c).and_then(|n| n.as_column()).unwrap();
+        assert!(
+            formula
+                .meta()
+                .formula
+                .as_ref()
+                .is_some_and(|f| f.compile().is_err()),
+            "the formula is the kept one again"
+        );
+        assert_eq!(stopped.bound.count, 0, "the report took the binding back");
+        assert!(stopped.history.can_redo);
+
+        // Redo replays the recorded entry: the column and the binding.
+        handle.redo().expect("redo");
+        let redone = handle.snapshot().expect("snapshot");
+        assert_eq!(redone.tree.formula_letters(c).as_deref(), Some("A+C"));
+        assert!(redone.tree.pending_bindings().is_empty());
+        let formula = redone.tree.node(c).and_then(|n| n.as_column()).unwrap();
+        assert!(formula
+            .meta()
+            .formula
+            .as_ref()
+            .is_some_and(|f| f.compile().is_ok()));
     }
 
     /// Stop after an accepted but **no-op** command (B5: no entry stored)

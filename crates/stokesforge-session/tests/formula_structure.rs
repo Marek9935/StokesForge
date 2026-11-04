@@ -2484,3 +2484,64 @@ fn a_calculation_over_a_formula_column_is_not_stale_after_load() {
     h.load(&path).expect("load");
     assert_eq!(stale(&h), vec![false], "after load");
 }
+
+/// #433 (Q3): a file whose kept formula names a column that **is** there
+/// (written when the column was missing, or by hand) binds when the session
+/// loads it, with no history entry (the history is just cleared) and with the
+/// right values; a kept formula that still names something missing stays kept.
+/// The kept parts and the reason survive the save and the load. Witness: with
+/// the load scan removed, the column stays empty until the first command.
+#[test]
+fn a_kept_formula_binds_when_the_file_is_loaded() {
+    use stokesforge_core::{ColumnFormula, FormulaPart};
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let sheet = first_sheet(&p, book);
+        let a = add_col(&mut p, sheet, "A", &[1.0, 2.0, 3.0]);
+        // Letters are positions: B, C, D, then E.
+        for name in ["B", "C", "D"] {
+            add_col(&mut p, sheet, name, &[0.0]);
+        }
+        add_col(&mut p, sheet, "E", &[10.0, 20.0, 30.0]);
+        let waiting = add_col(&mut p, sheet, "F", &[]);
+        let ready = add_col(&mut p, sheet, "G", &[]);
+        let keep = |p: &mut Project, id: NodeId, tail: &str| {
+            p.set_column_meta(
+                id,
+                ColumnMeta {
+                    formula: Some(ColumnFormula::from_parts(vec![
+                        FormulaPart::Column(a),
+                        FormulaPart::Text(tail.to_string()),
+                    ])),
+                    ..Default::default()
+                },
+            )
+            .expect("kept");
+        };
+        keep(&mut p, ready, "+E");
+        keep(&mut p, waiting, "+Q");
+        let dir = scratch("load-binds");
+        let path = dir.path().join("kept.stf");
+        stokesforge_persistence::save(&p, &path).expect("save");
+
+        let session =
+            Session::spawn_with_recalc(Project::new("Empty").unwrap(), None, mode).expect("actor");
+        let h = session.handle();
+        h.load(&path).expect("load");
+        let s = snap(&h);
+        assert_eq!(nums(&s.tree, ready), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        assert_eq!(s.tree.formula_letters(ready).as_deref(), Some("A+E"));
+        assert!(!s.history.can_undo, "no history entry for the load scan");
+        assert_eq!(s.bound.count, 0, "opening a file reports nothing");
+        // The one that still names something missing stays kept, same text.
+        assert_eq!(s.tree.formula_letters(waiting).as_deref(), Some("A+Q"));
+        assert!(column(&s.tree, waiting)
+            .meta()
+            .formula
+            .as_ref()
+            .is_some_and(|f| f.compile().is_err()));
+        assert!(s.tree.pending_bindings().is_empty());
+    }
+}
