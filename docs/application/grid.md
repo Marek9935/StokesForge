@@ -253,9 +253,10 @@ says it as an error; Undo gives back the old formula and values. While typing,
 the cell tints red for each of these except a syntax error. Validating the
 displayed text as is (even with `#REF`) writes nothing. A range written with a
 decimal comma (`max(B,1,5)`) is rewritten `max(B, 1, 5)` and the cell is orange
-for 10 s (S-R17). When pasting a rectangle, a refused formula writes nothing
-into its column (neither the formula nor the copied values), the other
-fields and columns are pasted and the status bar names the column. The decision is made in
+for 10 s (S-R17). When pasting a rectangle, a formula that cannot be read is
+kept like a typed one (#433: framed, the column emptied, never the copied
+values), the other fields and columns are pasted and the status bar names the
+columns that do not compute, then the reason of the first. The decision is made in
 `stokesforge-app-state` (`header_edit_issue`, `formula_issue`), the grid only
 paints it.
 

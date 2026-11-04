@@ -207,7 +207,7 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "A reference to another workbook names its sheet. Write […]Sheet1!B" | Add the sheet: `[Book2]Sheet5!B`, even if the workbook has a single sheet. |
 | "Several workbooks are named …. Write the path from the project root, for example […]Sheet1!B" | Write the folders before the name: `[Mesures/Book2]Sheet5!B`. |
 | "The formula is incomplete or not valid. Check the operators and the parentheses" | The text cannot be read as a calculation (`A +`, a missing parenthesis). The formula is kept and the cells are empty: fix the text in the **F(x)=** cell. |
-| "The formula of column … was not pasted: …" | A pasted formula could not be read in the destination sheet. Nothing was written into that column; the other columns of the paste went through. |
+| "The formula of column … does not compute: …" | A pasted formula could not be read in the destination sheet. It is kept, framed in red, and the column is empty; the other columns of the paste went through. It calculates once the missing column or sheet exists. |
 | "Read as the range from … to … and rewritten …. For the number …, write it with a point" | A range call such as `max(B,1,5)` was rewritten `max(B, 1, 5)`. The cell is orange for 10 seconds. Write `1.5` for the number 1.5. |
 | "Several objects are named … apart from case. Rename one of them" | An older project holds two objects whose names differ only by case. Rename one of them. |
 | "Column … does not exist in sheet …" | The sheet of the reference has fewer columns. |

@@ -1946,8 +1946,6 @@ pub fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
 pub(crate) enum HeaderTextRefused {
     /// x': it is not a finite number.
     NotANumber,
-    /// Formula: unknown letter, self-reference or `#REF`.
-    Formula(stokesforge_core::FormulaError),
 }
 
 impl HeaderField {
@@ -2001,10 +1999,9 @@ impl HeaderField {
 
     /// Writes `text` into the field of `column` (whose metadata is `meta`). Refusal
     /// (nothing is written) when the text is not a value of the field: x'
-    /// refuses anything that is not a finite number, the formula refuses an
-    /// unknown letter, the column itself or `#REF` — an empty text
-    /// erases it. The letters-to-identifiers conversion is
-    /// `Tree::formula_from_letters`, never a separate write.
+    /// refuses anything that is not a finite number, the formula keeps what it
+    /// cannot read (`Tree::formula_keeping`, #433) — an empty text erases it.
+    /// The letters-to-identifiers conversion is never a separate write.
     pub(crate) fn write_text(
         self,
         tree: &Tree,
@@ -2036,10 +2033,9 @@ impl HeaderField {
                 meta.formula = if text.trim().is_empty() {
                     None
                 } else {
-                    Some(
-                        tree.formula_for_entry(column, &text)
-                            .map_err(HeaderTextRefused::Formula)?,
-                    )
+                    // The keeping reading (#433): a paste keeps what it cannot
+                    // read, like typing; only `pyst` is strict.
+                    Some(tree.formula_keeping(column, &text).0)
                 };
                 Ok(())
             }
@@ -2324,10 +2320,9 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
 enum FormulaPaste {
     /// No formula was pasted here, or the write did not take place.
     NotWritten,
-    /// The pasted formula is stored: the column is recomputed.
+    /// The pasted formula is stored, kept as typed if it does not compute
+    /// (#433): the column is recomputed or empty, never given frozen values.
     Accepted,
-    /// The formula was refused (its sentence is set at the end of the paste).
-    Refused,
 }
 
 /// Column targeted by `cursor`, whatever its kind — [`GridCursor`]
@@ -9896,7 +9891,11 @@ impl AppState {
     /// A formula column naturally refuses the write of data
     /// (`CoreError::FormulaColumnReadOnly`): reported by the status, without
     /// blocking the other columns already pasted. A full-column paste does not
-    /// try it on the columns whose formula it has just written (#432). A paste that touches several
+    /// try it on the columns whose formula it has just written, kept or not
+    /// (#432, #433). A pasted formula that cannot be read is **kept** like a
+    /// typed one (`Tree::formula_keeping`, comma range not rewritten): framed,
+    /// the column emptied, the status bar names the columns that do not compute
+    /// and the reason of the first; only `pyst` is strict. A paste that touches several
     /// columns or several fields stays grouped in a single history entry.
     fn apply_paste(
         &mut self,
@@ -10207,9 +10206,9 @@ impl AppState {
         }
         // The formulas refused by this paste: the column, and why (#433).
         let mut refusals: Vec<(NodeId, String)> = Vec::new();
-        // Per target, what this paste did with the Formula field. `Accepted`
-        // and `Refused` both skip the body below: a refused formula writes
-        // nothing into its column (#433).
+        // Per target, what this paste did with the Formula field. A column
+        // that now carries a formula skips the body below, kept formula
+        // included: no frozen values, ever (#433).
         let mut formula_outcomes = vec![FormulaPaste::NotWritten; targets.len()];
         if let Some(from) = header_from {
             for field_index in from..HeaderField::COUNT {
@@ -10229,12 +10228,10 @@ impl AppState {
                         // `None` alone is ambiguous (column gone, refused x'):
                         // it is accepted only if the column now carries a
                         // formula.
-                        *outcome = match &refused {
-                            Some(_) => FormulaPaste::Refused,
-                            None if self.column_meta(column).formula.is_some() => {
-                                FormulaPaste::Accepted
-                            }
-                            None => FormulaPaste::NotWritten,
+                        *outcome = if self.column_meta(column).formula.is_some() {
+                            FormulaPaste::Accepted
+                        } else {
+                            FormulaPaste::NotWritten
                         };
                     }
                     if let Some(reason) = refused {
@@ -10246,8 +10243,8 @@ impl AppState {
         for ((&column, source), outcome) in targets.iter().zip(columns).zip(&formula_outcomes) {
             // The column whose formula this paste just wrote is recomputed:
             // its frozen values would only be refused as read-only.
-            // A column whose formula was refused gets nothing at all (#433): the
-            // frozen values would look like the result of the formula.
+            // A kept formula that does not compute stays empty (#433): frozen
+            // values would look like its result.
             if source.data.is_empty() || *outcome != FormulaPaste::NotWritten {
                 continue;
             }
@@ -10273,9 +10270,10 @@ impl AppState {
         self.fail_formula_paste(&refusals);
     }
 
-    /// The status bar sentence of the formulas a paste refused (#433), naming
-    /// the columns: nothing was written into them, the other columns went
-    /// through. Nothing if no formula was refused.
+    /// The status bar sentence of the formulas a paste kept without being
+    /// able to compute them (#433), naming the columns, like typing: the
+    /// formulas are stored, framed, the other columns went through. Nothing if
+    /// every formula computes.
     fn fail_formula_paste(&mut self, refusals: &[(NodeId, String)]) {
         let Some((first, reason)) = refusals.first() else {
             return;
@@ -10289,7 +10287,7 @@ impl AppState {
         let sentence = if refusals.len() == 1 {
             let column = letters(first);
             tr!(
-                "error-paste-formula-refused",
+                "error-paste-formula-kept",
                 column = column.as_str(),
                 reason = reason.as_str()
             )
@@ -10299,7 +10297,7 @@ impl AppState {
             // Every refused column is named, then the reason of the first.
             let first = letters(first);
             tr!(
-                "error-paste-formulas-refused",
+                "error-paste-formulas-kept",
                 columns = columns.as_str(),
                 first = first.as_str(),
                 reason = reason.as_str()
@@ -10312,14 +10310,14 @@ impl AppState {
     /// single field, then replaces them as a block
     /// (`Command::SetColumnMeta`: the "block replacement, never by subfield"
     /// doctrine of the `stokesforge-commands` crate, see its head doc).
-    /// Writes `text` into the header field `field` of `column`; a text that
-    /// the field refuses is reported without writing anything. Non-numeric x':
-    /// the status bar says so right away. Formula refused (unknown letter,
-    /// self-read, `#REF`): the **sentence** of the refusal is returned, and the
+    /// Writes `text` into the header field `field` of `column`. Non-numeric x':
+    /// refused, the status bar says so right away. A formula that does not
+    /// compute (unknown letter, self-read, `#REF`, loop...) is **kept** as
+    /// typed, the column emptied, and the **sentence** of why is returned; the
     /// caller sets it, **after** the writes of the whole paste (the other
-    /// fields are pasted, the status bar keeps the refusal). `None` does not
-    /// mean written: it is also returned for a column gone and for a refused
-    /// x' (both already reported); the caller reads the column back.
+    /// fields are pasted, the status bar keeps it). `None` does not mean
+    /// written: it is also returned for a column gone and for a refused x'
+    /// (both already reported); the caller reads the column back.
     fn paste_header_text(
         &mut self,
         column: NodeId,
@@ -10336,21 +10334,20 @@ impl AppState {
             self.fail(tr!("error-column-gone"));
             return None;
         };
+        // Why a pasted formula does not compute, if it does not: it is kept
+        // all the same, the sentence tells the status bar (#433).
+        let kept_error = (field == HeaderField::Formula && !text.trim().is_empty())
+            .then(|| self.snapshot.tree.formula_keeping(column, &text).1)
+            .flatten();
         match field.write_text(&self.snapshot.tree, column, &mut meta, text) {
             Ok(()) => {}
             Err(HeaderTextRefused::NotANumber) => {
                 self.fail(crate::tr!("status-x-prime-invalid"));
                 return None;
             }
-            Err(HeaderTextRefused::Formula(error)) => {
-                // Pasted formula with a letter that does not exist in the
-                // destination sheet, or that carries `#REF`: nothing is written
-                // in this field.
-                return Some(errors::formula::error_message(&error));
-            }
         }
         self.set_meta_dropping_formula_data(column, meta, false);
-        None
+        kept_error.map(|error| errors::formula::error_message(&error))
     }
 
     /// [`Action::SetColumnXPrime`].

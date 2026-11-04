@@ -302,7 +302,17 @@ fn a_formulas_copy_reads_by_name_in_every_destination() {
             let dst = *w.columns(sheet).last().unwrap();
             w.paste_header_on(sheet, dst, &clip);
             let place = w.state.tree().node(sheet).unwrap().name().to_string();
-            assert_eq!(w.letters(dst).as_deref(), want_letters, "{text} -> {place}");
+            if want_letters.is_none() {
+                // Kept as typed, framed, empty (#433): a paste keeps like typing.
+                assert_eq!(w.letters(dst).as_deref(), Some(*text), "{text} -> {place}");
+                assert!(w.state.formula_issue(dst).is_some(), "{text} -> {place}");
+                assert!(
+                    w.values(dst).iter().all(Option::is_none),
+                    "{text} -> {place}"
+                );
+            } else {
+                assert_eq!(w.letters(dst).as_deref(), want_letters, "{text} -> {place}");
+            }
             if want_letters.is_some() {
                 // The values are the formula's, never the pasted ones.
                 assert_eq!(w.values(dst)[0], want_value, "{text} -> {place}");
@@ -530,25 +540,39 @@ fn a_refused_formula_among_accepted_ones_ends_on_its_sentence_only() {
     w.paste_header_on(far, dst[0], &clip);
     assert_eq!(w.letters(dst[0]).as_deref(), Some("max(Sheet3!B)"));
     assert_eq!(w.values(dst[0])[0], Some(7104.0));
-    assert_eq!(w.letters(dst[1]), None, "Book9 has no `Blanc 2`");
+    assert_eq!(
+        w.letters(dst[1]).as_deref(),
+        Some("mean('Blanc 2'!B)"),
+        "kept: Book9 has no `Blanc 2`"
+    );
+    assert!(w.values(dst[1]).iter().all(Option::is_none));
     let status = w.status();
     assert!(
         status.starts_with("[error]") && status.contains("no sheet named"),
         "{status}"
     );
-    // The status names the column whose formula was not pasted (#433).
+    // The status names the column whose formula does not compute (#433).
     let letters = w.state.tree().column_letters(dst[1]).unwrap();
     assert!(
         status.contains(&format!("column {letters} ")),
         "no column name in `{status}`"
     );
     assert!(!status.contains(FORMULA_READ_ONLY), "{status}");
+    // The copied values were never written into the kept column: no refusal
+    // as read-only went through the status history either.
+    assert!(
+        w.state
+            .status_history()
+            .all(|message| !message.text.contains(FORMULA_READ_ONLY)),
+        "frozen values were written"
+    );
 }
 
-/// Several refused formulas are all named, then the reason of the first (#433).
+/// Several kept formulas that do not compute are all named, then the reason of
+/// the first (#433).
 /// Witness: a sentence without the reason fails the last assertion.
 #[test]
-fn several_refused_formulas_are_named_then_the_first_reason_is_given() {
+fn several_unreadable_pasted_formulas_are_named_then_the_first_reason_is_given() {
     let mut w = world();
     let src = sources(&mut w);
     let (sheet1, far) = (w.sheet1, w.far_sheet);
@@ -559,12 +583,14 @@ fn several_refused_formulas_are_named_then_the_first_reason_is_given() {
         w.state.tree().column_letters(dst[0]).unwrap(),
         w.state.tree().column_letters(dst[1]).unwrap(),
     );
-    assert_eq!(w.letters(dst[0]), None);
-    assert_eq!(w.letters(dst[1]), None);
+    assert!(
+        w.letters(dst[0]).is_some() && w.letters(dst[1]).is_some(),
+        "kept"
+    );
     let status = w.status();
     assert!(
         status.starts_with(&format!(
-            "[error] The formulas of columns {b}, {c} were not pasted. {b}: "
+            "[error] The formulas of columns {b}, {c} do not compute. {b}: "
         )),
         "{status}"
     );
@@ -599,7 +625,7 @@ fn an_accepted_formula_after_a_refused_x_prime_keeps_its_computed_values() {
 }
 
 #[test]
-fn pasting_a_formula_that_closes_a_loop_is_refused_with_the_loop_sentence() {
+fn pasting_a_formula_that_closes_a_loop_keeps_it_framed_with_the_loop_sentence() {
     let mut w = world();
     let src = sources(&mut w); // Sheet1!E = max(Sheet3!B)
     let (sheet1, sheet3) = (w.sheet1, w.sheet3);
@@ -609,7 +635,8 @@ fn pasting_a_formula_that_closes_a_loop_is_refused_with_the_loop_sentence() {
     let b3 = w.columns(sheet3)[1];
     let clip = w.copy_formula_column(sheet3, z);
     w.paste_header_on(sheet3, b3, &clip);
-    assert_eq!(w.letters(b3), None, "a loop is never stored");
+    assert_eq!(w.letters(b3).as_deref(), Some("max(Sheet1!E)"), "kept");
+    assert!(w.values(b3).iter().all(Option::is_none), "uncomputed");
     assert!(
         w.status()
             .contains("Formulas refer to each other in a loop"),
@@ -620,18 +647,54 @@ fn pasting_a_formula_that_closes_a_loop_is_refused_with_the_loop_sentence() {
     let _ = sheet1;
 }
 
+/// A pasted formula that cannot be read is kept like a typed one: framed, the
+/// column emptied (never the frozen values of the copy), one Undo gives the data
+/// back (#433). Witnesses: the strict reading stores nothing; writing the
+/// copied values leaves them in the column.
 #[test]
-fn a_refused_formulas_paste_leaves_the_destination_data_alone() {
+fn a_pasted_unreadable_formula_is_kept_and_empties_the_column() {
     let mut w = world();
     let _ = sources(&mut w);
     let sheet3 = w.sheet3;
     let z = w.formula_column(sheet3, "max(Sheet1!E)");
     let b3 = w.columns(sheet3)[1];
     let before = w.values(b3);
+    assert!(before.iter().all(Option::is_some));
     let clip = w.copy_formula_column(sheet3, z);
     w.paste_header_on(sheet3, b3, &clip);
+    assert_eq!(w.letters(b3).as_deref(), Some("max(Sheet1!E)"));
+    assert!(w.state.formula_issue(b3).is_some(), "framed");
+    assert!(w.values(b3).iter().all(Option::is_none), "no frozen values");
+    w.state.dispatch(Action::Undo);
     assert_eq!(w.letters(b3), None);
-    assert_eq!(w.values(b3), before);
+    assert_eq!(w.values(b3), before, "one undo restores the data");
+}
+
+/// The object a pasted formula waits for appears later: it binds like any kept
+/// formula (#433).
+#[test]
+fn a_pasted_kept_formula_binds_when_its_column_appears() {
+    let mut w = world();
+    let sheet1 = w.sheet1;
+    let e = w.formula_column(sheet1, "A+G");
+    assert!(w.state.formula_issue(e).is_some(), "kept: no column G");
+    let clip = w.copy_formula_column(sheet1, e);
+    let target = w.new_columns(sheet1, 1)[0]; // F
+    w.paste_header_on(sheet1, target, &clip);
+    assert_eq!(
+        w.letters(target).as_deref(),
+        Some("A+G"),
+        "kept by the paste"
+    );
+    assert!(w.state.formula_issue(target).is_some());
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 }); // G appears
+    assert!(w.state.formula_issue(target).is_none(), "bound");
+    assert!(w.state.formula_issue(e).is_none(), "bound");
+    assert!(
+        w.status().starts_with("2 formulas now read"),
+        "{}",
+        w.status()
+    );
 }
 
 // -- object clipboard --

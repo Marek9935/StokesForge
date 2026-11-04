@@ -24,6 +24,16 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Changed
+
+- Pasting a formula that cannot be read behaves like typing it (#433): it is
+  kept, framed in red with the reason, and its column is emptied (the copied
+  values are never pasted in its place); the other columns of the paste go
+  through, one **Undo** restores everything, and it calculates by itself when
+  the missing column or sheet appears. The status bar says "The formula of
+  column C does not compute: …". Scripts (`pyst`) stay strict.
+- Status bar warnings use one amber colour, further from the error red.
+
 ### Added
 
 - A formula kept because a column or a sheet it names does not exist yet

@@ -3187,7 +3187,7 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
 /// is kept and framed and the status bar says which (#433); pasted, it is refused,
 /// nothing is written, and the status bar names the column.
 #[test]
-fn a_formula_naming_a_missing_column_is_kept_when_typed_and_refused_when_pasted() {
+fn a_formula_naming_a_missing_column_is_kept_when_typed_and_when_pasted() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -3206,17 +3206,23 @@ fn a_formula_naming_a_missing_column_is_kept_when_typed_and_refused_when_pasted(
     let issue = state.formula_issue(signal).expect("kept text is framed");
     assert!(issue.contains("Column Z does not exist"), "{issue}");
 
-    // On paste, the same refusal (and its own message): nothing is written.
+    // On paste, kept the same way (#433), with the sentence of a paste.
     state.select_header_field(sheet1, note, HeaderField::Formula);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "Y*2".to_string(),
     });
-    assert_eq!(formula_letters(&state, note), None, "paste refused");
+    assert_eq!(
+        formula_letters(&state, note).as_deref(),
+        Some("Y*2"),
+        "paste kept"
+    );
     let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(
-        status.text.contains("Column Y does not exist") && status.text.contains("column C"),
+        status.text.contains("Column Y does not exist")
+            && status.text.contains("does not compute")
+            && status.text.contains("column C"),
         "unexpected status: {}",
         status.text
     );
@@ -3441,7 +3447,11 @@ fn a_refused_formula_in_a_paste_leaves_the_other_fields_pasted() {
         ("ln", "u", "c"),
         "the other fields are pasted"
     );
-    assert_eq!(formula_letters(&state, short), None, "formula refused");
+    assert_eq!(
+        formula_letters(&state, short).as_deref(),
+        Some("A*2"),
+        "formula kept, framed"
+    );
     let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(

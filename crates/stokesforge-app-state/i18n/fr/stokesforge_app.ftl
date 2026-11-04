@@ -760,8 +760,8 @@ error-formula-ambiguous-name = Plusieurs objets s'appellent { $name } à la cass
 error-formula-unknown-column-in = La colonne { $column } n'existe pas dans la feuille { $sheet }
 error-formula-remote-outside = Une colonne d'une autre feuille ne peut être lue que par at, max, min, mean, sum, std ou integral. La donner à l'une d'elles comme colonne
 error-formula-remote-x = La colonne X d'un at() sur une autre feuille se lit dans cette feuille. L'écrire sans préfixe (D, pas Sheet3!D)
-error-paste-formula-refused = La formule de la colonne { $column } n'a pas été collée : { $reason }
-error-paste-formulas-refused = Les formules des colonnes { $columns } n'ont pas été collées. { $first } : { $reason }
+error-paste-formula-kept = La formule de la colonne { $column } ne se calcule pas : { $reason }
+error-paste-formulas-kept = Les formules des colonnes { $columns } ne se calculent pas. { $first } : { $reason }
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus
