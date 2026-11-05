@@ -1213,7 +1213,7 @@ impl StokesForgeApp {
     }
 
     /// The detached requests stay drained before the workspace.
-    fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    pub(super) fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if !self.detached_tabs.is_empty() {
             self.show_detached_tabs(ctx);
             // Same draining as for the Project Manager, generalized to

@@ -107,9 +107,9 @@ fn published_size_lock(ctx: &egui::Context, graph: NodeId) -> Option<SizeLock> {
 
 /// Snap and its step for a graph window in the mode: on by default, coarse.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct SnapState {
-    on: bool,
-    fine: bool,
+pub(super) struct SnapState {
+    pub(super) on: bool,
+    pub(super) fine: bool,
 }
 
 impl Default for SnapState {
@@ -154,6 +154,12 @@ fn snap_id(graph: NodeId) -> egui::Id {
 fn snap_state(ctx: &egui::Context, graph: NodeId) -> SnapState {
     ctx.data(|data| data.get_temp(snap_id(graph)))
         .unwrap_or_default()
+}
+
+/// The snap state as the strip left it (read by tests).
+#[cfg(test)]
+pub(super) fn published_snap(ctx: &egui::Context, graph: NodeId) -> SnapState {
+    snap_state(ctx, graph)
 }
 
 fn set_snap_state(ctx: &egui::Context, graph: NodeId, state: SnapState) {

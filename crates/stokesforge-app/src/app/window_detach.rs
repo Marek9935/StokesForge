@@ -1866,6 +1866,153 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #426: the strip of a detached graph keeps answering: each click on its
+    /// controls takes effect, not only the first. The clicks go through the
+    /// detached viewport's own input, as in the real window, with the root
+    /// woken and painted only when the viewport asked for it.
+    #[test]
+    fn the_strip_of_a_detached_graph_answers_every_click() {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Graph(graph));
+        app.toggle_layout_mode(graph, Some(true));
+        let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let size = egui::vec2(1400.0, 900.0);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        let mut paint_root = |app: &mut StokesForgeApp| {
+            let mut raw = input.clone();
+            time += 0.7;
+            raw.time = Some(time);
+            let mut actions = Vec::new();
+            let mut output = ctx.run_ui(raw, |ui| {
+                app.run_layout_mode_requests(ui.ctx(), Some(graph));
+                app.drain_detached_tabs(ui.ctx(), &mut actions);
+            });
+            for action in actions {
+                app.state.dispatch(action);
+            }
+            output.textures_delta.clear();
+            output
+        };
+        let mut root = paint_root(&mut app);
+        let mut child_time = 0.0;
+        let mut paint_child =
+            |app: &mut StokesForgeApp, root: &mut egui::FullOutput, events: Vec<egui::Event>| {
+                let callback = root.viewport_output[&id].viewport_ui_cb.clone().unwrap();
+                let mut child = input.clone();
+                child_time += 0.7;
+                child.time = Some(child_time);
+                child.viewport_id = id;
+                child.events = events;
+                child.viewports.insert(
+                    id,
+                    egui::ViewportInfo {
+                        parent: Some(egui::ViewportId::ROOT),
+                        maximized: Some(true),
+                        focused: Some(true),
+                        ..Default::default()
+                    },
+                );
+                let mut output = ctx.run_ui(child, |ui| callback(ui));
+                output.textures_delta.clear();
+                if output.viewport_output[&egui::ViewportId::ROOT].repaint_delay == Duration::ZERO {
+                    *root = paint_root(app);
+                }
+                output
+            };
+        let mut last = paint_child(&mut app, &mut root, Vec::new());
+        for _ in 0..6 {
+            last = paint_child(&mut app, &mut root, Vec::new());
+        }
+        let find = |output: &egui::FullOutput, needle: &str| {
+            super::super::test_support::texts(&output.shapes)
+                .into_iter()
+                .find(|t| t.text == needle)
+                .map(|t| t.center)
+                .unwrap_or_else(|| panic!("{needle:?} not painted"))
+        };
+        let fine = || super::super::page_layout::published_snap(&ctx, graph).fine;
+        let snap_on = || super::super::page_layout::published_snap(&ctx, graph).on;
+        let mut click = |app: &mut StokesForgeApp,
+                         root: &mut egui::FullOutput,
+                         last: &mut egui::FullOutput,
+                         label: String| {
+            let pos = find(last, &label);
+            for pressed in [None, Some(true), Some(false)] {
+                let events = match pressed {
+                    None => vec![egui::Event::PointerMoved(pos)],
+                    Some(pressed) => vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                };
+                *last = paint_child(app, root, events);
+            }
+            for _ in 0..3 {
+                *last = paint_child(app, root, Vec::new());
+            }
+        };
+        assert!(!fine());
+        // Fine, Coarse, Fine, Coarse: four clicks in a row, each one answered.
+        for (round, (label, want)) in [
+            (tr!("layout-mode-step-fine"), true),
+            (tr!("layout-mode-step-coarse"), false),
+            (tr!("layout-mode-step-fine"), true),
+            (tr!("layout-mode-step-coarse"), false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            click(&mut app, &mut root, &mut last, label);
+            assert_eq!(fine(), want, "step click {round}");
+        }
+        // Snap: on, off, on.
+        for (round, want) in [false, true, false].into_iter().enumerate() {
+            click(&mut app, &mut root, &mut last, tr!("layout-mode-snap"));
+            assert_eq!(snap_on(), want, "snap click {round}");
+        }
+        // Grid mode and When axes are added reach the model through the root,
+        // and keep answering after each round trip.
+        let placement = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().layer_placement;
+        let fixed = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().fixed_figure;
+        for (round, free) in [true, false, true, false].into_iter().enumerate() {
+            let label = if free {
+                tr!("layout-mode-placement-free")
+            } else {
+                tr!("layout-mode-placement-regular")
+            };
+            click(&mut app, &mut root, &mut last, label);
+            assert_eq!(
+                placement(&app) == stokesforge_plot::LayerPlacement::Free,
+                free,
+                "grid mode click {round}"
+            );
+        }
+        for (round, want) in [true, false, true, false].into_iter().enumerate() {
+            let label = if want {
+                tr!("plot-figure-size-fixed")
+            } else {
+                tr!("plot-figure-size-grows")
+            };
+            click(&mut app, &mut root, &mut last, label);
+            assert_eq!(fixed(&app), want, "axes click {round}");
+        }
+        session.shutdown().unwrap();
+    }
+
     /// Issue #16: the state of each window (open/maximized/closed, collapsed,
     /// stacking rank) goes to the session with its floating geometry, and
     /// the latter moves neither on maximizing, nor on closing, nor on
