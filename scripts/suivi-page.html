@@ -201,6 +201,7 @@ function renderCi(){
   el.hidden=false;el.className='ciline '+l.cls;el.textContent=l.text;
 }
 /*CARDLINE-START*/
+const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
 /* One line per card, computed: whose turn it is. c = a colour entry or a paused entry; tests and
    qcms = S.tests and S.qcms. Members: the issue, its package's sub-issues, the colour's issues. */
 function cardLine(c,tests,qcms){
@@ -208,18 +209,28 @@ function cardLine(c,tests,qcms){
   const qcmOpen=(qcms||[]).some(q=>members.has(Number(q.issue)));
   const todo=(tests||[]).filter(t=>(t.status||'todo')==='todo'&&members.has(Number(t.n!=null?t.n:t.issue))).length;
   const held=c.held_by||[];
-  const you=qcmOpen||todo>0;
+  const note=typeof c.waiting==='string'?c.waiting.trim():'';
+  const noteYou=note!==''&&c.wait_kind==='you';
   const parts=[];
   if(qcmOpen)parts.push('répondre au questionnaire');
   if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
+  if(noteYou)parts.push(note);
+  const you=parts.length>0;
   const agent=held.includes('agent');
-  const note=typeof c.waiting==='string'?c.waiting.trim():'';
+  const idle=(c.agent_idle_min==null||isNaN(Number(c.agent_idle_min)))?null:Number(c.agent_idle_min);
+  const stopped=idle!==null&&idle>=IDLE_MIN;
   let text,also='';
-  if(you){text='À toi : '+parts.join(' · ');if(agent)also='l’agent continue';}
-  else if(agent)text='L’agent travaille';
+  if(you){
+    text='À toi : '+parts.join(' · ');
+    if(agent)also=idle===null?'session ouverte':stopped?'agent à l’arrêt, rien ne bouge sans toi':'l’agent travaille';
+    else if(!held.includes('legacy'))also='rien ne bouge sans toi';
+  }else if(agent){
+    text=idle===null?'Session ouverte':!stopped?'L’agent travaille':
+      'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
+  }
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
   else text='En pause';
-  return {user:you,text:text,also:also,note:note};
+  return {user:you,text:text,also:also,note:noteYou?'':note};
 }
 /*CARDLINE-END*/
 function lineEl(c){

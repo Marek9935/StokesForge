@@ -29,7 +29,7 @@ stored: a crash pauses an issue with no process left to write.
 
 Writes go through a temporary file and os.replace. Colour allocation takes the
 directory lock ../_stokesforge/.colour.lock (same lock as chantier.sh). Reads take
-no lock. Test seams: SF_SUIVI_DIR, SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
+no lock. Test seams: SF_SUIVI_DIR, SF_CLAUDE_PROJECTS (default ~/.claude/projects), SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
 SF_SUIVI_SLOW (seconds slept inside a claim's critical section), SF_SUIVI_CI=off (no CI watcher),
 SF_SUIVI_CI_POLL / SF_SUIVI_CI_TIMEOUT (seconds).
 
@@ -281,6 +281,32 @@ def held_by(r):
     if r.get("legacy"):
         why.append("legacy")
     return why
+
+
+def claude_projects():
+    return os.environ.get("SF_CLAUDE_PROJECTS") or os.path.expanduser("~/.claude/projects")
+
+
+def agent_idle_min(r):
+    """Whole minutes since the owner session last wrote (newest mtime of its transcript and
+    its subagents' transcripts), None if the owner is not alive or no file is found. Stat
+    only: the transcripts are private and never read. Whole minutes keep the ETag steady."""
+    if not owner_alive(r):
+        return None
+    sid = str((r.get("owner") or {}).get("session", ""))
+    if not sid or "/" in sid or sid.startswith("."):
+        return None
+    base = claude_projects()
+    paths = glob.glob(os.path.join(glob.escape(base), "*", glob.escape(sid) + ".jsonl"))
+    paths += glob.glob(os.path.join(glob.escape(base), "*", glob.escape(sid), "subagents", "*.jsonl"))
+    newest = None
+    for p in paths:
+        try:
+            m = os.stat(p).st_mtime
+        except OSError:
+            continue
+        newest = m if newest is None else max(newest, m)
+    return None if newest is None else max(0, int((time.time() - newest) // 60))
 
 
 def group_of(r):
@@ -552,12 +578,14 @@ def build_status():
         lead = next((r for r in gh if r["issue"] != g), gh[0])
         since, days = days_since(min(r.get("since") or "9999" for r in gh))
         why = sorted({w for r in gh for w in held_by(r)})
+        holder = next((r for r in gh if "agent" in held_by(r)), None)
         colours.append({
             "colour": c, "free": False, "issue": g, "issues": groups,
             "package": {"parent": g, "subs": pkg.get("subs", [])} if pkg else None,
             "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
-            "held_by": why, "worktrees": group_wts(g), "since": since, "days": days})
+            "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
+            "worktrees": group_wts(g), "since": since, "days": days})
     paused, done = [], []
     for r in recs.values():
         if r.get("done_at"):
@@ -566,12 +594,14 @@ def build_status():
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": r.get("kind", "issue"), "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": r.get("subs", []),
-                           "what": r.get("what", ""), "worktrees": group_wts(r["issue"]), "since": since, "days": days})
+                           "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
+                           "worktrees": group_wts(r["issue"]), "since": since, "days": days})
         elif not held_by(r):
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": "issue", "parent": r["parent"], "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": [],
-                           "what": r.get("what", ""), "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
+                           "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
+                           "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
     done.sort(key=lambda d: (d["done_at"], d["issue"]), reverse=True)
     return {"colours": colours, "paused": sorted(paused, key=lambda p: p["issue"]),
             "colourless": sorted(colourless), "done": done}
