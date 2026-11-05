@@ -80,8 +80,7 @@ rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
 
 # The logo (#388): only an official build (STOKESFORGE_DIST_LOGO=1) carries it,
 # generated at each release from the SVG and installed where the application
-# and install.sh read it. Its notice goes in before licenses-dist.sh, which
-# refuses icons without it. Without the variable, both calls do nothing.
+# and install.sh read it. Without the variable, both calls do nothing.
 "$REPO_ROOT/scripts/logo-dist.sh" generate
 "$REPO_ROOT/scripts/logo-dist.sh" install "$DIST" linux
 

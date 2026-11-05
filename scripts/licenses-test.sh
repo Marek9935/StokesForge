@@ -20,28 +20,6 @@ for platform in linux windows; do
         exit 1
     fi
     grep -Fq 'notice missing from the package' "$PROBE_DIR/missing-$platform.log"
-    # Without icons the logo step is passed (the refusal above is the next one).
-    if grep -Fq 'licenses/logo/LICENSE' "$PROBE_DIR/missing-$platform.log"; then
-        echo "[licences] ERROR: the logo step stopped a package without icons ($platform)" >&2
-        exit 1
-    fi
-
-    # Icons without the logo notice (#388): refused before anything else.
-    mkdir -p "$PROBE_DIR/icons-$platform/share/icons/hicolor/256x256/apps"
-    if "$REPO_ROOT/scripts/licenses-dist.sh" "$PROBE_DIR/icons-$platform" > "$PROBE_DIR/icons-$platform.log" 2>&1; then
-        echo "[licences] ERROR: icons without the logo notice were accepted ($platform)" >&2
-        exit 1
-    fi
-    grep -Fq 'share/icons without licenses/logo/LICENSE' "$PROBE_DIR/icons-$platform.log"
-    # With the notice, the logo step is passed.
-    mkdir -p "$PROBE_DIR/icons-$platform/licenses/logo"
-    echo notice > "$PROBE_DIR/icons-$platform/licenses/logo/LICENSE"
-    "$REPO_ROOT/scripts/licenses-dist.sh" "$PROBE_DIR/icons-$platform" > "$PROBE_DIR/icons-ok-$platform.log" 2>&1 || true
-    if grep -Fq 'share/icons without' "$PROBE_DIR/icons-ok-$platform.log"; then
-        echo "[licences] ERROR: the logo step refused icons that come with their notice ($platform)" >&2
-        exit 1
-    fi
-
     # Minimal copy: never alter the repository lock for these witnesses.
     mkdir -p "$PROBE_DIR/repo/vendor/python/licenses-$platform"
     versions="$REPO_ROOT/vendor/python/licenses-$platform/versions.env"
@@ -91,4 +69,4 @@ if cargo deny --offline --manifest-path "$PROBE_DIR/crate/Cargo.toml" \
     exit 1
 fi
 grep -Fq 'error[rejected]' "$PROBE_DIR/rejected.log"
-echo "[licences] OK: missing and stale notices, icons without the logo notice, notices of another platform, different lock and out-of-policy license refused"
+echo "[licences] OK: missing and stale notices, notices of another platform, different lock and out-of-policy license refused"

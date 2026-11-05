@@ -33,6 +33,7 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- The logo in `assets/logo/` is now under GPL-3.0-or-later, like the code (#450).
 - A transposed sheet over a formula column no longer says "Out of date" when
   the formula still gives the same numbers, nor after reopening the file (#439).
   The recalculation now keeps the version of a formula column it recomputes to

@@ -190,7 +190,7 @@ fi
 "$ISCC_BIN" /Q "/DAppVersion=$VERSION" "/DSuffix=$SUFFIX" "/DSourceDir=$(cygpath -w "$DIST")" \
     "/DOutputDir=$(cygpath -w "$REPO_ROOT/dist")" "${LOGO_DEFINES[@]}" "$(cygpath -w "$REPO_ROOT/scripts/stokesforge.iss")"
 # The script must still compile with no logo define (what a build without
-# assets/logo/ does); /O- writes no output.
+# the logo does); /O- writes no output.
 "$ISCC_BIN" /Q /O- "/DAppVersion=$VERSION" "/DSourceDir=$(cygpath -w "$DIST")" \
     "$(cygpath -w "$REPO_ROOT/scripts/stokesforge.iss")" \
     || { echo "[dist] ERROR: stokesforge.iss does not compile without the logo defines" >&2; exit 1; }
@@ -208,8 +208,7 @@ for expected in stokesforge-app.exe stokesforge-selftest.exe "$DLL" msvcp140.dll
     [[ -e "$INSTALL/$expected" ]] || { echo "[dist] ERROR: $expected missing from the installation" >&2; exit 1; }
 done
 if [[ "${STOKESFORGE_DIST_LOGO:-0}" == "1" ]]; then
-    for expected in share/icons/hicolor/256x256/apps/stokesforge.png stokesforge-project.ico \
-        licenses/logo/LICENSE; do
+    for expected in share/icons/hicolor/256x256/apps/stokesforge.png stokesforge-project.ico; do
         [[ -e "$INSTALL/$expected" ]] || { echo "[dist] ERROR: $expected (logo) missing from the installation" >&2; exit 1; }
     done
     reg query 'HKCU\Software\Classes\StokesForge.Project\DefaultIcon' >/dev/null \

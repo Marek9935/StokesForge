@@ -34,12 +34,11 @@ tn() { # tn <description> <command...>: the command must fail
     fi
 }
 
-# Fake logo folder: the two sources and the notice.
+# Fake logo folder: the two sources.
 LOGO="$tmp/logo"
 mkdir -p "$LOGO/00-final"
 echo '<svg/>' > "$LOGO/00-final/stokesforge-icone-clair.svg"
 echo '<svg/>' > "$LOGO/00-final/stokesforge-fichier-stf-clair.svg"
-echo 'logo notice' > "$LOGO/LICENSE"
 
 # Fake generator: records its call and writes the layout of the real one.
 GEN="$tmp/fake-gen"
@@ -96,7 +95,6 @@ t "linux: mimetypes png" test -f "$P/256x256/mimetypes/application-x-stokesforge
 t "linux: small size too" test -f "$P/16x16/apps/stokesforge.png"
 t "linux: scalable app svg" test -f "$P/scalable/apps/stokesforge.svg"
 t "linux: scalable mime svg" test -f "$P/scalable/mimetypes/application-x-stokesforge-project.svg"
-t "linux: notice" grep -qx 'logo notice' "$tmp/pkg-linux/licenses/logo/LICENSE"
 t "linux: no .ico in the package" test -z "$(find "$tmp/pkg-linux" -name '*.ico')"
 
 # --- opt-in, Windows: only the 256 png and the project .ico ---
@@ -104,8 +102,7 @@ mkdir -p "$tmp/pkg-win"
 t "opt-in: install windows" run 1 install "$tmp/pkg-win" windows
 t "windows: 256 png" test -f "$tmp/pkg-win/share/icons/hicolor/256x256/apps/stokesforge.png"
 t "windows: project ico" test -f "$tmp/pkg-win/stokesforge-project.ico"
-t "windows: notice" grep -qx 'logo notice' "$tmp/pkg-win/licenses/logo/LICENSE"
-t "windows: only the 256 png and the project ico" test "$(cd "$tmp/pkg-win" && find . -type f ! -path './licenses/*' | sort | tr '\n' ' ')" = "./share/icons/hicolor/256x256/apps/stokesforge.png ./stokesforge-project.ico "
+t "windows: only the 256 png and the project ico" test "$(cd "$tmp/pkg-win" && find . -type f | sort | tr '\n' ' ')" = "./share/icons/hicolor/256x256/apps/stokesforge.png ./stokesforge-project.ico "
 t "app-ico prints the application ico" test -s "$(run 1 app-ico)"
 tn "unknown platform refused" run 1 install "$tmp/pkg-win" macos
 tn "unknown command refused" run 1 frobnicate

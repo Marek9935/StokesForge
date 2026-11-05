@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# The logo in an official build (#388, #444).
+# The logo in a packaged build (#388).
 #
-# assets/logo/ is not under the GPL (its LICENSE): only the official packages
-# carry the logo, the code builds and runs without it. This script is the only
-# reader of that folder. It does nothing unless STOKESFORGE_DIST_LOGO=1, which
+# Only the packaged builds carry the logo, the code builds and runs without it.
+# This script is the only reader of that folder. It does nothing unless STOKESFORGE_DIST_LOGO=1, which
 # the CI sets on the release jobs only (`release-linux`, `dist-windows`).
 #
 # Usage:
@@ -18,7 +17,6 @@
 #   application reads at run time) and stokesforge-project.ico (the icon of
 #   the .stf files, referenced by stokesforge.iss); the application .ico goes
 #   into the executable through STOKESFORGE_EXE_ICON (crates/stokesforge-app/build.rs).
-# Both write licenses/logo/LICENSE, the notice of the logo.
 #
 # Variables (tests): STOKESFORGE_LOGO_DIR (default assets/logo), STOKESFORGE_LOGO_OUT
 # (default target/logo-dist), STOKESFORGE_LOGO_GEN (generator command; default: the
@@ -40,14 +38,14 @@ usage() {
 [[ $# -ge 1 ]] || usage
 
 if [[ "${STOKESFORGE_DIST_LOGO:-0}" != "1" ]]; then
-    exit 0 # not an official build: no logo, nothing to do
+    exit 0 # not a packaged build: no logo, nothing to do
 fi
 
 die() { echo "[logo] ERROR: $*" >&2; exit 1; }
 
 require_sources() {
-    [[ -f "$ICON_SVG" && -f "$PROJECT_SVG" && -f "$LOGO_DIR/LICENSE" ]] \
-        || die "STOKESFORGE_DIST_LOGO=1 but $LOGO_DIR has no icon sources or LICENSE (is assets/logo/ removed?)"
+    [[ -f "$ICON_SVG" && -f "$PROJECT_SVG" ]] \
+        || die "STOKESFORGE_DIST_LOGO=1 but $LOGO_DIR has no icon sources (is assets/logo/ removed?)"
 }
 
 generator() {
@@ -101,8 +99,6 @@ case "$1" in
                 ;;
             *) usage ;;
         esac
-        mkdir -p "$dest/licenses/logo"
-        cp "$LOGO_DIR/LICENSE" "$dest/licenses/logo/LICENSE"
         echo "[logo] installed into $dest ($3)"
         ;;
     *) usage ;;
