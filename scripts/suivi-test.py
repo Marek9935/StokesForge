@@ -1288,6 +1288,91 @@ class TestHookNews(WaitBase):
         sys.stderr.write("hook-news one run: %.0f ms\n" % (dt * 1000))
 
 
+class TestHookWait(WaitBase):
+    def hook(self, sid, command, stdin=None, env=None):
+        e = dict(self.env)
+        e.update({"CLAUDE_PROJECT_DIR": self.repo})
+        e.update(env or {})
+        p = subprocess.Popen([sys.executable, "-I", SUIVI, "hook-wait"], cwd=self.repo, env=e, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        p.stdin.write(json.dumps({"session_id": sid, "tool_input": {"command": command}}) if stdin is None else stdin)
+        p.stdin.close()
+        return p
+
+    def test_a_pose_command_arms_the_wait_and_an_event_wakes_with_exit_two_on_stderr(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        p = self.hook("S1", "python3 scripts/suivi.py qcm pose 1 d.js --title x")
+        self.armed()
+        self.entry("1-1", "retour", "too dark")
+        rc, out, err = self.finish(p)
+        self.assertEqual(rc, 2)
+        self.assertEqual(out, "")
+        self.assertIn("1-1 retour: too dark", err)
+        self.assertIn("resumes by itself at your next suivi.py call on #1", err.splitlines()[-1])
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_unrelated_commands_exit_zero_at_once_and_register_nothing(self):
+        self.owned(1)
+        self.entry("1-1")
+        for cmd in ("ls -la", "python3 scripts/suivi.py status", "python3 scripts/suivi.py qcm list"):
+            rc, out, err = self.finish(self.hook("S1", cmd), 5)
+            self.assertEqual((rc, out, err), (0, "", ""), cmd)
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_ownership_comes_from_stdin_not_the_environment(self):
+        self.owned(1, sid="S1")
+        self.entry("1-1")
+        p = self.hook("S1", "python3 scripts/suivi.py news 1", env={"CLAUDE_CODE_SESSION_ID": "OTHER"})
+        self.armed()
+        self.assertIsNone(p.poll())
+        os.unlink(os.path.join(self.state, "tests", "1-1.json"))      # let it end: nothing open
+        self.assertEqual(self.finish(p)[0], 0)
+
+    def test_another_sessions_issue_exits_zero_at_once(self):
+        self.owned(1, sid="S2")
+        self.entry("1-1")
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py news 1"), 5), (0, "", ""))
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_second_hook_while_listening_exits_zero_and_the_first_stays(self):
+        self.owned(1)
+        self.entry("1-1")
+        a = self.hook("S1", "python3 scripts/suivi.py news 1")
+        self.armed()
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py set 1 --what x"), 5), (0, "", ""))
+        self.assertIsNone(a.poll())
+
+    def test_nothing_open_exits_zero_at_once(self):
+        self.owned(1)
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py news 1"), 5), (0, "", ""))
+
+    def test_bad_input_exits_zero_silent(self):
+        for stdin in ("", "not json", "[]", '{"session_id": "S1"}', '{"session_id": "S1", "tool_input": 3}'):
+            self.assertEqual(self.finish(self.hook("S1", "", stdin=stdin), 5), (0, "", ""), stdin)
+        r = subprocess.run([sys.executable, "-I", SUIVI, "hook-wait", "--nope"], input="", capture_output=True,
+                           text=True, env=self.env, cwd=self.repo)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))          # argparse must not reach exit 2
+
+    def test_an_exception_inside_the_wait_exits_zero(self):
+        self.owned(1)
+        self.entry("1-1")
+        with open(os.path.join(self.state, "waits"), "w") as f:       # a file where the folder should be
+            f.write("x")
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py news 1"), 5), (0, "", ""))
+
+    def test_the_issue_is_parsed_from_the_command(self):
+        n = suivi.hook_issue
+        for cmd, want in (("cd x && python3 scripts/suivi.py test add 7 f.json", 7), ("python3 -I scripts/suivi.py qcm pose 12 d.js", 12),
+                          ("suivi.py test remove 7 7-1", 7), ("suivi.py set 454 --state code", 454), ("suivi.py news 3", 3),
+                          ("suivi.py test merged 7 abc", 7), ("suivi.py qcm answers 7-2", 7), ("suivi.py test list --issue 9", 9),
+                          ("suivi.py status", None), ("suivi.py test list", None), ("suivi.py qcm list --issue 7", None),
+                          ("echo 7", None), ("", None)):
+            self.assertEqual(n(cmd), want, cmd)
+
+
 class TestWaitServed(ServerBase):
     def test_real_post_during_the_wait_prints_retour_and_comment(self):
         e = dict(self.env)

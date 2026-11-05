@@ -462,7 +462,7 @@ Steps, in order:
     trial entries). No CI polling: report, close, release; `suivi.py serve` shows red on the page.
     Read the CI only for a tag, a release or a change to CI itself. The next sub-issue does not wait.
  7. Follow-ups: suivi.py test add; wrong commit: test merged --replace <old>.
-    TODO(#454, coordinator): how to launch `suivi.py wait <n>` after `qcm pose` / `test add`.
+    Nothing to launch: the PostToolUse hook arms `suivi.py wait` after a suivi.py call on your issue.
  8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
     stopping with no worktree: `--pause <parent>`; after its last sub-issue: `--done`.
 BRIEFING

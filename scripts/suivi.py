@@ -53,14 +53,15 @@ was reported (only suivi.py writes it, just before printing; another session sta
 mismatch), `waits/log` records SIGTERM/SIGHUP. When to wake is ONE function, `should_wake`. A wait never
 holds a colour and never writes issues/ or tests/. `news <n>` prints and records the unseen events.
 Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or comment, default 180 s).
-`hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
+`hook-wait` (PostToolUse hook, asyncRewake) arms that same wait after a `suivi.py` call on an issue the
+session owns: exit 2 with the text on stderr for an event, exit 0 silent otherwise. `hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
 or tells a new session which issues hold unread answers; it always exits 0.
 
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
-members, is-package, session-end, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
+members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|list, qcm pose|answers|list, import-online.
 """
 import argparse
@@ -854,9 +855,9 @@ def owner_session(b):
     return str(((b or {}).get("owner") or {}).get("session", ""))
 
 
-def wait_context(n):
+def wait_context(n, sid=None):
     """(session id, root, records, base record). Fails when there is no record or the session is not the owner."""
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or "" if sid is None else sid
     recs = load_all()
     r = recs.get(n)
     if r is None:
@@ -906,7 +907,7 @@ def exit_reason(b, sid):
     return None
 
 
-def open_summary(n, forms, todos):
+def open_summary(n, forms, todos, hook=False):
     parts = []
     if forms:
         parts.append("%d open form%s" % (len(forms), "" if len(forms) == 1 else "s"))
@@ -914,14 +915,20 @@ def open_summary(n, forms, todos):
         parts.append("%d trial entr%s to tick" % (len(todos), "y" if len(todos) == 1 else "ies"))
     if not parts:
         return "Nothing else is open."
+    if hook:
+        return ("Still open: %s. The wait resumes by itself at your next suivi.py call on #%d." % (", ".join(parts), n))
     return "Still open: %s. Re-arm: python3 scripts/suivi.py wait %d" % (", ".join(parts), n)
 
 
-def report_events(n, root, sid, events, forms, todos):
+def record_events(root, sid, events):
     seen = load_heard(root, sid)
     for e in events:
         seen[e["id"]] = e["fp"]
     save_heard(root, sid, seen)
+
+
+def report_events(n, root, sid, events, forms, todos):
+    record_events(root, sid, events)
     for e in events:
         print(e["line"])
     print(open_summary(n, forms, todos), flush=True)
@@ -938,15 +945,23 @@ def log_wait(text):
 
 def cmd_wait(a):
     os.environ["SF_SUIVI_DIR"] = suivi_dir()      # frozen: no git fork per tick, survives a removed cwd
-    sid, root, recs, _ = wait_context(a.issue)
+    kind, text = wait_session(a.issue, os.environ.get("CLAUDE_CODE_SESSION_ID") or "", a.timeout, False)
+    print(text, flush=True)
+    return 0
+
+
+def wait_session(n, sid, timeout, hook):
+    """Register, wait, unregister. Returns (kind, text): kind `event` (text = the lines to report,
+    already recorded) or `end` (an exit line), or `already`. Fails when the session is not the owner."""
+    sid, root, recs, _ = wait_context(n, sid)
     me = os.getpid()
     mine = os.path.join(waits_dir(), "%d.json" % root)
     with Lock():
         reg = live_wait(root)
         if reg is not None and reg.get("pid") != me:
             if reg.get("session") == sid:
-                print("already listening: a wait on #%d is running (pid %s); nothing to do." % (root, reg.get("pid")))
-                return 0
+                return "already", ("already listening: a wait on #%d is running (pid %s); nothing to do."
+                                   % (root, reg.get("pid")))
             raise Fail("another session already waits on #%d" % root)
         write_json(mine, {"pid": me, "pid_start": pid_start(me), "session": sid, "started": time.time()})
 
@@ -957,7 +972,7 @@ def cmd_wait(a):
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGHUP, on_signal)
     try:
-        return wait_loop(a, sid, root)
+        return wait_loop(n, sid, root, timeout, hook)
     finally:
         reg = read_json(mine)
         if isinstance(reg, dict) and reg.get("pid") == me:
@@ -967,33 +982,66 @@ def cmd_wait(a):
                 pass
 
 
-def wait_loop(a, sid, root):
+def wait_loop(n, sid, root, timeout, hook):
     started = time.time()
     poll, settle = wait_poll(), wait_settle()
-    timeout = WAIT_TIMEOUT if a.timeout is None else a.timeout
+    timeout = WAIT_TIMEOUT if timeout is None else timeout
     while True:
         recs = load_all()
-        b = recs.get(root) or recs.get(a.issue)
+        b = recs.get(root) or recs.get(n)
         line = exit_reason(b, sid)
         if line:
-            print(line, flush=True)
-            return 0
+            return "end", line
         items, forms, todos = scan_group(members_of(recs, root))
         events = unseen_events(items, load_heard(root, sid))
         now = time.time()
         last_change = max([it["mtime"] for it in items.values() if it["kind"] == "test"], default=0.0)
         if should_wake(events, len(todos), last_change, now, settle):
-            report_events(a.issue, root, sid, events, forms, todos)
-            return 0
+            record_events(root, sid, events)          # just before reporting, never earlier
+            return "event", "\n".join([e["line"] for e in events] + [open_summary(n, forms, todos, hook)])
         if not events and not forms and not todos:
-            print("nothing open: no open form, no trial entry to tick, nothing unread; "
-                  "nothing to do, end the turn without a message.", flush=True)
-            return 0
+            return "end", ("nothing open: no open form, no trial entry to tick, nothing unread; "
+                           "nothing to do, end the turn without a message.")
         if now - started >= timeout:
-            print("timeout: nothing happened for %d h. Re-arm: python3 scripts/suivi.py wait %d"
-                  % (max(1, int(timeout // 3600)), a.issue), flush=True)
-            return 0
+            return "end", ("timeout: nothing happened for %d h. Re-arm: python3 scripts/suivi.py wait %d"
+                           % (max(1, int(timeout // 3600)), n))
         time.sleep(min(poll, max(0.01, started + timeout - now)))
+
+
+HOOK_CMD_RE = re.compile(r"suivi\.py\s+(?:(?:qcm\s+(?:pose|answers)|test\s+(?:add|remove|merged)|set|news)\s+(\d+)"
+                         r"|test\s+list\s+--issue\s+(\d+))")
+
+
+def hook_issue(command):
+    """The issue number of a `suivi.py` call in a shell command, or None."""
+    m = HOOK_CMD_RE.search(command or "")
+    return int(m.group(1) or m.group(2)) if m else None
+
+
+def cmd_hook_wait(a):
+    """PostToolUse (Bash, asyncRewake) hook: arm the wait after a `suivi.py` call on an issue this
+    session owns. Exit 2 only for an event, the text on STDERR (that wakes the model); every other
+    outcome is exit 0 and silent, so no turn is wasted. Never exits 2 by accident."""
+    try:
+        data = json.loads(sys.stdin.read())
+        sid = str(data["session_id"])
+        n = hook_issue(data["tool_input"]["command"])
+        d = fast_state_dir()
+        if n is None or not sid or not d or not os.path.isdir(os.path.join(d, "issues")):
+            return 0
+        os.environ["SF_SUIVI_DIR"] = d
+        sid, root, recs, _ = wait_context(n, sid)
+        items, forms, todos = scan_group(members_of(recs, root))
+        if not (forms or todos or unseen_events(items, load_heard(root, sid))) or live_wait(root) is not None:
+            return 0
+        kind, text = wait_session(n, sid, None, True)
+        if kind == "event":
+            sys.stderr.write(text + "\n")
+            sys.stderr.flush()
+            return 2
+    except BaseException:
+        pass
+    return 0
 
 
 def cmd_news(a):
@@ -1012,8 +1060,9 @@ def hint_not_listening(n):
     r = recs.get(n)
     root = group_of(r) if r else n
     if not listening(recs, root):
-        sys.stderr.write("suivi: nobody is listening for #%d: run in the background "
-                         "python3 scripts/suivi.py wait %d\n" % (n, n))
+        sys.stderr.write("suivi: nobody is listening for #%d yet: the PostToolUse hook arms the wait after "
+                         "this command (no hook in this session: run python3 scripts/suivi.py wait %d "
+                         "in the background)\n" % (n, n))
 
 
 def fast_state_dir():
@@ -1052,7 +1101,8 @@ def cmd_hook_news(a):
                 if events:
                     report_events(g, g, sid, events, forms, todos)
                 if (forms or todos) and live_wait(g) is None:
-                    print("no wait running for #%d: arm it (python3 scripts/suivi.py wait %d)" % (g, g))
+                    print("no wait running for #%d: any suivi.py call on the issue re-arms it, for example "
+                          "suivi.py news %d" % (g, g))
         else:
             late = []
             for g, b in sorted(roots.items()):
@@ -1897,6 +1947,7 @@ def parser():
     p = add("is-package", cmd_is_package, "exit 0 if the issue is a package")
     p.add_argument("issue", type=int)
     add("session-end", cmd_session_end, "SessionEnd hook: reads {session_id, reason} on stdin")
+    add("hook-wait", cmd_hook_wait, "PostToolUse hook: arm the wait; exit 2 (text on stderr) only for an event")
     add("hook-news", cmd_hook_news, "SessionStart/UserPromptSubmit hook: reads {session_id} on stdin, always exits 0")
     p = add("wait", cmd_wait, "block until a trial entry is answered or a form finished (background; #454)")
     p.add_argument("issue", type=int)
@@ -1949,7 +2000,12 @@ def parser():
 
 
 def main(argv=None):
-    a = parser().parse_args(argv)
+    try:
+        a = parser().parse_args(argv)
+    except SystemExit:
+        if (argv if argv is not None else sys.argv[1:])[:1] == ["hook-wait"]:
+            return 0           # an exit 2 from argparse would wake the model for nothing
+        raise
     try:
         return a.fn(a)
     except Fail as e:
