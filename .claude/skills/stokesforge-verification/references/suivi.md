@@ -13,7 +13,7 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 | `removed-tests/` | archive of entries removed by `test remove`; numbers are not reused |
 | `ended/<session>` | touched by the `SessionEnd` hook |
 | `control.json` | result of the last `scripts/suivi.py check` |
-| `ci.json` | last reading of the CI of `main` by the server's watcher (#452): sha, verdict, names, reason, last_red, checked_at, notified |
+| `ci.json` | last reading of the CI of `main` by the server's watcher (#452): sha, verdict, names, reason, last_red, checked_at |
 
 ## The colour rule
 
@@ -66,7 +66,7 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 
 - Linux: `scripts/ci-status.sh --head` (the head of `main` read through `glab`, not the local clone). Green only when every job of `scripts/gitlab-status.py` `JOBS` except `robustness` is present and SUCCESS. A FAILED job is red, with its name. No pipeline yet is pending, then unknown after an hour. CANCELED, a `glab` failure, a timeout, empty or unreadable output is unknown.
 - Windows: once Linux is green, one public GitHub API read of the check runs `test-windows`, `test-python-windows`, `dist-windows` (60 requests per hour limit; only a green verdict is final for a SHA; a red head is read again at each poll, since the CI may be re-run on the same commit). A failed Windows job is red; a failed read is unknown, never green.
-- A red stays in `last_red` (shown while the new head is pending or unknown) until a newer head is green. `notify-send` fires once per red SHA; its absence is ignored.
+- A red stays in `last_red` (shown while the new head is pending or unknown) until a newer head is green. The watcher sends no desktop notification: the page is its only signal.
 - `ci.json` missing, corrupt, or older than 3 polls reads as unknown. The colour rule and the `pending` count do not depend on the CI.
 - Seams for tests: `SF_SUIVI_CI=off` (no thread), `SF_SUIVI_CI_POLL`, `SF_SUIVI_CI_TIMEOUT`, `SF_SUIVI_GITHUB`.
 

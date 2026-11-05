@@ -20,7 +20,7 @@
 # trial entries with `try`, `suivi.py test merged <n> M` writes M on them. No tag is
 # ever created or pushed. The run stops before `chantier.sh --release`, which stays
 # with the orchestrator. The CI is not polled: the watcher of `suivi.py serve`
-# alerts on red (read it only for a tag, a release or a change to CI itself).
+# shows red on the tracking page (read it only for a tag, a release or a change to CI itself).
 #
 # Exit: 0 delivered, 1 refused or failed (main unchanged unless M was already merged
 # locally), 2 usage, 3 main moved: it was merged into the branch, recheck and rerun.

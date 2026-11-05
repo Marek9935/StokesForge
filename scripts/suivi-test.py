@@ -1050,7 +1050,6 @@ case "$*" in
     *) echo "[]" ;;
 esac
 """
-FAKE_NOTIFY = "#!/usr/bin/env bash\necho \"$*\" >> \"$FAKE_DIR/notified\"\n"
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 
@@ -1065,10 +1064,9 @@ class CiBase(unittest.TestCase):
         self.state = os.path.join(self.tmp.name, "state")
         for d in (self.dir, self.bin, self.state):
             os.makedirs(d)
-        for name, body in (("glab", FAKE_GLAB), ("notify-send", FAKE_NOTIFY)):
-            with open(os.path.join(self.bin, name), "w") as f:
-                f.write(body)
-            os.chmod(os.path.join(self.bin, name), 0o755)
+        with open(os.path.join(self.bin, "glab"), "w") as f:
+            f.write(FAKE_GLAB)
+        os.chmod(os.path.join(self.bin, "glab"), 0o755)
         self.gh = {"code": 200, "runs": self.runs(), "hits": 0}
         gh = self.gh
 
@@ -1213,10 +1211,6 @@ class TestCiWindows(CiBase):
 
 
 class TestCiHeads(CiBase):
-    def notified(self):
-        p = os.path.join(self.dir, "notified")
-        return slurp(p).splitlines() if os.path.exists(p) else []
-
     def test_red_stays_until_a_newer_green(self):
         self.jobs(fmt="FAILED")
         r = self.poll()
@@ -1231,7 +1225,7 @@ class TestCiHeads(CiBase):
         self.assertEqual(r["verdict"], "green")
         self.assertIsNone(r["last_red"])
 
-    def test_red_rerun_green_on_same_sha_clears_and_notified_once(self):
+    def test_red_rerun_green_on_same_sha_clears(self):
         self.jobs(fmt="FAILED")
         r = self.poll()
         r = self.poll(r)
@@ -1240,23 +1234,6 @@ class TestCiHeads(CiBase):
         r = self.poll(r)
         self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
         self.assertIsNone(r["last_red"])
-        self.assertEqual(len(self.notified()), 1)
-
-    def test_notify_once_per_red_sha(self):
-        self.jobs(fmt="FAILED")
-        r = None
-        for _ in range(3):
-            r = self.poll(r)
-        self.assertEqual(len(self.notified()), 1)
-        self.head(SHA_B)
-        self.poll(r)
-        self.assertEqual(len(self.notified()), 2)
-
-    def test_missing_notify_send_does_not_crash(self):
-        self.jobs(fmt="FAILED")
-        with mock.patch.object(suivi.shutil, "which", return_value=None):
-            self.assertEqual(self.poll()["verdict"], "red")
-        self.assertEqual(self.notified(), [])
 
 
 class TestCiState(ServerBase):

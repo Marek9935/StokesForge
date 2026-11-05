@@ -39,7 +39,7 @@ through one public GitHub API read once Linux is green. It writes ci.json; /api/
 `ci` = {verdict: green|red|pending|unknown, names, reason, sha, last_red}. Green needs every blocking
 job present and SUCCESS (`robustness` is non-blocking); any doubt (CANCELED, glab or network failure,
 timeout, unparsable, stale file older than 3 polls) is `unknown`, never green. A red stays in
-`last_red` until a newer head is green. notify-send once per red SHA. The colour rule and the
+`last_red` until a newer head is green. The colour rule and the
 `pending` count do not depend on it.
 
 A record migrated from the old layout carries `legacy: true`: it counts as held
@@ -1224,23 +1224,12 @@ def ci_github_runs(sha):
         return json.load(r)["check_runs"]
 
 
-def ci_notify(sha, names):
-    exe = shutil.which("notify-send")
-    if not exe:
-        return
-    try:
-        subprocess.run([exe, "StokesForge CI red on main", "%s: %s" % (sha[:8], ", ".join(names))],
-                       timeout=5, capture_output=True)
-    except Exception:
-        pass
-
-
 def ci_poll(prev, now=None):
     """One reading. Never raises: any doubt is `unknown`."""
     now = time.time() if now is None else now
     prev = prev if isinstance(prev, dict) else {}
     out = {"checked_at": now, "sha": None, "verdict": "unknown", "names": [], "reason": "",
-           "last_red": prev.get("last_red"), "since": prev.get("since"), "notified": prev.get("notified")}
+           "last_red": prev.get("last_red"), "since": prev.get("since")}
     try:
         timeout = float(os.environ.get("SF_SUIVI_CI_TIMEOUT", "60"))
         rc, text, err = ci_run(["bash", CI_STATUS, "--head"], timeout)
@@ -1274,9 +1263,6 @@ def ci_poll(prev, now=None):
         out.update(verdict=verdict, names=names, reason=reason)
         if verdict == "red":
             out["last_red"] = {"sha": sha, "names": names}
-            if prev.get("notified") != sha:
-                out["notified"] = sha
-                ci_notify(sha, names)
         elif verdict == "green":
             out["last_red"] = None
     except Exception as e:

@@ -456,7 +456,7 @@ Steps, in order:
     `scripts/try.sh <n>` opens the branch on the user's screen; their OK is the go-ahead.
  6. Merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock,
     merge, push, trial entries). No CI polling: report, close, release; the watcher of
-    `suivi.py serve` alerts on red. Read the CI only for a tag, a release or a change to
+    `suivi.py serve` shows red on the tracking page. Read the CI only for a tag, a release or a change to
     CI itself. The next sub-issue does not wait.
  7. Follow-up entries: suivi.py test add; a wrong commit: test merged --replace <old>.
  8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
