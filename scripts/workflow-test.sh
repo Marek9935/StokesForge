@@ -97,7 +97,7 @@ export SF_ISSUE_TITLE_88="Plain issue"
 grep -qF '🟧 #217 Parent work' "$tmp/pkg" || fail "package tag: $(cat "$tmp/pkg")"
 grep -n '^  [0-9]\. #' "$tmp/pkg" | sed 's/^[0-9]*://' | tr '\n' '|' > "$tmp/order"
 eq "$(cat "$tmp/order")" "  1. #231 Old form|  2. #220 Second step (#217)|  3. #219 Rejected fields|  4. #221 Third thing|  5. #232 Short form|" "package order (parent body, then number; #2170, closed and quoted ignored)"
-grep -q 'first card of the start form' "$tmp/pkg" || fail "briefing: list is the first card"
+grep -q 'second card of the start form, after the understanding card' "$tmp/pkg" || fail "briefing: list is the second card"
 grep -q -- '--start 231' "$tmp/pkg" || fail "briefing: --start hint"
 [ ! -e "$tmp/_stokesforge/feature217" ] && [ ! -e "$tmp/_stokesforge/feature219" ] || fail "worktree created without --start"
 eq "$(rec 217 colour)" 🟧 "package colour reserved"
@@ -473,5 +473,33 @@ done
 w1="$(env -u SF_RUN_DIR -u SF_DISPLAY python3 "$tmp/r1/.claude/skills/run-stokesforge/driver.py" where)"
 w2="$(env -u SF_RUN_DIR -u SF_DISPLAY python3 "$tmp/r2/.claude/skills/run-stokesforge/driver.py" where)"
 [ "$w1" != "$w2" ] || fail "driver run folders are equal: $w1"
+
+# test-all.sh: nextest when present (then the doc tests), plain cargo test otherwise,
+# a red step fails the script, arguments are refused. A fake cargo logs its calls.
+fc="$tmp/fakecargo"; mkdir -p "$fc"
+cat > "$fc/cargo" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+case "$1 $2" in
+    "nextest --version") [ "${FAKE_NEXTEST:-1}" = 1 ] || exit 1 ;;
+    "nextest run") [ "${FAKE_RED:-}" != nextest ] || exit 1 ;;
+    "test --workspace") [ "${FAKE_RED:-}" != doc ] || { [[ " $* " == *" --doc "* ]] && exit 1; } ;;
+esac
+exit 0
+EOF
+chmod +x "$fc/cargo"
+ta() { : > "$tmp/fake.log"; PATH="$fc:$PATH" FAKE_LOG="$tmp/fake.log" "$here/test-all.sh" "$@" > /dev/null 2>&1; }
+ta || fail "test-all: nextest present, exit code"
+eq "$(grep -v -- '--version' "$tmp/fake.log")" "nextest run --workspace --no-fail-fast
+test --workspace --doc" "test-all: nextest then doc tests, in order"
+FAKE_NEXTEST=0 ta || fail "test-all: nextest absent, exit code"
+eq "$(grep -v -- '--version' "$tmp/fake.log")" "test --workspace" "test-all: nextest absent runs cargo test --workspace only"
+set +e; FAKE_RED=nextest ta; rc=$?; set -e
+[ "$rc" -ne 0 ] || fail "test-all: red nextest must fail"
+set +e; FAKE_RED=doc ta; rc=$?; set -e
+[ "$rc" -ne 0 ] || fail "test-all: red doc tests must fail"
+set +e; ta some_filter; rc=$?; set -e
+[ "$rc" -ne 0 ] || fail "test-all: an argument must be refused"
+eq "$(grep -c . "$tmp/fake.log")" 0 "test-all: a refused argument runs no cargo"
 
 echo "workflow-test: all passed"

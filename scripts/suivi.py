@@ -30,7 +30,17 @@ stored: a crash pauses an issue with no process left to write.
 Writes go through a temporary file and os.replace. Colour allocation takes the
 directory lock ../_stokesforge/.colour.lock (same lock as chantier.sh). Reads take
 no lock. Test seams: SF_SUIVI_DIR, SF_CLAUDE_PROJECTS (default ~/.claude/projects), SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
-SF_SUIVI_SLOW (seconds slept inside a claim's critical section).
+SF_SUIVI_SLOW (seconds slept inside a claim's critical section), SF_SUIVI_CI=off (no CI watcher),
+SF_SUIVI_CI_POLL / SF_SUIVI_CI_TIMEOUT (seconds).
+
+CI WATCHER (#452). `serve` runs a daemon thread that polls the CI of the newest commit of `main`
+every ~120 s through `scripts/ci-status.sh --head` (glab, one PROJECT_ID): the Linux and Windows jobs
+all come back as GitLab statuses (scripts/gitlab-status.py JOBS). It writes ci.json; /api/state carries
+`ci` = {verdict: green|red|pending|unknown, names, reason, sha, last_red}. Green needs every blocking
+job present and SUCCESS (`robustness` is non-blocking); any doubt (CANCELED, glab or network failure,
+timeout, unparsable, stale file older than 3 polls) is `unknown`, never green. A red stays in
+`last_red` until a newer head is green. The colour rule and the
+`pending` count do not depend on it.
 
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
@@ -1140,13 +1150,157 @@ def open_qcms():
     return [q for q in all_qcms() if not q["finished"]]
 
 
+# ------------------------------------------------------------ CI watcher (#452)
+HERE = os.path.dirname(os.path.abspath(__file__))
+CI_STATUS = os.path.join(HERE, "ci-status.sh")
+# Same list as JOBS of scripts/gitlab-status.py (a test compares them).
+CI_JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages",
+           "test-windows", "test-python-windows", "dist-windows")
+CI_NON_BLOCKING = ("robustness",)      # a failure is posted as skipped, not failed
+CI_PENDING_MAX = 3600                  # seconds a head may stay pending before it is `unknown`
+CI_VERDICTS = ("green", "red", "pending", "unknown")
+
+
+def ci_enabled():
+    return os.environ.get("SF_SUIVI_CI") != "off"
+
+
+def ci_poll_seconds():
+    try:
+        return max(0.05, float(os.environ.get("SF_SUIVI_CI_POLL", "120")))
+    except ValueError:
+        return 120.0
+
+
+def ci_path():
+    return os.path.join(suivi_dir(), "ci.json")
+
+
+def ci_parse_jobs(text):
+    """(sha, {job: STATUS}) from `ci-status.sh --head` output; sha is None if absent."""
+    sha, jobs = None, {}
+    for line in text.splitlines():
+        m = re.match(r"HEAD ([0-9a-f]{7,64})$", line)
+        if m:
+            sha = m.group(1)
+            continue
+        if line.startswith("== commit comments"):
+            break
+        m = re.match(r"(\S+)\s+([A-Za-z_]+)\s+\|", line)
+        if m:
+            jobs[m.group(1).split("/")[-1]] = m.group(2).upper()
+    return sha, jobs
+
+
+def ci_job_verdict(jobs):
+    """(verdict, names) for the blocking jobs (Linux and Windows); only SUCCESS everywhere is green."""
+    blocking = [j for j in CI_JOBS if j not in CI_NON_BLOCKING]
+    failed = [j for j in blocking if jobs.get(j) == "FAILED"]
+    if failed:
+        return "red", failed
+    odd = [j for j in blocking if jobs.get(j) in ("CANCELED", "SKIPPED")]
+    if odd:
+        return "unknown", odd
+    waiting = [j for j in blocking if jobs.get(j) != "SUCCESS"]
+    if waiting:
+        return "pending", waiting
+    return "green", []
+
+
+def ci_run(cmd, timeout):
+    """Run cmd in its own process group; on timeout kill the whole group (glab included)."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True, cwd=os.path.dirname(HERE))
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, 9)
+        except OSError:
+            pass
+        p.communicate()
+        raise
+    return p.returncode, out, err
+
+
+def ci_poll(prev, now=None):
+    """One reading. Never raises: any doubt is `unknown`."""
+    now = time.time() if now is None else now
+    prev = prev if isinstance(prev, dict) else {}
+    out = {"checked_at": now, "sha": None, "verdict": "unknown", "names": [], "reason": "",
+           "last_red": prev.get("last_red"), "since": prev.get("since")}
+    try:
+        timeout = float(os.environ.get("SF_SUIVI_CI_TIMEOUT", "60"))
+        rc, text, err = ci_run(["bash", CI_STATUS, "--head"], timeout)
+        sha, jobs = ci_parse_jobs(text)
+        out["sha"] = sha
+        if sha is None:
+            out["reason"] = "no head read from GitLab (exit %s)" % rc
+            return out
+        if prev.get("sha") == sha and prev.get("verdict") == "green":   # only green is final: a red CI may be re-run
+            for k in ("verdict", "names", "reason"):
+                out[k] = prev.get(k, out[k])
+            out["last_red"] = prev.get("last_red")
+            return out
+        if prev.get("sha") != sha:
+            out["since"] = now
+        if rc == 2:
+            verdict, names, reason = "pending", [], "no GitLab pipeline for this commit yet"
+        elif rc != 0 or not jobs:
+            verdict, names, reason = "unknown", [], "ci-status.sh failed (exit %s)" % rc
+        else:
+            verdict, names = ci_job_verdict(jobs)
+            reason = ""
+        if verdict == "pending" and now - (out["since"] or now) > CI_PENDING_MAX:
+            verdict, reason = "unknown", "still pending after %d min" % (CI_PENDING_MAX // 60)
+        out.update(verdict=verdict, names=names, reason=reason)
+        if verdict == "red":
+            out["last_red"] = {"sha": sha, "names": names}
+        elif verdict == "green":
+            out["last_red"] = None
+    except Exception as e:
+        out.update(verdict="unknown", names=[], reason="watcher error: %s" % type(e).__name__)
+    return out
+
+
+def ci_view():
+    """What /api/state shows: computed when read; missing, corrupt or stale is `unknown`."""
+    d = read_json(ci_path())
+    view = {"verdict": "unknown", "names": [], "reason": "no reading yet", "sha": None, "last_red": None}
+    if not isinstance(d, dict):
+        return view
+    lr = d.get("last_red")
+    if isinstance(lr, dict) and isinstance(lr.get("names"), list):
+        view["last_red"] = {"sha": str(lr.get("sha", ""))[:8], "names": [str(n) for n in lr["names"]]}
+    if isinstance(d.get("sha"), str):
+        view["sha"] = d["sha"][:8]
+    at = d.get("checked_at")
+    if not isinstance(at, (int, float)) or isinstance(at, bool) or time.time() - at > 3 * ci_poll_seconds():
+        view["reason"] = "reading too old"
+        return view
+    if d.get("verdict") in CI_VERDICTS:
+        view["verdict"] = d["verdict"]
+        view["names"] = [str(n) for n in d.get("names", [])] if isinstance(d.get("names"), list) else []
+        view["reason"] = str(d.get("reason") or "")
+    return view
+
+
+def ci_loop(path):
+    while True:
+        try:
+            write_json(path, ci_poll(read_json(path)))
+        except Exception:
+            pass
+        time.sleep(ci_poll_seconds())
+
+
 def build_state():
     s = build_status()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
     qcms = open_qcms()
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
-            "control": read_json(os.path.join(suivi_dir(), "control.json")),
+            "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
             "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
 
 
@@ -1352,6 +1506,9 @@ def cmd_serve(a):
         if e.errno == errno.EADDRINUSE:
             raise Fail("port %d is already in use (another suivi.py serve? see `ss -ltnp`)" % port)
         raise Fail("cannot listen on 127.0.0.1:%d: %s" % (port, e))
+    if ci_enabled():
+        import threading
+        threading.Thread(target=ci_loop, args=(ci_path(),), daemon=True).start()
     print("suivi: listening on http://127.0.0.1:%d/ (state %s)" % (srv.server_address[1], state), flush=True)
     try:
         srv.serve_forever()

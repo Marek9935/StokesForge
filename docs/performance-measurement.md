@@ -34,9 +34,9 @@ The script goes through the `run-stokesforge` driver, which sets
 the demo project opened in addition to Book1 and Graph1: varying this number
 gives the "cost per window" curve.
 
-The script starts the application under Xwayland (`driver.py`), opens the graphs
+The script starts the application under Xwayland (`driver.py`, forced to visible mode with `SF_VISIBLE=1`, so the figures stay comparable with those below; the default invisible mode runs under a headless mutter), opens the graphs
 by double-click in the Project Manager, drags the title bar of a window for 6 s
-(`scripts/perf/drag.py`, sinusoidal motion), then prints the 2 s blocks during
+(`scripts/perf/drag.py`, sinusoidal motion, on the display `driver.py where` prints; for a plain straight drag use `driver.py drag`), then prints the 2 s blocks during
 the drag (`scripts/perf/summ.py`). The drag is sometimes lost, especially in
 debug: the script retries up to 3 times.
 

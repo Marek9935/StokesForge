@@ -12,6 +12,8 @@ driver="$racine/.claude/skills/run-stokesforge/driver.py"
 dir_perf="$racine/scripts/perf"
 export SF_APP="$racine/target/$profil/stokesforge-app"
 export STOKESFORGE_PROF=1
+# Visible Xwayland, as in the earlier measurements: a headless compositor would change the numbers.
+export SF_VISIBLE=1
 [ -x "$SF_APP" ] || { echo "$SF_APP missing: cargo build [--release] -p stokesforge-app" >&2; exit 1; }
 
 essai() {

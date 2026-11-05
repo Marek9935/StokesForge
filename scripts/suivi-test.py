@@ -8,6 +8,7 @@ Everything runs in a throwaway repository and a throwaway state folder; the real
 ../_stokesforge/.suivi is never touched.
 """
 import http.client
+import http.server
 import importlib.util
 import json
 import os
@@ -16,8 +17,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUIVI = os.path.join(HERE, "suivi.py")
@@ -48,6 +51,7 @@ class Base(unittest.TestCase):
         self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "SF_"))}
         self.env["SF_TODAY"] = "2026-11-03"
+        self.env["SF_SUIVI_CI"] = "off"     # the CI watcher would call glab and the network (#452)
 
     def git(self, *a, cwd=None):
         subprocess.run(["git", *a], cwd=cwd or self.repo, check=True, capture_output=True)
@@ -932,6 +936,18 @@ class TestServer(ServerBase):
         self.assertIn(b"<title>Suivi StokesForge</title>", body)
         self.assertEqual(self.req("GET", "/qcm/nope")[0], 404)
 
+    def test_decision_form_has_a_home_link_shown_only_when_local(self):
+        os.makedirs(os.path.join(self.state, "qcm", "q1"))
+        with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "Form", "cards": 1}, f)
+        with open(os.path.join(self.state, "qcm", "q1", "data.js"), "w") as f:
+            f.write("const TITRE='T';const SEC={};const ISSUES={};const INTRO='';const D=[];\n")
+        status, _, body = self.req("GET", "/qcm/q1")
+        self.assertEqual(status, 200)
+        page = body.decode()
+        self.assertRegex(page, r'<a class="link" id="goHome" href="/" hidden[^>]*>← Retour à l’accueil</a>')
+        self.assertIn("if(LOCAL)document.getElementById('goHome').hidden=false", page)
+
     def test_port_in_use_exits_1(self):
         r = subprocess.run([sys.executable, "-I", SUIVI, "serve", "--port", str(self.port), "--state", self.state],
                            cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=10)
@@ -1084,6 +1100,258 @@ class TestFormTemplate(unittest.TestCase):
             self.assertIn(needle, html)
 
 
+
+FAKE_GLAB = r"""#!/usr/bin/env bash
+# Fake glab: behaviour is driven by files in $FAKE_DIR (sha, pipelines, jobs, mode).
+echo "$*" >> "$FAKE_DIR/calls"
+case "$(cat "$FAKE_DIR/mode" 2>/dev/null)" in
+    fail) exit 1 ;;
+    sleep) sleep 30 ;;
+    empty) exit 0 ;;
+esac
+case "$*" in
+    *repository/commits*) echo "[{\"id\": \"$(cat "$FAKE_DIR/sha")\"}]" ;;
+    *pipelines*) cat "$FAKE_DIR/pipelines" ;;
+    *graphql*) cat "$FAKE_DIR/jobs" ;;
+    *) echo "[]" ;;
+esac
+"""
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+class CiBase(unittest.TestCase):
+    """The CI watcher with a fake glab on PATH and a local stand-in for the GitHub API."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "fake")
+        self.bin = os.path.join(self.tmp.name, "bin")
+        self.state = os.path.join(self.tmp.name, "state")
+        for d in (self.dir, self.bin, self.state):
+            os.makedirs(d)
+        with open(os.path.join(self.bin, "glab"), "w") as f:
+            f.write(FAKE_GLAB)
+        os.chmod(os.path.join(self.bin, "glab"), 0o755)
+        patcher = mock.patch.dict(os.environ, {
+            "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_DIR": self.dir,
+            "SF_SUIVI_DIR": self.state, "SF_SUIVI_CI_TIMEOUT": "60"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("SF_SUIVI_CI", None)
+        self.head(SHA_A)
+        self.jobs()
+
+    def put_file(self, name, text):
+        with open(os.path.join(self.dir, name), "w") as f:
+            f.write(text)
+
+    def head(self, sha, pipeline=True):
+        self.put_file("sha", sha)
+        self.put_file("pipelines", '[{"iid": 5}]' if pipeline else "[]")
+
+    def jobs(self, **status):
+        nodes = [{"name": "github-actions/" + j, "status": status.get(j.replace("-", "_"), "SUCCESS"),
+                  "detailedStatus": {"label": "x"}} for j in suivi.CI_JOBS]
+        for j, st in status.items():
+            if st is None:
+                nodes = [n for n in nodes if n["name"] != "github-actions/" + j.replace("_", "-")]
+        data = {"data": {"project": {"pipeline": {"stages": {"nodes": [{"name": "external", "jobs": {"nodes": nodes}}]}}}}}
+        self.put_file("jobs", json.dumps(data))
+
+    def poll(self, prev=None, now=None):
+        return suivi.ci_poll(prev, now)
+
+
+class TestCiVerdict(CiBase):
+    def test_all_blocking_success_is_green(self):
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
+
+    def test_missing_job_is_pending_not_green(self):
+        self.jobs(clippy=None)
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["names"]), ("pending", ["clippy"]))
+
+    def test_failed_is_red_with_every_name(self):
+        self.jobs(fmt="FAILED", test="FAILED", clippy="RUNNING")
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["names"]), ("red", ["fmt", "test"]))
+
+    def test_robustness_skipped_or_missing_stays_green(self):
+        self.jobs(robustness="SKIPPED")
+        self.assertEqual(self.poll()["verdict"], "green")
+        self.jobs(robustness="FAILED")
+        self.assertEqual(self.poll()["verdict"], "green")
+
+    def test_canceled_is_unknown(self):
+        self.jobs(test="CANCELED")
+        self.assertEqual(self.poll()["verdict"], "unknown")
+
+    def test_glab_failure_timeout_or_empty_is_unknown(self):
+        for mode in ("fail", "empty", "sleep"):
+            self.put_file("mode", mode)
+            if mode == "sleep":
+                os.environ["SF_SUIVI_CI_TIMEOUT"] = "1"
+            r = self.poll()
+            self.assertEqual(r["verdict"], "unknown", mode)
+
+    def test_no_pipeline_is_pending_then_unknown(self):
+        self.head(SHA_A, pipeline=False)
+        r = self.poll(now=1000)
+        self.assertEqual(r["verdict"], "pending")
+        r = self.poll(r, now=1000 + suivi.CI_PENDING_MAX + 5)
+        self.assertEqual(r["verdict"], "unknown")
+
+    def test_blocking_list_equals_gitlab_status(self):
+        with open(os.path.join(HERE, "gitlab-status.py")) as f:
+            m = re.search(r"^JOBS = \((.*?)\)", f.read(), re.M | re.S)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', m.group(1))), suivi.CI_JOBS)
+
+    def test_ci_status_script_has_no_unknown_glab_use_outside_head_mode(self):
+        r = subprocess.run(["bash", os.path.join(HERE, "ci-status.sh"), "--head"], capture_output=True, text=True,
+                           env=dict(os.environ))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("HEAD " + SHA_A), r.stdout)
+        self.assertNotIn("commit comments", r.stdout)
+        calls = slurp(os.path.join(self.dir, "calls"))
+        self.assertNotIn("ls-remote", calls)
+        self.assertNotIn("comments", calls)
+
+
+class TestCiWindows(CiBase):
+    def test_windows_failure_turns_red_with_names(self):
+        self.jobs(**{"dist_windows": "FAILED"})
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["names"]), ("red", ["dist-windows"]))
+
+    def test_windows_pending_or_missing_is_not_green(self):
+        self.jobs(**{"test_windows": "RUNNING"})
+        self.assertEqual(self.poll()["verdict"], "pending")
+        self.jobs(**{"test_python_windows": None})
+        self.assertEqual(self.poll()["verdict"], "pending")
+
+    def test_windows_jobs_are_in_the_blocking_list_and_no_github_read_remains(self):
+        for j in ("test-windows", "test-python-windows", "dist-windows"):
+            self.assertIn(j, suivi.CI_JOBS)
+        for gone in ("ci_windows_verdict", "ci_github_runs", "CI_WINDOWS_JOBS", "GITHUB_API"):
+            self.assertFalse(hasattr(suivi, gone), gone)
+        self.assertNotIn("SF_SUIVI_GITHUB", slurp(SUIVI))
+
+
+class TestCiHeads(CiBase):
+    def test_red_stays_until_a_newer_green(self):
+        self.jobs(fmt="FAILED")
+        r = self.poll()
+        self.assertEqual(r["last_red"], {"sha": SHA_A, "names": ["fmt"]})
+        self.head(SHA_B)
+        self.jobs(fmt="RUNNING")
+        r = self.poll(r)
+        self.assertEqual((r["verdict"], r["sha"]), ("pending", SHA_B))
+        self.assertEqual(r["last_red"]["sha"], SHA_A)
+        self.jobs()
+        r = self.poll(r)
+        self.assertEqual(r["verdict"], "green")
+        self.assertIsNone(r["last_red"])
+
+    def test_red_rerun_green_on_same_sha_clears(self):
+        self.jobs(fmt="FAILED")
+        r = self.poll()
+        r = self.poll(r)
+        self.assertEqual(r["verdict"], "red")
+        self.jobs()
+        r = self.poll(r)
+        self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
+        self.assertIsNone(r["last_red"])
+
+
+class TestCiState(ServerBase):
+    def ci_file(self):
+        return os.path.join(self.state, "ci.json")
+
+    def state_json(self):
+        st, _, body = self.req("GET", "/api/state")
+        self.assertEqual(st, 200)
+        return json.loads(body)
+
+    def test_old_green_file_reads_unknown(self):
+        suivi.write_json(self.ci_file(), {"checked_at": time.time() - 1000, "sha": SHA_A, "verdict": "green", "names": []})
+        self.assertEqual(self.state_json()["ci"]["verdict"], "unknown")
+        suivi.write_json(self.ci_file(), {"checked_at": time.time(), "sha": SHA_A, "verdict": "green", "names": []})
+        self.assertEqual(self.state_json()["ci"]["verdict"], "green")
+
+    def test_missing_or_corrupt_file_is_unknown_with_200(self):
+        self.assertEqual(self.state_json()["ci"]["verdict"], "unknown")
+        for junk in ("{not json", "[1,2]", '{"checked_at": "x", "verdict": "green"}'):
+            with open(self.ci_file(), "w") as f:
+                f.write(junk)
+            self.assertEqual(self.state_json()["ci"]["verdict"], "unknown", junk)
+
+    def test_checked_at_is_not_in_the_state(self):
+        suivi.write_json(self.ci_file(), {"checked_at": time.time(), "sha": SHA_A, "verdict": "green", "names": []})
+        self.assertNotIn("checked_at", self.state_json()["ci"])
+
+    def test_red_ci_changes_neither_pending_nor_colours(self):
+        before = self.state_json()
+        suivi.write_json(self.ci_file(), {"checked_at": time.time(), "sha": SHA_A, "verdict": "red", "names": ["fmt"]})
+        after = self.state_json()
+        self.assertEqual(after["ci"]["verdict"], "red")
+        for k in ("pending", "colours", "paused", "qcms", "tests"):
+            self.assertEqual(before[k], after[k], k)
+
+
+class TestCiService(Base):
+    """The thread of `serve`, end to end, with the fake glab."""
+    def start(self, **extra):
+        self.fake = os.path.join(self.tmp.name, "fake")
+        os.makedirs(self.fake)
+        binp = os.path.join(self.tmp.name, "bin")
+        os.makedirs(binp)
+        with open(os.path.join(binp, "glab"), "w") as f:
+            f.write(FAKE_GLAB)
+        os.chmod(os.path.join(binp, "glab"), 0o755)
+        for n, t in (("sha", SHA_A), ("pipelines", '[{"iid": 5}]'),
+                     ("jobs", json.dumps({"data": {"project": {"pipeline": {"stages": {"nodes": [{"name": "e", "jobs": {"nodes": [
+                         {"name": "github-actions/" + j, "status": "FAILED", "detailedStatus": {"label": "x"}} for j in suivi.CI_JOBS]}}]}}}}}))):
+            with open(os.path.join(self.fake, n), "w") as f:
+                f.write(t)
+        env = dict(self.env, PATH=binp + os.pathsep + os.environ["PATH"], FAKE_DIR=self.fake, SF_SUIVI_CI_POLL="0.3", **extra)
+        self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
+                                     cwd=self.repo, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop)
+        m = re.search(r":(\d+)/", self.proc.stdout.readline())
+        self.port = int(m.group(1))
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait(5)
+        self.proc.stdout.close()
+        self.proc.stderr.close()
+
+    def get_state(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", "/api/state")
+        return json.loads(c.getresponse().read())
+
+    def test_seam_off_never_calls_glab(self):
+        os.makedirs(self.state)
+        self.start(SF_SUIVI_CI="off")
+        time.sleep(1.5)
+        self.assertFalse(os.path.exists(os.path.join(self.fake, "calls")))
+        self.assertEqual(self.get_state()["ci"]["verdict"], "unknown")
+
+    def test_watcher_thread_publishes_red(self):
+        os.makedirs(self.state)
+        self.env.pop("SF_SUIVI_CI")
+        self.start()
+        for _ in range(50):
+            ci = self.get_state()["ci"]
+            if ci["verdict"] != "unknown":
+                break
+            time.sleep(0.2)
+        self.assertEqual(ci["verdict"], "red", ci)
+
+
 class TestPage(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_script_parses(self):
@@ -1100,6 +1368,32 @@ class TestPage(unittest.TestCase):
     def page(self):
         with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:
             return f.read()
+
+    def ci_line(self, ci):
+        src = re.search(r"/\*CILINE-START\*/(.*)/\*CILINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(ciLine(%s)));" % json.dumps(ci)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_ci_line_red_visible_unknown_never_green(self):
+        red = self.ci_line({"verdict": "red", "names": ["fmt", "clippy"]})
+        self.assertEqual(red["cls"], "red")
+        self.assertIn("fmt, clippy", red["text"])
+        for ci in ({"verdict": "unknown", "names": []}, {"verdict": "weird"}, {"verdict": "unknown", "last_red": {"sha": "a", "names": ["fmt"]}}):
+            u = self.ci_line(ci)
+            self.assertNotIn("verte", u["text"])
+            self.assertNotEqual(u["cls"], "green")
+        self.assertEqual(self.ci_line({"verdict": "green", "names": []})["cls"], "green")
+        p = self.ci_line({"verdict": "pending", "last_red": {"sha": "a", "names": ["fmt"]}})
+        self.assertIn("fmt", p["text"])
+        self.assertIsNone(self.ci_line(None))
+
+    def test_ci_line_sits_above_the_tabs_outside_the_banner(self):
+        html = self.page()
+        self.assertLess(html.index('id="ciline"'), html.index('class="tabs"'))
+        self.assertNotIn("'ciline'", html.split("function renderTests")[1].split("function render()")[0])
 
     def card_line(self, c, tests=(), qcms=()):
         src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)

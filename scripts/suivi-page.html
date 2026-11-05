@@ -83,6 +83,10 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .box.isok{opacity:.75}
 .box.isback{border-color:var(--bad)}
 .banner{border:2px solid var(--warn);background:var(--warn-soft);color:var(--fg);border-radius:12px;padding:12px 16px;font-weight:700}
+.ciline{border:2px solid var(--line);border-radius:12px;padding:10px 16px;font-weight:700}
+.ciline.green{border-color:var(--ok);background:var(--ok-soft)}
+.ciline.red{border-color:var(--bad);background:var(--bad-soft)}
+.ciline.pending,.ciline.unknown{border-color:var(--warn);background:var(--warn-soft)}
 .empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
 details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
 .note{color:var(--muted);font-size:.9rem}
@@ -114,6 +118,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     </div>
     <button type="button" id="refresh">Actualiser</button>
   </header>
+  <div class="ciline" id="ciline" hidden role="status"></div>
   <div class="tabs" role="tablist" aria-label="Pages">
     <button class="tab" role="tab" id="tab-attente" aria-controls="p-attente" type="button">En attente <span class="count" id="n-pending">–</span></button>
     <button class="tab" role="tab" id="tab-suivi" aria-controls="p-suivi" type="button">Suivi</button>
@@ -174,6 +179,26 @@ function dayText(iso,days,prefix){
 function sinceEl(iso,days,prefix){
   const t=dayText(iso,days,prefix);if(!t)return null;
   return el('div','since'+(days>=7?' late':''),t);
+}
+/*CILINE-START*/
+/* The CI of main, one line above the tabs. ci = S.ci. Unknown never says green; a red that a newer
+   head has not cleared stays visible while the new head is pending or unknown. */
+function ciLine(ci){
+  if(!ci||typeof ci!=='object')return null;
+  const names=a=>(Array.isArray(a)?a:[]).join(', ');
+  const lr=ci.last_red&&Array.isArray(ci.last_red.names)?ci.last_red:null;
+  const v=ci.verdict;
+  if(v==='red')return {cls:'red',text:'CI rouge sur main : '+(names(ci.names)||'cause inconnue')+'. À corriger d’abord.'};
+  const old=lr?' Dernier rouge pas encore corrigé : '+(names(lr.names)||'?')+'.':'';
+  if(v==='green')return {cls:'green',text:'CI verte sur main (Linux et Windows).'};
+  if(v==='pending')return {cls:'pending',text:'CI en cours sur main.'+old};
+  return {cls:'unknown',text:'CI inconnue sur main : on ne sait pas si elle passe.'+old};
+}
+/*CILINE-END*/
+function renderCi(){
+  const el=$('ciline'),l=ciLine(S&&S.ci);
+  if(!l){el.hidden=true;return;}
+  el.hidden=false;el.className='ciline '+l.cls;el.textContent=l.text;
 }
 /*CARDLINE-START*/
 const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
@@ -371,7 +396,7 @@ function render(){
   const n=S.pending;const pc=$('n-pending');pc.textContent=n;pc.className='count'+(n?' hot':'');
   const taken=S.colours.filter(c=>!c.free).length;
   $('sub').textContent=(n?n+' chose'+(n>1?'s':'')+' à faire':'Rien ne t’attend')+' · '+taken+' couleur'+(taken>1?'s':'')+' prise'+(taken>1?'s':'')+' sur 6';
-  renderTests();renderSuivi();
+  renderCi();renderTests();renderSuivi();
 }
 
 /* ---- tabs ---- */
