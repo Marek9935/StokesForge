@@ -16,3 +16,4 @@ Read before touching a UI surface (workbook, graph, note, matrix, fixed panel, g
 - [ ] a new `AppState` field also exists in the detached view when it must apply there
 - [ ] a global shortcut tried with a graph active and a workbook detached
 - [ ] no egui ID computed under `Context::data_mut`
+- [ ] a new dialog is painted through `show_edit_dialogs` / `confirmations::show` only (the host paints it in a detached window, `app/dialog_host.rs`, #457); a new detached window kind ends its closure with `host_pass`, no lock held, and is a `DialogHost` variant

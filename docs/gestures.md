@@ -188,6 +188,7 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 | Click | title bar icon | minimizes, detaches, closes (depending on the icon) |
 | Click | window behind | brings it to the front (the click also acts on what it targets in the window) |
 | Click outside a modal dialog | background | blocked; the outline blinks |
+| Click on the main window | a dialog is open in a detached window | the dialog moves to the main window |
 
 ## Fields and selectors
 

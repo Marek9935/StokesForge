@@ -48,6 +48,14 @@ without a message, see `docs/persistence.md`).
   window covering the main window no longer freezes the application: what you
   do in the detached window still takes effect, about a tenth of a second late
   while the main window is hidden.
+- A dialog opened from a detached window (Graph Properties, About, the import
+  window, a confirmation...) now appears in that window instead of in the main
+  window behind it (#457), where it could stay unseen or show up late when the
+  detached window covers the main one. The main window is locked while it is
+  open; clicking on it brings the dialog back there. A detached window narrower
+  than 560 pixels or shorter than 170 still opens its dialogs in the main
+  window. Ctrl+Z and Ctrl+C in a text field of a dialog no longer reach the
+  model or the figure.
 - Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
   show a graph as a page with rulers, a grid, handles and a settings strip
   (figure size with a padlock shared with Graph Properties, position and size of
