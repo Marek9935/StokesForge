@@ -1367,6 +1367,7 @@ mod tests {
         enabled: bool,
         toggled: Option<bool>,
         center: egui::Pos2,
+        width: f32,
     }
 
     /// The shortcut texts that a menu button adds to its accessibility
@@ -1428,6 +1429,7 @@ mod tests {
                         ((bounds.x0 + bounds.x1) / 2.0) as f32,
                         ((bounds.y0 + bounds.y1) / 2.0) as f32,
                     ),
+                    width: (bounds.x1 - bounds.x0) as f32,
                 })
             })
             .collect()
@@ -1463,12 +1465,24 @@ mod tests {
         events: Vec<egui::Event>,
         modifiers: egui::Modifiers,
     ) -> (egui::FullOutput, Vec<Action>) {
+        paint_bar_wide(app, ctx, tab, events, modifiers, 1200.0)
+    }
+
+    /// Like [`paint_bar_with`], on a window `window` points wide.
+    fn paint_bar_wide(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        tab: Option<Tab>,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+        window: f32,
+    ) -> (egui::FullOutput, Vec<Action>) {
         let mut actions = Vec::new();
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(1200.0, 900.0),
+                    egui::vec2(window, 900.0),
                 )),
                 // egui 0.36: held keys go through an event.
                 events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
@@ -2661,6 +2675,53 @@ mod tests {
                 .dispatch(Action::SetLayerPlacement { graph, free: true });
         }
         (session, app, graph)
+    }
+
+    /// #426: the Layout menu takes its natural width: its entries are as wide
+    /// with a 1400-point window as with a 500-point one, and far below either.
+    /// Witness: `menu_choice` widening itself to `ui.available_width()`.
+    #[test]
+    fn the_layout_menu_is_as_wide_as_its_entries_not_the_window() {
+        let widths = |window: f32| {
+            let (session, mut app, graph) = layout_bench(2, true);
+            let tab = Some(Tab::Graph(graph));
+            let ctx = context();
+            let paint = |app: &mut StokesForgeApp, events: Vec<egui::Event>| {
+                paint_bar_wide(app, &ctx, tab, events, egui::Modifiers::NONE, window).0
+            };
+            let click = |app: &mut StokesForgeApp, pos: egui::Pos2| {
+                for pressed in [None, Some(true), Some(false)] {
+                    paint(
+                        app,
+                        vec![match pressed {
+                            None => egui::Event::PointerMoved(pos),
+                            Some(pressed) => egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        }],
+                    );
+                }
+            };
+            let pos = active(&entries(&paint(&mut app, Vec::new())), &tr!("menu-layout")).center;
+            click(&mut app, pos);
+            let menu = entries(&paint(&mut app, Vec::new()));
+            let found = [
+                tr!("menu-layout-page-mode"),
+                tr!("menu-layer-placement"),
+                tr!("action-delete-layer"),
+            ]
+            .map(|label| active(&menu, &label).width);
+            session.shutdown().unwrap();
+            found
+        };
+        let (wide, narrow) = (widths(1400.0), widths(500.0));
+        for (a, b) in wide.iter().zip(&narrow) {
+            assert!((a - b).abs() < 1.0, "{wide:?} vs {narrow:?}");
+            assert!(*a < 350.0, "an entry spans the window: {wide:?}");
+        }
     }
 
     /// #398: the Layout menu lists, in free placement, Layer Placement, New
