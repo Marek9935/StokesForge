@@ -46,6 +46,7 @@ pub enum Icon {
     Reattach,
     Maximize,
     Restore,
+    PageLayout,
     CaretDown,
     CaretRight,
     CaretLeft,
@@ -138,6 +139,11 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::Maximize,
         IconRole::Neutral,
         svg!("corners-out.neutral.svg"),
+    ),
+    (
+        Icon::PageLayout,
+        IconRole::Neutral,
+        svg!("layout.neutral.svg"),
     ),
     (
         Icon::Restore,

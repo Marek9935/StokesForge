@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use stokesforge_id::NodeId;
 
-use crate::panel::PanelSpec;
+use crate::panel::{FreePage, PanelSpec};
 use crate::series::SeriesSpec;
 use crate::text_anchor::TextAnchor;
 use crate::text_font::TextFont;
@@ -264,6 +264,11 @@ pub struct PlotSpec {
     /// frames. In `Free`, [`PlotSpec::frame_widths`], [`PlotSpec::frame_heights`],
     /// `figure_left` and `figure_top` are kept stored but ignored.
     pub layer_placement: LayerPlacement,
+    /// Page of a Free graph (#426): the minimum figure, in the stored page
+    /// coordinates of [`crate::FreeFrame`]. `None` = today's behaviour (the
+    /// figure is the bounding box of the cells). Read only in `Free`; read
+    /// through [`PlotSpec::sanitized_free_page`].
+    pub free_page: Option<FreePage>,
 }
 
 /// A stored size made usable: a missing, non-finite or non-positive entry
@@ -306,6 +311,11 @@ impl PlotSpec {
     pub fn sanitized_frame_widths(&self) -> Option<Vec<f64>> {
         (!self.frame_widths.is_empty())
             .then(|| sanitized_sizes(&self.frame_widths, self.columns(), FALLBACK_FRAME.0))
+    }
+
+    /// [`PlotSpec::free_page`] made usable (see [`FreePage::sanitized`]).
+    pub fn sanitized_free_page(&self) -> Option<FreePage> {
+        self.free_page.and_then(FreePage::sanitized)
     }
 
     /// The height of the frame of each grid row in points, sanitized (see
@@ -493,6 +503,7 @@ impl Default for PlotSpec {
             figure_left: None,
             figure_top: None,
             layer_placement: LayerPlacement::Grid,
+            free_page: None,
         }
     }
 }

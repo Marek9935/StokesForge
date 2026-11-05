@@ -489,24 +489,18 @@ annotations keep their priority. Known limit: a data right axis
 (`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
 the whole area. Test: `geometry.rs`, `layers.rs`, `hit.rs`.
 
-**Cell handles (#394).** `hit::cell_edge_at(plot, x, y, tolerance)` returns the
-`CellEdge { column, row }` under a pixel: the **outer** boundary of a cell
-(`DrawnPanel::cell_origin` + `cell_size`, beyond the tick labels and the axis
-title, never the axis line). Every cell's right boundary is the handle of its
-grid column and its bottom boundary the handle of its row, so the boundary two
-cells share belongs to the left column / the upper row and the figure's right and
-bottom edges to the last column and row; left and top edges have none. The strip
-is `CELL_EDGE_TOLERANCE_POINTS` (4) screen points either side
-(`GraphView::cell_edge_at` passes `4 / display_scale`), bounded by
-`CELL_EDGE_MAX_TOLERANCE` (half the 12 px margin) so that it never reaches an axis
-line. The left and top edges of the figure are `hit::figure_edge_at`
-(`FigureEdge { left, top }`, #405): they set Left and Top of the plot area
-(`GraphEvent::FramePlaced`), never the width of a cell. `GraphView` pulls it on the preview pattern (`FramePreview`, applied to the
-spec clone by `figure_layout` and the cache build, so the figure and the window
-that follows it see the new layout live; model untouched; the distance is
-measured in screen points over the display scale of the press because the figure
-grows under the pointer); at release, one `GraphEvent::FrameResized`, then
-`Action::SetFrameSizes` (one undo step). Never in the exports.
+**No handle outside the Page Layout Mode (#426).** The outer boundary of a cell
+(#394), the left and top edges of the figure (#405) and the edges and the plot
+area of a Free layer (#398) were once mouse handles of the Pointer tool; they are
+gone (`hit::cell_edge_at`, `figure_edge_at`, `free_handle_at`, `GraphView`'s
+`FrameDrag` / `FreeDrag` and their cursors, `FIGURE_GRAB_MARGIN`). Resizing and
+moving with the mouse exists only in the mode (below). What stays: the sizes are
+still changed by the Size fields of Graph Properties (`Action::SetFrameSize`, the
+draft), `pyst` and the mode, and `GraphView::layout_is_free` still serves Shift +
+click. `FramePreview` is the mode's preview only (`grid`, `frees`, `page`), applied to
+the spec clone by `figure_layout` and the cache build so the figure and the window
+that follows it see the new layout live; model untouched. Never in the exports.
+Test: `render-egui/tests/cell_handles.rs` (`no_layout_drag_outside_the_mode`).
 
 **Shared legend (#172).** The legend of an ordinary layer lists its
 curves first, then, layer by layer in the order of `PlotSpec::panels`, those of the
@@ -1007,8 +1001,6 @@ the graph title grows or shrinks the *image*, never the frame.
   or the top moves it inside the image, which is why the window follows the
   figure on that side while those edges are dragged. The title band is measured
   once (`ExplicitGrid::title_band`) and used by the layout and the drawing path.
-  Hit test: `hit::figure_edge_at` (left and top edges of the figure, same
-  bounded strip as `cell_edge_at`).
 - Everyone reads it: `draw`, `GraphView::figure_layout` (screen, memoized by
   graph, revision, pixels per point and preview generation; published per graph
   by `graph_view_contents` for the menus, the size fields and the window), the
@@ -1116,6 +1108,35 @@ bands, margins, titles, Fixed reserve and Left / Top stay as
   frames are fixed first), gives `None`. The image is whole points: the size
   lands within half a point. Tests: `render/tests/figure_layout.rs` ("Total
   image size"), `render-svg/tests/figure_size.rs`, robustness `b13`.
+
+### The Page Layout Mode in the app (#426)
+
+The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometry in
+`render::free_gesture` and `render::grid_gesture`); the app owns what surrounds it
+(`app/page_layout.rs`). Three rules to keep when touching the shell:
+
+- **A view, not the model.** Entering or leaving sends nothing. The only strip
+  control that touches the model is the Grid mode choice (`SetLayerPlacement`), and a
+  pending nudge burst is committed first (`flush_layout_edit`, which turns the
+  `LayoutEdited` event into its action *before* the toggle's), because a placement
+  change drops the burst.
+- **The figure's rectangle is stable.** The strip's height is reserved from the
+  previous frame, in whole points, so the cache key (`rect`) does not move while the
+  user types or the rows wrap. Rulers and `LAYOUT_GRAB_MARGIN` shrink the contain
+  rectangle, they never change the figure's own layout (invariant 5).
+- **The padlock is the application's** (`AppState::size_lock`, `Action::SetSizeLock`,
+  published to the graph windows each frame, copied by `fork_for_detached_view`):
+  Graph Properties and the strip share it, and `GraphView::set_figure_ratio_lock`
+  makes the L corners keep its ratio. A committed scale of the figure adopts the next
+  image (`SizeLock::adopt_next`), so a rounding never drifts the ratio.
+- **A floating window is maximised while the mode lasts, a detached one keeps its size, and
+  the keys are read first.** `app/layout_window.rs` maximises a floating window on entering
+  (never an OS window: it would hide the root on Wayland and stall the drain), reconciles each frame (a graph whose window
+  is no longer the maximised one leaves the mode) and reports the pre-mode state to the
+  saved window views. The keys (Esc, `G`, arrows) are read by `begin_layout_frame` at the
+  start of the root frame and at the top of a detached viewport, never in
+  `graph_view_contents`: a workbook painted behind the graph would take Esc first, and a
+  modal's Esc would reach the mode. Witnesses: `layout_window.rs` tests.
 
 ### Enlarging a graph without blurring the text
 

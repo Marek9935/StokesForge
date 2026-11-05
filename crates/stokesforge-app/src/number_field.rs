@@ -920,6 +920,24 @@ mod tests {
         }
     }
 
+    /// #426: a value validated with Enter leaves the field, so the global
+    /// undo shortcut is no longer shadowed by the field's own text undo.
+    #[test]
+    fn enter_on_a_typed_value_gives_the_focus_back() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        bench.focus_field();
+        let id = bench.id.unwrap();
+        assert!(bench.ctx.memory(|m| m.has_focus(id)));
+        bench.image(vec![egui::Event::Text("3".into())], false);
+        let (_, changed) = bench.image(vec![key_event(egui::Key::Enter)], false);
+        bench.image(Vec::new(), false);
+        assert!(changed);
+        assert!(
+            !bench.ctx.memory(|m| m.has_focus(id)),
+            "focus kept after Enter"
+        );
+    }
+
     #[test]
     fn arrows_change_by_a_step_and_shift_by_a_big_step() {
         let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);

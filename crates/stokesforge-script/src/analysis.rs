@@ -45,6 +45,7 @@ use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::{AutoDetect, Operation, Readiness, Warning};
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
 use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
+use stokesforge_analysis::AnalysisError;
 use stokesforge_commands::Command;
 use stokesforge_core::{
     compute, family_english, output_unit, wants_output, AuxRef, CalculationDraft, ColumnMeta,
@@ -574,6 +575,13 @@ fn fit_operation(
         }
         Err(error) => return host(Err(error)),
     };
+    // Entry check (#438): a number an `f64` cannot hold is refused here, while
+    // the lenient path (`readiness`) returns the operation and reports it.
+    if !lenient {
+        if let Some(error) = model.out_of_range_literal() {
+            return host(Err(AnalysisError::BadExpression(error)));
+        }
+    }
     let names: Vec<String> = compiled.params().iter().map(|p| p.name.clone()).collect();
     let (initial, bounds, fixed, shared) = (
         initial.unwrap_or_default(),

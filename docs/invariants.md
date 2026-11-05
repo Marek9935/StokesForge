@@ -200,6 +200,11 @@ The stack guarantees it by construction, and **inside a macro the entries are
 undone strictly in reverse order of insertion**, whatever their
 natures. This is what makes the hybrid hold.
 
+A formula pass runs outside the stack, so a macro's entries replayed in a row
+meet derived columns that no longer fit their deltas; a derived column is made
+to fit and the next pass rewrites it, while ordinary columns stay exact
+(#448).
+
 ## 9. No Python object crosses the actor channel
 
 Three rules, two of which are held by the compiler:

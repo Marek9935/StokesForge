@@ -16,6 +16,12 @@
 //! first appearance.
 //! Implicit multiplication (`2x`) does not exist.
 //!
+//! Number literals (#438): [`Expr::parse`] stays lenient, as stored models
+//! need (invariant 12): `1e400` reads as infinity and `1e-400` as 0.
+//! [`Expr::out_of_range_literal`] is the strict reading used at **entry**
+//! (the readiness of a Fit): it names the first literal an `f64` cannot hold,
+//! by the rule of [`number_out_of_range`], shared with the column formulas.
+//!
 //! Logarithms (#287): `log(x)` and `log10(x)` in base 10, `ln(x)` natural,
 //! `log2(x)`, `logx(x, b)` in base `b`; x < 0, `b ≤ 0` or `b = 1` give NaN.
 
@@ -40,6 +46,16 @@ pub enum ExprErrorKind {
     UnexpectedToken,
     UnbalancedParenthesis,
     BadNumber,
+    /// A literal that looks valid but that an `f64` cannot hold (#438): beyond
+    /// about 1.8e308 (`too_large`), or non-zero but under about 4.9e-324 (it
+    /// would read as 0). Only the strict reading
+    /// [`Expr::out_of_range_literal`] raises it, never [`Expr::parse`].
+    NumberOutOfRange {
+        /// The literal as typed.
+        text: String,
+        /// True beyond the largest `f64`, false under the smallest.
+        too_large: bool,
+    },
     /// Tree depth beyond [`MAX_DEPTH`] (parentheses, signs,
     /// exponents or operator chain too long).
     TooDeep,
@@ -60,6 +76,15 @@ impl fmt::Display for ExprErrorKind {
             Self::UnexpectedToken => write!(f, "unexpected token"),
             Self::UnbalancedParenthesis => write!(f, "unbalanced parenthesis"),
             Self::BadNumber => write!(f, "malformed number"),
+            Self::NumberOutOfRange { text, too_large } => write!(
+                f,
+                "the number {text} is too {} for a 64-bit float",
+                if *too_large {
+                    "large"
+                } else {
+                    "small to be stored"
+                }
+            ),
             Self::TooDeep => write!(f, "expression nested too deeply"),
             Self::UnknownFunction(n) => write!(f, "unknown function '{n}'"),
             Self::WrongArgumentCount {
@@ -69,6 +94,21 @@ impl fmt::Display for ExprErrorKind {
             } => write!(f, "'{name}' takes {expected} argument(s), {found} given"),
         }
     }
+}
+
+/// The range rule for a number typed by hand (#429, #438), one source for the
+/// column formulas and the model expressions: `Some(true)` when `text` reads
+/// as infinity although its mantissa has a digit (`1e400`), `Some(false)`
+/// when it reads as 0 although its mantissa has a non-zero digit (`1e-400`),
+/// `None` otherwise. Subnormals, a written zero (`0e400`, `0.000`), a text
+/// that is not a number and the words `inf` and `nan` give `None`: other rules
+/// decide about them. The text is read as is: no comma handling.
+pub fn number_out_of_range(text: &str) -> Option<bool> {
+    let value = text.parse::<f64>().ok()?;
+    let mantissa = text.split(['e', 'E']).next().unwrap_or("");
+    let too_large = !value.is_finite() && mantissa.chars().any(|c| c.is_ascii_digit());
+    let too_small = value == 0.0 && mantissa.chars().any(|c| ('1'..='9').contains(&c));
+    (too_large || too_small).then_some(too_large)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,9 +138,17 @@ enum Tok {
     Comma,
 }
 
-fn tokenize(src: &str) -> Result<Vec<(Tok, usize)>, ExprError> {
+/// The tokens of a source, and its first out-of-range literal if any (only
+/// the strict reading looks at it).
+struct Lexed {
+    toks: Vec<(Tok, usize)>,
+    out_of_range: Option<ExprError>,
+}
+
+fn tokenize(src: &str) -> Result<Lexed, ExprError> {
     let chars: Vec<char> = src.chars().collect();
     let mut out = Vec::new();
+    let mut out_of_range = None;
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -135,6 +183,12 @@ fn tokenize(src: &str) -> Result<Vec<(Tok, usize)>, ExprError> {
                 kind: ExprErrorKind::BadNumber,
                 position: start,
             })?;
+            if out_of_range.is_none() {
+                out_of_range = number_out_of_range(&text).map(|too_large| ExprError {
+                    kind: ExprErrorKind::NumberOutOfRange { text, too_large },
+                    position: start,
+                });
+            }
             out.push((Tok::Num(v), start));
         } else if c.is_alphabetic() || c == '_' {
             let start = i;
@@ -161,7 +215,10 @@ fn tokenize(src: &str) -> Result<Vec<(Tok, usize)>, ExprError> {
             });
         }
     }
-    Ok(out)
+    Ok(Lexed {
+        toks: out,
+        out_of_range,
+    })
 }
 
 /// Cap on tree depth, in "cost": one nesting level
@@ -346,7 +403,7 @@ impl Expr {
     /// Compiles `src`. Surrounding spaces are ignored; an empty text is an
     /// error.
     pub fn parse(src: &str) -> Result<Expr, ExprError> {
-        let toks = tokenize(src)?;
+        let toks = tokenize(src)?.toks;
         if toks.is_empty() {
             return Err(ExprError {
                 kind: ExprErrorKind::Empty,
@@ -372,6 +429,16 @@ impl Expr {
             root,
             params: parser.params,
         })
+    }
+
+    /// Strict reading of the literals, for entry (#438): the first number of
+    /// `src`, from the left, that an `f64` cannot hold (`1e400`, `1e-400`),
+    /// with the position of its first character. A sign is an operator, so
+    /// `-1e400` names `1e400`. `None` when every literal is fine, and also
+    /// when `src` does not tokenize: syntax errors are [`Expr::parse`]'s to
+    /// report, so call it after a successful parse.
+    pub fn out_of_range_literal(src: &str) -> Option<ExprError> {
+        tokenize(src).ok()?.out_of_range
     }
 
     /// Names of the parameters, in the order of their first appearance.
@@ -425,6 +492,78 @@ mod tests {
 
     fn ev(src: &str, x: f64, p: &[f64]) -> f64 {
         Expr::parse(src).unwrap().eval(x, p)
+    }
+
+    fn out_of_range(src: &str) -> Option<(ExprErrorKind, usize)> {
+        Expr::out_of_range_literal(src).map(|e| (e.kind, e.position))
+    }
+
+    fn range_error(text: &str, too_large: bool) -> ExprErrorKind {
+        ExprErrorKind::NumberOutOfRange {
+            text: text.into(),
+            too_large,
+        }
+    }
+
+    #[test]
+    fn a_literal_beyond_the_f64_range_is_named_by_the_strict_reading() {
+        assert_eq!(
+            out_of_range("x+1e400"),
+            Some((range_error("1e400", true), 2))
+        );
+        assert_eq!(
+            out_of_range("1E+400"),
+            Some((range_error("1E+400", true), 0))
+        );
+        let digits = "9".repeat(400);
+        assert_eq!(
+            out_of_range(&format!("a*x+{digits}")),
+            Some((range_error(&digits, true), 4))
+        );
+        assert_eq!(
+            out_of_range("1e-400"),
+            Some((range_error("1e-400", false), 0))
+        );
+        assert_eq!(
+            out_of_range("2e-324"),
+            Some((range_error("2e-324", false), 0))
+        );
+        // The sign is an operator: the literal is named without it.
+        assert_eq!(
+            out_of_range("-1e400"),
+            Some((range_error("1e400", true), 1))
+        );
+        // The leftmost one wins.
+        assert_eq!(
+            out_of_range("1e-400+1e400"),
+            Some((range_error("1e-400", false), 0))
+        );
+    }
+
+    #[test]
+    fn zeros_subnormals_and_the_largest_float_are_accepted() {
+        for src in [
+            "0",
+            "0.0e5",
+            "0e400",
+            "0.000",
+            "1e-310",
+            "5e-324",
+            "1.7976931348623157e308",
+            "a*x+2.5",
+        ] {
+            assert_eq!(out_of_range(src), None, "{src}");
+        }
+    }
+
+    #[test]
+    fn parse_stays_lenient_about_out_of_range_literals() {
+        let e = Expr::parse("a*x+1e400").unwrap();
+        assert_eq!(e.params(), ["a"]);
+        assert!(e.eval(1.0, &[1.0]).is_infinite());
+        assert_eq!(Expr::parse("1e-400").unwrap().eval(0.0, &[]), 0.0);
+        // A syntax error is not the strict reading's to report.
+        assert_eq!(out_of_range("1e400 $"), None);
     }
 
     #[test]

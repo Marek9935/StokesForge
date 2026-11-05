@@ -99,6 +99,8 @@ The **Output** block decides what is written and how the analysis is kept.
 | **Recalculate automatically** | Recalculates the columns whenever the source data change. When off, the columns are marked out of date instead. |
 | **Warn when R² is low** | Opens a dialog after the calculation when the R² of a fit is below 0.6. |
 
+When **Recalculate automatically** is off and a script deletes a row (`pyst.delete_rows`), undoing that script after a **Recalculate** can leave the result columns out of date, with an empty row and an old value; **Recalculate** puts them right.
+
 **Recalculate automatically** is on by default, except for **Reconvolution**, **Direct Deconvolution** and batches of more than 20 series, because these are slow. For a large batch, the window reminds you that recalculating each change can be slow.
 
 ### Where the results go
@@ -251,7 +253,7 @@ If you fix every parameter, the fit is refused: free at least one. Inverted boun
 
 Choose **Custom model** and write `y` as a function of `x`, for example `a*exp(-x/b)+c`. Every name other than `x`, `pi` and `e` becomes a parameter, in the order of its first appearance. Multiplication must be written with `*`: `2x` is not understood.
 
-You can use `+ - * / ^`, parentheses and these functions: `exp`, `ln`, `log` (base 10), `log10`, `log2`, `logx(x, b)`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `erf`, `erfc`, `sign`, `floor`, `ceil`, `pow`, `min`, `max` and `atan2`. An error message tells you the position of a mistake in the expression.
+You can use `+ - * / ^`, parentheses and these functions: `exp`, `ln`, `log` (base 10), `log10`, `log2`, `logx(x, b)`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `erf`, `erfc`, `sign`, `floor`, `ceil`, `pow`, `min`, `max` and `atan2`. A syntax error message tells you the position of the mistake in the expression. A number the computer cannot store is refused too, with the sentence you know from formulas: beyond about 1.8e308 (`1e400`), or non-zero but under about 4.9e-324 (`1e-400`). Write `0` for zero. While the model holds one, **Create** stays greyed and the message names the number (without a position). Whatever the mistake in the expression (syntax, unknown function, number out of range), the footer and the preview give the message while you type, and the field is framed in red once you leave it (its message appears when you hover it); the frame goes away when you click back in to correct the text, which stays in the field. An empty field is not framed. A calculation saved earlier with such a number still opens and recalculates, but you must correct the number before you can edit it (**Edit Calculation…** keeps **Update** greyed) or drag its range handles on the graph.
 
 ### Range, weights and residuals
 

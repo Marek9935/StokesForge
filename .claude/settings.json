@@ -1,5 +1,41 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/suivi.py\" hook-news || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/suivi.py\" hook-news || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(*suivi.py*)",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/suivi.py\" hook-wait",
+            "asyncRewake": true,
+            "timeout": 259200
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [

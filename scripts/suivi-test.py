@@ -821,6 +821,765 @@ class ServerBase(Base):
         with open(self.entry) as f:
             return f.read()
 
+class WaitBase(Base):
+    """`suivi.py wait` (#454): background processes polling every 0.05 s, `--timeout` as the guard."""
+
+    def setUp(self):
+        super().setUp()
+        self.env["SF_SUIVI_WAIT_POLL"] = "0.05"
+        self.env["SF_SUIVI_WAIT_SETTLE"] = "0"
+        self.procs = []
+        self.addCleanup(self.reap)
+
+    def reap(self):
+        for p in self.procs:
+            if p.poll() is None:
+                p.kill()
+            p.communicate()
+
+    def owned(self, n, sid="S1", **fields):
+        self.put(n, colour=C[0], name="N%d" % n, owner=self.live_owner(sid), **fields)
+
+    def entry(self, tid, status="todo", comment="", **extra):
+        os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
+        t = {"title": "T", "status": status, "try": "scripts/try.sh"}
+        if comment:
+            t["comment"] = comment
+        t.update(extra)
+        for k in [k for k, v in t.items() if v is None]:
+            del t[k]
+        with open(os.path.join(self.state, "tests", tid + ".json"), "w") as f:
+            json.dump(t, f)
+
+    def spawn(self, n, *extra, sid="S1", env=None, cwd=None):
+        e = dict(self.env)
+        e.update(self.as_session(sid))
+        e.update(env or {})
+        p = subprocess.Popen([sys.executable, "-I", SUIVI, "wait", str(n), *extra], cwd=cwd or self.repo, env=e,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        return p
+
+    def finish(self, p, t=10):
+        out, err = p.communicate(timeout=t)
+        return p.returncode, out, err
+
+    def run_wait(self, n, *extra, sid="S1", env=None, timeout="2"):
+        return self.finish(self.spawn(n, "--timeout", timeout, *extra, sid=sid, env=env))
+
+    def until(self, cond, t=5):
+        end = time.time() + t
+        while time.time() < end:
+            if cond():
+                return True
+            time.sleep(0.02)
+        self.fail("condition not met")
+
+    def reg_path(self, root=1):
+        return os.path.join(self.state, "waits", "%d.json" % root)
+
+    def armed(self, root=1):
+        self.until(lambda: os.path.exists(self.reg_path(root)))
+        time.sleep(0.15)       # past the first tick
+
+
+class TestWaitEvents(WaitBase):
+    def test_answered_before_start_returns_at_once(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "x")
+        self.entry("1-2")
+        t0 = time.time()
+        rc, out, _ = self.run_wait(1, timeout="30")
+        self.assertEqual(rc, 0)
+        self.assertIn("1-1 retour: x", out)
+        self.assertLess(time.time() - t0, 5)
+        self.assertIn("Still open: 1 trial entry to tick. Re-arm: python3 scripts/suivi.py wait 1", out)
+
+    def test_rearmed_reports_nothing_again(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "bad")
+        self.entry("1-2")
+        rc, out, _ = self.run_wait(1)
+        self.assertIn("1-1 retour: bad", out)
+        rc, out, _ = self.run_wait(1, timeout="1")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("timeout"), out)
+        self.assertNotIn("1-1", out)
+
+    def test_new_session_hears_everything_again(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "x")
+        self.entry("1-2")
+        self.assertIn("1-1 retour", self.run_wait(1)[1])
+        self.owned(1, sid="S2")
+        self.assertIn("1-1 retour", self.run_wait(1, sid="S2")[1])
+
+    def test_kill_before_printing_keeps_the_event_for_the_next_wait(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        self.entry("1-1", "retour", "x")
+        time.sleep(0.4)           # seen, held by the delay
+        p.kill()
+        p.communicate()
+        self.assertFalse(os.path.exists(os.path.join(self.state, "heard", "1.json")))
+        self.assertIn("1-1 retour", self.run_wait(1, timeout="3")[1])
+
+    def test_settle_groups_events_then_wakes(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "0.6"})
+        self.armed()
+        self.entry("1-1", "retour", "x")
+        time.sleep(0.3)
+        self.assertIsNone(p.poll())
+        rc, out, _ = self.finish(p)
+        self.assertIn("1-1 retour", out)
+
+    def test_plain_ok_with_entries_left_wakes_nothing(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        self.entry("1-1", "ok")
+        rc, out, _ = self.run_wait(1, timeout="1")
+        self.assertTrue(out.startswith("timeout"), out)
+
+    def test_each_change_restarts_the_delay(self):
+        self.owned(1)
+        for k in (1, 2, 3):
+            self.entry("1-%d" % k)
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "1.0"})
+        self.armed()
+        self.entry("1-1", "retour", "x")
+        time.sleep(0.6)
+        self.entry("1-3", "ok")                     # a silent tick restarts the delay
+        t1 = time.time()
+        time.sleep(0.6)
+        self.assertIsNone(p.poll())
+        rc, out, _ = self.finish(p)
+        self.assertGreaterEqual(time.time() - t1, 0.9)
+        self.assertIn("1-1 retour: x", out)
+        self.assertIn("1-3 ok", out)
+
+    def test_last_tick_wakes_at_once_and_reports_the_silent_oks(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        self.entry("1-1", "ok")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        self.assertIsNone(p.poll())
+        self.entry("1-2", "ok")
+        rc, out, _ = self.finish(p, 5)
+        self.assertIn("1-1 ok", out)
+        self.assertIn("1-2 ok", out)
+
+    def test_finished_form_wakes_at_once_despite_the_delay(self):
+        self.owned(1)
+        self.entry("1-1")
+        d = os.path.join(self.state, "qcm", "1-1")
+        os.makedirs(os.path.join(d, "answers"))
+        meta = {"issue": 1, "title": "F", "cards": 1, "finished": False}
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump(meta, f)
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        meta["finished"] = True
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump(meta, f)
+        self.assertIn("form 1-1 finished", self.finish(p, 5)[1])
+
+    def test_misclick_unticked_before_the_delay_wakes_nothing(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        p = self.spawn(1, "--timeout", "2.5", env={"SF_SUIVI_WAIT_SETTLE": "1.0"})
+        self.armed()
+        self.entry("1-1", "retour")
+        time.sleep(0.3)
+        self.entry("1-1", "todo")
+        self.assertTrue(self.finish(p)[1].startswith("timeout"))
+
+    def test_prefix_and_try_filter(self):
+        self.owned(454)
+        self.entry("45-1", "ok")
+        self.entry("454-2", "ok", **{"try": None})
+        self.entry("454-9")
+        self.entry("454-8", "retour", "x", **{"try": None})
+        rc, out, _ = self.run_wait(454, timeout="1")
+        self.assertTrue(out.startswith("timeout"), out)
+
+    def test_unticking_a_reported_ok_is_an_event_an_unreported_one_is_not(self):
+        self.owned(1)
+        self.entry("1-1", "ok")
+        self.entry("1-2", "ok")
+        self.assertIn("1-1 ok", self.run_wait(1)[1])      # no todo left: wakes and records
+        self.entry("1-1", "todo")
+        self.entry("1-3", "ok")
+        self.entry("1-3", "todo")                          # never reported: nothing to say
+        news = self.run_cli("news", "1", env=self.as_session()).stdout
+        self.assertIn("1-1 todo", news)
+        self.assertNotIn("1-3", news)
+
+    def test_form_event_only_once_finished_and_again_when_an_answer_changes(self):
+        self.owned(1)
+        self.entry("1-9")
+        d = os.path.join(self.state, "qcm", "1-1")
+        os.makedirs(os.path.join(d, "answers"))
+        meta = {"issue": 1, "title": "F", "cards": 2, "finished": False}
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump(meta, f)
+        with open(os.path.join(d, "answers", "1.json"), "w") as f:
+            json.dump({"code": "1", "choix": "a"}, f)
+        self.assertTrue(self.run_wait(1, timeout="1")[1].startswith("timeout"))
+        meta["finished"] = True
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump(meta, f)
+        out = self.run_wait(1)[1]
+        self.assertIn("form 1-1 finished, 1/2 answered, read with: suivi.py qcm answers 1-1", out)
+        self.assertTrue(self.run_wait(1, timeout="1")[1].startswith("timeout"))
+        with open(os.path.join(d, "answers", "1.json"), "w") as f:
+            json.dump({"code": "1", "choix": "b"}, f)
+        self.assertIn("form 1-1 finished", self.run_wait(1)[1])
+
+    def test_nothing_open_returns_at_once(self):
+        self.owned(1)
+        t0 = time.time()
+        rc, out, _ = self.run_wait(1, timeout="30")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("nothing open"), out)
+        self.assertIn("end the turn without a message", out)
+        self.assertLess(time.time() - t0, 5)
+
+    def test_package_watches_all_members_and_shares_one_registration(self):
+        self.owned(10, kind="package", subs=[{"n": 11, "title": "s"}])
+        self.owned(11, parent=10)
+        self.entry("11-1")
+        a = self.spawn(11)
+        self.armed(10)
+        self.assertFalse(os.path.exists(self.reg_path(11)))
+        rc, out, _ = self.finish(self.spawn(10))
+        self.assertIn("already listening", out)
+        self.assertEqual(rc, 0)
+        self.entry("11-1", "ok")
+        self.assertIn("11-1 ok", self.finish(a)[1])
+
+    def test_parent_wait_sees_a_sub_issue_entry(self):
+        self.owned(10, kind="package", subs=[{"n": 11, "title": "s"}])
+        self.owned(11, parent=10)
+        self.entry("11-1", "retour", "x")
+        self.entry("11-2")
+        self.assertIn("11-1 retour", self.run_wait(10)[1])
+
+    def test_no_record_and_not_the_owner_exit_one(self):
+        self.assertEqual(self.run_wait(5)[0], 1)
+        self.owned(1, sid="S2")
+        self.entry("1-1")
+        rc, _, err = self.run_wait(1)
+        self.assertEqual(rc, 1)
+        self.assertIn("does not own", err)
+
+
+class TestWaitExits(WaitBase):
+    def test_dead_pid_is_session_gone(self):
+        child = subprocess.Popen(["sleep", "30"])
+        start = suivi.pid_start(child.pid)
+        child.kill()
+        child.wait()
+        self.put(1, colour=C[0], owner={"session": "S1", "pid": child.pid, "pid_start": start, "at": time.time()})
+        self.entry("1-1")
+        rc, out, _ = self.run_wait(1)
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("session gone"), out)
+        self.assertIn("end the turn without a message", out)
+
+    def test_newer_ended_marker_is_session_gone(self):
+        self.put(1, colour=C[0], owner=self.live_owner("S1", at=time.time() - 100))
+        self.entry("1-1")
+        os.makedirs(os.path.join(self.state, "ended"))
+        open(os.path.join(self.state, "ended", "S1"), "w").close()
+        self.assertTrue(self.run_wait(1)[1].startswith("session gone"))
+
+    def test_pause_ends_the_wait_and_the_wait_never_held_the_colour(self):
+        self.owned(1)
+        self.entry("1-1")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_POLL": "2"})
+        self.armed()
+        os.unlink(os.path.join(self.state, "tests", "1-1.json"))     # nothing holds the colour now
+        self.assertEqual(self.run_cli("pause", "1").returncode, 0)
+        self.assertEqual(self.held(), [])          # colour free although the wait is alive
+        self.assertIsNone(p.poll())
+        self.assertTrue(self.finish(p)[1].startswith("paused"))
+
+    def test_done_ends_the_wait(self):
+        self.owned(1)
+        self.entry("1-1")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_POLL": "1"})
+        self.armed()
+        self.run_cli("done", "1")
+        self.assertTrue(self.finish(p)[1].startswith("done"))
+
+    def test_other_claim_ends_the_wait_as_taken(self):
+        self.owned(1)
+        self.entry("1-1")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_POLL": "1"})
+        self.armed()
+        self.owned(1, sid="S2")
+        self.assertTrue(self.finish(p)[1].startswith("taken"))
+
+    def test_second_wait_same_session_is_already_listening(self):
+        self.owned(1)
+        self.entry("1-1")
+        a = self.spawn(1, env={"SF_SUIVI_WAIT_POLL": "5"})
+        self.armed()
+        rc, out, _ = self.finish(self.spawn(1))
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("already listening"), out)
+        self.assertIsNone(a.poll())
+
+    def test_second_wait_other_session_exits_one(self):
+        self.owned(1)
+        self.entry("1-1")
+        a = self.spawn(1, env={"SF_SUIVI_WAIT_POLL": "5"})
+        self.armed()
+        self.owned(1, sid="S2")
+        rc, _, err = self.finish(self.spawn(1, sid="S2"))
+        self.assertEqual(rc, 1)
+        self.assertIn("another session", err)
+        self.assertIsNone(a.poll())
+
+    def test_no_git_after_start_and_survives_a_removed_worktree(self):
+        real = shutil.which("git")
+        bindir = os.path.join(self.tmp.name, "bin")
+        os.makedirs(bindir)
+        log = os.path.join(self.tmp.name, "git.log")
+        with open(os.path.join(bindir, "git"), "w") as f:
+            f.write('#!/bin/sh\necho "$@" >> "%s"\nexec "%s" "$@"\n' % (log, real))
+        os.chmod(os.path.join(bindir, "git"), 0o755)
+        self.worktree("feature1")
+        wt = os.path.join(self.root, "feature1")
+        self.owned(1)
+        self.entry("1-1")
+        p = self.spawn(1, env={"PATH": bindir + os.pathsep + os.environ["PATH"]}, cwd=wt)
+        self.armed()
+        before = slurp(log) if os.path.exists(log) else ""
+        self.git("worktree", "remove", "--force", wt)
+        time.sleep(0.6)
+        after = slurp(log) if os.path.exists(log) else ""
+        self.assertEqual(before, after)
+        self.assertIsNone(p.poll())
+
+    def test_sigterm_is_logged_and_unregisters(self):
+        self.owned(1)
+        self.entry("1-1")
+        p = self.spawn(1)
+        self.armed()
+        p.terminate()
+        self.finish(p)
+        self.assertIn("SIGTERM", slurp(os.path.join(self.state, "waits", "log")))
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_status_listening_and_unread(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2", "ok")
+        e = self.status()["colours"][0]
+        self.assertFalse(e["listening"])
+        self.assertEqual(e["unread"], 1)
+        self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        self.assertTrue(self.status()["colours"][0]["listening"])
+        reg = jload(self.reg_path())
+        reg["pid_start"] += 1
+        with open(self.reg_path(), "w") as f:
+            json.dump(reg, f)
+        self.assertFalse(self.status()["colours"][0]["listening"])
+
+    def test_hint_when_nobody_listens(self):
+        self.owned(1)
+        with open(os.path.join(self.tmp.name, "e.json"), "w") as f:
+            json.dump({"title": "T", "try": "x"}, f)
+        r = self.run_cli("test", "add", "1", os.path.join(self.tmp.name, "e.json"))
+        self.assertEqual(r.stdout.strip(), "1-1")
+        self.assertIn("nobody is listening for #1", r.stderr)
+        self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        r = self.run_cli("test", "add", "1", os.path.join(self.tmp.name, "e.json"), env=self.as_session())
+        self.assertNotIn("nobody is listening", r.stderr)
+
+    def test_news_prints_and_records(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "c")
+        r = self.run_cli("news", "1", env=self.as_session())
+        self.assertIn("1-1 retour: c", r.stdout)
+        self.assertIn("no news", self.run_cli("news", "1", env=self.as_session()).stdout)
+
+
+class TestHookNews(WaitBase):
+    def hook(self, sid, **env):
+        e = {"CLAUDE_PROJECT_DIR": self.repo}
+        e.update(env)
+        return self.run_cli("hook-news", env=e, stdin=json.dumps({"session_id": sid}))
+
+    def test_bad_json_or_no_state_is_silent_exit_zero(self):
+        for stdin in ("", "not json", "[]", '{"x": 1}'):
+            r = self.run_cli("hook-news", env={"CLAUDE_PROJECT_DIR": self.repo}, stdin=stdin)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), stdin)
+        r = self.hook("S1")                                   # no state folder at all
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        r = self.run_cli("hook-news", env={}, stdin='{"session_id": "S1"}')
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+    def test_owner_hears_each_event_once_and_is_told_to_arm_the_wait(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "dark")
+        self.entry("1-2")
+        r = self.hook("S1")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("1-1 retour: dark", r.stdout)
+        self.assertIn("no wait running", r.stdout)
+        r = self.hook("S1")
+        self.assertNotIn("1-1 retour", r.stdout)
+        self.assertIn("no wait running", r.stdout)
+        self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        self.assertNotIn("no wait running", self.hook("S1").stdout)
+
+    def test_new_session_lists_dead_owners_with_unread_answers_and_records_nothing(self):
+        child = subprocess.Popen(["sleep", "30"])
+        start = suivi.pid_start(child.pid)
+        child.kill()
+        child.wait()
+        self.put(1, colour=C[0], owner={"session": "S0", "pid": child.pid, "pid_start": start, "at": time.time()})
+        self.entry("1-1", "retour", "x")
+        self.owned(2, sid="S3")                              # a live owner stays silent
+        self.entry("2-1", "retour", "y")
+        r = self.hook("S9")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("#1", r.stdout)
+        self.assertNotIn("#2", r.stdout)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "heard")))
+        self.assertEqual(self.hook("S9").stdout, r.stdout)
+
+    def test_another_live_sessions_issue_is_silent(self):
+        self.owned(1, sid="S3")
+        self.entry("1-1", "retour", "x")
+        self.assertEqual(self.hook("S9").stdout, "")
+
+    def test_one_run_is_fast_and_forks_no_git(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "x")
+        real = shutil.which("git")
+        bindir = os.path.join(self.tmp.name, "bin")
+        os.makedirs(bindir)
+        log = os.path.join(self.tmp.name, "git.log")
+        with open(os.path.join(bindir, "git"), "w") as f:
+            f.write('#!/bin/sh\necho "$@" >> "%s"\nexec "%s" "$@"\n' % (log, real))
+        os.chmod(os.path.join(bindir, "git"), 0o755)
+        t0 = time.time()
+        r = self.hook("S1", PATH=bindir + os.pathsep + os.environ["PATH"])
+        dt = time.time() - t0
+        self.assertIn("1-1 retour", r.stdout)
+        self.assertFalse(os.path.exists(log))
+        self.assertLess(dt, 1.0)
+        sys.stderr.write("hook-news one run: %.0f ms\n" % (dt * 1000))
+
+
+class TestHookWait(WaitBase):
+    def hook(self, sid, command, stdin=None, env=None):
+        e = dict(self.env)
+        e.update({"CLAUDE_PROJECT_DIR": self.repo})
+        e.update(env or {})
+        p = subprocess.Popen([sys.executable, "-I", SUIVI, "hook-wait"], cwd=self.repo, env=e, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        p.stdin.write(json.dumps({"session_id": sid, "tool_input": {"command": command}}) if stdin is None else stdin)
+        p.stdin.close()
+        return p
+
+    def test_a_pose_command_arms_the_wait_and_an_event_wakes_with_exit_two_on_stderr(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        p = self.hook("S1", "python3 scripts/suivi.py qcm pose 1 d.js --title x")
+        self.armed()
+        self.entry("1-1", "retour", "too dark")
+        rc, out, err = self.finish(p)
+        self.assertEqual(rc, 2)
+        self.assertEqual(out, "")
+        self.assertIn("1-1 retour: too dark", err)
+        self.assertIn("resumes by itself at your next suivi.py call on #1", err.splitlines()[-1])
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_unrelated_commands_exit_zero_at_once_and_register_nothing(self):
+        self.owned(1)
+        self.entry("1-1")
+        for cmd in ("ls -la", "python3 scripts/suivi.py status", "python3 scripts/suivi.py qcm list"):
+            rc, out, err = self.finish(self.hook("S1", cmd), 5)
+            self.assertEqual((rc, out, err), (0, "", ""), cmd)
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_ownership_comes_from_stdin_not_the_environment(self):
+        self.owned(1, sid="S1")
+        self.entry("1-1")
+        p = self.hook("S1", "python3 scripts/suivi.py news 1", env={"CLAUDE_CODE_SESSION_ID": "OTHER"})
+        self.armed()
+        self.assertIsNone(p.poll())
+        os.unlink(os.path.join(self.state, "tests", "1-1.json"))      # let it end: nothing open
+        self.assertEqual(self.finish(p)[0], 0)
+
+    def test_another_sessions_issue_exits_zero_at_once(self):
+        self.owned(1, sid="S2")
+        self.entry("1-1")
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py news 1"), 5), (0, "", ""))
+        self.assertFalse(os.path.exists(self.reg_path()))
+
+    def test_second_hook_while_listening_exits_zero_and_the_first_stays(self):
+        self.owned(1)
+        self.entry("1-1")
+        a = self.hook("S1", "python3 scripts/suivi.py news 1")
+        self.armed()
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py set 1 --what x"), 5), (0, "", ""))
+        self.assertIsNone(a.poll())
+
+    def test_nothing_open_exits_zero_at_once(self):
+        self.owned(1)
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py news 1"), 5), (0, "", ""))
+
+    def test_bad_input_exits_zero_silent(self):
+        for stdin in ("", "not json", "[]", '{"session_id": "S1"}', '{"session_id": "S1", "tool_input": 3}'):
+            self.assertEqual(self.finish(self.hook("S1", "", stdin=stdin), 5), (0, "", ""), stdin)
+        r = subprocess.run([sys.executable, "-I", SUIVI, "hook-wait", "--nope"], input="", capture_output=True,
+                           text=True, env=self.env, cwd=self.repo)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))          # argparse must not reach exit 2
+
+    def test_an_exception_inside_the_wait_exits_zero(self):
+        self.owned(1)
+        self.entry("1-1")
+        with open(os.path.join(self.state, "waits"), "w") as f:       # a file where the folder should be
+            f.write("x")
+        self.assertEqual(self.finish(self.hook("S1", "python3 scripts/suivi.py news 1"), 5), (0, "", ""))
+
+    def test_the_issue_is_parsed_from_the_command(self):
+        n = suivi.hook_issue
+        for cmd, want in (("cd x && python3 scripts/suivi.py test add 7 f.json", 7), ("python3 -I scripts/suivi.py qcm pose 12 d.js", 12),
+                          ("suivi.py test remove 7 7-1", 7), ("suivi.py set 454 --state code", 454), ("suivi.py news 3", 3),
+                          ("suivi.py test merged 7 abc", 7), ("suivi.py qcm answers 7-2", 7), ("suivi.py test list --issue 9", 9),
+                          ("suivi.py status", None), ("suivi.py test list", None), ("suivi.py qcm list --issue 7", None),
+                          ("echo 7", None), ("", None)):
+            self.assertEqual(n(cmd), want, cmd)
+
+
+class TestSettingsHooks(unittest.TestCase):
+    """.claude/settings.json (#454): the hooks that report answers and arm the wait."""
+    PATH = os.path.join(HERE, os.pardir, ".claude", "settings.json")
+
+    def problems(self, d):
+        out = []
+        subs = set(next(a for a in suivi.parser()._actions if a.dest == "cmd").choices)
+        hooks = d.get("hooks", {})
+        for ev in ("SessionStart", "UserPromptSubmit", "PostToolUse", "SessionEnd"):
+            for group in hooks.get(ev, []):
+                for h in group.get("hooks", []):
+                    m = re.search(r'scripts/suivi\.py"? (\S+)', h.get("command", ""))
+                    if not m or m.group(1) not in subs:
+                        out.append("%s: command names no subcommand of suivi.py: %r" % (ev, h.get("command")))
+        def cmds(ev):
+            return [h for g in hooks.get(ev, []) for h in g.get("hooks", [])]
+        for ev in ("SessionStart", "UserPromptSubmit"):
+            hs = cmds(ev)
+            if not hs or not all(" hook-news" in h["command"] and h["command"].endswith("|| true") for h in hs):
+                out.append(ev + ": must run hook-news and end with || true")
+        post = hooks.get("PostToolUse", [])
+        ok = any(g.get("matcher") == "Bash" and any(
+            "suivi.py" in h.get("if", "") and h.get("asyncRewake") is True and h.get("timeout", 0) >= 259200
+            and h["command"].rstrip().endswith("hook-wait") for h in g.get("hooks", [])) for g in post)
+        if not ok:
+            out.append("PostToolUse: needs matcher Bash, if naming suivi.py, asyncRewake, timeout >= 259200, hook-wait")
+        if not any(" session-end" in h["command"] for h in cmds("SessionEnd")):
+            out.append("SessionEnd: session-end hook is gone")
+        return out
+
+    def test_the_committed_hooks_are_as_pinned(self):
+        with open(self.PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertEqual(self.problems(d), [])
+
+    def test_a_dropped_or_renamed_piece_is_caught(self):
+        with open(self.PATH, encoding="utf-8") as f:
+            text = f.read()
+        for old, new in ((" || true", ""), ("hook-news", "hook-nws"), ("hook-wait", "hook-wiat"),
+                         ('"asyncRewake": true', '"asyncRewake": false'), ("259200", "100"),
+                         ('"matcher": "Bash"', '"matcher": "Edit"')):
+            self.assertNotEqual(self.problems(json.loads(text.replace(old, new))), [], old)
+
+
+class TestMergeRequest(WaitBase):
+    """The page's « Fusionner » button (#454): a recorded request, never a merge."""
+
+    def request(self, n=1, at="t1"):
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, _ = suivi.scan_group([n], n)
+            key = suivi.merge_key(items)
+        os.makedirs(os.path.join(self.state, "merge"), exist_ok=True)
+        with open(os.path.join(self.state, "merge", "%d.json" % n), "w") as f:
+            json.dump({"at": at, "key": key}, f)
+
+    def all_ok(self):
+        self.owned(1)
+        self.entry("1-1", "ok")
+        self.entry("1-2", "ok")
+        self.assertIn("1-2 ok", self.run_wait(1)[1])          # the all-OK wake, recorded
+
+    def test_the_wait_stays_armed_after_all_ok_and_wakes_once_on_the_click(self):
+        self.all_ok()
+        p = self.spawn(1)
+        self.armed()
+        time.sleep(0.3)
+        self.assertIsNone(p.poll())                           # `nothing open` must not fire
+        self.request()
+        rc, out, _ = self.finish(p, 5)
+        self.assertIn("#1 merge requested on the page by the user: this is the go-ahead", out)
+        rc, out, _ = self.run_wait(1, timeout="1")             # same request: not again
+        self.assertTrue(out.startswith("timeout"), out)
+
+    def test_a_voided_request_then_a_new_click_wakes_again(self):
+        self.all_ok()
+        self.request(at="t1")
+        self.assertIn("merge requested", self.run_wait(1)[1])
+        self.entry("1-1", "todo")
+        self.entry("1-1", "ok")                                # voided: the entries changed
+        self.assertTrue(self.run_wait(1, timeout="1")[1].startswith("timeout"))
+        self.request(at="t2")
+        self.assertIn("merge requested", self.run_wait(1)[1])
+
+    def test_delivered_merge_ends_the_wait_quietly(self):
+        self.all_ok()
+        p = self.spawn(1)
+        self.armed()
+        self.entry("1-1", "ok", **{"try": None})              # what `test merged` does to the entries
+        self.entry("1-2", "ok", **{"try": None})
+        self.assertTrue(self.finish(p, 5)[1].startswith("nothing open"))
+
+    def test_hook_wait_arms_while_a_merge_is_ready(self):
+        self.all_ok()
+        e = dict(self.env)
+        e["CLAUDE_PROJECT_DIR"] = self.repo
+        p = subprocess.Popen([sys.executable, "-I", SUIVI, "hook-wait"], cwd=self.repo, env=e, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        p.stdin.write(json.dumps({"session_id": "S1", "tool_input": {"command": "python3 scripts/suivi.py news 1"}}))
+        p.stdin.close()
+        self.armed()
+        self.assertIsNone(p.poll())
+        self.request()
+        rc, out, err = self.finish(p, 5)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("merge requested", err)
+
+    def test_status_carries_the_flags_and_the_colour_rule_is_unchanged(self):
+        self.owned(1)
+        self.entry("1-1", "ok")
+        self.assertEqual(self.held(), ["agent"])
+        e = self.status()["colours"][0]
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (True, False))
+        self.request()
+        e = self.status()["colours"][0]
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (True, True))
+        self.entry("1-1", "retour", "x")
+        e = self.status()["colours"][0]
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (False, False))
+
+    def test_all_ok_without_an_agent_frees_the_colour(self):
+        self.put(1, colour=C[0], name="N", owner=None)
+        self.entry("1-1", "ok")
+        self.request()
+        self.assertEqual(self.held(), [])
+        self.assertEqual([p["issue"] for p in self.status()["paused"]], [1])
+
+    def test_test_merged_deletes_the_request(self):
+        self.claim(1, "--name", "One")
+        self.entry("1-1", "ok")
+        self.request()
+        self.git("checkout", "-q", "-b", "feature/1-x")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work (#1)")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "Merge #1", "feature/1-x")
+        full = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, capture_output=True, text=True).stdout.strip()
+        self.assertTrue(os.path.exists(os.path.join(self.state, "merge", "1.json")))
+        r = self.run_cli("test", "merged", "1", full)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge", "1.json")))
+
+
+class TestMergePost(ServerBase):
+    def merge(self, n=1, **kw):
+        return self.post("/api/issue/%d/merge" % n, body={}, **kw)
+
+    def flags(self, n=0):
+        e = json.loads(self.req("GET", "/api/state")[2])["colours"][n]
+        return e["merge_ready"], e["merge_requested"]
+
+    def test_refused_with_409_unless_every_try_entry_is_ok(self):
+        self.assertEqual(self.merge()[0], 409)                      # 1-1 is todo
+        for status in ("retour", "todo"):
+            with open(self.entry, "w") as f:
+                json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
+            self.assertEqual(self.merge()[0], 409, status)
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "ok"}, f)    # no `try`
+        self.assertEqual(self.merge()[0], 409)
+        self.assertEqual(self.merge(9)[0], 409)                     # no such issue
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+
+    def test_guards(self):
+        self.ok()
+        self.assertEqual(self.merge(headers={})[0], 403)
+        self.assertEqual(self.merge(headers={"X-Suivi": "1", "Origin": "http://evil.example"})[0], 403)
+        self.assertEqual(self.merge(host="evil.example")[0], 403)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+
+    def ok(self, status="ok"):
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
+
+    def test_a_click_records_once_and_a_change_voids_it(self):
+        self.ok()
+        self.assertEqual(self.flags(), (True, False))
+        self.assertEqual(self.merge()[0], 200)
+        path = os.path.join(self.state, "merge", "1.json")
+        first = slurp(path)
+        self.assertEqual(self.merge()[0], 200)
+        self.assertEqual(slurp(path), first)                        # idempotent
+        self.assertEqual(self.flags(), (True, True))
+        self.ok("todo")
+        self.assertEqual(self.flags(), (False, False))
+        self.ok("ok")
+        self.assertEqual(self.flags(), (True, False))               # not back on its own
+        self.assertEqual(self.merge()[0], 200)
+        self.assertEqual(self.flags(), (True, True))
+        self.assertNotEqual(slurp(path), first)
+
+
+class TestWaitServed(ServerBase):
+    def test_real_post_during_the_wait_prints_retour_and_comment(self):
+        e = dict(self.env)
+        e.update({"CLAUDE_CODE_SESSION_ID": "S1", "SF_SUIVI_WAIT_POLL": "0.05"})
+        p = subprocess.Popen([sys.executable, "-I", SUIVI, "wait", "1", "--timeout", "20"], cwd=self.repo, env=e,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.communicate()))
+        end = time.time() + 5
+        while not os.path.exists(os.path.join(self.state, "waits", "1.json")) and time.time() < end:
+            time.sleep(0.02)
+        time.sleep(0.2)
+        self.assertEqual(self.post(body={"status": "retour", "comment": "too dark"})[0], 200)
+        out, _ = p.communicate(timeout=10)
+        self.assertIn("1-1 retour: too dark", out)
+
+
 class TestAgentIdleServed(ServerBase):
     def test_api_state_carries_agent_idle_min(self):
         proj = os.path.join(self.tmp.name, "projects", "-p")
@@ -1412,7 +2171,9 @@ class TestPage(unittest.TestCase):
         l = L(card, [todo(7), todo(7), todo(7), todo(7, "ok"), todo(8)])
         self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : cocher 3 essais", "l’agent travaille"))   # lang: fr
         self.assertEqual(L(card, [todo(7)])["text"], "À toi : cocher 1 essai")                              # lang: fr
-        self.assertEqual(L(card, [todo(7, "ok")]), {"user": False, "text": "L’agent travaille", "also": "", "note": ""})   # lang: fr
+        l = L(card, [todo(7, "ok")])
+        self.assertEqual({k: l[k] for k in ("user", "text", "also", "note")},
+                         {"user": False, "text": "L’agent travaille", "also": "", "note": ""})   # lang: fr
         paused = dict(card, held_by=[])
         self.assertEqual(L(paused)["text"], "En pause")                                                     # lang: fr
         l = L(paused, [], [{"issue": 7}])
@@ -1433,6 +2194,71 @@ class TestPage(unittest.TestCase):
         for kind in ("dep", "ag"):
             l = L(dict(card, wait_kind=kind, waiting="my note"))
             self.assertEqual((l["user"], l["text"], l["note"]), (False, "L’agent travaille", "my note"))    # lang: fr
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_card_line_listening_and_merge_words(self):
+        L = self.card_line
+        # lang: fr begin
+        base = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": ""}
+        todo = {"n": 7, "status": "todo", "try": "x"}
+        ok = {"n": 7, "status": "ok", "try": "x"}
+        # an old server (no `listening`) keeps today's texts
+        self.assertEqual(L(dict(base, agent_idle_min=9))["text"], "Agent à l’arrêt depuis 9 min")
+        self.assertEqual(L(dict(base, agent_idle_min=9), [todo])["also"], "agent à l’arrêt, rien ne bouge sans toi")
+        # working: unchanged whatever `listening` says
+        self.assertEqual(L(dict(base, agent_idle_min=1, listening=True))["text"], "L’agent travaille")
+        # listening and not visibly at work
+        for idle in (5, None):
+            self.assertEqual(L(dict(base, agent_idle_min=idle, listening=True))["text"], "L’agent écoute")
+            l = L(dict(base, agent_idle_min=idle, listening=True), [todo])
+            self.assertEqual(l["also"], "l’agent écoute, il repart à ta réponse")
+        # not listening, stopped
+        self.assertEqual(L(dict(base, agent_idle_min=9, listening=False))["text"], "Agent à l’arrêt depuis 9 min")
+        self.assertEqual(L(dict(base, agent_idle_min=9, listening=False), [todo])["also"],
+                         "agent à l’arrêt, écris-lui après ta réponse")
+        # paused with an unread answer
+        paused = {"issue": 7, "held_by": [], "waiting": "", "wait_kind": "", "unread": 2}
+        l = L(paused)
+        self.assertEqual((l["user"], l["text"]), (True, "Réponse reçue : lance #7"))
+        self.assertEqual(L(dict(paused, unread=0))["text"], "En pause")
+        # all `try` entries OK: write to the agent to merge
+        l = L(dict(base, agent_idle_min=1, listening=True), [ok, dict(ok)])
+        self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : lancer la fusion", ""))
+        l = L(dict(base, agent_idle_min=1), [ok], [{"issue": 7}])
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire · lancer la fusion")
+        self.assertNotIn("fusion", L(base, [ok, todo])["text"])
+        self.assertNotIn("fusion", L(base, [{"n": 7, "status": "ok"}])["text"])      # merged entry: no `try`
+        self.assertEqual((L(base, [todo])["mergeReady"], L(base, [{"n": 7, "status": "ok"}])["mergeReady"]), (False, False))
+        # the request: grey note, button gone; "nothing listens" adds the reading line
+        l = L(dict(base, agent_idle_min=1, listening=False, merge_requested=True), [ok])
+        self.assertEqual((l["mergeReady"], l["mergeRequested"], l["mergeNote"]),
+                         (True, True, "Fusion demandée · l’agent la lira à sa reprise"))
+        self.assertNotIn("fusion", l["text"].lower())
+        l = L(dict(base, agent_idle_min=9, listening=True, merge_requested=True), [ok])
+        self.assertEqual(l["mergeNote"], "Fusion demandée")
+        # a request the server voided (flag false) or an entry not OK any more: no request
+        self.assertFalse(L(dict(base, merge_requested=True), [ok, todo])["mergeRequested"])
+        self.assertFalse(L(dict(base, merge_requested=False), [ok])["mergeRequested"])
+        # lang: fr end
+
+    def merge_ui(self, c, tests):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(mergeUi(cardLine(%s,%s,[]))));" % (json.dumps(c), json.dumps(tests))
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_merge_button_shows_by_state(self):
+        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        ok, todo = {"n": 7, "status": "ok", "try": "x"}, {"n": 7, "status": "todo", "try": "x"}
+        self.assertIn("'Fusionner'", self.page())
+        self.assertTrue(self.merge_ui(c, [ok])["button"])
+        self.assertFalse(self.merge_ui(c, [ok, todo])["button"])
+        self.assertFalse(self.merge_ui(c, [])["button"])
+        self.assertFalse(self.merge_ui(c, [{"n": 7, "status": "ok"}])["button"])           # merged entry, no `try`
+        u = self.merge_ui(dict(c, merge_requested=True, listening=True), [ok])
+        self.assertEqual((u["button"], u["note"]), (False, "Fusion demandée"))             # lang: fr
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_tells_a_working_agent_from_a_stopped_one(self):

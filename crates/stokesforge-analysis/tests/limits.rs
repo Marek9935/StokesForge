@@ -3,7 +3,7 @@
 
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
 use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
-use stokesforge_analysis::expr::ExprError;
+use stokesforge_analysis::expr::{ExprError, ExprErrorKind};
 use stokesforge_analysis::fit::{FitSpec, ParamSetting};
 use stokesforge_analysis::integrate::{IntegrateSpec, Under};
 use stokesforge_analysis::model::Model;
@@ -666,6 +666,23 @@ fn readiness_says_what_a_fit_lacks() {
         fit(custom("2 + 3"), Vec::new()).readiness(),
         Readiness::NoParameter
     );
+    // A number an f64 cannot hold is refused at entry (#438), before the
+    // missing parameter is reported; the operation itself stays valid, so a
+    // stored model keeps running.
+    for model in ["a*x+1e400", "1e400", "a*x+1e-400"] {
+        let operation = fit(custom(model), Vec::new());
+        assert!(
+            matches!(
+                operation.readiness(),
+                Readiness::BadExpression(ExprError {
+                    kind: ExprErrorKind::NumberOutOfRange { .. },
+                    ..
+                })
+            ),
+            "{model}"
+        );
+    }
+    assert!(fit(custom("a*x+1e400"), Vec::new()).validate().is_ok());
     // A degree beyond the cap (read from a file) is a refused setting,
     // without allocation: never the application giving up.
     assert_eq!(

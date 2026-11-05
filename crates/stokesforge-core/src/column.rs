@@ -1186,7 +1186,9 @@ impl Column {
     /// `stokesforge-alloc-probe`). Unlike [`Column::set_values`] and
     /// [`Column::insert_rows`], this method stays **infallible** by necessity: it is the
     /// primitive that `History::revert_delta` uses to restore a previous length
-    /// during an undo, and undoing must never be able to fail. In practice a
+    /// during an undo, so it is never itself the step that refuses. (Undo as a
+    /// whole can still fail on a column rewritten outside the history, #448;
+    /// `History` then makes a derived column fit.) In practice a
     /// restored length has always already gone through `write_block`/`insert_rows`, so never
     /// exceeded the bound; the cap here protects a direct call of the core API with an
     /// arbitrary length (this is the case the probe covers).

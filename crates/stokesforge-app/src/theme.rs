@@ -171,6 +171,13 @@ pub fn secondary_text(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).size(SECONDARY_TEXT_SIZE).weak()
 }
 
+/// A color a little darker than `color`, opaque: the outside of the page on the
+/// rulers of the Page Layout Mode (#426).
+pub fn darker(color: Color32) -> Color32 {
+    let k = |v: u8| (f32::from(v) * 0.82) as u8;
+    Color32::from_rgb(k(color.r()), k(color.g()), k(color.b()))
+}
+
 /// Level 4: the dimmed text, muted but at body size and not bold: empty
 /// states, "Calculating…", the label beside a result, a menu sub-group title.
 /// Help under a field stays [`secondary_text`].

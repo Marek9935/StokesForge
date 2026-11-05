@@ -308,6 +308,10 @@ fn readiness_says_what_is_missing_without_writing_anything() {
          assert pyst.analysis.readiness('integrate')['ready'] is True\n\
          r = pyst.analysis.readiness('fit', model='a*')\n\
          assert r['reason'] == 'bad_expression' and r['message'], r\n\
+         r = pyst.analysis.readiness('fit', model='a*x+1e400')\n\
+         assert r['reason'] == 'bad_expression' and '1e400' in r['message'], r\n\
+         r = pyst.analysis.readiness('fit', model='1e400')\n\
+         assert r['reason'] == 'bad_expression', r\n\
          assert pyst.analysis.readiness('fit')['ready'] is True\n\
          r = pyst.analysis.readiness('fit', model='1+2')\n\
          assert r['reason'] == 'no_parameter', r\n\
