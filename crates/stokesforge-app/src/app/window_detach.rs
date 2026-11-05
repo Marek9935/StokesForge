@@ -1326,8 +1326,10 @@ impl DetachedTabViewport {
         let tab = self.tab;
         let root_context = &self.root_context;
         // The edit shortcuts are read in the context
-        // of the viewport that has the focus, as for the root.
-        if matches!(tab, Tab::Book(_)) {
+        // of the viewport that has the focus, as for the root. Read after the
+        // contents are painted: a text field that has the focus keeps its own
+        // text undo, and the shortcut stands aside once it has lost it (#426).
+        if matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
             collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
         }
         if let Some(mut action) = finish_file_drop(ui.ctx()) {
@@ -2027,6 +2029,114 @@ mod tests {
                 tr!("plot-figure-size-fixed"),
             );
             assert_eq!(fixed(&app), want, "axes click {round}");
+        }
+        session.shutdown().unwrap();
+    }
+
+    /// #426: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z pressed in a detached graph
+    /// window itself (Page Layout Mode, focused) reach the model like the same
+    /// keys in the main window. The key goes through the detached viewport's own
+    /// input and the action is drained to the model through the root.
+    /// Witness: reading the shortcuts only for a workbook.
+    #[test]
+    fn undo_and_redo_work_from_a_detached_graph_window() {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Graph(graph));
+        app.toggle_layout_mode(graph, Some(true));
+        let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        let mut paint_root = |app: &mut StokesForgeApp| {
+            let mut raw = input.clone();
+            time += 0.7;
+            raw.time = Some(time);
+            let mut actions = Vec::new();
+            let mut output = ctx.run_ui(raw, |ui| {
+                app.run_layout_mode_requests(ui.ctx(), Some(graph));
+                app.drain_detached_tabs(ui.ctx(), &mut actions);
+            });
+            for action in actions {
+                app.state.dispatch(action);
+            }
+            output.textures_delta.clear();
+            output
+        };
+        let mut root = paint_root(&mut app);
+        let mut child_time = 0.0;
+        let mut paint_child =
+            |app: &mut StokesForgeApp, root: &mut egui::FullOutput, events: Vec<egui::Event>| {
+                let callback = root.viewport_output[&id].viewport_ui_cb.clone().unwrap();
+                let mut child = input.clone();
+                child_time += 0.7;
+                child.time = Some(child_time);
+                child.viewport_id = id;
+                child.events = events;
+                child.focused = true;
+                child.viewports.insert(
+                    id,
+                    egui::ViewportInfo {
+                        parent: Some(egui::ViewportId::ROOT),
+                        maximized: Some(true),
+                        focused: Some(true),
+                        ..Default::default()
+                    },
+                );
+                let mut output = ctx.run_ui(child, |ui| callback(ui));
+                output.textures_delta.clear();
+                if output.viewport_output[&egui::ViewportId::ROOT].repaint_delay == Duration::ZERO {
+                    *root = paint_root(app);
+                }
+                output
+            };
+        for _ in 0..6 {
+            paint_child(&mut app, &mut root, Vec::new());
+        }
+        let fixed = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().fixed_figure;
+        let key = |key: egui::Key, shift: bool| {
+            let mut modifiers = egui::Modifiers::COMMAND.plus(egui::Modifiers::CTRL);
+            if shift {
+                modifiers = modifiers.plus(egui::Modifiers::SHIFT);
+            }
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }]
+        };
+        let before = fixed(&app);
+        // An edit made from the model, as the strip does through the root.
+        app.state.dispatch(Action::SetFigureFixed {
+            graph,
+            fixed: !before,
+        });
+        assert_eq!(fixed(&app), !before);
+        for (events, want, what) in [
+            (key(egui::Key::Z, false), before, "Ctrl+Z"),
+            (key(egui::Key::Y, false), !before, "Ctrl+Y"),
+            (key(egui::Key::Z, false), before, "Ctrl+Z again"),
+            (key(egui::Key::Z, true), !before, "Ctrl+Shift+Z"),
+        ] {
+            paint_child(&mut app, &mut root, events);
+            for _ in 0..2 {
+                paint_child(&mut app, &mut root, Vec::new());
+            }
+            assert_eq!(fixed(&app), want, "{what} in the detached graph window");
         }
         session.shutdown().unwrap();
     }
