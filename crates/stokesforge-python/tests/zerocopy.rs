@@ -477,8 +477,20 @@ fn bit_for_bit_round_trip() {
 fn borrow_at_least_twenty_times_faster_than_copy() {
     prepare();
     const LEN: usize = 1_000_000;
-    let (borrow_ns, copy_ns) = measure_borrow_vs_copy(LEN).expect("measurement");
+    // One measurement can hit a slow moment of the machine (observed on a CI
+    // runner: ×12 instead of ×240 to ×370). Compare the fastest of several
+    // samples of each operation: noise only adds time, so the minimum filters
+    // it out, while a borrow that really copies has no fast minimum.
+    const SAMPLES: usize = 15;
+    let mut borrow_ns = u128::MAX;
+    let mut copy_ns = u128::MAX;
+    for _ in 0..SAMPLES {
+        let (borrow, copy) = measure_borrow_vs_copy(LEN).expect("measurement");
+        borrow_ns = borrow_ns.min(borrow);
+        copy_ns = copy_ns.min(copy);
+    }
 
+    println!("fastest of {SAMPLES} samples");
     println!("borrow of {LEN} f64: {borrow_ns} ns");
     println!("copy   of {LEN} f64: {copy_ns} ns");
     println!("ratio: ×{:.1}", copy_ns as f64 / borrow_ns.max(1) as f64);
