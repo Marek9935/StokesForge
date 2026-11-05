@@ -1777,6 +1777,95 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #426: a Page Layout Mode asked from inside a detached window (its
+    /// right-click Layout menu) starts at once. The request is run by the root,
+    /// so it must wake the root, not only the detached viewport; the root then
+    /// wakes the viewport, which maximises its OS window. Witness: the request
+    /// waking only the viewport it was made in.
+    #[test]
+    fn a_page_layout_mode_asked_in_a_detached_window_starts_without_another_click() {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Graph(graph));
+        let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let paint_root = |app: &mut StokesForgeApp| {
+            let mut output = ctx.run_ui(input.clone(), |ui| {
+                app.run_layout_mode_requests(ui.ctx(), Some(graph));
+                app.show_detached_tabs(ui.ctx());
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let child_input = || {
+            let mut child = input.clone();
+            child.viewport_id = id;
+            child.viewports.insert(
+                id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            child
+        };
+        let paint_child = |output: &egui::FullOutput, ask: bool| {
+            let callback = output.viewport_output[&id].viewport_ui_cb.as_ref().unwrap();
+            let mut child_output = ctx.run_ui(child_input(), |ui| {
+                if ask {
+                    super::super::page_layout::request_layout_mode_toggle(ui.ctx(), graph);
+                }
+                callback(ui)
+            });
+            child_output.textures_delta.clear();
+            child_output
+        };
+        let mut output = paint_root(&mut app);
+        for _ in 0..6 {
+            paint_child(&output, false);
+            output = paint_root(&mut app);
+        }
+        assert_eq!(output.viewport_output[&id].repaint_delay, Duration::MAX);
+        assert_eq!(
+            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
+            Duration::MAX,
+            "the bench must be at rest"
+        );
+        // The menu entry, clicked in the detached window.
+        let child_output = paint_child(&output, true);
+        let root_delay = child_output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        assert_eq!(root_delay, Duration::ZERO, "the root must run the request");
+        // The root frame that follows enters the mode and wakes the window.
+        let output = paint_root(&mut app);
+        assert_eq!(
+            app.read_graph_view(graph, GraphView::layout_mode),
+            Some(true)
+        );
+        assert_eq!(output.viewport_output[&id].repaint_delay, Duration::ZERO);
+        let child_output = paint_child(&output, false);
+        let commands = &child_output.viewport_output[&id].commands;
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Maximized(true))),
+            "{commands:?}"
+        );
+        session.shutdown().unwrap();
+    }
+
     /// Issue #16: the state of each window (open/maximized/closed, collapsed,
     /// stacking rank) goes to the session with its floating geometry, and
     /// the latter moves neither on maximizing, nor on closing, nor on

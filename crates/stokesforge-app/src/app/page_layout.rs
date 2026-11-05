@@ -68,6 +68,10 @@ pub(super) fn request_layout_mode_toggle(ctx: &egui::Context, graph: NodeId) {
         data.get_temp_mut_or_default::<Vec<NodeId>>(toggle_requests_id())
             .push(graph)
     });
+    // The root runs the request. A detached window asks from its own
+    // viewport, where a plain `request_repaint` would wake only that one and
+    // leave the request waiting for the next click on the root.
+    ctx.request_repaint_of(egui::ViewportId::ROOT);
     ctx.request_repaint();
 }
 
