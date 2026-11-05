@@ -45,6 +45,10 @@ The same list is shown by **Help ▸ Keyboard Shortcuts…**.
 | Move the selected series up | <kbd>Ctrl</kbd>+<kbd>Up</kbd> |
 | Move the selected series down | <kbd>Ctrl</kbd>+<kbd>Down</kbd> |
 | Zoom | <kbd>Ctrl</kbd>+<kbd>Wheel</kbd> |
+| Turn Snap on or off (Page Layout Mode) | <kbd>G</kbd> |
+| Nudge the selected graphs (Page Layout Mode) | <kbd>Arrow</kbd> <kbd>keys</kbd> |
+| Nudge ten steps (Page Layout Mode) | <kbd>Shift</kbd>+<kbd>Arrow</kbd> <kbd>keys</kbd> |
+| Leave the Page Layout Mode | <kbd>Esc</kbd> |
 
 ## Project Manager and Object Manager
 

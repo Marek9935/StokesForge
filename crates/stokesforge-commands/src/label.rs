@@ -282,9 +282,6 @@ pub enum PlotEditKind {
     /// The plot area (frame) width of a grid column or height of a grid row
     /// set, by a field or a handle (#394).
     ResizeCell,
-    /// The first plot area placed from the left or top edge of the image
-    /// (Left, Top) by dragging an edge of the figure (#405).
-    PlaceFigure,
     /// A layer put in front of the others in free placement (#398).
     BringLayerToFront,
     /// A layer put behind the others in free placement (#398).
@@ -295,6 +292,9 @@ pub enum PlotEditKind {
     MoveLayer,
     /// A layer of a free graph resized by one of its edges (#398).
     ResizeLayer,
+    /// The page (the figure) of a free graph resized in the Page Layout Mode
+    /// (#426), the boxes following in proportion.
+    ResizeFigure,
     /// Layers of a free graph lined up on the first selected one (#398).
     AlignLayers,
     /// Layers of a free graph given the width or height of the first
@@ -322,12 +322,12 @@ impl PlotEditKind {
         Self::AddCell,
         Self::RemoveCell,
         Self::ResizeCell,
-        Self::PlaceFigure,
         Self::BringLayerToFront,
         Self::SendLayerToBack,
         Self::LayerBackground,
         Self::MoveLayer,
         Self::ResizeLayer,
+        Self::ResizeFigure,
         Self::AlignLayers,
         Self::MatchLayerSize,
         Self::DistributeLayers,
@@ -352,12 +352,12 @@ impl std::fmt::Display for PlotEditKind {
             Self::AddCell => "Add Layer Beside",
             Self::RemoveCell => "Delete Layer",
             Self::ResizeCell => "Resize Plot Area",
-            Self::PlaceFigure => "Position Plot Area",
             Self::BringLayerToFront => "Bring Layer to Front",
             Self::SendLayerToBack => "Send Layer to Back",
             Self::LayerBackground => "Change Layer Background",
             Self::MoveLayer => "Move Layer",
             Self::ResizeLayer => "Resize Layer",
+            Self::ResizeFigure => "Resize Figure",
             Self::AlignLayers => "Align Layers",
             Self::MatchLayerSize => "Match Layer Size",
             Self::DistributeLayers => "Distribute Layers",

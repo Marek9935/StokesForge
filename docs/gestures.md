@@ -37,16 +37,11 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 | Click | curve, free text, shape, title, legend | selects the object (only the Pointer tool selects a curve) |
 | Click | empty area | deselects; activates the clicked layer; Text tool: places a text |
 | Drop of columns | right or bottom band of the figure | new cell beside the nearest one (right; bottom-right corner: right), with the series (#357) |
-| Drag | left or top edge of the figure (#405) | sets **Left** / **Top**, the distance from the image edge to the first plot area (never below what the axes and the title need); the graph window grows to the left or upward so the plot area stays still on screen; live preview, one undo step at release; top-left corner does both. The strip straddles the edge, 4 screen points each way, so it can be taken from the margin the window leaves around the figure (`FIGURE_GRAB_MARGIN`), where the window's own resize border never reaches; Undo and Redo of the step move the window back the same way. Dragging inward below what the axes need, or a start from a graph of an old file, changes nothing and sends no step. A click on the axis line still selects the axis |
-| Drag | outer boundary of a cell (beyond the numbers and the axis title; right and bottom boundaries only, #394) | changes the **plot area** size of that column and/or row by the distance dragged: the graph grows or shrinks by it and its window follows; live preview, one undo step at release. The boundary two cells share is the handle of the left column (the upper row); the right edge of the figure is the last column's, the bottom edge the last row's, so a one-cell graph has handles too; the corner pulls both. Resize cursor on hover. A click on the axis line still selects the axis |
-| Drag | plot area of a layer, **Layer placement = Free**, Pointer tool (#398) | **moves the layer**: live preview (`FramePreview.free`), one undo step at release (`Move Layer`); a click without movement does nothing but activate. The distance is the pointer's, in screen points, divided by the display scale frozen at the press. Tried after the handlers of texts, shapes, titles and legends, so a drag that starts on one of them moves that object. A drag that starts on an axis line, in an axis band or in a margin does nothing |
-| Drag | outer boundary of a layer (four edges and corners), **Free** (#398) | **resizes its frame**: right / bottom change the size; left / top move the position and change the size, the opposite edge staying still; 36–2000 pt (a left edge dragged past the minimum keeps width 36 and the right edge does not move); a corner does both. Same strip as the grid handles (4 screen points either side, at most 6 figure pixels), resize cursor on hover, move cursor while moving; one undo step at release (`Resize Layer`). Two layers that touch each keep their own side of the shared boundary |
-| Drag (magnets) | while moving or resizing in Free (#398) | the left / right edges of the dragged frame snap to the left / right edges of the **other layers' frames**, the top / bottom ones likewise, each axis on its own; no centers, no outer rectangles. Reach **6 screen points** (converted to points with the frozen scale). A dashed pink guide is painted over the figure while an edge is aligned (screen overlay, like the zoom rectangle: not cached, not exported). **Shift held = no magnet** (read at each frame) |
-| Drag | Free, window | the image grows or shrinks around the layers: when its origin moves (a layer dragged left of / above it) the floating window moves by `(new origin - old origin) x scale` and resizes by the growth, so page coordinates stay still on screen; also on Undo and Redo of the step. Limited to the workspace (what the edge refuses is given back later); a maximized, docked or detached window does not move |
+| Undo, Redo, Graph Properties | Free, window | the image grows or shrinks around the layers: when its origin moves (a layer placed left of / above it) the floating window moves by `(new origin - old origin) x scale` and resizes by the growth, so page coordinates stay still on screen. Limited to the workspace (what the edge refuses is given back later); a maximized, docked or detached window does not move |
 | Click | shared area of two overlapping layers, Free (#398) | the layer **in front** (highest stacking key, ties: the newest) is picked and activated; what lies under the outer rectangle of a layer drawn after it (plot area, axes, texts, shapes) cannot be picked, in `hit::component_at` and in `GraphView::panel_at` alike. On the grid every layer has rank 0: nothing is hidden |
 | Shift + click | plot area or number badge of a layer, **Free**, Pointer tool (#398) | **adds the layer's cell to the selection of layers, or removes it when already in** (toggle); the active layer stays the reference, the selected object is left alone and no move starts. A plain click on a layer or badge clears the selection; so do renumbering the layers (delete, Undo of a delete) and going back to the grid. Kept after an Align / Same / Distribute. The selected frames get a thin outline over the figure (never exported), the extra badges a selection-colored outline. Used by the Layout menu |
-| Drag | plot area, Pointer or Text tool, **Grid** | — (nothing: no more pan on a plain drag, #318; in Free the Pointer tool moves the layer, above) |
-| Priority of a plain Pointer drag in Free (#398) | | analysis handles (egui widgets on top) > layer edge > text, shape, title, legend > frame (move) > nothing. Ctrl or middle-button drag pans before everything; the Zoom, Text and shape tools are unchanged. Overlapping layers: the front-most one wins, hit-tested front to back, honoring what its outer rectangle hides |
+| Drag | plot area, Pointer or Text tool, **Grid or Free** | — (nothing: no pan on a plain drag, #318, and no move of a layer; layers are moved and resized only in the Page Layout Mode, #426) |
+| Priority of a plain Pointer drag (#398, #426) | | analysis handles (egui widgets on top) > text, shape, title, legend > nothing. Ctrl or middle-button drag pans before everything; the Zoom, Text and shape tools are unchanged. No edge of a cell, of a layer or of the figure is a handle outside the Page Layout Mode, and the cursor stays the default one there |
 | Drag | an axis | — (nothing; panning a scale is done with Ctrl or middle click) |
 | Drag | free text, shape, title or legend, Pointer tool | moves the object (a width handle resizes it) |
 | Drag | plot area, Zoom tool | zoom rectangle (beyond 4 px) |
@@ -62,6 +57,36 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 | Ctrl + click | plot area, Text or shape tool | — (no text placed, no shape, no return to the Pointer) |
 | Right-click | any object or the area | selects the target and opens its menu |
 | Shift + wheel | — | — |
+
+### The graph in the Page Layout Mode (#426)
+
+`Layout ▸ Page Layout Mode` (view state: no action, no undo step). The mode reads the
+placement of the figure **as drawn**; every gesture below is one undo step, with a live
+preview and no event before the release. Handles: 7x7 squares and 4x18 pills in the
+selection colour, solid on the selected graph, faint on the one under the pointer. The
+bands are 6 + 20 + 20 screen px wide in both placements; every inner reach is
+`min(wanted, E/4)`, `E` the extent of the graph on that axis.
+
+| Gesture | On | Effect |
+|---|---|---|
+| Drag | line between two columns or two rows, **Regular Grid** | the column (row) trades size with its neighbour on the other side of the line; the figure keeps its size; one `SetGridFrames` (`Resize Cell`) |
+| Drag | corner shared by several graphs, Regular Grid | moves every internal line it lies on (middle of a 2x2: column and row together); a corner on one line and on the figure's edge moves that line, one-axis cursor |
+| Drag | L-shaped corner of the figure, either placement | scales the figure (one factor per axis, bands frozen); with the padlock closed the axis that moved most relatively leads and the other follows (`locked_corner_delta`); `Resize Figure` |
+| Drag, arrows | inside a graph, Regular Grid | nothing: no move, no single-graph resize, no nudge |
+| Drag | inside a graph, handles, **Free** | moves / resizes the graph; magnets and the grid snap (**Shift** disables) |
+| Drag | line between two touching graphs, Free | centre band (6 px): both graphs; side band (20 px): the graph on the pointer's side, single arrow |
+| Arrows, Shift + arrows | Free | nudge the selected graphs by one grid step (ten with Shift); a burst is one `SetFreeLayout` 0.7 s after the last key, on leaving the mode or before any strip action |
+| `G` | the mode | turns Snap on or off |
+| Esc | the graph window has the focus | leaves the mode and gives the window back (below). It never leaves the mode from another window: with Graph Properties or any modal open, Esc closes that window and the mode stays; in a text field of the strip the first Esc gives the field back (the typed text is dropped) and the second leaves. The root reads the key at the start of the frame, before any window is painted, so a workbook painted behind the graph does not take it |
+
+Entering the mode **maximises** a floating graph window; leaving it (Esc, the toolbar or menu toggle, Restore, the Window menu, closing or deleting the graph, loading a project) gives its previous state back: position and size of a floating window never move while it is maximised, and a window that was already maximised stays so. A detached window keeps its size: the mode neither maximises nor restores it, and maximising it by hand does not leave the mode. Detaching, closing or reattaching a detached window leaves the mode. The saved window state is the one from before the mode (the project is not marked modified by entering it). Entering and leaving add no undo step; leaving commits a nudge in progress.
+
+The strip (module page_layout of the app) adds: Figure size with the padlock, X Y W H of the selected
+graph (X and Y greyed on the grid; W and H trade with the right neighbour, the last
+with its left), Align / Same Size / Distribute (greyed with a reason on the grid), Snap
+and a two-state toggle Coarse | Fine (view state, never in the spec, greyed with a reason while Snap is off), the **Grid mode:** toggle Regular | Free
+(`SetLayerPlacement`, one undo step), and *When axes are added* (Grows with the axes | Fixed). A two-state toggle
+shows both states at once with the current one highlighted; it is ONE button: a click anywhere on it, on either part, switches to the other state, and hovering outlines the whole button in green (`app/state_toggle.rs`). A pending nudge is committed before any of them reaches the model.
 
 ## The analysis window preview
 

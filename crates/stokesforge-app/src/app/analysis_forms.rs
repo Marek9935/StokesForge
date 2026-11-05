@@ -19,6 +19,7 @@ use stokesforge_core::{NodeId, Tree};
 use super::analysis_dialog::{exact_result_label, format_value};
 use super::form::{choice, choice_by, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
+use crate::field_state::{self, FieldIssue};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::{number_field, NumberResponse};
 use crate::theme;
@@ -617,6 +618,38 @@ fn x_extent(form: &AnalysisForm, tree: &Tree) -> Option<(f64, f64)> {
     x_extent_of(&stokesforge_app_state::analysis::series_points(tree, series).0)
 }
 
+/// The Custom model text field with the reason of a refused model (#438).
+/// Returns `true` if the text changed.
+///
+/// Like the Typst error of a rich text (S-T3): the frame and bubble appear once
+/// the field is left, so they do not flicker while typing; the footer, the
+/// preview and the table stay live. The dialog's initial focus (S-F9) lands on
+/// this field without the user doing anything: only an edit, a click or a Tab
+/// into the field counts as "being edited", so "Edit Calculation" on a stored
+/// bad model shows its frame at once.
+fn custom_model_field(ui: &mut egui::Ui, formula: &mut String, issue: Option<&str>) -> bool {
+    let width = FieldWidth::Full.points(ui);
+    let response = ui.add(
+        egui::TextEdit::singleline(formula)
+            .id(ui.id().with("custom_model"))
+            .desired_width(width)
+            .hint_text(tr!("analysis-fit-custom-example")),
+    );
+    let id = response.id.with("model_editing");
+    let user_input = ui.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Tab));
+    let mut editing = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    if !response.has_focus() {
+        editing = false;
+    } else if response.changed() || response.clicked() || (response.gained_focus() && user_input) {
+        editing = true;
+    }
+    ui.data_mut(|d| d.insert_temp(id, editing));
+    if let (Some(message), false) = (issue, editing) {
+        field_state::show_issue(ui, &response, &FieldIssue::refused(message));
+    }
+    response.changed()
+}
+
 fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let has_sigma = form.series.iter().any(|s| s.sigma.is_some());
     let multi = form.series.len() > 1;
@@ -626,6 +659,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
         .map(|s| stokesforge_app_state::analysis::series_points(tree, s))
         .unwrap_or_default();
     let extent = x_extent_of(&shown_x);
+    let model_issue = form.model_field_issue();
     let f = &mut form.setup.fit;
     let models: Vec<ChoiceOption<Model>> = Preset::fit_models()
         .into_iter()
@@ -662,15 +696,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
         }
         Model::Custom { formula } => {
             rows.note(tr!("analysis-fit-custom-hint"));
-            let changed = rows.field(|ui| {
-                let width = FieldWidth::Full.points(ui);
-                ui.add(
-                    egui::TextEdit::singleline(formula)
-                        .desired_width(width)
-                        .hint_text(tr!("analysis-fit-custom-example")),
-                )
-                .changed()
-            });
+            let changed = rows.field(|ui| custom_model_field(ui, formula, model_issue.as_deref()));
             if changed {
                 f.reset_params();
             }
@@ -1118,6 +1144,8 @@ pub(super) fn value_row(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use eframe::egui;
 
     use super::super::test_support::{click, context, image, key, text_exact, texts};
@@ -1287,5 +1315,72 @@ mod tests {
         let reference = y(stokesforge_app_state::tr!("analysis-field-reference"));
         assert!(input < type_, "Input above Analysis type");
         assert!(type_ < reference, "Reference below Analysis type");
+    }
+
+    /// A frame of the Custom model field with a refused model; `focus` gives it
+    /// the dialog's initial focus (no user input).
+    fn model_frame(
+        context: &egui::Context,
+        text: &mut String,
+        events: Vec<egui::Event>,
+        focus: bool,
+    ) -> (Vec<egui::epaint::ClippedShape>, egui::Id) {
+        let mut field_id = egui::Id::NULL;
+        let shapes = image(context, events, |ui| {
+            let id = ui.id().with("custom_model");
+            field_id = id;
+            if focus {
+                ui.memory_mut(|m| m.request_focus(id));
+            }
+            custom_model_field(ui, text, Some("The model is invalid"));
+        });
+        (shapes, field_id)
+    }
+
+    /// #438: the Custom model frame waits while the user edits the field; the
+    /// dialog's initial focus does not count as editing.
+    #[test]
+    fn the_model_frame_follows_the_editing_state_of_the_field() {
+        let context = context();
+        let mut text = "a*x+1e400".to_string();
+        let frames = |shapes: &[egui::epaint::ClippedShape]| red_frames(shapes);
+        // Initial focus, no user input: the frame shows (stored model).
+        let (_, id) = model_frame(&context, &mut text, vec![], true);
+        let (shapes, _) = model_frame(&context, &mut text, vec![], false);
+        assert!(context.memory(|m| m.has_focus(id)), "the field has focus");
+        assert_eq!(frames(&shapes), 1, "initial focus shows the frame");
+        // A keystroke: no frame.
+        model_frame(
+            &context,
+            &mut text,
+            vec![egui::Event::Text("1".into())],
+            false,
+        );
+        let (shapes, _) = model_frame(&context, &mut text, vec![], false);
+        assert_eq!(frames(&shapes), 0, "typing hides the frame");
+        // Focus lost: the frame is back.
+        context.memory_mut(|m| m.surrender_focus(id));
+        model_frame(&context, &mut text, vec![], false);
+        let (shapes, _) = model_frame(&context, &mut text, vec![], false);
+        assert_eq!(frames(&shapes), 1, "leaving the field shows the frame");
+        // Click into the unfocused field: no frame.
+        let pos = egui::pos2(100.0, 12.0);
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            custom_model_field(ui, &mut text, Some("The model is invalid"));
+        });
+        let (shapes, _) = model_frame(&context, &mut text, vec![], false);
+        assert!(context.memory(|m| m.has_focus(id)), "the click focused it");
+        assert_eq!(frames(&shapes), 0, "a click into the field hides the frame");
+    }
+
+    /// An empty field has no reason, so nothing is painted whatever its focus.
+    #[test]
+    fn an_empty_model_field_has_no_frame() {
+        let context = context();
+        let mut text = String::new();
+        let shapes = image(&context, vec![], |ui| {
+            custom_model_field(ui, &mut text, None);
+        });
+        assert_eq!(red_frames(&shapes), 0);
     }
 }

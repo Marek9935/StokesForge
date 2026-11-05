@@ -68,8 +68,8 @@ use plotters::coord::Shift;
 use plotters::prelude::*;
 use stokesforge_core::resolve::{ResolvedPanel, ResolvedPlot};
 use stokesforge_plot::{
-    AxisScale, AxisSide as PlotAxisSide, AxisSpec, FreeFrame, LayerPlacement, PanelSpec, PlotSpec,
-    SeriesAxis, TextAnchor, TextTarget, TickDirection,
+    AxisScale, AxisSide as PlotAxisSide, AxisSpec, FreeFrame, FreePage, LayerPlacement, PanelSpec,
+    PlotSpec, SeriesAxis, TextAnchor, TextTarget, TickDirection,
 };
 
 use crate::clip::{self, PixelBounds};
@@ -1217,6 +1217,12 @@ impl FreeLayout {
                 },
             });
         }
+        // #426: the page is the minimum figure; content leaving it grows it.
+        let page = spec.sanitized_free_page();
+        if let Some(page) = page {
+            x_min = x_min.min(page.left);
+            x_max = x_max.max(page.left + page.width);
+        }
         let width = width.unwrap_or_else(|| (x_max - x_min).round() as u32);
         let title_band = measure_title(width)?;
         let bands = panel_bands(spec, layout, width, measure)?;
@@ -1252,6 +1258,10 @@ impl FreeLayout {
             cell.padding.top = gutters.band + gutters.top - own.top;
             cell.padding.bottom = gutters.bottom - own.bottom;
             cell.gutters = gutters;
+        }
+        if let Some(page) = page {
+            y_min = y_min.min(page.top);
+            y_max = y_max.max(page.top + page.height);
         }
         overflow |= fixed && title_band > 0;
         Ok(Self {
@@ -1392,6 +1402,18 @@ impl FigureLayout {
     /// false for a legacy graph.
     pub fn is_explicit(&self) -> bool {
         self.placement == LayerPlacement::Free || !self.column_gutters.is_empty()
+    }
+
+    /// The image area under the title band in stored page coordinates, i.e.
+    /// the figure as the page the Page Layout Mode draws (#426). `None` on
+    /// the grid.
+    pub fn free_page_rect(&self) -> Option<FreePage> {
+        (self.placement == LayerPlacement::Free).then(|| FreePage {
+            left: self.free_origin.0,
+            top: self.free_origin.1,
+            width: f64::from(self.size.0),
+            height: f64::from(self.size.1.saturating_sub(self.title_band)),
+        })
     }
 
     /// The free cell with this grid identity (free placement only).
@@ -1743,11 +1765,17 @@ pub struct FittedFigure {
     /// True if the target was outside `range`: the frames are those of the
     /// nearest end (raised to the minimum, or lowered to the maximum).
     pub raised: bool,
+    /// The new page of a Free graph that has one (#426); `None` everywhere
+    /// else. [`FittedFigure::apply_to`] writes it.
+    pub page: Option<FreePage>,
 }
 
 impl FittedFigure {
-    /// Writes the fitted frames into `spec`.
+    /// Writes the fitted frames (and page) into `spec`.
     pub fn apply_to(&self, spec: &mut PlotSpec) {
+        if let Some(page) = self.page {
+            spec.free_page = Some(page);
+        }
         match &self.frames {
             FittedFrames::Grid { widths, heights } => {
                 spec.frame_widths = widths.clone();
@@ -1837,6 +1865,9 @@ pub fn fit_figure_size<DB: DrawingBackend>(
         return Ok(None);
     }
     if layout.placement == LayerPlacement::Free {
+        if spec.sanitized_free_page().is_some() {
+            return Ok(fit_free_page_axis(spec, &layout, axis, target_pt));
+        }
         return Ok(fit_free_axis(spec, &layout, axis, target_pt));
     }
     let (sizes, bands) = match axis {
@@ -1877,6 +1908,7 @@ pub fn fit_figure_size<DB: DrawingBackend>(
         frames: FittedFrames::Grid { widths, heights },
         range,
         raised: wanted != target_pt,
+        page: None,
     }))
 }
 
@@ -1923,6 +1955,7 @@ fn free_spans(
 /// `(width, height)` (#407). What a total field shows, so that a size typed and
 /// reached reads back as typed.
 pub fn free_extent(spec: &PlotSpec, layout: &FigureLayout) -> Option<(f64, f64)> {
+    let page = spec.sanitized_free_page();
     let along = |axis| -> Option<f64> {
         let spans: Vec<Span> = free_spans(spec, layout, axis)?
             .into_iter()
@@ -1936,11 +1969,59 @@ pub fn free_extent(spec: &PlotSpec, layout: &FigureLayout) -> Option<(f64, f64)>
             SizeAxis::Width => 0.0,
             SizeAxis::Height => f64::from(layout.title_band),
         };
-        origin
-            .is_finite()
-            .then(|| scaled_extent(&spans, origin, 1.0) + extra)
+        if !origin.is_finite() {
+            return None;
+        }
+        let Some(page) = page else {
+            return Some(scaled_extent(&spans, origin, 1.0) + extra);
+        };
+        // The page is the minimum figure (#426): union with the boxes.
+        let (mut low, mut high) = match axis {
+            SizeAxis::Width => (page.left, page.left + page.width),
+            SizeAxis::Height => (page.top, page.top + page.height),
+        };
+        for span in &spans {
+            low = low.min(span.pos - span.before);
+            high = high.max(span.pos + span.len + span.after);
+        }
+        Some((high - low).max(0.0) + extra)
     };
     Some((along(SizeAxis::Width)?, along(SizeAxis::Height)?))
+}
+
+/// [`fit_figure_size`] for a free graph **with a page** (#426): no search.
+/// The new page extent along `axis` is the target (minus the title band for
+/// the height), brought into `[MIN_FRAME_SIZE, MAX_FIGURE_EXTENT]`; the boxes
+/// are mapped affinely from the current page (the image area as it is now) to
+/// the new one ([`crate::free_gesture::scaled_to_page`]), their bands staying.
+fn fit_free_page_axis(
+    spec: &PlotSpec,
+    layout: &FigureLayout,
+    axis: SizeAxis,
+    target_pt: f64,
+) -> Option<FittedFigure> {
+    let from = layout.free_page_rect()?;
+    let extra = match axis {
+        SizeAxis::Width => 0.0,
+        SizeAxis::Height => f64::from(layout.title_band),
+    };
+    let range = (
+        MIN_FRAME_SIZE + extra,
+        stokesforge_plot::MAX_FIGURE_EXTENT + extra,
+    );
+    let wanted = target_pt.clamp(range.0, range.1);
+    let mut to = from;
+    match axis {
+        SizeAxis::Width => to.width = wanted - extra,
+        SizeAxis::Height => to.height = wanted - extra,
+    }
+    let boxes = crate::free_gesture::graph_boxes(spec, layout);
+    Some(FittedFigure {
+        frames: FittedFrames::Free(crate::free_gesture::scaled_to_page(&boxes, from, to)),
+        range,
+        raised: wanted != target_pt,
+        page: Some(to),
+    })
 }
 
 /// [`fit_figure_size`] for a free graph: the scale is found on the bounding
@@ -2059,6 +2140,7 @@ fn fit_free_axis(
         frames: FittedFrames::Free(fitted),
         range,
         raised: wanted != target_pt,
+        page: None,
     })
 }
 

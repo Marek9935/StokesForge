@@ -9,6 +9,12 @@ use stokesforge_core::{
 use stokesforge_persistence::{load, save};
 
 fn project_with_calculation() -> Project {
+    project_with_operation(Operation::Correct {
+        op: CorrectOp::Subtract,
+    })
+}
+
+fn project_with_operation(operation: Operation) -> Project {
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -25,9 +31,7 @@ fn project_with_calculation() -> Project {
         .unwrap();
     project
         .add_calculation(CalculationDraft {
-            operation: Operation::Correct {
-                op: CorrectOp::Subtract,
-            },
+            operation,
             series: vec![SeriesRef {
                 x: Some(x),
                 y,
@@ -86,6 +90,33 @@ fn a_calculation_survives_a_round_trip() {
     let back = load(&path).unwrap();
     assert_eq!(back.tree().calculations().len(), 1);
     assert_eq!(back.tree(), project.tree());
+}
+
+/// #438: the entry check of a Fit model is `readiness`'s alone. A stored model
+/// with a literal beyond the f64 range is neither refused at save nor
+/// discarded at load, and its text is intact.
+#[test]
+fn a_stored_fit_model_with_an_out_of_range_literal_round_trips_intact() {
+    use stokesforge_analysis::fit::FitSpec;
+    use stokesforge_analysis::model::Model;
+    let operation = Operation::Fit {
+        spec: FitSpec {
+            model: Model::Custom {
+                formula: "a*x+1e400".into(),
+            },
+            params: vec![],
+        },
+        range: None,
+        residuals: false,
+    };
+    let project = project_with_operation(operation.clone());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+    let (back, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert!(report.discarded_calculations.is_empty());
+    let kept = back.tree().calculations().values().next().unwrap();
+    assert_eq!(kept.operation, operation);
 }
 
 #[test]

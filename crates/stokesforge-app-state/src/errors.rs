@@ -1203,6 +1203,14 @@ pub mod analysis {
                 tr!("error-analysis-expr-unbalanced", position = position)
             }
             ExprErrorKind::BadNumber => tr!("error-analysis-expr-bad-number", position = position),
+            ExprErrorKind::NumberOutOfRange { text, too_large } => {
+                // The sentence of the number gives no position (#438), as for
+                // the formulas.
+                super::number::error_message(&stokesforge_core::number_format::NumberOutOfRange {
+                    text: text.clone(),
+                    too_large: *too_large,
+                })
+            }
             ExprErrorKind::TooDeep => tr!("error-analysis-expr-too-deep", position = position),
             ExprErrorKind::UnknownFunction(name) => tr!(
                 "error-analysis-expr-unknown-function",
@@ -1292,6 +1300,39 @@ pub mod analysis {
                 crate::errors::tests_support::check(sample, &error_message(sample));
             }
             assert_eq!(samples.len(), 18);
+        }
+
+        /// #438: a number literal beyond the f64 range of a model has the
+        /// sentence of the formulas (no position), long literals shortened.
+        #[test]
+        fn a_model_number_out_of_range_has_the_number_sentences() {
+            use stokesforge_analysis::expr::Expr;
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let huge = "9".repeat(400);
+            let cases = [
+                (
+                    "x+1e400",
+                    "The number 1e400 is too large. The largest is about 1.8e308",
+                ),
+                (
+                    "1e-400",
+                    "The number 1e-400 is too small to be stored. The smallest is about 4.9e-324; write 0 for zero",
+                ),
+                (
+                    huge.as_str(),
+                    "The number 999999999999\u{2026} is too large. The largest is about 1.8e308",
+                ),
+            ];
+            for (src, sentence) in cases {
+                let error = Expr::out_of_range_literal(src).unwrap();
+                assert_eq!(expr_message(&error), sentence, "{src}");
+            }
+            // Wrapped as the form does: the prefix of the model issues stays.
+            let error = Expr::out_of_range_literal("1e400").unwrap();
+            assert_eq!(
+                crate::analysis::issue_message(&crate::analysis::Issue::BadModel(Some(error))),
+                "The model is invalid: The number 1e400 is too large. The largest is about 1.8e308"
+            );
         }
 
         #[test]

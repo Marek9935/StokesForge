@@ -109,6 +109,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Open… | Ouvrir… |
 | Out-of-date data | Données pas à jour |
 | Outlines | Contours |
+| Page Layout Mode | Mode mise en page |
 | Paste | Coller |
 | Paste in Place | Coller à l'identique |
 | Peaks and Deconvolution | Pics et déconvolution |

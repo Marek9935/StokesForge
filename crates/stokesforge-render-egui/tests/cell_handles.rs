@@ -1,5 +1,7 @@
-//! The resize handles on the outer boundary of a cell (#394), end to end: the
-//! session, an `egui::Context` and the pointer events of a drag.
+//! The mouse gestures of a graph outside the Page Layout Mode, end to end (#426):
+//! the session, an `egui::Context` and the pointer events of a drag. Resizing and
+//! moving the layers happens only in the mode (`layout_mode.rs`); here the old
+//! edges and the plot areas do nothing, and the object drags still work.
 //!
 //! No graphics server: `egui::Context::run_ui` produces shapes without painting
 //! anything.
@@ -273,450 +275,6 @@ fn ready(fixture: &Fixture) -> (egui::Context, GraphView) {
     (context, view)
 }
 
-/// Pulling the right boundary: the preview changes the layout (so the window
-/// that follows the figure sees it) without touching the model, and a single
-/// signal carries the new frame width on release.
-#[test]
-fn pulling_the_right_boundary_signals_the_new_frame_width_on_release_only() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let (right, bottom, _, _) = geometry(&view);
-    let revision = fixture.snapshot().revision;
-    let size = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-
-    let from = Pos2::new(right - 2.0, bottom / 2.0);
-    let (_, hover) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from)],
-        0.05,
-    );
-    assert_eq!(hover, egui::CursorIcon::ResizeHorizontal);
-
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(60.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, 360.0)),
-            row: None
-        }]
-    );
-    assert_eq!(fixture.snapshot().revision, revision, "the model moved");
-    let after = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout");
-    assert_eq!(
-        after.size,
-        (size.0 + 60, size.1),
-        "the preview is held until the model changes"
-    );
-    assert_eq!(after.frame_widths, [360.0]);
-}
-
-/// The preview lays the figure out while the pointer is still down.
-#[test]
-fn the_preview_resizes_the_figure_during_the_drag() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let (right, bottom, _, _) = geometry(&view);
-    let size = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    let from = Pos2::new(right - 2.0, bottom / 2.0);
-    frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from), button_event(from, true)],
-        0.1,
-    );
-    let mut time = 0.1;
-    for step in 1..=4 {
-        time += 0.05;
-        frame(
-            &context,
-            &mut view,
-            &fixture,
-            vec![egui::Event::PointerMoved(
-                from + egui::vec2(10.0 * step as f32, 0.0),
-            )],
-            time,
-        );
-    }
-    let during = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    assert_eq!(during, (size.0 + 40, size.1));
-}
-
-/// The bottom boundary changes the row's frame height; the corner both, in a
-/// single signal.
-#[test]
-fn the_bottom_boundary_and_the_corner_signal_once() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let (right, bottom, _, _) = geometry(&view);
-
-    let from = Pos2::new(60.0, bottom - 2.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(0.0, -50.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FrameResized {
-            column: None,
-            row: Some((0, 150.0))
-        }]
-    );
-
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let corner = Pos2::new(right - 2.0, bottom - 2.0);
-    let (_, cursor) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(corner)],
-        0.05,
-    );
-    assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(20.0, 30.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, 320.0)),
-            row: Some((0, 230.0))
-        }]
-    );
-}
-
-/// A drag that starts on the axis line, or inside the frame, is no handle.
-#[test]
-fn a_drag_on_the_axis_line_or_in_the_frame_resizes_nothing() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let (_, _, frame_bottom, centre) = geometry(&view);
-    let on_axis = Pos2::new(centre, frame_bottom - 1.0);
-    let (_, cursor) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(on_axis)],
-        0.05,
-    );
-    assert_eq!(cursor, egui::CursorIcon::Default, "no resize cursor");
-    for from in [on_axis, Pos2::new(centre, frame_bottom - 60.0)] {
-        let signals = drag(
-            &context,
-            &mut view,
-            &fixture,
-            from,
-            from + egui::vec2(30.0, 40.0),
-        );
-        assert!(
-            !signals
-                .iter()
-                .any(|signal| matches!(signal, GraphEvent::FrameResized { .. })),
-            "{signals:?}"
-        );
-    }
-}
-
-/// A graph from an old file previews and signals the frames it is drawn with,
-/// moved by the drag.
-#[test]
-fn a_legacy_graph_is_pulled_from_the_frames_it_is_drawn_with() {
-    let fixture = Fixture::new(true);
-    let (context, mut view) = ready(&fixture);
-    let drawn = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .frame_widths[0];
-    let (right, bottom, _, _) = geometry(&view);
-    let from = Pos2::new(right - 2.0, bottom / 2.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(25.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, drawn + 25.0)),
-            row: None
-        }]
-    );
-}
-
-/// A press and a release that moved nothing (or under half a point) commit
-/// nothing and leave no preview behind.
-#[test]
-fn a_drag_that_comes_back_signals_nothing() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let (right, bottom, _, _) = geometry(&view);
-    let from = Pos2::new(right - 2.0, bottom / 2.0);
-    let size = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    let signals = drag(&context, &mut view, &fixture, from, from);
-    assert!(signals.is_empty(), "{signals:?}");
-    let after = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    assert_eq!(after, size);
-}
-
-/// Pulling the left edge of the figure outwards gives the frame more room on
-/// the left: one signal on release, Left = start + distance, nothing before.
-#[test]
-fn pulling_the_left_edge_signals_the_new_left_on_release_only() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let revision = fixture.snapshot().revision;
-    let size = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    let from = Pos2::new(2.0, size.1 as f32 / 2.0);
-    let (_, hover) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from)],
-        0.05,
-    );
-    assert_eq!(hover, egui::CursorIcon::ResizeHorizontal);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(-40.0, 0.0),
-    );
-    // 76 pt of left axis and margin + 40.
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(116.0),
-            top: None
-        }]
-    );
-    assert_eq!(fixture.snapshot().revision, revision, "the model moved");
-    let after = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout");
-    assert_eq!(after.size, (size.0 + 40, size.1), "the preview is held");
-    assert_eq!(after.frame_rect(0, 0).map(|r| r.0), Some(116));
-}
-
-/// The top edge, and the corner (both at once, one signal); pulling inwards
-/// below what the axes need stops at the minimum.
-#[test]
-fn pulling_the_top_edge_and_the_corner_signal_once() {
-    let fixture = Fixture::placed(false, Some(150.0), Some(120.0));
-    let (context, mut view) = ready(&fixture);
-    let size = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    let from = Pos2::new(size.0 as f32 / 2.0, 2.0);
-    let (_, hover) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from)],
-        0.05,
-    );
-    assert_eq!(hover, egui::CursorIcon::ResizeVertical);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(0.0, 30.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: None,
-            top: Some(90.0)
-        }]
-    );
-
-    let fixture = Fixture::placed(false, Some(150.0), Some(120.0));
-    let (context, mut view) = ready(&fixture);
-    let corner = Pos2::new(2.0, 2.0);
-    let (_, cursor) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(corner)],
-        0.05,
-    );
-    assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(500.0, 500.0),
-    );
-    // The axes need 76 on the left and 12 on top: the values stop there.
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(76.0),
-            top: Some(12.0)
-        }]
-    );
-    assert_eq!(view.placing_edges(), (false, false), "the gesture is over");
-}
-
-/// A click on the left axis line is no handle.
-#[test]
-fn the_left_axis_line_is_not_the_left_edge() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let panel = view.last_drawn().expect("drawn").panels[0].clone();
-    let on_axis = Pos2::new(
-        panel.pixel_origin.0 as f32 + 1.0,
-        panel.pixel_origin.1 as f32 + 80.0,
-    );
-    let (_, cursor) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(on_axis)],
-        0.05,
-    );
-    assert_eq!(cursor, egui::CursorIcon::Default);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        on_axis,
-        on_axis + egui::vec2(-30.0, 0.0),
-    );
-    assert!(signals.is_empty(), "{signals:?}");
-}
-
-/// #405: a graph from an old file stores no frame, yet its left edge is pulled
-/// from the plot area it is drawn with (76 pt), not from zero: pulling out by
-/// 40 gives 116, pushing in below what the axes need changes nothing and sends
-/// no signal (no stray history step).
-#[test]
-fn a_legacy_graph_edge_starts_from_its_drawn_plot_area() {
-    let fixture = Fixture::new(true);
-    let (context, mut view) = ready(&fixture);
-    let from = Pos2::new(2.0, 200.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(-40.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(116.0),
-            top: None
-        }]
-    );
-
-    let fixture = Fixture::new(true);
-    let (context, mut view) = ready(&fixture);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(60.0, 0.0),
-    );
-    assert!(signals.is_empty(), "{signals:?}");
-}
-
-/// #405: the handle can be taken from the margin just outside the figure (the
-/// window leaves room around it), where the window's own border never reaches.
-#[test]
-fn the_outer_edges_are_grabbed_from_the_margin_outside_the_figure() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let size = view
-        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
-        .expect("layout")
-        .size;
-    // 3 points left of the figure: inside the strip, outside the figure.
-    let from = Pos2::new(-3.0, size.1 as f32 / 2.0);
-    let (_, cursor) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from)],
-        0.05,
-    );
-    assert_eq!(cursor, egui::CursorIcon::ResizeHorizontal);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(-40.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FramePlaced {
-            left: Some(116.0),
-            top: None
-        }]
-    );
-    // Same on the right outer edge, 3 points beyond the figure.
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let from = Pos2::new(size.0 as f32 + 3.0, 100.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(30.0, 0.0),
-    );
-    assert_eq!(
-        signals,
-        [GraphEvent::FrameResized {
-            column: Some((0, 330.0)),
-            row: None
-        }]
-    );
-}
-
 /// Layer `base` of the free fixture as laid out: its outer rectangle and its
 /// frame in figure pixels.
 fn free_cell(
@@ -734,164 +292,12 @@ fn free_cell(
         .expect("cell")
 }
 
-/// The stored frame of layer `base`.
-fn stored(fixture: &Fixture, base: usize) -> FreeFrame {
-    let snapshot = fixture.snapshot();
-    let node = snapshot.tree.node(fixture.graph).expect("graph");
-    let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
-        panic!("a graph");
-    };
-    spec.panels[base].sanitized_free_frame()
-}
-
-/// One quiet frame at `scale`, so that the view knows the display scale it is
-/// pressed at (it reads the geometry of the last drawn frame).
-fn warm_up(context: &egui::Context, view: &mut GraphView, fixture: &Fixture, scale: f32) {
-    frame_with(
-        context,
-        view,
-        fixture,
-        vec![],
-        0.02,
-        scale,
-        egui::Modifiers::NONE,
-    );
-}
-
-fn framed(signals: &[GraphEvent]) -> (usize, FreeFrame, bool) {
-    match signals {
-        [GraphEvent::LayerFramed {
-            panel,
-            frame,
-            resized,
-        }] => (*panel, *frame, *resized),
-        other => panic!("one LayerFramed expected, got {other:?}"),
-    }
-}
-
 fn center(cell: &stokesforge_render::pipeline::FreeCellRect, scale: f32) -> Pos2 {
     let (x, y, w, h) = cell.frame;
     Pos2::new(
         (x as f32 + w as f32 / 2.0) * scale,
         (y as f32 + h as f32 / 2.0) * scale,
     )
-}
-
-/// #398 L2: a plain drag in the plot area moves the layer by the distance
-/// dragged divided by the display scale, with a single signal at the release.
-/// Witness: dropping the division by the scale, or signalling during the drag.
-#[test]
-fn dragging_the_plot_area_moves_the_layer_in_free_placement() {
-    for scale in [1.0_f32, 2.0] {
-        let fixture = Fixture::free_two_layers();
-        let (context, mut view) = ready(&fixture);
-        warm_up(&context, &mut view, &fixture, scale);
-        let cell = free_cell(&mut view, &context, &fixture, 0);
-        let from = center(&cell, scale);
-        let signals = drag_with(
-            &context,
-            &mut view,
-            &fixture,
-            from,
-            from + egui::vec2(40.0, 20.0),
-            scale,
-            egui::Modifiers::NONE,
-        );
-        let (panel, frame, resized) = framed(&signals);
-        let before = stored(&fixture, 0);
-        assert_eq!(panel, 0);
-        assert!(!resized);
-        assert!(
-            (frame.left - (before.left + 40.0 / f64::from(scale))).abs() < 0.011,
-            "scale {scale}: {frame:?}"
-        );
-        assert!((frame.top - (before.top + 20.0 / f64::from(scale))).abs() < 0.011);
-        assert_eq!((frame.width, frame.height), (300.0, 200.0));
-    }
-}
-
-/// #398 L2: the preview follows the pointer without touching the model.
-#[test]
-fn the_move_previews_the_layer_before_the_release() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = ready(&fixture);
-    let cell = free_cell(&mut view, &context, &fixture, 0);
-    let from = center(&cell, 1.0);
-    let revision = fixture.snapshot().revision;
-    let (signals, _) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(from), button_event(from, true)],
-        0.1,
-    );
-    assert!(signals.is_empty());
-    for (step, time) in [(10.0, 0.15), (30.0, 0.2), (40.0, 0.25)] {
-        let (signals, cursor) = frame(
-            &context,
-            &mut view,
-            &fixture,
-            vec![egui::Event::PointerMoved(from + egui::vec2(step, 0.0))],
-            time,
-        );
-        assert!(signals.is_empty());
-        // The gesture starts during the first of these frames.
-        if step > 10.0 {
-            assert_eq!(cursor, egui::CursorIcon::Move);
-        }
-    }
-    let moved = free_cell(&mut view, &context, &fixture, 0);
-    assert_eq!(moved.frame.0, cell.frame.0 + 40, "the layer is drawn moved");
-    assert_eq!(fixture.snapshot().revision, revision, "model untouched");
-}
-
-/// #398 L2: a click without movement does nothing but activate.
-#[test]
-fn a_click_without_movement_moves_nothing() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = ready(&fixture);
-    let cell = free_cell(&mut view, &context, &fixture, 0);
-    let at = center(&cell, 1.0);
-    let (mut signals, _) = frame(
-        &context,
-        &mut view,
-        &fixture,
-        vec![egui::Event::PointerMoved(at), button_event(at, true)],
-        0.1,
-    );
-    signals.extend(
-        frame(
-            &context,
-            &mut view,
-            &fixture,
-            vec![button_event(at, false)],
-            0.15,
-        )
-        .0,
-    );
-    assert!(signals.is_empty(), "{signals:?}");
-    // Nor does the model change: the layer is still where it was.
-    assert_eq!(stored(&fixture, 0).left, 400.0);
-}
-
-/// #398: the grid is unchanged, a plain drag in a plot area does nothing.
-#[test]
-fn a_plain_drag_in_the_plot_area_does_nothing_on_the_grid() {
-    let fixture = Fixture::new(false);
-    let (context, mut view) = ready(&fixture);
-    let panel = view.last_drawn().expect("drawn").panels[0].clone();
-    let from = Pos2::new(
-        panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
-        panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
-    );
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from + egui::vec2(40.0, 20.0),
-    );
-    assert!(signals.is_empty(), "{signals:?}");
 }
 
 /// #398: Ctrl + drag pans, before everything: no layer moves.
@@ -933,250 +339,6 @@ fn a_drag_started_on_the_legend_moves_the_legend_not_the_layer() {
         matches!(&signals[..], [GraphEvent::TextMoved { target, .. }] if *target == legend),
         "{signals:?}"
     );
-}
-
-/// #398: the four edges resize the frame; left and top move the position and
-/// keep the opposite edge still; corners do both. Resize cursors on hover.
-#[test]
-fn the_edges_resize_the_frame_and_the_opposite_edge_stays() {
-    // (name, grab point of the outer rectangle, delta, expected frame, cursor)
-    type EdgeCase = (
-        &'static str,
-        (f32, f32),
-        egui::Vec2,
-        (f64, f64, f64, f64),
-        egui::CursorIcon,
-    );
-    let start = {
-        let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
-        stored(&fixture, 0)
-    };
-    // (name, grab point of the outer rectangle, delta, expected frame, cursor)
-    let cases: [EdgeCase; 6] = [
-        (
-            "right",
-            (1.0, 0.5),
-            egui::vec2(30.0, 0.0),
-            (start.left, start.top, 330.0, 200.0),
-            egui::CursorIcon::ResizeHorizontal,
-        ),
-        (
-            "left",
-            (0.0, 0.5),
-            egui::vec2(-25.0, 0.0),
-            (start.left - 25.0, start.top, 325.0, 200.0),
-            egui::CursorIcon::ResizeHorizontal,
-        ),
-        (
-            "bottom",
-            (0.5, 1.0),
-            egui::vec2(0.0, 18.0),
-            (start.left, start.top, 300.0, 218.0),
-            egui::CursorIcon::ResizeVertical,
-        ),
-        (
-            "top",
-            (0.5, 0.0),
-            egui::vec2(0.0, -12.0),
-            (start.left, start.top - 12.0, 300.0, 212.0),
-            egui::CursorIcon::ResizeVertical,
-        ),
-        (
-            "bottom-right corner",
-            (1.0, 1.0),
-            egui::vec2(10.0, 15.0),
-            (start.left, start.top, 310.0, 215.0),
-            egui::CursorIcon::ResizeNwSe,
-        ),
-        (
-            "top-left corner",
-            (0.0, 0.0),
-            egui::vec2(-10.0, -15.0),
-            (start.left - 10.0, start.top - 15.0, 310.0, 215.0),
-            egui::CursorIcon::ResizeNwSe,
-        ),
-    ];
-    for (name, (fx, fy), delta, (left, top, width, height), cursor) in cases {
-        let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
-        let (context, mut view) = ready(&fixture);
-        let cell = free_cell(&mut view, &context, &fixture, 0);
-        let (x, y, w, h) = cell.outer;
-        let from = Pos2::new(x as f32 + w as f32 * fx, y as f32 + h as f32 * fy);
-        let (_, hovered) = frame(
-            &context,
-            &mut view,
-            &fixture,
-            vec![egui::Event::PointerMoved(from)],
-            0.05,
-        );
-        assert_eq!(hovered, cursor, "{name}");
-        let signals = drag(&context, &mut view, &fixture, from, from + delta);
-        let (panel, frame, resized) = framed(&signals);
-        assert_eq!(panel, 0, "{name}");
-        assert!(resized, "{name}");
-        assert_eq!(
-            (frame.left, frame.top, frame.width, frame.height),
-            (left, top, width, height),
-            "{name}"
-        );
-    }
-}
-
-/// #398: sizes stay within 36 and 2000 pt; a left edge dragged beyond the
-/// minimum keeps width 36 and the right edge does not move. Witness: no clamp
-/// on the left edge shifts the right edge.
-#[test]
-fn the_edges_keep_the_size_within_bounds() {
-    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
-    let before = stored(&fixture, 0);
-    let (context, mut view) = ready(&fixture);
-    let cell = free_cell(&mut view, &context, &fixture, 0);
-    let (x, y, w, h) = cell.outer;
-    let left = Pos2::new(x as f32, y as f32 + h as f32 / 2.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        left,
-        left + egui::vec2(800.0, 0.0),
-    );
-    let (_, frame, _) = framed(&signals);
-    assert_eq!(frame.width, 36.0);
-    assert_eq!(frame.left + frame.width, before.left + before.width);
-
-    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
-    let (context, mut view) = ready(&fixture);
-    let right = Pos2::new((x + w) as f32, y as f32 + h as f32 / 2.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        right,
-        right + egui::vec2(-900.0, 0.0),
-    );
-    assert_eq!(framed(&signals).1.width, 36.0);
-    let fixture = Fixture::free_two_layers_at((520.0, 40.0), (0, 0));
-    let (context, mut view) = ready(&fixture);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        right,
-        right + egui::vec2(5000.0, 0.0),
-    );
-    assert_eq!(framed(&signals).1.width, 2000.0);
-}
-
-/// #398: on an overlap the front-most layer takes the gesture. Witness: a
-/// forward scan moves layer 0 in both cases.
-#[test]
-fn the_front_most_layer_takes_the_move() {
-    for (stacks, front) in [((0, 0), 1), ((1, 0), 0)] {
-        let fixture = Fixture::free_two_layers_at((100.0, 200.0), stacks);
-        let (context, mut view) = ready(&fixture);
-        let b = free_cell(&mut view, &context, &fixture, 1);
-        // Inside both frames.
-        let from = Pos2::new(b.frame.0 as f32 + 40.0, b.frame.1 as f32 + 40.0);
-        let signals = drag(
-            &context,
-            &mut view,
-            &fixture,
-            from,
-            from + egui::vec2(20.0, 0.0),
-        );
-        assert_eq!(framed(&signals).0, front, "stacks {stacks:?}");
-    }
-}
-
-/// #398 L3: the edges of the moved frame snap to the edges of the other layers
-/// (6 screen px), Shift held disables it, and the dashed guide shows while the
-/// gesture lasts only. Layer 1 spans 40..340; layer 0 starts at 400.
-#[test]
-fn the_edges_snap_to_the_other_layers_unless_shift_is_held() {
-    let run = |shift: bool, dx: f32, scale: f32| {
-        let fixture = Fixture::free_two_layers();
-        let (context, mut view) = ready(&fixture);
-        warm_up(&context, &mut view, &fixture, scale);
-        let cell = free_cell(&mut view, &context, &fixture, 0);
-        let from = center(&cell, scale);
-        let modifiers = egui::Modifiers {
-            shift,
-            ..egui::Modifiers::NONE
-        };
-        // Press and move (not released) to read the guides.
-        frame_with(
-            &context,
-            &mut view,
-            &fixture,
-            vec![
-                egui::Event::PointerMoved(from),
-                egui::Event::PointerButton {
-                    pos: from,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers,
-                },
-            ],
-            0.1,
-            scale,
-            modifiers,
-        );
-        for (step, time) in [(0.5, 0.15), (1.0, 0.2)] {
-            frame_with(
-                &context,
-                &mut view,
-                &fixture,
-                vec![egui::Event::PointerMoved(from + egui::vec2(dx * step, 0.0))],
-                time,
-                scale,
-                modifiers,
-            );
-        }
-        let guides = view
-            .magnet_guides()
-            .iter()
-            .filter(|guide| guide.vertical)
-            .count();
-        let signals = frame_with(
-            &context,
-            &mut view,
-            &fixture,
-            vec![egui::Event::PointerButton {
-                pos: from + egui::vec2(dx, 0.0),
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers,
-            }],
-            0.3,
-            scale,
-            modifiers,
-        )
-        .0;
-        assert!(
-            view.magnet_guides().is_empty(),
-            "guides end with the gesture"
-        );
-        (framed(&signals).1.left, guides)
-    };
-    // Left edge 400 - 57 = 343: 3 pt from the right edge of layer 1 (340).
-    let (left, guides) = run(false, -57.0, 1.0);
-    assert_eq!(left, 340.0);
-    assert_eq!(guides, 1);
-    // 8 pt away: free.
-    let (left, guides) = run(false, -52.0, 1.0);
-    assert_eq!(left, 348.0);
-    assert_eq!(guides, 0);
-    // Shift: free at 3 pt.
-    let (left, guides) = run(true, -57.0, 1.0);
-    assert_eq!(left, 343.0);
-    assert_eq!(guides, 0);
-    // The reach is 6 screen px, so 3 pt at scale 2: 2.5 pt (5 px) snaps, 8 pt
-    // (16 px) does not.
-    let (left, _) = run(false, -115.0, 2.0);
-    assert_eq!(left, 340.0);
-    let (left, guides) = run(false, -2.0 * 52.0, 2.0);
-    assert_eq!(left, 348.0);
-    assert_eq!(guides, 0);
 }
 
 /// #398: a click picks the layer under the cursor by where it is drawn, not by
@@ -1474,4 +636,235 @@ fn a_right_click_inside_the_layer_selection_keeps_it() {
     right_click(&mut view, centre(0), 5.0);
     assert_eq!(view.active_panel(&spec), 0);
     assert!(view.extra_layers(&spec).is_empty());
+}
+
+/// Hover, press, drag and release at `from`: no signal, the default cursor on
+/// the way, and the figure laid out as before.
+fn assert_nothing_happens(fixture: &Fixture, from: Pos2, what: &str) {
+    let (context, mut view) = ready(fixture);
+    let (context, view) = (&context, &mut view);
+    let layout = |view: &mut GraphView| {
+        view.figure_layout(context, &fixture.snapshot(), fixture.graph)
+            .expect("layout")
+    };
+    let before = layout(view);
+    let revision = fixture.snapshot().revision;
+    let (signals, cursor) = frame(
+        context,
+        view,
+        fixture,
+        vec![egui::Event::PointerMoved(from)],
+        0.05,
+    );
+    assert!(signals.is_empty(), "{what}: hover {signals:?}");
+    assert_eq!(cursor, egui::CursorIcon::Default, "{what}: cursor");
+    let signals = drag(context, view, fixture, from, from + egui::vec2(30.0, 25.0));
+    assert!(signals.is_empty(), "{what}: drag {signals:?}");
+    let (_, cursor) = frame(
+        context,
+        view,
+        fixture,
+        vec![egui::Event::PointerMoved(from + egui::vec2(30.0, 25.0))],
+        2.0,
+    );
+    assert_eq!(cursor, egui::CursorIcon::Default, "{what}: cursor after");
+    assert_eq!(layout(view), before, "{what}: preview left behind");
+    assert_eq!(fixture.snapshot().revision, revision, "{what}: model");
+}
+
+/// #426: outside the Page Layout Mode no drag resizes or moves a graph, grid or
+/// Free: not the outer boundary of a cell, not the left and top edges of the
+/// figure, not the edges or the plot area of a Free layer; and the pointer
+/// keeps its default cursor over all of them. Witness: restoring one of the
+/// removed handlers (a cell edge, the figure edge, or the layer move).
+#[test]
+fn no_layout_drag_outside_the_mode() {
+    // Regular grid: the old cell and figure handles.
+    let fixture = Fixture::new(false);
+    let (_context, view) = ready(&fixture);
+    let (right, bottom, frame_bottom, centre) = geometry(&view);
+    let panel = view.last_drawn().expect("drawn").panels[0].clone();
+    let middle = bottom / 2.0;
+    for (what, at) in [
+        ("right boundary", Pos2::new(right - 2.0, middle)),
+        ("bottom boundary", Pos2::new(centre, bottom - 2.0)),
+        ("corner", Pos2::new(right - 2.0, bottom - 2.0)),
+        ("left figure edge", Pos2::new(2.0, middle)),
+        ("top figure edge", Pos2::new(centre, 2.0)),
+        ("axis line", Pos2::new(centre, frame_bottom - 1.0)),
+        (
+            "left axis line",
+            Pos2::new(
+                panel.pixel_origin.0 as f32 + 1.0,
+                panel.pixel_origin.1 as f32 + 80.0,
+            ),
+        ),
+        (
+            "plot area",
+            Pos2::new(
+                panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
+                panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+            ),
+        ),
+    ] {
+        assert_nothing_happens(&fixture, at, what);
+    }
+    // A legacy graph (no stored frames) too.
+    let legacy = Fixture::new(true);
+    let (_context, view) = ready(&legacy);
+    let (right, bottom, _, _) = geometry(&view);
+    assert_nothing_happens(
+        &legacy,
+        Pos2::new(right - 2.0, bottom / 2.0),
+        "legacy right boundary",
+    );
+    assert_nothing_happens(&legacy, Pos2::new(2.0, 200.0), "legacy left edge");
+
+    // Free: the edges and corners of a layer, its plot area, the page margin.
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    let cell = free_cell(&mut view, &context, &fixture, 0);
+    let (ox, oy, ow, oh) = cell.outer;
+    let (ox, oy, ow, oh) = (ox as f32, oy as f32, ow as f32, oh as f32);
+    for (what, at) in [
+        ("layer right edge", Pos2::new(ox + ow - 2.0, oy + oh / 2.0)),
+        ("layer left edge", Pos2::new(ox + 2.0, oy + oh / 2.0)),
+        ("layer top edge", Pos2::new(ox + ow / 2.0, oy + 2.0)),
+        ("layer bottom edge", Pos2::new(ox + ow / 2.0, oy + oh - 2.0)),
+        ("layer corner", Pos2::new(ox + ow - 2.0, oy + oh - 2.0)),
+        ("layer plot area", center(&cell, 1.0)),
+    ] {
+        assert_nothing_happens(&fixture, at, what);
+    }
+}
+
+/// A Free graph with a title, a free text and a filled object, on layer 0.
+fn free_with_objects() -> Fixture {
+    let fixture = Fixture::free_two_layers();
+    let snapshot = fixture.snapshot();
+    let node = snapshot.tree.node(fixture.graph).expect("graph");
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+        panic!("a graph");
+    };
+    let mut spec = spec.clone();
+    spec.title = "Title".to_owned();
+    let mut panel = spec.panels[0].clone();
+    panel
+        .annotations
+        .push(stokesforge_plot::AnnotationSpec::new("Peak", 16.0, 24.0));
+    panel.shapes.push(stokesforge_plot::ShapeSpec {
+        fill_color: "#3366cc66".to_string(),
+        ..stokesforge_plot::ShapeSpec::new(
+            stokesforge_plot::ShapeKind::Rectangle,
+            4.0,
+            4.0,
+            8.0,
+            12.0,
+        )
+    });
+    let mut panels: Vec<PanelSpec> = spec.panels.iter().cloned().collect();
+    panels[0] = panel;
+    spec.panels = Panels::new(panels);
+    fixture
+        .session
+        .handle()
+        .execute(stokesforge_commands::Command::SetPlotSpec {
+            graph: fixture.graph,
+            spec,
+        })
+        .expect("spec set");
+    fixture
+}
+
+/// #426: the drags of the objects of a Free graph are untouched by the removal
+/// of the layer gestures: a free text, a filled object and the title move, the
+/// title's width handle resizes it, each with one signal on release. Witness:
+/// gating the object handlers on the Page Layout Mode.
+#[test]
+fn text_shape_and_title_drags_still_work_on_a_free_graph() {
+    use stokesforge_render_egui::TextTarget;
+    let fixture = free_with_objects();
+    let (context, mut view) = ready(&fixture);
+
+    let annotation = stokesforge_plot::AnnotationRef { panel: 0, index: 0 };
+    let (at, _, _) = view.annotation_screen_box(annotation).expect("text drawn");
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        at,
+        at + egui::vec2(25.0, 10.0),
+    );
+    assert!(
+        matches!(&signals[..], [GraphEvent::AnnotationMoved { target, .. }] if *target == annotation),
+        "{signals:?}"
+    );
+
+    let drawn = view
+        .drawn_shape(stokesforge_plot::ShapeRef { panel: 0, index: 0 })
+        .expect("object drawn");
+    let origin = view.display_rect().expect("rect").min.to_vec2();
+    let middle = Pos2::new(
+        (drawn.p1.0 + drawn.p2.0) as f32 / 2.0,
+        (drawn.p1.1 + drawn.p2.1) as f32 / 2.0,
+    ) + origin;
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        middle,
+        middle + egui::vec2(20.0, 0.0),
+    );
+    assert!(
+        matches!(&signals[..], [GraphEvent::ShapeChanged { .. }]),
+        "{signals:?}"
+    );
+
+    let (title, size, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("title drawn");
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        title,
+        title + egui::vec2(0.0, 12.0),
+    );
+    assert!(
+        matches!(&signals[..], [GraphEvent::TextMoved { target, .. }] if *target == TextTarget::Title),
+        "{signals:?}"
+    );
+
+    // Select the title (a click), then pull its width handle.
+    let (title, size_now, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("title drawn");
+    let _ = size;
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(title), button_event(title, true)],
+        3.0,
+    );
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![button_event(title, false)],
+        3.1,
+    );
+    assert_eq!(view.selected_text(), Some(TextTarget::Title));
+    let handle = title + egui::vec2(size_now.x / 2.0 + 3.0, 0.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        handle,
+        handle + egui::vec2(60.0, 0.0),
+    );
+    assert!(
+        matches!(&signals[..], [GraphEvent::TextResized { target, .. }] if *target == TextTarget::Title),
+        "{signals:?}"
+    );
 }

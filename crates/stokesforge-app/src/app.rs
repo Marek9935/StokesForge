@@ -157,6 +157,7 @@ pub(crate) mod hover_help;
 mod import_wizard;
 mod inplace_edit;
 mod keyboard_shortcuts_window;
+mod layout_window;
 mod list_row;
 #[cfg(test)]
 mod manual_pages;
@@ -166,6 +167,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod page_layout;
 mod panel_memory;
 #[cfg(test)]
 mod panel_tests;
@@ -181,6 +183,7 @@ mod results_pane;
 mod script_console;
 pub(crate) mod shortcuts;
 mod stale_export;
+mod state_toggle;
 mod status_history;
 mod tab;
 pub(crate) mod tab_strip;
@@ -330,6 +333,13 @@ pub struct StokesForgeApp {
     /// Manager since this task: it is no longer a tab, and a fixed panel
     /// always fully visible has nothing to gain from being "maximized".
     maximized_tab: Option<Tab>,
+    /// The floating graphs whose Page Layout Mode was entered through
+    /// [`StokesForgeApp::toggle_layout_mode`], each with the tab that was
+    /// maximised before the mode (`layout_window.rs`).
+    layout_entries: HashMap<NodeId, Option<Tab>>,
+    /// Actions a leaving of the mode committed (a nudge in progress), sent with
+    /// the next dispatch.
+    layout_actions: Vec<Action>,
     /// True when the Project Manager is detached into a separate OS window (see
     /// the top doc of `window_detach.rs`, § Detaching the Project Manager). In this state,
     /// [`StokesForgeApp::project_manager_panel`] is simply not painted.
@@ -527,6 +537,8 @@ impl StokesForgeApp {
             graph_views: HashMap::new(),
             collapsed_tabs,
             maximized_tab,
+            layout_entries: HashMap::new(),
+            layout_actions: Vec::new(),
             pm_detached: false,
             script_collapsed: true,
             panel_memory: panel_memory::PanelMemory::default(),
@@ -1038,6 +1050,7 @@ impl eframe::App for StokesForgeApp {
         analysis_menu::publish_last_presets(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
         let history = self.collect_shortcuts_deferring_history(&ctx, &mut actions);
+        self.begin_layout_frame(&ctx, active_graph(active_tab_kind(active_tab)));
         // Ctrl+C on the active graph, before panels and contents read
         // the `Event::Copy` (#149).
         self.request_active_figure_copy(&ctx, active_tab, &mut actions);
@@ -1080,12 +1093,14 @@ impl eframe::App for StokesForgeApp {
         self.blocking_confirmations(&ctx, &mut actions);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
         self.sync_panel_layout(&mut actions);
+        self.drain_layout_actions(&mut actions);
         actions.extend(history);
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
 
         self.sync_window_views();
+        page_layout::note_field_focus(&ctx);
         if snapshot_stamp(self.state.snapshot()) != published_stamp {
             // A command applied after publication wakes the viewports.
             ctx.request_repaint();
@@ -1228,7 +1243,7 @@ impl StokesForgeApp {
     }
 
     /// The detached requests stay drained before the workspace.
-    fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    pub(super) fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if !self.detached_tabs.is_empty() {
             self.show_detached_tabs(ctx);
             // Same draining as for the Project Manager, generalized to
@@ -1848,6 +1863,8 @@ impl StokesForgeApp {
         self.active_detached = None;
         self.collapsed_tabs.clear();
         self.maximized_tab = None;
+        self.layout_entries.clear();
+        self.layout_actions.clear();
         self.window_positions.clear();
         self.window_sizes.clear();
         self.figure_follow.clear();

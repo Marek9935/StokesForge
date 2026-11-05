@@ -368,6 +368,13 @@ pub fn non_trivial_spec(
         figure_top: Some(97.25),
         // #398: free placement.
         layer_placement: stokesforge_plot::LayerPlacement::Free,
+        // #426: a stored page, none of its numbers a default.
+        free_page: Some(stokesforge_plot::FreePage {
+            left: -12.5,
+            top: 4.25,
+            width: 612.0,
+            height: 391.5,
+        }),
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

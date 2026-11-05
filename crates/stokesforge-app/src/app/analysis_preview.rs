@@ -829,11 +829,15 @@ pub(super) fn preview(
 
     // What prevents computing: said at the center of the preview.
     if let Some(issue) = &outcome.issue {
-        plot.text(
-            plot_rect.center_top() + egui::vec2(0.0, 8.0),
-            egui::Align2::CENTER_TOP,
+        let galley = issue_galley(
+            &plot,
             issue_message(issue),
-            egui::FontId::proportional(13.0),
+            theme::preview_result_color(dark),
+            plot_rect.width(),
+        );
+        plot.galley(
+            plot_rect.center_top() + egui::vec2(0.0, 8.0),
+            galley,
             theme::preview_result_color(dark),
         );
     }
@@ -1047,6 +1051,25 @@ fn seeds_of(form: &AnalysisForm) -> Vec<f64> {
     }
 }
 
+/// The sentence that says what prevents computing, wrapped to the preview width
+/// (minus a margin) so a long one is never cut on either side (#438).
+fn issue_galley(
+    painter: &egui::Painter,
+    text: String,
+    color: egui::Color32,
+    plot_width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    const MARGIN: f32 = 8.0;
+    let mut job = egui::text::LayoutJob::simple(
+        text,
+        egui::FontId::proportional(13.0),
+        color,
+        (plot_width - 2.0 * MARGIN).max(1.0),
+    );
+    job.halign = egui::Align::Center;
+    painter.layout_job(job)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1061,6 +1084,28 @@ mod tests {
             false,
         );
         (form, project.tree().clone())
+    }
+
+    /// #438: a long sentence is wrapped inside the preview width, a short one
+    /// stays on one line.
+    #[test]
+    fn the_issue_sentence_wraps_inside_the_preview_width() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut result = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter().clone();
+            let long = "The model is invalid: The number 1e-400 is too small to be stored. \
+                        The smallest is about 4.9e-324; write 0 for zero";
+            let wide =
+                |text: &str| issue_galley(&painter, text.to_string(), egui::Color32::RED, 400.0);
+            result = Some((wide(long), wide("The model has no parameter")));
+        });
+        output.textures_delta.clear();
+        let (long, short) = result.unwrap();
+        assert!(long.size().x <= 400.0, "{}", long.size().x);
+        assert!(long.rows.len() > 1);
+        assert_eq!(short.rows.len(), 1);
     }
 
     static ORDER: Mutex<Vec<u64>> = Mutex::new(Vec::new());

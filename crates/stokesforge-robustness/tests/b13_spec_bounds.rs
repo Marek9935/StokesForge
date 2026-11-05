@@ -527,8 +527,15 @@ fn b13_hostile_free_frames_cross_the_disk_and_lay_out_bounded() {
     // A cell with no frame at all, and an identity far beyond any grid (the reader accepts up to 10 000).
     panels.push(PanelSpec::at(100, 100));
     panels.push(PanelSpec::at(9_999, 9_999));
+    // #426: a page with a NaN extent reads as no page.
     let spec = PlotSpec {
         layer_placement: LayerPlacement::Free,
+        free_page: Some(stokesforge_plot::FreePage {
+            left: 0.0,
+            top: 0.0,
+            width: f64::NAN,
+            height: 300.0,
+        }),
         ..PlotSpec::empty("T").with_panels(Panels::new(panels))
     };
     let graph = project.add_graph(root, Some("Fig"), spec).expect("graph");
@@ -552,6 +559,18 @@ fn b13_hostile_free_frames_cross_the_disk_and_lay_out_bounded() {
         layout.size
     );
     assert!(layout.size.0 > 0 && layout.size.1 > 0);
+    // #426: the NaN page crossed the disk as written, reads None, and the
+    // layout is the one of the same graph without a page. Witness:
+    // `sanitized_free_page` removed (the NaN reaches the layout).
+    assert!(spec.free_page.is_some_and(|page| page.width.is_nan()));
+    assert_eq!(spec.sanitized_free_page(), None);
+    let without = PlotSpec {
+        free_page: None,
+        ..spec.clone()
+    };
+    let plain =
+        stokesforge_render_svg::figure_layout(&without, &measurer, &choice).expect("a layout");
+    assert_eq!(layout.size, plain.size);
 }
 
 /// #407: a hostile target size (NaN, infinite, negative, absurd) given to the

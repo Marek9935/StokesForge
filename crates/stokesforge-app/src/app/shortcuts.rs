@@ -60,6 +60,15 @@ pub(crate) const KEY_SHIFT_ARROW_UP: egui::KeyboardShortcut =
 /// down in the Project Manager (#423).
 pub(crate) const KEY_SHIFT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
+/// Shift+← — ten nudge steps left in the Page Layout Mode (#426).
+pub(crate) const KEY_SHIFT_ARROW_LEFT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowLeft);
+/// Shift+→ — ten nudge steps right in the Page Layout Mode (#426).
+pub(crate) const KEY_SHIFT_ARROW_RIGHT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+/// G — turns Snap on or off in the Page Layout Mode (#426).
+pub(crate) const KEY_LAYOUT_SNAP: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::G);
 /// Alt+↓ — opens the list of suggested values of a number field.
 pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
@@ -333,6 +342,18 @@ pub(super) const HELP: &[HelpEntry] = &[
     entry!(Graph, "help-move-series-up", shortcut SHORTCUT_MOVE_SERIES_UP),
     entry!(Graph, "help-move-series-down", shortcut SHORTCUT_MOVE_SERIES_DOWN),
     entry!(Graph, "help-zoom", text || tr!("help-keys-ctrl-wheel")),
+    entry!(Graph, "help-layout-snap", shortcut KEY_LAYOUT_SNAP),
+    entry!(
+        Graph,
+        "help-layout-nudge",
+        text || tr!("help-keys-four-arrows")
+    ),
+    entry!(
+        Graph,
+        "help-layout-nudge-ten",
+        text || tr!("help-keys-shift-four-arrows")
+    ),
+    entry!(Graph, "help-layout-leave", text || tr!("help-keys-escape")),
     entry!(Managers, "help-rename", shortcut SHORTCUT_RENAME_OBJECT),
     entry!(Managers, "help-delete-selection", text shortcut_text_delete),
     entry!(Managers, "help-duplicate", shortcut SHORTCUT_DUPLICATE_OBJECT),
