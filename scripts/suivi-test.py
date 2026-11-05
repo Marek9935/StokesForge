@@ -2111,6 +2111,646 @@ class TestCiService(Base):
         self.assertEqual(ci["verdict"], "red", ci)
 
 
+FAKE_GLAB_LABELS = r"""#!/usr/bin/env python3
+# Fake glab for the GitLab labels and tags (#467): state in $FAKE_DIR/state.json, every call logged in
+# $FAKE_DIR/calls, every PUT/POST parsed into $FAKE_DIR/writes.jsonl and applied to the state.
+import json, os, sys, time, urllib.parse
+d = os.environ["FAKE_DIR"]
+args = sys.argv[1:]
+open(d + "/calls", "a").write(" ".join(args) + "\n")
+mode = open(d + "/mode").read().strip() if os.path.exists(d + "/mode") else ""
+method, fields, path = "GET", {}, None
+i = 1
+while i < len(args):
+    if args[i] == "--method":
+        method = args[i + 1]; i += 2
+    elif args[i] == "-f":
+        k, v = args[i + 1].split("=", 1); fields[k] = v; i += 2
+    else:
+        path = args[i]; i += 1
+if mode == "sleep":
+    time.sleep(30)
+if mode == "empty" and method == "GET":
+    sys.exit(0)
+if mode == "garbage" and method == "GET":
+    print("<html>"); sys.exit(0)
+if mode == "dict" and method == "GET":
+    print("{}"); sys.exit(0)
+if mode == "fail" or (mode == "failwrite" and method != "GET"):
+    sys.exit(1)
+st = json.load(open(d + "/state.json"))
+base = "projects/86104040/"
+rel, _, query = path[len(base):].partition("?")
+q = urllib.parse.parse_qs(query)
+if method != "GET":
+    n = int(rel.split("/")[1])
+    iss = st["issues"][str(n)]
+    if rel.endswith("/notes"):
+        iss.setdefault("notes", []).append(fields["body"])
+    else:
+        labs = set(iss["labels"])
+        labs |= set(filter(None, fields.get("add_labels", "").split(",")))
+        labs -= set(filter(None, fields.get("remove_labels", "").split(",")))
+        iss["labels"] = sorted(labs)
+        if fields.get("state_event") == "close":
+            iss["state"] = "closed"
+    open(d + "/writes.jsonl", "a").write(json.dumps({"method": method, "issue": n, "fields": fields, "path": rel}) + "\n")
+    json.dump(st, open(d + "/state.json", "w"))
+    print("{}")
+    sys.exit(0)
+def out(x):
+    print(json.dumps(x))
+if rel == "issues":
+    want = [s_ for s_ in q.get("state", ["opened"])]
+    rows = []
+    for k, v in st["issues"].items():
+        if want != ["all"] and v["state"] not in want:
+            continue
+        if "labels" in q and q["labels"][0] not in v["labels"]:
+            continue
+        if "iids[]" in q and k not in q["iids[]"]:
+            continue
+        rows.append({"iid": int(k), "state": v["state"], "labels": v["labels"]})
+    out(rows)
+elif rel == "repository/tags":
+    out(st["tags"])
+elif rel.startswith("repository/tags/"):
+    out(next(t for t in st["tags"] if t["name"] == rel.split("/")[-1]))
+elif rel == "pipelines":
+    out(st.get("pipelines", []))
+elif rel.startswith("pipelines/") and rel.endswith("/jobs"):
+    out(st.get("pipeline_jobs", []))
+else:
+    out([])
+"""
+NOW = 1_000_000.0
+TAG_SHA = "c" * 40
+
+
+class GithubStandIn:
+    """A local stand-in for the GitHub Actions API: runs and jobs set by the test."""
+    def __init__(self):
+        self.runs = []                 # [{id, head_sha, created_at, name}]
+        self.jobs = {}                 # run id -> [job]
+        self.status = 200
+        self.hits = []
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                outer.hits.append(self.path)
+                if outer.status != 200:
+                    self.send_response(outer.status); self.end_headers(); return
+                if "/jobs" in self.path:
+                    rid = int(self.path.split("/runs/")[1].split("/")[0])
+                    body = {"jobs": outer.jobs.get(rid, [])}
+                else:
+                    body = {"workflow_runs": outer.runs}
+                data = json.dumps(body).encode()
+                self.send_response(200); self.send_header("Content-Length", str(len(data))); self.end_headers()
+                self.wfile.write(data)
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    @property
+    def url(self):
+        return "http://127.0.0.1:%d" % self.srv.server_address[1]
+
+    def close(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+
+def gh_job(name, conclusion="success", status="completed", steps=()):
+    return {"name": name, "status": status, "conclusion": conclusion,
+            "steps": [{"name": "s", "conclusion": c} for c in steps]}
+
+
+class LabelBase(Base):
+    """The GitLab labels pass with a fake glab on PATH; the real GitLab is never reached."""
+    def setUp(self):
+        super().setUp()
+        self.fake = os.path.join(self.tmp.name, "fake")
+        binp = os.path.join(self.tmp.name, "bin")
+        os.makedirs(self.fake)
+        os.makedirs(binp)
+        with open(os.path.join(binp, "glab"), "w") as f:
+            f.write(FAKE_GLAB_LABELS)
+        os.chmod(os.path.join(binp, "glab"), 0o755)
+        patcher = mock.patch.dict(os.environ, {"PATH": binp + os.pathsep + os.environ["PATH"], "FAKE_DIR": self.fake,
+                                               "SF_SUIVI_DIR": self.state, "SF_TODAY": "2026-11-03"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for k in ("SF_SUIVI_LABELS_SETTLE", "SF_SUIVI_LABELS_TIMEOUT", "SF_SUIVI_TAGJOBS_API", "SF_SUIVI_TAG_CAP"):
+            os.environ.pop(k, None)
+        self.fstate = {"issues": {}, "tags": [], "pipelines": [], "pipeline_jobs": []}
+        self.save_fake()
+        self.gh = GithubStandIn()
+        self.addCleanup(self.gh.close)
+        os.environ["SF_SUIVI_TAGJOBS_API"] = self.gh.url
+        os.environ["SF_SUIVI_TAGJOBS_POLL"] = "0"
+
+    def save_fake(self):
+        with open(os.path.join(self.fake, "state.json"), "w") as f:
+            json.dump(self.fstate, f)
+
+    def load_fake(self):
+        with open(os.path.join(self.fake, "state.json")) as f:
+            self.fstate = json.load(f)
+        return self.fstate
+
+    def issue(self, n, labels=(), state="opened"):
+        self.fstate["issues"][str(n)] = {"state": state, "labels": list(labels)}
+        self.save_fake()
+
+    def labels_of(self, n):
+        return sorted(self.load_fake()["issues"][str(n)]["labels"])
+
+    def mode(self, m):
+        with open(os.path.join(self.fake, "mode"), "w") as f:
+            f.write(m)
+
+    def writes(self):
+        p = os.path.join(self.fake, "writes.jsonl")
+        if not os.path.exists(p):
+            return []
+        return [json.loads(l) for l in slurp(p).splitlines() if l.strip()]
+
+    def puts(self):
+        return [w for w in self.writes() if w["method"] == "PUT"]
+
+    def calls(self):
+        p = os.path.join(self.fake, "calls")
+        return slurp(p).splitlines() if os.path.exists(p) else []
+
+    def held(self, n, **extra):
+        self.put(n, colour=C[0], owner=self.live_owner(), **extra)
+
+    def paused(self, n, **extra):
+        self.put(n, colour=None, last_colour=C[0], **extra)
+
+    def run_pass(self, prev=None, now=NOW, dry=False):
+        return suivi.label_pass(prev, now, dry)[0]
+
+    def tag(self, name, sha=TAG_SHA):
+        self.fstate["tags"].insert(0, {"name": name, "commit": {"id": sha}})
+        self.save_fake()
+
+    def gh_run(self, jobs, sha=TAG_SHA, run_id=1, created="2026-11-05T10:00:00Z"):
+        self.gh.runs.append({"id": run_id, "head_sha": sha, "created_at": created, "name": "CI"})
+        self.gh.jobs[run_id] = jobs
+
+    def declare(self, n, kind, jobs=None, human=""):
+        suivi.write_json(suivi.tagwait_path(n), {"issue": n, "kind": kind, "jobs": jobs or [], "human": human, "declared_at": 1})
+
+
+class TestLabelWanted(Base):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def dead_owner(self):
+        return {"session": "S9", "pid": 2 ** 22 + 12345, "pid_start": 1, "at": time.time()}
+
+    def test_every_hold_reason_is_en_cours_and_the_rest_en_pause(self):
+        self.put(1, colour=C[0], owner=self.live_owner())                    # agent
+        self.put(2, colour=C[1])                                              # open form, no agent
+        os.makedirs(os.path.join(self.state, "qcm", "2-1"))
+        with open(os.path.join(self.state, "qcm", "2-1", "meta.json"), "w") as f:
+            json.dump({"issue": 2, "finished": False}, f)
+        self.put(3, colour=C[2])                                              # trial to tick, no agent
+        os.makedirs(os.path.join(self.state, "tests"))
+        with open(os.path.join(self.state, "tests", "3-1.json"), "w") as f:
+            json.dump({"n": 3, "status": "todo", "try": "scripts/try.sh 3"}, f)
+        self.put(4, colour=C[3], legacy=True)                                 # migrated record
+        self.put(5, colour=None, last_colour=C[4])                            # holds nothing
+        self.put(6, colour=C[5], done_at="2026-11-01")                        # finished
+        self.put(7, colour=C[4], owner=self.dead_owner())                     # its session died
+        want = suivi.label_wanted(suivi.load_all())
+        self.assertEqual(want, {1: "en-cours", 2: "en-cours", 3: "en-cours", 4: "en-cours", 5: "en-pause", 7: "en-pause"})
+
+    def test_package_parent_follows_its_subs_and_unstarted_subs_have_none(self):
+        self.put(10, kind="package", colour=C[0], subs=[{"n": 11, "title": "a"}, {"n": 12, "title": "b"}, {"n": 13, "title": "c"}])
+        self.put(11, parent=10, colour=C[0], owner=self.live_owner())
+        self.put(12, parent=10, colour=C[0])
+        self.assertEqual(suivi.label_wanted(suivi.load_all()), {10: "en-cours", 11: "en-cours", 12: "en-pause"})
+        # no sub held any more: the parent pauses with them; sub 13 never had a record
+        self.put(11, parent=10, colour=C[0])
+        self.assertEqual(suivi.label_wanted(suivi.load_all()), {10: "en-pause", 11: "en-pause", 12: "en-pause"})
+
+    def test_reads_records_only_never_git(self):
+        self.put(1, colour=C[0], owner=self.live_owner())
+        empty = os.path.join(self.tmp.name, "nobin")
+        os.makedirs(empty)
+        code = ("import importlib.util, sys\n"
+                "s = importlib.util.spec_from_file_location('suivi', %r); m = importlib.util.module_from_spec(s)\n"
+                "s.loader.exec_module(m)\n"
+                "print(m.label_wanted(m.load_all()))\n" % SUIVI)
+        r = subprocess.run([sys.executable, "-I", "-c", code], env={"PATH": empty, "SF_SUIVI_DIR": self.state},
+                           capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "{1: 'en-cours'}"), r.stderr)
+
+
+class TestLabelPass(LabelBase):
+    def test_one_put_per_changed_issue_with_add_and_remove_and_nothing_more(self):
+        self.held(1)
+        self.paused(2)
+        self.issue(1, ["évolution", "en-pause"])
+        self.issue(2, ["bug", "en-pause"])           # already right: no PUT
+        st = self.run_pass()
+        self.assertTrue(st["ok"], st)
+        puts = self.puts()
+        self.assertEqual([(p["issue"], p["fields"]) for p in puts],
+                         [(1, {"add_labels": "en-cours", "remove_labels": "en-pause"})])
+        self.assertEqual(self.labels_of(1), ["en-cours", "évolution"])
+        self.assertNotIn("labels", puts[0]["fields"])             # `labels=` would replace the user's labels
+        self.assertEqual(self.run_pass()["ok"], True)
+        self.assertEqual(len(self.puts()), 1, "the second pass wrote again")
+
+    def test_closed_issue_loses_labels_and_is_not_readded_until_reopened(self):
+        self.held(1)
+        self.held(2)
+        self.issue(1, ["en-cours"], state="closed")
+        self.issue(2, ["attente-rc"], state="closed")      # a waiting label goes at closure too
+        self.issue(3, ["en-pause", "attente-final"], state="closed")   # no record at all
+        self.run_pass()
+        self.assertEqual((self.labels_of(1), self.labels_of(2), self.labels_of(3)), ([], [], []))
+        n = len(self.puts())
+        self.run_pass()
+        self.assertEqual(len(self.puts()), n, "a closed issue with a live record was labelled again")
+        self.fstate["issues"]["1"]["state"] = "opened"
+        self.save_fake()
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["en-cours"])
+
+    def test_issue_without_label_is_found_by_number_not_by_label(self):
+        self.held(5)
+        self.issue(5, [])
+        self.run_pass()
+        self.assertEqual(self.labels_of(5), ["en-cours"])
+
+    def test_failed_timed_out_or_empty_read_writes_nothing(self):
+        self.held(1)
+        self.issue(1, ["en-pause"])
+        os.environ["SF_SUIVI_LABELS_TIMEOUT"] = "1"
+        for m in ("fail", "empty", "garbage", "dict", "sleep"):
+            self.mode(m)
+            st = self.run_pass(now=NOW)
+            self.assertFalse(st["ok"], m)
+            self.assertTrue(st["reason"], m)
+            self.assertEqual(self.writes(), [], "mode %s wrote" % m)
+            self.assertEqual(self.labels_of(1), ["en-pause"], m)
+        self.mode("")
+        self.assertTrue(self.run_pass()["ok"])
+        self.assertEqual(self.labels_of(1), ["en-cours"])
+
+    def test_failed_write_is_reported_and_retried(self):
+        self.held(1)
+        self.issue(1, [])
+        self.mode("failwrite")
+        st = self.run_pass()
+        self.assertFalse(st["ok"])
+        self.assertIsNone(st["synced_at"])
+        self.mode("")
+        self.assertTrue(self.run_pass()["ok"])
+        self.assertEqual(self.labels_of(1), ["en-cours"])
+
+    def test_demotion_waits_ten_minutes_promotion_and_done_are_immediate(self):
+        self.paused(1)
+        self.issue(1, ["en-cours"])
+        st = self.run_pass(now=NOW)
+        self.assertEqual(self.puts(), [])
+        st = self.run_pass(st, now=NOW + 599)
+        self.assertEqual(self.puts(), [])
+        st = self.run_pass(st, now=NOW + 601)
+        self.assertEqual(self.labels_of(1), ["en-pause"])
+        # promotion: at once
+        self.held(2)
+        self.issue(2, ["en-pause"])
+        self.run_pass(st, now=NOW + 700)
+        self.assertEqual(self.labels_of(2), ["en-cours"])
+        # done: at once
+        self.put(3, colour=None, done_at="2026-11-02")
+        self.issue(3, ["en-cours"])
+        self.run_pass(st, now=NOW + 700)
+        self.assertEqual(self.labels_of(3), [])
+
+    def test_a_flap_restarts_the_delay(self):
+        self.paused(1)
+        self.issue(1, ["en-cours"])
+        st = self.run_pass(now=NOW)
+        self.held(1)                                   # /clear then resume: held again
+        st = self.run_pass(st, now=NOW + 300)
+        self.assertEqual(st["demote"], {})
+        self.paused(1)
+        st = self.run_pass(st, now=NOW + 400)
+        st = self.run_pass(st, now=NOW + 700)          # 300 s after the new start, 700 after the first
+        self.assertEqual(self.puts(), [])
+        self.run_pass(st, now=NOW + 1001)
+        self.assertEqual(self.labels_of(1), ["en-pause"])
+
+    def test_settle_seam(self):
+        os.environ["SF_SUIVI_LABELS_SETTLE"] = "0"
+        self.paused(1)
+        self.issue(1, ["en-cours"])
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["en-pause"])
+
+    def test_waiting_label_hides_en_pause_and_keeps_en_cours(self):
+        self.paused(1)
+        self.paused(2)
+        self.held(3)
+        self.issue(1, ["attente-final"])
+        self.issue(2, ["en-pause", "attente-rc"])
+        self.issue(3, ["attente-rc"])
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["attente-final"])
+        self.assertEqual(self.labels_of(2), ["attente-rc"])
+        self.assertEqual(self.labels_of(3), ["attente-rc", "en-cours"])
+
+    def test_tracking_state_wins_over_a_hand_edit(self):
+        self.held(1)
+        self.issue(1, ["en-pause", "en-cours"])        # both by hand
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["en-cours"])
+
+    def test_declared_wait_adds_its_label_once(self):
+        self.paused(1)
+        self.declare(1, "final")
+        self.issue(1, [])
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["attente-final"])      # and no en-pause: hidden
+        self.assertTrue(jload(suivi.tagwait_path(1)).get("added_at"))
+        self.fstate["issues"]["1"]["labels"] = []                   # removed by hand
+        self.save_fake()
+        self.run_pass()
+        self.assertNotIn("attente-final", self.labels_of(1), "the label was added twice")
+
+    def test_dry_run_prints_and_writes_nothing(self):
+        self.held(1)
+        self.issue(1, [])
+        self.declare(1, "rc")
+        r = self.run_cli("labels", "sync", "--dry-run", env={"PATH": os.environ["PATH"], "FAKE_DIR": self.fake,
+                                                             "SF_SUIVI_DIR": self.state})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("PUT #1 add=attente-rc,en-cours", r.stdout)
+        self.assertEqual(self.writes(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "labels.json")))
+        self.assertFalse(jload(suivi.tagwait_path(1)).get("added_at"))
+
+
+class TestLabelGate(LabelBase):
+    def serve(self, *extra, env=None, poll="0.2"):
+        e = dict(self.env, PATH=os.environ["PATH"], FAKE_DIR=self.fake, SF_SUIVI_LABELS_POLL=poll)
+        e.update(env or {})
+        e.pop("SF_SUIVI_DIR", None) if "--state" in extra else None
+        proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", *extra],
+                                cwd=self.repo, env=e, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (proc.terminate(), proc.wait(5), proc.stdout.close(), proc.stderr.close()))
+        m = re.search(r":(\d+)/", proc.stdout.readline())
+        return int(m.group(1))
+
+    def issues_called(self):
+        return [c for c in self.calls() if "issues" in c]
+
+    def test_state_folder_override_never_reaches_gitlab(self):
+        os.makedirs(self.state, exist_ok=True)
+        self.serve("--state", self.state)
+        self.serve(env={"SF_SUIVI_DIR": self.state})
+        time.sleep(1.5)
+        self.assertEqual(self.calls(), [])
+
+    def test_seam_on_runs_the_loop_and_off_wins(self):
+        os.makedirs(self.state, exist_ok=True)
+        self.held(1)
+        self.issue(1, [])
+        self.serve("--state", self.state, env={"SF_SUIVI_LABELS": "on", "SF_SUIVI_DIR": self.state})
+        for _ in range(40):
+            if self.puts():
+                break
+            time.sleep(0.2)
+        self.assertEqual(self.labels_of(1), ["en-cours"])
+
+    def test_off_seam(self):
+        os.makedirs(self.state, exist_ok=True)
+        self.serve("--state", self.state, env={"SF_SUIVI_LABELS": "off"})
+        time.sleep(1)
+        self.assertEqual(self.calls(), [])
+
+    def test_labels_enabled_is_off_by_default_for_a_test_folder(self):
+        os.environ.pop("SF_SUIVI_LABELS", None)
+        self.assertFalse(suivi.labels_enabled(False))
+        self.assertTrue(suivi.labels_enabled(True))
+        with mock.patch.dict(os.environ, {"SF_SUIVI_LABELS": "on"}):
+            self.assertTrue(suivi.labels_enabled(False))
+        with mock.patch.dict(os.environ, {"SF_SUIVI_LABELS": "off"}):
+            self.assertFalse(suivi.labels_enabled(True))
+
+    def test_state_etag_does_not_move_with_the_loop(self):
+        os.makedirs(self.state, exist_ok=True)
+        self.held(1)
+        self.issue(1, [])
+        port = self.serve("--state", self.state, env={"SF_SUIVI_LABELS": "on", "SF_SUIVI_DIR": self.state})
+
+        def etag():
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            c.request("GET", "/api/state")
+            r = c.getresponse()
+            r.read()
+            return r.getheader("ETag")
+        first = etag()
+        time.sleep(1.2)
+        self.assertTrue(first)
+        self.assertEqual(etag(), first)
+
+
+class TestTagReport(LabelBase):
+    def seed(self, *names):
+        for t in names:
+            self.tag(t, sha="a" * 40)
+        suivi.tag_pass(NOW)
+        self.assertEqual(self.writes(), [])
+
+    def test_first_run_only_seeds(self):
+        self.tag("v1.0.1")
+        self.issue(1, ["attente-final"])
+        self.gh_run([gh_job("release-linux")], sha=TAG_SHA)
+        lines = suivi.tag_pass(NOW)
+        d = jload(suivi.tags_path())
+        self.assertEqual((d["seen"], self.writes()), (["v1.0.1"], []))
+        self.assertFalse([c for c in self.calls() if "issues" in c], lines)
+        self.assertEqual(self.gh.hits, [])
+
+    def test_rc_tag_treats_attente_rc_only_final_treats_both_and_restart_is_quiet(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.issue(2, ["attente-final"])
+        self.gh_run([gh_job("release-linux"), gh_job("test-linux-packages (fedora:42, rpm)")])
+        self.tag("v1.1.0-rc1")
+        suivi.tag_pass(NOW)
+        posts = [w for w in self.writes() if w["path"].endswith("/notes")]
+        self.assertEqual([w["issue"] for w in posts], [1])
+        self.assertFalse([c for c in self.calls() if "labels=attente-final" in c], "an rc tag read attente-final")
+        suivi.tag_pass(NOW + 5000)                                   # restart: same data
+        self.assertEqual(len([w for w in self.writes() if w["path"].endswith("/notes")]), 1)
+        d = jload(suivi.tags_path())                                 # a crash after the comment, before `seen`
+        d["seen"].remove("v1.1.0-rc1")
+        suivi.write_json(suivi.tags_path(), d)
+        suivi.tag_pass(NOW + 5500)
+        self.assertEqual(len([w for w in self.writes() if w["path"].endswith("/notes")]), 1)
+        self.gh.runs.clear()
+        self.gh_run([gh_job("release-linux")], sha="d" * 40)
+        self.tag("v1.1.0", sha="d" * 40)
+        suivi.tag_pass(NOW + 6000)
+        posts = [(w["issue"]) for w in self.writes() if w["path"].endswith("/notes")]
+        self.assertEqual(sorted(posts), [1, 1, 2])                   # a later tag, a new comment
+        suivi.tag_pass(NOW + 9000)
+        self.assertEqual(len([w for w in self.writes() if w["path"].endswith("/notes")]), 3)
+
+    def test_runs_of_another_sha_are_ignored(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["release-linux"])
+        self.gh_run([gh_job("release-linux", "success")], sha="e" * 40, run_id=7, created="2026-11-05T12:00:00Z")
+        self.gh_run([gh_job("release-linux", "failure")], sha=TAG_SHA, run_id=8, created="2026-11-05T09:00:00Z")
+        self.tag("v1.0.1-rc1")
+        suivi.tag_pass(NOW)
+        note = self.load_fake()["issues"]["1"]["notes"][0]
+        self.assertIn("`release-linux`: failed", note)
+
+    def test_verdicts(self):
+        v = suivi.job_verdict
+        self.assertEqual(v("a", []), "missing")
+        self.assertEqual(v("a", [gh_job("b")]), "missing")
+        self.assertEqual(v("a", [gh_job("a", None, "in_progress")]), "pending")
+        self.assertEqual(v("a", [gh_job("a", "skipped")]), "skipped")
+        self.assertEqual(v("a", [gh_job("a", "cancelled")]), "failed")
+        self.assertEqual(v("a", [gh_job("a")]), "ok")
+        legs = [gh_job("a (x, rpm)"), gh_job("a (y, deb)"), gh_job("a (z, deb)")]
+        self.assertEqual(v("a", legs), "ok")
+        self.assertEqual(v("a", legs[:2] + [gh_job("a (z, deb)", "failure")]), "failed")
+        self.assertEqual(v("a", legs[:2] + [gh_job("a (z, deb)", None, "queued")]), "pending")
+        self.assertEqual(v("a", [gh_job("ab")]), "missing")               # a prefix of another name is not a match
+        # a `continue-on-error` job reads green although its step failed
+        self.assertEqual(v("a", [gh_job("a", "success", steps=("success", "failure"))]), "failed")
+
+    def test_unreadable_or_running_github_defers_without_any_comment(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["release-linux"])
+        self.tag("v1.0.1-rc1")
+        self.gh.status = 403
+        suivi.tag_pass(NOW)
+        self.assertEqual(self.writes(), [])
+        self.gh.status = 200
+        self.gh_run([gh_job("release-linux", None, "in_progress")])
+        suivi.tag_pass(NOW + 1)
+        self.assertEqual(self.writes(), [])
+        self.assertNotIn("v1.0.1-rc1", jload(suivi.tags_path())["seen"])
+        self.gh.jobs[1] = [gh_job("release-linux")]                   # finished: now it is reported
+        suivi.tag_pass(NOW + 2)
+        self.assertEqual(len(self.writes()), 1)
+        self.assertIn("v1.0.1-rc1", jload(suivi.tags_path())["seen"])
+
+    def test_a_declared_issue_with_every_job_ok_gets_a_card_that_closes_it(self):
+        self.seed("v1.0.0")
+        self.paused(1)
+        self.issue(1, ["attente-final"])
+        self.declare(1, "final", jobs=["release-linux", "pages"], human="Ouvre le manuel en ligne.")
+        self.gh_run([gh_job("release-linux")])
+        self.fstate["pipelines"] = [{"id": 9, "sha": TAG_SHA, "source": "push", "status": "success"}]
+        self.fstate["pipeline_jobs"] = [{"name": "pages", "status": "success"}]
+        self.tag("v1.1.0")
+        suivi.tag_pass(NOW)
+        card = jload(os.path.join(self.state, "tests", "1-1.json"))
+        self.assertEqual((card["status"], card["n"]), ("todo", 1))
+        self.assertNotIn("try", card)
+        suivi.check_entry({k: v for k, v in card.items() if k not in ("n", "status")})
+        self.assertIn("Ouvre le manuel en ligne.", card["steps"])
+        self.assertFalse(suivi.trial_pending(1), "the card must not hold a colour")
+        self.assertEqual(suivi.build_state()["pending"], 1)
+        suivi.tag_pass(NOW + 1)                                        # untouched card: nothing closes
+        self.assertEqual(self.puts(), [])
+        card["status"] = "retour"
+        suivi.write_json(os.path.join(self.state, "tests", "1-1.json"), card)
+        suivi.tag_pass(NOW + 2)
+        self.assertEqual(self.puts(), [])                              # Retour keeps it open
+        card["status"] = "ok"
+        suivi.write_json(os.path.join(self.state, "tests", "1-1.json"), card)
+        suivi.tag_pass(NOW + 3)
+        suivi.tag_pass(NOW + 4)
+        puts = self.puts()
+        self.assertEqual([(p["issue"], p["fields"]) for p in puts],
+                         [(1, {"remove_labels": "attente-final,attente-rc", "state_event": "close"})])
+        self.assertEqual(self.load_fake()["issues"]["1"]["state"], "closed")
+
+    def test_a_failed_job_comments_keeps_the_label_and_makes_no_card(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["release-linux", "test-linux-packages"])
+        self.gh_run([gh_job("release-linux"), gh_job("test-linux-packages (fedora:42, rpm)", "failure")])
+        self.tag("v1.0.1-rc1")
+        suivi.tag_pass(NOW)
+        self.assertEqual(len(self.writes()), 1)
+        self.assertIn("failed", self.load_fake()["issues"]["1"]["notes"][0])
+        self.assertEqual(self.labels_of(1), ["attente-rc"])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+
+    def test_a_missing_job_is_no_proof_so_no_card(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["test-linux-packages"])
+        self.gh_run([gh_job("release-linux")])
+        self.tag("v1.0.1-rc1")
+        suivi.tag_pass(NOW)
+        self.assertIn("missing (no proof)", self.load_fake()["issues"]["1"]["notes"][0])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+
+    def test_hand_placed_label_reports_all_release_jobs_with_a_generic_card(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.gh_run([gh_job(j) for j in suivi.RELEASE_JOBS])
+        self.tag("v1.0.1-rc1")
+        suivi.tag_pass(NOW)
+        note = self.load_fake()["issues"]["1"]["notes"][0]
+        for j in suivi.RELEASE_JOBS:
+            self.assertIn("`%s`: ok" % j, note)
+        card = jload(os.path.join(self.state, "tests", "1-1.json"))
+        self.assertIn("Relis l'issue #1", card["steps"][0])
+
+    def test_tag_check_dry_run_reads_and_never_writes(self):
+        self.tag("v1.0.1", sha=TAG_SHA)
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["release-linux"])
+        self.gh_run([gh_job("release-linux")])
+        env = {"PATH": os.environ["PATH"], "FAKE_DIR": self.fake, "SF_SUIVI_DIR": self.state,
+               "SF_SUIVI_TAGJOBS_API": self.gh.url}
+        r = self.run_cli("tag-check", "v1.0.1", "--dry-run", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("#1: comment on v1.0.1: release-linux=ok", r.stdout)
+        self.assertEqual(self.writes(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tags.json")))
+        self.assertNotEqual(self.run_cli("tag-check", "v1.0.1", env=env).returncode, 0)   # --dry-run is required
+
+    def test_status_shows_the_sync_state(self):
+        suivi.write_json(suivi.labels_path(), {"checked_at": time.time(), "ok": False, "reason": "glab failed (exit 1)",
+                                                "waiting": [{"issue": 345, "label": ["attente-final"]}]})
+        r = self.run_cli("status", env={"SF_SUIVI_DIR": self.state})
+        self.assertIn("FAILED (glab failed (exit 1))", r.stdout)
+        self.assertIn("#345 waits (attente-final)", r.stdout)
+
+    def test_tag_wait_command_writes_the_declaration(self):
+        r = self.run_cli("tag-wait", "389", "rc", "--jobs", "a,b", "--human", "Vérifie.", env={"SF_SUIVI_DIR": self.state})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = jload(suivi.tagwait_path(389))
+        self.assertEqual((d["kind"], d["jobs"], d["human"]), ("rc", ["a", "b"], "Vérifie."))
+        self.assertNotEqual(self.run_cli("tag-wait", "389", "soon", env={"SF_SUIVI_DIR": self.state}).returncode, 0)
+
+
 class TestPage(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_script_parses(self):

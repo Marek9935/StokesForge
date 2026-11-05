@@ -115,12 +115,23 @@ Each line is observed by a command or a page; none is declared
      Maintainer.
 5. Observe: the GitLab release exists, the installer and the archive can be
    downloaded from it.
-6. Go through the issues waiting for a tag (`glab issue list --label attente-tag`):
-   their code is merged but only runs at a tag. Read the jobs they name on GitHub
-   (they are not in `scripts/ci-status.sh`); close each issue whose proof is now
-   done and drop its label, otherwise note what failed in it. The non-blocking
-   jobs (`test-linux-packages` while the packages are unpublished, #390) need it
-   most: their failure does not stop the release.
+6. The issues waiting for a tag (`glab issue list --label attente-rc` and
+   `--label attente-final`; #467): their code is merged but only runs at a tag.
+   `attente-rc` is proved by an `-rcN` or the final tag, `attente-final` by the
+   final tag only. **Before the tag**, run `python3 scripts/suivi.py tag-check
+   <tag> --dry-run`: it reads GitLab and GitHub and prints what would be reported,
+   without writing. **Automatic** (the local `suivi.py serve`, which must be
+   running): within about 10 minutes of the tag, each waiting issue gets a comment
+   with the results of the jobs it names (read from GitHub, `pages` from the GitLab
+   pipeline) and, if none failed, a card in « En attente » of the tracking page;
+   OK on the card closes the issue and drops the label, Retour keeps it open. A
+   failed job gives the comment only and the label stays. **Still by hand**: the
+   tag itself (the user's order), reading `scripts/ci-status.sh` for the release
+   jobs, the check of what a card says to look at, and any issue whose label was
+   not declared (`suivi.py tag-wait`, or `deliver.sh --wait-tag`): it gets a
+   generic card « relis l'issue ». The non-blocking jobs (`test-linux-packages`
+   while the packages are unpublished, #390) need it most: their failure does
+   not stop the release.
 
 **Variant for a following version `X.Y.Z`** (`1.0.1`, `1.1.0`, `2.0.0`): the
 steps are the same, with what changes:
