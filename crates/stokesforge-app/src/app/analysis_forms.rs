@@ -618,6 +618,16 @@ fn x_extent(form: &AnalysisForm, tree: &Tree) -> Option<(f64, f64)> {
     x_extent_of(&stokesforge_app_state::analysis::series_points(tree, series).0)
 }
 
+/// The reason to paint on the Custom model field: not while the user is editing
+/// it (#438).
+fn model_issue_to_paint(issue: &Option<String>, editing: bool) -> Option<String> {
+    if editing {
+        None
+    } else {
+        issue.clone()
+    }
+}
+
 fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let has_sigma = form.series.iter().any(|s| s.sigma.is_some());
     let multi = form.series.len() > 1;
@@ -671,8 +681,28 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
                         .desired_width(width)
                         .hint_text(tr!("analysis-fit-custom-example")),
                 );
-                if let Some(message) = &model_issue {
-                    field_state::show_issue(ui, &response, &FieldIssue::refused(message.clone()));
+                // Like the Typst error of a rich text (S-T3): the frame and bubble
+                // appear once the field is left, so they do not flicker while
+                // typing; the footer, the preview and the table stay live.
+                // The dialog's initial focus (S-F9) lands on this field without
+                // the user doing anything: only an edit, a click or a Tab into
+                // the field counts as "being edited", so "Edit Calculation" on a
+                // stored bad model shows its frame at once.
+                let id = response.id.with("model_editing");
+                let user_input =
+                    ui.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Tab));
+                let mut editing = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+                if !response.has_focus() {
+                    editing = false;
+                } else if response.changed()
+                    || response.clicked()
+                    || (response.gained_focus() && user_input)
+                {
+                    editing = true;
+                }
+                ui.data_mut(|d| d.insert_temp(id, editing));
+                if let Some(message) = model_issue_to_paint(&model_issue, editing) {
+                    field_state::show_issue(ui, &response, &FieldIssue::refused(message));
                 }
                 response.changed()
             });
@@ -1123,6 +1153,17 @@ pub(super) fn value_row(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// #438: the Custom model frame waits for the field to be left.
+    #[test]
+    fn the_model_frame_waits_while_the_user_edits() {
+        let issue = Some("The model is invalid".to_string());
+        assert_eq!(model_issue_to_paint(&issue, true), None);
+        assert_eq!(model_issue_to_paint(&issue, false), issue);
+        assert_eq!(model_issue_to_paint(&None, false), None);
+    }
+
     use eframe::egui;
 
     use super::super::test_support::{click, context, image, key, text_exact, texts};

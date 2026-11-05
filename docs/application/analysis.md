@@ -93,7 +93,8 @@ The mathematical processing interface is split as follows:
   `error-number-too-large/small`) and `pyst.analysis.readiness`. The rule is
   `expr::number_out_of_range`, shared with `core::number_format::check_range`.
   The Custom model field is framed in red, with the reason in its bubble, for
-  every model error (`AnalysisForm::model_field_issue`, painted by
+  every model error, only while it does not have focus (S-T3: shown once the
+  field is left; footer, preview and table stay live) (`AnalysisForm::model_field_issue`, painted by
   `show_issue` in `analysis_forms.rs`; an empty field has no frame). A stored
   calculation holding such a number still loads and recalculates, but Edit
   Calculation (Update greyed) and a range-handle drag (`move_calculation_handle`:
