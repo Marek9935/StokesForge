@@ -1129,8 +1129,9 @@ The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometr
   Graph Properties and the strip share it, and `GraphView::set_figure_ratio_lock`
   makes the L corners keep its ratio. A committed scale of the figure adopts the next
   image (`SizeLock::adopt_next`), so a rounding never drifts the ratio.
-- **The window is maximised while the mode lasts, and its keys are read first.**
-  `app/layout_window.rs` maximises on entering, reconciles each frame (a graph whose window
+- **A floating window is maximised while the mode lasts, a detached one keeps its size, and
+  the keys are read first.** `app/layout_window.rs` maximises a floating window on entering
+  (never an OS window: it would hide the root on Wayland and stall the drain), reconciles each frame (a graph whose window
   is no longer the maximised one leaves the mode) and reports the pre-mode state to the
   saved window views. The keys (Esc, `G`, arrows) are read by `begin_layout_frame` at the
   start of the root frame and at the top of a detached viewport, never in

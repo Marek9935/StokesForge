@@ -348,8 +348,8 @@ fn follow_figure_in_viewport(
     let Some(step) = FigureFollow::observe(follows, graph, size, origin, scale) else {
         return;
     };
-    // In the Page Layout Mode the window is maximised (or about to be): the
-    // figure is recorded, the window keeps its size.
+    // In the Page Layout Mode the window keeps its size (it must not jump
+    // under the user's hands): the figure is recorded only.
     if in_layout_mode {
         return;
     }
@@ -464,9 +464,10 @@ pub(super) struct DetachedTabViewModel {
     /// the figure when its size changes (#394), see
     /// [`FigureFollow`](super::window_placement::FigureFollow).
     pub(super) figure_follow: HashMap<NodeId, FigureFollow>,
-    /// `Tab::Graph`: the maximise the Page Layout Mode forced on the OS window
-    /// (`layout_window::follow_mode_maximize`).
-    pub(super) mode_maximize: super::layout_window::ModeMaximize,
+    /// `Tab::Graph`: whether the viewport last painted the Page Layout Mode, to
+    /// wake it when the root toggles the mode. The OS window is never maximised
+    /// for the mode (see the top doc of `layout_window.rs`).
+    pub(super) mode_shown: bool,
 }
 
 /// What a detached window writes, so that [`StokesForgeApp::ui`](eframe::App::ui) (the only one to
@@ -911,7 +912,7 @@ impl StokesForgeApp {
             focused: false,
             expanded_size: None,
             figure_follow: HashMap::new(),
-            mode_maximize: None,
+            mode_shown: false,
         };
         self.detached_tabs.insert(
             tab,
@@ -1144,14 +1145,14 @@ impl DetachedTab {
         let mode_differs = model
             .graph_view
             .as_ref()
-            .is_some_and(|view| view.layout_mode() != model.mode_maximize.is_some());
+            .is_some_and(|view| view.layout_mode() != model.mode_shown);
         model.snapshot = Some(snapshot.clone());
         if let Some(view_state) = model.view_state.as_mut() {
             view_state.sync_detached_snapshot(snapshot.clone());
             view_state.sync_detached_sheet_editor(state);
         }
-        // A mode toggled from the root's menu: the viewport maximises or
-        // restores its window on its next frame.
+        // A mode toggled from the root's menu: the viewport repaints it on its
+        // next frame.
         changed || mode_differs
     }
 }
@@ -1236,12 +1237,11 @@ impl DetachedTabViewport {
         let root_context = &self.root_context;
         let mut header_actions = WindowHeaderActions::default();
         // Page Layout Mode (#426): the keys come first, before anything is
-        // painted, and the OS window follows the mode.
+        // painted. The OS window keeps its size in the mode.
         if let Tab::Graph(graph) = tab {
             let view = model.graph_view.get_or_insert_with(GraphView::default);
             super::page_layout::handle_keys(ui.ctx(), view, graph, &mut requests.actions);
-            let in_mode = view.layout_mode();
-            super::layout_window::follow_mode_maximize(ui.ctx(), &mut model.mode_maximize, in_mode);
+            model.mode_shown = view.layout_mode();
         }
         // Default stroke (inactive) only — the active outline
         // is no longer recolored here (B7,
@@ -1299,7 +1299,7 @@ impl DetachedTabViewport {
                             &mut model.figure_follow,
                             id,
                             model.graph_view.as_ref().and_then(GraphView::display_scale),
-                            model.mode_maximize.is_some(),
+                            model.mode_shown,
                         );
                         let view = model.graph_view.get_or_insert_with(GraphView::default);
                         if before != selected_manager_target(view) {
@@ -1780,7 +1780,7 @@ mod tests {
     /// #426: a Page Layout Mode asked from inside a detached window (its
     /// right-click Layout menu) starts at once. The request is run by the root,
     /// so it must wake the root, not only the detached viewport; the root then
-    /// wakes the viewport, which maximises its OS window. Witness: the request
+    /// wakes the viewport, which paints the mode and sends no `Maximized`. Witness: the request
     /// waking only the viewport it was made in.
     #[test]
     fn a_page_layout_mode_asked_in_a_detached_window_starts_without_another_click() {
@@ -1833,6 +1833,8 @@ mod tests {
             child_output.textures_delta.clear();
             child_output
         };
+        let callback_of =
+            |output: &egui::FullOutput| output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
         let mut output = paint_root(&mut app);
         for _ in 0..6 {
             paint_child(&output, false);
@@ -1855,13 +1857,37 @@ mod tests {
             Some(true)
         );
         assert_eq!(output.viewport_output[&id].repaint_delay, Duration::ZERO);
+        // The mode is painted; entering sent no maximise, now or later, and the
+        // user's own maximise / restore of the OS window neither leaves the
+        // mode nor draws a command. Witness: re-add a `Maximized` command, or
+        // reconcile the mode on the OS maximised state.
+        let mut all = Vec::new();
+        for maximized in [false, true, true, false, false] {
+            let mut child = child_input();
+            child.viewports.get_mut(&id).unwrap().maximized = Some(maximized);
+            let mut child_output = ctx.run_ui(child, |ui| callback_of(&output)(ui));
+            child_output.textures_delta.clear();
+            all.extend(child_output.viewport_output[&id].commands.clone());
+            paint_root(&mut app);
+            assert_eq!(
+                app.read_graph_view(graph, GraphView::layout_mode),
+                Some(true),
+                "a manual maximise of {maximized} keeps the mode"
+            );
+        }
+        assert!(
+            !all.iter()
+                .any(|c| matches!(c, egui::ViewportCommand::Maximized(_))),
+            "{all:?}"
+        );
+        app.toggle_layout_mode(graph, Some(false));
         let child_output = paint_child(&output, false);
         let commands = &child_output.viewport_output[&id].commands;
         assert!(
-            commands
+            !commands
                 .iter()
-                .any(|command| matches!(command, egui::ViewportCommand::Maximized(true))),
-            "{commands:?}"
+                .any(|c| matches!(c, egui::ViewportCommand::Maximized(_))),
+            "leaving sends none: {commands:?}"
         );
         session.shutdown().unwrap();
     }
