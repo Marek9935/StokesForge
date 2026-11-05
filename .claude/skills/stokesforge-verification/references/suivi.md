@@ -38,13 +38,13 @@ Entries are **guided routes**, at most 5 unmerged per issue (`test add` refuses 
 
 ## The agent wakes (#454)
 
-After `qcm pose` or `test add` the agent launches nothing and ends its turn; it never asks the user to say they finished. A `PostToolUse` hook of `.claude/settings.json` runs `suivi.py hook-wait` after any `suivi.py` call on an issue the session owns: it waits on local files and wakes the idle agent. After a wake the agent reads the answers (`qcm answers`, `test list`) and acts; any later `suivi.py` call on the issue re-arms the wait by itself. Without an active hook, fall back to `suivi.py wait <n>` as a background Bash command. Only the main session arms.
+After `qcm pose` or `test add` the agent launches nothing and ends its turn; it never asks the user to say they finished. A `PostToolUse` hook of `.claude/settings.json` runs `suivi.py hook-wait` after any `suivi.py` call on an issue the session owns: it waits on local files and wakes the idle agent. After a wake the agent reads the answers (`qcm answers`, `test list`) and acts; any later `suivi.py` call on the issue re-arms the wait by itself. Without an active hook, fall back to `suivi.py wait <n>` as a background Bash command. Only the session that owns the issue arms.
 
 - **Wake policy** (`should_wake`, the one place): a Retour, a comment on an OK, a finished form (« J'ai fini »), or no `todo` left. A plain OK with entries left wakes nothing. A Retour or comment waits 180 s after the last change of any entry (`SF_SUIVI_WAIT_SETTLE`); a finished form or no `todo` left wakes at once.
 - **Merge**: all entries OK does not merge by itself. The agent wakes, checks, announces it is ready, and merges on the user's word in the terminal (the user's plain OK there is the go-ahead). The card then reads « À toi : écrire à l’agent pour fusionner » (computed).
 - **Card**: « L’agent écoute » / « il repart à ta réponse » (waiting), « écris-lui après ta réponse » (agent stopped), « Réponse reçue : lance #n » (paused, unread answer).
 - **Safety net**: `hook-news` (SessionStart, UserPromptSubmit) prints unread answers; `chantier.sh` runs `suivi.py news <n>` on a claim. A wait never holds a colour.
-- **Limits**: a closed terminal cannot be woken (the answer waits for the next `lance`); a real wait beyond a few minutes is not proven past the 72 h hook timeout.
+- **Limits**: a closed terminal cannot be woken (the answer waits for the next `lance`); a real wait is not proven beyond a few minutes; the hook timeout is 72 h.
 
 ## Pre-trial (#452)
 
