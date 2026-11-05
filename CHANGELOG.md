@@ -54,8 +54,7 @@ without a message, see `docs/persistence.md`).
   detached window covers the main one. The main window is locked while it is
   open; clicking on it brings the dialog back there. A detached window narrower
   than 560 pixels or shorter than 170 still opens its dialogs in the main
-  window. Ctrl+Z and Ctrl+C in a text field of a dialog no longer reach the
-  model or the figure.
+  window. Ctrl+Z in a text field of a dialog no longer reaches the model.
 - Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
   show a graph as a page with rulers, a grid, handles and a settings strip
   (figure size with a padlock shared with Graph Properties, position and size of
