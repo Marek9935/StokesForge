@@ -882,6 +882,18 @@ class TestServer(ServerBase):
         self.assertIn(b"<title>Suivi StokesForge</title>", body)
         self.assertEqual(self.req("GET", "/qcm/nope")[0], 404)
 
+    def test_decision_form_has_a_home_link_shown_only_when_local(self):
+        os.makedirs(os.path.join(self.state, "qcm", "q1"))
+        with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "Form", "cards": 1}, f)
+        with open(os.path.join(self.state, "qcm", "q1", "data.js"), "w") as f:
+            f.write("const TITRE='T';const SEC={};const ISSUES={};const INTRO='';const D=[];\n")
+        status, _, body = self.req("GET", "/qcm/q1")
+        self.assertEqual(status, 200)
+        page = body.decode()
+        self.assertRegex(page, r'<a class="link" id="goHome" href="/" hidden[^>]*>← Retour à l’accueil</a>')
+        self.assertIn("if(LOCAL)document.getElementById('goHome').hidden=false", page)
+
     def test_port_in_use_exits_1(self):
         r = subprocess.run([sys.executable, "-I", SUIVI, "serve", "--port", str(self.port), "--state", self.state],
                            cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=10)
@@ -1067,36 +1079,14 @@ class CiBase(unittest.TestCase):
         with open(os.path.join(self.bin, "glab"), "w") as f:
             f.write(FAKE_GLAB)
         os.chmod(os.path.join(self.bin, "glab"), 0o755)
-        self.gh = {"code": 200, "runs": self.runs(), "hits": 0}
-        gh = self.gh
-
-        class H(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                gh["hits"] += 1
-                body = json.dumps({"check_runs": gh["runs"]}).encode()
-                self.send_response(gh["code"])
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *a):
-                pass
-        self.srv = http.server.HTTPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-        self.addCleanup(self.srv.server_close)
-        self.addCleanup(self.srv.shutdown)
         patcher = mock.patch.dict(os.environ, {
             "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_DIR": self.dir,
-            "SF_SUIVI_DIR": self.state, "SF_SUIVI_GITHUB": "http://127.0.0.1:%d" % self.srv.server_address[1],
-            "SF_SUIVI_CI_TIMEOUT": "60"})
+            "SF_SUIVI_DIR": self.state, "SF_SUIVI_CI_TIMEOUT": "60"})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop("SF_SUIVI_CI", None)
         self.head(SHA_A)
         self.jobs()
-
-    def runs(self, **over):
-        return [{"name": n, "status": "completed", "conclusion": over.get(n, "success")} for n in suivi.CI_WINDOWS_JOBS]
 
     def put_file(self, name, text):
         with open(os.path.join(self.dir, name), "w") as f:
@@ -1161,7 +1151,7 @@ class TestCiVerdict(CiBase):
 
     def test_blocking_list_equals_gitlab_status(self):
         with open(os.path.join(HERE, "gitlab-status.py")) as f:
-            m = re.search(r"^JOBS = \((.*?)\)", f.read(), re.M)
+            m = re.search(r"^JOBS = \((.*?)\)", f.read(), re.M | re.S)
         self.assertEqual(tuple(re.findall(r'"([^"]+)"', m.group(1))), suivi.CI_JOBS)
 
     def test_ci_status_script_has_no_unknown_glab_use_outside_head_mode(self):
@@ -1177,37 +1167,22 @@ class TestCiVerdict(CiBase):
 
 class TestCiWindows(CiBase):
     def test_windows_failure_turns_red_with_names(self):
-        self.gh["runs"] = self.runs(**{"dist-windows": "failure"})
+        self.jobs(**{"dist_windows": "FAILED"})
         r = self.poll()
         self.assertEqual((r["verdict"], r["names"]), ("red", ["dist-windows"]))
 
-    def test_windows_pending_missing_or_unreadable(self):
-        self.gh["runs"] = self.runs()[:2]
+    def test_windows_pending_or_missing_is_not_green(self):
+        self.jobs(**{"test_windows": "RUNNING"})
         self.assertEqual(self.poll()["verdict"], "pending")
-        self.gh["runs"] = self.runs()
-        self.gh["runs"][0]["status"] = "in_progress"
+        self.jobs(**{"test_python_windows": None})
         self.assertEqual(self.poll()["verdict"], "pending")
-        self.gh["code"] = 403
-        self.gh["runs"] = self.runs()
-        self.assertEqual(self.poll()["verdict"], "unknown")
-        self.gh["runs"] = self.runs(**{"test-windows": "cancelled"})
-        self.gh["code"] = 200
-        self.assertEqual(self.poll()["verdict"], "unknown")
 
-    def test_network_down_is_unknown_never_green(self):
-        os.environ["SF_SUIVI_GITHUB"] = "http://127.0.0.1:1"
-        self.assertEqual(self.poll()["verdict"], "unknown")
-
-    def test_github_not_read_when_linux_is_not_green_and_final_not_reread(self):
-        self.jobs(test="FAILED")
-        self.poll()
-        self.assertEqual(self.gh["hits"], 0)
-        self.jobs()
-        r = self.poll()
-        self.assertEqual(self.gh["hits"], 1)
-        self.poll(r)
-        self.poll(r)
-        self.assertEqual(self.gh["hits"], 1)
+    def test_windows_jobs_are_in_the_blocking_list_and_no_github_read_remains(self):
+        for j in ("test-windows", "test-python-windows", "dist-windows"):
+            self.assertIn(j, suivi.CI_JOBS)
+        for gone in ("ci_windows_verdict", "ci_github_runs", "CI_WINDOWS_JOBS", "GITHUB_API"):
+            self.assertFalse(hasattr(suivi, gone), gone)
+        self.assertNotIn("SF_SUIVI_GITHUB", slurp(SUIVI))
 
 
 class TestCiHeads(CiBase):

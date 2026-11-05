@@ -553,8 +553,8 @@ Linux runner is registered; Windows is not affected by this choice.
 | `test-linux-packages` (GitHub) | on a tag, after `release-linux`; matrix `fedora:42` (RPM), `debian:12` and `ubuntu:22.04` (DEB) (#390) | `scripts/linux-packages-install-test.sh` in the container, as root: installs the package with its dependencies only, `stokesforge --version`, `desktop-file-validate`, `.stf` type registered by the distribution triggers (`mimeinfo.cache`, `globs2`), window under `xvfb-run` with Mesa (exit 0), `stokesforge-selftest`, `install.sh --system --yes` of the archive refused, removal leaves nothing, package refused over an `install.sh --system` installation (preinst), reinstall, then `rpmlint` / `lintian` with the committed suppression lists `scripts/linux-packages/rpmlint.toml` and `lintian-suppress.txt`. The Fedora release is pinned: change it on purpose. The switch is 1 (#388): a failure here and in the package steps of `release-linux` blocks the release (`continue-on-error` is read from the switch; at 0 it would only show). The install test also checks, when the package carries the logo, that the app and `.stf` icons are installed and removed with the package |
 | `upload-linux-packages` (GitHub) | on a tag, after `test-linux-packages` | uploads the RPM and DEB (`scripts/release-upload.sh rpm\|deb`) only when `PUBLISH_LINUX_PACKAGES=1` in `scripts/linux-packages.env` (gated on the steps, not on the job, so that `publier` does not skip); `release-publish.sh` links them under the same switch |
 | `release-manual` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` | same tag guards as `release-linux`; builds the manual with the version in its title and uploads `StokesForge-X.Y.Z-manual.tar.gz` to the GitLab package registry (`scripts/release-upload.sh manual`, #362) |
-| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333) | same checks on a clean machine; `dist-windows` sets `STOKESFORGE_DIST_LOGO=1` (#388, one line to change): the `.exe` icon (`STOKESFORGE_EXE_ICON`, `build.rs`), the setup icon and the `.stf` icon, checked in the installation and the registry, and the installer script is compiled once more with no logo define (`/O-`); on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
-| `test-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking; GitHub only, not in `.gitlab-ci.yml` nor in `JOBS` of `scripts/gitlab-status.py` (#412) | `cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands`: the formula engine on Windows (float formatting, paths, stack depth); the first errors go in a `::error` annotation |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333); published to GitLab like the Linux jobs (`JOBS` of `scripts/gitlab-status.py`, #452) | same checks on a clean machine; `dist-windows` sets `STOKESFORGE_DIST_LOGO=1` (#388, one line to change): the `.exe` icon (`STOKESFORGE_EXE_ICON`, `build.rs`), the setup icon and the `.stf` icon, checked in the installation and the registry, and the installer script is compiled once more with no logo define (`/O-`); on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
+| `test-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking; GitHub only, not in `.gitlab-ci.yml`, but published to GitLab through `JOBS` of `scripts/gitlab-status.py` (#412, #452) | `cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands`: the formula engine on Windows (float formatting, paths, stack depth); the first errors go in a `::error` annotation |
 | Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta. Read with `scripts/toolchain-weekly-status.sh` (public GitHub API, no `gh`) |
 | `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md); the notes end with a line "Built with rustc … (Linux) and rustc … (Windows)" (outputs `rustc` of `release-linux` and `dist-windows`, `scripts/rustc-note.sh`), and `release-publish.sh` refuses to publish if one is missing (#412) |
 | `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, the token's role is not allowed to run pipelines on the protected tags `v*`: raise it to Maintainer |
@@ -637,7 +637,7 @@ package `since` date surviving a rerun, `suivi.py check` clean at the end, and `
 unmerged branch, modified or untracked files, ignored files other than `target/`,
 a run from a worktree or off `main`; never `-D` nor `--force`).
 
-`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the CI watcher (#452: verdict per job list, fake `glab` on `PATH`, red kept until a newer green, staleness, `SF_SUIVI_CI=off`) and the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|remove|list` (merge-commit check, `--replace`, the 5-entry limit and `--force`, removal by the owning session and its archive), `set` erasing the agent note, the page's `cardLine`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
+`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the CI watcher (#452: verdict per job list, fake `glab` on `PATH`, Windows jobs in the blocking list, red kept until a newer green, staleness, `SF_SUIVI_CI=off`) and the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|remove|list` (merge-commit check, `--replace`, the 5-entry limit and `--force`, removal by the owning session and its archive), `set` erasing the agent note, the page's `cardLine`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
 of `scripts/suivi.py`: a live owner holds (pid exists, same start time, no newer `ended/<sid>`); a
 dead pid, a reused pid or an ended session pauses; an open QCM or a `todo` trial entry with a `try`
 field holds, a finished QCM, an `ok` entry or one without `try` does not; resume takes the previous
@@ -674,11 +674,15 @@ author's machine no longer needs to be on (the old GitLab runner
 tests in parallel; only the captures (`egui_kittest` + wgpu) exclude each other
 (see below). The job sets `core.longpaths` before the checkout:
 without it, `git clean` fails on `.cargo/registry` ("Filename too long").
-These jobs, like `release-linux` and `publier`, not being in the list of
-`gitlab-status.py`, their result is read on GitHub, not in `ci-status.sh`; the watcher
-(#452) reads the Windows jobs there, once per finished SHA, when Linux is green.
-The GitHub API **without login** is limited to 60 requests per hour and per
-address: do not poll it in a loop; beyond that, it answers 403 until the next hour.
+`test-windows`, `test-python-windows` and `dist-windows` are in the list of
+`gitlab-status.py` (#452): their result and failure comment reach GitLab and
+`ci-status.sh` like the Linux jobs, and the watcher of the tracking page reads them
+there. On a `feature/**` push they are skipped by their `if`; the reporter posts
+them as skipped (and also as skipped, never failed, if GitHub did not list them on
+such a ref). `release-linux` and `publier` stay outside the list: their result is
+read on GitHub. The GitHub API **without login** is limited to 60 requests per
+hour and per address: do not poll it in a loop; beyond that, it answers 403 until
+the next hour.
 
 **Tag and mirror.** A tag pushed to GitLab sometimes arrives late on GitHub
 (CI starts there only on its arrival). Force the push: mirror synchronization
@@ -729,9 +733,9 @@ is not reduced: it sets the duration of the recalculation that the tests observe
 **Keeping the two CIs in agreement.** Every command changed in `.gitlab-ci.yml` or
 `ci.yml` is carried over to the other (see the table above). A new Linux
 job is also added to `JOBS` in `scripts/gitlab-status.py`, otherwise its
-result is not published. Known exception: `release-linux`, `publier` and the
-Windows jobs of GitHub do not appear there; their failure is read on GitHub
-(annotations readable by the API without login).
+result is not published. Known exception: `release-linux` and `publier` do not
+appear there; their failure is read on GitHub (annotations readable by the API
+without login). The Windows jobs are in the list since #452.
 
 ### GitHub results visible in GitLab
 

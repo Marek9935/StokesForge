@@ -414,9 +414,9 @@ jobs:
   # signing in). Git Bash (`shell: bash`): the scripts are the same as on Linux.
   # #412: the crates of the formula engine (parser, evaluation, recalculation,
   # `.stf` round trip) on Windows: float formatting, paths and stack depth
-  # differ there. Not in the `JOBS` of scripts/gitlab-status.py: like
-  # `test-python-windows`, it is skipped on `feature/**` pushes, and a job
-  # absent from the attempt would be posted as failed.
+  # differ there. In the `JOBS` of scripts/gitlab-status.py (#452): like
+  # `test-python-windows`, it is skipped on `feature/**` pushes, where the
+  # reporter posts it as skipped.
   test-windows:
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest

@@ -22,7 +22,11 @@ import zipfile
 REPOSITORY = "Marek9935/StokesForge"
 GITHUB = f"https://api.github.com/repos/{REPOSITORY}"
 GITLAB = "https://gitlab.com/api/v4/projects/86104040"
-JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages")
+JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages",
+        "test-windows", "test-python-windows", "dist-windows")
+# `if:` of ci.yml: these jobs do not run on feature/** pushes. GitHub lists a skipped job; if a
+# push ever omitted it, "missing" must not be posted as a failure there.
+NOT_ON_FEATURE = ("test-windows", "test-python-windows", "dist-windows")
 # GitLab caps the description of an external status.
 DESCRIPTION_MAX = 255
 LOG_MAX = 20_000_000
@@ -240,8 +244,10 @@ def trusted_run(event):
     return run
 
 
-def job_status(job, canceled=False):
+def job_status(job, canceled=False, absent_ok=False):
     if job is None:
+        if absent_ok:
+            return "skipped", "Job not run on this ref"
         return ("canceled" if canceled else "failed", "Job missing from the attempt")
     conclusion = job.get("conclusion")
     if conclusion == "cancelled":
@@ -301,7 +307,8 @@ def report(event, github_token, gitlab_token):
     pipeline_id = pipelines[0]["id"] if pipelines else None
     for name in JOBS:
         job = jobs.get(name)
-        state, description = job_status(job, run.get("conclusion") == "cancelled")
+        state, description = job_status(job, run.get("conclusion") == "cancelled",
+                                    name in NOT_ON_FEATURE and ref.startswith("feature/"))
         log = None
         if state == "failed" and job:
             log = fetch_job_log(job["id"], github_token)

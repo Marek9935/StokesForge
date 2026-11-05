@@ -31,11 +31,11 @@ Writes go through a temporary file and os.replace. Colour allocation takes the
 directory lock ../_stokesforge/.colour.lock (same lock as chantier.sh). Reads take
 no lock. Test seams: SF_SUIVI_DIR, SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
 SF_SUIVI_SLOW (seconds slept inside a claim's critical section), SF_SUIVI_CI=off (no CI watcher),
-SF_SUIVI_CI_POLL / SF_SUIVI_CI_TIMEOUT (seconds), SF_SUIVI_GITHUB (API base of the Windows read).
+SF_SUIVI_CI_POLL / SF_SUIVI_CI_TIMEOUT (seconds).
 
 CI WATCHER (#452). `serve` runs a daemon thread that polls the CI of the newest commit of `main`
-every ~120 s: Linux jobs through `scripts/ci-status.sh --head` (glab, one PROJECT_ID), Windows jobs
-through one public GitHub API read once Linux is green. It writes ci.json; /api/state carries
+every ~120 s through `scripts/ci-status.sh --head` (glab, one PROJECT_ID): the Linux and Windows jobs
+all come back as GitLab statuses (scripts/gitlab-status.py JOBS). It writes ci.json; /api/state carries
 `ci` = {verdict: green|red|pending|unknown, names, reason, sha, last_red}. Green needs every blocking
 job present and SUCCESS (`robustness` is non-blocking); any doubt (CANCELED, glab or network failure,
 timeout, unparsable, stale file older than 3 polls) is `unknown`, never green. A red stays in
@@ -1124,12 +1124,11 @@ def open_qcms():
 HERE = os.path.dirname(os.path.abspath(__file__))
 CI_STATUS = os.path.join(HERE, "ci-status.sh")
 # Same list as JOBS of scripts/gitlab-status.py (a test compares them).
-CI_JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages")
+CI_JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages",
+           "test-windows", "test-python-windows", "dist-windows")
 CI_NON_BLOCKING = ("robustness",)      # a failure is posted as skipped, not failed
-CI_WINDOWS_JOBS = ("test-windows", "test-python-windows", "dist-windows")
 CI_PENDING_MAX = 3600                  # seconds a head may stay pending before it is `unknown`
 CI_VERDICTS = ("green", "red", "pending", "unknown")
-GITHUB_API = "https://api.github.com/repos/Marek9935/StokesForge"
 
 
 def ci_enabled():
@@ -1163,8 +1162,8 @@ def ci_parse_jobs(text):
     return sha, jobs
 
 
-def ci_linux_verdict(jobs):
-    """(verdict, names) for the blocking Linux jobs; only SUCCESS everywhere is green."""
+def ci_job_verdict(jobs):
+    """(verdict, names) for the blocking jobs (Linux and Windows); only SUCCESS everywhere is green."""
     blocking = [j for j in CI_JOBS if j not in CI_NON_BLOCKING]
     failed = [j for j in blocking if jobs.get(j) == "FAILED"]
     if failed:
@@ -1173,27 +1172,6 @@ def ci_linux_verdict(jobs):
     if odd:
         return "unknown", odd
     waiting = [j for j in blocking if jobs.get(j) != "SUCCESS"]
-    if waiting:
-        return "pending", waiting
-    return "green", []
-
-
-def ci_windows_verdict(runs):
-    """Same verdicts from the check runs of the GitHub API (list of {name,status,conclusion})."""
-    by = {r.get("name"): r for r in runs if isinstance(r, dict)}
-    failed, odd, waiting = [], [], []
-    for j in CI_WINDOWS_JOBS:
-        r = by.get(j)
-        if r is None or r.get("status") != "completed":
-            waiting.append(j)
-        elif r.get("conclusion") in ("failure", "timed_out"):
-            failed.append(j)
-        elif r.get("conclusion") != "success":
-            odd.append(j)
-    if failed:
-        return "red", failed
-    if odd:
-        return "unknown", odd
     if waiting:
         return "pending", waiting
     return "green", []
@@ -1213,15 +1191,6 @@ def ci_run(cmd, timeout):
         p.communicate()
         raise
     return p.returncode, out, err
-
-
-def ci_github_runs(sha):
-    import urllib.request
-    base = os.environ.get("SF_SUIVI_GITHUB", GITHUB_API)
-    req = urllib.request.Request("%s/commits/%s/check-runs?per_page=100" % (base, sha),
-                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "stokesforge-suivi"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)["check_runs"]
 
 
 def ci_poll(prev, now=None):
@@ -1250,14 +1219,8 @@ def ci_poll(prev, now=None):
         elif rc != 0 or not jobs:
             verdict, names, reason = "unknown", [], "ci-status.sh failed (exit %s)" % rc
         else:
-            verdict, names = ci_linux_verdict(jobs)
+            verdict, names = ci_job_verdict(jobs)
             reason = ""
-            if verdict == "green":
-                try:
-                    verdict, names = ci_windows_verdict(ci_github_runs(sha))
-                    reason = "Windows jobs" if verdict != "green" else ""
-                except Exception as e:
-                    verdict, names, reason = "unknown", [], "Windows read failed: %s" % type(e).__name__
         if verdict == "pending" and now - (out["since"] or now) > CI_PENDING_MAX:
             verdict, reason = "unknown", "still pending after %d min" % (CI_PENDING_MAX // 60)
         out.update(verdict=verdict, names=names, reason=reason)
