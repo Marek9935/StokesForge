@@ -30,6 +30,11 @@ static QUEUED: AtomicU64 = AtomicU64::new(0);
 static PENDING: AtomicU64 = AtomicU64::new(0);
 static DRAINED: AtomicU64 = AtomicU64::new(0);
 static CHILD_PASSES: AtomicU64 = AtomicU64::new(0);
+// Two-children mode (`PROBE_TWO=1`): child A is small and repaints itself; child B
+// maximises over everything, so A is fully covered. What the root read of A.
+static A_SEEN: AtomicU64 = AtomicU64::new(0);
+static A_OCCLUDED: AtomicU64 = AtomicU64::new(0);
+static A_PASSES: AtomicU64 = AtomicU64::new(0);
 
 const SETTLE: Duration = Duration::from_secs(4);
 const WINDOW: Duration = Duration::from_secs(5);
@@ -38,11 +43,39 @@ const PERIOD: Duration = Duration::from_millis(200);
 struct Root;
 
 impl eframe::App for Root {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // As the application does on its first root pass (#457).
+        if let Some(window) = frame.winit_window() {
+            use winit::platform::wayland::WindowExtWayland as _;
+            window.set_reports_occlusion(true);
+        }
+        start();
         ROOT_UI.fetch_add(1, Relaxed);
         DRAINED.fetch_add(PENDING.swap(0, Relaxed), Relaxed);
         ui.label("root");
         let ctx = ui.ctx().clone();
+        if two_children() {
+            let a = egui::ViewportId::from_hash_of("child-a");
+            if let Some(info) = ctx.input(|i| i.raw.viewports.get(&a).cloned()) {
+                A_SEEN.fetch_add(1, Relaxed);
+                if info.occluded == Some(true) {
+                    A_OCCLUDED.fetch_add(1, Relaxed);
+                }
+            }
+            ctx.show_viewport_deferred(
+                a,
+                egui::ViewportBuilder::default()
+                    .with_title("probe child A")
+                    .with_decorations(false)
+                    .with_inner_size([200.0, 150.0]),
+                child_a,
+            );
+            // B appears once A is up, so that B is the one on top.
+            if start().elapsed() < Duration::from_secs(2) {
+                ctx.request_repaint_after(Duration::from_millis(500));
+                return;
+            }
+        }
         // The detached window, republished every root pass as the app does.
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of("child"),
@@ -53,6 +86,21 @@ impl eframe::App for Root {
             child_ui,
         );
     }
+}
+
+fn two_children() -> bool {
+    std::env::var_os("PROBE_TWO").is_some_and(|v| v == "1")
+}
+
+fn start() -> Instant {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *START.get_or_init(Instant::now)
+}
+
+fn child_a(ui: &mut egui::Ui, _class: egui::ViewportClass) {
+    let passes = A_PASSES.fetch_add(1, Relaxed) + 1;
+    ui.label(format!("child A pass {passes}"));
+    ui.ctx().request_repaint_after(Duration::from_millis(50));
 }
 
 fn cpu_ticks() -> u64 {
@@ -120,7 +168,19 @@ fn child_ui(ui: &mut egui::Ui, _class: egui::ViewportClass) {
          child_passes={passes} maximized={maximized:?} cpu_ms={cpu_ms}",
         if idle { "idle" } else { "active" }
     );
-    let ok = if idle {
+    let a_seen = A_SEEN.load(Relaxed);
+    let a_occluded = A_OCCLUDED.load(Relaxed);
+    if two_children() {
+        println!(
+            "probe: child A passes={} seen_by_root={a_seen} occluded_true={a_occluded}",
+            A_PASSES.load(Relaxed)
+        );
+    }
+    let ok = if two_children() {
+        // A covered child must not be reported occluded (it would lose its input),
+        // and the root must keep draining what B asks for.
+        a_seen >= 5 && a_occluded == 0 && queued >= 15 && drained * 10 >= queued * 8
+    } else if idle {
         root_ui <= 20
     } else {
         // A child that passed so rarely it queued next to nothing proves nothing.

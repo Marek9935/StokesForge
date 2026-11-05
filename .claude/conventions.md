@@ -19,7 +19,9 @@ Choice, targeted `rustfmt` commands, manual verification and removal:
 `vendor/winit/STOKESFORGE.md`. The exact parser and channel are tested by
 `stokesforge-app/tests/wayland_{uri,bridge}.rs`. Frame starvation (#457): Wayland
 has no occlusion event, so the vendored winit infers `Occluded` from a frame
-callback that does not come while a redraw is wanted (`frame_starvation.rs`, pure,
+callback that does not come while a redraw is wanted, only for a window that opts in with
+`WindowExtWayland::set_reports_occlusion` (the root, on its first pass; never a detached
+window: a reported window gets no pass and its input is dropped) (`frame_starvation.rs`, pure,
 `tests/wayland_frame_starvation.rs`); that is what lets eframe keep running a
 covered root, so a detached window may be maximised over it (Page Layout Mode).
 Never a periodic wake for it (#104). Recheck on any eframe upgrade; real-compositor

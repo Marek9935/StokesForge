@@ -1132,7 +1132,7 @@ The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometr
 - **A window is maximised while the mode lasts, and the keys are read first.**
   `app/layout_window.rs` maximises a floating window on entering and a detached one
   through its OS window (`follow_mode_maximize`; safe on Wayland since the vendored winit
-  reports a covered window as occluded, #457, `vendor/winit/STOKESFORGE.md`), reconciles
+  reports a covered root as occluded (the root only, it opts in), #457, `vendor/winit/STOKESFORGE.md`), reconciles
   each frame (a floating graph whose window is no longer the maximised one leaves the mode;
   the Restore button of a detached header leaves it too) and reports the pre-mode state to the
   saved window views. The keys (Esc, `G`, arrows) are read by `begin_layout_frame` at the

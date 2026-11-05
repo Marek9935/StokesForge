@@ -109,7 +109,12 @@ what to do with an occluded window (it runs `logic` and `ui` unpainted,
 throttled to 100 ms, as long as a viewport is visible); it only has to be
 told. Wayland has no event for it, so the backend infers one.
 
-- A window is **starved** when a redraw is pending and its callback has been
+- Opt-in per window: `WindowExtWayland::set_reports_occlusion(true)`, default
+  off (upstream behaviour). Only the StokesForge root opts in (first `ui` pass).
+  eframe gives a reported window no pass and drops its raw input, which a
+  detached window, a false positive away, must not suffer; an unreported
+  covered window just repaints at its callback. No effect on X11.
+- A reporting window is **starved** when a redraw is pending and its callback has been
   outstanding for 100 ms or more (`frame_starvation::assess`, pure). Never
   while idle: no redraw pending, no verdict, no wake.
 - The first time it is, the loop emits `WindowEvent::Occluded(true)` and
@@ -119,8 +124,8 @@ told. Wayland has no event for it, so the backend infers one.
 - When the callback finally comes (uncovered), `Occluded(false)` is emitted
   first, then `RedrawRequested`, whether or not the pending flag survived: the
   compositor shows the buffer from before the cover.
-- A false positive (slow compositor) only gives an unpainted pass, painted at
-  the callback.
+- A false positive (slow compositor, a root pass of 100 ms and more under CPU
+  load) only gives the root an unpainted pass, painted at the callback.
 
 Inert on X11 and the other platforms: the Wayland backend is not compiled
 there. It relies on eframe internals (`is_visible`/`Occluded` read in
@@ -197,7 +202,8 @@ When the chosen stable eframe version uses a winit with Wayland drop:
    `wayland_uri.rs` and `wayland_bridge.rs` and their `url`/`calloop`
    dev-dependencies.
 3. Regenerate `Cargo.lock`; check that a single winit version is used.
-   Also drop the starvation patch (#457) and its tests `wayland_frame_starvation.rs`
+   Also drop the starvation patch (#457), `set_reports_occlusion` and its call in
+   `StokesForgeApp::ui`, and its tests `wayland_frame_starvation.rs`
    and `wayland_covered_root.rs` if the new winit reports occlusion itself;
    otherwise port it.
 4. Re-examine `configure_window_backend`: the native choice must remain

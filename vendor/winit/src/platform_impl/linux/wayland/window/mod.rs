@@ -254,6 +254,11 @@ impl Window {
         // Not possible on Wayland.
     }
 
+    /// Opt this window in to the occlusion report of #457 (default: off).
+    pub fn set_reports_occlusion(&self, on: bool) {
+        self.window_state.lock().unwrap().set_reports_occlusion(on);
+    }
+
     #[inline]
     pub fn is_visible(&self) -> Option<bool> {
         // #457: Wayland tells nothing about occlusion; the frame callback that

@@ -85,7 +85,7 @@ impl Drop for Compositor {
 }
 
 /// Builds and runs the probe under the compositor; returns (exit success, stdout).
-fn run_probe(compositor: &Compositor, idle: bool) -> (bool, String) {
+fn run_probe(compositor: &Compositor, idle: bool, two: bool) -> (bool, String) {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let built = Command::new(cargo)
         .args([
@@ -108,6 +108,7 @@ fn run_probe(compositor: &Compositor, idle: bool) -> (bool, String) {
         .env("WAYLAND_DISPLAY", &compositor.socket)
         .env("WGPU_BACKEND", "gl")
         .env("PROBE_IDLE", if idle { "1" } else { "0" })
+        .env("PROBE_TWO", if two { "1" } else { "0" })
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child = cmd.spawn().expect("probe starts");
@@ -136,7 +137,7 @@ fn a_covered_root_drains_the_requests_of_the_window_covering_it() {
     let Some(compositor) = Compositor::start() else {
         return;
     };
-    let (ok, out) = run_probe(&compositor, false);
+    let (ok, out) = run_probe(&compositor, false, false);
     println!("{out}");
     assert!(ok, "the covered root stalled:\n{out}");
 }
@@ -147,7 +148,24 @@ fn an_idle_covered_root_stays_asleep() {
     let Some(compositor) = Compositor::start() else {
         return;
     };
-    let (ok, out) = run_probe(&compositor, true);
+    let (ok, out) = run_probe(&compositor, true, false);
     println!("{out}");
     assert!(ok, "the idle root woke up periodically:\n{out}");
+}
+
+#[test]
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn a_covered_detached_window_is_not_reported_occluded() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    // Child A (small, repaints itself) is fully covered by child B (maximised).
+    // Reported occluded, A would get no pass and lose its input (#457): only the
+    // root asks for the report.
+    let (ok, out) = run_probe(&compositor, false, true);
+    println!("{out}");
+    assert!(
+        ok,
+        "a covered child was reported occluded, or the root stalled:\n{out}"
+    );
 }

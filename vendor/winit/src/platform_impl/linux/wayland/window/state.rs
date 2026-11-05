@@ -147,6 +147,9 @@ pub struct WindowState {
     /// Reported occluded because the callback did not come (#457).
     starved: bool,
 
+    /// The application asked for the occlusion report of this window (#457).
+    reports_occlusion: bool,
+
     viewport: Option<WpViewport>,
     fractional_scale: Option<WpFractionalScaleV1>,
     blur: Option<OrgKdeKwinBlur>,
@@ -204,6 +207,7 @@ impl WindowState {
             frame_callback_state: FrameCallbackState::None,
             frame_callback_requested_at: None,
             starved: false,
+            reports_occlusion: false,
             seat_focus: Default::default(),
             has_pending_move: None,
             ime_allowed: false,
@@ -264,6 +268,18 @@ impl WindowState {
     /// Whether the window was reported occluded for lack of a callback (#457).
     pub fn is_starved(&self) -> bool {
         self.starved
+    }
+
+    /// Whether the application asked for the occlusion report (#457).
+    pub fn reports_occlusion(&self) -> bool {
+        self.reports_occlusion
+    }
+
+    pub fn set_reports_occlusion(&mut self, on: bool) {
+        self.reports_occlusion = on;
+        if !on {
+            self.starved = false;
+        }
     }
 
     pub fn set_starved(&mut self, starved: bool) {

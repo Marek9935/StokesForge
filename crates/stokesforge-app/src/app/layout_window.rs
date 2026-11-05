@@ -27,9 +27,11 @@
 //!   native Wayland winit only emits `RedrawRequested` once the frame callback
 //!   of the last present has come, and a fully covered surface never gets
 //!   one, so the root frame, and with it the whole application, stopped. The
-//!   vendored winit now reports such a window as occluded after 100 ms without
-//!   a callback while a redraw is wanted (`vendor/winit/STOKESFORGE.md`,
-//!   "Frame starvation"), and eframe then keeps running the occluded root's
+//!   vendored winit now reports the ROOT (the only window that opts in) as
+//!   occluded after 100 ms without a callback while a redraw is wanted
+//!   (`vendor/winit/STOKESFORGE.md`, "Frame starvation"); a detached window is
+//!   never reported, as it would get no pass and lose its input, and a covered one
+//!   repaints at its callback. eframe then keeps running the occluded root's
 //!   `logic` and `ui` unpainted, about every 100 ms, as long as a viewport is
 //!   visible. The detached window's request wakes the root, the root applies it
 //!   and publishes the result to the viewport in the same pass

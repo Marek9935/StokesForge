@@ -390,6 +390,7 @@ impl<T: 'static> EventLoop<T> {
                     window.frame_callback_requested_at(),
                     request.redraw_is_requested(),
                     window.is_starved(),
+                    window.reports_occlusion(),
                     now,
                 );
                 soonest = min_timeout(soonest, verdict.wake_in);
@@ -568,6 +569,7 @@ impl<T: 'static> EventLoop<T> {
                             .unwrap()
                             .redraw_is_requested(),
                         window.is_starved(),
+                        window.reports_occlusion(),
                         Instant::now(),
                     );
                     if verdict.starved && !window.is_starved() {

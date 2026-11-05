@@ -171,8 +171,9 @@ close, delete and project load). A detached window maximises its OS window the s
 (`follow_mode_maximize`, unless it was maximised at entry), and its header's Restore leaves the mode;
 a restore done from outside the application (an OS shortcut) cannot be told from a maximise the
 compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because the
-vendored winit reports a window the compositor no longer serves as occluded (frame starvation,
-#457): the covered root still runs `logic` and `ui` unpainted about every 100 ms, so the actions
+vendored winit reports the root, the only window that opts in, as occluded when the compositor no
+longer serves it (frame starvation, #457; a detached window is never reported: it would lose its
+input, and a covered one repaints at its frame callback): the covered root still runs `logic` and `ui` unpainted about every 100 ms, so the actions
 of the detached window are drained, at the cost of about 100 ms between a command and its paint
 while the main window is covered. The saved window views report the state from before the mode
 (`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at

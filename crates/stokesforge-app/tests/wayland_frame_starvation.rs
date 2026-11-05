@@ -16,14 +16,14 @@ fn ms(n: u64) -> Duration {
 #[test]
 fn a_callback_outstanding_for_150_ms_with_a_redraw_pending_is_starved() {
     let now = Instant::now();
-    let verdict = assess(Some(now - ms(150)), true, false, now);
+    let verdict = assess(Some(now - ms(150)), true, false, true, now);
     assert!(verdict.starved);
 }
 
 #[test]
 fn a_callback_outstanding_for_50_ms_is_still_waited_for_with_a_50_ms_deadline() {
     let now = Instant::now();
-    let verdict = assess(Some(now - ms(50)), true, false, now);
+    let verdict = assess(Some(now - ms(50)), true, false, true, now);
     assert_eq!(
         verdict,
         Verdict {
@@ -36,14 +36,14 @@ fn a_callback_outstanding_for_50_ms_is_still_waited_for_with_a_50_ms_deadline() 
 #[test]
 fn the_threshold_is_one_hundred_milliseconds_inclusive() {
     let now = Instant::now();
-    assert!(assess(Some(now - ms(100)), true, false, now).starved);
-    assert!(!assess(Some(now - ms(99)), true, false, now).starved);
+    assert!(assess(Some(now - ms(100)), true, false, true, now).starved);
+    assert!(!assess(Some(now - ms(99)), true, false, true, now).starved);
 }
 
 #[test]
 fn an_idle_window_is_never_starved_and_never_wakes_the_loop() {
     let now = Instant::now();
-    let verdict = assess(Some(now - ms(10_000)), false, false, now);
+    let verdict = assess(Some(now - ms(10_000)), false, false, true, now);
     assert_eq!(
         verdict,
         Verdict {
@@ -52,7 +52,7 @@ fn an_idle_window_is_never_starved_and_never_wakes_the_loop() {
         }
     );
     assert_eq!(
-        assess(None, false, false, now),
+        assess(None, false, false, true, now),
         Verdict {
             starved: false,
             wake_in: None
@@ -64,7 +64,7 @@ fn an_idle_window_is_never_starved_and_never_wakes_the_loop() {
 fn a_redraw_pending_without_an_outstanding_callback_is_not_starved() {
     let now = Instant::now();
     assert_eq!(
-        assess(None, true, false, now),
+        assess(None, true, false, true, now),
         Verdict {
             starved: false,
             wake_in: None
@@ -75,10 +75,10 @@ fn a_redraw_pending_without_an_outstanding_callback_is_not_starved() {
 #[test]
 fn a_starved_window_asks_for_no_further_wake() {
     let now = Instant::now();
-    let first = assess(Some(now - ms(150)), true, false, now);
+    let first = assess(Some(now - ms(150)), true, false, true, now);
     assert_eq!(first.wake_in, None);
     // Reported already: stays so, with no deadline, whatever the clock says.
-    let later = assess(Some(now - ms(10)), true, true, now);
+    let later = assess(Some(now - ms(10)), true, true, true, now);
     assert_eq!(
         later,
         Verdict {
@@ -103,4 +103,17 @@ fn the_callback_of_a_served_window_changes_nothing_but_the_pending_redraw() {
     let idle = on_callback(false, false);
     assert!(!idle.occluded_false && !idle.redraw);
     assert!(!on_callback(false, true).occluded_false);
+}
+
+#[test]
+fn a_window_that_did_not_ask_for_the_report_is_never_starved_and_never_wakes_the_loop() {
+    let now = Instant::now();
+    let verdict = assess(Some(now - ms(10_000)), true, false, false, now);
+    assert_eq!(
+        verdict,
+        Verdict {
+            starved: false,
+            wake_in: None
+        }
+    );
 }

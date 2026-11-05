@@ -427,6 +427,8 @@ pub struct StokesForgeApp {
     /// The window asked to close (cross, Alt+F4, Quit): to be posted to
     /// the state like `Action::Quit` (#229).
     close_requested: bool,
+    /// The root asked winit to report it occluded (Wayland, #457), once.
+    occlusion_reported: bool,
     /// The state released the closing: the next request is no longer held back.
     quit_confirmed: bool,
     /// Which window paints the dialogs: the root, or the detached window the
@@ -562,6 +564,7 @@ impl StokesForgeApp {
             autoquit,
             first_frame: None,
             close_requested: false,
+            occlusion_reported: false,
             quit_confirmed: false,
             dialog_hosting: dialog_host::HostState::default(),
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
@@ -1110,6 +1113,20 @@ impl eframe::App for StokesForgeApp {
         self.dialog_hosting.root_painted = dialogs::take_modal_painted(&ctx);
         self.hosted_dialog_veil(&ctx);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
+        // #457: a root covered by a detached window gets no frame callback and would
+        // freeze the actions of every window. Only the root opts in to the report:
+        // a reported window gets no pass and loses its input, which a detached
+        // window must not.
+        #[cfg(target_os = "linux")]
+        if !self.occlusion_reported {
+            if let Some(window) = frame.winit_window() {
+                {
+                    use winit::platform::wayland::WindowExtWayland as _;
+                    window.set_reports_occlusion(true);
+                }
+                self.occlusion_reported = true;
+            }
+        }
         self.sync_panel_layout(&mut actions);
         self.drain_layout_actions(&mut actions);
         actions.extend(history);

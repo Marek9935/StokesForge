@@ -33,13 +33,23 @@ pub struct Verdict {
 
 /// `requested_at`: when the outstanding callback was asked for, `None` when none
 /// is. `redraw_pending`: the application wants a frame. `was_starved`: this
-/// window was already reported occluded.
+/// window was already reported occluded. `reports`: the application asked for
+/// the report for this window; a window that did not is never starved and never
+/// wakes the loop, as upstream (a false positive on a window that drops its
+/// input when reported would lose that input).
 pub fn assess(
     requested_at: Option<Instant>,
     redraw_pending: bool,
     was_starved: bool,
+    reports: bool,
     now: Instant,
 ) -> Verdict {
+    if !reports {
+        return Verdict {
+            starved: false,
+            wake_in: None,
+        };
+    }
     if was_starved {
         // Already said; only the callback ends it.
         return Verdict {
