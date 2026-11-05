@@ -373,6 +373,8 @@ Deleting a column that an analysis uses opens a confirmation, **Column in use**,
 
 When a source column changes and **Recalculate automatically** is off, the result columns are marked out of date: the header is tinted, with a warning icon (<img class="icon" src="../images/icons/warning.neutral.svg" alt="">), and the column is grayed out. Its tooltip gives the reason: the source data changed, a source column was deleted, or the last recalculation failed. Use **Recalculate** on the column, or **Analysis ▸ Recalculate Out of Date** for all of them at once.
 
+Inserting or deleting rows in the source sheet also marks a result out of date when **Recalculate automatically** is off. Undo restores the rows but leaves the mark until you use **Recalculate**.
+
 ### Undo
 
 Creating, editing and deleting an analysis are steps of the history. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes them. The entries read, for example, **Add Fit Calculation**, **Edit Fit Calculation** and **Delete Fit Calculation**. A recalculation is not a step of its own: it follows the data.
