@@ -456,7 +456,7 @@ Steps, in order:
  5. Sonnet implements in the worktree (CLAUDE.md, "Delegation"). Visible change: a
     pre-trial agent walks the detailed checks in the real app, fixes, re-verifies, then
     `suivi.py test add` (stokesforge-verification/references/suivi.md, Pre-trial); then
-    `scripts/try.sh <n>` opens the branch on the user's screen; their OK is the go-ahead.
+    `scripts/try.sh <n>` opens the branch on the user's screen.
  6. All trial entries OK: announce it. Go-ahead = the page's merge button (reported by the wait) or the
     user's word; then merge from the main checkout with `scripts/deliver.sh <n> <message-file>`.
     No CI polling: report, close, release; `suivi.py serve` shows red on the page. Read the CI only
