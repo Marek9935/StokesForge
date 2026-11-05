@@ -1298,6 +1298,7 @@ class TestHookWait(WaitBase):
         self.procs.append(p)
         p.stdin.write(json.dumps({"session_id": sid, "tool_input": {"command": command}}) if stdin is None else stdin)
         p.stdin.close()
+        p.stdin = None  # communicate() flushes a stdin it still sees; Python 3.12 raises on a closed one
         return p
 
     def test_a_pose_command_arms_the_wait_and_an_event_wakes_with_exit_two_on_stderr(self):
@@ -1473,6 +1474,7 @@ class TestMergeRequest(WaitBase):
         self.procs.append(p)
         p.stdin.write(json.dumps({"session_id": "S1", "tool_input": {"command": "python3 scripts/suivi.py news 1"}}))
         p.stdin.close()
+        p.stdin = None  # communicate() flushes a stdin it still sees; Python 3.12 raises on a closed one
         self.armed()
         self.assertIsNone(p.poll())
         self.request()
@@ -1507,7 +1509,7 @@ class TestMergeRequest(WaitBase):
         self.git("checkout", "-q", "-b", "feature/1-x")
         self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work (#1)")
         self.git("checkout", "-q", "main")
-        self.git("merge", "-q", "--no-ff", "-m", "Merge #1", "feature/1-x")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", "Merge #1", "feature/1-x")
         full = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, capture_output=True, text=True).stdout.strip()
         self.assertTrue(os.path.exists(os.path.join(self.state, "merge", "1.json")))
         r = self.run_cli("test", "merged", "1", full)
