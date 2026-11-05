@@ -171,6 +171,37 @@ fn fit_column(snapshot: &Snapshot, id: NodeId) -> Vec<f64> {
         .to_vec()
 }
 
+/// Slope and fit column of a fresh linear fit of (X, Y) on the data of `snapshot`.
+fn fresh_fit(snapshot: &Snapshot, m: &Setup) -> (f64, Vec<f64>) {
+    let series = vec![SeriesRef {
+        x: Some(m.x),
+        y: m.y,
+        sigma: None,
+    }];
+    let computed = compute(&snapshot.tree, &fit_operation(), &series, None).unwrap();
+    let slope = computed.results[0]
+        .values
+        .iter()
+        .find(|v| v.key == "param.slope")
+        .unwrap()
+        .value;
+    let fit = computed
+        .columns
+        .iter()
+        .find(|c| c.key == "fit")
+        .unwrap()
+        .data
+        .clone();
+    (slope, fit)
+}
+
+fn same_numbers(a: &[f64], b: &[f64]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| (x.is_nan() && y.is_nan()) || (x - y).abs() < 1e-9)
+}
+
 fn modes() -> [FormulaRecalc; 2] {
     [FormulaRecalc::Targeted, FormulaRecalc::Full]
 }
@@ -1678,6 +1709,111 @@ fn a_failed_manual_calculation_stays_failed_when_a_row_is_deleted() {
     }
 }
 
+// -- undoing across a recalculation that shortened an output (#448) ------------
+
+/// #448, no macro: X cut to two rows, a row deleted at the end of the others,
+/// a manual rerun that rewrites the output shorter, then the undo of the
+/// deletion aims at row 3 of an output that only has two.
+#[test]
+fn undoing_a_deletion_over_an_output_the_rerun_shortened() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, false);
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![m.x],
+                at: 0,
+                count: 2,
+            })
+            .unwrap();
+        handle
+            .execute(Command::DeleteRows {
+                sheet: m.sheet,
+                at: 3,
+                count: 1,
+            })
+            .unwrap();
+        handle.recalculate(&[id]).unwrap();
+        handle
+            .undo()
+            .unwrap_or_else(|e| panic!("{mode:?}: the undo is not refused: {e}"));
+        let after = handle.snapshot().unwrap();
+        let y = after.tree.node(m.y).unwrap().as_column().unwrap();
+        assert_eq!(
+            y.numeric_view().unwrap().to_vec(),
+            vec![10.0, 20.0, 30.0, 40.0],
+            "{mode:?}: Y restored exactly once"
+        );
+        // The output no longer matches its sources and nobody reruns it.
+        assert_eq!(
+            after.tree.calculation(id).unwrap().stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+        // A further undo does not clear the mark.
+        handle.undo().unwrap();
+        assert_eq!(
+            handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .calculation(id)
+                .unwrap()
+                .stale,
+            Some(Staleness::Manual),
+            "{mode:?}: still marked after the next undo"
+        );
+        // Recalculate clears it and gives what a fresh calculation gives.
+        handle.recalculate(&[id]).unwrap();
+        let rerun = handle.snapshot().unwrap();
+        assert_eq!(rerun.tree.calculation(id).unwrap().stale, None, "{mode:?}");
+        let (slope_now, fit_now) = fresh_fit(&rerun, &m);
+        assert!((slope(&rerun, id) - slope_now).abs() < 1e-9, "{mode:?}");
+        assert!(same_numbers(&fit_column(&rerun, id), &fit_now), "{mode:?}");
+    }
+}
+
+/// #448, in a macro: the last row is deleted everywhere, then X loses a cell,
+/// so the pass rewrites the output with two rows. The abort puts the deleted
+/// row back at row 3, past the end of that output.
+#[test]
+fn aborting_a_macro_over_an_automatic_output_the_pass_shortened() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        handle
+            .begin_macro(stokesforge_commands::MacroKind::PasteCells)
+            .unwrap();
+        handle
+            .execute(Command::DeleteRows {
+                sheet: m.sheet,
+                at: 3,
+                count: 1,
+            })
+            .unwrap();
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![m.x],
+                at: 0,
+                count: 1,
+            })
+            .unwrap();
+        handle
+            .abort_macro()
+            .unwrap_or_else(|e| panic!("{mode:?}: the abort is not refused: {e}"));
+        let after = handle.snapshot().unwrap();
+        assert!((slope(&after, id) - 10.0).abs() < 1e-9, "{mode:?}");
+        let fit = fit_column(&after, id);
+        assert_eq!(fit.len(), 4, "{mode:?}");
+        assert!((fit[3] - 40.0).abs() < 1e-9, "{mode:?}");
+        assert_eq!(after.tree.calculation(id).unwrap().stale, None, "{mode:?}");
+        assert!(
+            same_numbers(&fit, &[10.0, 20.0, 30.0, 40.0]),
+            "{mode:?}: the output equals the state before the macro"
+        );
+    }
+}
+
 #[test]
 fn the_mark_of_a_row_deletion_survives_save_and_load_with_the_values() {
     for mode in modes() {
@@ -1692,5 +1828,110 @@ fn the_mark_of_a_row_deletion_survives_save_and_load_with_the_values() {
         let loaded = handle.snapshot().unwrap();
         assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
         assert_eq!(slope(&loaded, id), slope(&before, id), "values kept");
+    }
+}
+
+/// #448, the box ON, the gestures of the manual case: every undo succeeds and
+/// the output always equals a fresh calculation on the same data, with no mark.
+#[test]
+fn undoing_over_an_automatic_output_the_pass_shortened_stays_up_to_date() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        let before = handle.snapshot().unwrap();
+        let (slope_before, fit_before) = (slope(&before, id), fit_column(&before, id));
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![m.x],
+                at: 0,
+                count: 2,
+            })
+            .unwrap();
+        handle
+            .execute(Command::DeleteRows {
+                sheet: m.sheet,
+                at: 3,
+                count: 1,
+            })
+            .unwrap();
+        handle.recalculate(&[id]).unwrap();
+        for step in ["first", "second"] {
+            handle
+                .undo()
+                .unwrap_or_else(|e| panic!("{mode:?}: the {step} undo is not refused: {e}"));
+            let snapshot = handle.snapshot().unwrap();
+            assert_eq!(
+                snapshot.tree.calculation(id).unwrap().stale,
+                None,
+                "{mode:?} {step}"
+            );
+            let (slope_now, fit_now) = fresh_fit(&snapshot, &m);
+            assert!(
+                (slope(&snapshot, id) - slope_now).abs() < 1e-9,
+                "{mode:?} {step}"
+            );
+            assert!(
+                same_numbers(&fit_column(&snapshot, id), &fit_now),
+                "{mode:?} {step}"
+            );
+        }
+        let last = handle.snapshot().unwrap();
+        assert!((slope(&last, id) - slope_before).abs() < 1e-9, "{mode:?}");
+        assert!(
+            same_numbers(&fit_column(&last, id), &fit_before),
+            "{mode:?}: no gap and no old row left"
+        );
+    }
+}
+
+/// #439: since a pass keeps the version of a column it recomputes identically,
+/// only a command still gives a column a fresh version over the same content.
+/// That is what the comparison by content of a calculation is for: retyping the
+/// same values marks no manual calculation stale, and does not rerun an automatic
+/// one the file made stale. Witness: `same_contents` always false, at either of
+/// its two call sites.
+#[test]
+fn retyping_the_same_values_in_an_input_leaves_a_calculation_as_it_was() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, false);
+        handle
+            .execute(enter(m.y, &[10.0, 20.0, 30.0, 40.0]))
+            .unwrap();
+        let retyped = handle.snapshot().unwrap();
+        assert_eq!(
+            retyped.tree.calculation(id).unwrap().stale,
+            None,
+            "{mode:?}"
+        );
+        // Witness of the fixture: a different number does mark it.
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        assert_eq!(
+            handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .calculation(id)
+                .unwrap()
+                .stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        handle.save(&path).unwrap();
+        alter_file(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        handle.load(&path).unwrap();
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let waiting = handle.snapshot().unwrap();
+        assert_eq!(
+            waiting.tree.calculation(id).unwrap().stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+        assert!((slope(&waiting, id) - 10.0).abs() < 1e-9, "{mode:?}");
     }
 }

@@ -6,14 +6,19 @@
 //! - **correct**: after the gesture, the formula column holds the value that its
 //!   text and its sources impose — a forgotten recalculation fails here;
 //! - **targeted**: a formula column that the gesture does not concern is not
-//!   rewritten, which is read from its [`Column::version`] — a memo that
+//!   recomputed, which is read from the count of formula columns the passes
+//!   evaluated ([`Snapshot::formula_evaluations`], #439) — a memo that
 //!   recalculated everything would pass the first family without flinching.
+//!   Since #439 a pass that finds the same content keeps the column's
+//!   [`Column::version`], so the version no longer proves whether a column was
+//!   recomputed: the count does. The version assertions that remain say the
+//!   other half (a column recomputed to another content gets a fresh number,
+//!   one that is not touched keeps its own).
 //!
 //! Each "targeted" test has its **witness**: the same scenario in
-//! [`FormulaRecalc::Full`] rewrites the column, so changes its version. Without
-//! this witness, an unchanged version could just as well come from a write
-//! that does not change the version (which the repository forbids, but which
-//! no other test would see here).
+//! [`FormulaRecalc::Full`] evaluates more columns than the targeted mode.
+//! Without this witness, a count of zero could just as well come from a
+//! counter that never moves.
 //!
 //! The complete contract — "targeted recalculation gives exactly the full
 //! recalculation" — is held by the differential battery
@@ -111,6 +116,11 @@ fn take_snapshot(handle: &SessionHandle) -> Snapshot {
     handle.snapshot().expect("snapshot")
 }
 
+/// Formula columns the passes have evaluated so far (#439).
+fn evaluations(snapshot: &Snapshot) -> u64 {
+    snapshot.formula_evaluations
+}
+
 fn version(snapshot: &Snapshot, column: NodeId) -> u64 {
     snapshot
         .tree
@@ -180,8 +190,9 @@ fn some(values: &[f64]) -> Vec<Option<f64>> {
 // -- targeted: what must no longer be rewritten --------------------------------
 
 /// Plays the scenario "a formula, then an unrelated command" and returns
-/// `(version before, version after)` of the formula column.
-fn versions_around_an_unrelated_command(mode: FormulaRecalc) -> (u64, u64) {
+/// `(version before, version after, formula columns evaluated by the
+/// command)` of the formula column.
+fn versions_around_an_unrelated_command(mode: FormulaRecalc) -> (u64, u64, u64) {
     let (_session, handle, f) = start(mode);
     handle
         .execute(set_formula(&handle, f.c, "A+B"))
@@ -192,19 +203,25 @@ fn versions_around_an_unrelated_command(mode: FormulaRecalc) -> (u64, u64) {
         .expect("unrelated command");
     let after = take_snapshot(&handle);
     assert_eq!(numbers(&after, f.c), some(&[11.0, 22.0, 33.0]));
-    (version(&before, f.c), version(&after, f.c))
+    (
+        version(&before, f.c),
+        version(&after, f.c),
+        evaluations(&after) - evaluations(&before),
+    )
 }
 
 /// The heart of #193: changing something that is the source of no formula no
 /// longer rewrites any formula column.
 #[test]
 fn an_unrelated_command_rewrites_no_formula() {
-    let (before, after) = versions_around_an_unrelated_command(FormulaRecalc::Targeted);
+    let (before, after, evaluated) = versions_around_an_unrelated_command(FormulaRecalc::Targeted);
     assert_eq!(before, after, "C had no reason to be rewritten");
+    assert_eq!(evaluated, 0, "C had no reason to be evaluated");
 
-    // Witness: the full recalculation rewrites it, and the version shows it.
-    let (before, after) = versions_around_an_unrelated_command(FormulaRecalc::Full);
-    assert_ne!(before, after, "witness: the full recalculation rewrites C");
+    // Witness: the full recalculation evaluates it (it keeps its number since
+    // #439, the content being the same: only the count shows it).
+    let (_, _, evaluated) = versions_around_an_unrelated_command(FormulaRecalc::Full);
+    assert_eq!(evaluated, 1, "witness: the full recalculation evaluates C");
 }
 
 /// Modifying A recalculates the formulas that read A, and only them.
@@ -228,24 +245,26 @@ fn changing_a_source_recalculates_only_its_dependents() {
         assert_eq!(numbers(&after, f.c), some(&[200.0, 4.0, 6.0]));
         assert_eq!(numbers(&after, f.d), some(&[11.0, 21.0, 31.0]));
         assert_ne!(version(&before, f.c), version(&after, f.c), "C lit A");
+        assert_eq!(
+            version(&before, f.d),
+            version(&after, f.d),
+            "D does not read A: its content is the same, it keeps its number"
+        );
+        let evaluated = evaluations(&after) - evaluations(&before);
         match mode {
-            FormulaRecalc::Targeted => assert_eq!(
-                version(&before, f.d),
-                version(&after, f.d),
-                "D does not read A: it is not rewritten"
-            ),
-            FormulaRecalc::Full => assert_ne!(
-                version(&before, f.d),
-                version(&after, f.d),
-                "witness: the full recalculation rewrites D"
-            ),
+            FormulaRecalc::Targeted => {
+                assert_eq!(evaluated, 1, "only C reads A: D is not evaluated")
+            }
+            FormulaRecalc::Full => {
+                assert_eq!(evaluated, 2, "witness: the full recalculation evaluates D")
+            }
         }
     }
 }
 
 /// Plays "D = C+1, C = A*2, input into A, then an unrelated command" and
-/// returns true if C and D kept their version during the last one.
-fn chain_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
+/// returns how many formula columns the last command evaluated.
+fn chain_evaluations_of_an_unrelated_command(mode: FormulaRecalc) -> u64 {
     let (_session, handle, f) = start(mode);
     // D reads C which reads A; C is set **after** D, so that the declaration
     // order does not coincide with the calculation order.
@@ -264,7 +283,10 @@ fn chain_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
         .execute(unrelated(&before, 0))
         .expect("unrelated command");
     let after = take_snapshot(&handle);
-    version(&before, f.c) == version(&after, f.c) && version(&before, f.d) == version(&after, f.d)
+    // Neither column moves, in either mode: what changes is the evaluation.
+    assert_eq!(version(&before, f.c), version(&after, f.c));
+    assert_eq!(version(&before, f.d), version(&after, f.d));
+    evaluations(&after) - evaluations(&before)
 }
 
 /// A second immediate pass rewrites nothing: the order of the steps of the
@@ -273,12 +295,14 @@ fn chain_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
 /// this property, every command would recalculate a whole chain.
 #[test]
 fn a_recalculated_chain_is_stable_at_the_next_command() {
-    assert!(chain_unchanged_by_an_unrelated_command(
-        FormulaRecalc::Targeted
-    ));
-    assert!(
-        !chain_unchanged_by_an_unrelated_command(FormulaRecalc::Full),
-        "witness: the full recalculation rewrites the chain"
+    assert_eq!(
+        chain_evaluations_of_an_unrelated_command(FormulaRecalc::Targeted),
+        0
+    );
+    assert_eq!(
+        chain_evaluations_of_an_unrelated_command(FormulaRecalc::Full),
+        2,
+        "witness: the full recalculation evaluates the chain"
     );
 }
 
@@ -338,11 +362,9 @@ fn changing_the_formula_text_recalculates() {
 }
 
 /// Plays "C = A*2, then B moves to the front of the sheet" and returns `(values
-/// of C, displayed text of C, did C stay at its version?, displayed text after
-/// undo)`.
-fn move_b_to_front(
-    mode: FormulaRecalc,
-) -> (Vec<Option<f64>>, Option<String>, bool, Option<String>) {
+/// of C, displayed text of C, formula columns evaluated by the move, displayed
+/// text after undo)`; C keeps its version in both modes (same content).
+fn move_b_to_front(mode: FormulaRecalc) -> (Vec<Option<f64>>, Option<String>, u64, Option<String>) {
     let (_session, handle, f) = start(mode);
     handle
         .execute(set_formula(&handle, f.c, "A*2"))
@@ -360,7 +382,10 @@ fn move_b_to_front(
     (
         numbers(&after, f.c),
         after.tree.formula_letters(f.c),
-        version(&before, f.c) == version(&after, f.c),
+        {
+            assert_eq!(version(&before, f.c), version(&after, f.c));
+            evaluations(&after) - evaluations(&before)
+        },
         take_snapshot(&handle).tree.formula_letters(f.c),
     )
 }
@@ -370,22 +395,22 @@ fn move_b_to_front(
 /// letters follow (A became the second column: `B*2`), the stored text does not
 /// change, and nothing is rewritten — neither A nor B was written, the
 /// fingerprint does not contain the displayed text. Witness: the full
-/// recalculation rewrites the column. Mutant: resolution by position.
+/// recalculation evaluates the column. Mutant: resolution by position.
 #[test]
 fn moving_a_source_within_the_sheet_the_formula_follows() {
-    let (values, text, unchanged, after_undo) = move_b_to_front(FormulaRecalc::Targeted);
+    let (values, text, evaluated, after_undo) = move_b_to_front(FormulaRecalc::Targeted);
     assert_eq!(values, some(&[2.0, 4.0, 6.0]), "C still reads A");
     assert_eq!(
         text.as_deref(),
         Some("B*2"),
         "A is now the second column: the displayed letter follows"
     );
-    assert!(unchanged, "the formula is not rewritten");
+    assert_eq!(evaluated, 0, "the formula is not evaluated");
     assert_eq!(after_undo.as_deref(), Some("A*2"));
 
-    let (values, _, unchanged, _) = move_b_to_front(FormulaRecalc::Full);
+    let (values, _, evaluated, _) = move_b_to_front(FormulaRecalc::Full);
     assert_eq!(values, some(&[2.0, 4.0, 6.0]), "oracle");
-    assert!(!unchanged, "witness: the full recalculation rewrites C");
+    assert_eq!(evaluated, 1, "witness: the full recalculation evaluates C");
 }
 
 /// Moving a source to another sheet: the formula no longer finds it in **its**
@@ -610,15 +635,19 @@ fn the_one_row_floor_of_a_constant_is_stable_between_passes() {
         handle.execute(unrelated(&one, 1)).expect("pass 2");
         let two = take_snapshot(&handle);
         assert_eq!(numbers(&two, f), some(&[3.0]), "{mode:?}");
-        if mode == FormulaRecalc::Targeted {
-            assert_eq!(version(&one, f), version(&two, f), "second pass rewrote");
+        // The version no longer shows a recomputation (#439): the count does.
+        let evaluated = evaluations(&two) - evaluations(&one);
+        match mode {
+            FormulaRecalc::Targeted => assert_eq!(evaluated, 0, "second pass evaluated"),
+            FormulaRecalc::Full => assert_eq!(evaluated, 1, "witness"),
         }
     }
 }
 
 /// Plays "lengthen D, which the formula does not read" and returns
-/// `(C after, did C stay at its version?)`.
-fn lengthen_an_unread_column(mode: FormulaRecalc) -> (Vec<Option<f64>>, bool) {
+/// `(C after, formula columns evaluated by the lengthening)`; C keeps its
+/// version in both modes (same content).
+fn lengthen_an_unread_column(mode: FormulaRecalc) -> (Vec<Option<f64>>, u64) {
     let (_session, handle, f) = start(mode);
     handle
         .execute(set_formula(&handle, f.c, "A*2"))
@@ -628,23 +657,24 @@ fn lengthen_an_unread_column(mode: FormulaRecalc) -> (Vec<Option<f64>>, bool) {
         .execute(enter(f.d, 4, &[1.0]))
         .expect("D goes down to 5 rows");
     let after = take_snapshot(&handle);
+    assert_eq!(version(&before, f.c), version(&after, f.c));
     (
         numbers(&after, f.c),
-        version(&before, f.c) == version(&after, f.c),
+        evaluations(&after) - evaluations(&before),
     )
 }
 
 /// Lengthening a column that the formula does not read no longer lengthens it
-/// (#194), and the targeted mode does not even rewrite it; witness: the full
-/// mode rewrites it, identically.
+/// (#194), and the targeted mode does not even evaluate it; witness: the full
+/// mode evaluates it, with the same result.
 #[test]
 fn lengthening_an_unread_column_does_not_change_the_formula() {
-    let (targeted, spared) = lengthen_an_unread_column(FormulaRecalc::Targeted);
+    let (targeted, evaluated) = lengthen_an_unread_column(FormulaRecalc::Targeted);
     assert_eq!(targeted, some(&[2.0, 4.0, 6.0]));
-    assert!(spared, "C was not rewritten");
-    let (full, spared) = lengthen_an_unread_column(FormulaRecalc::Full);
+    assert_eq!(evaluated, 0, "C was not evaluated");
+    let (full, evaluated) = lengthen_an_unread_column(FormulaRecalc::Full);
     assert_eq!(full, targeted);
-    assert!(!spared, "witness: the full recalculation rewrites it");
+    assert_eq!(evaluated, 1, "witness: the full recalculation evaluates it");
 }
 
 /// An unreadable formula takes the length of the sheet's ordinary columns and
@@ -739,9 +769,10 @@ fn a_cycle_created_elsewhere_blocks_the_formula_and_is_undone() {
     );
 }
 
-/// Sets the cycle "C = B*2, B = C+1" and returns true if an unrelated command
-/// leaves the versions of B and C intact.
-fn cycle_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
+/// Sets the cycle "C = B*2, B = C+1" and returns how many formula columns an
+/// unrelated command evaluates; B and C keep their versions in both modes
+/// (same content).
+fn cycle_evaluations_of_an_unrelated_command(mode: FormulaRecalc) -> u64 {
     let (_session, handle, f) = start(mode);
     handle
         .execute(set_formula(&handle, f.c, "B*2"))
@@ -753,7 +784,9 @@ fn cycle_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
     assert!(all_empty(&before, f.b) && all_empty(&before, f.c));
     handle.execute(unrelated(&before, 0)).expect("unrelated");
     let after = take_snapshot(&handle);
-    version(&before, f.b) == version(&after, f.b) && version(&before, f.c) == version(&after, f.c)
+    assert_eq!(version(&before, f.b), version(&after, f.b));
+    assert_eq!(version(&before, f.c), version(&after, f.c));
+    evaluations(&after) - evaluations(&before)
 }
 
 /// A stable cycle is not rewritten at every command: its members do not bounce
@@ -761,12 +794,14 @@ fn cycle_unchanged_by_an_unrelated_command(mode: FormulaRecalc) -> bool {
 /// enter its fingerprint).
 #[test]
 fn a_stable_cycle_is_not_rewritten() {
-    assert!(cycle_unchanged_by_an_unrelated_command(
-        FormulaRecalc::Targeted
-    ));
-    assert!(
-        !cycle_unchanged_by_an_unrelated_command(FormulaRecalc::Full),
-        "witness: the full recalculation rewrites the cycle"
+    assert_eq!(
+        cycle_evaluations_of_an_unrelated_command(FormulaRecalc::Targeted),
+        0
+    );
+    assert_eq!(
+        cycle_evaluations_of_an_unrelated_command(FormulaRecalc::Full),
+        2,
+        "witness: the full recalculation evaluates the cycle"
     );
 }
 
@@ -882,9 +917,10 @@ fn a_restored_formula_column_is_correct() {
     );
 }
 
-/// Duplicates the sheet, inputs into the copy of A, and returns true if the
-/// **original** formula column kept its version.
-fn original_unchanged_by_an_input_into_the_copy(mode: FormulaRecalc) -> bool {
+/// Duplicates the sheet, inputs into the copy of A, and returns how many
+/// formula columns the input evaluated (the **original** formula column keeps
+/// its version in both modes: same content).
+fn evaluations_of_an_input_into_the_copy(mode: FormulaRecalc) -> u64 {
     let (_session, handle, f) = start(mode);
     handle
         .execute(set_formula(&handle, f.c, "A*2"))
@@ -914,20 +950,24 @@ fn original_unchanged_by_an_input_into_the_copy(mode: FormulaRecalc) -> bool {
     let after = take_snapshot(&handle);
     assert_eq!(numbers(&after, c2), some(&[18.0, 4.0, 6.0]));
     assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]));
-    version(&s, f.c) == version(&after, f.c)
+    assert_eq!(version(&s, f.c), version(&after, f.c));
+    evaluations(&after) - evaluations(&s)
 }
 
 /// A duplicated sheet calculates its own formulas on its own columns: the memo
 /// is kept by identifier, not by name nor by letter, and the original is not
-/// rewritten by an input into the copy.
+/// evaluated by an input into the copy.
 #[test]
 fn a_duplicated_sheet_has_its_own_formulas() {
-    assert!(original_unchanged_by_an_input_into_the_copy(
-        FormulaRecalc::Targeted
-    ));
-    assert!(
-        !original_unchanged_by_an_input_into_the_copy(FormulaRecalc::Full),
-        "witness: the full recalculation rewrites the original"
+    assert_eq!(
+        evaluations_of_an_input_into_the_copy(FormulaRecalc::Targeted),
+        1,
+        "only the copy's formula reads the copy's A"
+    );
+    assert_eq!(
+        evaluations_of_an_input_into_the_copy(FormulaRecalc::Full),
+        2,
+        "witness: the full recalculation evaluates the original too"
     );
 }
 
@@ -1375,7 +1415,7 @@ fn editing_the_unnamed_x_recalculates_at() {
     }
 }
 
-/// An unrelated command rewrites no column function, the full recalculation
+/// An unrelated command evaluates no column function, the full recalculation
 /// does (witness).
 #[test]
 fn an_unrelated_command_rewrites_no_column_function() {
@@ -1387,12 +1427,18 @@ fn an_unrelated_command_rewrites_no_column_function() {
         let before = take_snapshot(&handle);
         handle.execute(unrelated(&before, 0)).expect("unrelated");
         let after = take_snapshot(&handle);
-        (version(&before, f.c), version(&after, f.c))
+        (
+            version(&before, f.c),
+            version(&after, f.c),
+            evaluations(&after) - evaluations(&before),
+        )
     };
-    let (before, after) = versions(FormulaRecalc::Targeted);
+    let (before, after, evaluated) = versions(FormulaRecalc::Targeted);
     assert_eq!(before, after);
-    let (before, after) = versions(FormulaRecalc::Full);
-    assert_ne!(before, after, "witness");
+    assert_eq!(evaluated, 0);
+    let (before, after, evaluated) = versions(FormulaRecalc::Full);
+    assert_eq!(before, after, "the same content keeps its number");
+    assert_eq!(evaluated, 1, "witness");
 }
 
 /// The X is itself a formula column: it is recalculated first, even though the
@@ -1630,12 +1676,18 @@ fn editing_the_remote_column_recalculates_the_reader() {
         let before = take_snapshot(&handle);
         handle.execute(unrelated(&before, 0)).expect("unrelated");
         let after = take_snapshot(&handle);
-        (version(&before, f.c), version(&after, f.c))
+        (
+            version(&before, f.c),
+            version(&after, f.c),
+            evaluations(&after) - evaluations(&before),
+        )
     };
-    let (before, after) = versions(FormulaRecalc::Targeted);
+    let (before, after, evaluated) = versions(FormulaRecalc::Targeted);
     assert_eq!(before, after, "not rewritten");
-    let (before, after) = versions(FormulaRecalc::Full);
-    assert_ne!(before, after, "witness: the full mode rewrites");
+    assert_eq!(evaluated, 0, "not evaluated");
+    let (before, after, evaluated) = versions(FormulaRecalc::Full);
+    assert_eq!(before, after, "the same content keeps its number");
+    assert_eq!(evaluated, 1, "witness: the full mode evaluates");
 }
 
 /// A role change in the other sheet changes the X paired with the remote
@@ -1773,12 +1825,15 @@ fn a_chain_across_sheets_is_calculated_in_one_pass() {
             .expect("edit Sheet1!A");
         let s = take_snapshot(&handle);
         assert_eq!(numbers(&s, o.c).first().copied().flatten(), Some(31.0));
-        if mode == FormulaRecalc::Targeted {
-            let before = take_snapshot(&handle);
-            handle.execute(unrelated(&before, 1)).expect("unrelated");
-            let after = take_snapshot(&handle);
-            assert_eq!(version(&before, o.c), version(&after, o.c), "stable");
-            assert_eq!(version(&before, f.c), version(&after, f.c), "stable");
+        let before = take_snapshot(&handle);
+        handle.execute(unrelated(&before, 1)).expect("unrelated");
+        let after = take_snapshot(&handle);
+        assert_eq!(version(&before, o.c), version(&after, o.c), "stable");
+        assert_eq!(version(&before, f.c), version(&after, f.c), "stable");
+        let evaluated = evaluations(&after) - evaluations(&before);
+        match mode {
+            FormulaRecalc::Targeted => assert_eq!(evaluated, 0, "stable: nothing evaluated"),
+            FormulaRecalc::Full => assert_eq!(evaluated, 2, "witness: both are evaluated"),
         }
     }
 }
@@ -1820,11 +1875,14 @@ fn a_loop_across_sheets_stays_not_calculated_and_stable() {
         let s = take_snapshot(&handle);
         assert!(all_empty(&s, f.c), "{mode:?}");
         assert!(all_empty(&s, o.c), "{mode:?}");
-        if mode == FormulaRecalc::Targeted {
-            handle.execute(unrelated(&s, 2)).expect("unrelated");
-            let after = take_snapshot(&handle);
-            assert_eq!(version(&s, f.c), version(&after, f.c), "stable");
-            assert_eq!(version(&s, o.c), version(&after, o.c), "stable");
+        handle.execute(unrelated(&s, 2)).expect("unrelated");
+        let after = take_snapshot(&handle);
+        assert_eq!(version(&s, f.c), version(&after, f.c), "stable");
+        assert_eq!(version(&s, o.c), version(&after, o.c), "stable");
+        let evaluated = evaluations(&after) - evaluations(&s);
+        match mode {
+            FormulaRecalc::Targeted => assert_eq!(evaluated, 0, "stable: nothing evaluated"),
+            FormulaRecalc::Full => assert_eq!(evaluated, 2, "witness: both are evaluated"),
         }
     }
 }
@@ -2289,5 +2347,229 @@ fn several_kept_formulas_bind_in_identifier_order_each_on_the_previous_binding()
         assert_eq!(s.bound.recent, vec![f.c, f.d], "{mode:?}: ascending");
         assert_eq!(numbers(&s, f.c), some(&[110.0, 220.0, 330.0]));
         assert_eq!(numbers(&s, f.d), some(&[101.0, 202.0, 303.0]));
+    }
+}
+
+// -- undoing a macro across a formula pass (#448) ------------------------------
+
+/// `C = A*2` is a mixed column; `C = 1+2` (no column read) is a numeric one. The
+/// pass that follows each command retypes the column, outside the history.
+fn delete_row_then_retype(handle: &SessionHandle, f: &SheetFixture, at: usize) {
+    handle
+        .execute(Command::DeleteRows {
+            sheet: f.sheet,
+            at,
+            count: 1,
+        })
+        .expect("delete a row");
+    handle
+        .execute(set_formula(handle, f.c, "1+2"))
+        .expect("retype C through its formula");
+}
+
+/// #448: the delta of `DeleteRows` holds a mixed block for `C`, and when the
+/// macro aborts `C` is numeric: no pass runs between the two undos.
+#[test]
+fn aborting_a_macro_undoes_deleted_rows_over_a_retyped_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        let before = take_snapshot(&handle);
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        delete_row_then_retype(&handle, &f, 0);
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), numbers(&before, f.a), "A restored");
+        assert_eq!(numbers(&after, f.b), numbers(&before, f.b), "B restored");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "C recomputed");
+    }
+}
+
+/// #448: the same macro, closed then undone, goes through the same path.
+#[test]
+fn undoing_a_closed_macro_undoes_deleted_rows_over_a_retyped_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        delete_row_then_retype(&handle, &f, 0);
+        handle.end_macro().expect("close");
+        handle.undo().expect("the undo is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
+}
+
+/// #448: not only the type. `C = D` is shorter than the row that was deleted, so
+/// putting the row back aims past the end of `C`.
+#[test]
+fn aborting_a_macro_undoes_deleted_rows_over_a_shortened_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(enter(f.d, 0, &[7.0]))
+            .expect("D has one row");
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 2,
+                count: 1,
+            })
+            .expect("delete the last row");
+        handle
+            .execute(set_formula(&handle, f.c, "D"))
+            .expect("C = D, one row");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
+}
+
+/// #448: redo replays the entries with no pass between them either. `C = D` has
+/// one row before the macro; once `C = A*2` it has three, the macro deletes the
+/// last one, and the replay aims past the end of the one-row `C`.
+#[test]
+fn redoing_a_closed_macro_replays_deleted_rows_over_a_lengthened_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(enter(f.d, 0, &[7.0]))
+            .expect("D has one row");
+        handle
+            .execute(set_formula(&handle, f.c, "D"))
+            .expect("C = D, one row");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2, three rows");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 2,
+                count: 1,
+            })
+            .expect("delete the last row");
+        handle.end_macro().expect("close");
+        let done = take_snapshot(&handle);
+        handle.undo().expect("the undo is not refused");
+        handle.redo().expect("the redo is not refused");
+        let redone = take_snapshot(&handle);
+        assert_eq!(numbers(&redone, f.a), numbers(&done, f.a), "{mode:?}");
+        assert_eq!(numbers(&redone, f.c), numbers(&done, f.c), "{mode:?}");
+    }
+}
+
+/// #448: `DeleteCells` has its own arm. `C = A*2` is mixed, the macro deletes
+/// its first cell then retypes it numeric (`C = 1+2`); the abort puts a mixed
+/// block back over a numeric column.
+#[test]
+fn aborting_a_macro_undoes_deleted_cells_over_a_retyped_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![f.c],
+                at: 0,
+                count: 1,
+            })
+            .expect("delete a cell of C");
+        handle
+            .execute(set_formula(&handle, f.c, "1+2"))
+            .expect("C = 1+2");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
+}
+
+/// #448: reverting `InsertRows` deletes rows at a position `C` may no longer
+/// have: `C = D` has no row, the macro inserted two rows before it.
+#[test]
+fn aborting_a_macro_undoes_inserted_rows_over_a_shortened_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::InsertRows {
+                sheet: f.sheet,
+                at: 2,
+                count: 2,
+            })
+            .expect("insert two rows");
+        handle
+            .execute(set_formula(&handle, f.c, "D"))
+            .expect("C = D, no row");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
+}
+
+/// #448 without a macro: two plain undos still cross a retyped formula column.
+#[test]
+fn undoing_one_by_one_crosses_a_formula_column_made_mixed_by_a_too_deep_formula() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle
+            .execute(set_formula(&handle, f.c, &sum_of_a(1002)))
+            .expect("too deep: a not-calculated block");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 0,
+                count: 1,
+            })
+            .expect("delete a row");
+        handle
+            .execute(set_formula(&handle, f.c, "1+2"))
+            .expect("C = 1+2");
+        handle.undo().expect("undo C = 1+2");
+        handle.undo().expect("undo the deleted row");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), vec![None, None, None], "{mode:?}");
+    }
+}
+
+/// #448: an entry the abort reaches before the deleted rows is a structural one;
+/// the delete is still put back over the retyped column.
+#[test]
+fn aborting_a_macro_with_a_structural_entry_after_the_deleted_rows() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        delete_row_then_retype(&handle, &f, 0);
+        let snapshot = take_snapshot(&handle);
+        handle
+            .execute(unrelated(&snapshot, 0))
+            .expect("a structural command");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
     }
 }

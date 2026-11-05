@@ -2928,3 +2928,210 @@ fn absorb_into_last_without_an_entry_or_in_a_macro_is_a_plain_command() {
     history.end_macro(&mut f.project).unwrap();
     assert_eq!(history.len(), 2, "the macro is its own entry");
 }
+
+// -- 23. derived columns that no longer fit a delta (#448) -----------------
+//
+// The formula pass runs outside the history. Replaying a macro's deltas in a
+// row meets columns the pass rewrote in between; the tests emulate the pass
+// with direct `Project` calls.
+
+/// `C`, a formula column (`A*2`, mixed, `[1,2,3]`) appended to `Sheet1`.
+fn add_formula_column(f: &mut Fixture) -> NodeId {
+    let c = f
+        .project
+        .add_column(
+            f.sheet1,
+            None,
+            Some("C"),
+            Column::from_f64(&[1.0, 2.0, 3.0]),
+        )
+        .expect("column C");
+    f.project
+        .set_column_type(c, ColumnType::Mixed)
+        .expect("C mixed");
+    let formula = f
+        .project
+        .tree()
+        .formula_from_letters(c, "A*2")
+        .expect("formula entered");
+    f.project
+        .set_column_meta(
+            c,
+            ColumnMeta {
+                formula: Some(formula),
+                ..Default::default()
+            },
+        )
+        .expect("C = A*2");
+    c
+}
+
+fn version_of(project: &Project, column: NodeId) -> u64 {
+    project
+        .tree()
+        .node(column)
+        .and_then(Node::as_column)
+        .map(Column::version)
+        .expect("existing column")
+}
+
+#[test]
+fn aborting_over_a_retyped_formula_column_makes_it_fit() {
+    let mut f = fixture();
+    let c = add_formula_column(&mut f);
+    let mut history = History::new();
+    history.begin_macro(MacroKind::PasteCells).unwrap();
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet1,
+                at: 0,
+                count: 1,
+            },
+        )
+        .expect("delete a row");
+    // The pass that follows the command retypes C.
+    f.project.set_column_type(c, ColumnType::Numeric).unwrap();
+    let retyped = version_of(&f.project, c);
+
+    history
+        .abort_macro(&mut f.project)
+        .expect("a derived column is made to fit");
+
+    assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0], "A exact");
+    assert_eq!(floats(&f.project, f.b), vec![10.0, 20.0], "B exact");
+    assert_eq!(column_type(&f.project, c), ColumnType::Mixed, "block type");
+    assert_eq!(column_len(&f.project, c), 3);
+    assert_ne!(
+        version_of(&f.project, c),
+        retyped,
+        "the next pass rewrites C"
+    );
+}
+
+#[derive(Clone, Copy)]
+enum Replay {
+    Abort,
+    Undo,
+    Redo,
+}
+
+/// One row per site of `History` that aims at a row past the end of a derived
+/// column: the command of the macro, and how the entry is replayed. The
+/// emulated pass cuts `C` short before the replay.
+#[test]
+fn a_derived_column_shorter_than_the_delta_is_made_to_fit_at_every_site() {
+    type Make = fn(&Fixture, NodeId) -> Command;
+    let delete_rows: Make = |f, _| Command::DeleteRows {
+        sheet: f.sheet1,
+        at: 2,
+        count: 1,
+    };
+    let delete_cells: Make = |f, c| Command::DeleteCells {
+        columns: vec![f.a, f.b, c],
+        at: 2,
+        count: 1,
+    };
+    let insert_rows: Make = |f, _| Command::InsertRows {
+        sheet: f.sheet1,
+        at: 2,
+        count: 2,
+    };
+    let cases: [(&str, Make, Replay); 6] = [
+        ("revert DeleteRows", delete_rows, Replay::Abort),
+        ("revert DeleteCells", delete_cells, Replay::Abort),
+        ("revert InsertRows", insert_rows, Replay::Undo),
+        ("reapply InsertRows", insert_rows, Replay::Redo),
+        ("reapply DeleteRows", delete_rows, Replay::Redo),
+        ("reapply DeleteCells", delete_cells, Replay::Redo),
+    ];
+    for (site, make, replay) in cases {
+        let mut f = fixture();
+        let c = add_formula_column(&mut f);
+        let mut history = History::new();
+        history.begin_macro(MacroKind::PasteCells).unwrap();
+        let command = make(&f, c);
+        history
+            .execute(&mut f.project, command)
+            .unwrap_or_else(|e| panic!("{site}: {e}"));
+        let outcome = match replay {
+            Replay::Abort => {
+                f.project.set_length(c, 1).unwrap();
+                history.abort_macro(&mut f.project)
+            }
+            Replay::Undo => {
+                history.end_macro(&mut f.project).unwrap();
+                f.project.set_length(c, 0).unwrap();
+                history.undo(&mut f.project).map(drop)
+            }
+            Replay::Redo => {
+                history.end_macro(&mut f.project).unwrap();
+                history.undo(&mut f.project).unwrap();
+                f.project.set_length(c, 1).unwrap();
+                history.redo(&mut f.project).map(drop)
+            }
+        };
+        assert_eq!(outcome, Ok(()), "{site}");
+    }
+}
+
+/// An ordinary column holds what the user typed: a misfit stays an error. The
+/// abort still reverts every older entry, closes the macro and gives the
+/// pre-macro redo stack back.
+#[test]
+fn aborting_over_a_retyped_ordinary_column_fails_after_reverting_everything_else() {
+    let mut f = fixture();
+    let mut history = History::new();
+    history
+        .execute(&mut f.project, set_cells(f.a, 0, &[9.0]))
+        .unwrap();
+    history.undo(&mut f.project).unwrap();
+    assert!(history.can_redo());
+
+    history.begin_macro(MacroKind::PasteCells).unwrap();
+    history
+        .execute(&mut f.project, set_cells(f.a, 1, &[50.0]))
+        .unwrap();
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet1,
+                at: 0,
+                count: 1,
+            },
+        )
+        .unwrap();
+    // B is ordinary: nothing may rewrite it behind the history's back.
+    f.project.set_column_type(f.b, ColumnType::Mixed).unwrap();
+
+    let outcome = history.abort_macro(&mut f.project);
+    assert!(
+        matches!(outcome, Err(CommandError::Core(CoreError::TypeMismatch(_)))),
+        "{outcome:?}"
+    );
+    assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0], "older entry");
+    assert!(!history.in_macro());
+    assert!(history.can_redo(), "the saved redo stack is back");
+
+    // The bookkeeping of the stack matches a history that never failed.
+    history.begin_macro(MacroKind::PasteCells).unwrap();
+    history
+        .execute(&mut f.project, set_cells(f.a, 0, &[7.0]))
+        .unwrap();
+    history.end_macro(&mut f.project).unwrap();
+
+    let mut twin = fixture();
+    let mut twin_history = History::new();
+    twin_history
+        .execute(&mut twin.project, set_cells(twin.a, 0, &[9.0]))
+        .unwrap();
+    twin_history.undo(&mut twin.project).unwrap();
+    twin_history.begin_macro(MacroKind::PasteCells).unwrap();
+    twin_history
+        .execute(&mut twin.project, set_cells(twin.a, 0, &[7.0]))
+        .unwrap();
+    twin_history.end_macro(&mut twin.project).unwrap();
+    assert_eq!(history.retained_bytes(), twin_history.retained_bytes());
+}

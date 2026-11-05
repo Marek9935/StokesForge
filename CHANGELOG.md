@@ -26,6 +26,13 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- A transposed sheet over a formula column no longer says "Out of date" when
+  the formula still gives the same numbers, nor after reopening the file (#439).
+  The recalculation now keeps the version of a formula column it recomputes to
+  the same values. Pasting the same number in the source, or changing a value
+  and undoing it, still says "Out of date" until you recalculate; typing the
+  number a cell already holds writes nothing, as before. Transposing
+  again or recalculating an up-to-date sheet no longer adds an Undo step.
 - Pasting a formula that cannot be read behaves like typing it (#433): it is
   kept, framed in red with the reason, and its column is emptied (the copied
   values are never pasted in its place); the other columns of the paste go
@@ -253,6 +260,10 @@ without a message, see `docs/persistence.md`).
   `atan2`; `sqrt(A, 2)`: `root`).
 
 ### Fixed
+
+- A result column with **Recalculate automatically** off (#458) is now marked out of
+  date when rows are inserted or deleted in its source sheet. Undo restores the rows
+  and leaves the mark until **Recalculate**, like an edit followed by Undo.
 
 - Window names (#437): a folder named `Book1`, `Graph1`, `MBook1` or `Note1` next to the place where a window is created no longer refuses the new unnamed window; the automatic name moves on to the next free number.
 
