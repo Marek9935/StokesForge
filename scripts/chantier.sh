@@ -272,6 +272,13 @@ release_wt() {
     git -C "$main" worktree remove "$wt" > /dev/null || return 1
     if [ -n "$branch" ]; then git -C "$main" branch -d "$branch" > /dev/null || return 1; fi
     suivi release-line "$issue" --mark-done
+    # #467: an issue left open on purpose must have declared its wait (local git and files only).
+    local merge_msg
+    merge_msg="$(git -C "$main" log HEAD --first-parent --grep="^Merge #$issue:" --format=%B -n 1)"
+    if [ -n "$merge_msg" ] && ! grep -qiE "\\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#$issue\\b" <<< "$merge_msg" \
+        && [ ! -f "${SF_SUIVI_DIR:-$root/.suivi}/tagwait/$issue.json" ]; then
+        echo "release: warning: #$issue stays open (its merge does not close it) and no wait is declared; if a tag proves it: scripts/suivi.py tag-wait $issue rc|final" >&2
+    fi
 }
 
 if [ -n "$release_name" ]; then

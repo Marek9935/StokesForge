@@ -378,6 +378,35 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     eq "$(entry_field 7-1 commit)" "$m" "follow-up kept the old commit"
     eq "$(remote_head)" "$(main_head)" "follow-up pushed"
 
+    # --wait-tag (#467): refused before the lock if the message closes the issue; otherwise the wait
+    # is recorded locally, never through glab (a fake glab on PATH logs any call).
+    mkdir -p "$tmp/fakebin"; printf '#!/usr/bin/env bash\necho "$*" >> "%s/glab.log"\nexit 1\n' "$tmp" > "$tmp/fakebin/glab"
+    chmod +x "$tmp/fakebin/glab"
+    wdeliver() { ( cd "$sb/StokesForge" && PATH="$tmp/fakebin:$PATH" "$here/deliver.sh" "$@" ) > "$sb/out" 2>&1; }
+    dsb; base="$(main_head)"
+    printf 'Merge #7: add x\n\nCloses #7\n' > "$sb/msgc"
+    if wdeliver --wait-tag rc 7 "$sb/msgc"; then fail "--wait-tag with Closes accepted"; fi
+    grep -q 'keeps it open' "$sb/out" || fail "--wait-tag refusal text: $(cat "$sb/out")"
+    untouched "--wait-tag with Closes" "$base"
+    [ ! -e "$SF_SUIVI_DIR/tagwait/7.json" ] || fail "--wait-tag refused but a wait was recorded"
+    if wdeliver --wait-tag soon 7 "$sb/msg"; then fail "--wait-tag soon accepted"; fi
+    wdeliver --wait-tag final 7 "$sb/msg" || fail "--wait-tag final: $(cat "$sb/out")"
+    eq "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["kind"])' "$SF_SUIVI_DIR/tagwait/7.json")" final "tagwait record kind"
+    [ ! -e "$tmp/glab.log" ] || fail "deliver --wait-tag called glab: $(cat "$tmp/glab.log")"
+    # Cleanup warning: a merge that does not close the issue and declared no wait warns (stderr),
+    # the fixed colour line stays the only stdout; a declared wait or a Closes keeps it silent.
+    "$here/chantier.sh" --release 7 > "$sb/rout" 2> "$sb/rerr" || fail "release with a wait: $(cat "$sb/rerr")"
+    ! grep -q warning "$sb/rerr" || fail "release warned although the wait is declared: $(cat "$sb/rerr")"
+    dsb
+    deliver || fail "plain delivery: $(cat "$sb/out")"
+    "$here/chantier.sh" --release 7 > "$sb/rout" 2> "$sb/rerr" || fail "release without Closes: $(cat "$sb/rerr")"
+    grep -q 'warning: #7 stays open' "$sb/rerr" || fail "no warning for an issue left open: $(cat "$sb/rerr")"
+    eq "$(wc -l < "$sb/rout")" 1 "release: the colour line is the only stdout"
+    dsb; printf 'Merge #7: add x\n\nCloses #7\n' > "$sb/msg"
+    deliver || fail "closing delivery: $(cat "$sb/out")"
+    "$here/chantier.sh" --release 7 > "$sb/rout" 2> "$sb/rerr" || fail "release with Closes: $(cat "$sb/rerr")"
+    ! grep -q warning "$sb/rerr" || fail "warned although the merge closes the issue: $(cat "$sb/rerr")"
+
     # Refusals: main unchanged, lock free.
     dsb; base="$(main_head)"
     echo 'Merge #77: x' > "$sb/bad"; DMSG="$sb/bad" refused "bad message"

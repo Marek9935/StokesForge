@@ -16,6 +16,9 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 | `merge/<root>.json` | `{at, key}`: the user's merge request from the card button; removed by `test merged` |
 | `waits/<root>.json`, `waits/log` | the registered wait `{pid, pid_start, session, started}`; SIGTERM/SIGHUP log |
 | `control.json` | result of the last `scripts/suivi.py check` |
+| `labels.json` | state of the GitLab labels pass (#467): checked_at, ok, reason, synced_at, demote, waiting |
+| `tags.json` | tags already seen (the first run seeds), tags pending, and per tag and issue what was done (comment, card id, closed) |
+| `tagwait/<n>.json` | `tag-wait` declaration: kind `rc`/`final`, jobs, human text, added_at (set by the service once the label is on GitLab) |
 | `ci.json` | last reading of the CI of `main` by the server's watcher (#452): sha, verdict, names, reason, last_red, checked_at |
 
 ## The colour rule
@@ -81,6 +84,19 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 - A red stays in `last_red` (shown while the new head is pending or unknown) until a newer head is green. The watcher sends no desktop notification: the page is its only signal.
 - `ci.json` missing, corrupt, or older than 3 polls reads as unknown. The colour rule and the `pending` count do not depend on the CI.
 - Seams for tests: `SF_SUIVI_CI=off` (no thread), `SF_SUIVI_CI_POLL`, `SF_SUIVI_CI_TIMEOUT`.
+
+## GitLab labels and tag report (#467)
+
+`serve` runs a second thread (about 120 s, state `labels.json`) so the GitLab issue list shows where each issue stands. It runs **only for the real state folder**: with `SF_SUIVI_DIR` or `--state` it stays off unless `SF_SUIVI_LABELS=on` (`off` forces it off), so no test can write to GitLab.
+
+- **`en-cours` / `en-pause`**: same reading as the page (`held_by`): a live owner, an open form or a trial to tick with no agent, or `legacy` is `en-cours`; a record that holds nothing is `en-pause`; done, unstarted or no record is none. A package parent is `en-cours` while one of its sub-issues is held; a paused sub beside a held sibling is `en-pause`. The tracking state wins: a hand edit is undone at the next pass. Held to paused waits 10 minutes (`SF_SUIVI_LABELS_SETTLE`, seconds) so a `/clear` does not flap; promotion, done and closure are immediate. A closed issue loses every label of ours and is not labelled again; reopened, it is.
+- **Waiting labels**: `attente-rc` (an `-rcN` or the final tag proves it) and `attente-final` (final tag only). The label alone is the membership, so a hand-placed one works. A waiting label hides `en-pause`; `en-cours` stays if an agent resumes. The service adds one only for a `tag-wait` declaration (once) and removes them at closure.
+- **Writes**: one `PUT` per changed issue with `add_labels` / `remove_labels` (never `labels=`, which replaces the user's labels) and, for a closure, `state_event=close`. Reads per pass: the issues carrying each of our four labels, then the record numbers by `iids[]`, all `state=all`. Any failed, timed-out or empty read writes nothing and tries again at the next poll; the page and `/api/state` do not change (ETag).
+- **Tags**: the service reads `repository/tags` on GitLab each pass (never `releases`: an `-rcN` release is created then deleted). The first run only records what exists. At a new tag, each open issue with a label that tag handles (an rc tag: `attente-rc`; a final tag: both) gets a comment with its job results and, unless a job failed or lacks proof, a card in « En attente » (a trial entry without `try`: it holds no colour). The card OK closes the issue and drops both labels in one `PUT`; Retour keeps it open. A failed job: comment, label kept, no card. A later tag gives a new comment and card; never two for the same tag and issue, restart included (`tags.json`).
+- **Job results** come from the GitHub public API (`actions/runs?event=push&branch=<tag>`, no token, 60 requests per hour, read every 10 minutes while a tag is undecided; seams `SF_SUIVI_TAGJOBS_API`, `SF_SUIVI_TAGJOBS_POLL`, `SF_SUIVI_TAG_CAP`) and `pages` from the GitLab pipeline of the tag. Only the run of the tag's own commit counts. A job missing, still running, skipped or unreadable (403) is no proof; a running job or an unreadable GitHub delays the report (6 h at most). A matrix job (`name (leg)`) is ok only if every leg succeeded; a failed step of a `continue-on-error` job counts as failed. A hand-placed label has no declaration: all release jobs are reported and the card says « relis l'issue ».
+- **Declaring**: `suivi.py tag-wait <n> rc|final [--jobs a,b] [--human "…"]` (or `deliver.sh --wait-tag`), then the label appears within about 2 minutes.
+- **By hand**: `suivi.py labels sync [--dry-run]` runs one label pass (`--dry-run` prints the `PUT`s and writes nothing); `suivi.py tag-check <tag> --dry-run` reads GitLab and GitHub and prints what the service would report for that tag, writing nothing: run it before a tag. `suivi.py status` ends with the last sync (time, ok or failed with the reason) and the issues that wait.
+- **Restart rule**: the service is a user unit; after changing `scripts/suivi.py` restart it (`systemctl --user restart stokesforge-suivi.service`, see `scripts/suivi-install.sh`), else the old code keeps running.
 
 ## Migration and `legacy`
 
