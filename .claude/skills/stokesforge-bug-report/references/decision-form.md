@@ -31,7 +31,7 @@ Before offering options on an architecture choice, give the figures the user dec
 
 - **The decisions of a work package** (start form and follow-up form), even a single question: the multiple-choice form, below, **posed locally**: `scripts/suivi.py qcm pose <n> data.js --title "…"` (#441). It appears in the « En attente » tab of the tracking page (`http://127.0.0.1:8441/`) and opens at `/qcm/<id>`.
 - **`AskUserQuestion`** only for a quick question outside a work package's decisions (a yes/no on process): one question, 2 to 4 options, recommendation first with « (Recommandé) » ("(Recommended)" in the interaction language), advantage and drawback in each description.
-- **The multiple-choice form** is built from [`decision-form.html`](decision-form.html), one template with two storage modes: served by `suivi.py serve` on `127.0.0.1` (answers go to files, « J'ai fini » marks it finished), or published as an Artifact (answers go to the `decisions` collection). The **published Artifact form is the fallback**: the user is away from the PC (phone, other machine), the tracking server is down, or they ask for it. Never a list of questions in the terminal.
+- **The multiple-choice form** is built from [`decision-form.html`](decision-form.html), one template with two storage modes: served by `suivi.py serve` on `127.0.0.1` (answers go to files, « J'ai fini » marks it finished and wakes the agent), or published as an Artifact (answers go to the `decisions` collection). The **published Artifact form is the fallback**: the user is away from the PC (phone, other machine), the tracking server is down, or they ask for it. Never a list of questions in the terminal.
 
 The page is written in the **interaction language** (`CLAUDE.md`, "Interaction language"). The template `decision-form.html` is in French and exempt from the French guard; when the interaction language is not French, translate its wording when filling it. Interface texts appear in English, as on screen.
 
@@ -58,7 +58,7 @@ Bullets: one idea each, under 12 words when possible, the user's vocabulary (ges
 
 ## After the answers
 
-1. Read them: `python3 scripts/suivi.py qcm answers <id> [--json]` (usable after a `/clear`; `qcm list --open` finds the id). The user's « J'ai fini » at the bottom of the summary marks the form finished and frees the issue's colour if nothing else holds it; do not read the answers before, unless asked. Artifact fallback: `ArtifactData`, `action: list`, `collection: decisions`.
+1. Read them: `python3 scripts/suivi.py qcm answers <id> [--json]` (usable after a `/clear`; `qcm list --open` finds the id). After posing the form, end the turn: « J'ai fini » at the bottom of the summary marks it finished, wakes the agent and frees the issue's colour if nothing else holds it. Do not ask the user to say they finished, and do not read the answers before, unless asked. Wake rules: [suivi.md](../../stokesforge-verification/references/suivi.md). Artifact fallback: `ArtifactData`, `action: list`, `collection: decisions`.
 2. Cross-check them against each other and against `CLAUDE.md` and `docs/`: look for **inconsistencies**.
 3. For each choice that is not the recommendation: state its drawback and propose an adjustment that keeps its intent.
 4. An « Autre » that needs context: fetch it in the code, then ask again.
