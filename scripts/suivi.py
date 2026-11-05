@@ -52,6 +52,10 @@ was reported (only suivi.py writes it, just before printing; another session sta
 `.suivi/waits/<root>.json` {pid, pid_start, session, started} registers the wait (stale = pid_start
 mismatch), `waits/log` records SIGTERM/SIGHUP. When to wake is ONE function, `should_wake`. A wait never
 holds a colour and never writes issues/ or tests/. `news <n>` prints and records the unseen events.
+MERGE REQUEST. The page's « Fusionner » button POSTs /api/issue/<n>/merge (refused 409 unless every `try`
+entry of the group is OK now); that writes merge/<root>.json {at, key}. The request is live only while the
+condition holds and no entry changed since (key), and it is an event that wakes the wait at once. A merge
+ready and not delivered keeps the wait open (no `nothing open`); `test merged` deletes the file.
 Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or comment, default 180 s).
 `hook-wait` (PostToolUse hook, asyncRewake) arms that same wait after a `suivi.py` call on an issue the
 session owns: exit 2 with the text on stderr for an event, exit 0 silent otherwise. `hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
@@ -780,7 +784,7 @@ def should_wake(events, todos, last_change, now, settle):
     each change restarting it). A plain OK with `todo` left wakes nothing and stays unseen."""
     if not events:
         return False
-    if any(e["kind"] == "form" for e in events) or todos == 0:
+    if any(e["kind"] in ("form", "merge") for e in events) or todos == 0:
         return True
     if any(e["status"] == "retour" or e["comment"] for e in events):
         return now - last_change >= settle
@@ -806,8 +810,35 @@ def save_heard(root, sid, seen):
     write_json(heard_path(root), {"session": sid, "seen": seen})
 
 
-def scan_group(members):
-    """(items, open_forms, open_todos) for the issues in `members`. items: key -> {id, fp, line}."""
+def merge_path(root):
+    return os.path.join(suivi_dir(), "merge", "%d.json" % root)
+
+
+def merge_ready(items):
+    """The merge condition: at least one `try` entry and every one of them OK."""
+    tests = [it for it in items.values() if it["kind"] == "test"]
+    return bool(tests) and all(it["status"] == "ok" for it in tests)
+
+
+def merge_key(items):
+    """What a merge request is bound to: any change of a trial entry (a Retour, an un-tick and a new
+    tick) voids it, since each rewrite moves the file's mtime."""
+    raw = json.dumps(sorted((it["id"], it["status"], it["comment"], it["mns"]) for it in items.values()
+                            if it["kind"] == "test"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def merge_request(root, items):
+    """The live merge request {at, key} for the group, or None (no file, condition gone, entries changed)."""
+    d = read_json(merge_path(root))
+    if isinstance(d, dict) and merge_ready(items) and d.get("key") == merge_key(items):
+        return d
+    return None
+
+
+def scan_group(members, root=None):
+    """(items, open_forms, open_todos) for the issues in `members`. items: key -> {id, fp, line}.
+    With `root`, a live merge request of the group is an item too."""
     items, forms, todos = {}, [], []
     for m in members:
         for p in sorted(glob.glob(os.path.join(tests_dir(), "%s-*.json" % m)), key=natural):
@@ -822,7 +853,11 @@ def scan_group(members):
                 mtime = os.stat(p).st_mtime
             except OSError:
                 mtime = 0.0
-            items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime,
+            try:
+                mns = os.stat(p).st_mtime_ns
+            except OSError:
+                mns = 0
+            items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime, "mns": mns,
                           "fp": "%s|%s" % (status, comment), "line": "%s %s%s" % (tid, status, ": " + comment if comment else "")}
         for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
             qid = os.path.basename(os.path.dirname(p))
@@ -839,6 +874,11 @@ def scan_group(members):
                                    "fp": "finished|" + digest,
                                    "line": "form %s finished, %d/%d answered, read with: suivi.py qcm answers %s"
                                            % (qid, pr["answered"], pr["total"], qid)}
+    req = merge_request(root, items) if root is not None else None
+    if req:
+        items["merge:%d" % root] = {"id": "merge:%d" % root, "kind": "merge", "status": "", "comment": "", "mtime": 0.0,
+                                    "fp": "requested|%s" % req.get("at", ""),
+                                    "line": "#%d merge requested on the page by the user: this is the go-ahead" % root}
     return items, forms, todos
 
 
@@ -846,7 +886,7 @@ def unseen_events(items, seen):
     out = []
     for key in sorted(items, key=natural):
         it = items[key]
-        if seen.get(key, None if key.startswith("qcm:") else BASE_FP) != it["fp"]:
+        if seen.get(key, BASE_FP if it["kind"] == "test" else None) != it["fp"]:
             out.append(it)
     return out
 
@@ -886,9 +926,10 @@ def listening(recs, root):
 
 def wait_view(recs, root):
     """Computed `listening` and `unread` of a group: steady values, no timestamp (ETag)."""
-    items, _, _ = scan_group(members_of(recs, root))
+    items, _, _ = scan_group(members_of(recs, root), root)
     sid = owner_session(recs.get(root))
-    return {"listening": listening(recs, root), "unread": len(unseen_events(items, load_heard(root, sid)))}
+    return {"listening": listening(recs, root), "unread": len(unseen_events(items, load_heard(root, sid))),
+            "merge_ready": merge_ready(items), "merge_requested": any(it["kind"] == "merge" for it in items.values())}
 
 
 def exit_reason(b, sid):
@@ -907,8 +948,10 @@ def exit_reason(b, sid):
     return None
 
 
-def open_summary(n, forms, todos, hook=False):
+def open_summary(n, forms, todos, hook=False, ready=False):
     parts = []
+    if ready:
+        parts.append("merge ready, waiting for the user's go-ahead")
     if forms:
         parts.append("%d open form%s" % (len(forms), "" if len(forms) == 1 else "s"))
     if todos:
@@ -992,14 +1035,15 @@ def wait_loop(n, sid, root, timeout, hook):
         line = exit_reason(b, sid)
         if line:
             return "end", line
-        items, forms, todos = scan_group(members_of(recs, root))
+        items, forms, todos = scan_group(members_of(recs, root), root)
         events = unseen_events(items, load_heard(root, sid))
+        ready = merge_ready(items)
         now = time.time()
         last_change = max([it["mtime"] for it in items.values() if it["kind"] == "test"], default=0.0)
         if should_wake(events, len(todos), last_change, now, settle):
             record_events(root, sid, events)          # just before reporting, never earlier
-            return "event", "\n".join([e["line"] for e in events] + [open_summary(n, forms, todos, hook)])
-        if not events and not forms and not todos:
+            return "event", "\n".join([e["line"] for e in events] + [open_summary(n, forms, todos, hook, ready)])
+        if not events and not forms and not todos and not ready:
             return "end", ("nothing open: no open form, no trial entry to tick, nothing unread; "
                            "nothing to do, end the turn without a message.")
         if now - started >= timeout:
@@ -1031,8 +1075,9 @@ def cmd_hook_wait(a):
             return 0
         os.environ["SF_SUIVI_DIR"] = d
         sid, root, recs, _ = wait_context(n, sid)
-        items, forms, todos = scan_group(members_of(recs, root))
-        if not (forms or todos or unseen_events(items, load_heard(root, sid))) or live_wait(root) is not None:
+        items, forms, todos = scan_group(members_of(recs, root), root)
+        if not (forms or todos or merge_ready(items) or unseen_events(items, load_heard(root, sid))) \
+                or live_wait(root) is not None:
             return 0
         kind, text = wait_session(n, sid, None, True)
         if kind == "event":
@@ -1046,7 +1091,7 @@ def cmd_hook_wait(a):
 
 def cmd_news(a):
     sid, root, recs, _ = wait_context(a.issue)
-    items, forms, todos = scan_group(members_of(recs, root))
+    items, forms, todos = scan_group(members_of(recs, root), root)
     events = unseen_events(items, load_heard(root, sid))
     if not events:
         print("no news. " + open_summary(a.issue, forms, todos))
@@ -1096,11 +1141,11 @@ def cmd_hook_news(a):
         mine = sorted(g for g, b in roots.items() if owner_session(b) == sid)
         if mine:
             for g in mine:
-                items, forms, todos = scan_group(members_of(recs, g))
+                items, forms, todos = scan_group(members_of(recs, g), g)
                 events = unseen_events(items, load_heard(g, sid))
                 if events:
                     report_events(g, g, sid, events, forms, todos)
-                if (forms or todos) and live_wait(g) is None:
+                if (forms or todos or merge_ready(items)) and live_wait(g) is None:
                     print("no wait running for #%d: any suivi.py call on the issue re-arms it, for example "
                           "suivi.py news %d" % (g, g))
         else:
@@ -1108,7 +1153,7 @@ def cmd_hook_news(a):
             for g, b in sorted(roots.items()):
                 if b.get("owner") and owner_alive(b):
                     continue
-                items, _, _ = scan_group(members_of(recs, g))
+                items, _, _ = scan_group(members_of(recs, g), g)
                 if unseen_events(items, load_heard(g, owner_session(b))):
                     late.append("#%d" % g)
             if late:
@@ -1254,6 +1299,12 @@ def cmd_test_merged(a):
         raise Fail("not a commit hash: %r" % a.commit)
     full = check_merge_commit(a.issue, a.commit)
     with Lock():
+        recs = load_all()
+        for g in {a.issue, group_of(recs[a.issue]) if a.issue in recs else a.issue}:
+            try:
+                os.unlink(merge_path(g))
+            except OSError:
+                pass
         ts = load_tests(a.issue)
         if a.replace is not None:
             hit = [t for t in ts if "commit" in t and same_commit(t["commit"], a.replace)]
@@ -1832,7 +1883,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish)", path)
         if m:
             return self.post_qcm(m.group(1), m.group(2))
+        m = re.fullmatch(r"/api/issue/(\d+)/merge", path)
+        if m:
+            return self.post_merge(int(m.group(1)))
         self.fail(404, "not found")
+
+    def post_merge(self, n):
+        """Record the user's request to merge (the agent merges). Refused unless the merge condition holds now."""
+        if self.read_body() is None:
+            return
+        recs = load_all()
+        if n not in recs:
+            return self.fail(409, "no such issue")
+        root = group_of(recs[n])
+        items, _, _ = scan_group(members_of(recs, root), root)
+        if not merge_ready(items):
+            return self.fail(409, "the merge condition does not hold: every trial entry must be OK")
+        if not any(it["kind"] == "merge" for it in items.values()):     # idempotent: a live request stays as it is
+            write_json(merge_path(root), {"at": datetime.datetime.now().isoformat(timespec="microseconds"),
+                                          "key": merge_key(items)})
+        self.send(200, json.dumps({"ok": True}), "application/json")
 
     def post_qcm(self, qid, what):
         if not safe_id(qid):

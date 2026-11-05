@@ -1417,6 +1417,153 @@ class TestSettingsHooks(unittest.TestCase):
             self.assertNotEqual(self.problems(json.loads(text.replace(old, new))), [], old)
 
 
+class TestMergeRequest(WaitBase):
+    """The page's « Fusionner » button (#454): a recorded request, never a merge."""
+
+    def request(self, n=1, at="t1"):
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, _ = suivi.scan_group([n], n)
+            key = suivi.merge_key(items)
+        os.makedirs(os.path.join(self.state, "merge"), exist_ok=True)
+        with open(os.path.join(self.state, "merge", "%d.json" % n), "w") as f:
+            json.dump({"at": at, "key": key}, f)
+
+    def all_ok(self):
+        self.owned(1)
+        self.entry("1-1", "ok")
+        self.entry("1-2", "ok")
+        self.assertIn("1-2 ok", self.run_wait(1)[1])          # the all-OK wake, recorded
+
+    def test_the_wait_stays_armed_after_all_ok_and_wakes_once_on_the_click(self):
+        self.all_ok()
+        p = self.spawn(1)
+        self.armed()
+        time.sleep(0.3)
+        self.assertIsNone(p.poll())                           # `nothing open` must not fire
+        self.request()
+        rc, out, _ = self.finish(p, 5)
+        self.assertIn("#1 merge requested on the page by the user: this is the go-ahead", out)
+        rc, out, _ = self.run_wait(1, timeout="1")             # same request: not again
+        self.assertTrue(out.startswith("timeout"), out)
+
+    def test_a_voided_request_then_a_new_click_wakes_again(self):
+        self.all_ok()
+        self.request(at="t1")
+        self.assertIn("merge requested", self.run_wait(1)[1])
+        self.entry("1-1", "todo")
+        self.entry("1-1", "ok")                                # voided: the entries changed
+        self.assertTrue(self.run_wait(1, timeout="1")[1].startswith("timeout"))
+        self.request(at="t2")
+        self.assertIn("merge requested", self.run_wait(1)[1])
+
+    def test_delivered_merge_ends_the_wait_quietly(self):
+        self.all_ok()
+        p = self.spawn(1)
+        self.armed()
+        self.entry("1-1", "ok", **{"try": None})              # what `test merged` does to the entries
+        self.entry("1-2", "ok", **{"try": None})
+        self.assertTrue(self.finish(p, 5)[1].startswith("nothing open"))
+
+    def test_hook_wait_arms_while_a_merge_is_ready(self):
+        self.all_ok()
+        e = dict(self.env)
+        e["CLAUDE_PROJECT_DIR"] = self.repo
+        p = subprocess.Popen([sys.executable, "-I", SUIVI, "hook-wait"], cwd=self.repo, env=e, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        p.stdin.write(json.dumps({"session_id": "S1", "tool_input": {"command": "python3 scripts/suivi.py news 1"}}))
+        p.stdin.close()
+        self.armed()
+        self.assertIsNone(p.poll())
+        self.request()
+        rc, out, err = self.finish(p, 5)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("merge requested", err)
+
+    def test_status_carries_the_flags_and_the_colour_rule_is_unchanged(self):
+        self.owned(1)
+        self.entry("1-1", "ok")
+        self.assertEqual(self.held(), ["agent"])
+        e = self.status()["colours"][0]
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (True, False))
+        self.request()
+        e = self.status()["colours"][0]
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (True, True))
+        self.entry("1-1", "retour", "x")
+        e = self.status()["colours"][0]
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (False, False))
+
+    def test_all_ok_without_an_agent_frees_the_colour(self):
+        self.put(1, colour=C[0], name="N", owner=None)
+        self.entry("1-1", "ok")
+        self.request()
+        self.assertEqual(self.held(), [])
+        self.assertEqual([p["issue"] for p in self.status()["paused"]], [1])
+
+    def test_test_merged_deletes_the_request(self):
+        self.claim(1, "--name", "One")
+        self.entry("1-1", "ok")
+        self.request()
+        self.git("checkout", "-q", "-b", "feature/1-x")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work (#1)")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "Merge #1", "feature/1-x")
+        full = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, capture_output=True, text=True).stdout.strip()
+        self.assertTrue(os.path.exists(os.path.join(self.state, "merge", "1.json")))
+        r = self.run_cli("test", "merged", "1", full)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge", "1.json")))
+
+
+class TestMergePost(ServerBase):
+    def merge(self, n=1, **kw):
+        return self.post("/api/issue/%d/merge" % n, body={}, **kw)
+
+    def flags(self, n=0):
+        e = json.loads(self.req("GET", "/api/state")[2])["colours"][n]
+        return e["merge_ready"], e["merge_requested"]
+
+    def test_refused_with_409_unless_every_try_entry_is_ok(self):
+        self.assertEqual(self.merge()[0], 409)                      # 1-1 is todo
+        for status in ("retour", "todo"):
+            with open(self.entry, "w") as f:
+                json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
+            self.assertEqual(self.merge()[0], 409, status)
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "ok"}, f)    # no `try`
+        self.assertEqual(self.merge()[0], 409)
+        self.assertEqual(self.merge(9)[0], 409)                     # no such issue
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+
+    def test_guards(self):
+        self.ok()
+        self.assertEqual(self.merge(headers={})[0], 403)
+        self.assertEqual(self.merge(headers={"X-Suivi": "1", "Origin": "http://evil.example"})[0], 403)
+        self.assertEqual(self.merge(host="evil.example")[0], 403)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+
+    def ok(self, status="ok"):
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
+
+    def test_a_click_records_once_and_a_change_voids_it(self):
+        self.ok()
+        self.assertEqual(self.flags(), (True, False))
+        self.assertEqual(self.merge()[0], 200)
+        path = os.path.join(self.state, "merge", "1.json")
+        first = slurp(path)
+        self.assertEqual(self.merge()[0], 200)
+        self.assertEqual(slurp(path), first)                        # idempotent
+        self.assertEqual(self.flags(), (True, True))
+        self.ok("todo")
+        self.assertEqual(self.flags(), (False, False))
+        self.ok("ok")
+        self.assertEqual(self.flags(), (True, False))               # not back on its own
+        self.assertEqual(self.merge()[0], 200)
+        self.assertEqual(self.flags(), (True, True))
+        self.assertNotEqual(slurp(path), first)
+
+
 class TestWaitServed(ServerBase):
     def test_real_post_during_the_wait_prints_retour_and_comment(self):
         e = dict(self.env)
@@ -2024,7 +2171,9 @@ class TestPage(unittest.TestCase):
         l = L(card, [todo(7), todo(7), todo(7), todo(7, "ok"), todo(8)])
         self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : cocher 3 essais", "l’agent travaille"))   # lang: fr
         self.assertEqual(L(card, [todo(7)])["text"], "À toi : cocher 1 essai")                              # lang: fr
-        self.assertEqual(L(card, [todo(7, "ok")]), {"user": False, "text": "L’agent travaille", "also": "", "note": ""})   # lang: fr
+        l = L(card, [todo(7, "ok")])
+        self.assertEqual({k: l[k] for k in ("user", "text", "also", "note")},
+                         {"user": False, "text": "L’agent travaille", "also": "", "note": ""})   # lang: fr
         paused = dict(card, held_by=[])
         self.assertEqual(L(paused)["text"], "En pause")                                                     # lang: fr
         l = L(paused, [], [{"issue": 7}])
@@ -2074,12 +2223,42 @@ class TestPage(unittest.TestCase):
         self.assertEqual(L(dict(paused, unread=0))["text"], "En pause")
         # all `try` entries OK: write to the agent to merge
         l = L(dict(base, agent_idle_min=1, listening=True), [ok, dict(ok)])
-        self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : écrire à l’agent pour fusionner", ""))
+        self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : lancer la fusion", ""))
         l = L(dict(base, agent_idle_min=1), [ok], [{"issue": 7}])
-        self.assertEqual(l["text"], "À toi : répondre au questionnaire · écrire à l’agent pour fusionner")
-        self.assertNotIn("fusionner", L(base, [ok, todo])["text"])
-        self.assertNotIn("fusionner", L(base, [{"n": 7, "status": "ok"}])["text"])      # merged entry: no `try`
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire · lancer la fusion")
+        self.assertNotIn("fusion", L(base, [ok, todo])["text"])
+        self.assertNotIn("fusion", L(base, [{"n": 7, "status": "ok"}])["text"])      # merged entry: no `try`
+        self.assertEqual((L(base, [todo])["mergeReady"], L(base, [{"n": 7, "status": "ok"}])["mergeReady"]), (False, False))
+        # the request: grey note, button gone; "nothing listens" adds the reading line
+        l = L(dict(base, agent_idle_min=1, listening=False, merge_requested=True), [ok])
+        self.assertEqual((l["mergeReady"], l["mergeRequested"], l["mergeNote"]),
+                         (True, True, "Fusion demandée · l’agent la lira à sa reprise"))
+        self.assertNotIn("fusion", l["text"].lower())
+        l = L(dict(base, agent_idle_min=9, listening=True, merge_requested=True), [ok])
+        self.assertEqual(l["mergeNote"], "Fusion demandée")
+        # a request the server voided (flag false) or an entry not OK any more: no request
+        self.assertFalse(L(dict(base, merge_requested=True), [ok, todo])["mergeRequested"])
+        self.assertFalse(L(dict(base, merge_requested=False), [ok])["mergeRequested"])
         # lang: fr end
+
+    def merge_ui(self, c, tests):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(mergeUi(cardLine(%s,%s,[]))));" % (json.dumps(c), json.dumps(tests))
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_merge_button_shows_by_state(self):
+        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        ok, todo = {"n": 7, "status": "ok", "try": "x"}, {"n": 7, "status": "todo", "try": "x"}
+        self.assertIn("'Fusionner'", self.page())
+        self.assertTrue(self.merge_ui(c, [ok])["button"])
+        self.assertFalse(self.merge_ui(c, [ok, todo])["button"])
+        self.assertFalse(self.merge_ui(c, [])["button"])
+        self.assertFalse(self.merge_ui(c, [{"n": 7, "status": "ok"}])["button"])           # merged entry, no `try`
+        u = self.merge_ui(dict(c, merge_requested=True, listening=True), [ok])
+        self.assertEqual((u["button"], u["note"]), (False, "Fusion demandée"))             # lang: fr
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_tells_a_working_agent_from_a_stopped_one(self):

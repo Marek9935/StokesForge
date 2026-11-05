@@ -457,10 +457,10 @@ Steps, in order:
     pre-trial agent walks the detailed checks in the real app, fixes, re-verifies, then
     `suivi.py test add` (stokesforge-verification/references/suivi.md, Pre-trial); then
     `scripts/try.sh <n>` opens the branch on the user's screen; their OK is the go-ahead.
- 6. All trial entries OK is not the merge go-ahead: announce it, wait for the user's word. Then
-    merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock, merge, push,
-    trial entries). No CI polling: report, close, release; `suivi.py serve` shows red on the page.
-    Read the CI only for a tag, a release or a change to CI itself. The next sub-issue does not wait.
+ 6. All trial entries OK: announce it. Go-ahead = the page's merge button (reported by the wait) or the
+    user's word; then merge from the main checkout with `scripts/deliver.sh <n> <message-file>`.
+    No CI polling: report, close, release; `suivi.py serve` shows red on the page. Read the CI only
+    for a tag, a release or a change to CI itself. The next sub-issue does not wait.
  7. Follow-ups: suivi.py test add; wrong commit: test merged --replace <old>.
     Nothing to launch: the PostToolUse hook arms `suivi.py wait` after a suivi.py call on your issue.
  8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
