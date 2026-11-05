@@ -2291,3 +2291,116 @@ fn several_kept_formulas_bind_in_identifier_order_each_on_the_previous_binding()
         assert_eq!(numbers(&s, f.d), some(&[101.0, 202.0, 303.0]));
     }
 }
+
+// -- undoing a macro across a formula pass (#448) ------------------------------
+
+/// `C = A*2` is a mixed column; `C = 1+2` (no column read) is a numeric one. The
+/// pass that follows each command retypes the column, outside the history.
+fn delete_row_then_retype(handle: &SessionHandle, f: &SheetFixture, at: usize) {
+    handle
+        .execute(Command::DeleteRows {
+            sheet: f.sheet,
+            at,
+            count: 1,
+        })
+        .expect("delete a row");
+    handle
+        .execute(set_formula(handle, f.c, "1+2"))
+        .expect("retype C through its formula");
+}
+
+/// #448: the delta of `DeleteRows` holds a mixed block for `C`, and when the
+/// macro aborts `C` is numeric: no pass runs between the two undos.
+#[test]
+fn aborting_a_macro_undoes_deleted_rows_over_a_retyped_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        let before = take_snapshot(&handle);
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        delete_row_then_retype(&handle, &f, 0);
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), numbers(&before, f.a), "A restored");
+        assert_eq!(numbers(&after, f.b), numbers(&before, f.b), "B restored");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "C recomputed");
+    }
+}
+
+/// #448: the same macro, closed then undone, goes through the same path.
+#[test]
+fn undoing_a_closed_macro_undoes_deleted_rows_over_a_retyped_formula_column() {
+    let (_session, handle, f) = start(FormulaRecalc::Targeted);
+    handle
+        .execute(set_formula(&handle, f.c, "A*2"))
+        .expect("C = A*2");
+    handle.begin_macro(MacroKind::PasteCells).expect("macro");
+    delete_row_then_retype(&handle, &f, 0);
+    handle.end_macro().expect("close");
+    handle.undo().expect("the undo is not refused");
+    let after = take_snapshot(&handle);
+    assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]));
+    assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]));
+}
+
+/// #448: not only the type. `C = D` is shorter than the row that was deleted, so
+/// putting the row back aims past the end of `C`.
+#[test]
+fn aborting_a_macro_undoes_deleted_rows_over_a_shortened_formula_column() {
+    let (_session, handle, f) = start(FormulaRecalc::Targeted);
+    handle
+        .execute(enter(f.d, 0, &[7.0]))
+        .expect("D has one row");
+    handle
+        .execute(set_formula(&handle, f.c, "A*2"))
+        .expect("C = A*2");
+    handle.begin_macro(MacroKind::PasteCells).expect("macro");
+    handle
+        .execute(Command::DeleteRows {
+            sheet: f.sheet,
+            at: 2,
+            count: 1,
+        })
+        .expect("delete the last row");
+    handle
+        .execute(set_formula(&handle, f.c, "D"))
+        .expect("C = D, one row");
+    handle.abort_macro().expect("the abort is not refused");
+    let after = take_snapshot(&handle);
+    assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]));
+    assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]));
+}
+
+/// #448: redo replays the entries with no pass between them either. `C = D` has
+/// one row before the macro; once `C = A*2` it has three, the macro deletes the
+/// last one, and the replay aims past the end of the one-row `C`.
+#[test]
+fn redoing_a_closed_macro_replays_deleted_rows_over_a_lengthened_formula_column() {
+    let (_session, handle, f) = start(FormulaRecalc::Targeted);
+    handle
+        .execute(enter(f.d, 0, &[7.0]))
+        .expect("D has one row");
+    handle
+        .execute(set_formula(&handle, f.c, "D"))
+        .expect("C = D, one row");
+    handle.begin_macro(MacroKind::PasteCells).expect("macro");
+    handle
+        .execute(set_formula(&handle, f.c, "A*2"))
+        .expect("C = A*2, three rows");
+    handle
+        .execute(Command::DeleteRows {
+            sheet: f.sheet,
+            at: 2,
+            count: 1,
+        })
+        .expect("delete the last row");
+    handle.end_macro().expect("close");
+    let done = take_snapshot(&handle);
+    handle.undo().expect("the undo is not refused");
+    handle.redo().expect("the redo is not refused");
+    let redone = take_snapshot(&handle);
+    assert_eq!(numbers(&redone, f.a), numbers(&done, f.a));
+    assert_eq!(numbers(&redone, f.c), numbers(&done, f.c));
+}
