@@ -217,6 +217,10 @@ misfit only (retype to the block's type, pad to `at`, or clamp `at` to the
 length), through the `Project` primitives that draw a fresh version, so the next
 pass rewrites the column. A column that fits takes the exact path, unchanged;
 an ordinary column stays exact and the replay still fails on a misfit.
+On a misfit of the output of a calculation whose "Recalculate automatically"
+box is off, the calculation is marked out of date (`Staleness::Manual`, outside
+the history; a `Failed` mark is kept), since nothing reruns it; an automatic
+calculation gets no mark.
 `abort_macro` always finishes: it reverts every entry, closes the macro, gives
 back the redo stack saved at `begin_macro`, and only then returns the first
 error. `undo`/`redo` of a closed macro still stop at the first error and leave

@@ -38,7 +38,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use stokesforge_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, WindowMeta};
-use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Tree, ValueBlock};
+use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Staleness, Tree, ValueBlock};
 use stokesforge_plot::{PlotSpec, SavedColors};
 
 use crate::command::Command;
@@ -1985,11 +1985,32 @@ fn column_shape(project: &Project, column: NodeId) -> Option<(ColumnType, usize)
     Some((target.column_type(), target.len()))
 }
 
+/// On a misfit of the output of a **manual** calculation (its
+/// "Recalculate automatically" box is off), says so: the output no longer
+/// matches its sources and nothing will rerun it. `Failed` is kept, as the
+/// recalculation's own "mark stale" does. An automatic calculation gets no mark:
+/// its next pass recomputes it.
+fn mark_manual_output_stale(project: &mut Project, column: NodeId) {
+    let Some((id, _)) = project.tree().calculation_of_column(column) else {
+        return;
+    };
+    let Some(calc) = project.tree().calculation(id) else {
+        return;
+    };
+    if !calc.auto_recalc && !matches!(calc.stale, Some(Staleness::Failed(_))) {
+        let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+    }
+}
+
 /// `at`, or the length of `column` when `at` is past its end and the column is
-/// derived. A call with a fitting `at` reads nothing but the length.
-fn clamp_on_derived(project: &Project, column: NodeId, at: usize) -> usize {
+/// derived (a manual calculation's output is then marked out of date). A call
+/// with a fitting `at` reads nothing but the length.
+fn clamp_on_derived(project: &mut Project, column: NodeId, at: usize) -> usize {
     match column_shape(project, column) {
-        Some((_, len)) if at > len && is_derived(project, column) => len,
+        Some((_, len)) if at > len && is_derived(project, column) => {
+            mark_manual_output_stale(project, column);
+            len
+        }
         _ => at,
     }
 }
@@ -2007,6 +2028,7 @@ fn restore_block(
     if let Some((column_type, len)) = column_shape(project, column) {
         let misfit = !block.fits(column_type) || at > len;
         if misfit && is_derived(project, column) {
+            mark_manual_output_stale(project, column);
             if !block.fits(column_type) {
                 let target = match block {
                     ValueBlock::Float(_) => ColumnType::Numeric,
