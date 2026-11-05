@@ -99,7 +99,7 @@ fn the_callback_of_a_starved_window_reports_it_visible_and_keeps_the_redraw() {
 
 #[test]
 fn the_callback_of_a_served_window_changes_nothing_but_the_pending_redraw() {
-    assert_eq!(on_callback(false, true).redraw, true);
+    assert!(on_callback(false, true).redraw);
     let idle = on_callback(false, false);
     assert!(!idle.occluded_false && !idle.redraw);
     assert!(!on_callback(false, true).occluded_false);
