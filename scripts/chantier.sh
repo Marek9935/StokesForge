@@ -465,4 +465,6 @@ Steps, in order:
     Nothing to launch: the PostToolUse hook arms `suivi.py wait` after a suivi.py call on your issue.
  8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
     stopping with no worktree: `--pause <parent>`; after its last sub-issue: `--done`.
+ 9. Last line of the final report: nothing left, offer `/clear` (the user types it);
+    something left, say what (stokesforge-verification, step 9).
 BRIEFING
