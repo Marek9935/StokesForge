@@ -16,6 +16,7 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 /// The compositor stack, killed by process group on drop.
@@ -39,7 +40,14 @@ impl Compositor {
             }
         }
         let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
-        let socket = format!("sf-457-test-{}", std::process::id());
+        // One socket per test: the tests of this binary share a pid and run in
+        // parallel, and two probes on one compositor would cover each other.
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let socket = format!(
+            "sf-457-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
         let mut cmd = Command::new("dbus-run-session");
         cmd.args([
             "--",

@@ -123,7 +123,8 @@ fn child_ui(ui: &mut egui::Ui, _class: egui::ViewportClass) {
     let ok = if idle {
         root_ui <= 20
     } else {
-        queued > 0 && drained * 10 >= queued * 8
+        // A child that passed so rarely it queued next to nothing proves nothing.
+        queued >= 15 && drained * 10 >= queued * 8
     };
     println!("probe: {}", if ok { "PASS" } else { "FAIL: root stalled" });
     std::process::exit(if ok { 0 } else { 1 });
