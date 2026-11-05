@@ -831,6 +831,16 @@ tolerated reproduction (including a failed step under a tolerated conclusion),
 cancelations, absent jobs, excluded PRs/forks, old
 attempts, pagination, pipeline selection and HTTP retries.
 
+## Intermittent tests (#447)
+
+`a_missing_default_folder_gets_a_note_and_an_existing_one_does_not` (`crates/stokesforge-app/src/app/preferences_window.rs`) failed once on CI, on `main` at `f6a4c832` (2026-11-04), and never since. It was never reproduced: 40 runs alone, 10 runs of the whole library on 2 cores, 17 runs on 1 core with up to 150 concurrent programs, 0 failures.
+
+Measured on 2026-11-05 through `scripts/ci-status.sh`: of the 67 commits after `f6a4c832`, 7 have a `test` result, all green; of the 63 after `fe450cb1` (which added the diagnostics), 6 have one, all green. The other commits have no CI run (only pushed commits get one).
+
+Ruled out: the process-wide language (no in-memory test leaves English), an overwritten setting (preferences are in memory), environment variables. Weakened: a wait that was too short (it counted frames, so it slowed down with the machine; it now waits up to 30 s of real time).
+
+If it comes back: read the failure message in the CI log. It gives the duration, the frame count, the page on screen, the saved folder and the state of the disk probe. Then reopen #447 with that message. Do not loosen the test before reading it.
+
 ## Time report (#452)
 
 `python3 scripts/time-report.py [--since DATE] [--until DATE] [--logs DIR] [--power FILE] [--json]` says where the working time of the Claude sessions goes: per activity (model, tool, cargo test, wait for the user, wait for CI, ...) and per issue. Dates are UTC (`2026-10-31` or `2026-10-31T20:00`). `--logs` defaults to the session logs of this repository's main checkout. Privacy: the logs are private, the tool prints aggregates only (hours, counts, issue numbers), never a prompt, reply, command, title or description; a malformed line is skipped silently.
