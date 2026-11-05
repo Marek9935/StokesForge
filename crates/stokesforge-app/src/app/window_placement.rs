@@ -278,20 +278,6 @@ impl FigureFollow {
         })
     }
 
-    /// How far the window moves for `step` while the left or top edge of the
-    /// figure is being pulled (#405): the figure grows towards that side, so the
-    /// window grows the same way and the plot area stays where it is on screen.
-    /// Returned as the displacement of the window's top-left corner (negative
-    /// when it grows to the left or up); zero on a side that is not being
-    /// pulled, where the window keeps its top-left fixed.
-    pub(super) fn anchor_shift(step: FollowStep, left: bool, top: bool) -> egui::Vec2 {
-        let grow = step.delta * step.scale;
-        egui::vec2(
-            if left { -grow.x } else { 0.0 },
-            if top { -grow.y } else { 0.0 },
-        )
-    }
-
     /// How far the window's top-left corner moves for `step` in free placement
     /// (#398): the origin's move in page points at the kept scale, so that page
     /// coordinates stay still on screen (an image that grows to the left moves
@@ -607,38 +593,6 @@ mod tests {
         assert_eq!(grow.delta * grow.scale, egui::vec2(720.0, 0.0));
         let shrink = step(&mut follows, (480, 360), 1.5).expect("step");
         assert_eq!(shrink.delta * shrink.scale, egui::vec2(-720.0, 0.0));
-    }
-
-    /// #405: pulling the left (top) edge of the figure moves the window's
-    /// corner by the growth, at the display scale, so the plot area keeps its
-    /// place on screen; a side that is not pulled keeps the top-left fixed.
-    #[test]
-    fn pulling_the_left_or_top_edge_moves_the_window_corner_by_the_growth() {
-        let mut follows = HashMap::new();
-        step(&mut follows, (480, 360), 1.5);
-        let grow = step(&mut follows, (520, 390), 1.5).expect("step");
-        assert_eq!(
-            FigureFollow::anchor_shift(grow, true, false),
-            egui::vec2(-60.0, 0.0)
-        );
-        assert_eq!(
-            FigureFollow::anchor_shift(grow, false, true),
-            egui::vec2(0.0, -45.0)
-        );
-        assert_eq!(
-            FigureFollow::anchor_shift(grow, true, true),
-            egui::vec2(-60.0, -45.0)
-        );
-        assert_eq!(
-            FigureFollow::anchor_shift(grow, false, false),
-            egui::Vec2::ZERO
-        );
-        let shrink = step(&mut follows, (500, 390), 1.5).expect("step");
-        assert_eq!(
-            FigureFollow::anchor_shift(shrink, true, false),
-            egui::vec2(30.0, 0.0),
-            "pushed in, the corner moves right"
-        );
     }
 
     /// #398: an image that grows to the left (origin -30 pt) at scale 2 moves

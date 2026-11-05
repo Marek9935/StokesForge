@@ -37,6 +37,22 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A free graph can store a page (#426), the minimum size of its figure; it is
+  an optional `.stf` field (an older version that saves the file again drops it
+  without a message). Nothing is visible yet.
+
+- Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
+  show a graph as a page with rulers, a grid, handles and a settings strip
+  (figure size with a padlock shared with Graph Properties, position and size of
+  the selected graph, Align, Same Size, Distribute, Snap, **Grid mode**, and
+  when axes are added). Entering or leaving the mode changes nothing in the
+  file; **Grid mode** is the layer placement, one undo step. The padlock of the
+  figure size now belongs to the graph for the session instead of to the
+  Properties window, and two labels of Graph Properties are renamed: the total
+  is **Figure size**, the Advanced choice is **When axes are added**.
+  In **General**, **Figure size** now comes first in **Size**; the plot area
+  sizes (and Left and Top, or the four fields of a Free layer) moved into the
+  closed **Advanced** block. Nothing changes in the file.
 - A formula kept because a column or a sheet it names does not exist yet
   computes by itself when that column or sheet appears (#433): add the column,
   move one in, rename a sheet, delete a duplicate workbook, or open the file.
@@ -280,6 +296,18 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Behavior change (#426): resizing and moving graphs with the mouse now happens
+  only in the **Page Layout Mode** (**Layout ▸ Page Layout Mode**). The old
+  gestures of the Pointer tool are removed: dragging the outer boundary of a
+  cell (#394), dragging the left or top edge of the figure (#405), and moving or
+  resizing a layer of a Free graph by dragging its plot area or its edges
+  (#398), together with their resize pointers. Outside the mode a plain drag in
+  the plot area of a Free graph now does nothing, as on a Regular graph. Texts,
+  legends, shapes and annotations are still dragged (and their width handles
+  pulled), Shift + click still selects layers, and **Ctrl** or middle-button
+  drag still pans. The fields of Graph Properties, **Undo** and `pyst` are
+  unchanged, and files that store Left, Top or layer frames open and draw the
+  same. The history entry "Position Plot Area" is gone.
 - Formulas (#433): `0/0`, infinity minus infinity and zero times infinity are
   a failed calculation (`---`), like `ln(-1)`; `1/0` stays infinity. An infinite
   bound of a range means "to the end" (`max(B, 330, 1/0)`), and `integral(B, 2, 2)`

@@ -155,6 +155,24 @@ minimum 220 x 140. Opening: `open_tab` (`window_stack.rs`), from the Project Man
 second opening on the same entry brings the window to the front without
 duplicating it. Each new window is offset in a cascade.
 
+**Graph in the Page Layout Mode (#426).** The same window, same code
+(`graph_view_contents`), with two ruler strips (`RULER_WIDTH`) around the figure and
+a settings strip under it (`app/page_layout.rs`). The strip's height is reserved from
+what it used at the last frame (`controls_height`, whole points, at least
+`LAYOUT_CONTROLS_HEIGHT`), so the figure's rectangle never moves from frame to frame
+and the cache stays valid; its rows wrap and `keep_together` keeps a label with its
+field or button; its two-state toggles (Coarse | Fine, Regular | Free, Grows with the axes | Fixed) are drawn by `app/state_toggle.rs`. The mode adds no window and no dialog.
+It **maximises** a floating window while it lasts (`app/layout_window.rs`: `layout_entries` keeps
+the tab that was maximised before; `reconcile_layout_modes` leaves the mode of a graph
+whose window is no longer the maximised one, which covers Restore, the Window menu,
+close, delete and project load). A detached window keeps its size: the mode sends it no
+maximise or restore, because on Wayland a window covering the main window stops its frame
+callbacks and every action of a detached window is drained in the root frame. The saved window views report the state from before the mode
+(`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at
+the start of the frame (`begin_layout_frame`) and at the top of a detached viewport, never
+inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard
+a frame ago (`note_field_focus`) they stand aside.
+
 ## Outside the catalog
 
 - **In-place edits** (title, legend, text of a graph, grid cell,

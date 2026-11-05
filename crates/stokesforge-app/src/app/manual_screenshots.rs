@@ -183,6 +183,17 @@ fn layer_id(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Id {
     })
 }
 
+/// The workspace between the Project Manager and the Object Manager: what a
+/// maximized window fills (it has no floating layer to measure).
+fn maximized_workspace_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let projects = panel_rect(h, "stokesforge_pm");
+    let objects = panel_rect(h, "stokesforge_object_manager");
+    egui::Rect::from_min_max(
+        egui::pos2(projects.right(), projects.top()),
+        egui::pos2(objects.left(), projects.bottom()),
+    )
+}
+
 fn layer_rect(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Rect {
     let screen = h.ctx.content_rect();
     h.ctx.memory(|memory| {
@@ -304,14 +315,10 @@ const SHOTS: &[Shot] = &[
                 },
             );
             // Left stored (Top stays Auto): both kinds of value are shown.
-            act(
-                h,
-                Action::SetFigureOffsets {
-                    graph,
-                    left: Some(100.0),
-                    top: None,
-                },
-            );
+            if let Some(mut spec) = h.state().app.state.plot_spec(graph) {
+                spec.figure_left = Some(100.0);
+                act(h, Action::SetPlotSpec { graph, spec });
+            }
             act(
                 h,
                 Action::OpenPlotSettings {
@@ -415,6 +422,26 @@ const SHOTS: &[Shot] = &[
             show_only(h, Tab::Graph(graph), egui::vec2(760.0, 460.0));
         },
         crop: Crop::Rect(workspace_window_rect),
+    },
+    Shot {
+        name: "graphs-page-layout-mode",
+        setup: |h| {
+            let graph = h.state().ids.graph1;
+            act(
+                h,
+                Action::AddCell {
+                    graph,
+                    panel: 0,
+                    side: CellSide::Right,
+                    columns: Vec::new(),
+                },
+            );
+            show_only(h, Tab::Graph(graph), egui::vec2(900.0, 560.0));
+            h.state_mut().app.toggle_layout_mode(graph, Some(true));
+            settle(h);
+        },
+        // The mode maximizes the window: it fills the workspace.
+        crop: Crop::Rect(maximized_workspace_rect),
     },
     Shot {
         name: "analysis-integration",
