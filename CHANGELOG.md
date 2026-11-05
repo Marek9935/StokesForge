@@ -261,6 +261,10 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- A result column with **Recalculate automatically** off (#458) is now marked out of
+  date when rows are inserted or deleted in its source sheet. Undo restores the rows
+  and leaves the mark until **Recalculate**, like an edit followed by Undo.
+
 - Window names (#437): a folder named `Book1`, `Graph1`, `MBook1` or `Note1` next to the place where a window is created no longer refuses the new unnamed window; the automatic name moves on to the next free number.
 
 - Column type (#431): the Type entries (right-click on a column letter, Workbook > Columns) are greyed, with the reason as tooltip, on a column computed by a formula or produced by a calculation (they used to answer "Change Type" and be silently undone by the next recalculation). On a selection that also holds other columns, only those change. `pyst.set_column_type` raises `InvalidValueError` on such a column.

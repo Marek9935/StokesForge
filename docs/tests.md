@@ -410,7 +410,11 @@ names the behaviors.
 | versions of the inputs removed from the fingerprint of an automatic calculation | `b22`, `an_automatic_calculation_follows_its_inputs` |
 | manual: comparison by content (`seen`) removed, at either call site | `retyping_the_same_values_in_an_input_leaves_a_calculation_as_it_was` alone (#439: `b22` no longer sees it, a pass keeps the version of unchanged content) |
 | guard of the calculation → formula → calculation loops removed | `b22` (property 3: an unrelated command rewrites or evaluates columns) |
-| manual: definition change not "trusted" (`Trust`) | `editing_a_stale_manual_calculation_updates_it_without_making_it_stale_again` alone |
+| manual: replaced calculation record not "trusted" (`Trust`, `CalcMemo::record`) | `editing_a_stale_manual_calculation_updates_it_without_making_it_stale_again`, `undoing_and_redoing_an_update_of_a_stale_manual_calculation_follows_the_gesture`, `an_update_with_the_same_recipe_after_an_edit_that_left_the_outputs_unchanged_clears_the_mark` |
+| manual: a change of the output versions read as a gesture (#458) | `deleting_a_row_marks_a_manual_calculation_and_keeps_its_values`, `inserting_a_row_marks_a_manual_calculation`, the macro, undo/redo and save/load cases of the same section |
+| manual: mark cleared on renumbering, or `Failed` overwritten by `Manual` | `undo_and_redo_of_a_row_deletion_leave_the_mark_until_recalculate`, `a_failed_manual_calculation_stays_failed_when_a_row_is_deleted` |
+| manual: a mark on any move of an output version (row removed only from outputs moved to another sheet, decision 458-2) | `a_row_removed_only_from_the_moved_outputs_of_a_manual_calculation_does_not_mark_it` |
+| output versions removed from `CalcDefinition` (automatic) | `a_row_removed_only_from_the_moved_outputs_of_an_automatic_calculation_recomputes_them` |
 
 ### Proven mutants (#313, analysis warnings and errors)
 

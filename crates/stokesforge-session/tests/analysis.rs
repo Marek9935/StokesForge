@@ -10,7 +10,7 @@
 use stokesforge_analysis::fit::FitSpec;
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::Operation;
-use stokesforge_commands::Command;
+use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{
     compute, CalculationDraft, Column, ColumnMeta, NodeId, OutputDraft, Project, SeriesRef,
     Staleness, ValueBlock,
@@ -1371,6 +1371,344 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
     }
 }
 
+// ── #458: rows inserted or deleted under a manual calculation ───────────
+//
+// `DeleteRows` / `InsertRows` also rewrite the output columns of the
+// calculation, so the output versions of its definition move with the inputs.
+// A manual calculation must still be marked `Manual`: only a replaced
+// calculation record (`UpdateCalculation`, a structural undo) is a gesture.
+
+/// X = 1..4, Y not on a line, so that removing a row moves the slope.
+fn start_bent(mode: FormulaRecalc) -> (Session, SessionHandle, Setup) {
+    let (session, handle, m) = start(mode);
+    handle.execute(enter(m.y, &[1.0, 4.0, 2.0, 9.0])).unwrap();
+    (session, handle, m)
+}
+
+fn stale_of(handle: &SessionHandle, id: NodeId) -> Option<Staleness> {
+    handle
+        .snapshot()
+        .unwrap()
+        .tree
+        .calculation(id)
+        .unwrap()
+        .stale
+        .clone()
+}
+
+fn delete_first_row(handle: &SessionHandle, m: &Setup) {
+    handle
+        .execute(Command::DeleteRows {
+            sheet: m.sheet,
+            at: 0,
+            count: 1,
+        })
+        .unwrap();
+}
+
+/// The slope a fresh fit of the current inputs gives.
+fn fresh_slope(snapshot: &Snapshot, id: NodeId) -> f64 {
+    let calc = snapshot.tree.calculation(id).unwrap();
+    let computed = compute(&snapshot.tree, &calc.operation, &calc.series, None).unwrap();
+    computed.results[0]
+        .values
+        .iter()
+        .find(|v| v.key == "param.slope")
+        .unwrap()
+        .value
+}
+
+fn column_values(snapshot: &Snapshot, column: NodeId) -> Vec<f64> {
+    snapshot
+        .tree
+        .node(column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap()
+        .to_vec()
+}
+
+#[test]
+fn deleting_a_row_marks_a_manual_calculation_and_keeps_its_values() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        let before = handle.snapshot().unwrap();
+        delete_first_row(&handle, &m);
+        let after = handle.snapshot().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        assert_eq!(slope(&after, id), slope(&before, id), "values kept");
+    }
+}
+
+#[test]
+fn recalculating_after_a_row_deletion_clears_the_mark_for_good() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        delete_first_row(&handle, &m);
+        handle.recalculate(&[]).unwrap();
+        let fresh = handle.snapshot().unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+        assert_eq!(slope(&fresh, id), fresh_slope(&fresh, id));
+        // Rewriting an input with the values it already holds does not bring
+        // the mark back.
+        handle.execute(enter(m.x, &[2.0, 3.0, 4.0])).unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+        // A real change of an input marks it again.
+        handle.execute(enter(m.x, &[2.0, 3.0, 5.0])).unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+    }
+}
+
+#[test]
+fn undoing_a_row_deletion_after_recalculating_marks_the_calculation_again() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        delete_first_row(&handle, &m);
+        handle.recalculate(&[]).unwrap();
+        handle.undo().unwrap();
+        // The inputs are back to rows the result was not computed from.
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+    }
+}
+
+#[test]
+fn undo_and_redo_of_a_row_deletion_leave_the_mark_until_recalculate() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        let before = handle.snapshot().unwrap();
+        delete_first_row(&handle, &m);
+        handle.undo().unwrap();
+        let undone = handle.snapshot().unwrap();
+        assert_eq!(column_values(&undone, m.x), column_values(&before, m.x));
+        let fit = |s: &Snapshot| fit_column(s, id);
+        assert_eq!(fit(&undone), fit(&before), "outputs restored exactly");
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        handle.redo().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        handle.recalculate(&[]).unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+    }
+}
+
+#[test]
+fn a_row_deletion_in_a_macro_marks_it_and_aborting_the_macro_leaves_the_mark() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        handle.begin_macro(MacroKind::DeleteObjects).unwrap();
+        delete_first_row(&handle, &m);
+        handle.end_macro().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        handle.undo().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        handle.begin_macro(MacroKind::DeleteObjects).unwrap();
+        delete_first_row(&handle, &m);
+        handle.abort_macro().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+    }
+}
+
+#[test]
+fn inserting_a_row_marks_a_manual_calculation() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        handle
+            .execute(Command::InsertRows {
+                sheet: m.sheet,
+                at: 1,
+                count: 1,
+            })
+            .unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+    }
+}
+
+#[test]
+fn deleting_a_row_recomputes_an_automatic_calculation() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, true);
+        delete_first_row(&handle, &m);
+        let after = handle.snapshot().unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+        assert_eq!(slope(&after, id), fresh_slope(&after, id), "{mode:?}");
+    }
+}
+
+/// A second sheet, to which the output columns of a fit are moved.
+fn move_outputs_to_another_sheet(handle: &SessionHandle, id: NodeId) -> NodeId {
+    let snapshot = handle.snapshot().unwrap();
+    let book = snapshot.tree.resolve("[Book1]Sheet1").unwrap();
+    let workbook = snapshot.tree.node(book).unwrap().parent().unwrap();
+    handle
+        .execute(Command::AddWorksheet {
+            book: workbook,
+            name: Some("Other".into()),
+        })
+        .unwrap();
+    let other = handle
+        .snapshot()
+        .unwrap()
+        .tree
+        .resolve("[Book1]Other")
+        .unwrap();
+    for out in snapshot.tree.calculation(id).unwrap().outputs.clone() {
+        if let Some(column) = out.column {
+            handle
+                .execute(Command::Move {
+                    id: column,
+                    new_parent: other,
+                    index: 0,
+                })
+                .unwrap();
+        }
+    }
+    other
+}
+
+#[test]
+fn a_row_removed_only_from_the_moved_outputs_of_a_manual_calculation_does_not_mark_it() {
+    // Decision 458-2: a row removed only from moved outputs does not mark; pinned here.
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        let other = move_outputs_to_another_sheet(&handle, id);
+        handle
+            .execute(Command::DeleteRows {
+                sheet: other,
+                at: 0,
+                count: 1,
+            })
+            .unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+    }
+}
+
+#[test]
+fn a_row_removed_only_from_the_moved_outputs_of_an_automatic_calculation_recomputes_them() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, true);
+        let other = move_outputs_to_another_sheet(&handle, id);
+        let before = handle.snapshot().unwrap();
+        let rows = fit_column(&before, id).len();
+        handle
+            .execute(Command::DeleteRows {
+                sheet: other,
+                at: 0,
+                count: 1,
+            })
+            .unwrap();
+        let after = handle.snapshot().unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+        assert_eq!(fit_column(&after, id).len(), rows, "{mode:?}");
+    }
+}
+
+#[test]
+fn a_row_deleted_from_the_input_sheet_marks_a_manual_calculation_with_moved_outputs() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        move_outputs_to_another_sheet(&handle, id);
+        delete_first_row(&handle, &m);
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+    }
+}
+
+/// An `UpdateCalculation` with the recipe of `id`, recomputed on current data.
+fn update_with_current_data(handle: &SessionHandle, id: NodeId) {
+    let snapshot = handle.snapshot().unwrap();
+    let calc = snapshot.tree.calculation(id).unwrap();
+    let computed = compute(&snapshot.tree, &calc.operation, &calc.series, None).unwrap();
+    let outputs = computed
+        .columns
+        .iter()
+        .map(|c| OutputDraft {
+            series: c.series,
+            key: c.key.clone(),
+            index: c.index,
+            meta: ColumnMeta::default(),
+            data: c.data.clone(),
+        })
+        .collect();
+    handle
+        .execute(Command::UpdateCalculation {
+            id,
+            draft: CalculationDraft {
+                operation: calc.operation.clone(),
+                series: calc.series.clone(),
+                aux: None,
+                outputs,
+                results: computed.results,
+                keep_results: true,
+                auto_recalc: false,
+                low_r2_dialog: true,
+            },
+        })
+        .unwrap();
+}
+
+#[test]
+fn undoing_and_redoing_an_update_of_a_stale_manual_calculation_follows_the_gesture() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual));
+        update_with_current_data(&handle, id);
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+        handle.undo().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        handle.redo().unwrap();
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+    }
+}
+
+#[test]
+fn an_update_with_the_same_recipe_after_an_edit_that_left_the_outputs_unchanged_clears_the_mark() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, false);
+        // X is rescaled with Y, so the fitted curve is the same numbers.
+        handle.execute(enter(m.x, &[1.0, 2.0, 3.0, 5.0])).unwrap();
+        handle
+            .execute(enter(m.y, &[10.0, 20.0, 30.0, 50.0]))
+            .unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        update_with_current_data(&handle, id);
+        assert_eq!(stale_of(&handle, id), None, "{mode:?}");
+    }
+}
+
+#[test]
+fn a_failed_manual_calculation_stays_failed_when_a_row_is_deleted() {
+    for mode in modes() {
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        handle
+            .execute(enter(m.y, &[f64::NAN, f64::NAN, f64::NAN, f64::NAN]))
+            .unwrap();
+        handle.recalculate(&[]).unwrap();
+        assert!(matches!(stale_of(&handle, id), Some(Staleness::Failed(_))));
+        delete_first_row(&handle, &m);
+        assert!(
+            matches!(stale_of(&handle, id), Some(Staleness::Failed(_))),
+            "{mode:?}"
+        );
+    }
+}
+
 // -- undoing across a recalculation that shortened an output (#448) ------------
 
 /// #448, no macro: X cut to two rows, a row deleted at the end of the others,
@@ -1473,6 +1811,23 @@ fn aborting_a_macro_over_an_automatic_output_the_pass_shortened() {
             same_numbers(&fit, &[10.0, 20.0, 30.0, 40.0]),
             "{mode:?}: the output equals the state before the macro"
         );
+    }
+}
+
+#[test]
+fn the_mark_of_a_row_deletion_survives_save_and_load_with_the_values() {
+    for mode in modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, handle, m) = start_bent(mode);
+        let id = add_fit(&handle, &m, false);
+        let before = handle.snapshot().unwrap();
+        delete_first_row(&handle, &m);
+        let path = dir.path().join("rows.stf");
+        handle.save(&path).unwrap();
+        handle.load(&path).unwrap();
+        let loaded = handle.snapshot().unwrap();
+        assert_eq!(stale_of(&handle, id), Some(Staleness::Manual), "{mode:?}");
+        assert_eq!(slope(&loaded, id), slope(&before, id), "values kept");
     }
 }
 
