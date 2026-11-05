@@ -6968,7 +6968,11 @@ impl AppState {
             self.fail(tr!("error-refresh-failed", failures = failures.join(" ; ")));
             return;
         }
-        if self.handle.begin_macro(MacroKind::RefreshFromFile).is_err() {
+        if self
+            .handle
+            .begin_macro(MacroKind::RefreshFromSource)
+            .is_err()
+        {
             self.fail(tr!("error-refresh-group"));
             return;
         }
