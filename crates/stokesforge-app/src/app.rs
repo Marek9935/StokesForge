@@ -1102,8 +1102,13 @@ impl eframe::App for StokesForgeApp {
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
         if snapshot_stamp(self.state.snapshot()) != published_stamp {
-            // A command applied after publication wakes the viewports.
+            // A command applied after publication wakes the viewports. The
+            // detached windows get their snapshot and their wake-up now, not
+            // from the next root pass: when one of them covers the root, that
+            // pass runs only every 100 ms (`docs/windows.md`, #457), and the
+            // result of a click would wait for two of them.
             ctx.request_repaint();
+            self.republish_detached_tabs(&ctx);
         }
         self.screenshot(&ctx);
         self.autoquit(&ctx);
@@ -2186,7 +2191,7 @@ mod tests {
     }
 
     #[test]
-    fn a_detached_command_schedules_the_publication_of_its_result() {
+    fn a_detached_command_publishes_its_result_in_the_pass_that_applied_it() {
         use eframe::App as _;
         let (session, _graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -2231,7 +2236,7 @@ mod tests {
                 row: 0,
                 text: "42".into(),
             });
-        let mut output = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
+        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
         output.textures_delta.clear();
         assert_eq!(
             output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
@@ -2239,11 +2244,13 @@ mod tests {
             "the command changed the snapshot after painting"
         );
         assert_eq!(app.state.cell_text(column, 0), "42");
-        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
-        output.textures_delta.clear();
+        // #457: the same root pass already published the result and woke the
+        // detached window, so a root that is only repainted every 100 ms (a
+        // detached window covers it) does not make the result wait for two.
         assert_eq!(
             output.viewport_output[&egui::ViewportId::from_hash_of(tab)].repaint_delay,
-            Duration::ZERO
+            Duration::ZERO,
+            "the detached window is woken in the pass that applied the command"
         );
         assert_eq!(
             app.detached_tabs[&tab]
@@ -2255,7 +2262,7 @@ mod tests {
                 .unwrap()
                 .revision,
             app.state.revision(),
-            "the scheduled frame publishes the result"
+            "the pass publishes the result itself"
         );
         session.shutdown().unwrap();
     }

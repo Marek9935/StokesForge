@@ -1047,6 +1047,17 @@ impl StokesForgeApp {
     /// Does **not** drain the requests produced: [`StokesForgeApp::ui`](eframe::App::ui) does it
     /// right after, once this function has returned, exactly as for
     /// `pm_requests`.
+    /// Publishes the snapshot to the detached windows and wakes the ones it
+    /// changed, outside `show_detached_tabs` (#457). Called at the end of the
+    /// root pass, once the actions of the frame are applied.
+    pub(super) fn republish_detached_tabs(&self, ctx: &egui::Context) {
+        for (tab, detached) in &self.detached_tabs {
+            if detached.publish_snapshot(&self.state) {
+                ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
+            }
+        }
+    }
+
     pub(super) fn show_detached_tabs(&mut self, ctx: &egui::Context) {
         let Self {
             state,
