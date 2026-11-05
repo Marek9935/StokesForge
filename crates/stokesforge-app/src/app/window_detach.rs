@@ -1690,7 +1690,9 @@ mod tests {
             .is_empty());
         assert_eq!(app.state.note_text(note).as_deref(), Some("Start"));
 
-        let outside = egui::pos2(200.0, 15.0);
+        // Not on the title: grabbing it hands the window to the OS and is no
+        // click (#457), so it leaves the focus alone.
+        let outside = egui::pos2(200.0, 36.0);
         paint(
             vec![egui::Event::PointerMoved(outside), pointer(outside, true)],
             false,
