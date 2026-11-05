@@ -29,7 +29,7 @@
 //! empty again) — an old snapshot then has no relation left to the current
 //! tree, including its node identifiers, which restart from the value
 //! persisted in the file. `load` is refused
-//! (`Err(SessionError::Command(CommandError::MacroOpen(_)))`) if a macro is
+//! (`Err(SessionError::Command(stokesforge_commands::CommandError::MacroOpen(_)))`) if a macro is
 //! open; in that case, as for any `save`/`load` failure, neither the project
 //! nor the history is modified.
 //!
@@ -356,6 +356,12 @@ impl SessionHandle {
     /// `Err(Command(ForeignMacro("abort_macro")))` if a macro is open but by
     /// another sender — an `abort_macro` can no longer undo somebody else's
     /// work (A4, see the table at the top of the crate).
+    ///
+    /// The abort always finishes (#448): every entry is reverted and the macro
+    /// is closed, even if one revert fails; the first error is then returned
+    /// (`NotInMacro` and `ForeignMacro` touch nothing). After such an error the
+    /// revision has advanced and the formulas have been recalculated, as after
+    /// a success, since the model changed.
     pub fn abort_macro(&self) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::AbortMacro { client, reply })?
@@ -754,6 +760,196 @@ mod tests {
             assert!(snapshot.history.can_undo, "the previous entry stays");
             assert!(!snapshot.history.can_redo, "nothing was undone");
         }
+    }
+
+    // -- a revert that fails over an ordinary column (#448) --------------------
+
+    struct Cols {
+        a: NodeId,
+        b: NodeId,
+        c: NodeId,
+        sheet: NodeId,
+    }
+
+    /// `A [1,2,3]`, `B [10,20,30]` (ordinary), `C = A*2` (formula).
+    fn sheet_with_formula_and_ordinary_column() -> (Session, Cols) {
+        let mut project = Project::new("Demo").expect("project");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("workbook");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
+        let mut add = |name: &str, column: stokesforge_core::Column| {
+            project
+                .add_column(sheet, None, Some(name), column)
+                .expect("column")
+        };
+        let a = add("A", stokesforge_core::Column::from_f64(&[1.0, 2.0, 3.0]));
+        let b = add("B", stokesforge_core::Column::from_f64(&[10.0, 20.0, 30.0]));
+        let c = add(
+            "C",
+            stokesforge_core::Column::new(stokesforge_core::ColumnType::Numeric),
+        );
+        let session = Session::spawn(project, None).expect("actor");
+        session
+            .handle()
+            .execute(formula_c(&session.handle(), c))
+            .expect("C = A*2");
+        (session, Cols { a, b, c, sheet })
+    }
+
+    /// Edits the project outside the history, as a formula pass would.
+    fn edit_outside_history(
+        handle: &SessionHandle,
+        edit: impl FnOnce(&mut Project) + Send + 'static,
+    ) {
+        handle
+            .request(|reply| actor::Request::EditForTest {
+                edit: Box::new(edit),
+                reply,
+            })
+            .expect("edit done");
+    }
+
+    /// Numbers of a column, numeric or mixed (a formula column is mixed).
+    fn floats(handle: &SessionHandle, column: NodeId) -> Vec<f64> {
+        let snapshot = handle.snapshot().expect("snapshot");
+        let node = snapshot.tree.node(column).expect("node");
+        match node.as_column().expect("column").values() {
+            stokesforge_core::ColumnValues::Float(values) => values.to_vec(),
+            stokesforge_core::ColumnValues::Mixed(cells) => cells
+                .iter()
+                .map(|cell| match cell {
+                    stokesforge_core::MixedCell::Number(v) => *v,
+                    other => panic!("not a number: {other:?}"),
+                })
+                .collect(),
+        }
+    }
+
+    fn set_a_then_delete_first_row(handle: &SessionHandle, cols: &Cols) {
+        handle
+            .execute(Command::SetCells {
+                column: cols.a,
+                start: 0,
+                values: stokesforge_core::ValueBlock::Float(vec![10.0]),
+                expected_version: None,
+            })
+            .expect("A[0] = 10");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: cols.sheet,
+                at: 0,
+                count: 1,
+            })
+            .expect("delete a row");
+    }
+
+    /// An ordinary column holds what the user typed: its misfit stays an error.
+    /// The abort still goes through every entry, advances the revision, runs
+    /// the pass and closes the macro.
+    #[test]
+    fn a_failed_abort_still_finishes_and_runs_the_pass() {
+        let (session, cols) = sheet_with_formula_and_ordinary_column();
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        set_a_then_delete_first_row(&handle, &cols);
+        let b = cols.b;
+        edit_outside_history(&handle, move |project| {
+            project
+                .set_column_type(b, stokesforge_core::ColumnType::Mixed)
+                .expect("retype B");
+        });
+        let before = handle.snapshot().expect("snapshot").revision;
+        assert!(handle.abort_macro().is_err(), "B no longer fits");
+        let after = handle.snapshot().expect("snapshot");
+        assert!(after.revision > before, "the model changed");
+        assert!(!after.history.in_macro, "the macro is closed");
+        assert_eq!(
+            floats(&handle, cols.a),
+            [1.0, 2.0, 3.0],
+            "older entry reverted"
+        );
+        assert_eq!(floats(&handle, cols.c), [2.0, 4.0, 6.0], "pass ran");
+    }
+
+    #[test]
+    fn a_failed_undo_still_runs_the_pass() {
+        let (session, cols) = sheet_with_formula_and_ordinary_column();
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        set_a_then_delete_first_row(&handle, &cols);
+        handle.end_macro().expect("close");
+        let b = cols.b;
+        edit_outside_history(&handle, move |project| {
+            project
+                .set_column_type(b, stokesforge_core::ColumnType::Mixed)
+                .expect("retype B");
+        });
+        let before = handle.snapshot().expect("snapshot").revision;
+        assert!(handle.undo().is_err(), "B no longer fits");
+        assert!(handle.snapshot().expect("snapshot").revision > before);
+        // The macro stops at the first error: the delete was reverted over the
+        // columns before B, the write to A was not reached. C follows A anyway.
+        let a = floats(&handle, cols.a);
+        let c = floats(&handle, cols.c);
+        assert_eq!(c, a.iter().map(|v| v * 2.0).collect::<Vec<_>>(), "pass ran");
+    }
+
+    #[test]
+    fn a_failed_redo_still_runs_the_pass() {
+        let (session, cols) = sheet_with_formula_and_ordinary_column();
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::SetCells {
+                column: cols.a,
+                start: 0,
+                values: stokesforge_core::ValueBlock::Float(vec![10.0]),
+                expected_version: None,
+            })
+            .expect("A[0] = 10");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: cols.sheet,
+                at: 2,
+                count: 1,
+            })
+            .expect("delete the last row");
+        handle.end_macro().expect("close");
+        handle.undo().expect("undo");
+        let b = cols.b;
+        edit_outside_history(&handle, move |project| {
+            project.set_length(b, 1).expect("shorten B");
+        });
+        let before = handle.snapshot().expect("snapshot").revision;
+        assert!(handle.redo().is_err(), "row 2 is past the end of B");
+        assert!(handle.snapshot().expect("snapshot").revision > before);
+        assert_eq!(floats(&handle, cols.a), [10.0, 2.0], "A[0] was replayed");
+        assert_eq!(floats(&handle, cols.c), [20.0, 4.0], "pass ran");
+    }
+
+    /// Refusals that touch nothing leave the revision alone.
+    #[test]
+    fn refusals_that_touch_nothing_do_not_advance_the_revision() {
+        let (session, cols) = sheet_with_formula_and_ordinary_column();
+        let handle = session.handle();
+        let before = handle.snapshot().expect("snapshot").revision;
+        assert!(matches!(
+            handle.abort_macro(),
+            Err(SessionError::Command(
+                stokesforge_commands::CommandError::NotInMacro
+            ))
+        ));
+        assert_eq!(handle.snapshot().expect("snapshot").revision, before);
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        let inside = handle.snapshot().expect("snapshot").revision;
+        assert!(matches!(
+            handle.undo(),
+            Err(SessionError::Command(
+                stokesforge_commands::CommandError::MacroOpen(_)
+            ))
+        ));
+        assert_eq!(handle.snapshot().expect("snapshot").revision, inside);
+        let _ = cols;
     }
 
     /// An actor panic is visible: `actor_alive` becomes false, and any request

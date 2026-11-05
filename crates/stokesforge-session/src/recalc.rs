@@ -284,8 +284,10 @@ impl Recalculator {
     ///
     /// # Scope of the trigger
     ///
-    /// Called after **every** successful `Execute`/`Undo`/`Redo`/`AbortMacro`
-    /// and after every `Load` (see `actor::run`, for each call site and its
+    /// Called after **every** successful `Execute`/`Undo`/`Redo`/`AbortMacro`,
+    /// after a revert that failed halfway (`Undo`/`Redo`/`AbortMacro` returning
+    /// an error other than a refusal that touched nothing, #448), and after
+    /// every `Load` (see `actor::run`, for each call site and its
     /// own justification).
     ///
     /// The whole tree is **inspected**, not only "the sheet the command just

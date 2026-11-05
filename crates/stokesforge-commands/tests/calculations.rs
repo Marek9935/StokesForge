@@ -3,10 +3,11 @@
 
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::ops::Operation;
-use stokesforge_commands::{Command, History};
+use stokesforge_analysis::AnalysisError;
+use stokesforge_commands::{Command, History, MacroKind};
 use stokesforge_core::{
     AuxRef, CalculationDraft, Column, ColumnMeta, CoreError, NodeId, OutputDraft, Project,
-    SeriesRef, SeriesResult, ValueBlock,
+    SeriesRef, SeriesResult, Staleness, ValueBlock,
 };
 
 struct World {
@@ -1114,4 +1115,93 @@ fn deleting_the_replaced_column_removes_the_trace_and_the_copies() {
         .execute(&mut w.project, Command::RestoreOriginalData { trace })
         .unwrap();
     assert_eq!(values_of(&w.project, w.y), vec![10.0, 20.0, 30.0]);
+}
+
+/// #448: the output of a calculation is rewritten by the recalculation, outside
+/// the history. Putting rows back past its (shorter) end must not fail.
+#[test]
+fn aborting_over_a_shortened_calculation_output_makes_it_fit() {
+    let mut w = world();
+    add(&mut w, vec![1.0, 2.0, 3.0]);
+    let calc = calc_id(&w);
+    let output = w.project.tree().calculation(calc).unwrap().outputs[0]
+        .column
+        .expect("output column");
+    w.history.begin_macro(MacroKind::PasteCells).unwrap();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::DeleteRows {
+                sheet: w.sheet,
+                at: 2,
+                count: 1,
+            },
+        )
+        .unwrap();
+    // The recalculation that follows the command shortens the output.
+    w.project.set_length(output, 1).unwrap();
+
+    w.history
+        .abort_macro(&mut w.project)
+        .expect("a derived column is made to fit");
+
+    for column in [w.x, w.y, output] {
+        let len = w
+            .project
+            .tree()
+            .node(column)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .len();
+        assert_eq!(len, 3, "the sheet has its three rows back");
+    }
+}
+
+/// #448: a misfit on the output of a **manual** calculation marks it out of date
+/// (nothing reruns it); an automatic one gets no mark (its pass recomputes it); a
+/// manual one that already failed keeps its failure.
+#[test]
+fn a_misfit_marks_only_a_manual_calculation_and_keeps_a_failure() {
+    let cases = [
+        ("manual", false, None, Some(Staleness::Manual)),
+        ("automatic", true, None, None),
+        (
+            "manual, failed",
+            false,
+            Some(Staleness::Failed(AnalysisError::OutputUnwritable)),
+            Some(Staleness::Failed(AnalysisError::OutputUnwritable)),
+        ),
+    ];
+    for (name, auto, before, expected) in cases {
+        let mut w = world();
+        let mut d = draft(&w, vec![1.0, 2.0, 3.0]);
+        d.auto_recalc = auto;
+        w.history
+            .execute(&mut w.project, Command::AddCalculation { draft: d })
+            .unwrap();
+        let calc = calc_id(&w);
+        let output = w.project.tree().calculation(calc).unwrap().outputs[0]
+            .column
+            .expect("output column");
+        w.project.set_calculation_stale(calc, before).unwrap();
+        w.history.begin_macro(MacroKind::PasteCells).unwrap();
+        w.history
+            .execute(
+                &mut w.project,
+                Command::DeleteRows {
+                    sheet: w.sheet,
+                    at: 2,
+                    count: 1,
+                },
+            )
+            .unwrap();
+        w.project.set_length(output, 1).unwrap();
+        w.history.abort_macro(&mut w.project).unwrap();
+        assert_eq!(
+            w.project.tree().calculation(calc).unwrap().stale,
+            expected,
+            "{name}"
+        );
+    }
 }

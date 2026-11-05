@@ -1234,13 +1234,6 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
     // recalculation pass computes them all, and a load empties the memo.
     // Property 3 holds only once a pass has been made since either one.
     let mut memo_primed = false;
-    // A rejected `AbortMacro` can leave the tree half undone with no pass run
-    // after it (`TypeMismatch` while undoing a `DeleteRows` over a column a
-    // formula made Mixed, found by #433 and tracked in #448; the actor skips
-    // the pass on that error). The next command then catches up, rewriting columns that no
-    // unrelated command touched: not a targeted-recalculation defect, so
-    // property 3 does not judge that one step. Both twins agree (property 1).
-    let mut half_undone = false;
     for (rank, step) in draw.iter().enumerate() {
         let before = targeted.snapshot();
         let command = command(step, &before.tree, rank);
@@ -1325,7 +1318,6 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
         if matches!(step, Step::Unrelated)
             && targeted_reply == Reply::AcceptedWithPass
             && memo_primed
-            && !half_undone
         {
             prop_assert_eq!(
                 versions(&before.tree),
@@ -1344,14 +1336,44 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
             *coverage.per_step.entry(step_name(step)).or_default() += 1;
         }
         memo_primed |= ran_pass;
-        half_undone = (half_undone && !ran_pass)
-            || (matches!(step, Step::AbortMacro) && targeted_reply == Reply::Rejected);
     }
     coverage.bindings = targeted.snapshot().bound.count as usize;
     Ok(coverage)
 }
 
 // -- guard ------------------------------------------------------------------
+
+/// #448, the minimal sequence, named because the fixed draw of the oracle never
+/// reaches it. Sheet 1 column `C` is `A*2` (mixed), the macro deletes a row,
+/// types the constant `1+2` (numeric, so the pass retypes `C`), then aborts: the
+/// replayed `DeleteRows` meets a numeric `C`. The abort must finish and run its
+/// pass, so that the unrelated command after it rewrites no column (property 3,
+/// which is no longer excused after a rejected abort).
+#[test]
+fn b22_an_abort_over_a_retyped_formula_column_leaves_nothing_for_the_next_pass() {
+    let draw = [
+        Step::SetFormula {
+            sheet: 0,
+            column: 2,
+            formula_index: 0,
+        },
+        Step::OpenMacro,
+        Step::DeleteRows {
+            sheet: 0,
+            at: 0,
+            count: 1,
+        },
+        Step::SetFormula {
+            sheet: 0,
+            column: 2,
+            formula_index: 7,
+        },
+        Step::AbortMacro,
+        Step::Unrelated,
+    ];
+    let coverage = run_sequence(&draw).expect("the oracle and the three properties hold");
+    assert!(coverage.per_step.get("AbortMacro").copied().unwrap_or(0) >= 1);
+}
 
 /// The oracle, then the check of what the draw reached: without the latter,
 /// a draw that never set a formula, or whose formulas were all in error, would
