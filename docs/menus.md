@@ -172,7 +172,10 @@ Workbook › Sheet (including Reset Column Widths) / Columns (including Reset Wi
 
 **Layout (#398)** sits right after Graph, only when a graph is active
 (`layout_menu` / `layout_menu_contents`, one paint for the bar and for the
-right-click's `Layout ▸`). Sections, create before organize: **Layer Placement ▸**
+right-click's `Layout ▸`). Sections, create before organize: **Page Layout Mode**
+(#426, first entry, one check mark through `menu_choice` while the mode is on; it is a
+view state: no action, no undo step, no shortcut to enter; a toolbar button beside
+Properties, icon `Icon::PageLayout`, does the same) ─ **Layer Placement ▸**
 (Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
 (Right / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
 **Align ▸** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center) · Same
@@ -181,7 +184,10 @@ Front · Send to Back ─ **Delete Layer** (the active layer; disabled with the
 "keeps at least one layer" reason for the last cell). On the regular grid Align,
 Same, Distribute, Bring to Front and Send to Back are **absent** (they do not
 apply); in Free they are disabled with a `.disabled` tooltip when there are too
-few layers (Align and Same need two, Distribute three). They act on the cells
+few layers (Align and Same need two, Distribute three). The same three are in the
+Page Layout Mode strip (`align_items`, `same_size_items`, `distribute_items`, shared
+with the menu), where on a regular grid they are **disabled with a reason** instead of
+absent, to keep the strip's height stable. They act on the cells
 selected with Shift + click (`docs/gestures.md`), on all of them when fewer than
 two are selected.
 

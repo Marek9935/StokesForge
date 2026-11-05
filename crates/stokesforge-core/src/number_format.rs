@@ -85,19 +85,12 @@ pub struct NumberOutOfRange {
 /// read as in [`parse_input`].
 pub fn check_range(text: &str) -> Result<(), NumberOutOfRange> {
     let normalised = normalised_input(text);
-    let Ok(value) = normalised.parse::<f64>() else {
-        return Ok(());
-    };
-    let mantissa = normalised.split(['e', 'E']).next().unwrap_or("");
-    let too_large = !value.is_finite() && mantissa.chars().any(|c| c.is_ascii_digit());
-    let too_small = value == 0.0 && mantissa.chars().any(|c| ('1'..='9').contains(&c));
-    if too_large || too_small {
-        Err(NumberOutOfRange {
+    match stokesforge_analysis::expr::number_out_of_range(&normalised) {
+        Some(too_large) => Err(NumberOutOfRange {
             text: text.trim().to_owned(),
             too_large,
-        })
-    } else {
-        Ok(())
+        }),
+        None => Ok(()),
     }
 }
 

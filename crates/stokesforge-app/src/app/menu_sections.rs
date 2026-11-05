@@ -87,8 +87,10 @@ pub(super) fn menu_choice(
         padding.x * 2.0 + mark + gap + galley.size().x,
         galley.size().y.max(mark) + padding.y * 2.0,
     );
-    let width = size.x.max(ui.available_width());
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, size.y), egui::Sense::click());
+    // The layout justifies the entry to the menu's width, like a button: never
+    // `ui.available_width()`, which in a popup is the window's (#426).
+    let (id, rect) = ui.allocate_space(size);
+    let response = ui.interact(rect, id, egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::RadioButton,

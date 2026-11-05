@@ -37,6 +37,9 @@ impl StokesForgeApp {
                 tool: self
                     .read_graph_view(graph, GraphView::tool)
                     .unwrap_or_default(),
+                layout_mode: self
+                    .read_graph_view(graph, GraphView::layout_mode)
+                    .unwrap_or(false),
             },
             ActiveTabKind::Book(book) => {
                 let sheet = self.state.selected_sheet_in(book);
@@ -548,6 +551,11 @@ impl StokesForgeApp {
             ToolbarRequest::SetGraphTool(tool) => {
                 if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
                     self.with_graph_view(graph, |view| view.set_tool(tool));
+                }
+            }
+            ToolbarRequest::TogglePageLayoutMode => {
+                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                    self.toggle_layout_mode(graph, None);
                 }
             }
             ToolbarRequest::ResetZoom => {
@@ -1386,7 +1394,7 @@ mod tests {
             );
             assert!(matches!(
                 app.tools_context(Some(Tab::Graph(graph))),
-                ToolsContext::Graph { graph: g, tool: GraphTool::Pointer } if g == graph
+                ToolsContext::Graph { graph: g, tool: GraphTool::Pointer, .. } if g == graph
             ));
             app.run_toolbar_request(
                 &ctx,

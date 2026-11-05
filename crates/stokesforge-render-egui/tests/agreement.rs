@@ -1223,3 +1223,65 @@ fn a_titled_grid_graph_has_the_same_title_band_in_the_layout_and_on_screen() {
     assert_eq!(panel.pixel_origin, (x as i32, y as i32));
     assert_eq!(panel.pixel_size, (w, h));
 }
+
+/// #426: the page of a Free graph is the figure on screen (`GraphView`) and in
+/// the export alike, title band included, and the SVG document is that size.
+/// Witness: the page applied on the screen path only (the sizes differ).
+#[test]
+fn a_free_page_is_the_same_figure_on_screen_and_in_the_export() {
+    use stokesforge_plot::{FreeFrame, FreePage, LayerPlacement};
+    let mut fixture = minimal();
+    fixture.spec.title = "Paged".to_owned();
+    let mut panels: Vec<_> = fixture.spec.panels.iter().cloned().collect();
+    panels[0].free_frame = Some(FreeFrame {
+        left: 120.0,
+        top: 60.0,
+        width: 300.0,
+        height: 200.0,
+        stack: 0,
+    });
+    fixture.spec.panels = stokesforge_plot::Panels::new(panels);
+    fixture.spec.layer_placement = LayerPlacement::Free;
+    fixture.spec.free_page = Some(FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 900.0,
+        height: 500.0,
+    });
+    let mut project = fixture.project;
+    let root = project.root();
+    let graph = project
+        .add_graph(root, None, fixture.spec.clone())
+        .expect("graph");
+    let session = stokesforge_session::Session::spawn(project, None).expect("session");
+    let snapshot = session.handle().snapshot().expect("snapshot");
+
+    let context = egui::Context::default();
+    context.set_fonts(stokesforge_render_egui::font_definitions());
+    let mut view = stokesforge_render_egui::GraphView::new();
+    let screen = view
+        .figure_layout(&context, &snapshot, graph)
+        .expect("screen layout");
+
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let export =
+        stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice).expect("layout");
+    assert_eq!(screen.size, export.size);
+    assert_eq!(screen.size.0, 900);
+    assert_eq!(screen.size.1, 500 + screen.title_band);
+
+    let plot = resolve_spec(snapshot.tree.as_ref(), &fixture.spec);
+    let (document, _) = stokesforge_render_svg::render_to_string_with_geometry_and_texts(
+        &plot,
+        export.size,
+        &measurer,
+        &FigureTexts::default(),
+    )
+    .expect("SVG export");
+    assert!(
+        document.contains(&format!("width=\"{}\"", export.size.0))
+            && document.contains(&format!("height=\"{}\"", export.size.1)),
+        "the document has the size of the page"
+    );
+}

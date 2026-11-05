@@ -14894,11 +14894,11 @@ fn setting_a_frame_size_is_one_undo_step_and_the_other_frames_keep_theirs() {
     assert_ne!(revision, revision_now);
 }
 
-/// #394: pulling a corner handle commits both sizes as ONE undo step; a legacy
-/// graph is given the frames it was drawn with, only the pulled ones move; a
-/// refused size (outside the grid) commits nothing, not even the other one.
+/// #426: the Page Layout Mode commits the whole grid as ONE undo step; a legacy
+/// graph is given its drawn frames first; vectors of the wrong length commit
+/// nothing. Witness: one command per axis.
 #[test]
-fn pulling_a_corner_is_one_undo_step_and_fixes_a_legacy_graph() {
+fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (session, mut state, graph, _c) = cell_bench(dir.path());
     let mut legacy = graph_spec(&state, graph);
@@ -14906,37 +14906,159 @@ fn pulling_a_corner_is_one_undo_step_and_fixes_a_legacy_graph() {
     legacy.frame_widths.clear();
     legacy.frame_heights.clear();
     put_legacy_spec(&session, &mut state, graph, legacy.clone());
-    let drawn = layout_of(&legacy);
 
-    state.dispatch(Action::SetFrameSizes {
+    state.dispatch(Action::SetGridFrames {
         graph,
-        column: Some((0, 300.0)),
-        row: Some((0, 200.0)),
+        widths: vec![310.0],
+        heights: vec![210.0],
+        figure: false,
     });
     let after = graph_spec(&state, graph);
     assert_eq!(
         (after.frame_widths.clone(), after.frame_heights.clone()),
-        (vec![300.0], vec![200.0])
-    );
-    assert_ne!(drawn.frame_widths, after.frame_widths);
-    assert_eq!(
-        state.snapshot().history.undo_label,
-        Some(HistoryLabel::EditPlotSpec(
-            stokesforge_commands::PlotEditKind::ResizeCell
-        ))
+        (vec![310.0], vec![210.0])
     );
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), legacy, "one Undo is enough");
-    state.dispatch(Action::Redo);
-    assert_eq!(graph_spec(&state, graph), after);
+
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: vec![330.0],
+        heights: vec![220.0],
+        figure: true,
+    });
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::ResizeFigure
+        )),
+        "a figure scale is its own kind"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy, "one Undo restores all");
 
     let revision = state.snapshot().revision;
-    state.dispatch(Action::SetFrameSizes {
+    state.dispatch(Action::SetGridFrames {
         graph,
-        column: Some((0, 250.0)),
-        row: Some((9, 200.0)),
+        widths: vec![310.0, 100.0],
+        heights: vec![210.0],
+        figure: false,
     });
-    assert_eq!(state.snapshot().revision, revision, "all or nothing");
+    assert_eq!(state.snapshot().revision, revision, "wrong length: nothing");
+}
+
+/// #426: the figure size typed in the Page Layout Mode strip is ONE undo step
+/// of its own kind, the other axis follows the closed lock's ratio, and a free
+/// graph is left to `SetFreeLayout`. Witness: the ratio ignored.
+#[test]
+fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    let (width, height) = stokesforge_app_state::frame_sizes::figure_extent(&before).unwrap();
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: width + 100.0,
+        ratio: Some(height / width),
+    });
+    let (new_width, new_height) =
+        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+    assert!((new_width - (width + 100.0)).abs() < 1.0, "{new_width}");
+    assert!(
+        (new_height / new_width - height / width).abs() < 0.003,
+        "{new_width} x {new_height}"
+    );
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::ResizeFigure
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+
+    // Without a lock the other axis stays.
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: width + 100.0,
+        ratio: None,
+    });
+    let (_, kept) =
+        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+    assert!((kept - height).abs() < 1.0);
+    state.dispatch(Action::Undo);
+
+    // A free graph has `SetFreeLayout`: nothing here.
+    state.dispatch(Action::SetLayerPlacement { graph, free: true });
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: width + 100.0,
+        ratio: None,
+    });
+    assert_eq!(state.snapshot().revision, revision);
+}
+
+/// #426: "Fixed" / "Grows with the axes" of the strip is one undo step, and a
+/// second identical request sends nothing.
+#[test]
+fn the_strip_sets_the_figure_fixed_in_one_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    assert!(!before.fixed_figure);
+    state.dispatch(Action::SetFigureFixed { graph, fixed: true });
+    assert!(graph_spec(&state, graph).fixed_figure);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFigureFixed { graph, fixed: true });
+    assert_eq!(state.snapshot().revision, revision, "already fixed");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+}
+
+/// #426: the ratio lock is the session's, per graph: an action sets it, it
+/// changes no model and no history, a detached fork carries it, and a figure
+/// scale committed under a closed lock keeps its ratio instead of taking the
+/// new image's. Witness: `adopt_next` not called.
+#[test]
+fn the_size_lock_is_session_state_shared_with_a_detached_fork() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let spec = graph_spec(&state, graph);
+    let image = stokesforge_app_state::frame_sizes::figure_extent(&spec).unwrap();
+    let lock = stokesforge_app_state::frame_sizes::SizeLock::close(image).expect("lock");
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetSizeLock {
+        graph,
+        lock: Some(lock),
+    });
+    assert_eq!(state.size_lock(graph), Some(lock));
+    assert_eq!(state.snapshot().revision, revision, "no model change");
+    let mut fork = state.fork_for_detached_view().unwrap();
+    assert_eq!(fork.size_lock(graph), Some(lock), "carried to the fork");
+
+    // A scale of the figure adopts the next image: `follow` keeps the ratio.
+    let widths: Vec<f64> = spec.frame_widths.iter().map(|w| w * 1.3).collect();
+    let heights: Vec<f64> = spec.frame_heights.iter().map(|h| h * 1.2).collect();
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths,
+        heights,
+        figure: true,
+    });
+    let new_image =
+        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+    let mut followed = state.size_lock(graph).expect("still closed");
+    followed.follow(new_image);
+    assert!((followed.ratio - lock.ratio).abs() < 1e-12, "ratio kept");
+
+    state.dispatch(Action::SetSizeLock { graph, lock: None });
+    fork.sync_detached_sheet_editor(&state);
+    assert_eq!(fork.size_lock(graph), None);
 }
 
 /// #394: deleting a cell that empties its column removes that column; the
@@ -14992,55 +15114,6 @@ fn removing_an_overlay_layer_leaves_its_cell() {
         target: T::Panel(1),
     });
     assert_eq!(graph_spec(&state, graph).panels.len(), 1);
-}
-
-/// #405: a drag of the left or top edge of the figure commits Left and Top as
-/// ONE undo step; a legacy graph is given its frames in the same command; a
-/// refused or unchanged value commits nothing.
-#[test]
-fn placing_the_figure_is_one_undo_step_and_fixes_a_legacy_graph() {
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (session, mut state, graph, _c) = cell_bench(dir.path());
-    let mut legacy = graph_spec(&state, graph);
-    legacy.frame_widths.clear();
-    legacy.frame_heights.clear();
-    put_legacy_spec(&session, &mut state, graph, legacy.clone());
-    let drawn = layout_of(&legacy);
-
-    state.dispatch(Action::SetFigureOffsets {
-        graph,
-        left: Some(150.0),
-        top: Some(90.0),
-    });
-    let after = graph_spec(&state, graph);
-    assert_eq!(
-        (after.figure_left, after.figure_top),
-        (Some(150.0), Some(90.0))
-    );
-    assert_eq!(after.frame_widths, drawn.frame_widths, "same plot area");
-    assert_eq!(
-        state.snapshot().history.undo_label,
-        Some(HistoryLabel::EditPlotSpec(
-            stokesforge_commands::PlotEditKind::PlaceFigure
-        ))
-    );
-    state.dispatch(Action::Undo);
-    assert_eq!(graph_spec(&state, graph), legacy, "one Undo is enough");
-    state.dispatch(Action::Redo);
-    assert_eq!(graph_spec(&state, graph), after);
-
-    let revision = state.snapshot().revision;
-    state.dispatch(Action::SetFigureOffsets {
-        graph,
-        left: Some(150.0),
-        top: Some(90.0),
-    });
-    state.dispatch(Action::SetFigureOffsets {
-        graph,
-        left: Some(10.0),
-        top: Some(f64::NAN),
-    });
-    assert_eq!(state.snapshot().revision, revision, "unchanged or refused");
 }
 
 /// #405: switching the figure to Fixed (the properties window commits its
@@ -15125,37 +15198,6 @@ fn the_warning_of_a_fixed_figure_that_grew_survives_the_window_closing() {
         state.status().expect("a message").level,
         StatusLevel::Warning
     );
-}
-
-/// #405: Undo and Redo of a "Position Plot Area" step say so (the shell then
-/// moves the graph window back with the figure's left and top edge); any other
-/// step does not.
-#[test]
-fn undoing_a_figure_placement_is_flagged_for_the_window() {
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state, graph, _c) = cell_bench(dir.path());
-    state.dispatch(Action::SetFigureOffsets {
-        graph,
-        left: Some(150.0),
-        top: None,
-    });
-    assert_eq!(
-        state.placement_step_revision(),
-        None,
-        "doing it is not undoing it"
-    );
-    state.dispatch(Action::Undo);
-    assert_eq!(state.placement_step_revision(), Some(state.revision()));
-    state.dispatch(Action::Redo);
-    assert_eq!(state.placement_step_revision(), Some(state.revision()));
-    let mut titled = graph_spec(&state, graph);
-    titled.title = "T".to_owned();
-    state.dispatch(Action::SetPlotSpec {
-        graph,
-        spec: titled,
-    });
-    state.dispatch(Action::Undo);
-    assert_ne!(state.placement_step_revision(), Some(state.revision()));
 }
 
 // -- Free placement of the layers (#398) --------------------------------------------
@@ -15378,16 +15420,15 @@ fn layer_stacking_and_background_are_single_steps_in_free_and_nothing_on_the_gri
     assert_eq!(state.snapshot().revision, revision, "unreadable color");
 }
 
-/// #398 (L2): a drag of a layer commits one step, `Move Layer` when only the
-/// position changes and `Resize Layer` when the size does; nothing on the grid,
-/// for a missing layer or for the frame it already has. Undo gives back the
-/// frame, and the shell is told (placement step) so the window follows it.
-/// Witness: always labelling `ResizeLayer`.
+/// #426: `SetFreeLayout` writes frames and page as ONE undo step; the kind
+/// follows what changed (page size, frame size, position only); Undo gives
+/// back the page and every frame; unchanged or grid = nothing sent.
+/// Witness: two steps, or the page left out of the undo.
 #[test]
-fn moving_or_resizing_a_layer_is_one_undoable_step_in_free() {
+fn setting_the_free_layout_is_one_undoable_step_with_the_page() {
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_core::compose::CellSide;
-    use stokesforge_plot::FreeFrame;
+    use stokesforge_plot::{FreeFrame, FreePage};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     state.dispatch(Action::AddCell {
@@ -15396,84 +15437,235 @@ fn moving_or_resizing_a_layer_is_one_undoable_step_in_free() {
         side: CellSide::Right,
         columns: Vec::new(),
     });
-    let frame_of = |state: &AppState, panel: usize| {
-        graph_spec(state, graph).panels[panel].sanitized_free_frame()
+    let frames_of = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        (
+            spec.panels[0].sanitized_free_frame(),
+            spec.panels[1].sanitized_free_frame(),
+        )
     };
+    let page_of = |state: &AppState| graph_spec(state, graph).free_page;
     let label = |state: &AppState| state.snapshot().history.undo_label.clone();
+    let page = FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 900.0,
+        height: 500.0,
+    };
 
-    // Grid: nothing is sent.
     let revision = state.snapshot().revision;
-    state.dispatch(Action::SetFreeFrame {
+    state.dispatch(Action::SetFreeLayout {
         graph,
-        panel: 0,
-        frame: FreeFrame::FALLBACK,
+        frames: vec![(0, FreeFrame::FALLBACK)],
+        page: Some(page),
     });
     assert_eq!(state.snapshot().revision, revision, "no step on the grid");
 
     go_free(&mut state, graph);
-    let before = frame_of(&state, 0);
-    let other = frame_of(&state, 1);
+    let (a, b) = frames_of(&state);
+    assert_eq!(page_of(&state), None);
 
+    // A position-only change with the page frozen to the figure as drawn is a
+    // move; the page is stored.
+    let drawn = stokesforge_app_state::frame_sizes::figure_layout(&graph_spec(&state, graph))
+        .and_then(|layout| layout.free_page_rect())
+        .expect("free page");
     let moved = FreeFrame {
-        left: before.left - 80.0,
-        top: before.top + 10.0,
-        ..before
+        left: a.left + 5.0,
+        ..a
     };
-    state.dispatch(Action::SetFreeFrame {
+    state.dispatch(Action::SetFreeLayout {
         graph,
-        panel: 0,
-        frame: moved,
+        frames: vec![(0, moved)],
+        page: Some(drawn),
     });
-    assert_eq!(frame_of(&state, 0), moved);
-    assert_eq!(frame_of(&state, 1), other, "the other layer stays");
+    assert_eq!(frames_of(&state).0, moved);
+    assert_eq!(page_of(&state), Some(drawn));
     assert_eq!(
         label(&state),
         Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
     );
+    state.dispatch(Action::Undo);
+    assert_eq!(frames_of(&state).0, a, "one Undo gives the frame back");
+    assert_eq!(page_of(&state), None, "and the page");
+    state.dispatch(Action::Redo);
+
+    // Page size changed: ResizeFigure, both frames and the page in one step.
+    let (a, b2) = frames_of(&state);
+    assert_eq!(b2, b);
+    let (na, nb) = (
+        FreeFrame {
+            width: a.width / 2.0,
+            ..a
+        },
+        FreeFrame {
+            left: b.left / 2.0,
+            ..b
+        },
+    );
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page: Some(page),
+    });
+    assert_eq!(frames_of(&state), (na, nb));
+    assert_eq!(page_of(&state), Some(page));
     assert_eq!(
-        state.placement_step_revision(),
-        None,
-        "doing it is not undoing it"
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ResizeFigure))
     );
     state.dispatch(Action::Undo);
-    assert_eq!(frame_of(&state, 0), before, "one Undo is enough");
-    assert_eq!(state.placement_step_revision(), Some(state.revision()));
+    assert_eq!(frames_of(&state), (a, b));
+    assert_eq!(page_of(&state), Some(drawn));
     state.dispatch(Action::Redo);
-    assert_eq!(frame_of(&state, 0), moved);
-    assert_eq!(state.placement_step_revision(), Some(state.revision()));
 
+    // Nothing changes: nothing is sent. A missing layer too.
     let revision = state.snapshot().revision;
-    state.dispatch(Action::SetFreeFrame {
+    state.dispatch(Action::SetFreeLayout {
         graph,
-        panel: 0,
-        frame: moved,
+        frames: vec![(0, na), (1, nb)],
+        page: Some(page),
     });
-    assert_eq!(state.snapshot().revision, revision, "already that frame");
-    state.dispatch(Action::SetFreeFrame {
+    state.dispatch(Action::SetFreeLayout {
         graph,
-        panel: 9,
-        frame: moved,
+        frames: vec![(9, na)],
+        page: None,
     });
-    assert_eq!(state.snapshot().revision, revision, "no such layer");
+    assert_eq!(state.snapshot().revision, revision);
 
-    let resized = FreeFrame {
-        width: moved.width + 40.0,
-        left: moved.left - 40.0,
-        ..moved
+    // A frame size change under the same page: ResizeLayer.
+    let wider = FreeFrame {
+        width: na.width + 20.0,
+        ..na
     };
-    state.dispatch(Action::SetFreeFrame {
+    state.dispatch(Action::SetFreeLayout {
         graph,
-        panel: 0,
-        frame: resized,
+        frames: vec![(0, wider)],
+        page: Some(page),
     });
-    assert_eq!(frame_of(&state, 0), resized);
     assert_eq!(
         label(&state),
         Some(HistoryLabel::EditPlotSpec(K::ResizeLayer))
     );
+}
+
+/// #426: dragging a line between touching graphs writes the frames
+/// of every graph on it in one `SetFreeLayout`: one Undo gives all of them
+/// back. Witness: one command per frame.
+#[test]
+fn a_four_frame_layout_edit_is_undone_in_one_step() {
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreeFrame;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    for _ in 0..3 {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+    }
+    go_free(&mut state, graph);
+    let frames = |state: &AppState| -> Vec<FreeFrame> {
+        let spec = graph_spec(state, graph);
+        (0..4)
+            .map(|i| spec.panels[i].sanitized_free_frame())
+            .collect()
+    };
+    let before = frames(&state);
+    assert_eq!(before.len(), 4);
+    let drawn = stokesforge_app_state::frame_sizes::figure_layout(&graph_spec(&state, graph))
+        .and_then(|layout| layout.free_page_rect())
+        .expect("free page");
+    let moved: Vec<(usize, FreeFrame)> = before
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            (
+                i,
+                FreeFrame {
+                    left: f.left + 3.0,
+                    ..*f
+                },
+            )
+        })
+        .collect();
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: moved.clone(),
+        page: Some(drawn),
+    });
+    assert_eq!(
+        frames(&state),
+        moved.iter().map(|(_, f)| *f).collect::<Vec<_>>()
+    );
     state.dispatch(Action::Undo);
-    assert_eq!(frame_of(&state, 0), moved);
-    assert_eq!(state.placement_step_revision(), Some(state.revision()));
+    assert_eq!(frames(&state), before, "one Undo gives all four back");
+    assert!(state.snapshot().revision > revision);
+}
+
+/// #426: typing a figure size in Graph Properties on a graph with a page
+/// writes the fitted page and scales the boxes, in the same draft; a graph
+/// without a page stays without one.
+#[test]
+fn fitting_the_total_of_a_free_graph_with_a_page_writes_the_page() {
+    use stokesforge_app_state::frame_sizes::set_total_in_draft;
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreePage;
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    go_free(&mut state, graph);
+    let mut without = graph_spec(&state, graph);
+    set_total_in_draft(&mut without, SizeAxis::Width, 700.0, None).expect("fit");
+    assert_eq!(without.free_page, None);
+
+    let mut spec = graph_spec(&state, graph);
+    spec.free_page = Some(FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 1200.0,
+        height: 600.0,
+    });
+    let before = spec.panels[1].sanitized_free_frame();
+    set_total_in_draft(&mut spec, SizeAxis::Width, 600.0, None).expect("fit");
+    let page = spec.free_page.expect("page");
+    assert_eq!((page.width, page.height), (600.0, 600.0));
+    assert!(spec.panels[1].sanitized_free_frame().left < before.left);
+}
+
+/// #426: leaving Free placement clears the page and one Undo brings it back.
+/// Witness: the clear removed from `set_grid_placement` (the page survives on
+/// the grid), or the page left out of the undo.
+#[test]
+fn leaving_free_clears_the_page_and_undo_restores_it() {
+    use stokesforge_plot::FreePage;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    go_free(&mut state, graph);
+    let page = FreePage {
+        left: 0.0,
+        top: 0.0,
+        width: 640.0,
+        height: 480.0,
+    };
+    let mut spec = graph_spec(&state, graph);
+    spec.free_page = Some(page);
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    assert_eq!(graph_spec(&state, graph).free_page, Some(page));
+
+    state.dispatch(Action::SetLayerPlacement { graph, free: false });
+    assert_eq!(graph_spec(&state, graph).free_page, None);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph).free_page, Some(page));
 }
 
 /// #398 (batch 3a): Align Bottom on a free graph is one undo step
@@ -15511,10 +15703,10 @@ fn aligning_layers_is_one_undoable_step_in_free() {
         let mut frame = graph_spec(&state, graph).panels[panel].sanitized_free_frame();
         frame.height = height;
         frame.top += 30.0 * panel as f64;
-        state.dispatch(Action::SetFreeFrame {
+        state.dispatch(Action::SetFreeLayout {
             graph,
-            panel,
-            frame,
+            frames: vec![(panel, frame)],
+            page: None,
         });
     }
     let before = graph_spec(&state, graph);
