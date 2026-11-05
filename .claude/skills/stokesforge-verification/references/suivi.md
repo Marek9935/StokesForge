@@ -50,6 +50,10 @@ After `qcm pose` or `test add` the agent launches nothing and ends its turn; it 
 - **Safety net**: `hook-news` (SessionStart, UserPromptSubmit) prints unread answers; `chantier.sh` runs `suivi.py news <n>` on a claim. A wait never holds a colour.
 - **Limits**: a closed terminal cannot be woken (the answer waits for the next `lance`); a real wait is not proven beyond a few minutes; the hook timeout is 72 h.
 
+## Slowness seen at the trial (#474)
+
+`scripts/try.sh` builds in debug by default (build time), and debug draws far slower than release (#340: about 23 frames/s against 120). When a trial reports a slowness, the agent first asks the user to rerun with `scripts/try.sh --release <n>` and to say how loaded the machine was (other builds, tests or apps running); it diagnoses only what survives in release.
+
 ## Pre-trial (#452)
 
 Before `test add`, for a visible change, a Sonnet agent (the pre-trial agent) works in the branch's worktree on the invisible screen (`run-stokesforge`):

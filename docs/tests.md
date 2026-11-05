@@ -628,7 +628,7 @@ without tags (4 retries) and only then writes the real merge commit on the issue
 and was merged into the branch (recheck, rerun). It stops before the CI and `--release`. The scripts of this workflow
 (`chantier.sh`, `try.sh`, `main-lock.sh`, `deliver.sh`, `workflow-lib.sh`) are tested by
 `scripts/workflow-test.sh`, run by the `fmt` job, and the colour rule by `scripts/suivi-test.py`
-(same job). Besides the colours, briefing and locks, `workflow-test.sh` covers
+(same job). `scripts/try.sh` builds in debug; `scripts/try.sh --release <n>` (#474) builds and runs the release binary of the same worktree, because debug draws about 23 frames/s against 120 in release (#340): rerun in release before diagnosing a slowness seen at a trial. Besides the colours, briefing and locks, `workflow-test.sh` covers
 (#449) `deliver.sh` in its own sandbox with a bare fake remote (happy path, refusals, held lock, fetch,
 merge and push failures with retries, rerun, record failure, moved `main`, conflict) and
 (#441) `lance` recording the owner session (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`) and a rerun in
