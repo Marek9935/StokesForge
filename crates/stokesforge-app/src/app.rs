@@ -1396,13 +1396,19 @@ impl StokesForgeApp {
         confirmations::show(ctx, &self.state, actions);
     }
 
-    /// A save, or a gesture that may replace the project, takes the cell,
-    /// header and note entries open in the detached windows too (#465, #466),
-    /// as `AppState::commit_open_entries` does for the main window. The main
-    /// state then reads the result before it saves or asks its question.
-    fn commit_detached_entries(&mut self) {
+    /// A save, or a gesture that may replace the project, takes the entries
+    /// open in the detached windows too (#465, #466): cell, header and note
+    /// through `AppState::commit_open_entries` on their own state, and the
+    /// graph text editors (titles, legends, free texts, egui-side) of the
+    /// floating and detached graphs through the usual actions. The main state
+    /// then reads the result before it saves or asks its question.
+    fn commit_view_entries(&mut self, ctx: &egui::Context) {
         let mut committed = false;
-        for detached in self.detached_tabs.values() {
+        let mut actions = Vec::new();
+        for (graph, view) in &mut self.graph_views {
+            graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
+        }
+        for (tab, detached) in &self.detached_tabs {
             let mut model = detached
                 .view_model
                 .lock()
@@ -1410,6 +1416,12 @@ impl StokesForgeApp {
             if let Some(view) = model.view_state.as_mut() {
                 committed |= view.commit_open_entries();
             }
+            if let (Tab::Graph(graph), Some(view)) = (tab, model.graph_view.as_mut()) {
+                graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
+            }
+        }
+        for action in actions {
+            self.state.dispatch(action);
         }
         if committed {
             self.state.refresh();
@@ -1502,7 +1514,7 @@ impl StokesForgeApp {
                     | Action::OpenProject { .. }
                     | Action::Quit { .. }
             ) {
-                self.commit_detached_entries();
+                self.commit_view_entries(ctx);
             }
             let action = self.prepare_new_project_action(ctx, action);
             if self.dispatch_action(ctx, action) {
@@ -2786,6 +2798,105 @@ mod tests {
             }
             session.shutdown().unwrap();
         }
+    }
+
+    /// The graph text editors (egui-side) open on a floating graph are taken by
+    /// a save and by the replacing gestures; Undo is not a save.
+    #[test]
+    fn a_save_takes_the_graph_text_editor_open_on_a_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        let title = |app: &StokesForgeApp, graph| {
+            let spec =
+                stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
+            stokesforge_plot::TextTarget::Title.text(&spec)
+        };
+        for gesture in ["undo", "save_as", "new"] {
+            let (session, graph) = plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let context = egui::Context::default();
+            let before = title(&app, graph);
+            let view = app.graph_views.entry(graph).or_default();
+            graph_text_edit::start_text_editor(
+                &context,
+                view,
+                graph_text_edit::TextEditTarget::Title(stokesforge_plot::TextTarget::Title),
+                before.clone().unwrap_or_default(),
+                (egui::pos2(200.0, 200.0), egui::vec2(80.0, 20.0)),
+            );
+            let id = graph_text_edit::text_editor_id(view);
+            context.data_mut(|data| {
+                let mut editor: graph_text_edit::TextEditor = data.get_temp(id).unwrap();
+                editor.buffer = "Typed title".to_owned();
+                data.insert_temp(id, editor);
+            });
+            let action = match gesture {
+                "undo" => Action::Undo,
+                "save_as" => Action::SaveAs {
+                    path: dir.path().join("t.stf").display().to_string(),
+                },
+                _ => Action::NewProject {
+                    pending_edits: false,
+                },
+            };
+            app.dispatch_actions(&context, vec![action]);
+            let saved = gesture != "undo";
+            assert_eq!(
+                title(&app, graph).as_deref() == Some("Typed title"),
+                saved,
+                "{gesture}"
+            );
+            assert_eq!(
+                context
+                    .data(|data| data.get_temp::<graph_text_edit::TextEditor>(id))
+                    .is_none(),
+                saved,
+                "{gesture}: editor closed only by a save"
+            );
+            session.shutdown().unwrap();
+        }
+    }
+
+    /// Same for a graph in a detached window, whose view lives in its model.
+    #[test]
+    fn a_save_takes_the_graph_text_editor_open_in_a_detached_window() {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.open_tab(Tab::Graph(graph));
+        app.detach_tab(Tab::Graph(graph));
+        let context = egui::Context::default();
+        {
+            let detached = &app.detached_tabs[&Tab::Graph(graph)];
+            let mut model = detached.view_model.lock().unwrap();
+            let view = model.graph_view.as_mut().expect("detached graph view");
+            graph_text_edit::start_text_editor(
+                &context,
+                view,
+                graph_text_edit::TextEditTarget::Title(stokesforge_plot::TextTarget::Title),
+                String::new(),
+                (egui::pos2(200.0, 200.0), egui::vec2(80.0, 20.0)),
+            );
+            let id = graph_text_edit::text_editor_id(view);
+            context.data_mut(|data| {
+                let mut editor: graph_text_edit::TextEditor = data.get_temp(id).unwrap();
+                editor.buffer = "Typed title".to_owned();
+                data.insert_temp(id, editor);
+            });
+        }
+        let dir = tempfile::tempdir().unwrap();
+        app.dispatch_actions(
+            &context,
+            vec![Action::SaveAs {
+                path: dir.path().join("t.stf").display().to_string(),
+            }],
+        );
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
+        assert_eq!(
+            stokesforge_plot::TextTarget::Title.text(&spec).as_deref(),
+            Some("Typed title")
+        );
+        session.shutdown().unwrap();
     }
 
     /// An autosave-like path, `Action::Undo` here, leaves a detached entry open.

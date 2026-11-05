@@ -6,8 +6,8 @@ Continuation of the index [`README.md`](README.md). Contents: new project and em
 
 **File › New › New Project** ("File › New Project", Ctrl+N) replaces the
 current project in the same window. The File bar offers the same gesture.
-A project with unsaved work, including local input in a detached window or a
-graph text, asks "Discard Changes · Cancel · Save" (#229; Enter = Save, which
+A project with unsaved work, including an entry still being typed (committed first, see below), a refused entry
+or a text edit left open, asks "Discard Changes · Cancel · Save" (#229; Enter = Save, which
 saves then continues). Cancel, Esc or the close cross keep the project.
 Entries still open in the main window (cell, header field, note) are committed
 first, by `AppState` itself (`commit_open_entries`, called by `save` and
@@ -15,13 +15,15 @@ first, by `AppState` itself (`commit_open_entries`, called by `save` and
 file holds what was typed, and Cancel leaves the value committed (Ctrl+Z
 undoes it). A refused entry (a number out of range) stays open and is left out
 of the save. Autosave and the quit after a lost session do not commit.
-The entries open in detached windows (their own `view_state`) are committed by
-`StokesForgeApp::commit_detached_entries` before Save, Save As, New Project,
-Open and Quit, then the main state refreshes. A click elsewhere that opens a
+The entries open in detached windows (their own `view_state`) are committed
+by `StokesForgeApp::commit_view_entries` before Save, Save As, New Project,
+Open and Quit, then the main state refreshes. The same call closes the graph
+text editors (titles, legends, group names, free texts: egui-side, in egui temp
+data) of the floating and detached graphs and sends their usual undoable
+actions (`graph_text_edit::commit_open_text_editors`); they no longer raise an
+Unsaved Changes question of their own. A click elsewhere that opens a
 blocking dialog (row drop, export overwrite, alert) ends a cell or note entry
-through the state, so the frame's `actions.clear()` cannot drop it (T1). Graph
-text editors (titles, legends, free texts) are egui-side and are not committed:
-they still raise the Unsaved Changes question.
+through the state, so the frame's `actions.clear()` cannot drop it (T1).
 File › Open…, File › Quit and closing the window ask the same question
 (`Action::OpenProject`, `Action::Quit`, `app/confirmations.rs`). An unreadable
 project or a failed save is announced by a blocking dialog (S-M8,
