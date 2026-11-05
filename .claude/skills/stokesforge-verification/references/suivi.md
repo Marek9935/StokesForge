@@ -12,6 +12,8 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 | `qcm/<id>/data.js`, `answers/<code>.json` | the decisions (injected into the form template when served) and one record per answered card |
 | `removed-tests/` | archive of entries removed by `test remove`; numbers are not reused |
 | `ended/<session>` | touched by the `SessionEnd` hook |
+| `heard/<root>.json` | `{session, seen}`: the answers already reported to the agent (written only by `suivi.py`) |
+| `waits/<root>.json`, `waits/log` | the registered wait `{pid, pid_start, session, started}`; SIGTERM/SIGHUP log |
 | `control.json` | result of the last `scripts/suivi.py check` |
 | `ci.json` | last reading of the CI of `main` by the server's watcher (#452): sha, verdict, names, reason, last_red, checked_at |
 
@@ -21,7 +23,7 @@ An issue holds its colour while (a) the Claude session that owns it is alive, or
 
 ## Decision forms, local (#441)
 
-The start and follow-up forms are posed here, not published: `python3 scripts/suivi.py qcm pose <n> data.js --title "…"` (checks and counts the cards, creates `qcm/<n>-<k>/`, prints the id and `http://127.0.0.1:8441/qcm/<id>`). The form appears in « En attente » with its progress; the user answers there (each answer is a file), then presses « J'ai fini » at the bottom of the summary, which sets `finished` and frees the colour unless something else holds it. Agents read the answers with `suivi.py qcm answers <id> [--json]` and list forms with `qcm list [--open] [--issue n]`. Template and card rules: `stokesforge-bug-report/references/decision-form.md`. The published Artifact form stays as the fallback (user away from the PC, or asked).
+The start and follow-up forms are posed here, not published: `python3 scripts/suivi.py qcm pose <n> data.js --title "…"` (checks and counts the cards, creates `qcm/<n>-<k>/`, prints the id and `http://127.0.0.1:8441/qcm/<id>`). The form appears in « En attente » with its progress; the user answers there (each answer is a file), then presses « J'ai fini » at the bottom of the summary, which sets `finished` and frees the colour unless something else holds it. Agents read the answers with `suivi.py qcm answers <id> [--json]` and list forms with `qcm list [--open] [--issue n]`. Template and card rules: `stokesforge-bug-report/references/decision-form.md`. After `qcm pose` the agent ends its turn: it is woken on the answers (§ The agent wakes). The published Artifact form stays as the fallback (user away from the PC, or asked).
 
 ## Trial checklist
 
@@ -31,8 +33,18 @@ Entries are **guided routes**, at most 5 unmerged per issue (`test add` refuses 
 
 1. Write a JSON file: one object, or a list, with `title` (« Parcours 1/3 (3 min) »), optional `intro` (first sentence: what changes), `where` (menu or window steps, English labels as on screen), `steps` (short French imperatives, each « gesture → what you must see »), `expect` (tick OK if every step showed it), `try` (`scripts/try.sh <n>`).
 2. `python3 scripts/suivi.py test add <n> entries.json` creates `tests/<n>-<k>.json`, status `todo`.
-3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Every entry ticked OK (or the user's plain OK) is the merge go-ahead. After a « Retour », fix on the branch and redo the trial: `test remove <n> <id>... [--answered]` (only your own issue or its parent, never a merged entry; an answered entry needs `--answered`, its comment is printed back and named in your report; archived in `removed-tests/`), then `test add`.
+3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Ticks alone are not the go-ahead (§ The agent wakes, merge). After a « Retour », fix on the branch and redo the trial: `test remove <n> <id>... [--answered]` (only your own issue or its parent, never a merged entry; an answered entry needs `--answered`, its comment is printed back and named in your report; archived in `removed-tests/`), then `test add`.
 4. At the merge, `scripts/deliver.sh` runs `test merged <n> <commit>` (sets `commit`, removes `try`); it refuses a commit that is unknown, not on `main`, without the issue's branch while it exists, or not citing #<n>. A repeat with the same commit is « already recorded »; another commit needs `--replace <old>` (`test merged <n> <new> --replace <old>`). Any other usable change adds its entry after the merge with `test add` and a `commit` field. `test list [--issue n]` lists them.
+
+## The agent wakes (#454)
+
+After `qcm pose` or `test add` the agent launches nothing and ends its turn; it never asks the user to say they finished. A `PostToolUse` hook of `.claude/settings.json` runs `suivi.py hook-wait` after any `suivi.py` call on an issue the session owns: it waits on local files and wakes the idle agent. After a wake the agent reads the answers (`qcm answers`, `test list`) and acts; any later `suivi.py` call on the issue re-arms the wait by itself. Without an active hook, fall back to `suivi.py wait <n>` as a background Bash command. Only the main session arms.
+
+- **Wake policy** (`should_wake`, the one place): a Retour, a comment on an OK, a finished form (« J'ai fini »), or no `todo` left. A plain OK with entries left wakes nothing. A Retour or comment waits 180 s after the last change of any entry (`SF_SUIVI_WAIT_SETTLE`); a finished form or no `todo` left wakes at once.
+- **Merge**: all entries OK does not merge by itself. The agent wakes, checks, announces it is ready, and merges on the user's word in the terminal (the user's plain OK there is the go-ahead). The card then reads « À toi : écrire à l’agent pour fusionner » (computed).
+- **Card**: « L’agent écoute » / « il repart à ta réponse » (waiting), « écris-lui après ta réponse » (agent stopped), « Réponse reçue : lance #n » (paused, unread answer).
+- **Safety net**: `hook-news` (SessionStart, UserPromptSubmit) prints unread answers; `chantier.sh` runs `suivi.py news <n>` on a claim. A wait never holds a colour.
+- **Limits**: a closed terminal cannot be woken (the answer waits for the next `lance`); a real wait beyond a few minutes is not proven past the 72 h hook timeout.
 
 ## Pre-trial (#452)
 
@@ -54,7 +66,7 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 
 ## Notifications (W9)
 
-`PushNotification` at three moments: start form ready, trial ready, tracking page updated. The message starts with `<square> #<n>` and carries the local link `http://127.0.0.1:8441/`.
+`PushNotification` at three moments: start form ready, trial ready, tracking page updated. A form or a trial still notifies once; the user answers on the page, not in the terminal. The message starts with `<square> #<n>` and carries the local link `http://127.0.0.1:8441/`.
 
 ## Server
 
