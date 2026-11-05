@@ -1373,6 +1373,50 @@ class TestHookWait(WaitBase):
             self.assertEqual(n(cmd), want, cmd)
 
 
+class TestSettingsHooks(unittest.TestCase):
+    """.claude/settings.json (#454): the hooks that report answers and arm the wait."""
+    PATH = os.path.join(HERE, os.pardir, ".claude", "settings.json")
+
+    def problems(self, d):
+        out = []
+        subs = set(next(a for a in suivi.parser()._actions if a.dest == "cmd").choices)
+        hooks = d.get("hooks", {})
+        for ev in ("SessionStart", "UserPromptSubmit", "PostToolUse", "SessionEnd"):
+            for group in hooks.get(ev, []):
+                for h in group.get("hooks", []):
+                    m = re.search(r'scripts/suivi\.py"? (\S+)', h.get("command", ""))
+                    if not m or m.group(1) not in subs:
+                        out.append("%s: command names no subcommand of suivi.py: %r" % (ev, h.get("command")))
+        def cmds(ev):
+            return [h for g in hooks.get(ev, []) for h in g.get("hooks", [])]
+        for ev in ("SessionStart", "UserPromptSubmit"):
+            hs = cmds(ev)
+            if not hs or not all(" hook-news" in h["command"] and h["command"].endswith("|| true") for h in hs):
+                out.append(ev + ": must run hook-news and end with || true")
+        post = hooks.get("PostToolUse", [])
+        ok = any(g.get("matcher") == "Bash" and any(
+            "suivi.py" in h.get("if", "") and h.get("asyncRewake") is True and h.get("timeout", 0) >= 259200
+            and h["command"].rstrip().endswith("hook-wait") for h in g.get("hooks", [])) for g in post)
+        if not ok:
+            out.append("PostToolUse: needs matcher Bash, if naming suivi.py, asyncRewake, timeout >= 259200, hook-wait")
+        if not any(" session-end" in h["command"] for h in cmds("SessionEnd")):
+            out.append("SessionEnd: session-end hook is gone")
+        return out
+
+    def test_the_committed_hooks_are_as_pinned(self):
+        with open(self.PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertEqual(self.problems(d), [])
+
+    def test_a_dropped_or_renamed_piece_is_caught(self):
+        with open(self.PATH, encoding="utf-8") as f:
+            text = f.read()
+        for old, new in ((" || true", ""), ("hook-news", "hook-nws"), ("hook-wait", "hook-wiat"),
+                         ('"asyncRewake": true', '"asyncRewake": false'), ("259200", "100"),
+                         ('"matcher": "Bash"', '"matcher": "Edit"')):
+            self.assertNotEqual(self.problems(json.loads(text.replace(old, new))), [], old)
+
+
 class TestWaitServed(ServerBase):
     def test_real_post_during_the_wait_prints_retour_and_comment(self):
         e = dict(self.env)
