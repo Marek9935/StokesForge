@@ -99,7 +99,7 @@ The **Output** block decides what is written and how the analysis is kept.
 | **Recalculate automatically** | Recalculates the columns whenever the source data change. When off, the columns are marked out of date instead. |
 | **Warn when R² is low** | Opens a dialog after the calculation when the R² of a fit is below 0.6. |
 
-When **Recalculate automatically** is off, undoing a row deletion after a **Recalculate** can leave the result columns out of date, with an empty row and an old value; **Recalculate** puts them right.
+When **Recalculate automatically** is off and a script deletes a row (`pyst.delete_rows`), undoing that script after a **Recalculate** can leave the result columns out of date, with an empty row and an old value; **Recalculate** puts them right.
 
 **Recalculate automatically** is on by default, except for **Reconvolution**, **Direct Deconvolution** and batches of more than 20 series, because these are slow. For a large batch, the window reminds you that recalculating each change can be slow.
 
