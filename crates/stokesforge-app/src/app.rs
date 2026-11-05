@@ -142,6 +142,7 @@ mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
+mod dialog_host;
 mod dialogs;
 mod empty_state;
 mod figure_copy;
@@ -195,6 +196,8 @@ mod window_detach;
 mod window_placement;
 mod window_stack;
 mod workbook;
+
+pub use dialog_host::AppHost;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
