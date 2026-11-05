@@ -3,8 +3,7 @@
 //! The icon is a Windows resource, compiled in only when an **official build**
 //! asks for it with `STOKESFORGE_EXE_ICON=<path of a .ico>` (set by
 //! `scripts/app-dist-windows.sh` after `scripts/logo-dist.sh` generated it:
-//! the logo is not under the GPL and is read nowhere else, see
-//! `assets/logo/LICENSE`).
+//! the logo is read nowhere else).
 //!
 //! - variable unset or empty: nothing happens, the build is the usual one;
 //! - variable set and no such file: the build fails, rather than shipping an

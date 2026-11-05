@@ -54,7 +54,5 @@ results are read in the GitLab pipeline of the commit or with
 `scripts/ci-status.sh`. Instructions, runner pitfalls and maintenance:
 [`docs/tests.md`](docs/tests.md), "Using CI day to day".
 
-Any new extension interface covered by the exception requires an explicit
-commit in the closed list of that same page, with its public contract. This
-contribution agreement applies to `main`; it does not
+This contribution agreement applies to `main`; it does not
 change the license of the old implementation kept under the `legacy-python` tag.

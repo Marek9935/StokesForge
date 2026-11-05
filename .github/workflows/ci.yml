@@ -126,10 +126,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      # #388: the code builds and is checked without the logo (it is not under
-      # the GPL and only official builds carry it).
-      - name: Without assets/logo
-        run: rm -rf assets/logo
       - run: rustup component add clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -144,8 +140,6 @@ jobs:
       # has no GPU, lavapipe (Mesa) provides software rendering.
       - name: Software Vulkan driver
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
-      - name: Without assets/logo
-        run: rm -rf assets/logo
       - run: cargo test --workspace
 
   # Reproductions of anomalies (`#[ignore]` in robustness; none today): they
@@ -212,7 +206,7 @@ jobs:
     # Ubuntu 22.04 = glibc 2.35 (scripts/glibc-floor.env). The day GitHub
     # retires this runner, change the runner and the floor together.
     runs-on: ubuntu-22.04
-    # #388: an official build carries the logo (assets/logo/ is not under the GPL).
+    # #388: a packaged build carries the logo.
     env:
       STOKESFORGE_DIST_LOGO: "1"
     # #412: the compiler that built the archive, for the release notes.

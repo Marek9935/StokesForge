@@ -1,8 +1,8 @@
 //! The application's identity in the window system (#388): the icon and the
 //! application id, and the logo of the About window.
 //!
-//! The logo exists only in **official builds** (`assets/logo/` is not under the
-//! GPL, see its `LICENSE`). It is never compiled in: the packaging scripts
+//! The logo exists only in **packaged builds** (opt-in `STOKESFORGE_DIST_LOGO=1`,
+//! see `scripts/logo-dist.sh`). It is never compiled in: the packaging scripts
 //! install `share/icons/hicolor/256x256/apps/stokesforge.png` next to the
 //! executable's `bin` folder (`<exe dir>/share/...`) and this module reads that
 //! file at run time. A build without the file runs the same, with the system's

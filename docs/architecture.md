@@ -194,20 +194,18 @@ release, and a failure of their jobs blocks it (at 0 they would be built and
 tested at every tag but neither uploaded nor linked, and a failure would not
 block). Tests: `docs/tests.md`.
 
-**The logo (#388, #444).** Only official builds carry it. `scripts/logo-dist.sh`
+**The logo (#388).** Only packaged builds carry it. `scripts/logo-dist.sh`
 (opt-in `STOKESFORGE_DIST_LOGO=1`, set on `release-linux` and `dist-windows`)
 runs `stokesforge-logo-gen` on `assets/logo/00-final/stokesforge-icone-clair.svg`
-and `stokesforge-fichier-stf-clair.svg`, then installs the result with the notice
-`licenses/logo/LICENSE`: on Linux `share/icons/hicolor/<size>/{apps,mimetypes}/`
+and `stokesforge-fichier-stf-clair.svg`, then installs the result: on Linux `share/icons/hicolor/<size>/{apps,mimetypes}/`
 and both `scalable/` SVG (read by `install.sh` and the packages), on Windows the
 256 px PNG and `stokesforge-project.ico` (the icon of the `.stf` files, set by
 `stokesforge.iss`); the application `.ico` goes into `stokesforge-app.exe` through
 `STOKESFORGE_EXE_ICON` read by `crates/stokesforge-app/build.rs` (`winresource`).
 At run time `app_logo.rs` reads `<exe dir>/share/icons/hicolor/256x256/apps/stokesforge.png`
 (window icon, About logo); with no file the application runs unchanged. No
-generated raster is committed, nothing in `crates/` names `assets/logo/`
-(`stokesforge-arch-guard/tests/logo_boundary.rs`) and the CI jobs that build and
-test delete the folder first. Licence: [`license-and-extensions.md`](license-and-extensions.md).
+generated raster is committed and nothing in `crates/` names `assets/logo/`.
+Licence: [`license-and-extensions.md`](license-and-extensions.md).
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) is the counterpart of `app-dist.sh`: it
