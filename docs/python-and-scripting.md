@@ -66,7 +66,9 @@ Witnesses: `a_batch_is_a_single_multi_series_computation_undone_in_one_go`,
 `model=` accepts `linear`, `polynomial` (`degree`), `exponential`
 (`A·exp(−x/τ)`), `exponential_offset` (with `y0`), `exponential2` (two
 components and `y0`), `logarithm`, `power`, `gaussian`, `lorentzian`, or a
-formula. `pyst.analysis.peaks(center_window=…)` bounds each center to ± this
+formula; a formula holding a number beyond the `f64` range (`1e400`, `1e-400`)
+is refused by `fit` (`InvalidValueError`) and reported by `readiness` as
+`bad_expression` (#438). `pyst.analysis.peaks(center_window=…)` bounds each center to ± this
 distance from its starting position. Witness:
 `the_three_exponentials_and_the_center_window_have_their_name`.
 

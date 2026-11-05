@@ -23,4 +23,5 @@ Read for every feature before coding (decide where the user finds it), and whene
 - [ ] shortcut collisions: `rg "SHORTCUT_" crates/stokesforge-app/src/app/shortcuts.rs`; shortcut in the registry, a `HELP` row and `help-*` keys in en/fr
 - [ ] menu entry with its `shortcut_text`; greying computed from `AppState`
 - [ ] label from `state` and a `tr!` key of the `en` catalogue
+- [ ] a *view* mode (Page Layout Mode, #426) is toggled by a menu entry and a toolbar button that send **no action** (`request_layout_mode_toggle`, run at the start of the next frame); only a control that changes the model sends an action, after a pending gesture is committed (`flush_layout_edit`); a strip control disabled by the placement says why (`.on_disabled_hover_text`), never `add_enabled_ui` alone
 - [ ] shortcut tried while editing a cell (Ctrl+Z undoes the model, not the keystroke)

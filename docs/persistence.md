@@ -271,6 +271,21 @@ graph comes back as a grid of 480 x 360 pt shared equally, or as the stored
 `frame_widths` say. Witness `tests/witnesses/v1/project.stf` regenerated with a
 free graph; `schema.rs` keeps the old-record test.
 
+## Free placement: the page (#426)
+
+`PlotSpecRecord` gained `free_page` (`Option<FreePageRecord>`: `left`, `top`,
+`width`, `height` in points, the stored page coordinates of `free_frame`),
+`#[serde(default, skip_serializing_if = "Option::is_none")]`. A file without it
+reads no page, which is today's layout (the figure is the bounding box of the
+cells), so **`FORMAT_VERSION` did not move**. It is written as the spec holds
+it; `PlotSpec::sanitized_free_page()` reads it (a non-finite number reads no
+page, sizes are clamped). The page exists only in Free: leaving Free
+(`compose::set_grid_placement`) clears it, and Undo brings it back. An older
+version that re-saves the file drops it without a message (the figure goes back
+to the bounding box). Witness `tests/witnesses/v1/project.stf` regenerated with
+a page; the old-record case is in `schema.rs`, the hostile case in
+`b13_hostile_free_frames...`.
+
 ### Stacking and layer background (#398, batch 2a)
 
 `FreeFrameRecord` gained `stack` (`i32`, the stacking key) and `PanelSpecRecord`
