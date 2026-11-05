@@ -34,7 +34,7 @@ use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
 
 mod common;
-use common::{link_shapes, link_states, strip_links};
+use common::link_states;
 
 // -- draw -----------------------------------------------------------------
 
@@ -333,6 +333,10 @@ fn initial_project() -> Project {
     // A transposable sheet: every Y column numeric with an x'.
     col(&mut p, s2b, &[1.0, 2.0, 3.0], ColumnRole::Y, Some(1.0));
     col(&mut p, s2b, &[4.0, 5.0, 6.0], ColumnRole::Y, Some(2.0));
+    // A formula Y column with an x' (#439): a link over it must stay up to date
+    // while the formula gives the same numbers.
+    let c = col(&mut p, s2b, &[], ColumnRole::Y, Some(3.0));
+    pending.push((c, "A+B"));
     // Formulas last: they may read columns of sheets created after them.
     for (c, text) in pending {
         formula(&mut p, c, text);
@@ -411,9 +415,9 @@ fn is_ancestor(tree: &Tree, ancestor: NodeId, node: NodeId) -> bool {
     tree.ancestors(node).is_ok_and(|a| a.contains(&ancestor))
 }
 
-/// Sheets whose Y columns can all be transposed (numeric, with an x'). Formula
-/// columns are left out: when tried for #430, transposing a sheet with one made
-/// the targeted and full twins differ after an undo, also without #430 (#439).
+/// Sheets whose Y columns can all be transposed (numeric, with an x'), formula
+/// columns included (#439: they were left out while the targeted and full twins
+/// differed after an undo over such a link).
 fn transposable(tree: &Tree) -> Vec<NodeId> {
     sheets(tree)
         .into_iter()
@@ -425,9 +429,9 @@ fn transposable(tree: &Tree) -> Vec<NodeId> {
                 .collect();
             tree.transpose_link(s).is_none()
                 && !ys.is_empty()
-                && ys.iter().all(|c| {
-                    c.meta().formula.is_none() && c.meta().x_prime.is_some_and(f64::is_finite)
-                })
+                && ys
+                    .iter()
+                    .all(|c| c.meta().x_prime.is_some_and(f64::is_finite))
         })
         .collect()
 }
@@ -753,6 +757,12 @@ struct Coverage {
     /// Kept formulas the binder turned into formulas (#433), on the targeted
     /// session at the end of each sequence.
     bindings: usize,
+    /// Accepted reloads over a tree holding a link that is up to date over a
+    /// formula column (#439): the first pass must not make it stale.
+    reload_fresh_formula_link: usize,
+    /// Accepted `Transpose` / `RecalculateTranspose` steps that changed nothing
+    /// and stored no history entry, with such a link in the tree (#439).
+    noop_over_formula_link: usize,
     per_step: BTreeMap<&'static str, usize>,
 }
 
@@ -763,6 +773,8 @@ impl Coverage {
         self.ref_cells += other.ref_cells;
         self.checked += other.checked;
         self.bindings += other.bindings;
+        self.reload_fresh_formula_link += other.reload_fresh_formula_link;
+        self.noop_over_formula_link += other.noop_over_formula_link;
         for (k, v) in other.per_step {
             *self.per_step.entry(k).or_default() += v;
         }
@@ -783,6 +795,18 @@ impl Coverage {
             self.ref_cells += usize::from(tree.formula_has_deleted_reference(id));
         }
     }
+}
+
+/// True if `tree` holds a link that is up to date and reads a formula column.
+fn has_fresh_formula_link(tree: &Tree) -> bool {
+    tree.transposes().values().any(|link| {
+        !link.state(tree).stale
+            && link.inputs.iter().any(|input| {
+                tree.node(input.column)
+                    .and_then(|n| n.as_column())
+                    .is_some_and(|c| c.meta().formula.is_some())
+            })
+    })
 }
 
 fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
@@ -812,10 +836,12 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
         );
         coverage.accepted += usize::from(rt != Reply::Rejected);
         let (st, sf) = (targeted.snapshot(), full.snapshot());
-        // 0. a reload keeps every link's state on the targeted side: the first
-        // pass trusts a link that was up to date and whose inputs kept their
-        // values (#430); a stale or modified one stays so.
+        // 0. a reload keeps every link's state on the targeted side: a formula
+        // column recomputed to the same content keeps its version, so a link
+        // that was up to date stays so (#430, #439); a stale or modified one
+        // stays so.
         if matches!(step, Step::Reload) && rt != Reply::Rejected {
+            coverage.reload_fresh_formula_link += usize::from(has_fresh_formula_link(&before.tree));
             prop_assert_eq!(
                 link_states(&before.tree),
                 link_states(&st.tree),
@@ -836,9 +862,21 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
                     .collect::<Vec<_>>()
             );
         }
-        // 1. twin oracle.
+        // The gestures that must find nothing to do over an up-to-date link.
+        if matches!(
+            step,
+            Step::Transpose { .. } | Step::RecalculateTranspose { .. }
+        ) && rt != Reply::Rejected
+            && has_fresh_formula_link(&before.tree)
+            && before.tree == st.tree
+            && before.history == st.history
+        {
+            coverage.noop_over_formula_link += 1;
+        }
+        // 1. twin oracle: the trees are equal, transposed links and the version
+        // of every column included — the twins number alike (#439).
         prop_assert!(
-            strip_links(&st.tree) == strip_links(&sf.tree),
+            st.tree == sf.tree,
             "step {rank} ({step:?}): targeted and full trees differ"
         );
         // A command that stores an undo entry in one twin and not in the other only
@@ -848,13 +886,6 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
             &st.history,
             &sf.history,
             "step {} ({:?}): targeted and full histories differ",
-            rank,
-            step
-        );
-        prop_assert_eq!(
-            link_shapes(&st.tree),
-            link_shapes(&sf.tree),
-            "step {} ({:?}): transposed-sheet links differ",
             rank,
             step
         );
@@ -900,6 +931,10 @@ fn b23_formulas_stay_exact_across_structural_gestures() {
     if cases >= 64 {
         // The binder (#433) bound kept formulas.
         assert!(total.bindings > 10, "{total:?}");
+        // The draw reaches what #439 is about: a reload over an up-to-date link
+        // over a formula column, and a gesture over it that stores no entry.
+        assert!(total.reload_fresh_formula_link >= 1, "{total:?}");
+        assert!(total.noop_over_formula_link >= 1, "{total:?}");
     }
     if cases >= 64 {
         // Every structural gesture was accepted, with a pass, at least a few times.

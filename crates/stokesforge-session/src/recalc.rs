@@ -24,15 +24,22 @@
 //! On the column version counter ([`stokesforge_core::Column::
 //! version`]) and its doctrine: **a number never names two contents of the
 //! same column** (A7, `guide-de-correction-robustesse.md` §F2). Every data
-//! write, ordinary, undo or recalculation, gets a fresh number from the
-//! project's single counter (`Project::next_column_version`); a column
+//! write by a command (ordinary, undo, redo), identical or not, gets a fresh
+//! number from the project's single counter (`Project::next_column_version`).
+//! **The pass itself is the exception (#439):** `write_formula_column` writes
+//! nothing when the column already holds the same type, length and values (bit
+//! for bit), so a formula column recomputed to the same content keeps its
+//! number; that keeps a transposed link over it up to date, and makes the twins
+//! of `b22` and `b23` number alike. The count of columns the pass evaluated
+//! (`Recalculator::evaluations`, `Snapshot::formula_evaluations`) replaces the
+//! version as the witness that a column was not recomputed. A column
 //! inserted with a number (`AddColumn`, paste) pushes that counter past it
 //! (`Project::insert_node`); a tree restoration (`Entry::Structural`) brings
 //! back only a (version, content) pair that really coexisted. Equal version ⇒
 //! equal content: this is the assumption the whole module depends on,
 //! rechecked in the actor by battery `b22` and on the history by `b14`. The
-//! converse is not required: the same content under a fresh number costs only
-//! a useless recalculation.
+//! converse is not required: the same content under a fresh number (a user's
+//! write of the same value) costs only a useless recalculation.
 //!
 //! ## What the fingerprint must contain — the rule not to break
 //!
@@ -112,9 +119,12 @@
 //! - a **manual** calculation (reconvolution, deconvolution, batches of more
 //!   than 20 series) never reruns by itself: an input change marks it `Manual`.
 //!   It compares the **content** of its inputs with that of the last
-//!   calculation (`CalcMemo::seen`) rather than their versions — the full mode
-//!   rewrites the formula columns on every pass, which would change the
-//!   versions without changing the content; a change of *definition*
+//!   calculation (`CalcMemo::seen`) rather than their versions — before #439
+//!   the full mode rewrote the formula columns on every pass, which changed the
+//!   versions without changing the content; since then a pass keeps the version
+//!   of unchanged content, and the comparison by content still answers for a
+//!   **command** that retypes the same values (fresh version, same content); a
+//!   change of *definition*
 //!   (`UpdateCalculation`, undo) is a user gesture: the result is up to date by
 //!   construction (`Trust`). An **automatic** calculation that the file made
 //!   `Manual` obeys the same content comparison as long as its inputs do not
@@ -126,12 +136,10 @@
 //!   modes). Their staleness marker comes from the file, completed by
 //!   persistence: it marks `Manual` a calculation whose fingerprint of the
 //!   inputs' content (`Calculation::inputs_digest`) no longer matches. The
-//!   formula columns, on the other hand, are still recalculated on load.
-//!   The transposed links (#430) are trusted in the same one-shot way, in
-//!   both modes: after that pass, a link that was up to date in the loaded
-//!   tree and whose input columns kept their type and values is re-recorded
-//!   (`Project::trust_loaded_transposes`), the pass having only renumbered
-//!   the formula columns;
+//!   formula columns, on the other hand, are still recalculated on load; a
+//!   column that gets the same values keeps its version (#439), so the
+//!   transposed links (#430) over formula columns need no trust step: a link
+//!   that was up to date in the file stays so, in both modes;
 //! - formulas and calculations feed each other: `run` alternates the two until
 //!   a calculation writes nothing more (at most [`MAX_ROUNDS`] rounds). A loop
 //!   that crosses a calculation (its output feeds a formula that feeds its
@@ -188,6 +196,14 @@ pub(crate) struct Recalculator {
     /// that pass: a calculation without a memo after `AddCalculation` or an
     /// undo is still recalculated.
     trust_loaded: bool,
+    /// Formula columns the pass decided to compute, monotonic (#439): one per
+    /// column written by the pass or rewritten as a `NaN` block (cycle,
+    /// unreadable formula), none for a clean column in targeted mode. The
+    /// column versions no longer tell whether a column was recomputed (a pass
+    /// that finds the same content keeps the version), so this count is the
+    /// witness of the economy of the targeted mode. Read through
+    /// `Snapshot::formula_evaluations`; never in the history nor the `.stf`.
+    evaluations: u64,
 }
 
 /// Maximum number of "formulas → calculations" rounds of a pass: a chain
@@ -206,7 +222,14 @@ impl Recalculator {
             stop: None,
             interrupted: false,
             trust_loaded: false,
+            evaluations: 0,
         }
+    }
+
+    /// How many formula columns the passes have computed so far (see the
+    /// `evaluations` field).
+    pub(crate) fn evaluations(&self) -> u64 {
+        self.evaluations
     }
 
     /// Like [`Recalculator::run`], but stops between two columns (or two
@@ -256,20 +279,10 @@ impl Recalculator {
     /// persistence (fingerprint of the inputs' content,
     /// `stokesforge_persistence`), without a calculation either. The flag is
     /// single-use: reset to `false` before returning.
-    ///
-    /// The **transposed links** (#430) get the same trust in one step after
-    /// the pass: `Project::trust_loaded_transposes` re-records the link of a
-    /// sheet that was up to date in the loaded tree and whose input columns
-    /// kept their type and values (the pass only renumbered the formula
-    /// columns). Both modes, once; outside history, no version drawn.
     pub(crate) fn run_after_load(&mut self, project: &mut Project) {
         self.trust_loaded = true;
-        // The tree as loaded: the transposed links trusted afterwards are
-        // judged against it (#430).
-        let before = std::sync::Arc::clone(project.tree());
         self.run(project);
         self.trust_loaded = false;
-        project.trust_loaded_transposes(&before);
     }
 
     /// Recalculates the project's formula columns that need it — **direct**
@@ -456,6 +469,7 @@ impl Recalculator {
                         let fingerprint =
                             Fingerprint::new(project, id, source, Outcome::Unparsable, len);
                         if self.is_stale(id, &fingerprint) {
+                            self.evaluations += 1;
                             // Empty cells, no `---` (#433): a formula that does
                             // not read is kept and framed, no calculation failed.
                             write_formula_column(project, id, vec![f64::NAN; len], &[]);
@@ -523,6 +537,7 @@ impl Recalculator {
             let fingerprint =
                 Fingerprint::new(project, id, entry.source.clone(), Outcome::Blocked, len);
             if self.is_stale(id, &fingerprint) {
+                self.evaluations += 1;
                 // Empty cells, no `---` (#433): a loop is kept framed, and what
                 // depends on it has nothing to show.
                 write_formula_column(project, id, vec![f64::NAN; len], &[]);
@@ -609,6 +624,7 @@ impl Recalculator {
             if !self.is_stale(id, &fingerprint) {
                 continue;
             }
+            self.evaluations += 1;
             // The columns the evaluation may read: those of the own sheet
             // (except one that the formula reads in another sheet), the remote
             // columns that are in their sheet, and the paired X. A column
@@ -808,6 +824,9 @@ fn desired_formula_column_type(formula: &Formula, inputs: &FormulaInputs) -> Opt
 /// failure (`column` vanished meanwhile, which nothing in this function
 /// causes) rather than panicking — invariant 10.
 ///
+/// Writes **nothing** when the column already holds this exact content (#439):
+/// see the comment at the comparison.
+///
 /// For a **mixed** formula column, a row with status [`NumericStatus::Failed`]
 /// **or** [`NumericStatus::Missing`] is written as `MixedCell::Text("---")`
 /// rather than `MixedCell::Empty`: a result not calculated, whether because a
@@ -849,6 +868,33 @@ fn write_formula_column(
     } else {
         ValueBlock::Float(values)
     };
+    // The pass keeps the number (#439): a column that already holds this very
+    // content (same type, same length, same values bit for bit, text exact:
+    // the equality of `ColumnValues`) is left untouched, so it keeps its
+    // version and what read that version (a transposed link, a manual
+    // calculation) stays up to date. A user's write draws a fresh version even
+    // for an identical content; only this pass compares.
+    let unchanged = project
+        .tree()
+        .node(column)
+        .and_then(|node| node.as_column())
+        .is_some_and(|target| {
+            target.len() == length
+                && match (target.values(), &block) {
+                    (ColumnValues::Float(held), ValueBlock::Float(new)) => {
+                        held.len() == new.len()
+                            && held
+                                .iter()
+                                .zip(new)
+                                .all(|(a, b)| a.to_bits() == b.to_bits())
+                    }
+                    (ColumnValues::Mixed(held), ValueBlock::Mixed(new)) => held[..] == new[..],
+                    _ => false,
+                }
+        });
+    if unchanged {
+        return;
+    }
     if project.set_length(column, length).is_err() {
         return;
     }
@@ -913,8 +959,8 @@ fn calc_fingerprint(project: &Project, calc: &Calculation) -> Result<CalcFingerp
 /// The memo of a calculation: its fingerprint and, for a **manual** calculation
 /// only, the content of its inputs at its last calculation (a cloned `Arc`, not
 /// a copy as long as the column is not modified). Without it, a column rewritten
-/// identically — which the full recalculation of the formulas does on every
-/// pass — would make stale a calculation that nothing changed.
+/// identically by a command (retyping the same values draws a fresh version)
+/// would make stale a calculation whose inputs did not change.
 struct CalcMemo {
     fingerprint: CalcFingerprint,
     seen: Vec<ColumnValues>,
@@ -1087,9 +1133,9 @@ impl Recalculator {
                 // as long as the **content** of its inputs is the one it saw,
                 // recalculating it would move it from `Manual` to `Failed` or
                 // to "up to date" without anybody asking — and the full mode,
-                // which rewrites the formula columns (hence their versions) on
-                // every pass, would diverge from the targeted one (battery
-                // `b22`, latent before #321). A real modification of an input
+                // which used to rewrite the formula columns (hence their
+                // versions) on every pass, diverged from the targeted one
+                // (battery `b22`, latent before #321; harmless since #439). A real modification of an input
                 // recalculates it like any automatic one.
                 (_, Some(p))
                     if calc.stale == Some(Staleness::Manual)
@@ -1347,15 +1393,19 @@ mod tests {
             "D and E were not reached"
         );
         let c_version = version(&project, c);
+        assert_eq!(recalc.evaluations(), 1, "only C was evaluated");
 
         recalc.run(&mut project);
         assert_eq!(numbers(&project, d), values_of(&[3.0, 5.0, 7.0]));
         assert_eq!(numbers(&project, e), values_of(&[4.0, 6.0, 8.0]));
+        // The version cannot tell any more (a pass that finds the same content
+        // keeps it, #439): the count does. D and E only.
         assert_eq!(
-            version(&project, c),
-            c_version,
-            "C, already up to date, is not rewritten"
+            recalc.evaluations(),
+            3,
+            "C, already up to date, is not evaluated again"
         );
+        assert_eq!(version(&project, c), c_version);
     }
 
     /// Witness: without a stop request, the interruptible pass runs to the end.

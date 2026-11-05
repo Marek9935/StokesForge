@@ -287,3 +287,31 @@ fn recalculating_asks_before_erasing_edited_values() {
     s.state.dispatch(Action::Undo);
     assert!(s.state.transpose_info(sheet).unwrap().modified, "undoable");
 }
+
+/// #439: a user's write draws a fresh column version even when it changes
+/// nothing, so a command writing the value a source cell already holds (a paste,
+/// a script; typing it in the cell sends none) makes the link
+/// out of date, exactly like another number (what the banner reads).
+#[test]
+fn writing_the_same_value_in_the_source_marks_the_sheet_out_of_date() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    open_rows(&mut s, &[1]);
+    s.state.dispatch(Action::ApplyAnalysis);
+    let sheet = transposed(&s).unwrap();
+    assert!(!s.state.transpose_info(sheet).unwrap().stale);
+
+    // Row 2 of the first column already holds 2.0.
+    s.session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: s.cols[0],
+            start: 1,
+            values: stokesforge_core::ValueBlock::Float(vec![2.0]),
+            expected_version: None,
+        })
+        .unwrap();
+    s.state.refresh();
+    let info = s.state.transpose_info(sheet).unwrap();
+    assert!(info.stale && !info.modified, "wrote 2 on 2: out of date");
+}

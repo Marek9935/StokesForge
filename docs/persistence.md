@@ -724,16 +724,17 @@ written: they are derived on reading, hence the importance of the column version
 (written by the file) and of the content fingerprints (FNV-1a written in hard code, stable
 from one Rust version to another).
 
-On load, the first recalculation pass rewrites the formula columns and draws
-them fresh versions, same values. A link that was up to date in the file and
-whose input columns kept their type and values through that pass has its
-versions re-recorded (`Project::trust_loaded_transposes`, #430), so it is not
-shown stale; a link stale in the file, or whose inputs really changed, keeps
-its recorded versions. Once, outside history.
+On load, the first recalculation pass recomputes the formula columns, and a
+column that gets the same type and values keeps its version (#439: the pass
+writes nothing then). A link that was up to date in the file therefore stays so
+through that pass, and through every later one; a link stale in the file, or
+over a formula column whose values really change on load, is stale. There is no
+trust step any more (it was `Project::trust_loaded_transposes`, #430).
 
 Tolerant reading (invariant 10): a link whose sheet or source is not
 a sheet of the tree, or one of whose identifiers exceeds `MAX_NODE_ID`, is dropped alone;
 the sheet stays, ordinary. A column identifier that no longer exists is accepted
 (the column may have been deleted): the link recreates it on refresh. The object
-clipboard does not carry the links (a copy is ordinary). Additive field: it
+clipboard carries a link only when both its ends are inside the copied roots
+(#391, `docs/data-model.md`); otherwise the copy is ordinary. Additive field: it
 does not change the version number of the format.
