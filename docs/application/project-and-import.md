@@ -9,6 +9,12 @@ current project in the same window. The File bar offers the same gesture.
 A project with unsaved work, including local input in a detached window or a
 graph text, asks "Discard Changes · Cancel · Save" (#229; Enter = Save, which
 saves then continues). Cancel, Esc or the close cross keep the project.
+Entries still open in the main window (cell, header field, note) are committed
+first, by `AppState` itself (`commit_open_entries`, called by `save` and
+`request_unsaved`, #465, #466), through their usual undoable commands: the
+file holds what was typed, and Cancel leaves the value committed (Ctrl+Z
+undoes it). A refused entry (a number out of range) stays open and is left out
+of the save. Autosave and the quit after a lost session do not commit.
 File › Open…, File › Quit and closing the window ask the same question
 (`Action::OpenProject`, `Action::Quit`, `app/confirmations.rs`). An unreadable
 project or a failed save is announced by a blocking dialog (S-M8,
