@@ -15,6 +15,13 @@ first, by `AppState` itself (`commit_open_entries`, called by `save` and
 file holds what was typed, and Cancel leaves the value committed (Ctrl+Z
 undoes it). A refused entry (a number out of range) stays open and is left out
 of the save. Autosave and the quit after a lost session do not commit.
+The entries open in detached windows (their own `view_state`) are committed by
+`StokesForgeApp::commit_detached_entries` before Save, Save As, New Project,
+Open and Quit, then the main state refreshes. A click elsewhere that opens a
+blocking dialog (row drop, export overwrite, alert) ends a cell or note entry
+through the state, so the frame's `actions.clear()` cannot drop it (T1). Graph
+text editors (titles, legends, free texts) are egui-side and are not committed:
+they still raise the Unsaved Changes question.
 File › Open…, File › Quit and closing the window ask the same question
 (`Action::OpenProject`, `Action::Quit`, `app/confirmations.rs`). An unreadable
 project or a failed save is announced by a blocking dialog (S-M8,

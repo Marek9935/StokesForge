@@ -1396,6 +1396,26 @@ impl StokesForgeApp {
         confirmations::show(ctx, &self.state, actions);
     }
 
+    /// A save, or a gesture that may replace the project, takes the cell,
+    /// header and note entries open in the detached windows too (#465, #466),
+    /// as `AppState::commit_open_entries` does for the main window. The main
+    /// state then reads the result before it saves or asks its question.
+    fn commit_detached_entries(&mut self) {
+        let mut committed = false;
+        for detached in self.detached_tabs.values() {
+            let mut model = detached
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            if let Some(view) = model.view_state.as_mut() {
+                committed |= view.commit_open_entries();
+            }
+        }
+        if committed {
+            self.state.refresh();
+        }
+    }
+
     /// The entries of the external views count in the question "Discard Changes ·
     /// Cancel · Save" of New Project, Open… and Quit (#229).
     fn prepare_new_project_action(&self, ctx: &egui::Context, action: Action) -> Action {
@@ -1473,6 +1493,16 @@ impl StokesForgeApp {
                     self.state.report_folder_open_error(&error);
                 }
                 continue;
+            }
+            if matches!(
+                action,
+                Action::Save
+                    | Action::SaveAs { .. }
+                    | Action::NewProject { .. }
+                    | Action::OpenProject { .. }
+                    | Action::Quit { .. }
+            ) {
+                self.commit_detached_entries();
             }
             let action = self.prepare_new_project_action(ctx, action);
             if self.dispatch_action(ctx, action) {
@@ -2679,6 +2709,103 @@ mod tests {
             .textures_delta
             .clear();
         assert!(actions.is_empty(), "only the dialog can act in this frame");
+        session.shutdown().unwrap();
+    }
+
+    /// The first column of the detached workbook's first sheet, and its text at row 1.
+    fn detached_first_cell(app: &mut StokesForgeApp, book: NodeId) -> (NodeId, String) {
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let column = app.state.visible_columns(sheet)[0].0;
+        (column, app.state.cell_text(column, 1))
+    }
+
+    /// D1 of #465/#466: the entries open in a detached window are taken by a
+    /// save, Save As and the replacing gestures, like those of the main window.
+    #[test]
+    fn a_save_takes_the_entries_open_in_a_detached_window() {
+        let dir = tempfile::tempdir().unwrap();
+        for gesture in ["save", "save_as", "new"] {
+            let (session, _) = plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let book = app.state.books()[0].0;
+            app.detach_tab(Tab::Book(book));
+            let (column, before) = detached_first_cell(&mut app, book);
+            // The entry lives in the detached window's own state.
+            {
+                let detached = &app.detached_tabs[&Tab::Book(book)];
+                let mut model = detached.view_model.lock().unwrap();
+                let view = model.view_state.as_mut().expect("detached view state");
+                view.begin_edit(column, 1);
+                view.editing_mut().unwrap().buffer = "77".to_string();
+            }
+            assert_ne!(before, "77", "witness: the cell differs");
+            let target = dir.path().join(format!("{gesture}.stf"));
+            let action = match gesture {
+                "save" => {
+                    app.state.dispatch(Action::SaveAs {
+                        path: target.display().to_string(),
+                    });
+                    Action::Save
+                }
+                "save_as" => Action::SaveAs {
+                    path: target.display().to_string(),
+                },
+                _ => Action::NewProject {
+                    pending_edits: false,
+                },
+            };
+            // A separate frame from the typing: nothing else commits the entry.
+            app.dispatch_actions(&egui::Context::default(), vec![action]);
+            let detached = &app.detached_tabs[&Tab::Book(book)];
+            assert!(
+                detached
+                    .view_model
+                    .lock()
+                    .unwrap()
+                    .view_state
+                    .as_ref()
+                    .unwrap()
+                    .editing()
+                    .is_none(),
+                "{gesture}: the detached entry was taken"
+            );
+            assert_eq!(app.state.cell_text(column, 1), "77", "{gesture}");
+            if gesture == "new" {
+                assert!(app.state.unsaved_pending().is_some(), "{gesture}: asks");
+            } else {
+                app.state.dispatch(Action::OpenProject {
+                    path: target.display().to_string(),
+                    pending_edits: false,
+                });
+                assert_eq!(
+                    app.state.cell_text(column, 1),
+                    "77",
+                    "{gesture}: the file holds the detached entry"
+                );
+            }
+            session.shutdown().unwrap();
+        }
+    }
+
+    /// An autosave-like path, `Action::Undo` here, leaves a detached entry open.
+    #[test]
+    fn an_action_that_is_not_a_save_leaves_the_detached_entry_open() {
+        let (session, _) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        app.detach_tab(Tab::Book(book));
+        let (column, before) = detached_first_cell(&mut app, book);
+        {
+            let detached = &app.detached_tabs[&Tab::Book(book)];
+            let mut model = detached.view_model.lock().unwrap();
+            let view = model.view_state.as_mut().unwrap();
+            view.begin_edit(column, 1);
+            view.editing_mut().unwrap().buffer = "77".to_string();
+        }
+        app.dispatch_actions(&egui::Context::default(), vec![Action::Undo]);
+        assert_eq!(app.state.cell_text(column, 1), before);
         session.shutdown().unwrap();
     }
 

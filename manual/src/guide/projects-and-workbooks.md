@@ -35,7 +35,7 @@ StokesForge refuses to open a very large file, to protect your computer. The lim
 - **File ▸ Save** or <kbd>Ctrl</kbd>+<kbd>S</kbd> saves the project in its file. The first time, you choose where to save.
 - **File ▸ Save As…** or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves under a new name. If the file exists, StokesForge asks before it replaces it.
 
-If you are still typing in a cell, a header field or a note, saving enters what you typed first. A number the cell refuses (out of range) stays open and is not saved.
+If you are still typing in a cell, a header field or a note, saving enters what you typed first, in a detached window as well. A number the cell refuses (out of range) stays open and is not saved.
 
 The title bar shows a dot after the project name while there are unsaved changes. If saving fails, a message explains why and your changes are kept.
 

@@ -67,7 +67,7 @@ pub(super) fn matrix_contents(ui: &mut egui::Ui, _tree: &Tree, _matrix: NodeId) 
 pub(super) fn note_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
-    actions: &mut Vec<Action>,
+    _actions: &mut Vec<Action>,
     note: NodeId,
 ) {
     let Some(current_name) = state.tree().node(note).map(|node| node.name().to_string()) else {
@@ -108,13 +108,10 @@ pub(super) fn note_contents(
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             state.cancel_note_edit();
         } else {
-            let pending = state
-                .note_editing()
-                .filter(|edit| edit.note == note)
-                .map(|edit| edit.buffer.clone());
-            if let Some(text) = pending {
-                state.cancel_note_edit();
-                actions.push(Action::SetNoteText { note, text });
+            // Through the state, not an action: a blocking dialog that took the
+            // focus empties the actions of the frame (#465, T1).
+            if state.note_editing().is_some_and(|edit| edit.note == note) {
+                state.commit_note_edit();
             }
         }
     }
@@ -260,13 +257,14 @@ mod tests {
             pointer(outside, true),
         ]);
         image(vec![pointer(outside, false)]);
+        assert!(
+            actions.borrow().is_empty(),
+            "focus loss commits through the state, not an action"
+        );
         assert_eq!(
-            *actions.borrow(),
-            vec![Action::SetNoteText {
-                note,
-                text: "Début suite".to_owned(),
-            }],
-            "focus loss commits in one action"
+            state.borrow().note_text(note),
+            Some("Début suite".to_owned()),
+            "focus loss commits"
         );
         assert!(state.borrow().note_editing().is_none());
 

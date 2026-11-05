@@ -8070,15 +8070,24 @@ impl AppState {
     /// usual commands, so that a save or a gesture that may replace the
     /// project takes what is being typed (#465, #466). An entry the grid
     /// would refuse stays open and is left out. Never relies on the grid
-    /// losing focus: a blocking dialog clears that action.
-    fn commit_open_entries(&mut self) {
+    /// losing focus: a blocking dialog clears that action. Returns whether an
+    /// entry was committed. Public so the shell can call it on the view state
+    /// of a detached window (D1 of #465).
+    pub fn commit_open_entries(&mut self) -> bool {
+        let mut committed = false;
         if self.editing.is_some() && self.cell_edit_refusal().is_none() {
             self.commit_edit();
+            committed = true;
         }
         if self.header_editing.is_some() && self.header_edit_issue().is_none() {
             self.commit_header_edit();
+            committed = true;
         }
-        self.commit_note_edit();
+        if self.note_editing.is_some() {
+            self.commit_note_edit();
+            committed = true;
+        }
+        committed
     }
 
     /// Saves; then carries on with the gesture that was waiting for the save
