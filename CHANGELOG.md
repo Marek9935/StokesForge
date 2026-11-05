@@ -26,6 +26,13 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- A transposed sheet over a formula column no longer says "Out of date" when
+  the formula still gives the same numbers, nor after reopening the file (#439).
+  The recalculation now keeps the version of a formula column it recomputes to
+  the same values. Pasting the same number in the source, or changing a value
+  and undoing it, still says "Out of date" until you recalculate; typing the
+  number a cell already holds writes nothing, as before. Transposing
+  again or recalculating an up-to-date sheet no longer adds an Undo step.
 - Pasting a formula that cannot be read behaves like typing it (#433): it is
   kept, framed in red with the reason, and its column is emptied (the copied
   values are never pasted in its place); the other columns of the paste go

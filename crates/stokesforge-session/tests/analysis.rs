@@ -1528,3 +1528,55 @@ fn undoing_over_an_automatic_output_the_pass_shortened_stays_up_to_date() {
         );
     }
 }
+
+/// #439: since a pass keeps the version of a column it recomputes identically,
+/// only a command still gives a column a fresh version over the same content.
+/// That is what the comparison by content of a calculation is for: retyping the
+/// same values marks no manual calculation stale, and does not rerun an automatic
+/// one the file made stale. Witness: `same_contents` always false, at either of
+/// its two call sites.
+#[test]
+fn retyping_the_same_values_in_an_input_leaves_a_calculation_as_it_was() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, false);
+        handle
+            .execute(enter(m.y, &[10.0, 20.0, 30.0, 40.0]))
+            .unwrap();
+        let retyped = handle.snapshot().unwrap();
+        assert_eq!(
+            retyped.tree.calculation(id).unwrap().stale,
+            None,
+            "{mode:?}"
+        );
+        // Witness of the fixture: a different number does mark it.
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        assert_eq!(
+            handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .calculation(id)
+                .unwrap()
+                .stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        handle.save(&path).unwrap();
+        alter_file(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        handle.load(&path).unwrap();
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let waiting = handle.snapshot().unwrap();
+        assert_eq!(
+            waiting.tree.calculation(id).unwrap().stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+        assert!((slope(&waiting, id) - 10.0).abs() < 1e-9, "{mode:?}");
+    }
+}
