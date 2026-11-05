@@ -127,6 +127,37 @@ fn round_trip(project: &Project) -> Project {
     load(&path).expect("load")
 }
 
+/// A kept formula (`A+Z`, `A +`, #433) is stored as the parts the keeping
+/// reading gave: `A` as an identifier, the rest as typed. The file schema does
+/// not change: it round-trips with the same parts and the same reason, and the
+/// column stays uncomputed.
+#[test]
+fn a_kept_formula_round_trips_with_the_same_parts_and_the_same_reason() {
+    let mut f = fixture();
+    let sheet1 = f.sheet1;
+    let id = column(&mut f.project, sheet1, "F", &[0.0]);
+    for text in ["A+Z", "A +", "frob(A)", "A*1e400"] {
+        let (formula, error) = f.project.tree().formula_keeping(id, text);
+        let error = error.unwrap_or_else(|| panic!("`{text}` should be kept with a reason"));
+        f.project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    formula: Some(formula.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let loaded = round_trip(&f.project);
+        let again = stored(&loaded, id);
+        assert_eq!(again, formula, "`{text}`: same parts");
+        assert_eq!(loaded.tree().formula_letters(id).as_deref(), Some(text));
+        let (_, same) = loaded.tree().formula_keeping(id, text);
+        assert_eq!(same, Some(error), "`{text}`: same reason");
+        assert!(again.compile().is_err(), "`{text}` stays uncomputed");
+    }
+}
+
 #[test]
 fn every_formula_feature_survives_save_and_load() {
     let mut f = fixture();

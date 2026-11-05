@@ -168,15 +168,22 @@ column, its paired X and their membership in the sheet they must be in. The
 formula stores the sheet identifier of a remote column; the workbook is read
 from the tree, so moving the sheet changes the displayed prefix, not the
 values. A loop across sheets is a `FormulaError::Cycle` (cells empty, never a
-hang) and is refused at input (`Tree::formula_for_entry`), by the interface and
-by `pyst`; a file that already holds one frames the Formula cell. A remote
+hang): `pyst` refuses it at input (`Tree::formula_for_entry`), the
+interface field and a paste keep it uncomputed and frames the Formula cell
+(`Tree::formula_keeping`, #433), as does a file that already holds one. An
+unreadable or blocked formula leaves **empty** cells (no `---`, which stays for a
+failed calculation): the frame says why. A remote
 column does not lengthen the result: it keeps the length of its own sheet.
 
 **Result length (#194).** A formula column has the length of the longest of the
 columns it reads in its own sheet; beyond the length of a shorter column, the row is `NaN`. When
 it reads no column — constant, unreadable formula, caught in a cycle — it takes
 the length of the longest **ordinary** column (without a formula) of the sheet,
-never that of another formula column. A formula therefore does not grow with a
+never that of another formula column. A formula that names no column of its own
+sheet (a constant, or whole-column functions of other sheets only) has at least
+one row, so a sheet holding only such formulas is not empty (#433); a formula
+that names a column of its own sheet, even one gone to `#REF`, gets no floor.
+An unreadable formula or one caught in a cycle keeps the ordinary length. A formula therefore does not grow with a
 column it does not read, nor with another formula, and becomes short again when
 the growth of its source is undone.
 
@@ -187,6 +194,25 @@ the growth of its source is undone.
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
 | what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` and `b23` (two twin sessions, same trees at each step; `b23` draws the structural gestures) |
+
+### Binding a kept formula (#433)
+
+A formula the field kept because a column or a sheet it names was missing is
+bound by the actor when a gesture makes that name resolve (a column added or
+moved in, a sheet or workbook renamed, a duplicate deleted, a paste...). In the
+`Execute` branch, once `execute_recorded` returned `recorded == true`, **before**
+the reply and before the pass, `bind_kept_formulas` asks
+`Tree::next_binding` and writes each binding with `History::absorb_into_last`:
+the binding is part of the gesture's history entry, so Stop undoes both (and
+`BoundReport::retract` takes the report back), undo unbinds, redo replays.
+`Undo`, `Redo` and `AbortMacro` never bind (the state they restore was scanned).
+A `Load` scans the loaded tree with the direct primitives, before
+`run_after_load` (the history is cleared, nothing is undoable). The snapshot
+carries `bound: Arc<BoundReport>` (`count`, monotonic; `recent`, the last 32
+columns): the application says which column the formula now reads once per
+count it has not seen (`status-formula-now-reads`). Rule and fixed point:
+[`invariants.md`](invariants.md), §1 and §11. A client on an older snapshot can
+overwrite a binding with a `SetColumnMeta`; the next command binds again.
 
 ### Interruptible recalculation (#239)
 

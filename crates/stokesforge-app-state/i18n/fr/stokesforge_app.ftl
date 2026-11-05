@@ -343,6 +343,10 @@ status-history-empty = Aucun message pour l'instant. Les messages de vos actions
 status-history-time = { $time } UTC
 status-level-warning = Avertissement
 status-level-error = Erreur
+status-formula-now-reads = { $count ->
+    [one] La formule de la colonne { $column } lit maintenant { $formula }
+   *[other] { $count } formules lisent maintenant les colonnes ou les feuilles apparues
+}
 status-saved = Enregistré dans { $path }
 status-saved-over-limit = Enregistré dans { $path }, mais le fichier ({ $size } Mo) dépasse la limite d'ouverture de { $limit } Mo. Relever la limite dans Fichier > Préférences > Général pour le rouvrir
 status-loaded = Chargé depuis { $path }
@@ -379,6 +383,7 @@ status-paste-fields-dropped =
        *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
     }
 status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
+status-formula-comma-rewritten = Lu comme la plage de { $from } à { $to } et réécrit { $rewritten }. Pour le nombre { $decimal }, l'écrire avec un point
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
 status-language-not-saved = Impossible d'enregistrer le choix de la langue : { $detail }
@@ -708,7 +713,7 @@ error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les
 error-import-file = { $path } : { $detail }
 
 # Formules
-error-formula-invalid = Formule invalide : { $detail }
+error-formula-syntax = La formule est incomplète ou invalide. Vérifier les opérateurs et les parenthèses
 error-formula-unknown-column = La colonne { $letter } n'existe pas dans cette feuille
 error-formula-self-reference = Une formule ne peut pas faire référence à sa propre colonne ({ $letter })
 error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne
@@ -755,6 +760,8 @@ error-formula-ambiguous-name = Plusieurs objets s'appellent { $name } à la cass
 error-formula-unknown-column-in = La colonne { $column } n'existe pas dans la feuille { $sheet }
 error-formula-remote-outside = Une colonne d'une autre feuille ne peut être lue que par at, max, min, mean, sum, std ou integral. La donner à l'une d'elles comme colonne
 error-formula-remote-x = La colonne X d'un at() sur une autre feuille se lit dans cette feuille. L'écrire sans préfixe (D, pas Sheet3!D)
+error-paste-formula-kept = La formule de la colonne { $column } ne se calcule pas : { $reason }
+error-paste-formulas-kept = Les formules des colonnes { $columns } ne se calculent pas. { $first } : { $reason }
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus
@@ -1178,12 +1185,12 @@ formula-help-max = Le plus grand de x et y
 formula-help-if = a si la condition c est vraie, sinon b
 formula-help-pi = Le nombre π
 formula-help-at = Valeur de la colonne B pour X = x, par interpolation linéaire entre les deux points voisins. Vide hors des X. x peut être une colonne ; at(B, x, D) lit les X dans la colonne D.
-formula-help-max-column = Plus grande valeur de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : max(B, x1, x2).
-formula-help-min-column = Plus petite valeur de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : min(B, x1, x2).
-formula-help-mean = Moyenne de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : mean(B, x1, x2).
-formula-help-sum = Somme de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : sum(B, x1, x2).
-formula-help-std = Écart-type d'échantillon (divisé par n − 1) de la colonne B, qui demande deux valeurs. Ajouter deux valeurs de X pour ne garder que les points entre elles : std(B, x1, x2).
-formula-help-integral = Aire sous la colonne B par la méthode des trapèzes, même résultat que l'outil Intégration sans ligne de base. Ajouter deux valeurs de X pour intégrer entre elles : integral(B, x1, x2).
+formula-help-max-column = Plus grande valeur de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : max(B, x1, x2). Une borne 1/0 signifie « jusqu'au bout ».
+formula-help-min-column = Plus petite valeur de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : min(B, x1, x2). Une borne 1/0 signifie « jusqu'au bout ».
+formula-help-mean = Moyenne de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : mean(B, x1, x2). Une borne 1/0 signifie « jusqu'au bout ».
+formula-help-sum = Somme de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : sum(B, x1, x2). Une borne 1/0 signifie « jusqu'au bout ».
+formula-help-std = Écart-type d'échantillon (divisé par n − 1) de la colonne B, qui demande deux valeurs. Ajouter deux valeurs de X pour ne garder que les points entre elles : std(B, x1, x2). Une borne 1/0 signifie « jusqu'au bout ».
+formula-help-integral = Aire sous la colonne B par la méthode des trapèzes, même résultat que l'outil Intégration sans ligne de base. Ajouter deux valeurs de X pour intégrer entre elles : integral(B, x1, x2). Une borne 1/0 signifie « jusqu'au bout ».
 common-metadata = Métadonnées
 workbook-metadata-hide = Masquer la ligne Métadonnées
 workbook-metadata-summary =

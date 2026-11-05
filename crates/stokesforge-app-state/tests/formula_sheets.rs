@@ -79,37 +79,40 @@ fn formula_text(s: &Setup, column: NodeId) -> Option<String> {
 }
 
 #[test]
-fn a_loop_across_sheets_is_refused_at_typing() {
+fn a_loop_across_sheets_is_kept_framed_at_typing() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path(), |_, _, _| {});
     let (c, a3) = (s.s1[2], s.s3[0]);
     type_formula(&mut s, c, "max(Sheet3!A)");
-    assert_eq!(s.state.header_edit_refusal(), None, "no loop yet");
+    assert_eq!(s.state.header_edit_issue(), None, "no loop yet");
     commit(&mut s);
     assert_eq!(formula_text(&s, c).as_deref(), Some("max(Sheet3!A)"));
 
-    // Sheet3!A reading Sheet1!C would close the loop.
+    // Sheet3!A reading Sheet1!C would close the loop: the text is kept
+    // uncomputed and framed, both columns of the loop are (#433).
     type_formula(&mut s, a3, "max(Sheet1!C)");
-    assert_eq!(s.state.header_edit_refusal().as_deref(), Some(LOOP_MESSAGE));
+    assert_eq!(s.state.header_edit_issue().as_deref(), Some(LOOP_MESSAGE));
     commit(&mut s);
-    assert_eq!(formula_text(&s, a3), None, "nothing is written");
+    assert_eq!(formula_text(&s, a3).as_deref(), Some("max(Sheet1!C)"));
+    assert_eq!(s.state.formula_issue(a3).as_deref(), Some(LOOP_MESSAGE));
+    assert_eq!(s.state.formula_issue(c).as_deref(), Some(LOOP_MESSAGE));
 
     // A loop through a third column (A -> B -> Sheet1!C -> Sheet3!A), then a
     // purely local one.
     let (b3, d) = (s.s3[1], s.s1[3]);
     type_formula(&mut s, b3, "max(Sheet1!C)");
-    assert_eq!(s.state.header_edit_refusal(), None);
+    assert_eq!(s.state.header_edit_issue(), None);
     commit(&mut s);
     type_formula(&mut s, a3, "max(B)");
-    assert_eq!(s.state.header_edit_refusal().as_deref(), Some(LOOP_MESSAGE));
+    assert_eq!(s.state.header_edit_issue().as_deref(), Some(LOOP_MESSAGE));
     commit(&mut s);
-    assert_eq!(formula_text(&s, a3), None);
+    assert_eq!(formula_text(&s, a3).as_deref(), Some("max(B)"));
     type_formula(&mut s, d, "A+1");
-    assert_eq!(s.state.header_edit_refusal(), None);
+    assert_eq!(s.state.header_edit_issue(), None);
     commit(&mut s);
     let a1 = s.s1[0];
     type_formula(&mut s, a1, "D+1");
-    assert_eq!(s.state.header_edit_refusal().as_deref(), Some(LOOP_MESSAGE));
+    assert_eq!(s.state.header_edit_issue().as_deref(), Some(LOOP_MESSAGE));
 }
 
 /// The refusal is kept for the frames that follow, but follows the project:
@@ -122,9 +125,9 @@ fn the_kept_refusal_follows_the_project() {
     type_formula(&mut s, c, "max(Sheet3!A)");
     commit(&mut s);
     type_formula(&mut s, a3, "max(Sheet1!C)");
-    assert_eq!(s.state.header_edit_refusal().as_deref(), Some(LOOP_MESSAGE));
+    assert_eq!(s.state.header_edit_issue().as_deref(), Some(LOOP_MESSAGE));
     assert_eq!(
-        s.state.header_edit_refusal().as_deref(),
+        s.state.header_edit_issue().as_deref(),
         Some(LOOP_MESSAGE),
         "same answer between frames"
     );
@@ -134,7 +137,7 @@ fn the_kept_refusal_follows_the_project() {
         formula: Some("A".to_string()),
     });
     assert_eq!(
-        s.state.header_edit_refusal(),
+        s.state.header_edit_issue(),
         None,
         "the project changed: asked again"
     );

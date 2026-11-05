@@ -282,6 +282,23 @@ a message: the layers come back in creation order with no background. Witness
 `tests/witnesses/v1/project.stf` regenerated (a layer with `stack = -3` and a
 background); `schema.rs` keeps the old-record test.
 
+## A kept formula: same parts, no format change (#433)
+
+A formula the field could not read is stored in the shape `formula_parts`
+already holds: the identifiers that resolved as `Column(id)` and everything
+else as `Text`. `A+Z` with no column Z is `[Column(A), Text("+Z")]`; a literal
+out of range (`1e400`) is split in two `Text` fragments so that it does not
+compute. No variant, no field, `FORMAT_VERSION` did not move. The reason is not
+stored: it is recomputed from the parts when the file is open, so the same
+file shows the same frame. A version that did not know the shape reads the same
+file, shows the text and leaves the column empty (its cells are not framed
+there). `crates/stokesforge-persistence/tests/formula_roundtrip.rs`
+(`a_kept_formula_round_trips_…`). When the session loads such a file and the
+missing column or sheet is now there, the actor binds the formula before the
+first recalculation, with no history entry (`stokesforge-session/src/actor.rs`,
+`bind_kept_formulas_at_load`; `session.md`, "Binding a kept formula"); nothing
+changes in what is written.
+
 ## Formulas that read another sheet: additive field (#403)
 
 The `Column` record gained `formula_remote` (`Vec<RemoteRefRecord>`, each

@@ -362,7 +362,7 @@ Each imported column remembers the file it came from and the settings used. When
 1. Click a sheet with imported columns.
 2. Choose **File ▸ Import ▸ Refresh from Source**.
 
-The values are rewritten in place. The columns keep their identity, so graphs that use them stay valid. The number of rows follows the longest of the new contents. It shrinks only if all the columns of the sheet are refreshed.
+The values are rewritten in place. The columns keep their identity, so graphs that use them stay valid. The number of rows follows the longest of the new contents. It shrinks only if all the columns of the sheet are refreshed; columns that hold a formula are not a reason to keep the rows, they are recomputed on the new length. A column you typed by hand is never cut, so it keeps the rows.
 
 The entry is greyed out when no column of the sheet comes from a file.
 

@@ -32,6 +32,42 @@ pub struct HistoryState {
     pub in_macro: bool,
 }
 
+/// The kept formulas the actor bound to a column or a sheet that appeared
+/// (#433), as the snapshot reports them. The binding is written inside the
+/// history entry of the gesture that created the object, so the report is only
+/// information: the client says which column the formula now reads, once per
+/// `count` it has not seen. Undo and redo add nothing (an undo unbinds, a redo
+/// replays the recorded entry), a Stop takes back what its command had added.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BoundReport {
+    /// Number of formulas bound since the session started, monotonic.
+    pub count: u64,
+    /// The columns of the last bindings, oldest first, capped
+    /// ([`BoundReport::RECENT`]): `recent.len()` may be below the difference
+    /// of two counts when more were bound between two snapshots.
+    pub recent: Vec<NodeId>,
+}
+
+impl BoundReport {
+    /// How many columns [`BoundReport::recent`] keeps.
+    pub const RECENT: usize = 32;
+
+    pub(crate) fn push(&mut self, column: NodeId) {
+        self.count += 1;
+        self.recent.push(column);
+        if self.recent.len() > Self::RECENT {
+            self.recent.remove(0);
+        }
+    }
+
+    /// Takes back the `n` last bindings (a Stop undid their gesture).
+    pub(crate) fn retract(&mut self, n: u64) {
+        self.count = self.count.saturating_sub(n);
+        let keep = self.recent.len().saturating_sub(n as usize);
+        self.recent.truncate(keep);
+    }
+}
+
 /// Immutable snapshot returned to clients. Cloning a `Snapshot` is cheap
 /// (two `Arc`s/counters and a handful of fields): the tree is never copied,
 /// only shared.
@@ -78,4 +114,6 @@ pub struct Snapshot {
     /// moved without it looking like a model mutation (and so without
     /// invalidating a cache that has no reason to be).
     pub geometry_revision: u64,
+    /// The formulas bound to a column or sheet that appeared (#433).
+    pub bound: Arc<BoundReport>,
 }

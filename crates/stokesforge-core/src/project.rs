@@ -530,7 +530,9 @@ impl Project {
             // (prefix order). A reference outside the copy receives a
             // reservation with no node — it is shown as `#REF`, and neither an
             // existing column nor a future allocation must give it another
-            // meaning in the destination.
+            // meaning in the destination. Except a column pasted into the sheet
+            // it was copied from, in the same project (#433): it keeps reading
+            // the same columns, `A+B` stays `A+B`.
             let mut reserved = std::collections::HashMap::new();
             for item in items {
                 let copy = &item.copy;
@@ -544,10 +546,22 @@ impl Project {
                     let Some(&new_column) = ids.get(&source.id()) else {
                         continue;
                     };
+                    let same_sheet = !copy.is_external() && source.parent() == Some(item.parent);
                     let mut failure = None;
                     let remapped = formula.remap_keeping(
                         |old| {
-                            if let Some(&id) = ids.get(&old).or_else(|| reserved.get(&old)) {
+                            if let Some(&id) = ids.get(&old) {
+                                return id;
+                            }
+                            // A column pasted into the sheet it was copied
+                            // from reads the same columns (#433): an existing
+                            // identifier, none allocated. A copy into another
+                            // sheet, or from another project, still gets a
+                            // reservation.
+                            if same_sheet {
+                                return old;
+                            }
+                            if let Some(&id) = reserved.get(&old) {
                                 return id;
                             }
                             match self.ids.next() {

@@ -201,11 +201,14 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "This column is produced by a calculation. Detach it from the calculation to edit its values" | Right-click the header and choose **Detach from Calculation**. |
 | "This column is computed by a formula. Edit the formula to change its values" | Change the **F(x)=** cell, or use **Remove Formula, Keep Data**. |
 | "Column … does not exist in this sheet" | A formula names a letter that is not in the sheet. |
-| "Formulas refer to each other in a loop. Remove one of the references" | Break the loop between formulas, in the same sheet or in several. When you type it, the field stays open; a project saved earlier that holds a loop frames the **F(x)=** cell in red and leaves the cells empty. |
+| "Formulas refer to each other in a loop. Remove one of the references" | Break the loop between formulas, in the same sheet or in several. The formula is kept as typed, the cells are empty and the **F(x)=** cell of every column of the loop is framed in red. |
 | "There is no sheet named … in this workbook. Check its spelling" | A reference such as `Sheet3!B` names a sheet that is not in the workbook of the formula. Write `[Book2]Sheet3!B` for another workbook. |
 | "There is no workbook named …. Check its spelling" | The name between brackets matches no workbook of the project. |
 | "A reference to another workbook names its sheet. Write […]Sheet1!B" | Add the sheet: `[Book2]Sheet5!B`, even if the workbook has a single sheet. |
 | "Several workbooks are named …. Write the path from the project root, for example […]Sheet1!B" | Write the folders before the name: `[Mesures/Book2]Sheet5!B`. |
+| "The formula is incomplete or not valid. Check the operators and the parentheses" | The text cannot be read as a calculation (`A +`, a missing parenthesis). The formula is kept and the cells are empty: fix the text in the **F(x)=** cell. |
+| "The formula of column … does not compute: …" | A pasted formula could not be read in the destination sheet. It is kept, framed in red, and the column is empty; the other columns of the paste went through. It calculates once the missing column or sheet exists. |
+| "Read as the range from … to … and rewritten …. For the number …, write it with a point" | A range call such as `max(B,1,5)` was rewritten `max(B, 1, 5)`. The cell is orange for 10 seconds. Write `1.5` for the number 1.5. |
 | "Several objects are named … apart from case. Rename one of them" | An older project holds two objects whose names differ only by case. Rename one of them. |
 | "Column … does not exist in sheet …" | The sheet of the reference has fewer columns. |
 | "A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column" | Write `max(Sheet3!B)` and use the result in the formula (`B / max(Sheet3!B)`). |
@@ -219,7 +222,7 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "Function … reads a whole column. Give it a column letter, not a calculation (B, not B*2)" | The first value of `at`, `max(B)`, `mean(B)`, `integral(B)`… (and the third of `at(B, x, D)`) is a column letter. Calculate the expression in another column first. |
 | "The column this formula reads has no X column. Put a column with the role X to its left" | `at`, `integral` and the range forms (`max(B, 330, 350)`) read the X paired with the column. Change the role of a column to X, or move it to the left of the one the formula reads. The cells show `---` until then. |
 | "The formula found no point to compute from: the column or the range is empty, or the value asked for is outside the X data. Check the bounds" | Every cell of the result is empty. Check the bounds, the X values and the data of the column. |
-| "The number … is too large. The largest is about 1.8e308" | A number typed in a formula or a cell is beyond what a double stores (`1e400`). The field stays open: write a smaller number. |
+| "The number … is too large. The largest is about 1.8e308" | A number typed in a formula or a cell is beyond what a double stores (`1e400`). The formula is kept and framed in red: write a smaller number. |
 | "The number … is too small to be stored. The smallest is about 4.9e-324; write 0 for zero" | A non-zero number typed in a formula or a cell would be stored as 0 (`1e-400`). Write a larger number, or `0`. |
 | "Nothing was pasted. The number … (row …) is too large / too small to be stored…" | A block pasted from another program holds a number beyond what a double stores (`1e400`) or that would be stored as 0 (`1e-400`). The whole block is refused. Fix the value named in the message, or replace it by `0`, then paste again. |
 

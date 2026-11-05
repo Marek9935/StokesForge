@@ -708,7 +708,8 @@ pub mod formula {
     /// The sentence of a [`FormulaError`].
     pub fn error_message(error: &FormulaError) -> String {
         match error {
-            FormulaError::Parse(detail) => tr!("error-formula-invalid", detail = detail.as_str()),
+            // No detail: the raw parser text is for the CLI and `pyst` (#433).
+            FormulaError::Parse(_) => tr!("error-formula-syntax"),
             FormulaError::UnknownColumn(letter) => {
                 tr!("error-formula-unknown-column", letter = letter.as_str())
             }
@@ -912,6 +913,20 @@ pub mod formula {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
+        }
+
+        #[test]
+        fn a_syntax_error_sentence_holds_no_parser_detail() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let message = error_message(&FormulaError::Parse("unexpected token Plus".into()));
+            assert!(
+                !message.contains("Plus") && !message.contains("token"),
+                "{message}"
+            );
+            assert_eq!(
+                message,
+                "The formula is incomplete or not valid. Check the operators and the parentheses"
+            );
         }
 
         #[test]
