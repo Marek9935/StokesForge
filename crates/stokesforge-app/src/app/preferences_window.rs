@@ -1234,7 +1234,7 @@ mod tests {
     /// does not. The disk is looked at on a thread: the frames are repeated until
     /// it has answered, within a real-time deadline. The failure message reports
     /// the probe state, because this test failed once on CI with no known cause
-    /// (#447).
+    /// (#447; see "Intermittent tests" in `docs/tests.md`).
     #[test]
     fn a_missing_default_folder_gets_a_note_and_an_existing_one_does_not() {
         let (dir, mut harness) = folders_bench();
