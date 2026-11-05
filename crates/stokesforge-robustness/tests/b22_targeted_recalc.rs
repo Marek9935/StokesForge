@@ -1293,6 +1293,16 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
             s_targeted.tree.calculations(),
             s_full.tree.calculations()
         );
+        // A command that stores an undo entry in one twin and not in the other only
+        // shows as a tree difference at a later Undo; compare histories to catch it
+        // at its step (#439).
+        prop_assert_eq!(
+            &s_targeted.history,
+            &s_full.history,
+            "step {} ({:?}): targeted and full histories differ",
+            rank,
+            step
+        );
         prop_assert_eq!(
             link_shapes(&s_targeted.tree),
             link_shapes(&s_full.tree),

@@ -841,6 +841,16 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
             strip_links(&st.tree) == strip_links(&sf.tree),
             "step {rank} ({step:?}): targeted and full trees differ"
         );
+        // A command that stores an undo entry in one twin and not in the other only
+        // shows as a tree difference at a later Undo; compare histories to catch it
+        // at its step (#439).
+        prop_assert_eq!(
+            &st.history,
+            &sf.history,
+            "step {} ({:?}): targeted and full histories differ",
+            rank,
+            step
+        );
         prop_assert_eq!(
             link_shapes(&st.tree),
             link_shapes(&sf.tree),
