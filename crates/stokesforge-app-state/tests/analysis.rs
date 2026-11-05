@@ -132,6 +132,24 @@ fn what_is_missing_is_named_before_any_computation() {
     assert!(matches!(form.issues().as_slice(), [Issue::BadModel(_)]));
 }
 
+/// #438: a number an f64 cannot hold is refused at entry like a syntax error,
+/// while the parameter table keeps reading the model (it stays lenient).
+#[test]
+fn a_model_with_an_out_of_range_number_is_refused_with_the_number_sentence() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+    form.setup.fit.set_model(Model::Custom {
+        formula: "a*x+1e-400".to_string(),
+    });
+    let issues = form.issues();
+    assert!(matches!(issues.as_slice(), [Issue::BadModel(Some(_))]));
+    let sentence = stokesforge_app_state::analysis::issue_message(&issues[0]);
+    assert!(sentence.contains("1e-400"), "{sentence}");
+    assert!(sentence.contains("too small"), "{sentence}");
+    assert!(form.draft(f.project.tree()).is_err());
+    assert_eq!(form.setup.fit.param_count(), 1);
+}
+
 /// #260: the draft is described as an `Operation` and `Operation::readiness`
 /// says what is missing, including for the single point or zone.
 #[test]
@@ -846,4 +864,89 @@ fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     // Smoothing can replace the data, like a correction.
     let fresh = AnalysisForm::new(&Preset::SmoothMedian, series(&f), false);
     assert_eq!(fresh.replacement_disabled(f.project.tree()), None);
+}
+
+/// #438: the Custom model field of the Fit form is framed with the reason when
+/// the typed model is refused, whatever the reason; empty or valid gets nothing.
+#[test]
+fn the_custom_model_field_has_a_reason_exactly_when_the_model_is_refused() {
+    let f = fixture();
+    let field_issue = |model: Model| {
+        let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+        form.setup.fit.set_model(model);
+        form.model_field_issue()
+    };
+    let custom = |formula: &str| Model::Custom {
+        formula: formula.to_string(),
+    };
+    let too_large = field_issue(custom("a*x+1e400")).expect("out of range");
+    assert!(
+        too_large.contains("1e400") && too_large.contains("too large"),
+        "{too_large}"
+    );
+    let too_small = field_issue(custom("a*x+1e-400")).expect("out of range");
+    assert!(too_small.contains("too small"), "{too_small}");
+    for refused in ["a*", "foo(x)", "1+2"] {
+        assert!(field_issue(custom(refused)).is_some(), "{refused}");
+    }
+    // Nothing typed yet: no red on arrival.
+    assert_eq!(field_issue(custom("")), None);
+    assert_eq!(field_issue(custom("   ")), None);
+    assert_eq!(field_issue(custom("a*x+1")), None);
+    assert_eq!(field_issue(custom("0.0e5*x+a")), None);
+    assert_eq!(field_issue(custom("a*x+1e-310")), None);
+    assert_eq!(field_issue(Model::Gaussian), None);
+    assert_eq!(field_issue(Model::Linear), None);
+}
+
+/// #438, C2: a stored calculation holding such a number reopens with the
+/// issue (Update stays greyed), the draft errs, and nothing is carved out for
+/// an unchanged text.
+#[test]
+fn a_stored_fit_with_an_out_of_range_number_reopens_refused() {
+    use stokesforge_analysis::fit::FitSpec;
+    use stokesforge_core::CalculationDraft;
+    for formula in ["a*x+1e400", "a*x+1e-400"] {
+        let f = fixture();
+        let mut project = f.project;
+        project
+            .add_calculation(CalculationDraft {
+                operation: Operation::Fit {
+                    spec: FitSpec {
+                        model: Model::Custom {
+                            formula: formula.to_string(),
+                        },
+                        params: vec![],
+                    },
+                    range: Some((2.0, 8.0)),
+                    residuals: false,
+                },
+                series: vec![SeriesRef {
+                    x: Some(f.x),
+                    y: f.y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![],
+                results: vec![],
+                keep_results: true,
+                auto_recalc: false,
+                low_r2_dialog: false,
+            })
+            .unwrap();
+        let (id, calc) = project
+            .tree()
+            .calculations()
+            .iter()
+            .next()
+            .map(|(id, c)| (*id, c.clone()))
+            .unwrap();
+        let form = AnalysisForm::from_calculation(id, &calc);
+        assert!(
+            matches!(form.issues().as_slice(), [Issue::BadModel(Some(_))]),
+            "{formula}"
+        );
+        assert!(form.model_field_issue().is_some(), "{formula}");
+        assert!(form.draft(project.tree()).is_err(), "{formula}");
+    }
 }

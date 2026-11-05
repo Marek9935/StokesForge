@@ -791,6 +791,26 @@ impl AnalysisForm {
         issues
     }
 
+    /// The sentence for the Custom model field of the Fit form, `Some` when the
+    /// typed model is refused (syntax error, unknown function, number beyond the
+    /// f64 range, no parameter) so that the shell frames the field in red with
+    /// this reason (#438). An empty field gets none: nothing is typed yet.
+    pub fn model_field_issue(&self) -> Option<String> {
+        if self.kind != OperationKind::Fit {
+            return None;
+        }
+        let Model::Custom { formula } = &self.setup.fit.model else {
+            return None;
+        };
+        if formula.trim().is_empty() {
+            return None;
+        }
+        match self.setup_issues()? {
+            issue @ Issue::BadModel(_) => Some(issue_message(&issue)),
+            _ => None,
+        }
+    }
+
     /// The settings of the active family that are missing: the draft is described
     /// as an [`Operation`] (even incomplete) and `stokesforge-analysis` says what
     /// is missing ([`Operation::readiness`]).

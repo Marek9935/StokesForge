@@ -197,7 +197,8 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "The baseline needs at least … anchor points, … given" | Place more anchor points. |
 | "The background zones hold … points, … are needed for degree …. Widen the zones or lower the degree" | Widen the zones or lower the **Degree**. |
 | "The error column holds a missing, zero or negative value. Fix it or turn weighting off" | Fix the error column, or untick **Weight by the error column**. |
-| "The expression is empty", "Unknown function … at position …" | Fix the expression of the custom model. |
+| "The expression is empty", "Unknown function … at position …" | Fix the expression of the custom model; the footer says why, and the field is framed in red once you leave it. |
+| "The model is invalid: The number … is too large / too small to be stored…" | A custom model holds a number beyond what a double stores (`1e400`) or that would be stored as 0 (`1e-400`). **Create** stays greyed and the footer says why, and once you leave the model field it is framed in red (hover it for the reason). Write a smaller or larger number, or `0`. A calculation saved with such a number opens, but **Update** stays greyed and dragging its range handles is refused until you correct it. |
 | "This column is produced by a calculation. Detach it from the calculation to edit its values" | Right-click the header and choose **Detach from Calculation**. |
 | "This column is computed by a formula. Edit the formula to change its values" | Change the **F(x)=** cell, or use **Remove Formula, Keep Data**. |
 | "Column … does not exist in this sheet" | A formula names a letter that is not in the sheet. |

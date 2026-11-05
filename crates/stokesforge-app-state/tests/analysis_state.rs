@@ -1659,3 +1659,88 @@ fn the_list_closes_when_the_last_low_r2_calculation_is_deleted() {
     s.state.dispatch(Action::CloseLowR2List);
     assert!(!s.state.low_r2_list_open());
 }
+
+/// #438, C2: a stored Fit whose model holds a number beyond the f64 range stays
+/// in the project, but a range-handle drag is refused: nothing changes, nothing
+/// enters the history, and the status bar says why. No carve-out for a model
+/// the drag leaves unchanged.
+#[test]
+fn dragging_a_handle_of_a_stored_fit_with_an_out_of_range_number_is_refused() {
+    use stokesforge_analysis::fit::FitSpec;
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{CalculationDraft, SeriesRef};
+    for (formula, word) in [("a*x+1e400", "too large"), ("a*x+1e-400", "too small")] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = setup(dir.path());
+        let model = Model::Custom {
+            formula: formula.to_string(),
+        };
+        // Hand-stored, as a file written before the check would hold it.
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        let xs: Vec<f64> = (0..11).map(f64::from).collect();
+        let x = project
+            .add_column(sheet, None, Some("A"), Column::from_f64(&xs))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, Some("B"), Column::from_f64(&xs))
+            .unwrap();
+        project
+            .add_calculation(CalculationDraft {
+                operation: Operation::Fit {
+                    spec: FitSpec {
+                        model: model.clone(),
+                        params: vec![],
+                    },
+                    range: Some((2.0, 8.0)),
+                    residuals: false,
+                },
+                series: vec![SeriesRef {
+                    x: Some(x),
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![],
+                results: vec![],
+                keep_results: true,
+                auto_recalc: false,
+                low_r2_dialog: false,
+            })
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        s.state = AppState::new_with_preferences(
+            session.handle(),
+            dir.path().join("q.stf").display().to_string(),
+            stokesforge_app_state::preferences::Preferences::load_from(None),
+        )
+        .unwrap();
+        s._session = session;
+        let id = only_calculation(&s);
+        let stored = |s: &Setup| s.state.tree().calculation(id).unwrap().operation.clone();
+        let before = stored(&s);
+        let revision = s.state.revision();
+        assert!(!s.state.can_undo());
+
+        s.state.dispatch(Action::MoveCalculationHandle {
+            calculation: id,
+            slot: HandleSlot::Edge(RangeSet::Fit, 0, Edge::Hi),
+            x: 6.0,
+            y: 0.0,
+        });
+        let status = s.state.status().expect("a sentence in the status bar");
+        assert!(status.is_error(), "{formula}");
+        assert!(
+            status.text.contains(formula.split('+').nth(1).unwrap()) && status.text.contains(word),
+            "{}",
+            status.text
+        );
+        assert_eq!(stored(&s), before, "{formula}: the model is untouched");
+        assert!(
+            !s.state.can_undo(),
+            "{formula}: nothing entered the history"
+        );
+        assert_eq!(s.state.revision(), revision, "{formula}");
+    }
+}

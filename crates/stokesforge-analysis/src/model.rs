@@ -136,6 +136,18 @@ impl Model {
         })
     }
 
+    /// Entry check of a free model (#438): the first number literal an `f64`
+    /// cannot hold (`1e400`, `1e-400`), which [`Model::compile`] reads
+    /// leniently so that stored models keep loading and recalculating
+    /// (invariant 12). Built-in models have none. Call it after a successful
+    /// `compile`: a syntax error is `compile`'s to report.
+    pub fn out_of_range_literal(&self) -> Option<crate::expr::ExprError> {
+        match self {
+            Model::Custom { formula } => Expr::out_of_range_literal(formula),
+            _ => None,
+        }
+    }
+
     /// The model is linear in its parameters: exact least squares.
     pub fn is_linear_in_params(&self) -> bool {
         matches!(

@@ -69,14 +69,41 @@ fn add_fit(handle: &SessionHandle, m: &Setup, auto: bool) -> NodeId {
 
 /// Adds a linear fit of (`x`, `y`), automatic or not.
 fn add_fit_on(handle: &SessionHandle, x: NodeId, y: NodeId, auto: bool) -> NodeId {
+    add_stored_fit(handle, x, y, &fit_operation(), &fit_operation(), auto)
+}
+
+/// A fit of a free model `formula`, parameters left to default.
+fn custom_fit(formula: &str) -> Operation {
+    Operation::Fit {
+        spec: FitSpec {
+            model: Model::Custom {
+                formula: formula.to_string(),
+            },
+            params: vec![],
+        },
+        range: None,
+        residuals: false,
+    }
+}
+
+/// Adds the calculation `op` on (`x`, `y`) with the outputs that `computed`
+/// gives: they differ when a test stores a model that cannot be computed.
+fn add_stored_fit(
+    handle: &SessionHandle,
+    x: NodeId,
+    y: NodeId,
+    op: &Operation,
+    computed: &Operation,
+    auto: bool,
+) -> NodeId {
     let snapshot = handle.snapshot().unwrap();
     let series = vec![SeriesRef {
         x: Some(x),
         y,
         sigma: None,
     }];
-    let op = fit_operation();
-    let computed = compute(&snapshot.tree, &op, &series, None).unwrap();
+    let op = op.clone();
+    let computed = compute(&snapshot.tree, computed, &series, None).unwrap();
     let outputs = computed
         .columns
         .iter()
@@ -108,7 +135,7 @@ fn add_fit_on(handle: &SessionHandle, x: NodeId, y: NodeId, auto: bool) -> NodeI
         .tree
         .calculations()
         .keys()
-        .next()
+        .max()
         .unwrap()
 }
 
@@ -313,6 +340,57 @@ fn changing_the_definition_of_a_manual_calculation_does_not_make_it_stale() {
     let snapshot = handle.snapshot().unwrap();
     let id = *snapshot.tree.calculations().keys().next().unwrap_or(&id);
     assert_eq!(snapshot.tree.calculation(id).unwrap().stale, None);
+}
+
+fn param(snapshot: &Snapshot, id: NodeId, key: &str) -> f64 {
+    snapshot.tree.calculation(id).unwrap().results[0]
+        .values
+        .iter()
+        .find(|v| v.key == key)
+        .unwrap()
+        .value
+}
+
+/// #438: the entry check of a Fit model lives in `readiness` only. A stored
+/// model with a number an f64 reads as 0 recalculates like the model without
+/// it, in both modes (a strict `compile` would break it silently at load).
+#[test]
+fn a_stored_model_with_a_tiny_literal_recalculates_like_the_one_without_it() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let plain = custom_fit("a*x");
+        let tiny = custom_fit("a*x+1e-400");
+        let a = add_stored_fit(&handle, m.x, m.y, &plain, &plain, true);
+        let b = add_stored_fit(&handle, m.x, m.y, &tiny, &tiny, true);
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let after = handle.snapshot().unwrap();
+        assert_eq!(after.tree.calculation(b).unwrap().stale, None, "{mode:?}");
+        assert!((param(&after, b, "param.a") - 2.0).abs() < 1e-9);
+        assert_eq!(fit_column(&after, b), fit_column(&after, a), "{mode:?}");
+    }
+}
+
+/// #438: a stored model with `1e400` that cannot be computed fails like any
+/// failing calculation (last values kept), without a panic.
+#[test]
+fn a_stored_model_with_a_huge_literal_fails_cleanly_and_keeps_its_values() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let plain = custom_fit("a*x");
+        let huge = custom_fit("a*x+1e400");
+        let id = add_stored_fit(&handle, m.x, m.y, &huge, &plain, true);
+        let before = handle.snapshot().unwrap();
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let after = handle.snapshot().unwrap();
+        assert!(
+            matches!(
+                after.tree.calculation(id).unwrap().stale,
+                Some(Staleness::Failed(_))
+            ),
+            "{mode:?}"
+        );
+        assert_eq!(fit_column(&after, id), fit_column(&before, id));
+    }
 }
 
 #[test]
