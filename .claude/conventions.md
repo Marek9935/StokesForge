@@ -17,7 +17,15 @@ X11; the `vendor/winit` and `vendor/smithay-clipboard` patches, outside the
 workspace, share the drop receiver and the clipboard between viewports.
 Choice, targeted `rustfmt` commands, manual verification and removal:
 `vendor/winit/STOKESFORGE.md`. The exact parser and channel are tested by
-`stokesforge-app/tests/wayland_{uri,bridge}.rs`.
+`stokesforge-app/tests/wayland_{uri,bridge}.rs`. Frame starvation (#457): Wayland
+has no occlusion event, so the vendored winit infers `Occluded` from a frame
+callback that does not come while a redraw is wanted, only for a window that opts in with
+`WindowExtWayland::set_reports_occlusion` (the root, on its first pass; never a detached
+window: a reported window gets no pass and its input is dropped) (`frame_starvation.rs`, pure,
+`tests/wayland_frame_starvation.rs`); that is what lets eframe keep running a
+covered root, so a detached window may be maximised over it (Page Layout Mode).
+Never a periodic wake for it (#104). Handing a gesture to the OS (`ViewportCommand::StartDrag` / `BeginResize`) goes only through `app/os_gesture.rs` (guard `no_os_gesture_command_outside_the_helper`): on Wayland the compositor keeps the button release, so the helper plays it for egui at the head of the next pass of that viewport (`Plugin::input_hook`); a plain send leaves the title "dragged", every second grab does nothing and hover extends the column selection (#457). Recheck on any eframe upgrade; real-compositor
+proof: `tests/wayland_covered_root.rs` (manual, headless mutter, GL backend).
 The empty graph goes through `AddGraph`; `SessionHandle::new_project`, like
 `load`, replaces the identity and empties the history after confirmation in the UI.
 
@@ -115,6 +123,8 @@ of `window_detach.rs`; the Python engine stays in the main AppState.
 - Graph composition (#257): the rules that build series from the columns of a workbook live in `stokesforge_core::compose` (`series_from_columns` for the nearest Y→X / Y2→X2 pairing **to the left** and the palette by rank, `x_for` for the abscissa alone, `row_series` — the translated name is a parameter, never `tr!` in core —, `overlay_base`, `role_layer_of`, `overlays_full`, `current_plot_spec`, `panel_plot_type`), shared by the application (`AppState::plot_columns`, `add_series_to_graph`, `add_layer`, `add_rows_to_graph`, `plot_rows`: they only emit the command and the messages), `pyst.plot` and the appendix of an analysis. A new series goes through `SeriesSpec::from_palette(y, rang)`, never `palette_color` / `LineSpec::from_palette` written by hand; an overlaid layer is named (`OverlaySpec::role_layer(n)` for Xn/Yn, n = 2 to 4 — `SECOND_AXES` for n = 2 —, `TOP_X` for the lines layer — its Y stays on the left, on purpose —, `OverlaySpec::new` for the rest), never a literal `{ x_top, y_right }`. `pyst.plot(y)` without `x=` looks for the abscissa by role like the window (`docs/python-and-scripting.md`). Error columns (#360): `series_from_columns` and `errors_for` pair the first `YError` / `XError` column to the right of a Y (Y2–Y4 too), before the next ordinate column, into `y_error` / `x_error`; `pyst.plot` applies the same rule unless `x_error=` / `y_error=` is given (`None` goes without); the "Y error" / "X error" series fields change it per series (never propagated to a group); the renderer draws whiskers on every type from the error column alone.
 - New graphs (#103): no default title, demo included; `name` names the node and its window, never the figure. Keep the possibility of typing a title, without hiding `title_visible`. The explicit titles of `stokesforge-render::sample` are rendering witnesses, not user defaults.
 - Detached windows (#104): publishing a snapshot does not wake the `show_viewport_deferred` callback. `app/window_detach.rs` compares epoch, data revision and geometry revision, then requests a repaint of the reader viewport; a mutation applied after painting schedules the root publication frame (end of `ui()`, `app.rs`). Tests: `app::window_detach::tests`, `app::tests`. The Project Manager also follows its selection, its hiding and the active tab. No periodic wake-up at rest.
+
+- Dialogs and detached windows (#457): any dialog of the app is painted through the host of `app/dialog_host.rs` (`show_edit_dialogs`, `confirmations::show`), never directly in a viewport closure; a detached closure ends with `dialog_host::host_pass` with none of its locks held, and a new detached window kind adds a `DialogHost` variant, its `viewport` and its existence test. The host dispatches its own actions (no queue to the root). A key consumer in a viewport that can host a dialog (`collect_undo_redo_shortcuts`, Esc) stands aside with `modal_shown`.
 
 ## Interface: wiring not to forget (detached window, layer, dialog)
 

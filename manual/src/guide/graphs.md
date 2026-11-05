@@ -113,7 +113,7 @@ You can open them in several ways:
 
 <img src="../images/graphs-graph-menu.png" alt="The Graph menu: Show Data, Add Text, New Layer, the mirror axes, Reset Zoom, Export and Properties." width="139">
 
-While the window is open, your changes show on the graph at once. Click **OK** to keep them as a single undo step. Click **Cancel**, or press <kbd>Esc</kbd>, to go back to how the graph was. The rest of the application is locked while the window is open.
+While the window is open, your changes show on the graph at once. Click **OK** to keep them as a single undo step. Click **Cancel**, or press <kbd>Esc</kbd>, to go back to how the graph was. The rest of the application is locked while the window is open. If the graph is in its own window, the properties open inside that window; click on the main window to bring them back there.
 
 ### The tabs
 
@@ -178,7 +178,7 @@ By default these entries act on every layer, the active layer being the referenc
 
 #### The Page Layout Mode
 
-**Layout ▸ Page Layout Mode** (or the page layout button of the toolbar) shows the graph as a page: a ruler along the top and the left edge in your length unit, a grid, and handles on the graphs. Turning the mode on or off changes nothing in the graph and is not a step of **Undo**; it works the same on a **Regular Grid** and on a **Free** graph. While the mode is on, a graph window in the main window fills the workspace, so that the whole figure and its four corner handles are in view; when you leave the mode the window comes back to the position and size it had (a window that was already maximized stays maximized). A graph in its own detached window keeps the size of that window: resize or maximize it yourself if you want more room. Click a graph to select it: its handles are solid, the graph under the pointer shows them faintly.
+**Layout ▸ Page Layout Mode** (or the page layout button of the toolbar) shows the graph as a page: a ruler along the top and the left edge in your length unit, a grid, and handles on the graphs. Turning the mode on or off changes nothing in the graph and is not a step of **Undo**; it works the same on a **Regular Grid** and on a **Free** graph. While the mode is on, a graph window in the main window fills the workspace, so that the whole figure and its four corner handles are in view; when you leave the mode the window comes back to the position and size it had (a window that was already maximized stays maximized). A graph in its own detached window is maximized the same way and comes back to its size when you leave the mode. Pressing the **Maximize the window** button of that window while it is maximized by the mode restores it and leaves the mode. Click a graph to select it: its handles are solid, the graph under the pointer shows them faintly.
 
 <img src="../images/graphs-page-layout-mode.png" alt="A graph with two layers side by side in the Page Layout Mode: rulers along the top and left edges, the selected graph with its handles, and under the figure the settings strip: Figure size with its padlock, Graph 1 with X, Y, W and H, Align, Same Size, Distribute, Snap with Coarse and Fine, Grid mode with Regular and Free, and When axes are added with Grows with the axes and Fixed." width="640">
 

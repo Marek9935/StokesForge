@@ -95,6 +95,8 @@ the interface); the content window goes through `show_window_in_layer`, an
 
 All are painted in `StokesForgeApp::show_edit_dialogs` (`app.rs`), as long as
 their state is open in `AppState`, except the blocking ones (last section).
+They are painted by the window the user works in (#457): the root, or a detached
+window while it has the focus. See "Where a dialog is painted" below.
 
 | Window | Nature | Size | Pages or content | Opened from | Identifier, file |
 |---|---|---|---|---|---|
@@ -165,13 +167,63 @@ field or button; its two-state toggles (Coarse | Fine, Regular | Free, Grows wit
 It **maximises** a floating window while it lasts (`app/layout_window.rs`: `layout_entries` keeps
 the tab that was maximised before; `reconcile_layout_modes` leaves the mode of a graph
 whose window is no longer the maximised one, which covers Restore, the Window menu,
-close, delete and project load). A detached window keeps its size: the mode sends it no
-maximise or restore, because on Wayland a window covering the main window stops its frame
-callbacks and every action of a detached window is drained in the root frame. The saved window views report the state from before the mode
+close, delete and project load). A detached window maximises its OS window the same way
+(`follow_mode_maximize`, unless it was maximised at entry), and its header's Restore leaves the mode;
+a restore done from outside the application (an OS shortcut) cannot be told from a maximise the
+compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because the
+vendored winit reports the root, the only window that opts in, as occluded when the compositor no
+longer serves it (frame starvation, #457; a detached window is never reported: it would lose its
+input, and a covered one repaints at its frame callback): the covered root still runs `logic` and `ui` unpainted about every 100 ms, so the actions
+of the detached window are drained, at the cost of about 100 ms between a command and its paint
+while the main window is covered. The saved window views report the state from before the mode
 (`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at
 the start of the frame (`begin_layout_frame`) and at the top of a detached viewport, never
 inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard
 a frame ago (`note_field_focus`) they stand aside.
+
+## Moving and resizing a detached window (#457)
+
+A detached window has no OS decoration: its title (`window_chrome.rs`,
+`panel_header`, `window_header`) and eight edge zones (`detached_resize_handles`)
+hand the gesture to the compositor. That goes only through `app/os_gesture.rs`
+(`start_drag`, `begin_resize`; guard `no_os_gesture_command_outside_the_helper`).
+On Wayland the compositor keeps the button release, so the helper plays it for
+egui at the head of the next pass of the same viewport (a pointer move too far
+for a click, then the releases), otherwise the title stays "dragged" and every
+second grab does nothing.
+
+## Where a dialog is painted (#457)
+
+`app/dialog_host.rs`. A dialog is painted by the pass of **one** window, through
+the same code and the same `AppState`: the root, or a detached window (graph,
+workbook, Project Manager, Object Manager, console) that hosts it. The reason is
+the frame starvation of a covered root (above): a dialog painted by a root that
+runs unpainted every 100 ms would show late or never.
+
+- `StokesForgeApp::dialog_hosting.host` is `None` (the root paints) or a detached
+  window. While no dialog is shown it follows the focus (the root's own
+  `input.focused` first, then the latest focus a window reported); while one is
+  shown it stays. A host that is closed, reattached, dropped by a project load, or
+  smaller than `HOST_MIN_SIZE` (560 x 170: the footer must fit) falls back to the
+  root, which then paints the dialog.
+- Each detached closure ends with `dialog_host::host_pass`, with none of its locks
+  held. When it is the host it paints `show_edit_dialogs` and the confirmations,
+  then **dispatches the actions itself**: queueing them for the root would leave an
+  answered dialog painted for up to 110 ms and a second click would answer it twice.
+  The root is woken after, and the detached windows get the new snapshot at once.
+- The root skips both painters while a host exists, but still empties the actions of
+  the frame for a blocking dialog, and wakes the host after any pass that dispatched
+  something (an action such as `OpenPlotSettings` does not change the snapshot).
+- While a hosted dialog is open the root paints an invisible veil (`paint_veil`) and
+  `collect_shortcuts` stands aside, so the main window cannot change the model
+  under it. A press on the veil moves the dialog to the root: the way out when the
+  root is raised over a host that then gets no pass.
+- A dialog squeezed by a small hosting window is not remembered at that size.
+- Not covered: object properties (own viewport), `rfd` pickers, local popups.
+- The hosted window cannot be moved or resized while its dialog is open (the
+  backdrop covers its header).
+- Rule: any dialog of the application is painted through this host, never
+  directly in a closure.
 
 ## Outside the catalog
 

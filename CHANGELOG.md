@@ -24,6 +24,13 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Fixed
+
+- A detached window can be grabbed by its title, or resized by its edges, every
+  time (#457): before, on Wayland, every second grab did nothing, and moving a
+  window could then extend the selected columns of a sheet when the mouse
+  passed over the column letters. Present on `main` too.
+
 ### Changed
 
 - A transposed sheet over a formula column no longer says "Out of date" when
@@ -48,6 +55,20 @@ without a message, see `docs/persistence.md`).
   an optional `.stf` field (an older version that saves the file again drops it
   without a message). Nothing is visible yet.
 
+- A detached graph window in the Page Layout Mode (#426, #457) is maximized
+  with the mode and restored when you leave it, like a graph window in the main
+  window, and its **Maximize the window** button, pressed while it is maximized,
+  restores it and leaves the mode. On Wayland a detached
+  window covering the main window no longer freezes the application: what you
+  do in the detached window still takes effect, about a tenth of a second late
+  while the main window is hidden.
+- A dialog opened from a detached window (Graph Properties, About, the import
+  window, a confirmation...) now appears in that window instead of in the main
+  window behind it (#457), where it could stay unseen or show up late when the
+  detached window covers the main one. The main window is locked while it is
+  open; clicking on it brings the dialog back there. A detached window narrower
+  than 560 pixels or shorter than 170 still opens its dialogs in the main
+  window. Ctrl+Z in a text field of a dialog no longer reaches the model.
 - Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
   show a graph as a page with rulers, a grid, handles and a settings strip
   (figure size with a padlock shared with Graph Properties, position and size of

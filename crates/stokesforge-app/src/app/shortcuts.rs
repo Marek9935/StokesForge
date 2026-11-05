@@ -86,7 +86,14 @@ const SHORTCUT_REDO_Z: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
 );
 
 /// Undo/redo in the active viewport, root or detached workbook.
+///
+/// Stands aside while a modal dialog is open in this viewport: a text field of
+/// the dialog keeps its own text undo, and the command the key would send is
+/// refused anyway while the dialog's history macro is open (#457).
 pub(super) fn collect_undo_redo_shortcuts(ctx: &egui::Context, actions: &mut Vec<Action>) {
+    if super::dialogs::modal_shown(ctx) {
+        return;
+    }
     ctx.input_mut(|input| {
         // Redo is tested before undo: Ctrl+Shift+Z would also match Ctrl+Z
         // with the extra modifiers.

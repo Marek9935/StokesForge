@@ -79,7 +79,7 @@ bands are 6 + 20 + 20 screen px wide in both placements; every inner reach is
 | `G` | the mode | turns Snap on or off |
 | Esc | the graph window has the focus | leaves the mode and gives the window back (below). It never leaves the mode from another window: with Graph Properties or any modal open, Esc closes that window and the mode stays; in a text field of the strip the first Esc gives the field back (the typed text is dropped) and the second leaves. The root reads the key at the start of the frame, before any window is painted, so a workbook painted behind the graph does not take it |
 
-Entering the mode **maximises** a floating graph window; leaving it (Esc, the toolbar or menu toggle, Restore, the Window menu, closing or deleting the graph, loading a project) gives its previous state back: position and size of a floating window never move while it is maximised, and a window that was already maximised stays so. A detached window keeps its size: the mode neither maximises nor restores it, and maximising it by hand does not leave the mode. Detaching, closing or reattaching a detached window leaves the mode. The saved window state is the one from before the mode (the project is not marked modified by entering it). Entering and leaving add no undo step; leaving commits a nudge in progress.
+Entering the mode **maximises** a floating graph window; leaving it (Esc, the toolbar or menu toggle, Restore, the Window menu, closing or deleting the graph, loading a project) gives its previous state back: position and size of a floating window never move while it is maximised, and a window that was already maximised stays so. A detached window is maximised and restored the same way (unless it was already maximised), and its own Restore button leaves the mode; restoring it from outside the application (an OS shortcut) leaves the mode on. Detaching, closing or reattaching a detached window leaves the mode. The saved window state is the one from before the mode (the project is not marked modified by entering it). Entering and leaving add no undo step; leaving commits a nudge in progress.
 
 The strip (module page_layout of the app) adds: Figure size with the padlock, X Y W H of the selected
 graph (X and Y greyed on the grid; W and H trade with the right neighbour, the last
@@ -183,11 +183,12 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 
 | Gesture | On | Effect |
 |---|---|---|
-| Drag | title bar | moves the window; outside the application, detaches it |
+| Drag | title bar | moves the window; outside the application, detaches it. A detached window hands the move (and a drag on its edges the resize) to the OS through `app/os_gesture.rs`, which also releases the pointer in egui so every grab works (#457) |
 | Drag | edge or corner | resizes |
 | Click | title bar icon | minimizes, detaches, closes (depending on the icon) |
 | Click | window behind | brings it to the front (the click also acts on what it targets in the window) |
 | Click outside a modal dialog | background | blocked; the outline blinks |
+| Click on the main window | a dialog is open in a detached window | the dialog moves to the main window |
 
 ## Fields and selectors
 

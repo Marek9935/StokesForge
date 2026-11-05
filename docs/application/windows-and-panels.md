@@ -249,6 +249,14 @@ on the pixel). A node that contains a tree must return the center of its
 row to its parent; limit: the vertical starts at the top of the body, not at the bottom
 of the parent's arrow.
 
+### Dialogs in a detached window (#457)
+
+A dialog opened from a detached window is painted by that window, not by the root
+behind it: `app/dialog_host.rs`, rule and tests described in
+[`../windows.md`](../windows.md), "Where a dialog is painted". `main.rs` gives
+eframe an `AppHost`, which forwards `logic`, `ui` and `on_exit` to the application
+with `try_borrow_mut`; the deferred closures reach the application through it.
+
 ### Collapsible and detached panels (#100)
 
 The three panels share `panel_header` (`app/window_chrome.rs`): compact

@@ -254,9 +254,17 @@ impl Window {
         // Not possible on Wayland.
     }
 
+    /// Opt this window in to the occlusion report of #457 (default: off).
+    pub fn set_reports_occlusion(&self, on: bool) {
+        self.window_state.lock().unwrap().set_reports_occlusion(on);
+    }
+
     #[inline]
     pub fn is_visible(&self) -> Option<bool> {
-        None
+        // #457: Wayland tells nothing about occlusion; the frame callback that
+        // does not come with a redraw wanted is the only hint (see
+        // `frame_starvation`). Otherwise unknown, as upstream.
+        self.window_state.lock().unwrap().is_starved().then_some(false)
     }
 
     #[inline]
@@ -739,6 +747,11 @@ impl WindowRequests {
 
     pub fn take_redraw_requested(&self) -> bool {
         self.redraw_requested.swap(false, Ordering::Relaxed)
+    }
+
+    /// A redraw is wanted and not yet handed to the application.
+    pub fn redraw_is_requested(&self) -> bool {
+        self.redraw_requested.load(Ordering::Relaxed)
     }
 }
 

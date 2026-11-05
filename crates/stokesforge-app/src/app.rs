@@ -142,6 +142,7 @@ mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
+mod dialog_host;
 mod dialogs;
 mod empty_state;
 mod figure_copy;
@@ -167,6 +168,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod os_gesture;
 mod page_layout;
 mod panel_memory;
 #[cfg(test)]
@@ -195,6 +197,8 @@ mod window_detach;
 mod window_placement;
 mod window_stack;
 mod workbook;
+
+pub use dialog_host::AppHost;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -424,8 +428,13 @@ pub struct StokesForgeApp {
     /// The window asked to close (cross, Alt+F4, Quit): to be posted to
     /// the state like `Action::Quit` (#229).
     close_requested: bool,
+    /// The root asked winit to report it occluded (Wayland, #457), once.
+    occlusion_reported: bool,
     /// The state released the closing: the next request is no longer held back.
     quit_confirmed: bool,
+    /// Which window paints the dialogs: the root, or the detached window the
+    /// user works in (#457, [`dialog_host`]).
+    dialog_hosting: dialog_host::HostState,
 }
 
 impl StokesForgeApp {
@@ -556,7 +565,9 @@ impl StokesForgeApp {
             autoquit,
             first_frame: None,
             close_requested: false,
+            occlusion_reported: false,
             quit_confirmed: false,
+            dialog_hosting: dialog_host::HostState::default(),
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
             screenshot_delay: SCREENSHOT_SETTLE_FRAMES,
         }
@@ -631,7 +642,8 @@ impl StokesForgeApp {
 
     /// Consumes the shortcuts at the context level and turns them into actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if self.state.blocking_dialog() {
+        // A dialog hosted by a detached window blocks the main one (#457).
+        if self.state.blocking_dialog() || self.dialog_hosting.open {
             return;
         }
         let mut save_as = false;
@@ -1070,6 +1082,7 @@ impl eframe::App for StokesForgeApp {
         );
         self.object_manager_panel(ui, active_tab, &mut actions);
         self.drain_detached_tabs(&ctx, &mut actions);
+        self.update_dialog_host(&ctx);
         self.show_workspace(
             ui,
             active_tab,
@@ -1082,7 +1095,14 @@ impl eframe::App for StokesForgeApp {
         for (tab, rect) in geometry_updates {
             self.remember_window_geometry(tab, rect);
         }
-        self.show_edit_dialogs(&ctx, &mut actions);
+        // A detached window that hosts the dialogs paints them in its own pass
+        // (#457); the root still keeps the geometry bookkeeping in step.
+        let _ = dialogs::take_modal_painted(&ctx);
+        if self.dialog_hosting.host.is_none() {
+            self.show_edit_dialogs(&ctx, &mut actions);
+        } else {
+            dialogs::sync_dialogs(&ctx, &self.state, &mut actions);
+        }
         if let Some(action) = finish_file_drop(&ctx) {
             actions.push(action);
         }
@@ -1091,19 +1111,43 @@ impl eframe::App for StokesForgeApp {
         }
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
+        self.dialog_hosting.root_painted = dialogs::take_modal_painted(&ctx);
+        self.hosted_dialog_veil(&ctx);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
+        // #457: a root covered by a detached window gets no frame callback and would
+        // freeze the actions of every window. Only the root opts in to the report:
+        // a reported window gets no pass and loses its input, which a detached
+        // window must not.
+        #[cfg(target_os = "linux")]
+        if !self.occlusion_reported {
+            if let Some(window) = frame.winit_window() {
+                {
+                    use winit::platform::wayland::WindowExtWayland as _;
+                    window.set_reports_occlusion(true);
+                }
+                self.occlusion_reported = true;
+            }
+        }
         self.sync_panel_layout(&mut actions);
         self.drain_layout_actions(&mut actions);
         actions.extend(history);
+        let dispatched = !actions.is_empty();
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
 
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
-        if snapshot_stamp(self.state.snapshot()) != published_stamp {
-            // A command applied after publication wakes the viewports.
+        let changed = snapshot_stamp(self.state.snapshot()) != published_stamp;
+        self.wake_dialog_host(&ctx, dispatched, changed);
+        if changed {
+            // A command applied after publication wakes the viewports. The
+            // detached windows get their snapshot and their wake-up now, not
+            // from the next root pass: when one of them covers the root, that
+            // pass runs only every 100 ms (`docs/windows.md`, #457), and the
+            // result of a click would wait for two of them.
             ctx.request_repaint();
+            self.republish_detached_tabs(&ctx);
         }
         self.screenshot(&ctx);
         self.autoquit(&ctx);
@@ -1308,7 +1352,8 @@ impl StokesForgeApp {
     }
 
     /// Paints the dialogs after the CentralPanel, before the deferred application.
-    fn show_edit_dialogs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    /// Returns whether the language changed.
+    fn show_edit_dialogs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
         // Import window (`Action::ImportFiles`, see the top doc of
         // [`import_window`]): a transient dialog, painted as long as
         // `self.state.import_state()` is `Some`, rather than one more floating
@@ -1328,7 +1373,8 @@ impl StokesForgeApp {
         formula_functions_window(ctx, &self.state, actions);
         let about_logo = self.about_logo(ctx);
         about_window(ctx, &self.state, about_logo, actions);
-        if let Some(language) = preferences_window(ctx, &self.state, actions) {
+        let language = preferences_window(ctx, &self.state, actions);
+        if let Some(language) = language {
             self.choose_language(language);
         }
         analysis_window(ctx, &mut self.state, actions);
@@ -1340,6 +1386,7 @@ impl StokesForgeApp {
         full_copy_window(ctx, &self.state, actions);
         recovery_window(ctx, &self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
+        language.is_some()
     }
 
     /// Applies the stack changes only after the windows are painted.
@@ -1393,7 +1440,9 @@ impl StokesForgeApp {
             // requests of the detached viewports are also blocked.
             actions.clear();
         }
-        confirmations::show(ctx, &self.state, actions);
+        if self.dialog_hosting.host.is_none() {
+            confirmations::show(ctx, &self.state, actions);
+        }
     }
 
     /// A save, or a gesture that may replace the project, takes the entries
@@ -2228,7 +2277,7 @@ mod tests {
     }
 
     #[test]
-    fn a_detached_command_schedules_the_publication_of_its_result() {
+    fn a_detached_command_publishes_its_result_in_the_pass_that_applied_it() {
         use eframe::App as _;
         let (session, _graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -2273,7 +2322,7 @@ mod tests {
                 row: 0,
                 text: "42".into(),
             });
-        let mut output = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
+        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
         output.textures_delta.clear();
         assert_eq!(
             output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
@@ -2281,11 +2330,13 @@ mod tests {
             "the command changed the snapshot after painting"
         );
         assert_eq!(app.state.cell_text(column, 0), "42");
-        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
-        output.textures_delta.clear();
+        // #457: the same root pass already published the result and woke the
+        // detached window, so a root that is only repainted every 100 ms (a
+        // detached window covers it) does not make the result wait for two.
         assert_eq!(
             output.viewport_output[&egui::ViewportId::from_hash_of(tab)].repaint_delay,
-            Duration::ZERO
+            Duration::ZERO,
+            "the detached window is woken in the pass that applied the command"
         );
         assert_eq!(
             app.detached_tabs[&tab]
@@ -2297,7 +2348,7 @@ mod tests {
                 .unwrap()
                 .revision,
             app.state.revision(),
-            "the scheduled frame publishes the result"
+            "the pass publishes the result itself"
         );
         session.shutdown().unwrap();
     }
