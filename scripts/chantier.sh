@@ -446,21 +446,19 @@ Steps, in order:
  1. Read each issue, ALL its comments, the siblings, `git worktree list`
     (stokesforge-feature, section 1); `scripts/suivi.py status`; never edit .suivi.
  2. Agent `perimetre` first: scope; edge cases tagged stated / default / changes behaviour (last = card).
- 3. One start form (stokesforge-bug-report/references/decision-form.md), posed with
-    `scripts/suivi.py qcm pose <n> data.js --title "..."`; read it with `suivi.py qcm
-    answers <id>`; Artifact only as fallback. First card: one-line understanding of the
-    issue; a package: second card = the sub-issue list and order. Lots no answer can
-    change start at pose; name the running lots in the report and in `set --what`.
+ 3. One start form (stokesforge-bug-report/references/decision-form.md): `scripts/suivi.py qcm
+    pose <n> data.js --title "..."`, read with `suivi.py qcm answers <id>`; Artifact only as
+    fallback. First card: one-line understanding; a package: second card = sub-issue list and
+    order. Lots no answer can change start at pose; name them in the report and in `set --what`.
  4. Each change of state: `scripts/suivi.py set <n> --state questions|code|essai|fusion
     --what "..." [--wait you|dep|ag --waiting "..."]` (a note is erased by the next `set`).
- 5. Sonnet implements in the worktree (CLAUDE.md, "Delegation"). Visible change: a
-    pre-trial agent walks the detailed checks in the real app, fixes, re-verifies, then
-    `suivi.py test add` (stokesforge-verification/references/suivi.md, Pre-trial); then
-    `scripts/try.sh <n>` opens the branch on the user's screen.
- 6. All trial entries OK: announce it. Go-ahead = the page's merge button (reported by the wait) or the
-    user's word; then merge from the main checkout with `scripts/deliver.sh <n> <message-file>`.
-    No CI polling: report, close, release; `suivi.py serve` shows red on the page. Read the CI only
-    for a tag, a release or a change to CI itself. The next sub-issue does not wait.
+ 5. Sonnet implements in the worktree (CLAUDE.md, "Delegation"). Visible change: a pre-trial
+    agent walks the checks in the real app, fixes, re-verifies, then `suivi.py test add`
+    (stokesforge-verification/references/suivi.md); then `scripts/try.sh <n>` opens the branch.
+ 6. All trial entries OK: announce it. Go-ahead = the page's merge button or the user's word;
+    then, from the main checkout, `scripts/deliver.sh <n> <message-file>`. No CI polling: report,
+    close, release (`suivi.py serve` shows red on the page); read the CI only for a tag, a
+    release or a change to CI itself. The next sub-issue does not wait.
  7. Follow-ups: suivi.py test add; wrong commit: test merged --replace <old>.
     Nothing to launch: the PostToolUse hook arms `suivi.py wait` after a suivi.py call on your issue.
  8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
