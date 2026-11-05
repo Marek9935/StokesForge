@@ -436,13 +436,16 @@ for x in "${names[@]}"; do tags="${tags:+$tags · }$x"; done
 # The user tells parallel terminals apart by this tag, without reading (#418).
 echo "Start EVERY message to the user with: $tags"
 echo "Tracking page: $SF_TO_TEST_URL"
+# Answers that arrived while no session owned the issue (#454): print and record them.
+if [ "$dry" = 0 ]; then
+    for n in "${issues[@]}"; do suivi news "$n" 2>/dev/null || true; done
+fi
 cat <<'BRIEFING'
 Several issues: one worktree each, one session. Never work in another worktree.
 Steps, in order:
  1. Read each issue, ALL its comments, the siblings, `git worktree list`
     (stokesforge-feature, section 1); `scripts/suivi.py status`; never edit .suivi.
- 2. Agent `perimetre` first: scope and edge cases, each tagged stated by the issue /
-    obvious default / changes behaviour (only the last becomes a card).
+ 2. Agent `perimetre` first: scope; edge cases tagged stated / default / changes behaviour (last = card).
  3. One start form (stokesforge-bug-report/references/decision-form.md), posed with
     `scripts/suivi.py qcm pose <n> data.js --title "..."`; read it with `suivi.py qcm
     answers <id>`; Artifact only as fallback. First card: one-line understanding of the
@@ -454,11 +457,12 @@ Steps, in order:
     pre-trial agent walks the detailed checks in the real app, fixes, re-verifies, then
     `suivi.py test add` (stokesforge-verification/references/suivi.md, Pre-trial); then
     `scripts/try.sh <n>` opens the branch on the user's screen; their OK is the go-ahead.
- 6. Merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock,
-    merge, push, trial entries). No CI polling: report, close, release; the watcher of
-    `suivi.py serve` shows red on the tracking page. Read the CI only for a tag, a release or a change to
-    CI itself. The next sub-issue does not wait.
- 7. Follow-up entries: suivi.py test add; a wrong commit: test merged --replace <old>.
+ 6. All trial entries OK is not the merge go-ahead: announce it, wait for the user's word. Then
+    merge from the main checkout with `scripts/deliver.sh <n> <message-file>` (lock, merge, push,
+    trial entries). No CI polling: report, close, release; `suivi.py serve` shows red on the page.
+    Read the CI only for a tag, a release or a change to CI itself. The next sub-issue does not wait.
+ 7. Follow-ups: suivi.py test add; wrong commit: test merged --replace <old>.
+    TODO(#454, coordinator): how to launch `suivi.py wait <n>` after `qcm pose` / `test add`.
  8. Clean up: `chantier.sh --release <n>` (copy its line in the report); a package
     stopping with no worktree: `--pause <parent>`; after its last sub-issue: `--done`.
 BRIEFING

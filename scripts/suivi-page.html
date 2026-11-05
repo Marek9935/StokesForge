@@ -207,28 +207,41 @@ const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
 function cardLine(c,tests,qcms){
   const members=new Set([c.issue].concat(c.issues||[],((c.package&&c.package.subs)||c.subs||[]).map(s=>s.n)).filter(n=>n!=null).map(Number));
   const qcmOpen=(qcms||[]).some(q=>members.has(Number(q.issue)));
-  const todo=(tests||[]).filter(t=>(t.status||'todo')==='todo'&&members.has(Number(t.n!=null?t.n:t.issue))).length;
+  const mine=(tests||[]).filter(t=>members.has(Number(t.n!=null?t.n:t.issue)));
+  const todo=mine.filter(t=>(t.status||'todo')==='todo').length;
+  const tried=mine.filter(t=>t.try);      // merged entries (no `try`) do not count
+  const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok');
   const held=c.held_by||[];
   const note=typeof c.waiting==='string'?c.waiting.trim():'';
   const noteYou=note!==''&&c.wait_kind==='you';
   const parts=[];
   if(qcmOpen)parts.push('répondre au questionnaire');
   if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
+  if(readyToMerge)parts.push('écrire à l’agent pour fusionner');
   if(noteYou)parts.push(note);
   const you=parts.length>0;
   const agent=held.includes('agent');
   const idle=(c.agent_idle_min==null||isNaN(Number(c.agent_idle_min)))?null:Number(c.agent_idle_min);
   const stopped=idle!==null&&idle>=IDLE_MIN;
+  const known=c.listening!==undefined;      // an old server does not send it: keep the old texts
+  const hearing=known&&c.listening===true;
+  const away=idle===null||stopped;          // the agent is not visibly at work
   let text,also='';
   if(you){
     text='À toi : '+parts.join(' · ');
-    if(agent)also=idle===null?'session ouverte':stopped?'agent à l’arrêt, rien ne bouge sans toi':'l’agent travaille';
+    if(parts.length===1&&readyToMerge)also='';
+    else if(agent){
+      if(hearing&&away)also='l’agent écoute, il repart à ta réponse';
+      else if(known&&stopped)also='agent à l’arrêt, écris-lui après ta réponse';
+      else also=idle===null?'session ouverte':stopped?'agent à l’arrêt, rien ne bouge sans toi':'l’agent travaille';
+    }
     else if(!held.includes('legacy'))also='rien ne bouge sans toi';
   }else if(agent){
-    text=idle===null?'Session ouverte':!stopped?'L’agent travaille':
+    text=hearing&&away?'L’agent écoute':idle===null?'Session ouverte':!stopped?'L’agent travaille':
       'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
   }
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
+  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:noteYou?'':note};
   else text='En pause';
   return {user:you,text:text,also:also,note:noteYou?'':note};
 }

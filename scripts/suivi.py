@@ -52,13 +52,15 @@ was reported (only suivi.py writes it, just before printing; another session sta
 `.suivi/waits/<root>.json` {pid, pid_start, session, started} registers the wait (stale = pid_start
 mismatch), `waits/log` records SIGTERM/SIGHUP. When to wake is ONE function, `should_wake`. A wait never
 holds a colour and never writes issues/ or tests/. `news <n>` prints and records the unseen events.
-Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (grouping delay, seconds).
+Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or comment, default 180 s).
+`hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
+or tells a new session which issues hold unread answers; it always exits 0.
 
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
-members, is-package, session-end, wait, news, serve (the local page, 127.0.0.1 only),
+members, is-package, session-end, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|list, qcm pose|answers|list, import-online.
 """
 import argparse
@@ -763,20 +765,25 @@ def wait_poll():
 
 def wait_settle():
     try:
-        return max(0.0, float(os.environ.get("SF_SUIVI_WAIT_SETTLE", "0")))
+        return max(0.0, float(os.environ.get("SF_SUIVI_WAIT_SETTLE", "180")))
     except ValueError:
-        return 0.0
+        return 180.0
 
 
-def should_wake(events, now, first_seen, settle):
-    """THE wake policy (#454), the only place that decides. `events` are the unseen ones,
-    `first_seen[(id, fp)]` when this wait first saw each, `settle` the grouping delay in seconds.
-    For now: wake on every event, no grouping."""
+def should_wake(events, todos, last_change, now, settle):
+    """THE wake policy (#454), the only place that decides. `events` are the unseen ones
+    (kind, status, comment), `todos` the watched `try` entries still `todo`, `last_change` the time
+    of the latest change of any watched entry, `settle` the delay in seconds.
+    Wake only when the agent has something to do: a finished form, or no `todo` left (at once);
+    a Retour or a comment while entries remain `todo` (settle after the last change of any entry,
+    each change restarting it). A plain OK with `todo` left wakes nothing and stays unseen."""
     if not events:
         return False
-    if settle <= 0:
+    if any(e["kind"] == "form" for e in events) or todos == 0:
         return True
-    return now - min(first_seen[(e["id"], e["fp"])] for e in events) >= settle
+    if any(e["status"] == "retour" or e["comment"] for e in events):
+        return now - last_change >= settle
+    return False
 
 
 def waits_dir():
@@ -810,8 +817,12 @@ def scan_group(members):
             status, comment = t.get("status", "todo"), str(t.get("comment") or "").strip()
             if status == "todo":
                 todos.append(tid)
-            items[tid] = {"id": tid, "fp": "%s|%s" % (status, comment),
-                          "line": "%s %s%s" % (tid, status, ": " + comment if comment else "")}
+            try:
+                mtime = os.stat(p).st_mtime
+            except OSError:
+                mtime = 0.0
+            items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime,
+                          "fp": "%s|%s" % (status, comment), "line": "%s %s%s" % (tid, status, ": " + comment if comment else "")}
         for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
             qid = os.path.basename(os.path.dirname(p))
             meta = read_json(p)
@@ -823,7 +834,8 @@ def scan_group(members):
             ans = load_answers(qid)
             digest = hashlib.sha1(json.dumps(ans, sort_keys=True).encode("utf-8")).hexdigest()[:16]
             pr = qcm_progress(qid, meta)
-            items["qcm:" + qid] = {"id": "qcm:" + qid, "fp": "finished|" + digest,
+            items["qcm:" + qid] = {"id": "qcm:" + qid, "kind": "form", "status": "", "comment": "", "mtime": 0.0,
+                                   "fp": "finished|" + digest,
                                    "line": "form %s finished, %d/%d answered, read with: suivi.py qcm answers %s"
                                            % (qid, pr["answered"], pr["total"], qid)}
     return items, forms, todos
@@ -957,7 +969,6 @@ def cmd_wait(a):
 
 def wait_loop(a, sid, root):
     started = time.time()
-    first_seen = {}
     poll, settle = wait_poll(), wait_settle()
     timeout = WAIT_TIMEOUT if a.timeout is None else a.timeout
     while True:
@@ -970,9 +981,8 @@ def wait_loop(a, sid, root):
         items, forms, todos = scan_group(members_of(recs, root))
         events = unseen_events(items, load_heard(root, sid))
         now = time.time()
-        for e in events:
-            first_seen.setdefault((e["id"], e["fp"]), now)
-        if should_wake(events, now, first_seen, settle):
+        last_change = max([it["mtime"] for it in items.values() if it["kind"] == "test"], default=0.0)
+        if should_wake(events, len(todos), last_change, now, settle):
             report_events(a.issue, root, sid, events, forms, todos)
             return 0
         if not events and not forms and not todos:
@@ -1004,6 +1014,58 @@ def hint_not_listening(n):
     if not listening(recs, root):
         sys.stderr.write("suivi: nobody is listening for #%d: run in the background "
                          "python3 scripts/suivi.py wait %d\n" % (n, n))
+
+
+def fast_state_dir():
+    """The state folder without a git call, from $CLAUDE_PROJECT_DIR (main checkout or a worktree
+    beside it); None when it cannot be told."""
+    if os.environ.get("SF_SUIVI_DIR"):
+        return os.environ["SF_SUIVI_DIR"]
+    proj = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not proj:
+        return None
+    proj = os.path.abspath(proj)
+    if re.fullmatch(r"feature\d+[a-z]*", os.path.basename(proj)) and os.path.basename(os.path.dirname(proj)) == "_stokesforge":
+        return os.path.join(os.path.dirname(proj), ".suivi")
+    return os.path.join(os.path.dirname(proj), "_stokesforge", ".suivi")
+
+
+def cmd_hook_news(a):
+    """SessionStart / UserPromptSubmit hook: reads {session_id, ...} on stdin. Never fails (exit 2
+    would block the user's message), takes no lock, spends no git call."""
+    try:
+        sid = str(json.loads(sys.stdin.read())["session_id"])
+        d = fast_state_dir()
+        if not sid or not d or not os.path.isdir(os.path.join(d, "issues")):
+            return 0
+        os.environ["SF_SUIVI_DIR"] = d
+        recs = load_all()
+        roots = {}
+        for r in recs.values():
+            if not r.get("done_at"):
+                roots.setdefault(group_of(r), recs.get(group_of(r)) or r)
+        mine = sorted(g for g, b in roots.items() if owner_session(b) == sid)
+        if mine:
+            for g in mine:
+                items, forms, todos = scan_group(members_of(recs, g))
+                events = unseen_events(items, load_heard(g, sid))
+                if events:
+                    report_events(g, g, sid, events, forms, todos)
+                if (forms or todos) and live_wait(g) is None:
+                    print("no wait running for #%d: arm it (python3 scripts/suivi.py wait %d)" % (g, g))
+        else:
+            late = []
+            for g, b in sorted(roots.items()):
+                if b.get("owner") and owner_alive(b):
+                    continue
+                items, _, _ = scan_group(members_of(recs, g))
+                if unseen_events(items, load_heard(g, owner_session(b))):
+                    late.append("#%d" % g)
+            if late:
+                print("Answers wait for %s (no live session owns them): lance <n> reads them." % ", ".join(late))
+    except Exception:
+        pass
+    return 0
 
 
 # ------------------------------------------------------------ trial entries
@@ -1835,6 +1897,7 @@ def parser():
     p = add("is-package", cmd_is_package, "exit 0 if the issue is a package")
     p.add_argument("issue", type=int)
     add("session-end", cmd_session_end, "SessionEnd hook: reads {session_id, reason} on stdin")
+    add("hook-news", cmd_hook_news, "SessionStart/UserPromptSubmit hook: reads {session_id} on stdin, always exits 0")
     p = add("wait", cmd_wait, "block until a trial entry is answered or a form finished (background; #454)")
     p.add_argument("issue", type=int)
     p.add_argument("--timeout", type=float, metavar="S", help="seconds before giving up (default 72 h)")
