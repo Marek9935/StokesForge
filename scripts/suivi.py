@@ -42,11 +42,23 @@ timeout, unparsable, stale file older than 3 polls) is `unknown`, never green. A
 `last_red` until a newer head is green. The colour rule and the
 `pending` count do not depend on it.
 
+WAIT (#454). `wait <n> [--timeout S]` blocks, polling local files every 5 s, until an event the
+agent must read: a trial entry of the issue's package answered (status or comment changed) or a
+decision form finished. It prints one line per event and a last line (what stays open, whether to
+re-arm), then exits 0 so a background run wakes the agent. It also exits 0 with one line when there
+is nothing left to wait for (done, paused, taken, session gone, nothing open) or after 72 h. Exit 1:
+no record, or the session is not the owner. `.suivi/heard/<root>.json` {session, seen} remembers what
+was reported (only suivi.py writes it, just before printing; another session starts afresh).
+`.suivi/waits/<root>.json` {pid, pid_start, session, started} registers the wait (stale = pid_start
+mismatch), `waits/log` records SIGTERM/SIGHUP. When to wake is ONE function, `should_wake`. A wait never
+holds a colour and never writes issues/ or tests/. `news <n>` prints and records the unseen events.
+Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (grouping delay, seconds).
+
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
-members, is-package, session-end, serve (the local page, 127.0.0.1 only),
+members, is-package, session-end, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|list, qcm pose|answers|list, import-online.
 """
 import argparse
@@ -60,6 +72,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -499,11 +512,14 @@ def cmd_is_package(a):
     return 0 if r and r.get("kind") == "package" else 1
 
 
+def members_of(recs, n):
+    ids = [n] + [x["issue"] for x in recs.values() if x.get("parent") == n]
+    ids += [s["n"] for s in (recs.get(n) or {}).get("subs", [])]
+    return sorted(set(ids))
+
+
 def cmd_members(a):
-    recs = load_all()
-    ids = [a.issue] + [x["issue"] for x in recs.values() if x.get("parent") == a.issue]
-    ids += [s["n"] for s in (recs.get(a.issue) or {}).get("subs", [])]
-    print(" ".join(str(i) for i in sorted(set(ids))))
+    print(" ".join(str(i) for i in members_of(load_all(), a.issue)))
     return 0
 
 
@@ -585,6 +601,7 @@ def build_status():
             "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
             "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
+            **wait_view(recs, g),
             "worktrees": group_wts(g), "since": since, "days": days})
     paused, done = [], []
     for r in recs.values():
@@ -595,12 +612,14 @@ def build_status():
             paused.append({"issue": r["issue"], "kind": r.get("kind", "issue"), "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": r.get("subs", []),
                            "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
+                           **wait_view(recs, r["issue"]),
                            "worktrees": group_wts(r["issue"]), "since": since, "days": days})
         elif not held_by(r):
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": "issue", "parent": r["parent"], "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": [],
                            "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
+                           **wait_view(recs, group_of(r)),
                            "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
     done.sort(key=lambda d: (d["done_at"], d["issue"]), reverse=True)
     return {"colours": colours, "paused": sorted(paused, key=lambda p: p["issue"]),
@@ -730,6 +749,263 @@ def cmd_session_end(a):
     return 0
 
 
+# -------------------------------------------------------------------- wait
+WAIT_TIMEOUT = 72 * 3600     # wall clock, then the wait says so and the agent re-arms
+BASE_FP = "todo|"            # fingerprint of a trial entry nobody answered: not an event
+
+
+def wait_poll():
+    try:
+        return max(0.01, float(os.environ.get("SF_SUIVI_WAIT_POLL", "5")))
+    except ValueError:
+        return 5.0
+
+
+def wait_settle():
+    try:
+        return max(0.0, float(os.environ.get("SF_SUIVI_WAIT_SETTLE", "0")))
+    except ValueError:
+        return 0.0
+
+
+def should_wake(events, now, first_seen, settle):
+    """THE wake policy (#454), the only place that decides. `events` are the unseen ones,
+    `first_seen[(id, fp)]` when this wait first saw each, `settle` the grouping delay in seconds.
+    For now: wake on every event, no grouping."""
+    if not events:
+        return False
+    if settle <= 0:
+        return True
+    return now - min(first_seen[(e["id"], e["fp"])] for e in events) >= settle
+
+
+def waits_dir():
+    return os.path.join(suivi_dir(), "waits")
+
+
+def heard_path(root):
+    return os.path.join(suivi_dir(), "heard", "%d.json" % root)
+
+
+def load_heard(root, sid):
+    d = read_json(heard_path(root))
+    if isinstance(d, dict) and sid and d.get("session") == sid and isinstance(d.get("seen"), dict):
+        return d["seen"]
+    return {}
+
+
+def save_heard(root, sid, seen):
+    write_json(heard_path(root), {"session": sid, "seen": seen})
+
+
+def scan_group(members):
+    """(items, open_forms, open_todos) for the issues in `members`. items: key -> {id, fp, line}."""
+    items, forms, todos = {}, [], []
+    for m in members:
+        for p in sorted(glob.glob(os.path.join(tests_dir(), "%s-*.json" % m)), key=natural):
+            tid = os.path.basename(p)[:-5]
+            t = read_json(p)
+            if not safe_id(tid) or not isinstance(t, dict) or "try" not in t:
+                continue
+            status, comment = t.get("status", "todo"), str(t.get("comment") or "").strip()
+            if status == "todo":
+                todos.append(tid)
+            items[tid] = {"id": tid, "fp": "%s|%s" % (status, comment),
+                          "line": "%s %s%s" % (tid, status, ": " + comment if comment else "")}
+        for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
+            qid = os.path.basename(os.path.dirname(p))
+            meta = read_json(p)
+            if not safe_id(qid) or not isinstance(meta, dict) or not re.fullmatch(r"%d-\d+" % m, qid):
+                continue
+            if not meta.get("finished"):
+                forms.append(qid)
+                continue
+            ans = load_answers(qid)
+            digest = hashlib.sha1(json.dumps(ans, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+            pr = qcm_progress(qid, meta)
+            items["qcm:" + qid] = {"id": "qcm:" + qid, "fp": "finished|" + digest,
+                                   "line": "form %s finished, %d/%d answered, read with: suivi.py qcm answers %s"
+                                           % (qid, pr["answered"], pr["total"], qid)}
+    return items, forms, todos
+
+
+def unseen_events(items, seen):
+    out = []
+    for key in sorted(items, key=natural):
+        it = items[key]
+        if seen.get(key, None if key.startswith("qcm:") else BASE_FP) != it["fp"]:
+            out.append(it)
+    return out
+
+
+def owner_session(b):
+    return str(((b or {}).get("owner") or {}).get("session", ""))
+
+
+def wait_context(n):
+    """(session id, root, records, base record). Fails when there is no record or the session is not the owner."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    recs = load_all()
+    r = recs.get(n)
+    if r is None:
+        raise Fail("no record for #%d (run scripts/chantier.sh %d first)" % (n, n))
+    root = group_of(r)
+    b = recs.get(root) or r
+    if not sid or owner_session(b) != sid:
+        raise Fail("this session does not own #%d: scripts/chantier.sh %d claims it" % (n, root))
+    return sid, root, recs, b
+
+
+def live_wait(root):
+    """The live registration of a wait on `root`, or None (stale = pid_start mismatch)."""
+    reg = read_json(os.path.join(waits_dir(), "%d.json" % root))
+    if not isinstance(reg, dict):
+        return None
+    st = pid_start(reg.get("pid", -1))
+    return reg if st is not None and st == reg.get("pid_start") else None
+
+
+def listening(recs, root):
+    sid = owner_session(recs.get(root))
+    reg = live_wait(root)
+    return bool(sid and reg and reg.get("session") == sid)
+
+
+def wait_view(recs, root):
+    """Computed `listening` and `unread` of a group: steady values, no timestamp (ETag)."""
+    items, _, _ = scan_group(members_of(recs, root))
+    sid = owner_session(recs.get(root))
+    return {"listening": listening(recs, root), "unread": len(unseen_events(items, load_heard(root, sid)))}
+
+
+def exit_reason(b, sid):
+    """The word and sentence of an exit decided from the record alone, or None."""
+    end = "nothing to do, end the turn without a message."
+    if b is None:
+        return "paused: the record is gone; " + end
+    if b.get("done_at"):
+        return "done: the issue is done; " + end
+    if not b.get("owner"):
+        return "paused: the issue is paused; " + end
+    if owner_session(b) != sid:
+        return "taken: another session owns the issue; " + end
+    if not owner_alive(b):
+        return "session gone: the owner session has ended; " + end
+    return None
+
+
+def open_summary(n, forms, todos):
+    parts = []
+    if forms:
+        parts.append("%d open form%s" % (len(forms), "" if len(forms) == 1 else "s"))
+    if todos:
+        parts.append("%d trial entr%s to tick" % (len(todos), "y" if len(todos) == 1 else "ies"))
+    if not parts:
+        return "Nothing else is open."
+    return "Still open: %s. Re-arm: python3 scripts/suivi.py wait %d" % (", ".join(parts), n)
+
+
+def report_events(n, root, sid, events, forms, todos):
+    seen = load_heard(root, sid)
+    for e in events:
+        seen[e["id"]] = e["fp"]
+    save_heard(root, sid, seen)
+    for e in events:
+        print(e["line"])
+    print(open_summary(n, forms, todos), flush=True)
+
+
+def log_wait(text):
+    try:
+        os.makedirs(waits_dir(), exist_ok=True)
+        with open(os.path.join(waits_dir(), "log"), "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (datetime.datetime.now().isoformat(timespec="seconds"), text))
+    except Exception:
+        pass
+
+
+def cmd_wait(a):
+    os.environ["SF_SUIVI_DIR"] = suivi_dir()      # frozen: no git fork per tick, survives a removed cwd
+    sid, root, recs, _ = wait_context(a.issue)
+    me = os.getpid()
+    mine = os.path.join(waits_dir(), "%d.json" % root)
+    with Lock():
+        reg = live_wait(root)
+        if reg is not None and reg.get("pid") != me:
+            if reg.get("session") == sid:
+                print("already listening: a wait on #%d is running (pid %s); nothing to do." % (root, reg.get("pid")))
+                return 0
+            raise Fail("another session already waits on #%d" % root)
+        write_json(mine, {"pid": me, "pid_start": pid_start(me), "session": sid, "started": time.time()})
+
+    def on_signal(signum, frame):
+        log_wait("%s pid=%d #%d session=%s" % (signal.Signals(signum).name, me, root, sid))
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGHUP, on_signal)
+    try:
+        return wait_loop(a, sid, root)
+    finally:
+        reg = read_json(mine)
+        if isinstance(reg, dict) and reg.get("pid") == me:
+            try:
+                os.unlink(mine)
+            except OSError:
+                pass
+
+
+def wait_loop(a, sid, root):
+    started = time.time()
+    first_seen = {}
+    poll, settle = wait_poll(), wait_settle()
+    timeout = WAIT_TIMEOUT if a.timeout is None else a.timeout
+    while True:
+        recs = load_all()
+        b = recs.get(root) or recs.get(a.issue)
+        line = exit_reason(b, sid)
+        if line:
+            print(line, flush=True)
+            return 0
+        items, forms, todos = scan_group(members_of(recs, root))
+        events = unseen_events(items, load_heard(root, sid))
+        now = time.time()
+        for e in events:
+            first_seen.setdefault((e["id"], e["fp"]), now)
+        if should_wake(events, now, first_seen, settle):
+            report_events(a.issue, root, sid, events, forms, todos)
+            return 0
+        if not events and not forms and not todos:
+            print("nothing open: no open form, no trial entry to tick, nothing unread; "
+                  "nothing to do, end the turn without a message.", flush=True)
+            return 0
+        if now - started >= timeout:
+            print("timeout: nothing happened for %d h. Re-arm: python3 scripts/suivi.py wait %d"
+                  % (max(1, int(timeout // 3600)), a.issue), flush=True)
+            return 0
+        time.sleep(min(poll, max(0.01, started + timeout - now)))
+
+
+def cmd_news(a):
+    sid, root, recs, _ = wait_context(a.issue)
+    items, forms, todos = scan_group(members_of(recs, root))
+    events = unseen_events(items, load_heard(root, sid))
+    if not events:
+        print("no news. " + open_summary(a.issue, forms, todos))
+        return 0
+    report_events(a.issue, root, sid, events, forms, todos)
+    return 0
+
+
+def hint_not_listening(n):
+    recs = load_all()
+    r = recs.get(n)
+    root = group_of(r) if r else n
+    if not listening(recs, root):
+        sys.stderr.write("suivi: nobody is listening for #%d: run in the background "
+                         "python3 scripts/suivi.py wait %d\n" % (n, n))
+
+
 # ------------------------------------------------------------ trial entries
 ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
 TEST_FIELDS = {"title": str, "intro": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
@@ -826,6 +1102,7 @@ def cmd_test_add(a):
             write_json(test_path("%d-%d" % (a.issue, k)), t)
             ids.append("%d-%d" % (a.issue, k))
     print(" ".join(ids))
+    hint_not_listening(a.issue)
     return 0
 
 
@@ -1073,6 +1350,7 @@ def cmd_qcm_pose(a):
                                               "cards": cards, "finished": False})
     print(qid)
     print("http://127.0.0.1:%d/qcm/%s" % (int(os.environ.get("SF_SUIVI_PORT", "8441")), qid))
+    hint_not_listening(a.issue)
     return 0
 
 
@@ -1557,6 +1835,11 @@ def parser():
     p = add("is-package", cmd_is_package, "exit 0 if the issue is a package")
     p.add_argument("issue", type=int)
     add("session-end", cmd_session_end, "SessionEnd hook: reads {session_id, reason} on stdin")
+    p = add("wait", cmd_wait, "block until a trial entry is answered or a form finished (background; #454)")
+    p.add_argument("issue", type=int)
+    p.add_argument("--timeout", type=float, metavar="S", help="seconds before giving up (default 72 h)")
+    p = add("news", cmd_news, "print and record the events not yet reported to this session")
+    p.add_argument("issue", type=int)
     p = add("serve", cmd_serve, "serve the local tracking page on 127.0.0.1 only")
     p.add_argument("--port", type=int, help="default 8441 (env SF_SUIVI_PORT); 0 = any free port")
     p.add_argument("--state", help="state folder (default: ../_stokesforge/.suivi)")
