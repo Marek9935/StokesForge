@@ -24,6 +24,13 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Fixed
+
+- A detached window can be grabbed by its title, or resized by its edges, every
+  time (#457): before, on Wayland, every second grab did nothing, and moving a
+  window could then extend the selected columns of a sheet when the mouse
+  passed over the column letters. Present on `main` too.
+
 ### Changed
 
 - Pasting a formula that cannot be read behaves like typing it (#433): it is

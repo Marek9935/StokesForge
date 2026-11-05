@@ -181,6 +181,17 @@ the start of the frame (`begin_layout_frame`) and at the top of a detached viewp
 inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard
 a frame ago (`note_field_focus`) they stand aside.
 
+## Moving and resizing a detached window (#457)
+
+A detached window has no OS decoration: its title (`window_chrome.rs`,
+`panel_header`, `window_header`) and eight edge zones (`detached_resize_handles`)
+hand the gesture to the compositor. That goes only through `app/os_gesture.rs`
+(`start_drag`, `begin_resize`; guard `no_os_gesture_command_outside_the_helper`).
+On Wayland the compositor keeps the button release, so the helper plays it for
+egui at the head of the next pass of the same viewport (a pointer move too far
+for a click, then the releases), otherwise the title stays "dragged" and every
+second grab does nothing.
+
 ## Where a dialog is painted (#457)
 
 `app/dialog_host.rs`. A dialog is painted by the pass of **one** window, through

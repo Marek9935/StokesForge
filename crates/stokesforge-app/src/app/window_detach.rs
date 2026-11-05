@@ -17,6 +17,11 @@
 //! ([`StokesForgeApp::republish_detached_tabs`]), so one action waits for one
 //! throttle, not two.
 //!
+//! Moving and resizing a detached window is handed to the OS through
+//! [`super::os_gesture`], the only path for `StartDrag` / `BeginResize`: the
+//! compositor keeps the button release, so the helper plays it for egui
+//! (#457). Without it every second grab of a title or an edge did nothing.
+//!
 //! The dialogs of the application are painted by the detached window the user
 //! works in, at the end of its closure ([`super::dialog_host::host_pass`], #457),
 //! not by that covered root: see `dialog_host.rs`.
@@ -305,7 +310,7 @@ pub(super) struct DetachedScriptConsole {
 
 /// The detached panels have the home-made frame and a single window action.
 /// A close requested by the compositor becomes a reattach.
-fn detached_panel_contents(
+pub(super) fn detached_panel_contents(
     ui: &mut egui::Ui,
     title: &str,
     contents: impl FnOnce(&mut egui::Ui),
@@ -321,7 +326,7 @@ fn detached_panel_contents(
             let header = panel_header(ui, title, PanelPlacement::Detached, false);
             reattach = header.detach;
             if header.title_drag_started {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                super::os_gesture::start_drag(ui.ctx());
             }
             show_window_contents_bounded(ui, contents);
         });
@@ -1478,7 +1483,7 @@ impl DetachedTabViewport {
                 .send_viewport_cmd(egui::ViewportCommand::InnerSize(target));
         }
         if header_actions.title_drag_started {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            super::os_gesture::start_drag(ui.ctx());
         }
         if header_actions.maximize {
             let is_maximized = ui

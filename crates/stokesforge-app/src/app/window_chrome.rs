@@ -95,10 +95,10 @@ pub(super) struct WindowHeaderActions {
     /// detached caller, which prefers `title_drag_started`.
     pub(super) drag_delta: egui::Vec2,
     /// True on the frame where the title drag starts — it is the one the
-    /// detached caller uses to trigger
-    /// `ViewportCommand::StartDrag` only once, the OS window then taking
-    /// over the gesture (`drag_delta` would no longer be reliable once
-    /// the OS is in control of the pointer).
+    /// detached caller uses to hand the move to the OS only once, through
+    /// `os_gesture::start_drag` (the OS window then takes over the gesture and
+    /// `drag_delta` would no longer be reliable; the helper also releases the
+    /// pointer in egui, #457).
     pub(super) title_drag_started: bool,
 }
 
@@ -468,9 +468,10 @@ fn resize_handle_label(source: &str) -> String {
 /// decoration (`.with_decorations(false)`, see the top doc of
 /// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)): eight thin zones at the edges/corners of the
 /// viewport, which delegate resizing to the OS as soon as the drag
-/// starts (`ViewportCommand::BeginResize`) — same principle as
-/// `ViewportCommand::StartDrag` for moving the title: no delta
-/// computation on our side, the OS/window manager takes over.
+/// starts (`os_gesture::begin_resize`) — same principle as
+/// `os_gesture::start_drag` for moving the title: no delta
+/// computation on our side, the OS/window manager takes over, and the
+/// helper releases the pointer in egui so the next grab works (#457).
 pub(super) fn detached_resize_handles(ui: &egui::Ui) {
     const BORDER: f32 = 6.0;
     let rect = ui.ctx().input(|input| input.content_rect());
@@ -559,8 +560,7 @@ pub(super) fn detached_resize_handles(ui: &egui::Ui) {
             ui.ctx().set_cursor_icon(cursor);
         }
         if response.drag_started() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+            super::os_gesture::begin_resize(ui.ctx(), direction);
         }
     }
 }

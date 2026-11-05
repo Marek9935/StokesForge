@@ -183,7 +183,7 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 
 | Gesture | On | Effect |
 |---|---|---|
-| Drag | title bar | moves the window; outside the application, detaches it |
+| Drag | title bar | moves the window; outside the application, detaches it. A detached window hands the move (and a drag on its edges the resize) to the OS through `app/os_gesture.rs`, which also releases the pointer in egui so every grab works (#457) |
 | Drag | edge or corner | resizes |
 | Click | title bar icon | minimizes, detaches, closes (depending on the icon) |
 | Click | window behind | brings it to the front (the click also acts on what it targets in the window) |

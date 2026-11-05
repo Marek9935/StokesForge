@@ -24,7 +24,7 @@ callback that does not come while a redraw is wanted, only for a window that opt
 window: a reported window gets no pass and its input is dropped) (`frame_starvation.rs`, pure,
 `tests/wayland_frame_starvation.rs`); that is what lets eframe keep running a
 covered root, so a detached window may be maximised over it (Page Layout Mode).
-Never a periodic wake for it (#104). Recheck on any eframe upgrade; real-compositor
+Never a periodic wake for it (#104). Handing a gesture to the OS (`ViewportCommand::StartDrag` / `BeginResize`) goes only through `app/os_gesture.rs` (guard `no_os_gesture_command_outside_the_helper`): on Wayland the compositor keeps the button release, so the helper plays it for egui at the head of the next pass of that viewport (`Plugin::input_hook`); a plain send leaves the title "dragged", every second grab does nothing and hover extends the column selection (#457). Recheck on any eframe upgrade; real-compositor
 proof: `tests/wayland_covered_root.rs` (manual, headless mutter, GL backend).
 The empty graph goes through `AddGraph`; `SessionHandle::new_project`, like
 `load`, replaces the identity and empties the history after confirmation in the UI.

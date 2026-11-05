@@ -1532,6 +1532,73 @@ fn the_cursors_guard_sees_a_cursor_written_in_place() {
     .is_empty());
 }
 
+/// The commands that hand a pointer gesture to the OS, outside
+/// `app/os_gesture.rs`, `path:line` (#457). A plain send leaves the button
+/// down in egui when the compositor keeps the release.
+fn os_gesture_commands_outside_module(sources: &[SourceFile]) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in sources {
+        if file.path == "app/os_gesture.rs" {
+            continue;
+        }
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if starts_with_at(&source.mask, i, "ViewportCommand::StartDrag")
+                || starts_with_at(&source.mask, i, "ViewportCommand::BeginResize")
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+/// Rule #457: `StartDrag` and `BeginResize` are sent only by
+/// `app/os_gesture.rs`, which also releases the pointer in egui.
+#[test]
+fn no_os_gesture_command_outside_the_helper() {
+    let sources = sources::sources();
+    let offenders = os_gesture_commands_outside_module(&sources);
+    assert!(
+        offenders.is_empty(),
+        "hand a gesture to the OS through `os_gesture::start_drag` / `begin_resize`: {offenders:?}"
+    );
+}
+
+/// The witness: both commands written in place are seen; the helper, a
+/// comment and test code pass.
+#[test]
+fn the_os_gesture_guard_sees_a_plain_send() {
+    for code in [
+        "fn f(c: &Context) { c.send_viewport_cmd(egui::ViewportCommand::StartDrag); }",
+        "fn f(c: &Context) { c.send_viewport_cmd(ViewportCommand::BeginResize(d)); }",
+    ] {
+        assert_eq!(
+            os_gesture_commands_outside_module(&[file("app/e.rs", code)]).len(),
+            1,
+            "not seen: {code}"
+        );
+    }
+    for code in [
+        "fn f() {} // ViewportCommand::StartDrag",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { let _ = ViewportCommand::StartDrag; } }",
+    ] {
+        assert!(
+            os_gesture_commands_outside_module(&[file("app/e.rs", code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+    assert!(os_gesture_commands_outside_module(&[file(
+        "app/os_gesture.rs",
+        "fn f(c: &Context) { c.send_viewport_cmd(ViewportCommand::StartDrag); }"
+    )])
+    .is_empty());
+}
+
 /// Rule #227 (`docs/interface-standard.md`, § Choices, layout, S-L4): two
 /// spacing constants in `theme.rs`, no numeric `add_space`
 /// elsewhere.

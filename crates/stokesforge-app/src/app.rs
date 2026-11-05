@@ -168,6 +168,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod os_gesture;
 mod page_layout;
 mod panel_memory;
 #[cfg(test)]

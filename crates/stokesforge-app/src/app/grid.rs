@@ -4721,6 +4721,36 @@ mod tests {
         assert!(bench.state.is_column_selected(sheet, bench.columns[1]));
     }
 
+    /// #457: after a detached window handed a gesture to the OS, the release
+    /// is played for egui, so hovering a letter does not extend the selection
+    /// as if the button were still held.
+    #[test]
+    fn hovering_a_letter_after_an_os_gesture_does_not_extend_the_selection() {
+        let mut bench = Bench::new();
+        let sheet = bench.sheet;
+        let (a, c) = (letter(&bench, 0), letter(&bench, 2));
+        bench.click_on(&a);
+        assert!(bench.state.is_column_selected(sheet, bench.columns[0]));
+        // The press of a window title outside the grid, taken over by the OS.
+        let title = bench.center_of("before").unwrap();
+        let at_c = bench.center_of(&c).unwrap();
+        bench.image(vec![
+            egui::Event::PointerMoved(title),
+            egui::Event::PointerButton {
+                pos: title,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        super::super::os_gesture::start_drag(&bench.context);
+        bench.image(Vec::new());
+        bench.image(vec![egui::Event::PointerMoved(at_c)]);
+        bench.image(Vec::new());
+        assert!(bench.state.is_column_selected(sheet, bench.columns[0]));
+        assert!(!bench.state.is_column_selected(sheet, bench.columns[2]));
+    }
+
     #[test]
     fn shift_click_replaces_and_ctrl_shift_click_adds_a_range() {
         let mut bench = Bench::new();
