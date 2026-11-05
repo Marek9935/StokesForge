@@ -62,7 +62,7 @@ class ReportTest(unittest.TestCase):
             return {"total_count": len(self.jobs), "jobs": self.jobs}
         if "/pipelines?" in url:
             self.assertIn("sha=" + "a" * 40, url)
-            self.assertIn("ref=main", url)
+            self.assertIn("ref=" + self.event["workflow_run"]["head_branch"].replace("/", "%2F"), url)
             return self.pipeline
         return {"run_attempt": 2}
 
@@ -102,6 +102,30 @@ class ReportTest(unittest.TestCase):
         self.posts.clear()
         self.report()
         self.assertEqual([p["state"] for p in self.posts], ["canceled"] * len(status.JOBS))
+
+    def test_windows_jobs_are_reported_like_the_others(self):
+        for name in ("test-windows", "test-python-windows", "dist-windows"):
+            self.assertIn(name, status.JOBS)
+        self.report()
+        self.assertEqual({p["name"] for p in self.posts} >= {"github-actions/dist-windows"}, True)
+        self.posts.clear()
+        win = next(j for j in self.jobs if j["name"] == "test-windows")
+        win["conclusion"] = "failure"
+        self.report()
+        self.assertEqual([p["state"] for p in self.posts if p["name"] == "github-actions/test-windows"], ["failed"])
+
+    def test_windows_jobs_skipped_or_absent_on_a_feature_push_are_not_failures(self):
+        self.event["workflow_run"]["head_branch"] = "feature/1-x"
+        self.jobs = [j for j in self.jobs if "windows" not in j["name"]]
+        self.report()
+        by = {p["name"]: p["state"] for p in self.posts}
+        for name in ("test-windows", "test-python-windows", "dist-windows"):
+            self.assertEqual(by["github-actions/" + name], "skipped")
+        self.assertNotIn("failed", by.values())
+        self.posts.clear()
+        self.event["workflow_run"]["head_branch"] = "main"
+        self.report()
+        self.assertEqual({p["name"]: p["state"] for p in self.posts}["github-actions/dist-windows"], "failed")
 
     def test_failure_publishes_step_and_first_error_of_the_log(self):
         self.jobs[2]["conclusion"] = "failure"

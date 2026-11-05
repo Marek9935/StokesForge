@@ -113,16 +113,6 @@ fn some(v: &[f64]) -> Vec<Option<f64>> {
     v.iter().copied().map(Some).collect()
 }
 
-fn all_empty(t: &Tree, id: NodeId) -> bool {
-    let c = column(t, id);
-    !c.is_empty()
-        && (0..c.len()).all(|r| match c.get(r) {
-            Cell::Float(v) => v.is_nan(),
-            Cell::Text(Some(s)) => s == "---",
-            Cell::Text(None) => true,
-        })
-}
-
 fn enter(column: NodeId, start: usize, v: &[f64]) -> Command {
     Command::SetCells {
         column,
@@ -210,19 +200,14 @@ fn book_with_c() -> Project {
     p
 }
 
-/// DESIGN QUESTION. A same-project `InsertCopy` of a lone `A+B` column into
-/// its own sheet: `project.rs` (formula remap loop, "reservation with no node")
-/// reserves an identifier for every column outside the copy, even when the copy
-/// is local, so the pasted column reads `#REF+#REF` and is empty. Graph series
-/// do the opposite (a local copy keeps reading the original). The docs say
-/// "reads outside the copy becomes #REF" only for the external case
-/// (`docs/commands-and-history.md`, cross-project paragraph), and say "Within
-/// the same project, the dependencies are not inserted". The interface copies a
-/// column's formula through the grid clipboard (letters), not this path, so the
-/// object-level copy of a lone column is probably unreachable from the UI.
+/// A same-project `InsertCopy` of a lone `A+B` column into its own sheet reads
+/// the same columns (#433 point 4): `A+B` stays `A+B`, with the same values, and
+/// follows an edit of A. Into another sheet it reads `#REF` (core test
+/// `copy_formula_columns.rs`). The interface copies a column's formula through
+/// the grid clipboard (letters); this object-level copy is reachable from
+/// `pyst.duplicate`.
 #[test]
-// #433 point 4
-fn a_local_copy_of_a_lone_formula_column_reads_ref() {
+fn a_local_copy_of_a_lone_formula_column_reads_the_same_columns() {
     for mode in BOTH {
         let (_s, h) = spawn(book_with_c(), mode);
         let t = snap(&h).tree;
@@ -235,20 +220,66 @@ fn a_local_copy_of_a_lone_formula_column_reads_ref() {
         })
         .expect("paste");
         let t = snap(&h).tree;
+        let (c, c2) = (
+            colat(&t, "[Book1]Sheet1", "C"),
+            colat(&t, "[Book1]Sheet1", "C2"),
+        );
+        assert_eq!(t.formula_letters(c2).as_deref(), Some("A+B"), "{mode:?}");
+        assert_eq!(nums(&t, c2), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        assert_eq!(nums(&t, c), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        // Editing A reaches the copy.
+        h.execute(enter(colat(&t, "[Book1]Sheet1", "A"), 1, &[100.0]))
+            .expect("edit A");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, c2), some(&[11.0, 120.0, 33.0]), "{mode:?}");
+        // Undo the edit, then the paste; redo both.
+        h.undo().expect("undo edit");
+        h.undo().expect("undo paste");
+        assert!(snap(&h)
+            .tree
+            .child_by_name(sheet, "C2")
+            .expect("sheet")
+            .is_none());
+        h.redo().expect("redo paste");
+        h.redo().expect("redo edit");
+        let t = snap(&h).tree;
         let c2 = colat(&t, "[Book1]Sheet1", "C2");
+        assert_eq!(nums(&t, c2), some(&[11.0, 120.0, 33.0]), "{mode:?}");
+        let oracle = reloaded_full(&h, "local-copy");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
+/// Into another sheet of the same workbook: the local reads become `#REF`, the
+/// remote part is kept.
+#[test]
+fn a_copy_of_a_lone_formula_column_into_another_sheet_reads_ref() {
+    for mode in BOTH {
+        let mut p = book_with_c();
+        let t = p.tree().clone();
+        let book = node(&t, "[Book1]");
+        let s2 = p.add_worksheet(book, Some("Sheet2")).expect("Sheet2");
+        let s3 = p.add_worksheet(book, Some("Sheet3")).expect("Sheet3");
+        let x = add_col(&mut p, s3, "X", &[0.0, 1.0]);
+        set_x(&mut p, x);
+        add_col(&mut p, s3, "Y", &[5.0, 7.0]);
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        set_f(&mut p, c, "A+max(Sheet3!B)");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        h.execute(Command::InsertCopy {
+            parent: s2,
+            copy: NodeCopy::capture(&t, c).expect("capture"),
+            name: "C2".into(),
+        })
+        .expect("paste");
+        let t = snap(&h).tree;
+        let c2 = colat(&t, "[Book1]Sheet2", "C2");
         assert_eq!(
             t.formula_letters(c2).as_deref(),
-            Some("#REF+#REF"),
+            Some("#REF+max(Sheet3!B)"),
             "{mode:?}"
-        );
-        assert!(
-            all_empty(&t, c2) || nums(&t, c2).iter().all(Option::is_none),
-            "{mode:?}"
-        );
-        // The original is untouched.
-        assert_eq!(
-            nums(&t, colat(&t, "[Book1]Sheet1", "C")),
-            some(&[11.0, 22.0, 33.0])
         );
     }
 }
@@ -1216,11 +1247,62 @@ fn renames_recalculate_nothing_keep_values_and_round_trip() {
     }
 }
 
+// -- 9b. arithmetic NaN is a failed calculation (#433 point 1) ---------------------
+
+#[test]
+fn zero_over_zero_shows_a_failed_calculation_in_the_cell() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s = first_sheet(&p, book);
+        add_col(&mut p, s, "A", &[0.0, 1.0]);
+        let c = add_col(&mut p, s, "C", &[]);
+        set_f(&mut p, c, "A/A");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        assert_eq!(
+            column(&t, c).get(0),
+            Cell::Text(Some("---".into())),
+            "{mode:?}"
+        );
+        assert_eq!(nums(&t, c), vec![None, Some(1.0)], "{mode:?}");
+        let oracle = reloaded_full(&h, "zero-over-zero");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
+/// No point in the range: empty cells (not `---`): the NaN operand is not a
+/// failed calculation of the arithmetic.
+#[test]
+fn dividing_by_a_range_with_no_point_stays_empty() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s = first_sheet(&p, book);
+        let x = add_col(&mut p, s, "A", &[1.0, 2.0]);
+        set_x(&mut p, x);
+        add_col(&mut p, s, "B", &[3.0, 4.0]);
+        let c = add_col(&mut p, s, "C", &[]);
+        set_f(&mut p, c, "B/max(B, 100, 200)");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        assert!(nums(&t, c).iter().all(Option::is_none), "{mode:?}");
+        assert!(
+            (0..2).all(|r| column(&t, c).get(r) != Cell::Text(Some("---".into()))),
+            "{mode:?}"
+        );
+    }
+}
+
 // -- 10. a sheet whose only columns are formulas reading remote columns --------
 
 #[test]
 // #433 point 8
-fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
+fn a_sheet_holding_only_remote_formulas_has_at_least_one_row() {
     for mode in BOTH {
         let mut p = Project::new("P").expect("project");
         let root = p.root();
@@ -1240,16 +1322,8 @@ fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
             colat(&t, "[Book1]Sheet1", "F1"),
             colat(&t, "[Book1]Sheet1", "F2"),
         );
-        // recalc.rs `ordinary_len`: a sheet without an ordinary column has no
-        // row to broadcast into, so the result is empty. Pinned as a design
-        // question; the interface offers no way to give such a sheet rows other
-        // than typing into an ordinary column.
-        eprintln!(
-            "{mode:?} lengths {} {}",
-            column(&t, f1).len(),
-            column(&t, f2).len()
-        );
-        assert_eq!(column(&t, f1).len(), column(&t, f2).len());
+        assert_eq!(nums(&t, f1), some(&[300.0]), "{mode:?}");
+        assert_eq!(nums(&t, f2), some(&[200.0]), "{mode:?}");
         // Giving the sheet rows makes them appear, with the right values.
         h.execute(Command::AddColumn {
             sheet: node(&t, "[Book1]Sheet1"),
@@ -1261,12 +1335,117 @@ fn a_sheet_holding_only_remote_formulas_has_the_length_of_nothing() {
         let t = snap(&h).tree;
         assert_eq!(nums(&t, f1), some(&[300.0; 4]), "{mode:?}");
         assert_eq!(nums(&t, f2), some(&[200.0; 4]), "{mode:?}");
-        // Removing the rows again, undo, redo.
+        // Undo: back to the single row; redo: four again.
         h.undo().expect("undo");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, f1), some(&[300.0]), "{mode:?} after undo");
+        assert_eq!(nums(&t, f2), some(&[200.0]), "{mode:?} after undo");
         h.redo().expect("redo");
         let t = snap(&h).tree;
         assert_eq!(nums(&t, f1), some(&[300.0; 4]), "{mode:?}");
         let oracle = reloaded_full(&h, "only-remote");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
+/// `Book1/Sheet1` holding an empty ordinary column `E` and the one formula
+/// `src` (column `F`); `Sheet3` has A (X) and B per `sheet3_b`.
+fn floor_world(src: &str, sheet3_b: &[f64]) -> Project {
+    let mut p = Project::new("P").expect("project");
+    let root = p.root();
+    let book = add_book(&mut p, root, "Book1");
+    let s1 = first_sheet(&p, book);
+    let s3 = p.add_worksheet(book, Some("Sheet3")).expect("Sheet3");
+    let x = add_col(
+        &mut p,
+        s3,
+        "A",
+        &(0..sheet3_b.len()).map(|i| i as f64).collect::<Vec<_>>(),
+    );
+    set_x(&mut p, x);
+    add_col(&mut p, s3, "B", sheet3_b);
+    add_col(&mut p, s1, "E", &[]);
+    let f = add_col(&mut p, s1, "F", &[]);
+    set_f(&mut p, f, src);
+    p
+}
+
+#[test]
+// #433 point 8
+fn the_one_row_floor_applies_only_to_formulas_naming_no_column_of_their_sheet() {
+    for mode in BOTH {
+        // A constant: one row, although an (empty) ordinary column exists.
+        let (_s, h) = spawn(floor_world("1+2", &[1.0]), mode);
+        let t = snap(&h).tree;
+        assert_eq!(
+            nums(&t, colat(&t, "[Book1]Sheet1", "F")),
+            some(&[3.0]),
+            "{mode:?}"
+        );
+        // A local reference to an empty column: no floor.
+        let (_s, h) = spawn(floor_world("A+1", &[1.0]), mode);
+        let t = snap(&h).tree;
+        assert_eq!(
+            column(&t, colat(&t, "[Book1]Sheet1", "F")).len(),
+            0,
+            "{mode:?}"
+        );
+        // A local reference gone to #REF: no floor either.
+        let mut p = floor_world("A+1", &[1.0]);
+        let t = p.tree().clone();
+        let e = colat(&t, "[Book1]Sheet1", "E");
+        p.remove(e).expect("remove E");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        assert_eq!(t.formula_letters(f).as_deref(), Some("#REF+1"), "{mode:?}");
+        assert_eq!(column(&t, f).len(), 0, "{mode:?}");
+        // Remote, Sheet3 empty: one empty row; undo of the entry: no rows.
+        let mut p = floor_world("1", &[]);
+        let t = p.tree().clone();
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        let c = ColumnMeta {
+            formula: None,
+            ..Default::default()
+        };
+        p.set_column_meta(f, c).expect("clear");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        h.execute(set_meta_formula(&t, f, "max(Sheet3!B)"))
+            .expect("entry");
+        let t = snap(&h).tree;
+        let f = colat(&t, "[Book1]Sheet1", "F");
+        assert_eq!(column(&t, f).len(), 1, "{mode:?}");
+        assert!(nums(&t, f).iter().all(Option::is_none), "{mode:?}");
+        h.undo().expect("undo");
+        let t = snap(&h).tree;
+        assert_eq!(
+            column(&t, colat(&t, "[Book1]Sheet1", "F")).len(),
+            0,
+            "{mode:?}"
+        );
+    }
+}
+
+/// A formula that reads a formula column of its own sheet follows its length
+/// (one row here), whatever that one reads.
+#[test]
+// #433 point 8
+fn a_formula_reading_a_remote_formula_of_its_sheet_has_the_same_single_row() {
+    for mode in BOTH {
+        let mut p = floor_world("max(Sheet3!B)", &[5.0, 7.0]);
+        let t = p.tree().clone();
+        let g = add_col(&mut p, node(&t, "[Book1]Sheet1"), "G", &[]);
+        set_f(&mut p, g, "B*2");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        assert_eq!(
+            nums(&t, colat(&t, "[Book1]Sheet1", "G")),
+            some(&[14.0]),
+            "{mode:?}"
+        );
+        let oracle = reloaded_full(&h, "floor-chain");
         same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
     }
 }
@@ -2304,4 +2483,65 @@ fn a_calculation_over_a_formula_column_is_not_stale_after_load() {
     h.save(&path).expect("save");
     h.load(&path).expect("load");
     assert_eq!(stale(&h), vec![false], "after load");
+}
+
+/// #433 (Q3): a file whose kept formula names a column that **is** there
+/// (written when the column was missing, or by hand) binds when the session
+/// loads it, with no history entry (the history is just cleared) and with the
+/// right values; a kept formula that still names something missing stays kept.
+/// The kept parts and the reason survive the save and the load. Witness: with
+/// the load scan removed, the column stays empty until the first command.
+#[test]
+fn a_kept_formula_binds_when_the_file_is_loaded() {
+    use stokesforge_core::{ColumnFormula, FormulaPart};
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let sheet = first_sheet(&p, book);
+        let a = add_col(&mut p, sheet, "A", &[1.0, 2.0, 3.0]);
+        // Letters are positions: B, C, D, then E.
+        for name in ["B", "C", "D"] {
+            add_col(&mut p, sheet, name, &[0.0]);
+        }
+        add_col(&mut p, sheet, "E", &[10.0, 20.0, 30.0]);
+        let waiting = add_col(&mut p, sheet, "F", &[]);
+        let ready = add_col(&mut p, sheet, "G", &[]);
+        let keep = |p: &mut Project, id: NodeId, tail: &str| {
+            p.set_column_meta(
+                id,
+                ColumnMeta {
+                    formula: Some(ColumnFormula::from_parts(vec![
+                        FormulaPart::Column(a),
+                        FormulaPart::Text(tail.to_string()),
+                    ])),
+                    ..Default::default()
+                },
+            )
+            .expect("kept");
+        };
+        keep(&mut p, ready, "+E");
+        keep(&mut p, waiting, "+Q");
+        let dir = scratch("load-binds");
+        let path = dir.path().join("kept.stf");
+        stokesforge_persistence::save(&p, &path).expect("save");
+
+        let session =
+            Session::spawn_with_recalc(Project::new("Empty").unwrap(), None, mode).expect("actor");
+        let h = session.handle();
+        h.load(&path).expect("load");
+        let s = snap(&h);
+        assert_eq!(nums(&s.tree, ready), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        assert_eq!(s.tree.formula_letters(ready).as_deref(), Some("A+E"));
+        assert!(!s.history.can_undo, "no history entry for the load scan");
+        assert_eq!(s.bound.count, 0, "opening a file reports nothing");
+        // The one that still names something missing stays kept, same text.
+        assert_eq!(s.tree.formula_letters(waiting).as_deref(), Some("A+Q"));
+        assert!(column(&s.tree, waiting)
+            .meta()
+            .formula
+            .as_ref()
+            .is_some_and(|f| f.compile().is_err()));
+        assert!(s.tree.pending_bindings().is_empty());
+    }
 }

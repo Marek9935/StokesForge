@@ -48,7 +48,12 @@ Copyright © 2026 Aliocha Skrzypczak. This branch is under
 
 **The logo is excluded from the GPL.** Everything in `assets/logo/` is under
 all rights reserved: no use or modification without the author's written
-permission. See [`assets/logo/LICENSE`](assets/logo/LICENSE).
+permission, except for one permission: the official packages, and builds of the
+unmodified official source, carry it as the icon of the application. It may not
+be modified nor used outside this software (another project, an extension), and
+a modified version of the program removes it. The code builds and runs without
+`assets/logo/`. See [`assets/logo/LICENSE`](assets/logo/LICENSE) (the wording of
+that permission is a draft, to be reviewed by a lawyer before the next tag).
 
 **Use not covered by the GPL** (for example a proprietary connector for an
 instrument): an additional permission or a separate license can be requested

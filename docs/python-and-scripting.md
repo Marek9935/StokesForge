@@ -66,7 +66,9 @@ Witnesses: `a_batch_is_a_single_multi_series_computation_undone_in_one_go`,
 `model=` accepts `linear`, `polynomial` (`degree`), `exponential`
 (`A·exp(−x/τ)`), `exponential_offset` (with `y0`), `exponential2` (two
 components and `y0`), `logarithm`, `power`, `gaussian`, `lorentzian`, or a
-formula. `pyst.analysis.peaks(center_window=…)` bounds each center to ± this
+formula; a formula holding a number beyond the `f64` range (`1e400`, `1e-400`)
+is refused by `fit` (`InvalidValueError`) and reported by `readiness` as
+`bad_expression` (#438). `pyst.analysis.peaks(center_window=…)` bounds each center to ± this
 distance from its starting position. Witness:
 `the_three_exponentials_and_the_center_window_have_their_name`.
 
@@ -167,7 +169,7 @@ describes its effects.
 | `rename(handle, name)` | renames the node, keeping its handle |
 | `remove(handle)` | removes the node and its descendants, except the root |
 | `set_values(handle, values)` | replaces the values and the length of this column only |
-| `set_column_meta(handle, **metadata)` | changes only the named fields, preserving provenance |
+| `set_column_meta(handle, **metadata)` | changes only the named fields, preserving provenance; `formula=None` removes the formula **and its computed values** (like the interface), `keep_data=True` keeps them (#433) |
 | `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | creates a native graph or adds a series to a graph; handle; without `x`, the X column to the left by role, otherwise the row index |
 | `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | adds a graphic object in data coordinates; returns the rank in the panel |
 | `remove_shape(graph, index, *, panel=(0, 0))` | removes the graphic object of this rank |
@@ -183,7 +185,7 @@ describes its effects.
 | `delete_rows(worksheet, at, count=1)` | deletes `count` rows from `at` in the columns of the sheet; `undo()` gives the cells back |
 | `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column or a calculation output raises `InvalidValueError` (read-only column, #431) |
 | `move(handle, parent, index=None)` | moves under `parent` at `index` among the other children (default: last; same parent = reorder); the handle stays valid; unsuitable parent, cycle, name taken or index out of range: `InvalidValueError` |
-| `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused |
+| `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused; a lone formula column copied in its own sheet reads the same columns (`A+B` stays `A+B`, #433), a copy into another sheet reads `#REF` for its local references |
 | `set_note(note, text)` | replaces the whole text of a note |
 
 **Saving (#331).** `save` and `save_as` go through `SessionHandle::save`, like
@@ -316,15 +318,24 @@ copied. Creations return empty objects; for text data, create a `mixed` column,
 then call `set_values`.
 
 `set_column_meta` accepts `role`, `long_name`, `unit`, `comment`,
-`display_format` and `formula`. Values are strings, except `formula=None`, which
-removes the formula; the roles are those of `info`.
+`display_format`, `formula` and `keep_data`. Values are strings, except
+`formula=None`, which removes the formula **and the values it computed**, in one
+history entry (like the interface, #236; the column is then empty and writable),
+and `keep_data`, a bool: `formula=None, keep_data=True` keeps the values as plain
+data. `keep_data=True` without `formula=None`, or a non-bool, raises
+`InvalidValueError` and writes nothing (#433). Removing the formula of a column
+that has none leaves its data alone. The roles are those of `info`.
 The formula is written **in column letters** of the column's sheet
 (`formula="A * 2"`; a column letter is normalized to capitals) and is read the
 same way. The grammar is that of the interface (`^`, functions such as
 `sqrt(A)` or `round(B, 2)`, comparisons and `if`, #401: manual, "Formula
-syntax"). A letter that designates no column of the sheet, the column itself,
-`#REF`, an unknown function or a wrong argument count raise
-`InvalidValueError` without writing anything (#321). The script never handles
+syntax"). **Every badly written formula** raises `InvalidValueError` (raw
+English) without writing anything: a letter that designates no column of the
+sheet, the column itself, a loop, `#REF`, an unknown function, a wrong argument
+count, a number out of range and a syntax error (`A +`, #433). The script reads
+strictly where the interface field keeps the text and frames it. A range with a
+decimal comma (`max(B,1,5)`) stays a range, as typed: no rewrite and no warning
+(#321, #433). The script never handles
 identifiers: the stored text of the formula is not rewritten by another field
 (changing `unit` of a column whose formula displays `#REF` succeeds).
 `type` and `version` stay read-only. A formula column refuses direct writes.
@@ -677,11 +688,11 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.4"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.5"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
-  (`0.3` to `0.4`); there is no stability promise. `1.0` stabilizes the API.
+  (`0.4` to `0.5`); there is no stability promise. `1.0` stabilizes the API.
 - **From `1.0`**: a pure addition raises the minor; any modified or removed line
   (adding an optional parameter changes the signature line) raises the major
   and resets the minor to 0. The API major may not exceed the major of the crates.
@@ -859,6 +870,7 @@ unit
 comment
 display_format
 formula
+keep_data
 ```
 
 ### Return shapes

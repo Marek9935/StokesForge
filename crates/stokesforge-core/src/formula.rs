@@ -28,7 +28,9 @@
 //! once (`stokesforge_analysis::column_values`, `O(log n)` per row). Empty and
 //! text cells, rows whose X is empty or text, and infinite values are ignored;
 //! no point (empty column, empty range, `at` outside the X domain) is an empty
-//! cell — `sum` and `integral` too, never 0.
+//! cell — `sum` and `integral` too, never 0. The bounds of a range: an infinite
+//! bound means "to the end", a `NaN` bound gives an empty cell, and `integral`
+//! over equal finite bounds is 0 when the bound lies inside the X values (#433).
 //!
 //! Precedence, lowest first: comparisons; `+ -`; `* /`; unary sign; `^`
 //! (right-associative, `-2^2 = -4`, `2^3^2 = 512`); call, number, column,
@@ -350,7 +352,7 @@ pub fn counts_text(counts: &[usize]) -> String {
 // only at the boundary (input, display): see the top-level doc.
 
 /// 0-based position → spreadsheet-style letter(s).
-fn index_to_letters(index: usize) -> String {
+pub(crate) fn index_to_letters(index: usize) -> String {
     let mut name = String::new();
     let mut remaining = index as i64;
     loop {
@@ -1401,11 +1403,60 @@ impl ColumnFormula {
         own: NodeId,
         scope: Option<SheetScope<'_>>,
     ) -> Result<Self, FormulaError> {
+        let (formula, error) = Self::read_letters(text, sheet_columns, own, scope);
+        if let Some(error) = error {
+            return Err(error);
+        }
+        // A wrong argument count is refused here; any other syntax error is
+        // stored and returned by `compile`, as before.
+        if let Err(
+            error @ (FormulaError::WrongArgumentCount { .. }
+            | FormulaError::ColumnExpected { .. }
+            | FormulaError::RemoteOutsideColumnFunction
+            | FormulaError::RemoteXColumn),
+        ) = formula.compile()
+        {
+            return Err(error);
+        }
+        Ok(formula)
+    }
+
+    /// The **keeping** reading of a typed text (#433), for the field: it never
+    /// refuses. Every token that cannot be resolved (unknown letter, `#REF`,
+    /// unknown function or sheet, broken quote) stays in a text fragment as
+    /// typed; every token that resolves becomes its column identifier, so the
+    /// kept formula follows moves. The error is the first one of the reading,
+    /// else the one of [`ColumnFormula::compile`], else `None`. A loop is not
+    /// checked here ([`crate::Tree::formula_keeping`] does).
+    pub fn from_letters_keeping(
+        text: &str,
+        sheet_columns: &[NodeId],
+        own: NodeId,
+        scope: Option<SheetScope<'_>>,
+    ) -> (Self, Option<FormulaError>) {
+        let (formula, error) = Self::read_letters(text, sheet_columns, own, scope);
+        let error = error.or_else(|| formula.compile().err());
+        (formula, error)
+    }
+
+    /// The one reading behind [`ColumnFormula::from_letters_in`] (strict) and
+    /// [`ColumnFormula::from_letters_keeping`] (#433): it never stops. The
+    /// formula holds what resolved as identifiers and the rest as typed; the
+    /// error is the **first** one met. A column that is the formula's own is
+    /// stored as an identifier (the recalculation blocks it), so a loop keeps
+    /// its identifiers.
+    fn read_letters(
+        text: &str,
+        sheet_columns: &[NodeId],
+        own: NodeId,
+        scope: Option<SheetScope<'_>>,
+    ) -> (Self, Option<FormulaError>) {
         let chars: Vec<char> = text.chars().collect();
         let mut parts = Vec::new();
         let mut remote = BTreeMap::new();
         let mut buffer = String::new();
         let mut frames: Vec<Frame> = Vec::new();
+        let mut first: Option<FormulaError> = None;
         // The name just read is `at` and waits for its `(`.
         let mut pending_at = false;
         let mut i = 0;
@@ -1418,14 +1469,42 @@ impl ColumnFormula {
                     .collect::<String>()
                     .eq_ignore_ascii_case("ref")
             {
-                return Err(FormulaError::DeletedColumn);
-            } else if c.is_ascii_digit() || c == '.' {
-                let end = number_end(&chars, i);
-                check_number_range(&chars[i..end])?;
+                first.get_or_insert(FormulaError::DeletedColumn);
+                let end = (i + 4).min(chars.len());
                 buffer.extend(&chars[i..end]);
                 i = end;
+            } else if c.is_ascii_digit() || c == '.' {
+                let end = number_end(&chars, i);
+                if let Err(error) = check_number_range(&chars[i..end]) {
+                    first.get_or_insert(error);
+                    // A literal out of range would still compile (the lenient
+                    // rule for old files, #429): split it in two fragments so
+                    // that the kept formula does not compute (`1` then
+                    // `e400`, the second one holds a letter).
+                    let literal = &chars[i..end];
+                    let cut = literal
+                        .iter()
+                        .position(|ch| ch.eq_ignore_ascii_case(&'e'))
+                        .unwrap_or(1)
+                        .max(1);
+                    buffer.extend(&literal[..cut]);
+                    parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
+                    buffer.extend(&literal[cut..]);
+                } else {
+                    buffer.extend(&chars[i..end]);
+                }
+                i = end;
             } else if let Some(prefix) = if matches!(c, '[' | '\'') || c.is_ascii_alphabetic() {
-                prefix_at(&chars, i)?
+                match prefix_at(&chars, i) {
+                    Ok(prefix) => prefix,
+                    Err(error) => {
+                        // Broken quote or bracket: the rest is one fragment.
+                        first.get_or_insert(error);
+                        buffer.extend(&chars[i..]);
+                        i = chars.len();
+                        continue;
+                    }
+                }
             } else {
                 None
             } {
@@ -1435,44 +1514,80 @@ impl ColumnFormula {
                     end += 1;
                 }
                 if end == start {
-                    return Err(FormulaError::Parse(
+                    first.get_or_insert(FormulaError::Parse(
                         "a sheet prefix is followed by column letters".to_string(),
                     ));
+                    buffer.extend(&chars[i..start]);
+                    i = start;
+                    continue;
                 }
                 let letters: String = chars[start..end]
                     .iter()
                     .collect::<String>()
                     .to_ascii_uppercase();
                 let argument = frames.last().map_or(0, |frame| frame.argument);
+                // The tokens that do not resolve stay as typed.
+                let unresolved =
+                    |first: &mut Option<FormulaError>, buffer: &mut String, error: FormulaError| {
+                        first.get_or_insert(error);
+                        buffer.extend(&chars[i..end]);
+                    };
                 if argument == 2 && frames.last().is_some_and(|frame| frame.is_at) {
-                    return Err(FormulaError::RemoteXColumn);
+                    unresolved(&mut first, &mut buffer, FormulaError::RemoteXColumn);
+                    i = end;
+                    continue;
                 }
                 let Some(scope) = scope else {
-                    return Err(FormulaError::UnknownSheet(prefix.sheet));
+                    unresolved(
+                        &mut first,
+                        &mut buffer,
+                        FormulaError::UnknownSheet(prefix.sheet),
+                    );
+                    i = end;
+                    continue;
                 };
-                let target = scope.directory.find_sheet(
+                let target = match scope.directory.find_sheet(
                     scope.own_sheet,
                     prefix.workbook.as_deref(),
                     &prefix.sheet,
-                )?;
+                ) {
+                    Ok(target) => target,
+                    Err(error) => {
+                        unresolved(&mut first, &mut buffer, error);
+                        i = end;
+                        continue;
+                    }
+                };
                 let local = target == scope.own_sheet;
                 let columns = if local {
-                    sheet_columns
+                    Some(sheet_columns)
                 } else {
-                    scope
-                        .directory
-                        .columns_of(target)
-                        .ok_or_else(|| FormulaError::UnknownSheet(prefix.sheet.clone()))?
+                    scope.directory.columns_of(target)
+                };
+                let Some(columns) = columns else {
+                    unresolved(
+                        &mut first,
+                        &mut buffer,
+                        FormulaError::UnknownSheet(prefix.sheet.clone()),
+                    );
+                    i = end;
+                    continue;
                 };
                 let Some(&id) = letters_to_index(&letters).and_then(|index| columns.get(index))
                 else {
-                    return Err(FormulaError::UnknownColumnIn {
-                        sheet: prefix.sheet,
-                        column: letters,
-                    });
+                    unresolved(
+                        &mut first,
+                        &mut buffer,
+                        FormulaError::UnknownColumnIn {
+                            sheet: prefix.sheet,
+                            column: letters,
+                        },
+                    );
+                    i = end;
+                    continue;
                 };
                 if id == own {
-                    return Err(FormulaError::SelfReference(letters));
+                    first.get_or_insert(FormulaError::SelfReference(letters));
                 }
                 if !buffer.is_empty() {
                     parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
@@ -1502,13 +1617,13 @@ impl ColumnFormula {
                         let letters = name.to_ascii_uppercase();
                         let names_a_column = letters_to_index(&letters)
                             .is_some_and(|index| index < sheet_columns.len());
-                        return Err(if names_a_column {
+                        first.get_or_insert(if names_a_column {
                             FormulaError::NotAFunction(letters)
                         } else {
                             FormulaError::UnknownFunction {
                                 suggestion: Callee::nearest(&name)
                                     .map(|nearest| nearest.name().to_string()),
-                                name,
+                                name: name.clone(),
                             }
                         });
                     }
@@ -1520,10 +1635,8 @@ impl ColumnFormula {
                 while i < chars.len() && chars[i].is_ascii_alphabetic() {
                     i += 1;
                 }
-                let letters: String = chars[start..i]
-                    .iter()
-                    .collect::<String>()
-                    .to_ascii_uppercase();
+                let typed: String = chars[start..i].iter().collect();
+                let letters = typed.to_ascii_uppercase();
                 // The third argument of `at(Sheet3!B, x, D)` is read in the
                 // sheet of the first one.
                 let in_remote_sheet = frames
@@ -1531,16 +1644,24 @@ impl ColumnFormula {
                     .filter(|frame| frame.is_at && frame.argument == 2)
                     .and_then(|frame| frame.remote.clone());
                 if let (Some((sheet, name)), Some(scope)) = (in_remote_sheet, scope) {
-                    let columns = scope
-                        .directory
-                        .columns_of(sheet)
-                        .ok_or_else(|| FormulaError::UnknownSheet(name.clone()))?;
-                    let Some(&id) = letters_to_index(&letters).and_then(|index| columns.get(index))
-                    else {
-                        return Err(FormulaError::UnknownColumnIn {
-                            sheet: name,
-                            column: letters,
-                        });
+                    let found = scope.directory.columns_of(sheet).map(|columns| {
+                        letters_to_index(&letters).and_then(|index| columns.get(index).copied())
+                    });
+                    let id = match found {
+                        None => {
+                            first.get_or_insert(FormulaError::UnknownSheet(name));
+                            buffer.push_str(&typed);
+                            continue;
+                        }
+                        Some(None) => {
+                            first.get_or_insert(FormulaError::UnknownColumnIn {
+                                sheet: name,
+                                column: letters,
+                            });
+                            buffer.push_str(&typed);
+                            continue;
+                        }
+                        Some(Some(id)) => id,
                     };
                     if !buffer.is_empty() {
                         parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
@@ -1559,14 +1680,16 @@ impl ColumnFormula {
                     letters_to_index(&letters).and_then(|index| sheet_columns.get(index))
                 else {
                     // `pi` is the number only with parentheses.
-                    return Err(if letters == "PI" {
+                    first.get_or_insert(if letters == "PI" {
                         FormulaError::PiNeedsParentheses
                     } else {
                         FormulaError::UnknownColumn(letters)
                     });
+                    buffer.push_str(&typed);
+                    continue;
                 };
                 if id == own {
-                    return Err(FormulaError::SelfReference(letters));
+                    first.get_or_insert(FormulaError::SelfReference(letters));
                 }
                 if !buffer.is_empty() {
                     parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
@@ -1596,19 +1719,7 @@ impl ColumnFormula {
         if !buffer.is_empty() {
             parts.push(FormulaPart::Text(buffer));
         }
-        let formula = Self { parts, remote };
-        // A wrong argument count is refused here; any other syntax error is
-        // stored and returned by `compile`, as before.
-        if let Err(
-            error @ (FormulaError::WrongArgumentCount { .. }
-            | FormulaError::ColumnExpected { .. }
-            | FormulaError::RemoteOutsideColumnFunction
-            | FormulaError::RemoteXColumn),
-        ) = formula.compile()
-        {
-            return Err(error);
-        }
-        Ok(formula)
+        (Self { parts, remote }, first)
     }
 
     /// The text to display: each column read is written by its **current
@@ -2022,10 +2133,10 @@ fn eval_expr(expr: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
             let (value, status) = eval_expr(inner, row, ctx);
             (-value, status)
         }
-        Expr::Add(a, b) => combine(a, b, row, ctx, |x, y| x + y),
-        Expr::Sub(a, b) => combine(a, b, row, ctx, |x, y| x - y),
-        Expr::Mul(a, b) => combine(a, b, row, ctx, |x, y| x * y),
-        Expr::Div(a, b) => combine(a, b, row, ctx, |x, y| x / y),
+        Expr::Add(a, b) => arithmetic(a, b, row, ctx, |x, y| x + y),
+        Expr::Sub(a, b) => arithmetic(a, b, row, ctx, |x, y| x - y),
+        Expr::Mul(a, b) => arithmetic(a, b, row, ctx, |x, y| x * y),
+        Expr::Div(a, b) => arithmetic(a, b, row, ctx, |x, y| x / y),
         Expr::Pow(a, b) => eval_pow(a, b, row, ctx),
         Expr::Cmp(op, a, b) => eval_cmp(*op, a, b, row, ctx),
         Expr::Call(func, args) => eval_call(func, args, row, ctx),
@@ -2257,9 +2368,7 @@ fn compute_call(
         let ctx = Ctx { columns, states };
         let bounds = (eval_expr(lo, 0, &ctx), eval_expr(hi, 0, &ctx));
         let value = match bounds {
-            ((lo, NumericStatus::Ok), (hi, NumericStatus::Ok))
-                if lo.is_finite() && hi.is_finite() =>
-            {
+            ((lo, NumericStatus::Ok), (hi, NumericStatus::Ok)) if !lo.is_nan() && !hi.is_nan() => {
                 match call.func.stat() {
                     Some(stat) => ColumnIndex::new(&xs, &ys).stat(stat, lo, hi),
                     None => integral_of(&xs, &ys, Some((lo, hi))),
@@ -2274,9 +2383,35 @@ fn compute_call(
 
 /// The Integration tool's total (no baseline) over the finite points, on the
 /// whole curve or on a range: the same function, not a copy. `None` where the
-/// tool fails (fewer than two points, empty range) or overflows.
+/// tool fails (fewer than two points, empty range) or overflows. A range with
+/// equal finite bounds is 0 when there is a usable point; an infinite bound is
+/// clipped to the cleaned X domain before the tool is called (it refuses a
+/// non-finite bound, #276).
 fn integral_of(xs: &[f64], ys: &[f64], range: Option<(f64, f64)>) -> Option<f64> {
     let cleaned = clean(xs, ys).series;
+    let mut range = range;
+    if let Some((a, b)) = range {
+        let (mut lo, mut hi) = (a.min(b), a.max(b));
+        if lo == hi && lo.is_finite() {
+            // A zero-width range: no area, as long as the bound lies inside
+            // the cleaned X values (min <= a <= max); outside, nothing is there.
+            let xmin = cleaned.x.iter().copied().fold(f64::INFINITY, f64::min);
+            let xmax = cleaned.x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            return (!cleaned.x.is_empty() && xmin <= lo && lo <= xmax).then_some(0.0);
+        }
+        if !(lo.is_finite() && hi.is_finite()) {
+            // An infinite bound means "to the end": clip it to the data (the
+            // Integration tool refuses a non-finite bound, #276).
+            let xmin = cleaned.x.iter().copied().fold(f64::INFINITY, f64::min);
+            let xmax = cleaned.x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            lo = lo.max(xmin);
+            hi = hi.min(xmax);
+            if !(lo.is_finite() && hi.is_finite() && hi > lo) {
+                return None;
+            }
+        }
+        range = Some((lo, hi));
+    }
     let spec = IntegrateSpec {
         ranges: range.into_iter().collect(),
         under: Under::Zero,
@@ -2342,7 +2477,29 @@ fn domain_checked(value: f64, status: NumericStatus) -> (f64, NumericStatus) {
     }
 }
 
-/// Factor common to the four binary operators: computes each operand
+/// The four arithmetic operators: [`combine`], then a `NaN` out of two operands
+/// that were not `NaN` and whose status is `Ok` (`0/0`, `inf-inf`, `0*inf`) is
+/// a failed calculation, like `ln(-1)` (#433). `1/0` stays infinity. Out of
+/// line so `eval_expr`'s frame does not grow (#408).
+fn arithmetic(
+    a: &Expr,
+    b: &Expr,
+    row: usize,
+    ctx: &Ctx,
+    op: impl Fn(f64, f64) -> f64,
+) -> (f64, NumericStatus) {
+    let (av, astatus) = eval_expr(a, row, ctx);
+    let (bv, bstatus) = eval_expr(b, row, ctx);
+    let status = astatus.combine(bstatus);
+    let value = op(av, bv);
+    if av.is_nan() || bv.is_nan() {
+        (value, status)
+    } else {
+        domain_checked(value, status)
+    }
+}
+
+/// Factor common to the binary operators: computes each operand
 /// (value and status), combines the values with `op` (unchanged IEEE
 /// arithmetic) and the statuses with [`NumericStatus::combine`].
 fn combine(
@@ -2645,9 +2802,8 @@ mod tests {
 
     #[test]
     fn division_by_zero_is_ieee_not_an_error() {
-        // Ordinary floating-point behavior, not a degradation case
-        // specific to the module: 0/0 = NaN, x/0 = ±inf, exactly like
-        // any missing or non-finite value already tolerated by the model.
+        // x/0 = ±inf is ordinary floating-point behavior; 0/0 is NaN, which
+        // `arithmetic` turns into a failed calculation (#433).
         let formula = parse("A/B").expect("parse");
         let columns = [float_column(&[1.0, 0.0]), float_column(&[0.0, 0.0])];
         let result = evaluate(&formula, &sheet_values(&columns), 2);

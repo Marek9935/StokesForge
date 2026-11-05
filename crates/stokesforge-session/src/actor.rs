@@ -12,7 +12,7 @@ use stokesforge_core::{NodeId, NodeKind, Project};
 use crate::error::{SessionError, SessionResult};
 use crate::gauge::{RecalcEnd, RecalcGauge};
 use crate::recalc::{FormulaRecalc, Recalculator};
-use crate::snapshot::{HistoryState, Revision, Snapshot};
+use crate::snapshot::{BoundReport, HistoryState, Revision, Snapshot};
 use crate::{ClientId, LoadReport, WindowGeometry};
 
 /// Request sent to the actor by a [`crate::SessionHandle`]. Private to the
@@ -228,6 +228,10 @@ pub(crate) fn run(
     // recalculated by this actor: the empty memo will do it entirely at the
     // first mutating request, as before #193.
     let mut formulas = Recalculator::new(recalc);
+    // #433 — the kept formulas bound to an object that appeared, reported in
+    // the snapshot; never in the history (the binding itself is in the entry
+    // of the gesture) nor in the `.stf`.
+    let mut bound = BoundReport::default();
 
     for request in rx {
         match request {
@@ -250,6 +254,15 @@ pub(crate) fn run(
                         continue;
                     }
                 };
+                // #433 (Q3) — a kept formula whose missing column or sheet this
+                // command made appear is bound **now**, inside the history
+                // entry of the command (one undo unbinds), before the reply and
+                // before the pass: the pass sees the bound formula.
+                let bound_now = if recorded {
+                    bind_kept_formulas(&mut project, &mut history, &mut bound)
+                } else {
+                    0
+                };
                 revision += 1;
                 if interruptible {
                     // #239 — the command is applied: reply without waiting
@@ -270,6 +283,8 @@ pub(crate) fn run(
                         // unrelated — only what was just stored is undone.
                         if recorded && matches!(history.undo(&mut project), Ok(true)) {
                             end = RecalcEnd::Stopped;
+                            // The bindings went with the entry.
+                            bound.retract(bound_now);
                         }
                         formulas.run(&mut project);
                     }
@@ -397,7 +412,7 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::Snapshot { reply } => {
-                let snapshot = build_snapshot(
+                let mut snapshot = build_snapshot(
                     &project,
                     &history,
                     revision,
@@ -406,6 +421,7 @@ pub(crate) fn run(
                     &column_widths,
                     geometry_revision,
                 );
+                snapshot.bound = Arc::new(bound.clone());
                 let _ = reply.send(snapshot);
             }
             Request::SetWindowGeometry {
@@ -596,6 +612,7 @@ fn load_project(
     }
     let (mut loaded, view, report) = stokesforge_persistence::load_with_limits(path, limits)?;
     orient_graphs(&mut loaded);
+    bind_kept_formulas_at_load(&mut loaded);
     *project = loaded;
     *geometries = view.window_geometries;
     *column_widths = view.column_widths;
@@ -605,6 +622,62 @@ fn load_project(
     // outside tests.
     let _ = history.clear();
     Ok(report)
+}
+
+/// Binds the kept formulas that the tree can now read (#433, Q3), each in the
+/// history entry of the gesture that has just been applied
+/// ([`History::absorb_into_last`], or a plain recorded command inside an open
+/// macro), ascending identifier order, asking again after each so that a
+/// binding enters the loop check of the next. Returns how many were bound,
+/// and tells `bound`. Fixed point: `Tree::pending_bindings` is empty
+/// afterwards. A refused command (a calculation's output column cannot hold a
+/// formula) stops the scan rather than looping.
+fn bind_kept_formulas(
+    project: &mut Project,
+    history: &mut History,
+    bound: &mut BoundReport,
+) -> u64 {
+    let mut done = 0;
+    while let Some((column, formula)) = project.tree().next_binding() {
+        let Some(mut meta) = project
+            .tree()
+            .node(column)
+            .and_then(|node| node.as_column())
+            .map(|node| node.meta().clone())
+        else {
+            break;
+        };
+        meta.formula = Some(formula);
+        match history.absorb_into_last(project, Command::SetColumnMeta { column, meta }) {
+            Ok(true) => {
+                bound.push(column);
+                done += 1;
+            }
+            _ => break,
+        }
+    }
+    done
+}
+
+/// The same scan for a project just read from a file: the history is empty
+/// and not undoable, so the primitives of `core` are used directly, like
+/// [`orient_graphs`] (invariant 1: nothing is installed yet, no client holds a
+/// copy). Not reported: opening a file says nothing about bindings.
+fn bind_kept_formulas_at_load(project: &mut Project) {
+    while let Some((column, formula)) = project.tree().next_binding() {
+        let Some(mut meta) = project
+            .tree()
+            .node(column)
+            .and_then(|node| node.as_column())
+            .map(|node| node.meta().clone())
+        else {
+            break;
+        };
+        meta.formula = Some(formula);
+        if project.set_column_meta(column, meta).is_err() {
+            break;
+        }
+    }
 }
 
 /// Brings the axes of every graph of a project that was just read back to
@@ -675,6 +748,8 @@ fn build_snapshot(
         window_geometries: Arc::new(geometries.clone()),
         column_widths: Arc::new(column_widths.clone()),
         geometry_revision,
+        // Filled by the caller that holds the report (#433).
+        bound: Arc::default(),
     }
 }
 

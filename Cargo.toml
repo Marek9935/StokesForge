@@ -22,11 +22,18 @@ members = [
     "crates/stokesforge-app",
     "crates/stokesforge-robustness",
     "crates/stokesforge-arch-guard",
+    "crates/stokesforge-logo-gen",
 ]
 
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
+
+# #452: line tables only (panics and backtraces keep file:line; no variable
+# debug info, so builds and target/ are smaller). The test profile inherits dev.
+# To inspect variables in a debugger: CARGO_PROFILE_DEV_DEBUG=true cargo build.
+[profile.dev]
+debug = "line-tables-only"
 
 [workspace.lints.clippy]
 all = "warn"

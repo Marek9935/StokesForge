@@ -13,9 +13,11 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     qcm/<id>/data.js       the decisions (injected into the form template when served)
     qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
     qcm/<id>/answers/<code>.json   one record per card (written by the page's POST)
-    tests/<n>-<k>.json     trial entry: title, where, steps, expect, try, commit, date,
+    tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
                            page's POST and by `test add|merged`)
+    removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
+                           outside tests/ so nothing reads it, and its number is never reused)
     control.json           result of the last `check`
 
 THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
@@ -27,15 +29,25 @@ stored: a crash pauses an issue with no process left to write.
 
 Writes go through a temporary file and os.replace. Colour allocation takes the
 directory lock ../_stokesforge/.colour.lock (same lock as chantier.sh). Reads take
-no lock. Test seams: SF_SUIVI_DIR, SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
-SF_SUIVI_SLOW (seconds slept inside a claim's critical section).
+no lock. Test seams: SF_SUIVI_DIR, SF_CLAUDE_PROJECTS (default ~/.claude/projects), SF_TODAY=YYYY-MM-DD, SF_SUIVI_LOCK_WAIT (seconds),
+SF_SUIVI_SLOW (seconds slept inside a claim's critical section), SF_SUIVI_CI=off (no CI watcher),
+SF_SUIVI_CI_POLL / SF_SUIVI_CI_TIMEOUT (seconds).
+
+CI WATCHER (#452). `serve` runs a daemon thread that polls the CI of the newest commit of `main`
+every ~120 s through `scripts/ci-status.sh --head` (glab, one PROJECT_ID): the Linux and Windows jobs
+all come back as GitLab statuses (scripts/gitlab-status.py JOBS). It writes ci.json; /api/state carries
+`ci` = {verdict: green|red|pending|unknown, names, reason, sha, last_red}. Green needs every blocking
+job present and SUCCESS (`robustness` is non-blocking); any doubt (CANCELED, glab or network failure,
+timeout, unparsable, stale file older than 3 polls) is `unknown`, never green. A red stays in
+`last_red` until a newer head is green. The colour rule and the
+`pending` count do not depend on it.
 
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, serve (the local page, 127.0.0.1 only),
-test add|merged|list, qcm pose|answers|list, import-online.
+test add|merged|remove|list, qcm pose|answers|list, import-online.
 """
 import argparse
 import datetime
@@ -99,6 +111,12 @@ def colour_line(kind, *a):
 def git(*args, cwd=None):
     r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def git_rc(*args, cwd=None):
+    """(exit code, stdout) of a git command: git() hides the exit code."""
+    r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
+    return r.returncode, r.stdout
 
 
 def main_dir():
@@ -265,6 +283,32 @@ def held_by(r):
     return why
 
 
+def claude_projects():
+    return os.environ.get("SF_CLAUDE_PROJECTS") or os.path.expanduser("~/.claude/projects")
+
+
+def agent_idle_min(r):
+    """Whole minutes since the owner session last wrote (newest mtime of its transcript and
+    its subagents' transcripts), None if the owner is not alive or no file is found. Stat
+    only: the transcripts are private and never read. Whole minutes keep the ETag steady."""
+    if not owner_alive(r):
+        return None
+    sid = str((r.get("owner") or {}).get("session", ""))
+    if not sid or "/" in sid or sid.startswith("."):
+        return None
+    base = claude_projects()
+    paths = glob.glob(os.path.join(glob.escape(base), "*", glob.escape(sid) + ".jsonl"))
+    paths += glob.glob(os.path.join(glob.escape(base), "*", glob.escape(sid), "subagents", "*.jsonl"))
+    newest = None
+    for p in paths:
+        try:
+            m = os.stat(p).st_mtime
+        except OSError:
+            continue
+        newest = m if newest is None else max(newest, m)
+    return None if newest is None else max(0, int((time.time() - newest) // 60))
+
+
 def group_of(r):
     return r.get("parent") or r["issue"]
 
@@ -389,9 +433,13 @@ def cmd_set(a):
     with Lock():
         recs = load_all()
         r = need(recs, a.issue)
-        for key, val in (("state", a.state), ("what", a.what), ("waiting", a.waiting), ("wait_kind", a.wait)):
+        # state and what are kept when not passed. waiting and wait_kind are an agent note:
+        # the next `set` erases them unless it restates them (E1, #449).
+        for key, val in (("state", a.state), ("what", a.what)):
             if val is not None:
                 r[key] = val
+        r["waiting"] = a.waiting or ""
+        r["wait_kind"] = a.wait or ""
         save(r)
     return 0
 
@@ -530,12 +578,14 @@ def build_status():
         lead = next((r for r in gh if r["issue"] != g), gh[0])
         since, days = days_since(min(r.get("since") or "9999" for r in gh))
         why = sorted({w for r in gh for w in held_by(r)})
+        holder = next((r for r in gh if "agent" in held_by(r)), None)
         colours.append({
             "colour": c, "free": False, "issue": g, "issues": groups,
             "package": {"parent": g, "subs": pkg.get("subs", [])} if pkg else None,
             "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
-            "held_by": why, "worktrees": group_wts(g), "since": since, "days": days})
+            "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
+            "worktrees": group_wts(g), "since": since, "days": days})
     paused, done = [], []
     for r in recs.values():
         if r.get("done_at"):
@@ -544,12 +594,14 @@ def build_status():
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": r.get("kind", "issue"), "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": r.get("subs", []),
-                           "what": r.get("what", ""), "worktrees": group_wts(r["issue"]), "since": since, "days": days})
+                           "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
+                           "worktrees": group_wts(r["issue"]), "since": since, "days": days})
         elif not held_by(r):
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": "issue", "parent": r["parent"], "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": [],
-                           "what": r.get("what", ""), "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
+                           "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
+                           "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
     done.sort(key=lambda d: (d["done_at"], d["issue"]), reverse=True)
     return {"colours": colours, "paused": sorted(paused, key=lambda p: p["issue"]),
             "colourless": sorted(colourless), "done": done}
@@ -680,9 +732,10 @@ def cmd_session_end(a):
 
 # ------------------------------------------------------------ trial entries
 ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
-TEST_FIELDS = {"title": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
+TEST_FIELDS = {"title": str, "intro": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
                "date": str, "colour": str, "name": str}
 TEST_STATUSES = ("todo", "ok", "retour")
+MAX_UNMERGED = 5      # E2: trial entries with `try` per issue, unless `test add --force`
 
 
 def safe_id(s):
@@ -727,6 +780,20 @@ def check_entry(e):
             raise Fail("field %r must be a list of strings" % k)
 
 
+def removed_dir():
+    return os.path.join(suivi_dir(), "removed-tests")
+
+
+def used_numbers(issue):
+    """Numbers already taken for the issue: live entries and the archive of removed ones."""
+    out = []
+    for t in load_tests(issue):
+        out.append(t["id"])
+    for p in glob.glob(os.path.join(removed_dir(), "%d-*.json" % issue)):
+        out.append(os.path.basename(p)[:-5])
+    return [int(m.group(1)) for tid in out for m in [re.fullmatch(r"%d-(\d+)" % issue, tid)] if m]
+
+
 def cmd_test_add(a):
     try:
         with open(a.file, encoding="utf-8") as f:
@@ -739,9 +806,16 @@ def cmd_test_add(a):
     rec = load_all().get(a.issue) or {}
     ids = []
     with Lock():
-        used = [int(m.group(1)) for t in load_tests(a.issue)
-                for m in [re.fullmatch(r"%d-(\d+)" % a.issue, t["id"])] if m]
-        k = max(used, default=0)
+        unmerged = sum(1 for t in load_tests(a.issue) if "try" in t)
+        incoming = sum(1 for e in entries if "try" in e)
+        if unmerged + incoming > MAX_UNMERGED:
+            if not a.force:
+                raise Fail("#%d would have %d entries to try (%d already + %d new); the limit is %d: group them "
+                           "into fewer guided walk-throughs, or pass --force and justify it in the report"
+                           % (a.issue, unmerged + incoming, unmerged, incoming, MAX_UNMERGED))
+            sys.stderr.write("suivi: --force: %d entries to try on #%d (limit %d); the report must justify it\n"
+                             % (unmerged + incoming, a.issue, MAX_UNMERGED))
+        k = max(used_numbers(a.issue), default=0)
         for e in entries:
             k += 1
             t = dict(e)
@@ -755,20 +829,112 @@ def cmd_test_add(a):
     return 0
 
 
+HEX_RE = re.compile(r"[0-9a-fA-F]{4,40}")
+
+
+def same_commit(stored, ref):
+    """Hex values compare by prefix (either way), case-insensitive; anything else, exactly."""
+    stored = str(stored)
+    if HEX_RE.fullmatch(stored) and HEX_RE.fullmatch(ref):
+        a, b = stored.lower(), ref.lower()
+        return a.startswith(b) or b.startswith(a)
+    return stored == ref
+
+
+def check_merge_commit(issue, commit):
+    """L2: the full hash of `commit`, or Fail. Real commit, on main, containing every
+    feature/<issue>-* branch still there, message citing #<issue>."""
+    rc, out = git_rc("rev-parse", "--verify", "--quiet", commit + "^{commit}")
+    if rc != 0:
+        raise Fail("no such commit in this repository: %s" % commit)
+    full = out.strip()
+    if git_rc("merge-base", "--is-ancestor", full, "main")[0] != 0:
+        raise Fail("commit %s is not on main" % commit)
+    rc, out = git_rc("for-each-ref", "--format=%(refname:short)", "refs/heads/feature/%d-*" % issue)
+    for br in out.split():
+        if git_rc("merge-base", "--is-ancestor", br, full)[0] != 0:
+            raise Fail("commit %s does not contain the branch %s" % (commit, br))
+    rc, msg = git_rc("log", "-1", "--format=%B", full)
+    if not re.search(r"#%d(?!\d)" % issue, msg):
+        raise Fail("the message of commit %s does not cite #%d" % (commit, issue))
+    return full
+
+
 def cmd_test_merged(a):
-    if not re.fullmatch(r"[0-9a-fA-F]{4,40}", a.commit):
+    if not HEX_RE.fullmatch(a.commit):
         raise Fail("not a commit hash: %r" % a.commit)
-    n = 0
+    full = check_merge_commit(a.issue, a.commit)
     with Lock():
-        for t in load_tests(a.issue):
+        ts = load_tests(a.issue)
+        if a.replace is not None:
+            hit = [t for t in ts if "commit" in t and same_commit(t["commit"], a.replace)]
+            if not hit:
+                raise Fail("no entry of #%d carries the commit %r" % (a.issue, a.replace))
+            for t in hit:
+                tid = t.pop("id")
+                t["commit"] = full
+                write_json(test_path(tid), t)
+            print("%d entr%s replaced" % (len(hit), "y" if len(hit) == 1 else "ies"))
+            return 0
+        tries = [t for t in ts if "try" in t]
+        if tries:
+            for t in tries:
+                tid = t.pop("id")
+                t.pop("try")
+                t["commit"] = full
+                write_json(test_path(tid), t)
+            print("%d entr%s merged" % (len(tries), "y" if len(tries) == 1 else "ies"))
+            return 0
+        others = [str(t["commit"]) for t in ts if t.get("commit") and not same_commit(t["commit"], full)]
+        if others:
+            raise Fail("the entries of #%d already carry the commit %s, not %s; to correct it: "
+                       "suivi.py test merged %d %s --replace %s" % (a.issue, others[0], full, a.issue, a.commit, others[0]))
+        if any(t.get("commit") for t in ts):
+            print("already recorded")
+        else:
+            print("no entries")
+    return 0
+
+
+def is_answered(t):
+    return t.get("status", "todo") != "todo" or bool(str(t.get("comment") or "").strip())
+
+
+def cmd_test_remove(a):
+    owner = current_owner()
+    recs = load_all()
+    rec = recs.get(a.issue)
+    if owner is None or rec is None:
+        raise Fail("only the session that owns #%d may remove its trial entries (run scripts/chantier.sh %d first)"
+                   % (a.issue, a.issue))
+    sessions = {str((rec.get("owner") or {}).get("session", ""))}
+    if rec.get("parent") in recs:
+        sessions.add(str((recs[rec["parent"]].get("owner") or {}).get("session", "")))
+    sessions.discard("")
+    if owner["session"] not in sessions:
+        raise Fail("#%d belongs to another session (or to none): scripts/chantier.sh %d claims it" % (a.issue, a.issue))
+    with Lock():
+        picked = []
+        for tid in a.ids:
+            if not re.fullmatch(r"%d-\d+" % a.issue, tid):
+                raise Fail("%r is not an entry of #%d" % (tid, a.issue))
+            t = read_json(test_path(tid))
+            if not isinstance(t, dict):
+                raise Fail("no entry %s" % tid)
             if "try" not in t:
-                continue
-            tid = t.pop("id")
-            t.pop("try")
-            t["commit"] = a.commit
-            write_json(test_path(tid), t)
-            n += 1
-    print("%d entr%s merged" % (n, "y" if n == 1 else "ies"))
+                raise Fail("%s is merged (no `try`): a merged entry is never removed" % tid)
+            picked.append((tid, t))
+        answered = [(tid, t) for tid, t in picked if is_answered(t)]
+        if answered and not a.answered:
+            raise Fail("answered entries need --answered: " + "; ".join(
+                "%s [%s] %r" % (tid, t.get("status", "todo"), t.get("comment", "")) for tid, t in answered))
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        for tid, t in picked:
+            write_json(os.path.join(removed_dir(), tid + ".json"), dict(t, removed_at=stamp))
+            os.unlink(test_path(tid))
+    for tid, t in answered:
+        print("answered %s [%s] %s" % (tid, t.get("status", "todo"), t.get("comment", "")))
+    print("%d entr%s removed" % (len(picked), "y" if len(picked) == 1 else "ies"))
     return 0
 
 
@@ -984,13 +1150,157 @@ def open_qcms():
     return [q for q in all_qcms() if not q["finished"]]
 
 
+# ------------------------------------------------------------ CI watcher (#452)
+HERE = os.path.dirname(os.path.abspath(__file__))
+CI_STATUS = os.path.join(HERE, "ci-status.sh")
+# Same list as JOBS of scripts/gitlab-status.py (a test compares them).
+CI_JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages",
+           "test-windows", "test-python-windows", "dist-windows")
+CI_NON_BLOCKING = ("robustness",)      # a failure is posted as skipped, not failed
+CI_PENDING_MAX = 3600                  # seconds a head may stay pending before it is `unknown`
+CI_VERDICTS = ("green", "red", "pending", "unknown")
+
+
+def ci_enabled():
+    return os.environ.get("SF_SUIVI_CI") != "off"
+
+
+def ci_poll_seconds():
+    try:
+        return max(0.05, float(os.environ.get("SF_SUIVI_CI_POLL", "120")))
+    except ValueError:
+        return 120.0
+
+
+def ci_path():
+    return os.path.join(suivi_dir(), "ci.json")
+
+
+def ci_parse_jobs(text):
+    """(sha, {job: STATUS}) from `ci-status.sh --head` output; sha is None if absent."""
+    sha, jobs = None, {}
+    for line in text.splitlines():
+        m = re.match(r"HEAD ([0-9a-f]{7,64})$", line)
+        if m:
+            sha = m.group(1)
+            continue
+        if line.startswith("== commit comments"):
+            break
+        m = re.match(r"(\S+)\s+([A-Za-z_]+)\s+\|", line)
+        if m:
+            jobs[m.group(1).split("/")[-1]] = m.group(2).upper()
+    return sha, jobs
+
+
+def ci_job_verdict(jobs):
+    """(verdict, names) for the blocking jobs (Linux and Windows); only SUCCESS everywhere is green."""
+    blocking = [j for j in CI_JOBS if j not in CI_NON_BLOCKING]
+    failed = [j for j in blocking if jobs.get(j) == "FAILED"]
+    if failed:
+        return "red", failed
+    odd = [j for j in blocking if jobs.get(j) in ("CANCELED", "SKIPPED")]
+    if odd:
+        return "unknown", odd
+    waiting = [j for j in blocking if jobs.get(j) != "SUCCESS"]
+    if waiting:
+        return "pending", waiting
+    return "green", []
+
+
+def ci_run(cmd, timeout):
+    """Run cmd in its own process group; on timeout kill the whole group (glab included)."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True, cwd=os.path.dirname(HERE))
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, 9)
+        except OSError:
+            pass
+        p.communicate()
+        raise
+    return p.returncode, out, err
+
+
+def ci_poll(prev, now=None):
+    """One reading. Never raises: any doubt is `unknown`."""
+    now = time.time() if now is None else now
+    prev = prev if isinstance(prev, dict) else {}
+    out = {"checked_at": now, "sha": None, "verdict": "unknown", "names": [], "reason": "",
+           "last_red": prev.get("last_red"), "since": prev.get("since")}
+    try:
+        timeout = float(os.environ.get("SF_SUIVI_CI_TIMEOUT", "60"))
+        rc, text, err = ci_run(["bash", CI_STATUS, "--head"], timeout)
+        sha, jobs = ci_parse_jobs(text)
+        out["sha"] = sha
+        if sha is None:
+            out["reason"] = "no head read from GitLab (exit %s)" % rc
+            return out
+        if prev.get("sha") == sha and prev.get("verdict") == "green":   # only green is final: a red CI may be re-run
+            for k in ("verdict", "names", "reason"):
+                out[k] = prev.get(k, out[k])
+            out["last_red"] = prev.get("last_red")
+            return out
+        if prev.get("sha") != sha:
+            out["since"] = now
+        if rc == 2:
+            verdict, names, reason = "pending", [], "no GitLab pipeline for this commit yet"
+        elif rc != 0 or not jobs:
+            verdict, names, reason = "unknown", [], "ci-status.sh failed (exit %s)" % rc
+        else:
+            verdict, names = ci_job_verdict(jobs)
+            reason = ""
+        if verdict == "pending" and now - (out["since"] or now) > CI_PENDING_MAX:
+            verdict, reason = "unknown", "still pending after %d min" % (CI_PENDING_MAX // 60)
+        out.update(verdict=verdict, names=names, reason=reason)
+        if verdict == "red":
+            out["last_red"] = {"sha": sha, "names": names}
+        elif verdict == "green":
+            out["last_red"] = None
+    except Exception as e:
+        out.update(verdict="unknown", names=[], reason="watcher error: %s" % type(e).__name__)
+    return out
+
+
+def ci_view():
+    """What /api/state shows: computed when read; missing, corrupt or stale is `unknown`."""
+    d = read_json(ci_path())
+    view = {"verdict": "unknown", "names": [], "reason": "no reading yet", "sha": None, "last_red": None}
+    if not isinstance(d, dict):
+        return view
+    lr = d.get("last_red")
+    if isinstance(lr, dict) and isinstance(lr.get("names"), list):
+        view["last_red"] = {"sha": str(lr.get("sha", ""))[:8], "names": [str(n) for n in lr["names"]]}
+    if isinstance(d.get("sha"), str):
+        view["sha"] = d["sha"][:8]
+    at = d.get("checked_at")
+    if not isinstance(at, (int, float)) or isinstance(at, bool) or time.time() - at > 3 * ci_poll_seconds():
+        view["reason"] = "reading too old"
+        return view
+    if d.get("verdict") in CI_VERDICTS:
+        view["verdict"] = d["verdict"]
+        view["names"] = [str(n) for n in d.get("names", [])] if isinstance(d.get("names"), list) else []
+        view["reason"] = str(d.get("reason") or "")
+    return view
+
+
+def ci_loop(path):
+    while True:
+        try:
+            write_json(path, ci_poll(read_json(path)))
+        except Exception:
+            pass
+        time.sleep(ci_poll_seconds())
+
+
 def build_state():
     s = build_status()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
     qcms = open_qcms()
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
-            "control": read_json(os.path.join(suivi_dir(), "control.json")),
+            "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
             "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
 
 
@@ -1196,6 +1506,9 @@ def cmd_serve(a):
         if e.errno == errno.EADDRINUSE:
             raise Fail("port %d is already in use (another suivi.py serve? see `ss -ltnp`)" % port)
         raise Fail("cannot listen on 127.0.0.1:%d: %s" % (port, e))
+    if ci_enabled():
+        import threading
+        threading.Thread(target=ci_loop, args=(ci_path(),), daemon=True).start()
     print("suivi: listening on http://127.0.0.1:%d/ (state %s)" % (srv.server_address[1], state), flush=True)
     try:
         srv.serve_forever()
@@ -1250,15 +1563,22 @@ def parser():
     t = add("test", None, "trial entries (tests/<n>-<k>.json)").add_subparsers(dest="tcmd", required=True)
     for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
                         ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
+                        ("remove", cmd_test_remove, "withdraw the session's own unmerged entries (archived)"),
                         ("list", cmd_test_list, "list the entries")):
         q = t.add_parser(name, help=h, allow_abbrev=False)
         q.set_defaults(fn=fn)
         if name == "add":
             q.add_argument("issue", type=int)
             q.add_argument("file")
+            q.add_argument("--force", action="store_true", help="exceed the limit of %d entries to try" % MAX_UNMERGED)
         elif name == "merged":
             q.add_argument("issue", type=int)
             q.add_argument("commit")
+            q.add_argument("--replace", metavar="OLD", help="correct entries that carry the commit OLD")
+        elif name == "remove":
+            q.add_argument("issue", type=int)
+            q.add_argument("ids", nargs="+")
+            q.add_argument("--answered", action="store_true", help="also remove entries ticked or commented")
         else:
             q.add_argument("--issue", type=int)
     q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)

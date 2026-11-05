@@ -341,6 +341,10 @@ status-history-empty = No messages yet. The messages of your actions will appear
 status-history-time = { $time } UTC
 status-level-warning = Warning
 status-level-error = Error
+status-formula-now-reads = { $count ->
+    [one] The formula of column { $column } now reads { $formula }
+   *[other] { $count } formulas now read the columns or sheets that appeared
+}
 status-saved = Saved to { $path }
 status-saved-over-limit = Saved to { $path }, but the file ({ $size } MB) is over the { $limit } MB opening limit. Raise the limit in File > Preferences > General to reopen it
 status-loaded = Loaded from { $path }
@@ -377,6 +381,7 @@ status-paste-fields-dropped =
        *[other] { $count } header fields did not fit and were not pasted
     }
 status-paste-columns-fields-dropped = { $columns } column(s) and { $fields } header field(s) did not fit and were not pasted
+status-formula-comma-rewritten = Read as the range from { $from } to { $to } and rewritten { $rewritten }. For the number { $decimal }, write it with a point
 status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }
@@ -709,7 +714,7 @@ error-import-whitespace-thousands = A space cannot both separate the columns and
 error-import-file = { $path }: { $detail }
 
 # Formulas
-error-formula-invalid = Invalid formula: { $detail }
+error-formula-syntax = The formula is incomplete or not valid. Check the operators and the parentheses
 error-formula-unknown-column = Column { $letter } does not exist in this sheet
 error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
 error-formula-deleted-column = Column deleted. Replace #REF with a column letter
@@ -756,6 +761,8 @@ error-formula-ambiguous-name = Several objects are named { $name } apart from ca
 error-formula-unknown-column-in = Column { $column } does not exist in sheet { $sheet }
 error-formula-remote-outside = A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column
 error-formula-remote-x = The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)
+error-paste-formula-kept = The formula of column { $column } does not compute: { $reason }
+error-paste-formulas-kept = The formulas of columns { $columns } do not compute. { $first }: { $reason }
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists
@@ -1206,12 +1213,12 @@ formula-help-max = The larger of x and y
 formula-help-if = a if the condition c holds, otherwise b
 formula-help-pi = The number π
 formula-help-at = Value of column B at X = x, by linear interpolation between the two neighboring points. Empty outside the X data. x can be a column; at(B, x, D) reads the X values in column D.
-formula-help-max-column = Largest value of column B. Add two X values to keep only the points between them: max(B, x1, x2).
-formula-help-min-column = Smallest value of column B. Add two X values to keep only the points between them: min(B, x1, x2).
-formula-help-mean = Mean of column B. Add two X values to keep only the points between them: mean(B, x1, x2).
-formula-help-sum = Sum of column B. Add two X values to keep only the points between them: sum(B, x1, x2).
-formula-help-std = Sample standard deviation (divided by n − 1) of column B, which needs two values. Add two X values to keep only the points between them: std(B, x1, x2).
-formula-help-integral = Area under column B by the trapezoid method, the same result as the Integration tool without a baseline. Add two X values to integrate between them: integral(B, x1, x2).
+formula-help-max-column = Largest value of column B. Add two X values to keep only the points between them: max(B, x1, x2). A bound of 1/0 means "to the end".
+formula-help-min-column = Smallest value of column B. Add two X values to keep only the points between them: min(B, x1, x2). A bound of 1/0 means "to the end".
+formula-help-mean = Mean of column B. Add two X values to keep only the points between them: mean(B, x1, x2). A bound of 1/0 means "to the end".
+formula-help-sum = Sum of column B. Add two X values to keep only the points between them: sum(B, x1, x2). A bound of 1/0 means "to the end".
+formula-help-std = Sample standard deviation (divided by n − 1) of column B, which needs two values. Add two X values to keep only the points between them: std(B, x1, x2). A bound of 1/0 means "to the end".
+formula-help-integral = Area under column B by the trapezoid method, the same result as the Integration tool without a baseline. Add two X values to integrate between them: integral(B, x1, x2). A bound of 1/0 means "to the end".
 common-metadata = Metadata
 workbook-metadata-hide = Hide Metadata Row
 workbook-metadata-summary =

@@ -517,9 +517,11 @@ pub enum Action {
     /// of `stokesforge_core::formula` / `stokesforge-session::actor`, outside
     /// the scope of this action. The text is typed in **letters**; it is
     /// converted into column identifiers by
-    /// [`stokesforge_core::Tree::formula_from_letters`] (#321). A refusal
-    /// (unknown letter, self-reference, `#REF`) is reported in the status bar
-    /// and nothing is written.
+    /// [`stokesforge_core::Tree::formula_keeping`] (#321, #433): the field never
+    /// refuses. A text that cannot be read (unknown letter, self-reference,
+    /// `#REF`, syntax error) is stored as typed, the status bar says why and the
+    /// cell is framed ([`AppState::formula_issue`]); a range written with a
+    /// decimal comma is rewritten and warned (S-R17).
     SetColumnFormula {
         /// Target column.
         column: NodeId,
@@ -1973,8 +1975,6 @@ pub fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
 pub(crate) enum HeaderTextRefused {
     /// x': it is not a finite number.
     NotANumber,
-    /// Formula: unknown letter, self-reference or `#REF`.
-    Formula(stokesforge_core::FormulaError),
 }
 
 impl HeaderField {
@@ -2028,10 +2028,9 @@ impl HeaderField {
 
     /// Writes `text` into the field of `column` (whose metadata is `meta`). Refusal
     /// (nothing is written) when the text is not a value of the field: x'
-    /// refuses anything that is not a finite number, the formula refuses an
-    /// unknown letter, the column itself or `#REF` — an empty text
-    /// erases it. The letters-to-identifiers conversion is
-    /// `Tree::formula_from_letters`, never a separate write.
+    /// refuses anything that is not a finite number, the formula keeps what it
+    /// cannot read (`Tree::formula_keeping`, #433) — an empty text erases it.
+    /// The letters-to-identifiers conversion is never a separate write.
     pub(crate) fn write_text(
         self,
         tree: &Tree,
@@ -2060,14 +2059,11 @@ impl HeaderField {
                 Ok(())
             }
             HeaderField::Formula => {
-                meta.formula = if text.trim().is_empty() {
-                    None
-                } else {
-                    Some(
-                        tree.formula_for_entry(column, &text)
-                            .map_err(HeaderTextRefused::Formula)?,
-                    )
-                };
+                // A non-blank text never gets here: it goes through
+                // `AppState::write_formula_text`, the one write of the field
+                // (typing and pasting, #433). Blank erases the formula.
+                let _ = (tree, column, text);
+                meta.formula = None;
                 Ok(())
             }
         }
@@ -2085,13 +2081,21 @@ impl HeaderField {
 }
 
 /// The refusal of a formula being typed, with what it was computed from
-/// ([`AppState::header_edit_refusal`]).
+/// ([`AppState::header_edit_issue`]).
 struct FormulaRefusalMemo {
     column: NodeId,
     buffer: String,
     revision: stokesforge_session::Revision,
     epoch: u64,
     refusal: Option<String>,
+}
+
+/// What is known of the formulas of one revision (see
+/// [`AppState::formula_issue`]).
+struct FormulaIssueMemo {
+    revision: stokesforge_session::Revision,
+    epoch: u64,
+    issues: std::collections::HashMap<NodeId, Option<stokesforge_core::FormulaError>>,
 }
 
 /// Grid area touched by the current selection — the header, the
@@ -2338,15 +2342,33 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
 }
 
+/// A comma range the Formula field rewrote (#433): the formula it stored and
+/// the sentence still to hand to the grid. The orange lives only while the
+/// column holds that formula. Typing and pasting both make one, through
+/// [`AppState::write_formula_text`].
+struct FormulaRewrite {
+    column: NodeId,
+    formula: stokesforge_core::ColumnFormula,
+    pending: Option<String>,
+}
+
+/// What [`AppState::write_formula_text`] did with a text.
+enum FormulaWrite {
+    Clean,
+    /// Rewritten (comma range): the sentence.
+    Warned(String),
+    /// Kept although it does not compute: the sentence of why.
+    Kept(String),
+}
+
 /// What a full-column paste did with the Formula field of one target (#432).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FormulaPaste {
     /// No formula was pasted here, or the write did not take place.
     NotWritten,
-    /// The pasted formula is stored: the column is recomputed.
+    /// The pasted formula is stored, kept as typed if it does not compute
+    /// (#433): the column is recomputed or empty, never given frozen values.
     Accepted,
-    /// The formula was refused (its sentence is set at the end of the paste).
-    Refused,
 }
 
 /// Column targeted by `cursor`, whatever its kind — [`GridCursor`]
@@ -3129,6 +3151,24 @@ pub struct AppState {
     /// the formulas of the project (#403). Valid for one buffer on one
     /// revision of one project.
     formula_refusal_memo: std::cell::RefCell<Option<FormulaRefusalMemo>>,
+    /// Why each kept formula does not compute, for one revision and epoch of the
+    /// project (#433): the grid asks every frame, and the strict re-read of a
+    /// formula walks the sheets. The error, not the sentence: a language change
+    /// is followed.
+    formula_issue_memo: std::cell::RefCell<Option<FormulaIssueMemo>>,
+    /// A comma range just rewritten in the F(x)= field of a column (#433): the
+    /// grid takes it once and paints the orange state for 10 s.
+    formula_rewrites: Vec<FormulaRewrite>,
+    /// Sentences of the comma rewrites made by the paste in progress, the
+    /// first of which the status bar shows once the paste is done.
+    paste_warnings: Vec<String>,
+    /// The formula the field wrote when it rewrote a comma range, kept so the
+    /// orange state lives only while the column still holds it (#433): red,
+    /// undone, replaced or removed, it is gone.
+    /// How many formula bindings the status bar has already told (#433): the
+    /// session counts the kept formulas it bound when their column or sheet
+    /// appeared, the snapshot carries the count.
+    seen_bound: u64,
     /// Last structured grid clipboard, set by [`AppState::
     /// copy_selection`]/[`AppState::copy_full_columns`] — pure UI state, like
     /// [`AppState::selection`]: never in the history, never sent to
@@ -3336,6 +3376,10 @@ impl AppState {
             selection: std::collections::HashMap::new(),
             header_editing: None,
             formula_refusal_memo: std::cell::RefCell::new(None),
+            formula_issue_memo: std::cell::RefCell::new(None),
+            formula_rewrites: Vec::new(),
+            paste_warnings: Vec::new(),
+            seen_bound: 0,
             grid_clipboard: None,
             clipboard_text: None,
             clipboard_dirty: false,
@@ -3396,6 +3440,57 @@ impl AppState {
         view.clipboard_text = self.clipboard_text.clone();
         view.clipboard_dirty = false;
         Ok(view)
+    }
+
+    /// Says in the status bar, as a warning kept until the next message (like
+    /// the comma sentence), which column a kept formula now reads, once per
+    /// binding (#433, Q3): the session bound it inside the gesture that made
+    /// the column or sheet appear, and the snapshot counts it. An undo says
+    /// nothing (it unbinds without counting), nor does a new project or a
+    /// loaded file (`reopened`), which only resynchronize the count. A binding
+    /// that was undone before this snapshot (Stop) no longer reads and is
+    /// skipped.
+    fn tell_bound_formulas(&mut self, reopened: bool) {
+        let report = std::sync::Arc::clone(&self.snapshot.bound);
+        let new = report.count.saturating_sub(self.seen_bound);
+        self.seen_bound = report.count;
+        if reopened || new == 0 {
+            return;
+        }
+        let tree = &self.snapshot.tree;
+        let told = usize::try_from(new)
+            .unwrap_or(usize::MAX)
+            .min(report.recent.len());
+        let lines: Vec<(String, String)> = report.recent[report.recent.len() - told..]
+            .iter()
+            .filter_map(|column| {
+                let formula = tree.node(*column)?.as_column()?.meta().formula.as_ref()?;
+                formula.compile().ok()?;
+                Some((
+                    tree.column_letters(*column)?,
+                    tree.formula_letters(*column)?,
+                ))
+            })
+            .collect();
+        match lines.as_slice() {
+            [] => {}
+            [(column, formula)] => {
+                self.warn(tr!(
+                    "status-formula-now-reads",
+                    count = 1,
+                    column = column.as_str(),
+                    formula = formula.as_str()
+                ));
+            }
+            many => {
+                self.warn(tr!(
+                    "status-formula-now-reads",
+                    count = many.len(),
+                    column = "",
+                    formula = ""
+                ));
+            }
+        }
     }
 
     /// Refreshes a viewport's read without touching its selection or
@@ -4769,14 +4864,15 @@ impl AppState {
         field.text_of(&self.snapshot.tree, column, &self.column_meta(column))
     }
 
-    /// Why the text being typed in the **Formula** field is
-    /// refused: a letter that designates no column of the sheet, the column
-    /// itself, or a modified `#REF` (#321). `None` for everything else:
-    /// an empty text (clears), the displayed text as is (nothing is written, even
-    /// with `#REF`) and a **syntax error**, which is saved (the column
-    /// fills with `---`). This is the only place that decides; the grid
-    /// keeps the field open and paints the refusal.
-    pub fn header_edit_refusal(&self) -> Option<String> {
+    /// Why the text being typed in the **Formula** field will not compute (#433):
+    /// the sentence of the bubble and of the tint. The field always writes what
+    /// is typed (the text is kept and framed), so this no longer refuses
+    /// anything; it tells while typing. `None` for an empty text, for the
+    /// displayed text as is, for a text that reads, and for a **syntax error**
+    /// (`A +` while typing stays plain: no tint for `Parse` and `TooDeep`, the
+    /// sentence comes once the text is written). This is the only place that
+    /// decides what the live frame says.
+    pub fn header_edit_issue(&self) -> Option<String> {
         let edit = self.header_editing.as_ref()?;
         if edit.field != HeaderField::Formula {
             return None;
@@ -4797,11 +4893,18 @@ impl AppState {
                 return memo.refusal.clone();
             }
         }
-        let refusal = self
+        let (_, error) = self
             .snapshot
             .tree
-            .formula_for_entry(edit.column, &edit.buffer)
-            .err()
+            .formula_keeping(edit.column, &edit.buffer);
+        let refusal = error
+            .filter(|error| {
+                !matches!(
+                    error,
+                    stokesforge_core::FormulaError::Parse(_)
+                        | stokesforge_core::FormulaError::TooDeep
+                )
+            })
             .map(|error| errors::formula::error_message(&error));
         *self.formula_refusal_memo.borrow_mut() = Some(FormulaRefusalMemo {
             column: edit.column,
@@ -4819,7 +4922,7 @@ impl AppState {
     /// as is (a stored text `1e400` reopened stays), a date in a Date/Time
     /// column, any other text (it widens the column). Only typing is checked:
     /// paste, import and scripts keep their own rule. The grid keeps the cell
-    /// open and paints the refusal, like [`AppState::header_edit_refusal`].
+    /// open and paints the refusal, like [`AppState::header_edit_issue`].
     pub fn cell_edit_refusal(&self) -> Option<String> {
         let edit = self.editing.as_ref()?;
         self.cell_entry_range_error(edit.column, edit.row, &edit.buffer)
@@ -4851,30 +4954,159 @@ impl AppState {
         stokesforge_core::number_format::check_range(text).err()
     }
 
-    /// The sentence saying why the formula of `column` no longer computes,
-    /// when it reads a deleted column (`#REF`, #321), when it is part of a loop
-    /// that a file holds (#403), when a column function finds no X paired with
-    /// the column it reads, or when every cell of the result is empty because
-    /// the functions found no point (#402): the grid paints it as a frame on
-    /// the Formula cell.
+    /// The sentence saying why the formula of `column` does not compute, when it
+    /// reads a deleted column (`#REF`, #321), when it is part of a loop (#403,
+    /// kept uncomputed, #433), when it does not read (kept text: a letter that
+    /// names no column, a syntax error, #433), when a column function finds no X
+    /// paired with the column it reads, or when every cell of the result is
+    /// empty because the functions found no point (#402): the grid paints it as
+    /// a frame on the Formula cell. Nothing here reads the rows, so a sheet of
+    /// no row is framed too.
     pub fn formula_issue(&self, column: NodeId) -> Option<String> {
+        let revision = self.snapshot.revision;
+        let epoch = self.snapshot.epoch;
+        if let Some(memo) = self.formula_issue_memo.borrow().as_ref() {
+            if memo.revision == revision && memo.epoch == epoch {
+                if let Some(known) = memo.issues.get(&column) {
+                    return known.as_ref().map(errors::formula::error_message);
+                }
+            }
+        }
+        let error = self.formula_issue_error(column);
+        let mut memo = self.formula_issue_memo.borrow_mut();
+        let fresh = memo
+            .as_ref()
+            .is_some_and(|memo| memo.revision == revision && memo.epoch == epoch);
+        if !fresh {
+            *memo = Some(FormulaIssueMemo {
+                revision,
+                epoch,
+                issues: std::collections::HashMap::new(),
+            });
+        }
+        if let Some(memo) = memo.as_mut() {
+            memo.issues.insert(column, error.clone());
+        }
+        error.as_ref().map(errors::formula::error_message)
+    }
+
+    /// The error behind [`AppState::formula_issue`], in order of precedence: a
+    /// lost column hides the rest; a loop; a text that does not read; a missing
+    /// X shows empty cells everywhere; no point is the whole result empty (#402).
+    fn formula_issue_error(&self, column: NodeId) -> Option<stokesforge_core::FormulaError> {
         use stokesforge_core::FormulaError;
         let tree = &self.snapshot.tree;
-        // In order of precedence: a lost column hides the rest; a missing X
-        // shows `---` everywhere; no point is the whole result empty (#402).
-        let error = if tree.formula_has_deleted_reference(column) {
-            FormulaError::DeletedColumn
-        } else if tree.formula_in_loop(column) {
-            // A file can hold a loop that input would have refused (#403).
-            FormulaError::Cycle
-        } else if tree.formula_lacks_paired_x(column) {
-            FormulaError::NoPairedX
-        } else if tree.formula_found_no_point(column) {
-            FormulaError::NoPoint
-        } else {
-            return None;
+        let formula = tree
+            .node(column)
+            .and_then(Node::as_column)
+            .and_then(|node| node.meta().formula.as_ref())?;
+        if tree.formula_has_deleted_reference(column) {
+            return Some(FormulaError::DeletedColumn);
+        }
+        if tree.formula_in_loop(column) {
+            // A column that reads itself says so; a loop through others is a
+            // loop. Kept formulas and older files alike (#403, #433).
+            return Some(match tree.column_letters(column) {
+                Some(letters) if formula.columns().contains(&column) => {
+                    FormulaError::SelfReference(letters)
+                }
+                _ => FormulaError::Cycle,
+            });
+        }
+        if let Err(compile_error) = formula.compile() {
+            // The kept text read strictly says why precisely (`Z` names no
+            // column); a formula that compiles is **not** re-read: an old
+            // file's case-twin siblings would be framed by `AmbiguousName`.
+            let shown = tree.formula_letters(column).unwrap_or_default();
+            return Some(
+                tree.formula_for_entry(column, &shown)
+                    .err()
+                    .unwrap_or(compile_error),
+            );
+        }
+        if tree.formula_lacks_paired_x(column) {
+            return Some(FormulaError::NoPairedX);
+        }
+        if tree.formula_found_no_point(column) {
+            return Some(FormulaError::NoPoint);
+        }
+        None
+    }
+
+    /// True while `column` still holds the formula the field rewrote from a
+    /// comma range and that formula computes (no frame): the only time the
+    /// orange state and its bubble may show (#433). Red, undone, replaced or
+    /// removed, it is false.
+    pub fn formula_rewrite_holds(&self, column: NodeId) -> bool {
+        let Some(rewrite) = self.formula_rewrites.iter().find(|r| r.column == column) else {
+            return false;
         };
-        Some(errors::formula::error_message(&error))
+        self.snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .and_then(|node| node.meta().formula.as_ref())
+            == Some(&rewrite.formula)
+            && self.formula_issue(column).is_none()
+    }
+
+    /// Forgets every pending or remembered comma rewrite (Undo, Redo).
+    fn clear_formula_rewrite(&mut self) {
+        self.formula_rewrites.clear();
+        self.paste_warnings.clear();
+    }
+
+    /// Forgets the pending sentence and the rewrite of `column`: a warning for
+    /// a formula that is gone must never appear later.
+    pub fn forget_formula_rewrite(&mut self, column: NodeId) {
+        self.formula_rewrites.retain(|r| r.column != column);
+    }
+
+    /// The sentence of the comma range just rewritten in the Formula field of
+    /// `column`, once (#433): the grid flags the cell orange for 10 s with it.
+    /// Only while the column still holds the rewritten formula
+    /// ([`AppState::formula_rewrite_holds`]); otherwise it is dropped.
+    pub fn take_formula_warning(&mut self, column: NodeId) -> Option<String> {
+        if !self.formula_rewrite_holds(column) {
+            self.forget_formula_rewrite(column);
+            return None;
+        }
+        self.formula_rewrites
+            .iter_mut()
+            .find(|r| r.column == column)
+            .and_then(|r| r.pending.take())
+    }
+
+    /// **The** write of a text into a Formula field, for typing and for every
+    /// paste (#433): one reading ([`crate::formula_entry::read`]), one store,
+    /// one memory of the rewrite. The callers only decide when the status bar
+    /// says what [`FormulaWrite`] reports.
+    fn write_formula_text(&mut self, column: NodeId, text: &str) -> FormulaWrite {
+        self.forget_formula_rewrite(column);
+        let (formula, outcome) = crate::formula_entry::read(&self.snapshot.tree, column, text);
+        self.set_column_meta_field(column, |meta| meta.formula = Some(formula));
+        match outcome {
+            crate::formula_entry::Outcome::Clean => FormulaWrite::Clean,
+            crate::formula_entry::Outcome::Warned { sentence, .. } => {
+                if let Some(stored) = self
+                    .snapshot
+                    .tree
+                    .node(column)
+                    .and_then(Node::as_column)
+                    .and_then(|node| node.meta().formula.clone())
+                {
+                    self.formula_rewrites.push(FormulaRewrite {
+                        column,
+                        formula: stored,
+                        pending: Some(sentence.clone()),
+                    });
+                }
+                FormulaWrite::Warned(sentence)
+            }
+            crate::formula_entry::Outcome::Kept { error } => {
+                FormulaWrite::Kept(errors::formula::error_message(&error))
+            }
+        }
     }
 
     /// Entry in progress in a column header field, if there is one.
@@ -5406,8 +5638,17 @@ impl AppState {
             self.dialog_error = None;
         }
         match action {
-            Action::Undo => self.undo(),
-            Action::Redo => self.redo(),
+            // Undo and Redo always end the orange of a comma rewrite (#433):
+            // the same stored formula can come back, but the warning was about
+            // the gesture that is now undone or replayed.
+            Action::Undo => {
+                self.clear_formula_rewrite();
+                self.undo();
+            }
+            Action::Redo => {
+                self.clear_formula_rewrite();
+                self.redo();
+            }
             Action::Save => {
                 self.save();
             }
@@ -5589,16 +5830,19 @@ impl AppState {
             }
             Action::SetColumnXPrime { column, text } => self.set_column_x_prime(column, text),
             Action::SetColumnFormula { column, formula } => {
-                // Refusal: nothing is written, the status bar says why. The
-                // conversion from letters to identifiers is done here, above
+                // The field keeps what it is given (#433): a text that does not
+                // read is stored as typed, framed, and the status bar says why.
+                // The conversion from letters to identifiers is done here, above
                 // the command (`SetColumnMeta` never validates references).
                 match formula {
-                    None => self.set_column_meta_field(column, |meta| meta.formula = None),
-                    Some(text) => match self.snapshot.tree.formula_for_entry(column, &text) {
-                        Ok(formula) => {
-                            self.set_column_meta_field(column, |meta| meta.formula = Some(formula));
-                        }
-                        Err(error) => self.fail(errors::formula::error_message(&error)),
+                    None => {
+                        self.forget_formula_rewrite(column);
+                        self.set_column_meta_field(column, |meta| meta.formula = None);
+                    }
+                    Some(text) => match self.write_formula_text(column, &text) {
+                        FormulaWrite::Clean => {}
+                        FormulaWrite::Warned(sentence) => self.warn(sentence),
+                        FormulaWrite::Kept(sentence) => self.fail(sentence),
                     },
                 }
             }
@@ -6316,6 +6560,7 @@ impl AppState {
                 }
                 let reopened = self.snapshot.epoch != snapshot.epoch;
                 self.snapshot = snapshot;
+                self.tell_bound_formulas(reopened);
                 self.revalidate_selection();
                 self.refresh_low_r2_groups();
                 if reopened {
@@ -6754,8 +6999,9 @@ impl AppState {
             return;
         }
         // The rows of the sheet follow the longest of the new contents;
-        // they shrink only if **all** the columns are refreshed
-        // (a hand-typed column is never truncated).
+        // they shrink only if **all** the columns without a formula are
+        // refreshed (a hand-typed column is never truncated). A formula column
+        // has no source and is recomputed on the new length (#433).
         let new_len = refreshed
             .iter()
             .filter_map(|(_, planned)| stokesforge_importer::import_block(&items, *planned))
@@ -6766,7 +7012,18 @@ impl AppState {
             .max()
             .unwrap_or(0);
         let rows = self.row_count(sheet);
-        let all_refreshed = refreshed.len() == self.visible_columns(sheet).len();
+        let all_refreshed = self
+            .visible_columns(sheet)
+            .iter()
+            .filter(|(id, _, _)| {
+                !self
+                    .snapshot
+                    .tree
+                    .node(*id)
+                    .and_then(Node::as_column)
+                    .is_some_and(|column| column.meta().formula.is_some())
+            })
+            .all(|(id, _, _)| refreshed.iter().any(|(refreshed_id, _)| refreshed_id == id));
         if new_len > rows {
             self.execute(Command::InsertRows {
                 sheet,
@@ -9653,7 +9910,11 @@ impl AppState {
     /// A formula column naturally refuses the write of data
     /// (`CoreError::FormulaColumnReadOnly`): reported by the status, without
     /// blocking the other columns already pasted. A full-column paste does not
-    /// try it on the columns whose formula it has just written (#432). A paste that touches several
+    /// try it on the columns whose formula it has just written, kept or not
+    /// (#432, #433). A pasted formula that cannot be read is **kept** like a
+    /// typed one, through the same write (`AppState::write_formula_text`, `formula_entry::read`: comma range rewritten and orange too): framed,
+    /// the column emptied, the status bar names the columns that do not compute
+    /// and the reason of the first; only `pyst` is strict. A paste that touches several
     /// columns or several fields stays grouped in a single history entry.
     fn apply_paste(
         &mut self,
@@ -9686,9 +9947,10 @@ impl AppState {
     fn paste_single_value(&mut self, anchor: GridCursor, text: &str) {
         match anchor {
             GridCursor::Header(column, field) => {
-                if let Some(refusal) = self.paste_header_text(column, field, text.to_string()) {
-                    self.fail(refusal);
-                }
+                let refusal = self.paste_header_text(column, field, text.to_string());
+                let refusals: Vec<(NodeId, String)> =
+                    refusal.map(|reason| (column, reason)).into_iter().collect();
+                self.fail_formula_paste(&refusals);
             }
             GridCursor::Data(column, row) => {
                 let Some(kind) = self
@@ -9837,12 +10099,14 @@ impl AppState {
                     self.fail(tr!("error-paste-group"));
                     return;
                 }
-                let mut refusal = None;
+                let mut refusals: Vec<(NodeId, String)> = Vec::new();
                 for &(field, cells) in &writes {
                     for (index, &column) in targets.iter().enumerate() {
                         let text = cells.get(index).cloned().unwrap_or_default();
                         let refused = self.paste_header_text(column, field, text);
-                        refusal = refusal.or(refused);
+                        if let Some(reason) = refused {
+                            refusals.push((column, reason));
+                        }
                     }
                 }
                 if grouped {
@@ -9856,9 +10120,7 @@ impl AppState {
                 );
                 // The refusal of a formula goes last: it wins over the
                 // overflow notice, the other fields are pasted.
-                if let Some(refusal) = refusal {
-                    self.fail(refusal);
-                }
+                self.fail_formula_paste(&refusals);
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -9962,10 +10224,11 @@ impl AppState {
             self.fail(tr!("error-paste-group"));
             return;
         }
-        let mut refusal = None;
-        // Per target, what this paste did with the Formula field. Only
-        // `Accepted` skips the body below; `Refused` is kept explicit for the
-        // callers that will treat a refused formula differently (#433).
+        // The formulas refused by this paste: the column, and why (#433).
+        let mut refusals: Vec<(NodeId, String)> = Vec::new();
+        // Per target, what this paste did with the Formula field. A column
+        // that now carries a formula skips the body below, kept formula
+        // included: no frozen values, ever (#433).
         let mut formula_outcomes = vec![FormulaPaste::NotWritten; targets.len()];
         if let Some(from) = header_from {
             for field_index in from..HeaderField::COUNT {
@@ -9985,22 +10248,24 @@ impl AppState {
                         // `None` alone is ambiguous (column gone, refused x'):
                         // it is accepted only if the column now carries a
                         // formula.
-                        *outcome = match &refused {
-                            Some(_) => FormulaPaste::Refused,
-                            None if self.column_meta(column).formula.is_some() => {
-                                FormulaPaste::Accepted
-                            }
-                            None => FormulaPaste::NotWritten,
+                        *outcome = if self.column_meta(column).formula.is_some() {
+                            FormulaPaste::Accepted
+                        } else {
+                            FormulaPaste::NotWritten
                         };
                     }
-                    refusal = refusal.or(refused);
+                    if let Some(reason) = refused {
+                        refusals.push((column, reason));
+                    }
                 }
             }
         }
         for ((&column, source), outcome) in targets.iter().zip(columns).zip(&formula_outcomes) {
             // The column whose formula this paste just wrote is recomputed:
             // its frozen values would only be refused as read-only.
-            if source.data.is_empty() || *outcome == FormulaPaste::Accepted {
+            // A kept formula that does not compute stays empty (#433): frozen
+            // values would look like its result.
+            if source.data.is_empty() || *outcome != FormulaPaste::NotWritten {
                 continue;
             }
             let Some(kind) = self
@@ -10022,23 +10287,63 @@ impl AppState {
         self.notice_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
         // The refusal of a formula goes last: the other fields and the values
         // are pasted, the status bar says what is not.
-        if let Some(refusal) = refusal {
-            self.fail(refusal);
-        }
+        self.fail_formula_paste(&refusals);
+    }
+
+    /// The status bar sentence of the formulas a paste kept without being
+    /// able to compute them (#433), naming the columns, like typing: the
+    /// formulas are stored, framed, the other columns went through. Nothing if
+    /// every formula computes.
+    fn fail_formula_paste(&mut self, refusals: &[(NodeId, String)]) {
+        // A rewrite of a comma range by the paste: its sentence is the
+        // status, unless an error wins (the error sentence is set below).
+        let warnings = std::mem::take(&mut self.paste_warnings);
+        let Some((first, reason)) = refusals.first() else {
+            if let Some(sentence) = warnings.into_iter().next() {
+                self.warn(sentence);
+            }
+            return;
+        };
+        let letters = |column: &NodeId| {
+            self.snapshot
+                .tree
+                .column_letters(*column)
+                .unwrap_or_default()
+        };
+        let sentence = if refusals.len() == 1 {
+            let column = letters(first);
+            tr!(
+                "error-paste-formula-kept",
+                column = column.as_str(),
+                reason = reason.as_str()
+            )
+        } else {
+            let columns: Vec<String> = refusals.iter().map(|(c, _)| letters(c)).collect();
+            let columns = columns.join(", ");
+            // Every refused column is named, then the reason of the first.
+            let first = letters(first);
+            tr!(
+                "error-paste-formulas-kept",
+                columns = columns.as_str(),
+                first = first.as_str(),
+                reason = reason.as_str()
+            )
+        };
+        self.fail(sentence);
     }
 
     /// Re-reads the current metadata of `column`, lets `update` modify a
     /// single field, then replaces them as a block
     /// (`Command::SetColumnMeta`: the "block replacement, never by subfield"
     /// doctrine of the `stokesforge-commands` crate, see its head doc).
-    /// Writes `text` into the header field `field` of `column`; a text that
-    /// the field refuses is reported without writing anything. Non-numeric x':
-    /// the status bar says so right away. Formula refused (unknown letter,
-    /// self-read, `#REF`): the **sentence** of the refusal is returned, and the
+    /// Writes `text` into the header field `field` of `column`. Non-numeric x':
+    /// refused, the status bar says so right away. A formula that does not
+    /// compute (unknown letter, self-read, `#REF`, loop...) is **kept** as
+    /// typed, the column emptied, and the **sentence** of why is returned; the
     /// caller sets it, **after** the writes of the whole paste (the other
-    /// fields are pasted, the status bar keeps the refusal). `None` does not
-    /// mean written: it is also returned for a column gone and for a refused
-    /// x' (both already reported); the caller reads the column back.
+    /// fields are pasted, the status bar keeps it). `None` does not mean
+    /// written: it is also returned for a column gone and for a refused x'
+    /// (both already reported); the caller reads the column back.
     fn paste_header_text(
         &mut self,
         column: NodeId,
@@ -10055,17 +10360,23 @@ impl AppState {
             self.fail(tr!("error-column-gone"));
             return None;
         };
+        // A formula text goes through the one write of the Formula field, the
+        // same as typing (#433): rewrite, memory of the orange, kept error.
+        if field == HeaderField::Formula && !text.trim().is_empty() {
+            return match self.write_formula_text(column, &text) {
+                FormulaWrite::Clean => None,
+                FormulaWrite::Warned(sentence) => {
+                    self.paste_warnings.push(sentence);
+                    None
+                }
+                FormulaWrite::Kept(sentence) => Some(sentence),
+            };
+        }
         match field.write_text(&self.snapshot.tree, column, &mut meta, text) {
             Ok(()) => {}
             Err(HeaderTextRefused::NotANumber) => {
                 self.fail(crate::tr!("status-x-prime-invalid"));
                 return None;
-            }
-            Err(HeaderTextRefused::Formula(error)) => {
-                // Pasted formula with a letter that does not exist in the
-                // destination sheet, or that carries `#REF`: nothing is written
-                // in this field.
-                return Some(errors::formula::error_message(&error));
             }
         }
         self.set_meta_dropping_formula_data(column, meta, false);

@@ -8,6 +8,7 @@ Everything runs in a throwaway repository and a throwaway state folder; the real
 ../_stokesforge/.suivi is never touched.
 """
 import http.client
+import http.server
 import importlib.util
 import json
 import os
@@ -16,8 +17,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUIVI = os.path.join(HERE, "suivi.py")
@@ -48,6 +51,7 @@ class Base(unittest.TestCase):
         self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "SF_"))}
         self.env["SF_TODAY"] = "2026-11-03"
+        self.env["SF_SUIVI_CI"] = "off"     # the CI watcher would call glab and the network (#452)
 
     def git(self, *a, cwd=None):
         subprocess.run(["git", *a], cwd=cwd or self.repo, check=True, capture_output=True)
@@ -438,35 +442,291 @@ class TestTestCommands(Base):
             json.dump(data, f)
         return p
 
+    ONE = {"title": "A", "where": ["File", "Open"], "steps": ["Do"], "expect": "See", "try": "scripts/try.sh 7"}
+
+    def gout(self, *a):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=self.repo,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def feature(self, n, msg=None, keep=True, topic="x"):
+        """Merge a real feature/<n>-<topic> branch into main with --no-ff; returns the merge commit."""
+        br = "feature/%d-%s" % (n, topic)
+        self.gout("checkout", "-q", "-b", br, "main")
+        self.gout("commit", "-q", "--allow-empty", "-m", "work %d" % n)
+        self.gout("checkout", "-q", "main")
+        self.gout("merge", "-q", "--no-ff", "-m", msg or "Merge #%d: x" % n, br)
+        h = self.gout("rev-parse", "HEAD")
+        if not keep:
+            self.gout("branch", "-q", "-D", br)
+        return h
+
+    def add(self, n, entries, *extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            return self.run_cli("test", "add", str(n), self.entries(tmp, entries), *extra)
+
+    def tfile(self, tid):
+        return os.path.join(self.state, "tests", tid + ".json")
+
+    def snap_tests(self):
+        d = os.path.join(self.state, "tests")
+        return {f: slurp(os.path.join(d, f)) for f in sorted(os.listdir(d))} if os.path.isdir(d) else {}
+
+    def put_test(self, tid, **fields):
+        os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
+        with open(self.tfile(tid), "w") as f:
+            json.dump(dict({"title": tid, "status": "todo", "n": int(tid.split("-")[0])}, **fields), f)
+
+    def merged(self, n, commit, *extra):
+        return self.run_cli("test", "merged", str(n), commit, *extra)
+
     def test_add_merged_list(self):
         self.claim(7, "--name", "Seven")
-        with tempfile.TemporaryDirectory() as tmp:
-            one = {"title": "A", "where": ["File", "Open"], "steps": ["Do"], "expect": "See", "try": "scripts/try.sh 7"}
-            r = self.run_cli("test", "add", "7", self.entries(tmp, [one, {"title": "B", "try": "scripts/try.sh 7"}]))
-            self.assertEqual((r.returncode, r.stdout.strip()), (0, "7-1 7-2"), r.stderr)
-            r = self.run_cli("test", "add", "7", self.entries(tmp, one))
-            self.assertEqual(r.stdout.strip(), "7-3")
-        t = jload(os.path.join(self.state, "tests", "7-1.json"))
+        r = self.add(7, [self.ONE, {"title": "B", "try": "scripts/try.sh 7"}])
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "7-1 7-2"), r.stderr)
+        self.assertEqual(self.add(7, self.ONE).stdout.strip(), "7-3")
+        t = jload(self.tfile("7-1"))
         self.assertEqual((t["status"], t["n"], t["name"], t["colour"], t["date"]), ("todo", 7, "Seven", C[0], "2026-11-03"))
         self.assertEqual(self.held(C[0]), ["agent", "essai"])
         out = self.run_cli("test", "list", "--issue", "7").stdout
         self.assertEqual(len(out.strip().splitlines()), 3)
         self.assertIn("(try)", out)
-        r = self.run_cli("test", "merged", "7", "abcdef12")
+        full = self.feature(7)
+        r = self.merged(7, full[:8])
         self.assertIn("3 entries", r.stdout)
-        t = jload(os.path.join(self.state, "tests", "7-1.json"))
-        self.assertEqual((t["commit"], "try" in t), ("abcdef12", False))
+        t = jload(self.tfile("7-1"))
+        self.assertEqual((t["commit"], "try" in t), (full, False))
         self.assertEqual(self.held(C[0]), ["agent"])
 
     def test_rejects_unknown_fields_and_bad_commit(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            r = self.run_cli("test", "add", "7", self.entries(tmp, {"title": "A", "status": "ok"}))
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("unknown field", r.stderr)
-            r = self.run_cli("test", "add", "7", self.entries(tmp, {"steps": "not a list"}))
-            self.assertNotEqual(r.returncode, 0)
+        r = self.add(7, {"title": "A", "status": "ok"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("unknown field", r.stderr)
+        self.assertNotEqual(self.add(7, {"steps": "not a list"}).returncode, 0)
+        self.assertNotEqual(self.add(7, {"intro": ["not", "a", "str"]}).returncode, 0)
         self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
-        self.assertNotEqual(self.run_cli("test", "merged", "7", "../x").returncode, 0)
+        r = self.merged(7, "../x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a commit hash", r.stderr)
+
+    def test_merged_refuses_a_commit_that_does_not_belong_to_the_issue(self):
+        self.add(7, [self.ONE])
+        self.add(44, [dict(self.ONE, title="F")])
+        before = self.snap_tests()
+        self.gout("commit", "-q", "--allow-empty", "-m", "prepare #7")          # main HEAD before the merge
+        prev = self.gout("rev-parse", "HEAD")
+        full = self.feature(7)
+        self.gout("checkout", "-q", "-b", "side", full)                        # contains the branch, cites #7, not on main
+        self.gout("commit", "-q", "--allow-empty", "-m", "side #7")
+        side = self.gout("rev-parse", "HEAD")
+        self.gout("checkout", "-q", "main")
+        m449 = self.feature(449, keep=False)
+        for what, issue, commit in (("unknown", 7, "deadbeef"), ("not on main", 7, side),
+                                    ("main before the merge, branch still there", 7, prev),
+                                    ("message cites #449, not #44", 44, m449)):
+            r = self.merged(issue, commit)
+            self.assertNotEqual(r.returncode, 0, what)
+            self.assertEqual(self.snap_tests(), before, what)
+        self.assertIn("no such commit", self.merged(7, "deadbeef").stderr)
+        self.assertIn("not on main", self.merged(7, side).stderr)
+        self.gout("branch", "-q", "-D", "feature/7-x")                         # branch gone: the message is enough
+        r = self.merged(7, full)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(jload(self.tfile("7-1"))["commit"], full)
+
+    def test_replace_changes_only_the_entries_that_carry_the_old_commit(self):
+        old, other = "a" * 40, "b" * 40
+        self.put_test("7-1", commit=old, status="ok", comment="fine", reviewed="2026-11-01")
+        self.put_test("7-2", commit=old[:8].upper(), status="retour", comment="no")
+        self.put_test("7-3", commit=other)
+        self.put_test("7-4", **{"try": "scripts/try.sh 7"})
+        full = self.feature(7)
+        before = self.snap_tests()
+        for bad in (("zzzz", "--replace", old), (full[:8], "--replace", "c" * 8)):
+            r = self.merged(7, *bad)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertEqual(self.snap_tests(), before)
+        r = self.merged(7, full[:8], "--replace", old[:6])                      # short old against a full stored one
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = self.snap_tests()
+        self.assertEqual(json.loads(after["7-1.json"]), dict(json.loads(before["7-1.json"]), commit=full))
+        self.assertEqual(json.loads(after["7-2.json"]), dict(json.loads(before["7-2.json"]), commit=full))
+        self.assertEqual((after["7-3.json"], after["7-4.json"]), (before["7-3.json"], before["7-4.json"]))
+        self.put_test("7-5", commit=full[:8])
+        self.assertEqual(self.merged(7, full, "--replace", full).returncode, 0)  # full old against a short stored one
+
+    def test_replace_matches_a_legacy_non_hex_commit_exactly(self):
+        self.put_test("7-1", commit="main")
+        self.put_test("7-2", commit="mainline")
+        full = self.feature(7)
+        self.assertEqual(self.merged(7, full, "--replace", "mai").returncode, 1)
+        self.assertEqual(self.merged(7, full, "--replace", "main").returncode, 0)
+        self.assertEqual((jload(self.tfile("7-1"))["commit"], jload(self.tfile("7-2"))["commit"]), (full, "mainline"))
+
+    def test_second_merged_call_is_idempotent_or_points_at_replace(self):
+        self.add(7, [self.ONE])
+        full = self.feature(7)
+        self.assertIn("1 entry", self.merged(7, full).stdout)
+        for ref in (full, full[:8]):
+            r = self.merged(7, ref)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, "already recorded"))
+        self.gout("commit", "-q", "--allow-empty", "-m", "touch #7")
+        other = self.gout("rev-parse", "HEAD")
+        before = self.snap_tests()
+        r = self.merged(7, other)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn(full, r.stderr)
+        self.assertIn("--replace", r.stderr)
+        self.assertEqual(self.snap_tests(), before)
+        r = self.merged(5, full)                                                # no entries for the issue
+        self.assertEqual(r.returncode, 1)                                       # (message cites #7, not #5)
+        self.feature(5)
+        r = self.merged(5, self.gout("rev-parse", "HEAD"))
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "no entries"))
+
+    def test_merged_writes_only_the_entries_to_try_when_there_are_some(self):
+        self.put_test("7-1", commit="old12345", status="ok")
+        self.put_test("7-2", **{"try": "scripts/try.sh 7"})
+        full = self.feature(7)
+        self.assertEqual(self.merged(7, full).returncode, 0)
+        self.assertEqual(jload(self.tfile("7-1"))["commit"], "old12345")
+        self.assertEqual(jload(self.tfile("7-2"))["commit"], full)
+
+    def test_at_most_five_entries_to_try_per_issue(self):
+        five = [dict(self.ONE, title=str(i)) for i in range(5)]
+        self.assertEqual(self.add(7, five).returncode, 0)
+        before = self.snap_tests()
+        r = self.add(7, [self.ONE])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.snap_tests(), before)
+        r = self.add(7, [self.ONE], "--force")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "7-6"))
+        self.assertIn("justify", r.stderr)
+        self.assertEqual(self.add(8, five + [self.ONE]).returncode, 1)          # one file of six
+        self.assertEqual(self.snap_tests().keys() & {"8-1.json"}, set())
+        self.assertEqual(self.add(8, five + [self.ONE], "--force").returncode, 0)
+        self.put_test("9-1", commit="x" * 8)                                     # merged entries do not count
+        self.assertEqual(self.add(9, five).returncode, 0)
+
+    def test_big_legacy_issue_still_works_but_takes_no_new_entry_without_force(self):
+        self.claim(5)
+        for k in range(1, 27):
+            self.put_test("5-%d" % k, **{"try": "scripts/try.sh 5"}, **({"issue": 434} if k == 3 else {}))
+        self.assertEqual(len(self.run_cli("test", "list", "--issue", "5").stdout.splitlines()), 26)
+        self.assertEqual(self.held(C[0]), ["agent", "essai"])
+        self.assertNotEqual(self.add(5, [self.ONE]).returncode, 0)
+        full = self.feature(5)
+        self.assertIn("26 entries", self.merged(5, full).stdout)
+
+    def own(self, sid="S1"):
+        return self.as_session(sid)
+
+    def remove(self, n, *ids, sid="S1", env=None):
+        return self.run_cli("test", "remove", str(n), *ids, env=self.own(sid) if env is None else env)
+
+    def test_remove_needs_the_owner_session_of_the_issue_or_its_parent(self):
+        self.put_test("7-1", **{"try": "t"})
+        self.put_test("9-1", **{"try": "t"})
+        before = self.snap_tests()
+        self.assertNotEqual(self.remove(7).returncode, 0)                                   # argparse: no ids
+        self.assertIn("chantier.sh 7", self.remove(7, "7-1").stderr)                         # no record
+        self.put(7, colour=C[0])                                                             # a record, no owner
+        self.assertNotEqual(self.remove(7, "7-1").returncode, 0)
+        self.put(7, colour=C[0], legacy=True)
+        self.assertNotEqual(self.remove(7, "7-1").returncode, 0)
+        self.put(7, colour=C[0], owner=self.live_owner("S2"))
+        self.assertNotEqual(self.remove(7, "7-1", sid="S1").returncode, 0)                   # another session
+        self.put(7, colour=C[0], owner=self.live_owner("S1"))
+        self.assertNotEqual(self.remove(7, "7-1", env={}).returncode, 0)                     # no session
+        self.assertEqual(self.snap_tests(), before)
+        # package: the parent's owner removes a sub's entry, the sub's owner cannot touch the parent's
+        self.put(9, kind="package", colour=C[1], owner=self.live_owner("S1"))
+        self.put(7, colour=C[1], parent=9, owner=self.live_owner("S2"))
+        self.assertEqual(self.remove(7, "7-1", sid="S1").returncode, 0)
+        self.assertNotEqual(self.remove(9, "9-1", sid="S2").returncode, 0)
+        self.assertTrue(os.path.exists(self.tfile("9-1")))
+
+    def test_remove_never_touches_merged_or_answered_entries_without_the_option(self):
+        self.claim(7)
+        self.put_test("7-1", commit="a" * 8)
+        self.put_test("7-2", status="ok")
+        self.put_test("7-3", status="retour", comment="too slow", **{"try": "t"})
+        self.put_test("7-4", comment="why?", **{"try": "t"})
+        self.put_test("7-5", reviewed="2026-11-02", **{"try": "t"})
+        self.put_test("7-6", status="ok", **{"try": "t"})
+        self.put_test("7-7", **{"try": "t"})
+        before = self.snap_tests()
+        self.assertNotEqual(self.remove(7, "7-1", "--answered").returncode, 0)
+        for ids in (("7-3",), ("7-4",), ("7-6",), ("7-7", "7-3"), ("7-7", "7-5", "7-6")):
+            r = self.remove(7, *ids)
+            self.assertNotEqual(r.returncode, 0, ids)
+            self.assertEqual(self.snap_tests(), before, ids)
+        r = self.run_cli("test", "remove", "7", "7-3", "7-4", "7-6", "--answered", env=self.own())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("too slow", r.stdout)
+        self.assertIn("retour", r.stdout)
+        r = self.remove(7, "7-5", "7-7")                       # `reviewed` alone: still unanswered
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(self.snap_tests()), ["7-1.json", "7-2.json"])
+
+    def test_remove_archives_the_entry_and_never_reuses_its_number(self):
+        self.claim(7)
+        self.add(7, [self.ONE, self.ONE])
+        self.run_cli("test", "remove", "7", "7-2", "--answered", env=self.own())
+        self.assertEqual(sorted(os.listdir(os.path.join(self.state, "tests"))), ["7-1.json"])
+        arch = jload(os.path.join(self.state, "removed-tests", "7-2.json"))
+        self.assertEqual((arch["title"], "removed_at" in arch), ("A", True))
+        self.assertEqual(self.remove(7, "7-1").returncode, 0)
+        self.assertEqual(self.held(C[0]), ["agent"])                                       # no entry left to hold it
+        self.assertEqual(self.add(7, self.ONE).stdout.strip(), "7-3")
+        self.assertEqual(self.run_cli("test", "list", "--issue", "7").stdout.count("\n"), 1)
+
+    def test_set_erases_the_agent_note_unless_restated(self):
+        self.claim(7)
+        self.run_cli("set", "7", "--state", "code", "--what", "w", "--wait", "you", "--waiting", "note")
+        self.run_cli("set", "7", "--what", "other")
+        r = self.rec(7)
+        self.assertEqual((r["state"], r["what"], r["waiting"], r["wait_kind"]), ("code", "other", "", ""))
+        self.run_cli("set", "7", "--wait", "dep", "--waiting", "n2")
+        self.run_cli("set", "7", "--wait", "dep", "--waiting", "n2", "--what", "z")
+        r = self.rec(7)
+        self.assertEqual((r["what"], r["waiting"], r["wait_kind"]), ("z", "n2", "dep"))
+
+
+class TestAgentIdle(Base):
+    def setUp(self):
+        super().setUp()
+        self.proj = os.path.join(self.tmp.name, "projects")
+        self.env["SF_CLAUDE_PROJECTS"] = self.proj
+
+    def touch(self, rel, age_min):
+        p = os.path.join(self.proj, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").close()
+        t = time.time() - age_min * 60
+        os.utime(p, (t, t))
+
+    def idle(self):
+        return self.status()["colours"][0].get("agent_idle_min")
+
+    def test_idle_minutes_come_from_the_newest_transcript_stat(self):
+        self.put(1, colour=C[0], owner=self.live_owner("S1"))
+        self.assertIsNone(self.idle())                                         # no file found
+        self.touch("-p/S1.jsonl", 30)
+        self.touch("-q/S2.jsonl", 0)                                           # another session
+        self.assertEqual(self.idle(), 30)
+        self.touch("-p/S1/subagents/a.jsonl", 7)                               # a newer subagent file wins
+        self.assertEqual(self.idle(), 7)
+        self.touch("-p/S1.jsonl", 0)
+        self.assertEqual(self.idle(), 0)
+
+    def test_dead_owner_has_no_idle_time(self):
+        self.touch("-p/S1.jsonl", 3)
+        child = subprocess.Popen(["sleep", "30"])
+        start = suivi.pid_start(child.pid)
+        child.kill()
+        child.wait()
+        self.put(1, colour=C[0], owner={"session": "S1", "pid": child.pid, "pid_start": start, "at": time.time()})
+        self.assertIsNone(self.status()["paused"][0]["agent_idle_min"])      # paused: the owner is gone
 
 
 class TestImportOnline(Base):
@@ -560,6 +820,23 @@ class ServerBase(Base):
     def entry_text(self):
         with open(self.entry) as f:
             return f.read()
+
+class TestAgentIdleServed(ServerBase):
+    def test_api_state_carries_agent_idle_min(self):
+        proj = os.path.join(self.tmp.name, "projects", "-p")
+        os.makedirs(proj)
+        self.stop()
+        self.env["SF_CLAUDE_PROJECTS"] = os.path.dirname(proj)
+        p = os.path.join(proj, "S1.jsonl")
+        open(p, "w").close()
+        os.utime(p, (time.time() - 600, time.time() - 600))
+        self.put(1, colour=C[0], name="One", owner=self.live_owner("S1"))
+        self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
+                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.port = int(re.search(r":(\d+)/", self.proc.stdout.readline()).group(1))
+        status, _, body = self.req("GET", "/api/state")
+        self.assertEqual(json.loads(body)["colours"][0]["agent_idle_min"], 10)
+
 
 class TestServer(ServerBase):
     def test_csp_lets_the_inline_tab_icon_load(self):
@@ -658,6 +935,18 @@ class TestServer(ServerBase):
         self.assertEqual(status, 200)
         self.assertIn(b"<title>Suivi StokesForge</title>", body)
         self.assertEqual(self.req("GET", "/qcm/nope")[0], 404)
+
+    def test_decision_form_has_a_home_link_shown_only_when_local(self):
+        os.makedirs(os.path.join(self.state, "qcm", "q1"))
+        with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "Form", "cards": 1}, f)
+        with open(os.path.join(self.state, "qcm", "q1", "data.js"), "w") as f:
+            f.write("const TITRE='T';const SEC={};const ISSUES={};const INTRO='';const D=[];\n")
+        status, _, body = self.req("GET", "/qcm/q1")
+        self.assertEqual(status, 200)
+        page = body.decode()
+        self.assertRegex(page, r'<a class="link" id="goHome" href="/" hidden[^>]*>← Retour à l’accueil</a>')
+        self.assertIn("if(LOCAL)document.getElementById('goHome').hidden=false", page)
 
     def test_port_in_use_exits_1(self):
         r = subprocess.run([sys.executable, "-I", SUIVI, "serve", "--port", str(self.port), "--state", self.state],
@@ -811,6 +1100,258 @@ class TestFormTemplate(unittest.TestCase):
             self.assertIn(needle, html)
 
 
+
+FAKE_GLAB = r"""#!/usr/bin/env bash
+# Fake glab: behaviour is driven by files in $FAKE_DIR (sha, pipelines, jobs, mode).
+echo "$*" >> "$FAKE_DIR/calls"
+case "$(cat "$FAKE_DIR/mode" 2>/dev/null)" in
+    fail) exit 1 ;;
+    sleep) sleep 30 ;;
+    empty) exit 0 ;;
+esac
+case "$*" in
+    *repository/commits*) echo "[{\"id\": \"$(cat "$FAKE_DIR/sha")\"}]" ;;
+    *pipelines*) cat "$FAKE_DIR/pipelines" ;;
+    *graphql*) cat "$FAKE_DIR/jobs" ;;
+    *) echo "[]" ;;
+esac
+"""
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+class CiBase(unittest.TestCase):
+    """The CI watcher with a fake glab on PATH and a local stand-in for the GitHub API."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "fake")
+        self.bin = os.path.join(self.tmp.name, "bin")
+        self.state = os.path.join(self.tmp.name, "state")
+        for d in (self.dir, self.bin, self.state):
+            os.makedirs(d)
+        with open(os.path.join(self.bin, "glab"), "w") as f:
+            f.write(FAKE_GLAB)
+        os.chmod(os.path.join(self.bin, "glab"), 0o755)
+        patcher = mock.patch.dict(os.environ, {
+            "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_DIR": self.dir,
+            "SF_SUIVI_DIR": self.state, "SF_SUIVI_CI_TIMEOUT": "60"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("SF_SUIVI_CI", None)
+        self.head(SHA_A)
+        self.jobs()
+
+    def put_file(self, name, text):
+        with open(os.path.join(self.dir, name), "w") as f:
+            f.write(text)
+
+    def head(self, sha, pipeline=True):
+        self.put_file("sha", sha)
+        self.put_file("pipelines", '[{"iid": 5}]' if pipeline else "[]")
+
+    def jobs(self, **status):
+        nodes = [{"name": "github-actions/" + j, "status": status.get(j.replace("-", "_"), "SUCCESS"),
+                  "detailedStatus": {"label": "x"}} for j in suivi.CI_JOBS]
+        for j, st in status.items():
+            if st is None:
+                nodes = [n for n in nodes if n["name"] != "github-actions/" + j.replace("_", "-")]
+        data = {"data": {"project": {"pipeline": {"stages": {"nodes": [{"name": "external", "jobs": {"nodes": nodes}}]}}}}}
+        self.put_file("jobs", json.dumps(data))
+
+    def poll(self, prev=None, now=None):
+        return suivi.ci_poll(prev, now)
+
+
+class TestCiVerdict(CiBase):
+    def test_all_blocking_success_is_green(self):
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
+
+    def test_missing_job_is_pending_not_green(self):
+        self.jobs(clippy=None)
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["names"]), ("pending", ["clippy"]))
+
+    def test_failed_is_red_with_every_name(self):
+        self.jobs(fmt="FAILED", test="FAILED", clippy="RUNNING")
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["names"]), ("red", ["fmt", "test"]))
+
+    def test_robustness_skipped_or_missing_stays_green(self):
+        self.jobs(robustness="SKIPPED")
+        self.assertEqual(self.poll()["verdict"], "green")
+        self.jobs(robustness="FAILED")
+        self.assertEqual(self.poll()["verdict"], "green")
+
+    def test_canceled_is_unknown(self):
+        self.jobs(test="CANCELED")
+        self.assertEqual(self.poll()["verdict"], "unknown")
+
+    def test_glab_failure_timeout_or_empty_is_unknown(self):
+        for mode in ("fail", "empty", "sleep"):
+            self.put_file("mode", mode)
+            if mode == "sleep":
+                os.environ["SF_SUIVI_CI_TIMEOUT"] = "1"
+            r = self.poll()
+            self.assertEqual(r["verdict"], "unknown", mode)
+
+    def test_no_pipeline_is_pending_then_unknown(self):
+        self.head(SHA_A, pipeline=False)
+        r = self.poll(now=1000)
+        self.assertEqual(r["verdict"], "pending")
+        r = self.poll(r, now=1000 + suivi.CI_PENDING_MAX + 5)
+        self.assertEqual(r["verdict"], "unknown")
+
+    def test_blocking_list_equals_gitlab_status(self):
+        with open(os.path.join(HERE, "gitlab-status.py")) as f:
+            m = re.search(r"^JOBS = \((.*?)\)", f.read(), re.M | re.S)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', m.group(1))), suivi.CI_JOBS)
+
+    def test_ci_status_script_has_no_unknown_glab_use_outside_head_mode(self):
+        r = subprocess.run(["bash", os.path.join(HERE, "ci-status.sh"), "--head"], capture_output=True, text=True,
+                           env=dict(os.environ))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("HEAD " + SHA_A), r.stdout)
+        self.assertNotIn("commit comments", r.stdout)
+        calls = slurp(os.path.join(self.dir, "calls"))
+        self.assertNotIn("ls-remote", calls)
+        self.assertNotIn("comments", calls)
+
+
+class TestCiWindows(CiBase):
+    def test_windows_failure_turns_red_with_names(self):
+        self.jobs(**{"dist_windows": "FAILED"})
+        r = self.poll()
+        self.assertEqual((r["verdict"], r["names"]), ("red", ["dist-windows"]))
+
+    def test_windows_pending_or_missing_is_not_green(self):
+        self.jobs(**{"test_windows": "RUNNING"})
+        self.assertEqual(self.poll()["verdict"], "pending")
+        self.jobs(**{"test_python_windows": None})
+        self.assertEqual(self.poll()["verdict"], "pending")
+
+    def test_windows_jobs_are_in_the_blocking_list_and_no_github_read_remains(self):
+        for j in ("test-windows", "test-python-windows", "dist-windows"):
+            self.assertIn(j, suivi.CI_JOBS)
+        for gone in ("ci_windows_verdict", "ci_github_runs", "CI_WINDOWS_JOBS", "GITHUB_API"):
+            self.assertFalse(hasattr(suivi, gone), gone)
+        self.assertNotIn("SF_SUIVI_GITHUB", slurp(SUIVI))
+
+
+class TestCiHeads(CiBase):
+    def test_red_stays_until_a_newer_green(self):
+        self.jobs(fmt="FAILED")
+        r = self.poll()
+        self.assertEqual(r["last_red"], {"sha": SHA_A, "names": ["fmt"]})
+        self.head(SHA_B)
+        self.jobs(fmt="RUNNING")
+        r = self.poll(r)
+        self.assertEqual((r["verdict"], r["sha"]), ("pending", SHA_B))
+        self.assertEqual(r["last_red"]["sha"], SHA_A)
+        self.jobs()
+        r = self.poll(r)
+        self.assertEqual(r["verdict"], "green")
+        self.assertIsNone(r["last_red"])
+
+    def test_red_rerun_green_on_same_sha_clears(self):
+        self.jobs(fmt="FAILED")
+        r = self.poll()
+        r = self.poll(r)
+        self.assertEqual(r["verdict"], "red")
+        self.jobs()
+        r = self.poll(r)
+        self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
+        self.assertIsNone(r["last_red"])
+
+
+class TestCiState(ServerBase):
+    def ci_file(self):
+        return os.path.join(self.state, "ci.json")
+
+    def state_json(self):
+        st, _, body = self.req("GET", "/api/state")
+        self.assertEqual(st, 200)
+        return json.loads(body)
+
+    def test_old_green_file_reads_unknown(self):
+        suivi.write_json(self.ci_file(), {"checked_at": time.time() - 1000, "sha": SHA_A, "verdict": "green", "names": []})
+        self.assertEqual(self.state_json()["ci"]["verdict"], "unknown")
+        suivi.write_json(self.ci_file(), {"checked_at": time.time(), "sha": SHA_A, "verdict": "green", "names": []})
+        self.assertEqual(self.state_json()["ci"]["verdict"], "green")
+
+    def test_missing_or_corrupt_file_is_unknown_with_200(self):
+        self.assertEqual(self.state_json()["ci"]["verdict"], "unknown")
+        for junk in ("{not json", "[1,2]", '{"checked_at": "x", "verdict": "green"}'):
+            with open(self.ci_file(), "w") as f:
+                f.write(junk)
+            self.assertEqual(self.state_json()["ci"]["verdict"], "unknown", junk)
+
+    def test_checked_at_is_not_in_the_state(self):
+        suivi.write_json(self.ci_file(), {"checked_at": time.time(), "sha": SHA_A, "verdict": "green", "names": []})
+        self.assertNotIn("checked_at", self.state_json()["ci"])
+
+    def test_red_ci_changes_neither_pending_nor_colours(self):
+        before = self.state_json()
+        suivi.write_json(self.ci_file(), {"checked_at": time.time(), "sha": SHA_A, "verdict": "red", "names": ["fmt"]})
+        after = self.state_json()
+        self.assertEqual(after["ci"]["verdict"], "red")
+        for k in ("pending", "colours", "paused", "qcms", "tests"):
+            self.assertEqual(before[k], after[k], k)
+
+
+class TestCiService(Base):
+    """The thread of `serve`, end to end, with the fake glab."""
+    def start(self, **extra):
+        self.fake = os.path.join(self.tmp.name, "fake")
+        os.makedirs(self.fake)
+        binp = os.path.join(self.tmp.name, "bin")
+        os.makedirs(binp)
+        with open(os.path.join(binp, "glab"), "w") as f:
+            f.write(FAKE_GLAB)
+        os.chmod(os.path.join(binp, "glab"), 0o755)
+        for n, t in (("sha", SHA_A), ("pipelines", '[{"iid": 5}]'),
+                     ("jobs", json.dumps({"data": {"project": {"pipeline": {"stages": {"nodes": [{"name": "e", "jobs": {"nodes": [
+                         {"name": "github-actions/" + j, "status": "FAILED", "detailedStatus": {"label": "x"}} for j in suivi.CI_JOBS]}}]}}}}}))):
+            with open(os.path.join(self.fake, n), "w") as f:
+                f.write(t)
+        env = dict(self.env, PATH=binp + os.pathsep + os.environ["PATH"], FAKE_DIR=self.fake, SF_SUIVI_CI_POLL="0.3", **extra)
+        self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
+                                     cwd=self.repo, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop)
+        m = re.search(r":(\d+)/", self.proc.stdout.readline())
+        self.port = int(m.group(1))
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait(5)
+        self.proc.stdout.close()
+        self.proc.stderr.close()
+
+    def get_state(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", "/api/state")
+        return json.loads(c.getresponse().read())
+
+    def test_seam_off_never_calls_glab(self):
+        os.makedirs(self.state)
+        self.start(SF_SUIVI_CI="off")
+        time.sleep(1.5)
+        self.assertFalse(os.path.exists(os.path.join(self.fake, "calls")))
+        self.assertEqual(self.get_state()["ci"]["verdict"], "unknown")
+
+    def test_watcher_thread_publishes_red(self):
+        os.makedirs(self.state)
+        self.env.pop("SF_SUIVI_CI")
+        self.start()
+        for _ in range(50):
+            ci = self.get_state()["ci"]
+            if ci["verdict"] != "unknown":
+                break
+            time.sleep(0.2)
+        self.assertEqual(ci["verdict"], "red", ci)
+
+
 class TestPage(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_script_parses(self):
@@ -823,6 +1364,109 @@ class TestPage(unittest.TestCase):
                 f.write(js)
             r = subprocess.run(["node", "--check", p], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def page(self):
+        with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:
+            return f.read()
+
+    def ci_line(self, ci):
+        src = re.search(r"/\*CILINE-START\*/(.*)/\*CILINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(ciLine(%s)));" % json.dumps(ci)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_ci_line_red_visible_unknown_never_green(self):
+        red = self.ci_line({"verdict": "red", "names": ["fmt", "clippy"]})
+        self.assertEqual(red["cls"], "red")
+        self.assertIn("fmt, clippy", red["text"])
+        for ci in ({"verdict": "unknown", "names": []}, {"verdict": "weird"}, {"verdict": "unknown", "last_red": {"sha": "a", "names": ["fmt"]}}):
+            u = self.ci_line(ci)
+            self.assertNotIn("verte", u["text"])
+            self.assertNotEqual(u["cls"], "green")
+        self.assertEqual(self.ci_line({"verdict": "green", "names": []})["cls"], "green")
+        p = self.ci_line({"verdict": "pending", "last_red": {"sha": "a", "names": ["fmt"]}})
+        self.assertIn("fmt", p["text"])
+        self.assertIsNone(self.ci_line(None))
+
+    def test_ci_line_sits_above_the_tabs_outside_the_banner(self):
+        html = self.page()
+        self.assertLess(html.index('id="ciline"'), html.index('class="tabs"'))
+        self.assertNotIn("'ciline'", html.split("function renderTests")[1].split("function render()")[0])
+
+    def card_line(self, c, tests=(), qcms=()):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(cardLine(%s,%s,%s)));" % (
+            json.dumps(c), json.dumps(list(tests)), json.dumps(list(qcms)))
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_card_line_says_whose_turn_it_is(self):
+        card = {"issue": 7, "issues": [7], "package": None, "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        todo = lambda n, st="todo": {"n": n, "status": st}
+        L = self.card_line
+        self.assertEqual(L(card, [], [{"issue": 7}])["text"], "À toi : répondre au questionnaire")        # lang: fr
+        l = L(card, [todo(7), todo(7), todo(7), todo(7, "ok"), todo(8)])
+        self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : cocher 3 essais", "l’agent travaille"))   # lang: fr
+        self.assertEqual(L(card, [todo(7)])["text"], "À toi : cocher 1 essai")                              # lang: fr
+        self.assertEqual(L(card, [todo(7, "ok")]), {"user": False, "text": "L’agent travaille", "also": "", "note": ""})   # lang: fr
+        paused = dict(card, held_by=[])
+        self.assertEqual(L(paused)["text"], "En pause")                                                     # lang: fr
+        l = L(paused, [], [{"issue": 7}])
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
+        # the open form or the pending trial is itself what holds the colour: still nobody at work
+        l = L(dict(card, held_by=["qcm"]), [], [{"issue": 7}])
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
+        l = L(dict(card, held_by=["essai"]), [todo(7)])
+        self.assertEqual((l["user"], l["also"]), (True, "rien ne bouge sans toi"))                   # lang: fr
+        self.assertEqual(L(dict(card, held_by=["legacy"]), [todo(7)])["also"], "")
+        l = L(card, [], [{"issue": 7}])
+        self.assertEqual((l["text"], l["also"]), ("À toi : répondre au questionnaire", "l’agent travaille"))   # lang: fr
+        # a note of kind `you` is the user's turn, alone or joined; other kinds stay muted text
+        l = L(dict(card, wait_kind="you", waiting="run make"))
+        self.assertEqual((l["user"], l["text"], l["note"]), (True, "À toi : run make", ""))                 # lang: fr
+        l = L(dict(card, wait_kind="you", waiting="run make"), [], [{"issue": 7}])
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire · run make")                         # lang: fr
+        for kind in ("dep", "ag"):
+            l = L(dict(card, wait_kind=kind, waiting="my note"))
+            self.assertEqual((l["user"], l["text"], l["note"]), (False, "L’agent travaille", "my note"))    # lang: fr
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_card_line_tells_a_working_agent_from_a_stopped_one(self):
+        base = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": ""}
+        L = self.card_line
+        # lang: fr begin
+        for idle, text in ((4, "L’agent travaille"), (5, "Agent à l’arrêt depuis 5 min"), (59, "Agent à l’arrêt depuis 59 min"),
+                           (125, "Agent à l’arrêt depuis 2 h"), (None, "Session ouverte")):
+            self.assertEqual(L(dict(base, agent_idle_min=idle))["text"], text, idle)
+        self.assertEqual(L(base)["text"], "Session ouverte")                                  # old server: no field   # lang: fr
+        mine = [{"issue": 7}]
+        for idle, also in ((4, "l’agent travaille"), (5, "agent à l’arrêt, rien ne bouge sans toi"),
+                           (0, "l’agent travaille"), (None, "session ouverte")):
+            l = L(dict(base, agent_idle_min=idle), [], mine)
+            self.assertEqual((l["user"], l["also"]), (True, also), idle)
+        # lang: fr end
+        l = L(dict(base, agent_idle_min=4), [], mine)
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire")                       # lang: fr
+        self.assertEqual(L(dict(base, held_by=["legacy"]), [], mine)["also"], "")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_card_line_counts_every_member_of_a_package(self):
+        pkg = {"issue": 9, "issues": [9], "held_by": ["agent"], "package": {"parent": 9, "subs": [{"n": 11, "title": "a"}, {"n": 12, "title": "b"}]}}
+        l = self.card_line(pkg, [{"n": 11, "status": "todo"}, {"n": 12, "status": "todo"}, {"n": 13, "status": "todo"}], [{"issue": 12}])
+        self.assertEqual(l["text"], "À toi : répondre au questionnaire · cocher 2 essais")                  # lang: fr
+        self.assertEqual(self.card_line(dict(pkg, package=None), [{"n": 11, "status": "todo"}])["user"], False)
+        paused = {"issue": 9, "kind": "package", "subs": [{"n": 11, "title": "a"}]}                           # a paused box
+        self.assertEqual(self.card_line(paused, [{"n": 11, "status": "todo"}])["text"], "À toi : cocher 1 essai")   # lang: fr
+
+    def test_page_drops_the_held_colour_line_and_shows_the_intro(self):
+        html = self.page()
+        for gone in ("Couleur tenue", "T’attend", "waitEl", ".wait.dep"):                                   # lang: fr
+            self.assertNotIn(gone, html)
+        self.assertIn("x.intro", html)
 
     def test_legacy_row_highlights_no_state_step(self):
         with open(os.path.join(HERE, "suivi-page.html"), encoding="utf-8") as f:

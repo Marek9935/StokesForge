@@ -13,7 +13,7 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 | [`stokesforge-python`](stokesforge-python/SKILL.md) | PyO3 bridge, `pyst`, console | a script, the `python` feature |
 | [`stokesforge-ui-texts`](stokesforge-ui-texts/SKILL.md) | visible texts by the glossary | any label, tooltip or message |
 | [`stokesforge-verification`](stokesforge-verification/SKILL.md) | test placement, checks, commit | « vérifie », « commit », end of a task |
-| [`run-stokesforge`](run-stokesforge/SKILL.md) | launch, drive and capture the real app | « lance l'app », « screenshot » |
+| [`run-stokesforge`](run-stokesforge/SKILL.md) | launch, drive and capture the real app on an invisible screen | « lance l'app », « screenshot » |
 | [`stokesforge-explain`](stokesforge-explain/SKILL.md) | answer a chemist: features and architecture | « est-ce que je peux… », « comment ça marche » |
 
 ## How they chain
@@ -21,10 +21,10 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 ```text
 question ──► stokesforge-explain
 symptom  ──► stokesforge-bug-report ──(explicit request)──► stokesforge-bug-fix ──┐
-request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► merge (green, or the trial OK)
+request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► pre-trial if visible ──► merge (green, or the trial OK)
 ```
 
-`run-stokesforge` sits beside verification for any change to see or handle in the real app. Several orchestrators may work at once: `scripts/chantier.sh <n>…`, run by the orchestrator in the current session, creates or finds the worktrees, assigns the colours and prints the briefing, `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the local tracking page (`http://127.0.0.1:8441/`, `scripts/suivi.py serve`) lists what to answer and test and who holds which colour (`stokesforge-verification/references/suivi.md`). Asking the user to decide (one start form, one follow-up form, always the published form even for one question): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
+`run-stokesforge` sits beside verification for any change to see or handle in the real app; its screen is invisible, so agents run in parallel, and a visible change gets a pre-trial by an agent in the real app before the user's trial (`stokesforge-verification/references/suivi.md` § Pre-trial). Several orchestrators may work at once: `scripts/chantier.sh <n>…`, run by the orchestrator in the current session, creates or finds the worktrees, assigns the colours and prints the briefing, `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the local tracking page (`http://127.0.0.1:8441/`, `scripts/suivi.py serve`) lists what to answer and test, who holds which colour, and carries the one CI watcher (nobody polls the CI) (`stokesforge-verification/references/suivi.md`). Asking the user to decide (one start form, one follow-up form, always the form even for one question, posed locally with `scripts/suivi.py qcm pose`, the published Artifact as fallback): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
 
 ## Keeping them true
 

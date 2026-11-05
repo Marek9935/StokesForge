@@ -3183,10 +3183,11 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
 
 // -- Formulas by identifier (#321) --
 
-/// A letter that designates no column of the sheet is refused: nothing
-/// is written, the status bar says which (on input as on paste).
+/// A letter that designates no column of the sheet: typed in the field, the text
+/// is kept and framed and the status bar says which (#433); pasted, it is refused,
+/// nothing is written, and the status bar names the column.
 #[test]
-fn a_formula_naming_a_missing_column_is_refused_with_a_message() {
+fn a_formula_naming_a_missing_column_is_kept_when_typed_and_when_pasted() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -3194,7 +3195,7 @@ fn a_formula_naming_a_missing_column_is_refused_with_a_message() {
     let note = column_id(&state, sheet1, "Note");
 
     set_header_field(&mut state, signal, HeaderField::Formula, "Z*2");
-    assert_eq!(formula_letters(&state, signal), None, "nothing is written");
+    assert_eq!(formula_letters(&state, signal).as_deref(), Some("Z*2"));
     let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(
@@ -3202,18 +3203,26 @@ fn a_formula_naming_a_missing_column_is_refused_with_a_message() {
         "unexpected status: {}",
         status.text
     );
+    let issue = state.formula_issue(signal).expect("kept text is framed");
+    assert!(issue.contains("Column Z does not exist"), "{issue}");
 
-    // On paste, the same refusal (and its own message): nothing is written.
+    // On paste, kept the same way (#433), with the sentence of a paste.
     state.select_header_field(sheet1, note, HeaderField::Formula);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "Y*2".to_string(),
     });
-    assert_eq!(formula_letters(&state, note), None, "paste refused");
+    assert_eq!(
+        formula_letters(&state, note).as_deref(),
+        Some("Y*2"),
+        "paste kept"
+    );
     let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(
-        status.text.contains("Column Y does not exist"),
+        status.text.contains("Column Y does not exist")
+            && status.text.contains("does not compute")
+            && status.text.contains("column C"),
         "unexpected status: {}",
         status.text
     );
@@ -3255,26 +3264,33 @@ fn a_formula_reading_a_deleted_column_shows_ref_and_survives_an_unchanged_edit()
     );
 }
 
-/// The refusal of the Formula cell is decided in `app-state`
-/// (`header_edit_refusal`), which the grid paints: a column that reads
-/// itself is refused as soon as it is typed, and committing a refused text writes nothing.
+/// What the Formula cell says while typing is decided in `app-state`
+/// (`header_edit_issue`), which the grid paints: a column that reads itself is
+/// flagged as soon as it is typed, and committing keeps the text, framed (#433).
 #[test]
-fn a_formula_reading_its_own_column_is_refused_while_typing() {
+fn a_formula_reading_its_own_column_is_flagged_while_typing_and_kept() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note"); // column C
 
     state.begin_header_edit(note, HeaderField::Formula);
-    assert_eq!(state.header_edit_refusal(), None, "nothing typed");
+    assert_eq!(state.header_edit_issue(), None, "nothing typed");
     state.header_editing_mut().expect("input").buffer = "C*2".to_string();
-    let refusal = state.header_edit_refusal().expect("self-reading refused");
+    let refusal = state.header_edit_issue().expect("self-reading refused");
     assert!(
         refusal.contains("own column") && refusal.contains('C'),
         "unexpected sentence: {refusal}"
     );
     state.commit_header_edit();
-    assert_eq!(formula_letters(&state, note), None, "nothing is written");
+    assert_eq!(formula_letters(&state, note).as_deref(), Some("C*2"));
+    let issue = state
+        .formula_issue(note)
+        .expect("a column that reads itself");
+    assert!(
+        issue.contains("own column") && issue.contains('C'),
+        "{issue}"
+    );
 
     // Lowercase is normalized: `a*2` is displayed as `A*2`.
     set_header_field(&mut state, note, HeaderField::Formula, "a*2");
@@ -3344,12 +3360,12 @@ fn the_formula_cell_says_why_a_column_function_has_no_value() {
     assert_eq!(state.formula_issue(note), None);
 }
 
-/// `#REF`: committing the displayed text without touching it writes nothing and is not
-/// refused; modifying it (`#REF*3`) is refused; clearing erases; a
-/// **syntax** error is never a refusal (it is saved). And the Formula cell
+/// `#REF`: committing the displayed text without touching it writes nothing;
+/// modifying it (`#REF*3`) is flagged while typing and kept as typed; clearing
+/// erases; a **syntax** error is not flagged while typing. And the Formula cell
 /// carries its problem (`formula_issue`) as long as it reads a deleted column.
 #[test]
-fn a_ref_formula_is_refused_only_when_its_text_is_changed() {
+fn a_ref_formula_is_kept_as_typed_when_its_text_is_changed() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -3366,22 +3382,29 @@ fn a_ref_formula_is_refused_only_when_its_text_is_changed() {
     let stored = state.column_meta(signal).formula;
 
     state.begin_header_edit(signal, HeaderField::Formula);
-    assert_eq!(state.header_edit_refusal(), None, "displayed text: valid");
+    assert_eq!(state.header_edit_issue(), None, "displayed text: valid");
     state.header_editing_mut().expect("input").buffer = "#REF*3".to_string();
-    let refusal = state.header_edit_refusal().expect("modified #REF refused");
+    let refusal = state.header_edit_issue().expect("modified #REF refused");
     assert!(refusal.contains("Column deleted"), "{refusal}");
     state.commit_header_edit();
-    assert_eq!(
+    assert_ne!(
         state.column_meta(signal).formula,
         stored,
-        "nothing is written"
+        "the text is kept"
     );
+    assert_eq!(
+        formula_letters(&state, signal).as_deref(),
+        Some("#REF*3"),
+        "as typed"
+    );
+    let issue = state.formula_issue(signal).expect("still a lost column");
+    assert!(issue.contains("Column deleted"), "{issue}");
 
     state.begin_header_edit(signal, HeaderField::Formula);
     state.header_editing_mut().expect("input").buffer = "B*".to_string();
-    assert_eq!(state.header_edit_refusal(), None, "a syntax error is saved");
+    assert_eq!(state.header_edit_issue(), None, "a syntax error is saved");
     state.header_editing_mut().expect("input").buffer = String::new();
-    assert_eq!(state.header_edit_refusal(), None, "clearing erases");
+    assert_eq!(state.header_edit_issue(), None, "clearing erases");
     state.cancel_header_edit();
 }
 
@@ -3424,7 +3447,11 @@ fn a_refused_formula_in_a_paste_leaves_the_other_fields_pasted() {
         ("ln", "u", "c"),
         "the other fields are pasted"
     );
-    assert_eq!(formula_letters(&state, short), None, "formula refused");
+    assert_eq!(
+        formula_letters(&state, short).as_deref(),
+        Some("A*2"),
+        "formula kept, framed"
+    );
     let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(

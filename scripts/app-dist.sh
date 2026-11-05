@@ -78,6 +78,13 @@ rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
 # __pycache__ kept: see the doc of pyhello-dist.sh (same reason, same gain of
 # ~165 ms at the first script).
 
+# The logo (#388): only an official build (STOKESFORGE_DIST_LOGO=1) carries it,
+# generated at each release from the SVG and installed where the application
+# and install.sh read it. Its notice goes in before licenses-dist.sh, which
+# refuses icons without it. Without the variable, both calls do nothing.
+"$REPO_ROOT/scripts/logo-dist.sh" generate
+"$REPO_ROOT/scripts/logo-dist.sh" install "$DIST" linux
+
 # Licenses of the code, the resources and the runtime actually delivered (#129).
 "$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
 
@@ -139,6 +146,13 @@ set -e
 
 if [[ "$CODE" -ne 0 ]]; then
     echo "[dist] ERROR: the packaged window exited with code $CODE (expected 0)" >&2
+    exit 1
+fi
+
+# An installed logo that cannot be decoded only degrades the window (invariant
+# 10), so the exit code stays 0: the run log tells (#388).
+if grep -q 'cannot decode the logo' "$DIST/../stokesforge-app-run.log"; then
+    echo "[dist] ERROR: the packaged window could not decode its logo (see stokesforge-app-run.log)" >&2
     exit 1
 fi
 

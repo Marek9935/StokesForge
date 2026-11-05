@@ -429,6 +429,15 @@ fn reference_integral(x: &[f64], y: &[f64], range: Option<(f64, f64)>) -> Option
         .map(|(a, b)| (*a, *b))
         .collect();
     pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // Equal finite written bounds: no area, 0 when the bound lies inside the
+    // X values, empty outside (#433).
+    if let Some((a, b)) = range {
+        if a == b && a.is_finite() {
+            let inside =
+                pairs.first().is_some_and(|p| p.0 <= a) && pairs.last().is_some_and(|p| a <= p.0);
+            return inside.then_some(0.0);
+        }
+    }
     if pairs.len() < 2 {
         return None;
     }
@@ -614,10 +623,12 @@ fn integral_bounds_outside_the_data_are_clipped_and_empty_ranges_are_empty() {
     assert_eq!(on_xy("integral(B, 2.5, 100)", &x, &y), Some(1.375));
     assert_eq!(on_xy("integral(B, 10, 20)", &x, &y), None);
     assert_eq!(on_xy("integral(B, -20, -10)", &x, &y), None);
-    // A zero-width range holds no area: an empty cell, like an empty range.
-    assert_eq!(on_xy("integral(B, 2, 2)", &x, &y), None);
-    // Infinite bounds are refused (empty), not read as "to the end".
-    assert_eq!(on_xy("integral(B, 0, 1/0)", &x, &y), None);
+    // A zero-width range holds no area: 0 inside the X values, empty outside.
+    assert_eq!(on_xy("integral(B, 2, 2)", &x, &y), Some(0.0));
+    assert_eq!(on_xy("integral(B, 100, 100)", &x, &y), None);
+    // An infinite bound means "to the end" (#433).
+    assert_eq!(on_xy("integral(B, 0, 1/0)", &x, &y), Some(4.0));
+    assert_eq!(on_xy("integral(B, 2.5, 1/0)", &x, &y), Some(1.375));
 }
 
 #[test]
@@ -942,11 +953,11 @@ fn range_bounds_equal_reversed_and_partially_overlapping() {
 }
 
 #[test]
-fn infinite_or_empty_bounds_give_an_empty_cell() {
+fn infinite_bounds_mean_to_the_end_and_nan_bounds_give_an_empty_cell() {
     let x = [1.0, 2.0, 3.0];
     let y = [1.0, 2.0, 3.0];
-    assert_eq!(on_xy("sum(B, 0, 1/0)", &x, &y), None);
-    assert_eq!(on_xy("sum(B, -1/0, 5)", &x, &y), None);
+    assert_eq!(on_xy("sum(B, 0, 1/0)", &x, &y), Some(6.0));
+    assert_eq!(on_xy("sum(B, -1/0, 5)", &x, &y), Some(6.0));
     // A NaN bound read per row: the row is empty (Missing), not a failure.
     let nan_bound = [f64::NAN, 0.0, 0.0];
     let hi = [5.0, 5.0, 5.0];
@@ -954,12 +965,102 @@ fn infinite_or_empty_bounds_give_an_empty_cell() {
     assert!(v[0].is_nan());
     assert_eq!(s[0], NumericStatus::Missing);
     assert_eq!(v[1], 6.0);
-    // An infinite bound read per row: empty, status Ok.
+    // An infinite bound read per row means "to the end"; with the other bound
+    // after the data, nothing is left: empty, status Ok.
     let inf_bound = [0.0, 0.0, f64::INFINITY];
     let (v, s) = eval("sum(B, C, D)", &[&x, &y, &inf_bound, &hi], &[(1, 0)], 3);
     assert_eq!(v[0], 6.0);
     assert!(v[2].is_nan());
     assert_eq!(s[2], NumericStatus::Ok);
+    let lo = [0.0, 0.0, 0.0];
+    let inf_hi = [f64::INFINITY; 3];
+    let (v, _) = eval("sum(B, C, D)", &[&x, &y, &lo, &inf_hi], &[(1, 0)], 3);
+    assert_eq!(v, vec![6.0; 3]);
+}
+
+/// Infinite and equal bounds, on literal bounds and on bounds read from
+/// columns (two code paths, #433): to the end, zero-width, empty.
+#[test]
+fn infinite_and_zero_width_bounds_agree_for_literals_and_columns() {
+    let x = [1.0, 2.0, 3.0];
+    let y = [10.0, 20.0, 30.0];
+    let inf = f64::INFINITY;
+    // (literal lo, literal hi, expected max, expected integral)
+    #[allow(clippy::type_complexity)]
+    let table: &[(&str, &str, f64, f64, Option<f64>, Option<f64>)] = &[
+        ("0", "1/0", 0.0, inf, Some(30.0), Some(40.0)),
+        ("1/0", "0", inf, 0.0, Some(30.0), Some(40.0)),
+        ("-1/0", "2", -inf, 2.0, Some(20.0), Some(15.0)),
+        ("-1/0", "1/0", -inf, inf, Some(30.0), Some(40.0)),
+        ("1/0", "1/0", inf, inf, None, None),
+        ("-1/0", "-1/0", -inf, -inf, None, None),
+        ("2", "2", 2.0, 2.0, Some(20.0), Some(0.0)),
+        ("2.5", "2.5", 2.5, 2.5, None, Some(0.0)),
+        ("9", "9", 9.0, 9.0, None, None),
+        ("0", "0", 0.0, 0.0, None, None),
+    ];
+    for (llo, lhi, clo, chi, max, integral) in table {
+        let got_max = on_xy(&format!("max(B, {llo}, {lhi})"), &x, &y);
+        let got_int = on_xy(&format!("integral(B, {llo}, {lhi})"), &x, &y);
+        assert_eq!(got_max, *max, "max literal {llo}, {lhi}");
+        assert_eq!(got_int, *integral, "integral literal {llo}, {lhi}");
+        let (lo, hi) = ([*clo; 3], [*chi; 3]);
+        let (v, _) = eval("max(B, C, D)", &[&x, &y, &lo, &hi], &[(1, 0)], 3);
+        assert_eq!(
+            Some(v[0]).filter(|x| !x.is_nan()),
+            *max,
+            "max column {llo}, {lhi}"
+        );
+        let (v, _) = eval("integral(B, C, D)", &[&x, &y, &lo, &hi], &[(1, 0)], 3);
+        assert_eq!(
+            Some(v[0]).filter(|x| !x.is_nan()),
+            *integral,
+            "integral column {llo}, {lhi}"
+        );
+    }
+    // `sum` takes the bounds the same way.
+    assert_eq!(on_xy("sum(B, -1/0, 2)", &x, &y), Some(30.0));
+}
+
+/// A zero-width integral is 0 only when the bound lies inside the cleaned X
+/// values (`min <= a <= max`); outside them, or with no usable point, it is
+/// empty. A bound beyond the data on one side is clipped first.
+#[test]
+fn a_zero_width_integral_needs_the_bound_inside_the_x_values() {
+    assert_eq!(on_xy("integral(B, 9, 9)", &[1.0, 2.0], &[5.0, 6.0]), None);
+    assert_eq!(
+        on_xy("integral(B, 1.5, 1.5)", &[1.0, 2.0], &[5.0, 6.0]),
+        Some(0.0)
+    );
+    assert_eq!(
+        on_xy("integral(B, 2, 2)", &[1.0, 2.0], &[5.0, 6.0]),
+        Some(0.0),
+        "the bounds of the span are inside"
+    );
+    // A single point: span [1, 1].
+    assert_eq!(on_xy("integral(B, 2, 2)", &[1.0], &[5.0]), None);
+    assert_eq!(on_xy("integral(B, 1, 1)", &[1.0], &[5.0]), Some(0.0));
+    assert_eq!(on_xy("integral(B, 2, 2)", &[], &[]), None);
+    assert_eq!(on_xy("integral(B, 2, 2)", &[f64::NAN], &[1.0]), None);
+    // Clipped to a single X: nothing left, as before.
+    assert_eq!(on_xy("integral(B, 2, 100)", &[1.0, 2.0], &[5.0, 6.0]), None);
+    assert_eq!(on_xy("integral(B, 2, 1/0)", &[1.0, 2.0], &[5.0, 6.0]), None);
+    // A single point and a range of positive width stays empty.
+    assert_eq!(on_xy("integral(B, 0, 1/0)", &[1.0], &[5.0]), None);
+}
+
+/// `B / max(B, 100, 200)` with no point: a NaN operand with status Ok does
+/// not become a failure; the column is empty, not `---` (#433 point 1).
+#[test]
+fn dividing_by_an_empty_column_function_stays_empty_not_failed() {
+    let (v, s) = eval(
+        "B / max(B, 100, 200)",
+        &[&[1.0, 2.0], &[3.0, 4.0]],
+        &[(1, 0)],
+        2,
+    );
+    assert!(v.iter().all(|x| x.is_nan()));
+    assert_eq!(s, vec![NumericStatus::Ok; 2]);
 }
 
 #[test]

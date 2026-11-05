@@ -24,6 +24,17 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Changed
+
+- Pasting a formula that cannot be read behaves like typing it (#433): it is
+  kept, framed in red with the reason, and its column is emptied (the copied
+  values are never pasted in its place); the other columns of the paste go
+  through, one **Undo** restores everything, and it calculates by itself when
+  the missing column or sheet appears. The status bar says "The formula of
+  column C does not compute: …". A pasted comma range is rewritten and shown
+  in orange exactly like a typed one. Scripts (`pyst`) stay strict.
+- Status bar warnings use one amber colour, further from the error red.
+
 ### Added
 
 - A free graph can store a page (#426), the minimum size of its figure; it is
@@ -42,6 +53,27 @@ without a message, see `docs/persistence.md`).
   In **General**, **Figure size** now comes first in **Size**; the plot area
   sizes (and Left and Top, or the four fields of a Free layer) moved into the
   closed **Advanced** block. Nothing changes in the file.
+- A formula kept because a column or a sheet it names does not exist yet
+  computes by itself when that column or sheet appears (#433): add the column,
+  move one in, rename a sheet, delete a duplicate workbook, or open the file.
+  The binding is part of the history entry of that action (one **Undo** takes
+  both) and the status bar says which column the formula now reads. A binding
+  that would make a loop stays framed. Once bound, the formula holds the column
+  by identifier, so moving it later gives no `#REF`.
+- Application icon (#388): the StokesForge logo is the icon of the window, of
+  the Windows `stokesforge-app.exe` and of its installer, of the menu entry and
+  of the `.stf` files (a landscape sheet with the logo), and sits at the top of
+  the About window. The same picture at every size. It is in the official
+  packages and installers only: the code builds and runs without it, and its
+  notice (`licenses/logo/LICENSE`) allows its use with the unmodified software
+  only (the wording is a draft, to be reviewed before the release). All windows,
+  detached ones included, now carry the application id `stokesforge` that the
+  menu entry matches.
+- RPM and DEB packages are published with each release (#390, #388): the
+  publication switch `PUBLISH_LINUX_PACKAGES` is now 1, so a failure of the
+  package jobs blocks the release. The manual says how to install them and that
+  a per-user `install.sh` copy shadows the package. `install.sh` also installs
+  and removes the icon of the `.stf` type.
 
 - A new graph plotted from a workbook is named after it (#434): "Book1 plot",
   then "Book1 plot 2"… (numbered after the highest existing number, a deleted
@@ -245,6 +277,14 @@ without a message, see `docs/persistence.md`).
   beyond the `f64` range (`1e400`) or too small to be stored (`1e-400`) is refused with a
   sentence (the cell stays open; a pasted block holding one is refused as a whole; imported values are not checked),
   while a stored formula holding one still loads.
+- A custom Fit model typed with a number beyond the `f64` range (`1e400`) or too
+  small to be stored (`1e-400`) is refused at entry with the same sentences as
+  formulas (**Create** stays greyed; `pyst.analysis.fit` raises and
+  `readiness` says `bad_expression`), while a stored model holding one still
+  loads and recalculates as before (#438). Once you leave it, the Custom model field is framed in red
+  with the reason for every model error (the text stays, an empty field is not
+  framed); a stored calculation holding such a number must be corrected before
+  Edit Calculation or a range-handle drag works.
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that
@@ -268,6 +308,33 @@ without a message, see `docs/persistence.md`).
   drag still pans. The fields of Graph Properties, **Undo** and `pyst` are
   unchanged, and files that store Left, Top or layer frames open and draw the
   same. The history entry "Position Plot Area" is gone.
+- Formulas (#433): `0/0`, infinity minus infinity and zero times infinity are
+  a failed calculation (`---`), like `ln(-1)`; `1/0` stays infinity. An infinite
+  bound of a range means "to the end" (`max(B, 330, 1/0)`), and `integral(B, 2, 2)`
+  is 0 when the column has a point. A sheet that holds only constants or
+  formulas of other sheets has one row. A formula column copied alone into its
+  own sheet (`pyst.duplicate`) reads the same columns.
+- Refresh from Source with a shorter file shrinks a sheet that has formula
+  columns; they are recomputed on the new length (#433).
+- `pyst.set_column_meta(formula=None)` removes the formula and the values it
+  computed, like the interface; `keep_data=True` keeps them. `pyst` API 0.5
+  (alpha) (#433).
+- Formulas (#433): a formula you type in the **F(x)=** field is now always kept
+  (Enter, Tab or a click elsewhere closes the field, Esc cancels). When it
+  cannot be calculated (unknown column or function, wrong argument count, loop,
+  `#REF`, syntax error such as `A +`, number too large) the text stays as typed,
+  the column is empty, the cell is framed in red with the reason, and Ctrl+Z
+  brings the old formula back. A column the formula could read still follows
+  moves. A loop is kept uncalculated, its columns framed. Unreadable and
+  looping formulas leave empty cells instead of `---`. A syntax error has one
+  short sentence ("The formula is incomplete or not valid…"). A range written
+  with a decimal comma (`max(B,1,5)`) keeps its range, is rewritten
+  `max(B, 1, 5)` and shows orange for 10 s with the reason, also in the status
+  bar. Pasting a formula that cannot be read writes nothing into its column
+  (not the copied values either), the other columns go through and the status
+  bar names the column. `pyst` raises `InvalidValueError` for every badly
+  written formula, `A +` included, and writes nothing.
+
 - The axes are named **Bottom / Top / Left / Right** everywhere in the interface
   (Bas / Haut / Gauche / Droite in French), instead of "X (bottom)", "Secondary Y
   (right)"...: axis tabs, context menu, Object Manager (#358).

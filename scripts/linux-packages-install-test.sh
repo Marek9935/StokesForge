@@ -60,6 +60,15 @@ grep -q '\*\.stf' /usr/share/mime/globs2 || die "*.stf missing from the MIME glo
 ok "menu entry and .stf type registered by the distribution triggers"
 if [ "$FMT" = rpm ]; then rpm -qf /opt/stokesforge >/dev/null; else dpkg -S /opt/stokesforge >/dev/null; fi
 ok "the package owns /opt/stokesforge"
+# An official package carries the logo (#388): the icons are installed for the
+# desktop (the app's, and the one of the .stf type), and removed with the package.
+if [ -d /opt/stokesforge/share/icons ]; then
+    for icon in apps/stokesforge mimetypes/application-x-stokesforge-project; do
+        [ -f "/usr/share/icons/hicolor/256x256/$icon.png" ] || die "icon $icon.png missing from /usr/share/icons"
+    done
+    [ -f /opt/stokesforge/licenses/logo/LICENSE ] || die "the logo notice is missing from the package"
+    ok "icons installed with the package, logo notice present"
+fi
 
 step "window under a virtual screen, Mesa software Vulkan"
 if [ "${STOKESFORGE_PKG_TEST_NOWINDOW:-}" = 1 ]; then
@@ -96,6 +105,8 @@ pm_remove
 [ ! -e /usr/bin/stokesforge ] || die "/usr/bin/stokesforge is still there"
 [ ! -e /usr/share/applications/stokesforge.desktop ] || die "the menu entry is still there"
 [ ! -e /usr/share/mime/packages/stokesforge.xml ] || die "the MIME file is still there"
+[ -z "$(find /usr/share/icons -name 'stokesforge.png' -o -name 'application-x-stokesforge-project.png' 2>/dev/null)" ] \
+    || die "the icons are still there"
 if [ "$FMT" = deb ]; then
     dpkg -P stokesforge > /dev/null 2>&1 || true
     ! dpkg -l stokesforge 2> /dev/null | grep -q '^[a-z][a-z] ' || die "stokesforge is still known to dpkg after purge"

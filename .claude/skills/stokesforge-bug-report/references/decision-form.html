@@ -145,6 +145,7 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 </style>
 <div class="wrap">
 <header>
+  <a class="link" id="goHome" href="/" hidden style="align-self:flex-start">← Retour à l’accueil</a>
   <div class="top"><h1 id="h1"></h1><button class="link" id="goSum">Voir le résumé</button></div>
   <div class="prog" aria-hidden="true"><i id="bar"></i></div>
   <div class="count" id="count" aria-live="polite"></div>
@@ -325,6 +326,7 @@ const itag=d=>{const x=ISSUES[d.is];return x?'<span class="itag">'+esc(x.colour)
 // Deux modes : local (page servie par scripts/suivi.py sur 127.0.0.1, chemin /qcm/<id>) ou en ligne (claude.ai, capacité db).
 const QID=((location.pathname.match(/^\/qcm\/([A-Za-z0-9_.-]+)\/?$/)||[])[1])||null;
 const LOCAL=!!QID&&(location.hostname==='127.0.0.1'||location.hostname==='localhost');
+if(LOCAL)document.getElementById('goHome').hidden=false;   /* local server only: '/' is the tracking home */
 const KEY='sf-dec-'+(QID?QID+'-':'')+ORDER.map(d=>d.c).join(',');
 let finished=false, finMsg='';
 let ans={}, cur=0, view='card', confirmAll=false, store=null, sync='';

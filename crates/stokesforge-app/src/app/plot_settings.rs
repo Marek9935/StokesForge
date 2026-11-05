@@ -766,7 +766,13 @@ fn flag_total_bound(
         )
     };
     let now = ui.ctx().input(|input| input.time);
-    field_state::flag(ui.ctx(), id, FieldIssue::Clamped { message }, now);
+    field_state::flag(
+        ui.ctx(),
+        id,
+        FieldIssue::Clamped { message },
+        now,
+        field_state::CLAMPED_SECONDS,
+    );
 }
 
 /// `value` rounded to the decimals the unit shows.

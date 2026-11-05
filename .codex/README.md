@@ -80,7 +80,9 @@ follow the user's request, `AGENTS.md`, this guide and the current code.
 (menus, dialogs, input, undo). Its shared driver is
 `.claude/skills/run-stokesforge/driver.py`; read the captures with the image
 tool available in Codex. It runs on X11 under Xwayland and validates
-neither native Wayland, nor the `rfd` picker, nor drag. The windows opened
+neither native Wayland, nor the `rfd` picker, nor OS drag and drop (drags
+inside the window work). The driver runs the app on an invisible screen (headless
+mutter) when `mutter` and `dbus-run-session` exist; the windows opened
 for verification are closed at the end of the scenario, as the skill says.
 
 While creating or enriching issues, keep the reporting context

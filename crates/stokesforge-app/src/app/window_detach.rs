@@ -497,7 +497,7 @@ pub(super) fn panel_viewport(
     min_size: [f32; 2],
     init: Option<DetachAt>,
 ) -> egui::ViewportBuilder {
-    let builder = egui::ViewportBuilder::default()
+    let builder = crate::app_logo::viewport()
         .with_title(title)
         .with_decorations(false)
         .with_inner_size(init.map_or(default_size, |at| at.size))
@@ -1080,7 +1080,7 @@ impl StokesForgeApp {
             // Neither position nor size remembered: the detached OS window has
             // no persisted geometry (issue #16), only the floating
             // geometry is.
-            let viewport = egui::ViewportBuilder::default()
+            let viewport = crate::app_logo::viewport()
                 .with_title(title)
                 .with_decorations(false)
                 .with_inner_size(size)
@@ -1477,6 +1477,14 @@ mod tests {
     use super::super::window_chrome::tests::find_icon_centers;
     use super::*;
     use crate::theme;
+
+    /// A detached panel carries the application id: egui copies the icon to a
+    /// child window, not the id (#388).
+    #[test]
+    fn a_detached_panel_has_the_application_id() {
+        let builder = panel_viewport("Panel".to_string(), [300.0, 200.0], [100.0, 100.0], None);
+        assert_eq!(builder.app_id.as_deref(), Some("stokesforge"));
+    }
     use stokesforge_core::{Column, ColumnRole, Project};
     use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
     use stokesforge_session::Session;

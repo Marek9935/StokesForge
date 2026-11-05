@@ -111,6 +111,20 @@ removed nodes, so there is nothing to free explicitly; and a restored node
 comes back under its **original identifier**, since `replace_tree` does not
 move the allocator back.
 
+### Folding a follow-up into the gesture: `absorb_into_last` (#433)
+
+`History::absorb_into_last(project, command)` applies a command and folds its
+entry **into the top entry** of the stack, which keeps its label: the entry
+becomes an `Entry::Macro` holding the gesture's entries then the follow-up, so
+the label rule of `Entry::Macro` is no longer "always `HistoryLabel::Macro`":
+it is the group's label from `end_macro`, or the label of the gesture that was
+absorbed into. The actor uses it for the automatic binding of a kept formula
+(a column added, a sheet renamed... makes a name resolve): one undo reverts the
+gesture and the binding, in reverse order (invariant 8). The footprint is the
+union of both, and the byte accounting is rebuilt (`resync_pinned`, the same
+fallback as closing a macro). With an open macro or an empty stack it is
+`execute_recorded`; `Ok(false)` leaves the top entry as it was; an error too.
+
 ### What the hybrid imposes: strict LIFO
 
 Restoring a whole tree overwrites everything written after it. A structural
@@ -274,8 +288,12 @@ the subtree, fresh identifier, series, auxiliary and outputs renumbered) and the
 transposed sheets (`NodeCopy::transposes`: sheet and source both inside) through
 the same map of new identifiers. The renumbering comes **after** the loop,
 because a graph may come before the workbook it plots (prefix order). A
-reference to a node outside the copy keeps the original in a local copy. A
-folder is therefore copyable like any other node: the Project Manager no longer
+reference to a node outside the copy keeps the original in a local copy, for a
+graph series and for a remote formula reference; a formula column that reads a
+column outside the copy depends on where it lands (#433): pasted into the sheet
+it was copied from, in the same project, it reads the same columns (`A+B` stays
+`A+B`, no identifier allocated); pasted into another sheet, or from another
+project, the reference becomes `#REF`. A folder is therefore copyable like any other node: the Project Manager no longer
 refuses it, and one `MacroKind` entry covers the gesture.
 
 The rule covers the whole gesture, not only one subtree (#391, S1). The roots
@@ -300,7 +318,8 @@ dependencies; `NodeCopy::into_external` enables their insertion in
 structural entry, with the references replaced. Columns inside the copied
 subtree are never embedded (the graph reads the pasted workbook); a formula or a
 calculation that reads outside the copy becomes `#REF`, respectively plain
-columns. Within the same project, the dependencies are not inserted. Revealing
+columns (an external paste is never the "same sheet" case, even when the
+identifiers match). Within the same project, the dependencies are not inserted. Revealing
 the workbook reuses `SetWindowMeta`, hence its delta and its undo. The system
 clipboard carries the calculations and transposed sheets of the copy in two
 `#[serde(default)]` fields of `ClipboardRecord` (the `.stf` format is unchanged,
