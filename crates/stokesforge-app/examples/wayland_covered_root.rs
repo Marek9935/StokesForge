@@ -45,10 +45,15 @@ struct Root;
 impl eframe::App for Root {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // As the application does on its first root pass (#457).
+        // Wayland only: the example still has to compile on every platform,
+        // since `cargo test --features python` builds examples (#469).
+        #[cfg(target_os = "linux")]
         if let Some(window) = frame.winit_window() {
             use winit::platform::wayland::WindowExtWayland as _;
             window.set_reports_occlusion(true);
         }
+        #[cfg(not(target_os = "linux"))]
+        let _ = frame;
         start();
         ROOT_UI.fetch_add(1, Relaxed);
         DRAINED.fetch_add(PENDING.swap(0, Relaxed), Relaxed);
