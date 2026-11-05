@@ -195,7 +195,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             MacroKind::RenameObjects => tr!("history-macro-rename-objects"),
             MacroKind::ClearSelection => tr!("history-macro-clear-selection"),
             MacroKind::GraphProperties => tr!("history-macro-graph-properties"),
-            MacroKind::RefreshFromFile => tr!("history-macro-refresh-from-file"),
+            MacroKind::RefreshFromSource => tr!("history-macro-refresh-from-source"),
             MacroKind::Import => tr!("history-macro-import"),
             MacroKind::AddWorkbook => tr!("history-macro-add-workbook"),
             MacroKind::AddWorksheet => tr!("history-macro-add-worksheet"),
