@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deliver a work package's branch to main in one stop-at-first-failure run (#449).
 #
-#   scripts/deliver.sh <issue-number> <message-file>
+#   scripts/deliver.sh [--wait-tag rc|final] <issue-number> <message-file>
 #
 # Run from the MAIN checkout, on `main` (the script of a worktree may be run with the
 # main checkout as the current directory: it finds its siblings by its own path and
@@ -22,6 +22,11 @@
 # with the orchestrator. The CI is not polled: the watcher of `suivi.py serve`
 # shows red on the tracking page (read it only for a tag, a release or a change to CI itself).
 #
+# `--wait-tag rc|final` (#467): the issue stays open on purpose because only a tag proves it.
+# Refused before the lock if the message closes the issue (`Closes #<n>` and the other GitLab
+# keywords); after the push it runs `suivi.py tag-wait <n> <kind>`, and the service then adds the
+# label `attente-rc` / `attente-final` on GitLab (no glab call here).
+#
 # Exit: 0 delivered, 1 refused or failed (main unchanged unless M was already merged
 # locally), 2 usage, 3 main moved: it was merged into the branch, recheck and rerun.
 set -euo pipefail
@@ -30,10 +35,20 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 die() { echo "deliver: $*" >&2; exit 1; }
 
-[ "$#" -eq 2 ] && [[ "$1" =~ ^[0-9]+$ ]] || { echo "usage: deliver.sh <issue-number> <message-file>" >&2; exit 2; }
+usage() { echo "usage: deliver.sh [--wait-tag rc|final] <issue-number> <message-file>" >&2; exit 2; }
+wait_tag=""
+if [ "${1:-}" = "--wait-tag" ]; then
+    [ "$#" -ge 2 ] || usage
+    case "$2" in rc | final) wait_tag="$2" ;; *) usage ;; esac
+    shift 2
+fi
+[ "$#" -eq 2 ] && [[ "$1" =~ ^[0-9]+$ ]] || usage
 n="$1"
 msgfile="$2"
 [ -f "$msgfile" ] && [ -r "$msgfile" ] || die "cannot read the message file $msgfile"
+if [ -n "$wait_tag" ] && grep -qiE "\\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#$n\\b" "$msgfile"; then
+    die "the message closes #$n (Closes/Fixes/Resolves #$n), but --wait-tag keeps it open until the tag: remove that line"
+fi
 first="$(head -n 1 "$msgfile")"
 case "$first" in "Merge #$n:"*) ;; *) die "the first line of the message must start with 'Merge #$n:' (got: $first)" ;; esac
 
@@ -115,6 +130,9 @@ if push_main; then pushed=1; else
 fi
 [ "$pushed" = 1 ] || die "push failed after retries; the merge $m is local only, rerun to push it"
 
+if [ -n "$wait_tag" ]; then
+    suivi tag-wait "$n" "$wait_tag" || die "pushed $m, but declaring the wait failed; run: scripts/suivi.py tag-wait $n $wait_tag"
+fi
 if suivi test list --issue "$n" | grep -q '(try)'; then
     suivi test merged "$n" "$m" || die "pushed $m, but recording it on the trial entries failed; rerun to record it"
 else

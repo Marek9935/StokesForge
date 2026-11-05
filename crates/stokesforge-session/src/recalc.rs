@@ -124,9 +124,12 @@
 //!   versions without changing the content; since then a pass keeps the version
 //!   of unchanged content, and the comparison by content still answers for a
 //!   **command** that retypes the same values (fresh version, same content); a
-//!   change of *definition*
-//!   (`UpdateCalculation`, undo) is a user gesture: the result is up to date by
-//!   construction (`Trust`). An **automatic** calculation that the file made
+//!   **replaced calculation record** (`UpdateCalculation`, a structural undo or
+//!   redo: `CalcMemo::record`) is a user gesture: the result is up to date by
+//!   construction (`Trust`). A change of the output versions alone is not one:
+//!   `InsertRows` and `DeleteRows` rewrite the output columns with the inputs,
+//!   and still mark the calculation (#458). Undoing them leaves the mark until
+//!   Recalculate, like an edit followed by Undo. An **automatic** calculation that the file made
 //!   `Manual` obeys the same content comparison as long as its inputs do not
 //!   really change, in both modes (without it, the full mode erased it and
 //!   diverged from the targeted one — latent before #321, found by `b22`);
@@ -151,6 +154,7 @@
 //! `docs/tests.md`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use stokesforge_analysis::ops::Operation;
 use stokesforge_analysis::AnalysisError;
@@ -909,9 +913,10 @@ fn write_formula_column(
 /// versions of the columns it **reads**, and what **defines** it (operation,
 /// output columns and their version).
 ///
-/// The separation serves the manual calculations: an input change makes them
-/// stale; a change of definition (`UpdateCalculation`, undo) is a user gesture
-/// whose result is up to date by construction.
+/// The separation serves the automatic calculations (their outputs are
+/// rewritten when a row is removed under them) and the memo of the manual ones.
+/// For a manual calculation the gesture is not read from `definition` but from
+/// `CalcMemo::record`: output versions move on `DeleteRows` too (#458).
 #[derive(Debug, Clone, PartialEq)]
 struct CalcFingerprint {
     inputs: Vec<(NodeId, u64)>,
@@ -958,14 +963,22 @@ fn calc_fingerprint(project: &Project, calc: &Calculation) -> Result<CalcFingerp
     })
 }
 
-/// The memo of a calculation: its fingerprint and, for a **manual** calculation
-/// only, the content of its inputs at its last calculation (a cloned `Arc`, not
+/// The memo of a calculation: its fingerprint, its record, and, for a **manual**
+/// calculation only, the content of its inputs at its last calculation (a cloned `Arc`, not
 /// a copy as long as the column is not modified). Without it, a column rewritten
 /// identically by a command (retyping the same values draws a fresh version)
 /// would make stale a calculation whose inputs did not change.
 struct CalcMemo {
     fingerprint: CalcFingerprint,
     seen: Vec<ColumnValues>,
+    /// The calculation record at the last pass. Every gesture on the
+    /// calculation itself (`UpdateCalculation`, a structural undo or redo)
+    /// replaces the `Arc`; a row insertion or deletion, which only rewrites
+    /// the columns, does not (#458). The output versions of the definition
+    /// cannot tell the two apart: both move them.
+    /// A mark written outside the pass (a refitted output, #448) also replaces
+    /// it: `Trust` keeps that mark and only refreshes `seen`.
+    record: Arc<Calculation>,
 }
 
 /// Is the content of each input the one that was seen?
@@ -1086,6 +1099,11 @@ impl Recalculator {
         calc: &Calculation,
         fingerprint: CalcFingerprint,
     ) {
+        // The record is read back from the project: the command may have
+        // replaced the one `calc` was cloned from.
+        let Some(record) = project.tree().calculation(id).cloned() else {
+            return;
+        };
         // The content of the inputs is kept for a manual calculation, and for
         // an automatic one that the file made stale (`Manual`, or
         // `InputMissing` that `Trust` brings back to `Manual`): see
@@ -1100,7 +1118,14 @@ impl Recalculator {
         } else {
             Vec::new()
         };
-        self.calc_memo.insert(id, CalcMemo { fingerprint, seen });
+        self.calc_memo.insert(
+            id,
+            CalcMemo {
+                fingerprint,
+                seen,
+                record,
+            },
+        );
     }
 
     fn update_calculation(&mut self, project: &mut Project, id: NodeId, force: bool) -> bool {
@@ -1160,7 +1185,10 @@ impl Recalculator {
             // compared by content, in both modes (see `CalcMemo`).
             match previous {
                 None => CalcAction::Trust,
-                Some(p) if p.fingerprint.definition != fingerprint.definition => CalcAction::Trust,
+                // A replaced record is a gesture on the calculation. A changed
+                // definition alone is not: rows inserted or deleted in the
+                // sheet rewrite the output columns, hence their versions (#458).
+                Some(p) if !Arc::ptr_eq(&p.record, &calc) => CalcAction::Trust,
                 Some(p) if p.fingerprint.inputs == fingerprint.inputs => CalcAction::Skip,
                 Some(p) if same_contents(project, &fingerprint.inputs, &p.seen) => {
                     CalcAction::Renumber
@@ -1188,6 +1216,14 @@ impl Recalculator {
             CalcAction::MarkStale => {
                 if !matches!(calc.stale, Some(Staleness::Failed(_))) {
                     let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+                }
+                // The memo keeps the content it saw, and moves to the current
+                // record: the next pass must not take the marking itself for a
+                // gesture.
+                if let (Some(memo), Some(record)) =
+                    (self.calc_memo.get_mut(&id), project.tree().calculation(id))
+                {
+                    memo.record = Arc::clone(record);
                 }
                 false
             }
