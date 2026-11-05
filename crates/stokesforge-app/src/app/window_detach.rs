@@ -8,6 +8,14 @@
 //! the snapshot, painting and collecting events, window commands.
 //! The callback's payload stays owned and `'static`; its two locks
 //! keep the same duration, and business actions still wait for the root.
+//! That stays true when a detached window covers the main one (#457): on
+//! native Wayland the covered root gets no frame callback, so the vendored
+//! winit reports it occluded after 100 ms and eframe runs its `logic` and `ui`
+//! unpainted about every 100 ms (`vendor/winit/STOKESFORGE.md`, "Frame
+//! starvation"). The viewport's request wakes the root, the root applies it,
+//! and the end of that same pass publishes the result back to the viewports
+//! ([`StokesForgeApp::republish_detached_tabs`]), so one action waits for one
+//! throttle, not two.
 //!
 //! # Taken from the top doc of `app.rs`
 //!

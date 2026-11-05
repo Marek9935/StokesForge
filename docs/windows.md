@@ -165,9 +165,14 @@ field or button; its two-state toggles (Coarse | Fine, Regular | Free, Grows wit
 It **maximises** a floating window while it lasts (`app/layout_window.rs`: `layout_entries` keeps
 the tab that was maximised before; `reconcile_layout_modes` leaves the mode of a graph
 whose window is no longer the maximised one, which covers Restore, the Window menu,
-close, delete and project load). A detached window keeps its size: the mode sends it no
-maximise or restore, because on Wayland a window covering the main window stops its frame
-callbacks and every action of a detached window is drained in the root frame. The saved window views report the state from before the mode
+close, delete and project load). A detached window maximises its OS window the same way
+(`follow_mode_maximize`, unless it was maximised at entry), and its header's Restore leaves the mode;
+a restore done from outside the application (an OS shortcut) cannot be told from a maximise the
+compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because the
+vendored winit reports a window the compositor no longer serves as occluded (frame starvation,
+#457): the covered root still runs `logic` and `ui` unpainted about every 100 ms, so the actions
+of the detached window are drained, at the cost of about 100 ms between a command and its paint
+while the main window is covered. The saved window views report the state from before the mode
 (`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at
 the start of the frame (`begin_layout_frame`) and at the top of a detached viewport, never
 inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard

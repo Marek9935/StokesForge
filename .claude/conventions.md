@@ -17,7 +17,13 @@ X11; the `vendor/winit` and `vendor/smithay-clipboard` patches, outside the
 workspace, share the drop receiver and the clipboard between viewports.
 Choice, targeted `rustfmt` commands, manual verification and removal:
 `vendor/winit/STOKESFORGE.md`. The exact parser and channel are tested by
-`stokesforge-app/tests/wayland_{uri,bridge}.rs`.
+`stokesforge-app/tests/wayland_{uri,bridge}.rs`. Frame starvation (#457): Wayland
+has no occlusion event, so the vendored winit infers `Occluded` from a frame
+callback that does not come while a redraw is wanted (`frame_starvation.rs`, pure,
+`tests/wayland_frame_starvation.rs`); that is what lets eframe keep running a
+covered root, so a detached window may be maximised over it (Page Layout Mode).
+Never a periodic wake for it (#104). Recheck on any eframe upgrade; real-compositor
+proof: `tests/wayland_covered_root.rs` (manual, headless mutter, GL backend).
 The empty graph goes through `AddGraph`; `SessionHandle::new_project`, like
 `load`, replaces the identity and empties the history after confirmation in the UI.
 

@@ -41,6 +41,13 @@ without a message, see `docs/persistence.md`).
   an optional `.stf` field (an older version that saves the file again drops it
   without a message). Nothing is visible yet.
 
+- A detached graph window in the Page Layout Mode (#426, #457) is maximized
+  with the mode and restored when you leave it, like a graph window in the main
+  window, and its **Maximize the window** button, pressed while it is maximized,
+  restores it and leaves the mode. On Wayland a detached
+  window covering the main window no longer freezes the application: clicks
+  in the covered main window still take effect, about a tenth of a second late
+  while it is hidden.
 - Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
   show a graph as a page with rulers, a grid, handles and a settings strip
   (figure size with a padlock shared with Graph Properties, position and size of
