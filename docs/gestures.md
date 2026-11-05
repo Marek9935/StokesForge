@@ -84,9 +84,9 @@ Entering the mode **maximises** the graph window; leaving it (Esc, the toolbar o
 The strip (module page_layout of the app) adds: Figure size with the padlock, X Y W H of the selected
 graph (X and Y greyed on the grid; W and H trade with the right neighbour, the last
 with its left), Align / Same Size / Distribute (greyed with a reason on the grid), Snap
-and a two-part choice Coarse | Fine (view state, never in the spec, greyed with a reason while Snap is off), the **Grid mode:** choice Regular | Free
-(`SetLayerPlacement`, one undo step), and *When axes are added* (Grows with the axes | Fixed). A two-part choice
-shows both options at once with the active one highlighted; a click on the other one selects it, a click on the active one does nothing (`app/segmented.rs`). A pending nudge is committed before any of them reaches the model.
+and a two-state toggle Coarse | Fine (view state, never in the spec, greyed with a reason while Snap is off), the **Grid mode:** toggle Regular | Free
+(`SetLayerPlacement`, one undo step), and *When axes are added* (Grows with the axes | Fixed). A two-state toggle
+shows both states at once with the current one highlighted; it is ONE button: a click anywhere on it, on either part, switches to the other state, and hovering outlines the whole button in green (`app/state_toggle.rs`). A pending nudge is committed before any of them reaches the model.
 
 ## The analysis window preview
 

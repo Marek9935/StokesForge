@@ -1966,17 +1966,9 @@ mod tests {
             }
         };
         assert!(!fine());
-        // Fine, Coarse, Fine, Coarse: four clicks in a row, each one answered.
-        for (round, (label, want)) in [
-            (tr!("layout-mode-step-fine"), true),
-            (tr!("layout-mode-step-coarse"), false),
-            (tr!("layout-mode-step-fine"), true),
-            (tr!("layout-mode-step-coarse"), false),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            click(&mut app, &mut root, &mut last, label);
+        // The same spot, four times: the step toggles every time.
+        for (round, want) in [true, false, true, false].into_iter().enumerate() {
+            click(&mut app, &mut root, &mut last, tr!("layout-mode-step-fine"));
             assert_eq!(fine(), want, "step click {round}");
         }
         // Snap: on, off, on.
@@ -1989,12 +1981,12 @@ mod tests {
         let placement = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().layer_placement;
         let fixed = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().fixed_figure;
         for (round, free) in [true, false, true, false].into_iter().enumerate() {
-            let label = if free {
-                tr!("layout-mode-placement-free")
-            } else {
-                tr!("layout-mode-placement-regular")
-            };
-            click(&mut app, &mut root, &mut last, label);
+            click(
+                &mut app,
+                &mut root,
+                &mut last,
+                tr!("layout-mode-placement-free"),
+            );
             assert_eq!(
                 placement(&app) == stokesforge_plot::LayerPlacement::Free,
                 free,
@@ -2002,12 +1994,12 @@ mod tests {
             );
         }
         for (round, want) in [true, false, true, false].into_iter().enumerate() {
-            let label = if want {
-                tr!("plot-figure-size-fixed")
-            } else {
-                tr!("plot-figure-size-grows")
-            };
-            click(&mut app, &mut root, &mut last, label);
+            click(
+                &mut app,
+                &mut root,
+                &mut last,
+                tr!("plot-figure-size-fixed"),
+            );
             assert_eq!(fixed(&app), want, "axes click {round}");
         }
         session.shutdown().unwrap();

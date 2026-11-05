@@ -24,7 +24,7 @@ use stokesforge_render::{scaled_to_page, GraphBox, MIN_PAGE_EXTENT};
 use stokesforge_render_egui::{GraphEvent, GraphView};
 
 use super::grid::keyboard_focus_outside_grid;
-use super::segmented::{segmented_choice, segmented_width, Segment};
+use super::state_toggle::{paint_hover_outline, state_toggle, state_toggle_width};
 use super::StokesForgeApp;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::number_field;
@@ -1016,7 +1016,7 @@ fn arrange_row(
     );
     ui.separator();
 
-    // Snap on or off, then the grid step as a two-part choice. View state only.
+    // Snap on or off, then the grid step as a two-state toggle. View state only.
     let mut snap = snap_state(ctx, graph);
     let before = snap;
     let (snap_label, coarse, fine) = (
@@ -1024,44 +1024,33 @@ fn arrange_row(
         tr!("layout-mode-step-coarse"),
         tr!("layout-mode-step-fine"),
     );
-    let steps_width = segmented_width(ui, &[&coarse, &fine]);
+    let steps_width = state_toggle_width(ui, [&coarse, &fine]);
     keep_together(ui, &[&snap_label], 0, button_padding(ui) + steps_width);
-    if ui
+    let snap_button = ui
         .add(egui::Button::new(snap_label).selected(snap.on))
-        .on_hover_text(tr!("layout-mode-snap", "hint"))
-        .clicked()
-    {
+        .on_hover_text(tr!("layout-mode-snap", "hint"));
+    if snap_button.hovered() {
+        paint_hover_outline(ui, snap_button.rect);
+    }
+    if snap_button.clicked() {
         snap.on = !snap.on;
     }
-    let step_hints = (
-        tr!("layout-mode-step-coarse", "hint"),
-        tr!("layout-mode-step-fine", "hint"),
-    );
     let step_reason = tr!("layout-mode-step", "disabled");
-    if let Some(index) = segmented_choice(
+    if state_toggle(
         ui,
-        "snap_step",
-        &[
-            Segment {
-                label: &coarse,
-                hint: &step_hints.0,
-            },
-            Segment {
-                label: &fine,
-                hint: &step_hints.1,
-            },
-        ],
+        [&coarse, &fine],
         usize::from(snap.fine),
+        &tr!("layout-mode-step", "hint"),
         (!snap.on).then_some(step_reason.as_str()),
     ) {
-        snap.fine = index == 1;
+        snap.fine = !snap.fine;
     }
     if snap != before {
         set_snap_state(ctx, graph, snap);
     }
     ui.separator();
 
-    // The placement of the layers, saved and undoable: both options are shown.
+    // The placement of the layers, saved and undoable: both states are shown.
     let (placement_label, regular, free_label) = (
         tr!("layout-mode-placement"),
         tr!("layout-mode-placement-regular"),
@@ -1071,33 +1060,17 @@ fn arrange_row(
         ui,
         &[&placement_label],
         0,
-        segmented_width(ui, &[&regular, &free_label]),
+        state_toggle_width(ui, [&regular, &free_label]),
     );
     ui.label(placement_label);
-    let hints = (
-        tr!("layout-mode-placement-regular", "hint"),
-        tr!("layout-mode-placement-free", "hint"),
-    );
-    if let Some(index) = segmented_choice(
+    if state_toggle(
         ui,
-        "placement",
-        &[
-            Segment {
-                label: &regular,
-                hint: &hints.0,
-            },
-            Segment {
-                label: &free_label,
-                hint: &hints.1,
-            },
-        ],
+        [&regular, &free_label],
         usize::from(free),
+        &tr!("layout-mode-placement", "hint"),
         None,
     ) {
-        model.push(Action::SetLayerPlacement {
-            graph,
-            free: index == 1,
-        });
+        model.push(Action::SetLayerPlacement { graph, free: !free });
     }
     ui.separator();
 
@@ -1108,29 +1081,19 @@ fn arrange_row(
         ui,
         &[&axes_label],
         0,
-        segmented_width(ui, &[&grows, &fixed]),
+        state_toggle_width(ui, [&grows, &fixed]),
     );
     ui.label(axes_label);
-    let axes_hint = tr!("plot-figure-size", "hint");
-    if let Some(index) = segmented_choice(
+    if state_toggle(
         ui,
-        "axes",
-        &[
-            Segment {
-                label: &grows,
-                hint: &axes_hint,
-            },
-            Segment {
-                label: &fixed,
-                hint: &axes_hint,
-            },
-        ],
+        [&grows, &fixed],
         usize::from(spec.fixed_figure),
+        &tr!("plot-figure-size", "hint"),
         None,
     ) {
         model.push(Action::SetFigureFixed {
             graph,
-            fixed: index == 1,
+            fixed: !spec.fixed_figure,
         });
     }
 }
@@ -1291,6 +1254,11 @@ mod tests {
         fn click_text(&mut self, needle: &str) -> Vec<Action> {
             let (output, _) = self.frame(Vec::new());
             let pos = find_text_center(&output.shapes, needle);
+            self.click_text_at(pos)
+        }
+
+        /// Clicks at `pos`; the actions sent over the frames.
+        fn click_text_at(&mut self, pos: egui::Pos2) -> Vec<Action> {
             let mut sent = Vec::new();
             let ctx = self.ctx.clone();
             let bench = std::cell::RefCell::new(&mut *self);
@@ -1418,36 +1386,43 @@ mod tests {
         bench.session.shutdown().unwrap();
     }
 
-    /// The two-part choices of the strip (Coarse | Fine, Regular | Free,
-    /// Grows with the axes | Fixed): every option is painted at once, the label
-    /// of each never changes, only the active one is in the selection colour,
-    /// a click on the active one sends nothing and a click on the other sends
-    /// exactly one action. Witnesses: a button that renames itself (one option
-    /// painted) fails the first two; a click on the active segment that sends
-    /// again fails the last.
+    /// A two-state toggle of the strip is ONE button: both labels stay painted
+    /// and fixed, the current state alone is in the selection colour, a click
+    /// anywhere on it, either part and the seam included, switches to the other
+    /// state and sends exactly one action (none for the view-state step), so
+    /// two clicks on the same spot come back. Hover outlines the whole button
+    /// once, in the stroke of the theme. Witnesses: a click handled per part, an
+    /// outline on the hovered part only and a hard-coded colour each fail.
     #[test]
-    fn a_two_part_choice_shows_both_options_and_acts_only_on_the_other() {
-        fn selected_texts(output: &egui::FullOutput, fill: egui::Color32) -> Vec<String> {
-            fn walk(shape: &egui::Shape, fill: egui::Color32, out: &mut Vec<egui::Rect>) {
+    fn a_state_toggle_is_one_button_that_shows_both_states() {
+        fn rects(output: &egui::FullOutput) -> Vec<egui::epaint::RectShape> {
+            fn walk(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
                 match shape {
-                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, fill, out)),
-                    egui::Shape::Rect(rect) if rect.fill == fill => out.push(rect.rect),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+                    egui::Shape::Rect(rect) => out.push(rect.clone()),
                     _ => {}
                 }
             }
-            let mut rects = Vec::new();
-            output
-                .shapes
-                .iter()
-                .for_each(|clipped| walk(&clipped.shape, fill, &mut rects));
+            let mut out = Vec::new();
+            output.shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+            out
+        }
+        fn selected_texts(output: &egui::FullOutput, fill: egui::Color32) -> Vec<String> {
+            let filled: Vec<egui::Rect> = rects(output)
+                .into_iter()
+                .filter(|r| r.fill == fill)
+                .map(|r| r.rect)
+                .collect();
             super::super::test_support::texts(&output.shapes)
                 .into_iter()
-                .filter(|t| rects.iter().any(|r| r.contains(t.center)))
+                .filter(|t| filled.iter().any(|r| r.contains(t.center)))
                 .map(|t| t.text)
                 .collect()
         }
         let mut bench = Bench::new(2, false);
-        let fill = bench.ctx.global_style().visuals.selection.bg_fill;
+        let visuals = bench.ctx.global_style().visuals.clone();
+        let fill = visuals.selection.bg_fill;
+        let outline = visuals.widgets.hovered.bg_stroke;
         let pairs = [
             (tr!("layout-mode-step-coarse"), tr!("layout-mode-step-fine")),
             (
@@ -1456,43 +1431,152 @@ mod tests {
             ),
             (tr!("plot-figure-size-grows"), tr!("plot-figure-size-fixed")),
         ];
+        // At rest: both labels, only the first selected, no outline.
         let (output, _) = bench.frame(Vec::new());
-        for (active, other) in &pairs {
-            assert!(painted(&output, active) && painted(&output, other));
-        }
         let selected = selected_texts(&output, fill);
-        for (active, other) in &pairs {
+        for (first, second) in &pairs {
+            assert!(painted(&output, first) && painted(&output, second));
             assert!(
-                selected.contains(active),
-                "{active:?} not selected: {selected:?}"
+                selected.contains(first),
+                "{first:?} not selected: {selected:?}"
             );
             assert!(
-                !selected.contains(other),
-                "{other:?} selected: {selected:?}"
+                !selected.contains(second),
+                "{second:?} selected: {selected:?}"
             );
         }
-        // The active segment: nothing sent. The other one: the step is view
-        // state (no action), the two model choices send exactly one.
-        for (index, (active, other)) in pairs.iter().enumerate() {
-            let sent = bench.click_text(active);
-            assert!(sent.is_empty(), "{active:?} resent {sent:?}");
-            let sent = bench.click_text(other);
-            assert_eq!(
-                sent.len(),
-                usize::from(index > 0),
-                "{other:?} sent {sent:?}"
-            );
-        }
-        // Labels never change after the view state moved.
-        let (output, _) = bench.frame(Vec::new());
-        for (active, other) in &pairs {
-            assert!(painted(&output, active) && painted(&output, other));
-        }
-        let selected = selected_texts(&output, fill);
         assert!(
-            selected.contains(&pairs[0].1),
-            "Fine selected: {selected:?}"
+            !rects(&output).iter().any(|r| r.stroke == outline),
+            "no outline at rest"
         );
+        for (index, (first, second)) in pairs.iter().enumerate() {
+            let at = |bench: &mut Bench, text: &str| {
+                let (output, _) = bench.frame(Vec::new());
+                find_text_center(&output.shapes, text)
+            };
+            let first_at = at(&mut bench, first);
+            let second_at = at(&mut bench, second);
+            // Hover on the first part: ONE outline, around both parts.
+            let ctx = bench.ctx.clone();
+            let (output, _) = bench.frame(vec![egui::Event::PointerMoved(first_at)]);
+            let (output, _) = {
+                drop(output);
+                bench.frame(Vec::new())
+            };
+            let outlines: Vec<_> = rects(&output)
+                .into_iter()
+                .filter(|r| r.stroke == outline && r.rect.contains(first_at))
+                .collect();
+            assert_eq!(outlines.len(), 1, "{first:?}: {outlines:?}");
+            let whole = outlines[0].rect;
+            assert!(
+                whole.contains(second_at) && whole.contains(first_at),
+                "the outline surrounds both parts of {first:?} | {second:?}"
+            );
+            drop(ctx);
+            // Hit area: the middle of each part and the seam (the edge of the
+            // selected fill facing the other part), each one switches.
+            let seam = rects(&output)
+                .into_iter()
+                .filter(|r| r.fill == fill && r.rect.contains(first_at))
+                .map(|r| r.rect.right())
+                .next()
+                .expect("the selected part");
+            let spots = [first_at, egui::pos2(seam, whole.center().y), second_at];
+            let mut state_is_second = false;
+            for spot in spots {
+                let sent = bench.click_text_at(spot);
+                assert_eq!(
+                    sent.len(),
+                    usize::from(index > 0),
+                    "{first:?} at {spot:?}: {sent:?}"
+                );
+                if index == 0 {
+                    state_is_second = !state_is_second;
+                    assert_eq!(snap_state(&bench.ctx, bench.graph).fine, state_is_second);
+                } else {
+                    // The model is not applied here: the state stays put and
+                    // each click asks for the same switch again.
+                    assert!(matches!(
+                        sent[0],
+                        Action::SetLayerPlacement { free: true, .. }
+                            | Action::SetFigureFixed { fixed: true, .. }
+                    ));
+                }
+            }
+            // The step toggle was clicked three times: the last state is Fine.
+        }
+        // Both labels are still painted and unchanged afterwards.
+        let (output, _) = bench.frame(Vec::new());
+        for (first, second) in &pairs {
+            assert!(painted(&output, first) && painted(&output, second));
+        }
+        bench.session.shutdown().unwrap();
+    }
+
+    /// Tab reaches the step toggle, outlined like a hover, and Space
+    /// switches it. Witness: a toggle that is not focusable never gets the
+    /// outline.
+    #[test]
+    fn the_step_toggle_is_reached_by_tab_and_space_switches_it() {
+        let mut bench = Bench::new(2, false);
+        let outline = bench.ctx.global_style().visuals.widgets.hovered.bg_stroke;
+        let key = |key: egui::Key| {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut stops = 0;
+        for _ in 0..60 {
+            bench.frame(key(egui::Key::Tab));
+            let (output, _) = bench.frame(Vec::new());
+            let at = find_text_center(&output.shapes, &tr!("layout-mode-step-fine"));
+            let outlined = output.shapes.iter().any(|clipped| {
+                matches!(&clipped.shape, egui::Shape::Rect(r)
+                    if r.stroke == outline && r.rect.contains(at))
+            });
+            if outlined {
+                stops += 1;
+                if stops == 1 {
+                    assert!(!snap_state(&bench.ctx, bench.graph).fine);
+                    bench.frame(key(egui::Key::Space));
+                    bench.frame(Vec::new());
+                    assert!(snap_state(&bench.ctx, bench.graph).fine, "Space switches");
+                }
+            }
+        }
+        assert!(stops >= 1, "Tab never reached the toggle");
+        bench.session.shutdown().unwrap();
+    }
+
+    /// Greyed (Snap off): the step toggle neither reacts nor outlines.
+    #[test]
+    fn the_step_toggle_is_inert_while_snap_is_off() {
+        let mut bench = Bench::new(2, false);
+        bench.click_text(&tr!("layout-mode-snap"));
+        assert!(!snap_state(&bench.ctx, bench.graph).on);
+        let outline = bench.ctx.global_style().visuals.widgets.hovered.bg_stroke;
+        let (output, _) = bench.frame(Vec::new());
+        let at = find_text_center(&output.shapes, &tr!("layout-mode-step-fine"));
+        bench.frame(vec![egui::Event::PointerMoved(at)]);
+        let (output, _) = bench.frame(Vec::new());
+        let mut hovered_outline = false;
+        for clipped in &output.shapes {
+            if let egui::Shape::Rect(rect) = &clipped.shape {
+                hovered_outline |= rect.stroke == outline && rect.rect.contains(at);
+            }
+        }
+        assert!(!hovered_outline, "no outline while greyed");
+        let before = snap_state(&bench.ctx, bench.graph);
+        bench.click_text(&tr!("layout-mode-step-fine"));
+        assert_eq!(snap_state(&bench.ctx, bench.graph), before, "no click");
         bench.session.shutdown().unwrap();
     }
 
