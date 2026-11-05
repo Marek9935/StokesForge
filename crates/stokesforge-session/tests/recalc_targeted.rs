@@ -2332,45 +2332,49 @@ fn aborting_a_macro_undoes_deleted_rows_over_a_retyped_formula_column() {
 /// #448: the same macro, closed then undone, goes through the same path.
 #[test]
 fn undoing_a_closed_macro_undoes_deleted_rows_over_a_retyped_formula_column() {
-    let (_session, handle, f) = start(FormulaRecalc::Targeted);
-    handle
-        .execute(set_formula(&handle, f.c, "A*2"))
-        .expect("C = A*2");
-    handle.begin_macro(MacroKind::PasteCells).expect("macro");
-    delete_row_then_retype(&handle, &f, 0);
-    handle.end_macro().expect("close");
-    handle.undo().expect("the undo is not refused");
-    let after = take_snapshot(&handle);
-    assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]));
-    assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]));
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        delete_row_then_retype(&handle, &f, 0);
+        handle.end_macro().expect("close");
+        handle.undo().expect("the undo is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
 }
 
 /// #448: not only the type. `C = D` is shorter than the row that was deleted, so
 /// putting the row back aims past the end of `C`.
 #[test]
 fn aborting_a_macro_undoes_deleted_rows_over_a_shortened_formula_column() {
-    let (_session, handle, f) = start(FormulaRecalc::Targeted);
-    handle
-        .execute(enter(f.d, 0, &[7.0]))
-        .expect("D has one row");
-    handle
-        .execute(set_formula(&handle, f.c, "A*2"))
-        .expect("C = A*2");
-    handle.begin_macro(MacroKind::PasteCells).expect("macro");
-    handle
-        .execute(Command::DeleteRows {
-            sheet: f.sheet,
-            at: 2,
-            count: 1,
-        })
-        .expect("delete the last row");
-    handle
-        .execute(set_formula(&handle, f.c, "D"))
-        .expect("C = D, one row");
-    handle.abort_macro().expect("the abort is not refused");
-    let after = take_snapshot(&handle);
-    assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]));
-    assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]));
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(enter(f.d, 0, &[7.0]))
+            .expect("D has one row");
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 2,
+                count: 1,
+            })
+            .expect("delete the last row");
+        handle
+            .execute(set_formula(&handle, f.c, "D"))
+            .expect("C = D, one row");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
 }
 
 /// #448: redo replays the entries with no pass between them either. `C = D` has
@@ -2378,29 +2382,136 @@ fn aborting_a_macro_undoes_deleted_rows_over_a_shortened_formula_column() {
 /// last one, and the replay aims past the end of the one-row `C`.
 #[test]
 fn redoing_a_closed_macro_replays_deleted_rows_over_a_lengthened_formula_column() {
-    let (_session, handle, f) = start(FormulaRecalc::Targeted);
-    handle
-        .execute(enter(f.d, 0, &[7.0]))
-        .expect("D has one row");
-    handle
-        .execute(set_formula(&handle, f.c, "D"))
-        .expect("C = D, one row");
-    handle.begin_macro(MacroKind::PasteCells).expect("macro");
-    handle
-        .execute(set_formula(&handle, f.c, "A*2"))
-        .expect("C = A*2, three rows");
-    handle
-        .execute(Command::DeleteRows {
-            sheet: f.sheet,
-            at: 2,
-            count: 1,
-        })
-        .expect("delete the last row");
-    handle.end_macro().expect("close");
-    let done = take_snapshot(&handle);
-    handle.undo().expect("the undo is not refused");
-    handle.redo().expect("the redo is not refused");
-    let redone = take_snapshot(&handle);
-    assert_eq!(numbers(&redone, f.a), numbers(&done, f.a));
-    assert_eq!(numbers(&redone, f.c), numbers(&done, f.c));
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(enter(f.d, 0, &[7.0]))
+            .expect("D has one row");
+        handle
+            .execute(set_formula(&handle, f.c, "D"))
+            .expect("C = D, one row");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2, three rows");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 2,
+                count: 1,
+            })
+            .expect("delete the last row");
+        handle.end_macro().expect("close");
+        let done = take_snapshot(&handle);
+        handle.undo().expect("the undo is not refused");
+        handle.redo().expect("the redo is not refused");
+        let redone = take_snapshot(&handle);
+        assert_eq!(numbers(&redone, f.a), numbers(&done, f.a), "{mode:?}");
+        assert_eq!(numbers(&redone, f.c), numbers(&done, f.c), "{mode:?}");
+    }
+}
+
+/// #448: `DeleteCells` has its own arm. `C = A*2` is mixed, the macro deletes
+/// its first cell then retypes it numeric (`C = 1+2`); the abort puts a mixed
+/// block back over a numeric column.
+#[test]
+fn aborting_a_macro_undoes_deleted_cells_over_a_retyped_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![f.c],
+                at: 0,
+                count: 1,
+            })
+            .expect("delete a cell of C");
+        handle
+            .execute(set_formula(&handle, f.c, "1+2"))
+            .expect("C = 1+2");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
+}
+
+/// #448: reverting `InsertRows` deletes rows at a position `C` may no longer
+/// have: `C = D` has no row, the macro inserted two rows before it.
+#[test]
+fn aborting_a_macro_undoes_inserted_rows_over_a_shortened_formula_column() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        handle
+            .execute(Command::InsertRows {
+                sheet: f.sheet,
+                at: 2,
+                count: 2,
+            })
+            .expect("insert two rows");
+        handle
+            .execute(set_formula(&handle, f.c, "D"))
+            .expect("C = D, no row");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
+}
+
+/// #448 without a macro: two plain undos still cross a retyped formula column.
+#[test]
+fn undoing_one_by_one_crosses_a_formula_column_made_mixed_by_a_too_deep_formula() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle
+            .execute(set_formula(&handle, f.c, &sum_of_a(1002)))
+            .expect("too deep: a not-calculated block");
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 0,
+                count: 1,
+            })
+            .expect("delete a row");
+        handle
+            .execute(set_formula(&handle, f.c, "1+2"))
+            .expect("C = 1+2");
+        handle.undo().expect("undo C = 1+2");
+        handle.undo().expect("undo the deleted row");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), vec![None, None, None], "{mode:?}");
+    }
+}
+
+/// #448: an entry the abort reaches before the deleted rows is a structural one;
+/// the delete is still put back over the retyped column.
+#[test]
+fn aborting_a_macro_with_a_structural_entry_after_the_deleted_rows() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle.begin_macro(MacroKind::PasteCells).expect("macro");
+        delete_row_then_retype(&handle, &f, 0);
+        let snapshot = take_snapshot(&handle);
+        handle
+            .execute(unrelated(&snapshot, 0))
+            .expect("a structural command");
+        handle.abort_macro().expect("the abort is not refused");
+        let after = take_snapshot(&handle);
+        assert_eq!(numbers(&after, f.a), some(&[1.0, 2.0, 3.0]), "{mode:?}");
+        assert_eq!(numbers(&after, f.c), some(&[2.0, 4.0, 6.0]), "{mode:?}");
+    }
 }

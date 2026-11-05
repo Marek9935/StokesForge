@@ -1261,3 +1261,77 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
         );
     }
 }
+
+// -- undoing across a recalculation that shortened an output (#448) ------------
+
+/// #448, no macro: X cut to two rows, a row deleted at the end of the others,
+/// a manual rerun that rewrites the output shorter, then the undo of the
+/// deletion aims at row 3 of an output that only has two.
+#[test]
+fn undoing_a_deletion_over_an_output_the_rerun_shortened() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, false);
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![m.x],
+                at: 0,
+                count: 2,
+            })
+            .unwrap();
+        handle
+            .execute(Command::DeleteRows {
+                sheet: m.sheet,
+                at: 3,
+                count: 1,
+            })
+            .unwrap();
+        handle.recalculate(&[id]).unwrap();
+        handle
+            .undo()
+            .unwrap_or_else(|e| panic!("{mode:?}: the undo is not refused: {e}"));
+        let after = handle.snapshot().unwrap();
+        let y = after.tree.node(m.y).unwrap().as_column().unwrap();
+        assert_eq!(
+            y.numeric_view().unwrap().to_vec(),
+            vec![10.0, 20.0, 30.0, 40.0],
+            "{mode:?}: Y restored exactly once"
+        );
+    }
+}
+
+/// #448, in a macro: the last row is deleted everywhere, then X loses a cell,
+/// so the pass rewrites the output with two rows. The abort puts the deleted
+/// row back at row 3, past the end of that output.
+#[test]
+fn aborting_a_macro_over_an_automatic_output_the_pass_shortened() {
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        handle
+            .begin_macro(stokesforge_commands::MacroKind::PasteCells)
+            .unwrap();
+        handle
+            .execute(Command::DeleteRows {
+                sheet: m.sheet,
+                at: 3,
+                count: 1,
+            })
+            .unwrap();
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![m.x],
+                at: 0,
+                count: 1,
+            })
+            .unwrap();
+        handle
+            .abort_macro()
+            .unwrap_or_else(|e| panic!("{mode:?}: the abort is not refused: {e}"));
+        let after = handle.snapshot().unwrap();
+        assert!((slope(&after, id) - 10.0).abs() < 1e-9, "{mode:?}");
+        let fit = fit_column(&after, id);
+        assert_eq!(fit.len(), 4, "{mode:?}");
+        assert!((fit[3] - 40.0).abs() < 1e-9, "{mode:?}");
+    }
+}
