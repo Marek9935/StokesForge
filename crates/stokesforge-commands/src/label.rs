@@ -69,7 +69,7 @@ pub enum MacroKind {
     /// Apply the properties window of a graph.
     GraphProperties,
     /// Refresh columns from their source file.
-    RefreshFromFile,
+    RefreshFromSource,
     /// Import instrument files.
     Import,
     /// Create a workbook and fill it (plot, import into a new workbook).
@@ -108,7 +108,7 @@ impl MacroKind {
         MacroKind::RenameObjects,
         MacroKind::ClearSelection,
         MacroKind::GraphProperties,
-        MacroKind::RefreshFromFile,
+        MacroKind::RefreshFromSource,
         MacroKind::Import,
         MacroKind::AddWorkbook,
         MacroKind::AddWorksheet,
@@ -386,7 +386,7 @@ impl fmt::Display for MacroKind {
             MacroKind::RenameObjects => "Rename Objects",
             MacroKind::ClearSelection => "Clear Selection",
             MacroKind::GraphProperties => "Edit Graph Properties",
-            MacroKind::RefreshFromFile => "Refresh from File",
+            MacroKind::RefreshFromSource => "Refresh from Source",
             MacroKind::Import => "Import",
             MacroKind::AddWorkbook => "Add Workbook",
             MacroKind::AddWorksheet => "Add Sheet",
