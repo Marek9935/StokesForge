@@ -17,6 +17,10 @@
 //! ([`StokesForgeApp::republish_detached_tabs`]), so one action waits for one
 //! throttle, not two.
 //!
+//! The dialogs of the application are painted by the detached window the user
+//! works in, at the end of its closure ([`super::dialog_host::host_pass`], #457),
+//! not by that covered root: see `dialog_host.rs`.
+//!
 //! # Taken from the top doc of `app.rs`
 //!
 //! # Detaching the Project Manager
@@ -593,6 +597,7 @@ impl StokesForgeApp {
                 }
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
+            super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::ObjectManager);
         });
         if changed {
             ctx.request_repaint_of(id);
@@ -685,6 +690,9 @@ impl StokesForgeApp {
                 requests.actions.append(&mut actions);
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
+            // The dispatch of a hosted dialog may read the console's state.
+            drop(model);
+            super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::Console);
         });
         if changed {
             ctx.request_repaint_of(id);
@@ -856,6 +864,10 @@ impl StokesForgeApp {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                 }
+                super::dialog_host::host_pass(
+                    ui.ctx(),
+                    super::dialog_host::DialogHost::ProjectManager,
+                );
             },
         );
         if changed {
@@ -1176,9 +1188,18 @@ impl DetachedTab {
 }
 
 impl DetachedTabViewport {
+    /// The window's frame, then the dialogs when this window hosts them (#457).
+    /// The hosted dialogs dispatch their actions at once and read the locks
+    /// of every detached window, so none is held when they run.
+    fn show(&self, ui: &mut egui::Ui) {
+        self.show_locked(ui);
+        super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::Tab(self.tab));
+        super::page_layout::note_field_focus(ui.ctx());
+    }
+
     /// The two locks stay held during the whole frame, as before the
     /// split: no root drain comes in between its phases.
-    fn show(&self, ui: &mut egui::Ui) {
+    fn show_locked(&self, ui: &mut egui::Ui) {
         let root_context = &self.root_context;
         begin_file_drop(ui.ctx());
         let mut model = self
@@ -1240,7 +1261,6 @@ impl DetachedTabViewport {
             requests.close = true;
             root_context.request_repaint_of(egui::ViewportId::ROOT);
         }
-        super::page_layout::note_field_focus(ui.ctx());
     }
 
     fn paint_contents(

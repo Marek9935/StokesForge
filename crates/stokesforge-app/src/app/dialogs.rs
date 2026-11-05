@@ -98,6 +98,10 @@ const FOCUS_WALK_STEPS: u8 = 32;
 struct DialogGeometry {
     pos: egui::Pos2,
     size: egui::Vec2,
+    /// The screen was smaller than the size the dialog wanted (a small hosting
+    /// window, #457): the size is the screen's, not the user's choice, so
+    /// closing the dialog must not remember it. Cleared by a resize by hand.
+    clamped: bool,
 }
 
 /// The three **size classes** of a dialog (S-F11): the default size is not
@@ -725,9 +729,18 @@ pub(super) fn set_dialog_size(ctx: &egui::Context, id: egui::Id, size: egui::Vec
             DialogGeometry {
                 pos: screen.center() - size / 2.0,
                 size,
+                clamped: false,
             },
         );
     });
+}
+
+/// The size remembered for the dialog `id` (a test seam, #457).
+#[cfg(test)]
+pub(super) fn remembered_size(ctx: &egui::Context, id: egui::Id) -> Option<egui::Vec2> {
+    ctx.data(|data| data.get_temp::<RememberedGeometries>(remembered_id()))
+        .and_then(|remembered| remembered.0.get(&dialog_kind(id)).copied())
+        .map(|saved| egui::vec2(saved.width, saved.height))
 }
 
 /// The remembered geometries, copied from the preferences into egui's memory.
@@ -812,9 +825,49 @@ fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
 
 /// Records that a modal window is painted in this viewport, in this frame.
 fn mark_modal_shown(ctx: &egui::Context) {
+    stamp_modal_mark(ctx);
+    let painted = modal_painted_id(ctx);
+    ctx.data_mut(|data| data.insert_temp(painted, true));
+}
+
+/// Only the "a modal is open here" mark, without saying a dialog was painted:
+/// the veil of the root over a dialog hosted elsewhere (#457).
+fn stamp_modal_mark(ctx: &egui::Context) {
     // Ids read before the lock: `viewport_id` locks the context too.
     let (frame, mark) = (ctx.cumulative_frame_nr(), modal_mark_id(ctx));
     ctx.data_mut(|data| data.insert_temp(mark, frame));
+}
+
+fn modal_painted_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_modal_painted", ctx.viewport_id()))
+}
+
+/// Whether a modal window was painted in this viewport since the last call,
+/// and clears the note: a caller brackets the painting of its dialogs with two
+/// calls to learn whether it painted one in this very pass (#457), with no
+/// frame arithmetic.
+pub(super) fn take_modal_painted(ctx: &egui::Context) -> bool {
+    let painted = modal_painted_id(ctx);
+    ctx.data_mut(|data| data.remove_temp::<bool>(painted))
+        .unwrap_or(false)
+}
+
+/// The blocking layer of the root over a dialog hosted in another window
+/// (#457): invisible like the backdrop of a modal, it takes every click and
+/// marks the viewport modal so the workspace keys stand aside. Returns whether
+/// the pointer was pressed on it: the dialog then moves to this window, the
+/// way out when the window that hosts it is covered and cannot be reached.
+pub(super) fn paint_veil(ctx: &egui::Context) -> bool {
+    stamp_modal_mark(ctx);
+    let screen = ctx.input(|input| input.content_rect());
+    let veil = egui::Area::new(egui::Id::new("stokesforge_hosted_dialog_veil"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
+        .sense(egui::Sense::click_and_drag())
+        .show(ctx, |ui| {
+            ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+        });
+    veil.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed())
 }
 
 /// Whether a modal window is open in this viewport (#406): painted in this frame
@@ -858,20 +911,24 @@ fn modal_frame(
             Some(saved) => DialogGeometry {
                 pos: egui::pos2(saved.x, saved.y),
                 size: egui::vec2(saved.width, saved.height),
+                clamped: false,
             },
             None => {
-                let size = nature.size().min(screen.size());
+                let size = nature.size();
                 DialogGeometry {
                     pos: screen.center() - size / 2.0,
                     size,
+                    clamped: false,
                 }
             }
         }
     });
-    geometry.size = geometry
-        .size
-        .max(MIN_CONTENT_WINDOW_SIZE)
-        .min(screen.size());
+    // A screen smaller than the wanted size shrinks the dialog; that size is
+    // the screen's, not the user's, and is never remembered (#457).
+    let wanted = geometry.size.max(MIN_CONTENT_WINDOW_SIZE);
+    geometry.clamped |= wanted.x > screen.width() || wanted.y > screen.height();
+    geometry.size = wanted.min(screen.size());
+    let size_before = geometry.size;
     geometry.pos = geometry
         .pos
         .clamp(screen.min, (screen.max - geometry.size).max(screen.min));
@@ -1014,6 +1071,7 @@ fn modal_frame(
     geometry = DialogGeometry {
         pos: position,
         size,
+        clamped: geometry.clamped && size == size_before,
     };
     let editing_now = ctx
         .memory(|memory| memory.focused())
@@ -1077,6 +1135,9 @@ fn modal_frame(
             data.remove::<f64>(flash_id);
             data.remove::<FocusWalk>(walk_id);
             data.remove::<bool>(text_focus_id);
+            if geometry.clamped {
+                return;
+            }
             let remembered = data.get_temp_mut_or_default::<RememberedGeometries>(remembered_id());
             remembered.0.insert(kind.clone(), saved);
             data.get_temp_mut_or_default::<ClosedGeometries>(closed_id())
