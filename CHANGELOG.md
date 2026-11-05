@@ -265,7 +265,10 @@ without a message, see `docs/persistence.md`).
   small to be stored (`1e-400`) is refused at entry with the same sentences as
   formulas (**Create** stays greyed; `pyst.analysis.fit` raises and
   `readiness` says `bad_expression`), while a stored model holding one still
-  loads and recalculates as before (#438).
+  loads and recalculates as before (#438). The Custom model field is framed in red
+  with the reason for every model error (the text stays, an empty field is not
+  framed); a stored calculation holding such a number must be corrected before
+  Edit Calculation or a range-handle drag works.
 - Peak Decomposition window (#384): the preview no longer overflows the window
   (the last tick read "70" instead of "700") and "Keep in Results" no longer
   wraps; the settings column is wider and the preview takes the width that

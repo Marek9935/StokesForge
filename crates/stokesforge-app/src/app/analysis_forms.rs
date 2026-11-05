@@ -19,6 +19,7 @@ use stokesforge_core::{NodeId, Tree};
 use super::analysis_dialog::{exact_result_label, format_value};
 use super::form::{choice, choice_by, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
+use crate::field_state::{self, FieldIssue};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::{number_field, NumberResponse};
 use crate::theme;
@@ -626,6 +627,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
         .map(|s| stokesforge_app_state::analysis::series_points(tree, s))
         .unwrap_or_default();
     let extent = x_extent_of(&shown_x);
+    let model_issue = form.model_field_issue();
     let f = &mut form.setup.fit;
     let models: Vec<ChoiceOption<Model>> = Preset::fit_models()
         .into_iter()
@@ -664,12 +666,15 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
             rows.note(tr!("analysis-fit-custom-hint"));
             let changed = rows.field(|ui| {
                 let width = FieldWidth::Full.points(ui);
-                ui.add(
+                let response = ui.add(
                     egui::TextEdit::singleline(formula)
                         .desired_width(width)
                         .hint_text(tr!("analysis-fit-custom-example")),
-                )
-                .changed()
+                );
+                if let Some(message) = &model_issue {
+                    field_state::show_issue(ui, &response, &FieldIssue::refused(message.clone()));
+                }
+                response.changed()
             });
             if changed {
                 f.reset_params();

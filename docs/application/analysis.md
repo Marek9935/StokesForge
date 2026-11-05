@@ -92,6 +92,12 @@ The mathematical processing interface is split as follows:
   `NoParameter`, which feeds the form (`Issue::BadModel`, sentence of
   `error-number-too-large/small`) and `pyst.analysis.readiness`. The rule is
   `expr::number_out_of_range`, shared with `core::number_format::check_range`.
+  The Custom model field is framed in red, with the reason in its bubble, for
+  every model error (`AnalysisForm::model_field_issue`, painted by
+  `show_issue` in `analysis_forms.rs`; an empty field has no frame). A stored
+  calculation holding such a number still loads and recalculates, but Edit
+  Calculation (Update greyed) and a range-handle drag (`move_calculation_handle`:
+  status-bar sentence, no history step) are refused until the number is fixed.
 - Fit window (#204): three distinct exponentials (`Exponential`,
   `Exponential with Plateau`, `Two Exponentials`, same names as `pyst`:
   `exponential`, `exponential_offset`, `exponential2`); the model formula
