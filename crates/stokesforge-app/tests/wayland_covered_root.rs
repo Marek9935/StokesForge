@@ -41,11 +41,17 @@ impl Compositor {
         let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
         let socket = format!("sf-457-test-{}", std::process::id());
         let mut cmd = Command::new("dbus-run-session");
-        cmd.args(["--", "mutter", "--headless", "--no-x11", "--wayland-display"])
-            .arg(&socket)
-            .args(["--virtual-monitor", "1400x900"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        cmd.args([
+            "--",
+            "mutter",
+            "--headless",
+            "--no-x11",
+            "--wayland-display",
+        ])
+        .arg(&socket)
+        .args(["--virtual-monitor", "1400x900"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
         // Own process group: one kill takes the bus and the compositor.
         std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
         let leader = cmd.spawn().ok()?;
@@ -74,7 +80,13 @@ impl Drop for Compositor {
 fn run_probe(compositor: &Compositor, idle: bool) -> (bool, String) {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let built = Command::new(cargo)
-        .args(["build", "-p", "stokesforge-app", "--example", "wayland_covered_root"])
+        .args([
+            "build",
+            "-p",
+            "stokesforge-app",
+            "--example",
+            "wayland_covered_root",
+        ])
         .status()
         .expect("cargo runs");
     assert!(built.success(), "the probe example builds");

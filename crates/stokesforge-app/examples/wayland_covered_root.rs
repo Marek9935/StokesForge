@@ -91,9 +91,11 @@ fn child_ui(ui: &mut egui::Ui, _class: egui::ViewportClass) {
         ctx.request_repaint_after(Duration::from_millis(50));
         return;
     }
-    let baseline = *clock
-        .at_window_start
-        .get_or_insert((ROOT_UI.load(Relaxed), DRAINED.load(Relaxed), cpu_ticks()));
+    let baseline = *clock.at_window_start.get_or_insert((
+        ROOT_UI.load(Relaxed),
+        DRAINED.load(Relaxed),
+        cpu_ticks(),
+    ));
     if elapsed < SETTLE + WINDOW {
         if idle {
             ctx.request_repaint_after(WINDOW);
