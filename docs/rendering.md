@@ -1116,7 +1116,7 @@ The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometr
 (`app/page_layout.rs`). Three rules to keep when touching the shell:
 
 - **A view, not the model.** Entering or leaving sends nothing. The only strip
-  control that touches the model is the Grid mode toggle (`SetLayerPlacement`), and a
+  control that touches the model is the Grid mode choice (`SetLayerPlacement`), and a
   pending nudge burst is committed first (`flush_layout_edit`, which turns the
   `LayoutEdited` event into its action *before* the toggle's), because a placement
   change drops the burst.

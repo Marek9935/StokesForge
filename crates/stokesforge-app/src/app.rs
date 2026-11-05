@@ -181,6 +181,7 @@ mod recovery;
 mod reorder_list;
 mod results_pane;
 mod script_console;
+mod segmented;
 pub(crate) mod shortcuts;
 mod stale_export;
 mod status_history;

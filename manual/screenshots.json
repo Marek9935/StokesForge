@@ -77,7 +77,7 @@
   {
     "image": "graphs-page-layout-mode.png",
     "page": "guide/graphs.md",
-    "shows": "Graph1 with two layers side by side in the Page Layout Mode on a regular grid: rulers along the top and left edges, the grid, the selected graph with its handles, the four corners of the figure, and the settings strip under the figure (Figure size, Graph 1 with X Y W H, Align, Same Size, Distribute, Snap, Coarse, Grid mode: Regular, When axes are added)."
+    "shows": "Graph1 with two layers side by side in the Page Layout Mode on a regular grid: rulers along the top and left edges, the grid, the selected graph with its handles, the four corners of the figure, and the settings strip under the figure (Figure size, Graph 1 with X Y W H, Align, Same Size, Distribute, Snap with Coarse | Fine, Grid mode with Regular | Free, When axes are added with Grows with the axes | Fixed)."
   },
   {
     "image": "analysis-integration.png",

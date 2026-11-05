@@ -161,7 +161,7 @@ a settings strip under it (`app/page_layout.rs`). The strip's height is reserved
 what it used at the last frame (`controls_height`, whole points, at least
 `LAYOUT_CONTROLS_HEIGHT`), so the figure's rectangle never moves from frame to frame
 and the cache stays valid; its rows wrap and `keep_together` keeps a label with its
-field or button. The mode adds no window and no dialog.
+field or button; its two-part choices (Coarse | Fine, Regular | Free, Grows with the axes | Fixed) are drawn by `app/segmented.rs`. The mode adds no window and no dialog.
 It **maximises** the window while it lasts (`app/layout_window.rs`: `layout_entries` keeps
 the tab that was maximised before; `reconcile_layout_modes` leaves the mode of a graph
 whose window is no longer the maximised one, which covers Restore, the Window menu,

@@ -24,6 +24,7 @@ use stokesforge_render::{scaled_to_page, GraphBox, MIN_PAGE_EXTENT};
 use stokesforge_render_egui::{GraphEvent, GraphView};
 
 use super::grid::keyboard_focus_outside_grid;
+use super::segmented::{segmented_choice, segmented_width, Segment};
 use super::StokesForgeApp;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::number_field;
@@ -1009,18 +1010,16 @@ fn arrange_row(
     );
     ui.separator();
 
-    // Snap on or off, then one button that toggles the step. View state only.
+    // Snap on or off, then the grid step as a two-part choice. View state only.
     let mut snap = snap_state(ctx, graph);
     let before = snap;
-    let (snap_label, step_label) = (
+    let (snap_label, coarse, fine) = (
         tr!("layout-mode-snap"),
-        if snap.fine {
-            tr!("layout-mode-step-fine")
-        } else {
-            tr!("layout-mode-step-coarse")
-        },
+        tr!("layout-mode-step-coarse"),
+        tr!("layout-mode-step-fine"),
     );
-    keep_together(ui, &[&snap_label, &step_label], 0, 2.0 * button_padding(ui));
+    let steps_width = segmented_width(ui, &[&coarse, &fine]);
+    keep_together(ui, &[&snap_label], 0, button_padding(ui) + steps_width);
     if ui
         .add(egui::Button::new(snap_label).selected(snap.on))
         .on_hover_text(tr!("layout-mode-snap", "hint"))
@@ -1028,58 +1027,104 @@ fn arrange_row(
     {
         snap.on = !snap.on;
     }
-    let step_hint = if snap.fine {
-        tr!("layout-mode-step-fine", "hint")
-    } else {
-        tr!("layout-mode-step-coarse", "hint")
-    };
-    if ui.button(step_label).on_hover_text(step_hint).clicked() {
-        snap.fine = !snap.fine;
+    let step_hints = (
+        tr!("layout-mode-step-coarse", "hint"),
+        tr!("layout-mode-step-fine", "hint"),
+    );
+    let step_reason = tr!("layout-mode-step", "disabled");
+    if let Some(index) = segmented_choice(
+        ui,
+        "snap_step",
+        &[
+            Segment {
+                label: &coarse,
+                hint: &step_hints.0,
+            },
+            Segment {
+                label: &fine,
+                hint: &step_hints.1,
+            },
+        ],
+        usize::from(snap.fine),
+        (!snap.on).then_some(step_reason.as_str()),
+    ) {
+        snap.fine = index == 1;
     }
     if snap != before {
         set_snap_state(ctx, graph, snap);
     }
     ui.separator();
 
-    // The placement of the layers, saved and undoable: its label is the state.
-    let (placement_label, placement_hint) = if free {
-        (
-            tr!("layout-mode-placement-free"),
-            tr!("layout-mode-placement-free", "hint"),
-        )
-    } else {
-        (
-            tr!("layout-mode-placement-regular"),
-            tr!("layout-mode-placement-regular", "hint"),
-        )
-    };
-    keep_together(ui, &[&placement_label], 0, button_padding(ui));
-    if ui
-        .button(placement_label)
-        .on_hover_text(placement_hint)
-        .clicked()
-    {
-        model.push(Action::SetLayerPlacement { graph, free: !free });
+    // The placement of the layers, saved and undoable: both options are shown.
+    let (placement_label, regular, free_label) = (
+        tr!("layout-mode-placement"),
+        tr!("layout-mode-placement-regular"),
+        tr!("layout-mode-placement-free"),
+    );
+    keep_together(
+        ui,
+        &[&placement_label],
+        0,
+        segmented_width(ui, &[&regular, &free_label]),
+    );
+    ui.label(placement_label);
+    let hints = (
+        tr!("layout-mode-placement-regular", "hint"),
+        tr!("layout-mode-placement-free", "hint"),
+    );
+    if let Some(index) = segmented_choice(
+        ui,
+        "placement",
+        &[
+            Segment {
+                label: &regular,
+                hint: &hints.0,
+            },
+            Segment {
+                label: &free_label,
+                hint: &hints.1,
+            },
+        ],
+        usize::from(free),
+        None,
+    ) {
+        model.push(Action::SetLayerPlacement {
+            graph,
+            free: index == 1,
+        });
     }
     ui.separator();
 
     // What an added axis or title does to the image.
     let axes_label = tr!("plot-figure-size");
-    let axes_state = if spec.fixed_figure {
-        tr!("layout-mode-axes-fixed")
-    } else {
-        tr!("layout-mode-axes-grows")
-    };
-    keep_together(ui, &[&axes_label, &axes_state], 0, button_padding(ui));
+    let (grows, fixed) = (tr!("plot-figure-size-grows"), tr!("plot-figure-size-fixed"));
+    keep_together(
+        ui,
+        &[&axes_label],
+        0,
+        segmented_width(ui, &[&grows, &fixed]),
+    );
     ui.label(axes_label);
-    if ui
-        .button(axes_state)
-        .on_hover_text(tr!("plot-figure-size", "hint"))
-        .clicked()
-    {
+    let axes_hint = tr!("plot-figure-size", "hint");
+    if let Some(index) = segmented_choice(
+        ui,
+        "axes",
+        &[
+            Segment {
+                label: &grows,
+                hint: &axes_hint,
+            },
+            Segment {
+                label: &fixed,
+                hint: &axes_hint,
+            },
+        ],
+        usize::from(spec.fixed_figure),
+        None,
+    ) {
         model.push(Action::SetFigureFixed {
             graph,
-            fixed: !spec.fixed_figure,
+            fixed: index == 1,
         });
     }
 }
@@ -1262,17 +1307,18 @@ mod tests {
         }
     }
 
-    /// The Grid mode button is the one thing of the strip that touches the
-    /// model: one `SetLayerPlacement`, one undo step, its label follows the
-    /// placement, Undo returns. Witness: a label that does not change.
+    /// The Grid mode choice is the one thing of the strip that touches the
+    /// model: choosing the other segment sends one `SetLayerPlacement`, one
+    /// undo step; both segments stay painted, Undo returns. Witness: a segment
+    /// that shows only the current state.
     #[test]
-    fn the_grid_mode_button_is_one_undo_step_and_its_label_follows() {
+    fn the_grid_mode_choice_is_one_undo_step_and_both_options_stay_visible() {
         let mut bench = Bench::new(2, false);
         let regular = tr!("layout-mode-placement-regular");
         let free = tr!("layout-mode-placement-free");
-        assert!(bench.is_painted(&regular) && !bench.is_painted(&free));
+        assert!(bench.is_painted(&regular) && bench.is_painted(&free));
         let revision = bench.state.revision();
-        let actions = bench.click_text(&regular);
+        let actions = bench.click_text(&free);
         assert_eq!(
             actions,
             vec![Action::SetLayerPlacement {
@@ -1286,16 +1332,16 @@ mod tests {
             bench.spec().layer_placement,
             stokesforge_plot::LayerPlacement::Free
         );
-        assert!(bench.is_painted(&free) && !bench.is_painted(&regular));
+        assert!(bench.is_painted(&free) && bench.is_painted(&regular));
         bench.state.dispatch(Action::Undo);
         assert_eq!(
             bench.spec().layer_placement,
             stokesforge_plot::LayerPlacement::Grid
         );
-        assert!(bench.is_painted(&regular) && !bench.is_painted(&free));
+        assert!(bench.is_painted(&regular) && bench.is_painted(&free));
         // And back to Regular from Free with one more click.
         bench.state.dispatch(Action::Redo);
-        let actions = bench.click_text(&tr!("layout-mode-placement-free"));
+        let actions = bench.click_text(&regular);
         assert_eq!(
             actions,
             vec![Action::SetLayerPlacement {
@@ -1318,7 +1364,7 @@ mod tests {
         bench.frame(Vec::new());
         let now = bench.time;
         bench.view.nudge((1, 0), now);
-        let actions = bench.click_text(&tr!("layout-mode-placement-free"));
+        let actions = bench.click_text(&tr!("layout-mode-placement-regular"));
         let kinds: Vec<&str> = actions
             .iter()
             .map(|action| match action {
@@ -1340,12 +1386,11 @@ mod tests {
         let spec = bench.spec();
         let revision = bench.state.revision();
         assert!(snap_state(&bench.ctx, bench.graph).on);
-        assert!(bench.is_painted(&tr!("layout-mode-step-coarse")));
-        let sent = bench.click_text(&tr!("layout-mode-step-coarse"));
+        assert!(!snap_state(&bench.ctx, bench.graph).fine);
+        let sent = bench.click_text(&tr!("layout-mode-step-fine"));
         assert!(sent.is_empty(), "{sent:?}");
         assert!(snap_state(&bench.ctx, bench.graph).fine);
-        assert!(bench.is_painted(&tr!("layout-mode-step-fine")));
-        assert!(!bench.is_painted(&tr!("layout-mode-step-coarse")));
+        assert!(bench.is_painted(&tr!("layout-mode-step-coarse")));
         let sent = bench.click_text(&tr!("layout-mode-snap"));
         assert!(sent.is_empty(), "{sent:?}");
         assert!(!snap_state(&bench.ctx, bench.graph).on);
@@ -1367,13 +1412,91 @@ mod tests {
         bench.session.shutdown().unwrap();
     }
 
+    /// The two-part choices of the strip (Coarse | Fine, Regular | Free,
+    /// Grows with the axes | Fixed): every option is painted at once, the label
+    /// of each never changes, only the active one is in the selection colour,
+    /// a click on the active one sends nothing and a click on the other sends
+    /// exactly one action. Witnesses: a button that renames itself (one option
+    /// painted) fails the first two; a click on the active segment that sends
+    /// again fails the last.
+    #[test]
+    fn a_two_part_choice_shows_both_options_and_acts_only_on_the_other() {
+        fn selected_texts(output: &egui::FullOutput, fill: egui::Color32) -> Vec<String> {
+            fn walk(shape: &egui::Shape, fill: egui::Color32, out: &mut Vec<egui::Rect>) {
+                match shape {
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, fill, out)),
+                    egui::Shape::Rect(rect) if rect.fill == fill => out.push(rect.rect),
+                    _ => {}
+                }
+            }
+            let mut rects = Vec::new();
+            output
+                .shapes
+                .iter()
+                .for_each(|clipped| walk(&clipped.shape, fill, &mut rects));
+            super::super::test_support::texts(&output.shapes)
+                .into_iter()
+                .filter(|t| rects.iter().any(|r| r.contains(t.center)))
+                .map(|t| t.text)
+                .collect()
+        }
+        let mut bench = Bench::new(2, false);
+        let fill = bench.ctx.global_style().visuals.selection.bg_fill;
+        let pairs = [
+            (tr!("layout-mode-step-coarse"), tr!("layout-mode-step-fine")),
+            (
+                tr!("layout-mode-placement-regular"),
+                tr!("layout-mode-placement-free"),
+            ),
+            (tr!("plot-figure-size-grows"), tr!("plot-figure-size-fixed")),
+        ];
+        let (output, _) = bench.frame(Vec::new());
+        for (active, other) in &pairs {
+            assert!(painted(&output, active) && painted(&output, other));
+        }
+        let selected = selected_texts(&output, fill);
+        for (active, other) in &pairs {
+            assert!(
+                selected.contains(active),
+                "{active:?} not selected: {selected:?}"
+            );
+            assert!(
+                !selected.contains(other),
+                "{other:?} selected: {selected:?}"
+            );
+        }
+        // The active segment: nothing sent. The other one: the step is view
+        // state (no action), the two model choices send exactly one.
+        for (index, (active, other)) in pairs.iter().enumerate() {
+            let sent = bench.click_text(active);
+            assert!(sent.is_empty(), "{active:?} resent {sent:?}");
+            let sent = bench.click_text(other);
+            assert_eq!(
+                sent.len(),
+                usize::from(index > 0),
+                "{other:?} sent {sent:?}"
+            );
+        }
+        // Labels never change after the view state moved.
+        let (output, _) = bench.frame(Vec::new());
+        for (active, other) in &pairs {
+            assert!(painted(&output, active) && painted(&output, other));
+        }
+        let selected = selected_texts(&output, fill);
+        assert!(
+            selected.contains(&pairs[0].1),
+            "Fine selected: {selected:?}"
+        );
+        bench.session.shutdown().unwrap();
+    }
+
     /// "Grows with the axes" / "Fixed" is the setter of Graph Properties: one
     /// step, the label follows. Witness: the label of the other state.
     #[test]
     fn the_axes_button_toggles_fixed_in_one_step() {
         let mut bench = Bench::new(1, false);
         assert!(!bench.spec().fixed_figure);
-        let actions = bench.click_text(&tr!("layout-mode-axes-grows"));
+        let actions = bench.click_text(&tr!("plot-figure-size-fixed"));
         assert_eq!(
             actions,
             vec![Action::SetFigureFixed {
@@ -1383,7 +1506,7 @@ mod tests {
         );
         bench.apply(actions);
         assert!(bench.spec().fixed_figure);
-        assert!(bench.is_painted(&tr!("layout-mode-axes-fixed")));
+        assert!(bench.is_painted(&tr!("plot-figure-size-grows")));
         bench.state.dispatch(Action::Undo);
         assert!(!bench.spec().fixed_figure, "one step");
         bench.session.shutdown().unwrap();
@@ -1560,7 +1683,11 @@ mod tests {
             let texts = super::super::test_support::texts(&output.shapes);
             for (first, second) in [
                 (tr!("layout-mode-snap"), tr!("layout-mode-step-coarse")),
-                (tr!("plot-figure-size"), tr!("layout-mode-axes-grows")),
+                (
+                    tr!("layout-mode-placement"),
+                    tr!("layout-mode-placement-regular"),
+                ),
+                (tr!("plot-figure-size"), tr!("plot-figure-size-grows")),
                 (
                     tr!("plot-size-total", unit = "cm"),
                     tr!("plot-size-total-by"),
