@@ -158,7 +158,10 @@ the outcome (computed, unreadable, caught in a cycle) — and compares it with t
 current state. An unrelated
 command (a curve color, a folder) therefore rewrites no column; modifying A
 rewrites only what reads A, then, through the version of what has just been
-rewritten, what reads that in turn.
+rewritten, what reads that in turn. A column that is recomputed to the **same**
+type and values (bit for bit) is not written at all, so it keeps its version
+(#439): the version says "same content", the count of formula columns evaluated
+(`Snapshot::formula_evaluations`) says "recomputed".
 
 **Across sheets and workbooks (#403).** A formula may read a column of another
 sheet or workbook (`max(Sheet3!B)`, `at([Book2]Sheet5!B, 340)`): the pass
@@ -190,7 +193,8 @@ the growth of its source is undone.
 | | |
 |---|---|
 | where the memo lives | in the actor, next to the `Project` (`Recalculator`): neither history nor `.stf` |
-| what empties it | `Load` (the values of a file are not taken on trust, except that analysis calculations and up-to-date transposed links are trusted on the first pass after it, #316 and #430) and `NewProject` |
+| what empties it | `Load` (the values of a file are not taken on trust, except that analysis calculations are trusted on the first pass after it, #316; a transposed link over a formula column stays up to date because the pass keeps the version of a column recomputed to the same content, #439) and `NewProject` |
+| the economy witness | `Snapshot::formula_evaluations`: monotonic count of the formula columns the passes computed (one per column the pass decided to compute, a `NaN` block of a cycle or unreadable formula included; none for a clean one). The versions cannot play that part since #439 |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
 | what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` and `b23` (two twin sessions, same trees at each step; `b23` draws the structural gestures) |

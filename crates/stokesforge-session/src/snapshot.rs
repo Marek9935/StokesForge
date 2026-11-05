@@ -116,4 +116,14 @@ pub struct Snapshot {
     pub geometry_revision: u64,
     /// The formulas bound to a column or sheet that appeared (#433).
     pub bound: Arc<BoundReport>,
+    /// Formula columns the recalculation passes have computed since the
+    /// session started, monotonic (#439). One per column a pass decided to
+    /// compute (a `NaN` block written for a cycle or an unreadable formula
+    /// counts), none for a column the targeted mode found clean. Column
+    /// versions no longer show whether a column was recomputed (a pass that
+    /// finds the same content keeps the version), so this is the witness of
+    /// the economy of the targeted mode: an unrelated command leaves it
+    /// unchanged. Read-only information, like `bound`: never in the history
+    /// nor the `.stf`.
+    pub formula_evaluations: u64,
 }

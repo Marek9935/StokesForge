@@ -444,6 +444,7 @@ pub(crate) fn run(
                     geometry_revision,
                 );
                 snapshot.bound = Arc::new(bound.clone());
+                snapshot.formula_evaluations = formulas.evaluations();
                 let _ = reply.send(snapshot);
             }
             Request::SetWindowGeometry {
@@ -777,6 +778,8 @@ fn build_snapshot(
         geometry_revision,
         // Filled by the caller that holds the report (#433).
         bound: Arc::default(),
+        // Filled by the caller that holds the recalculator (#439).
+        formula_evaluations: 0,
     }
 }
 

@@ -1057,7 +1057,10 @@ impl Column {
     /// write goes through `Project`, which replaces this counter with a
     /// fresh number from its single counter (`Project::next_column_version`), and a
     /// column inserted with its number moves that counter beyond it
-    /// (`Project::insert_node`).
+    /// (`Project::insert_node`). A write by a command draws a fresh number even
+    /// when it changes nothing; only the recalculation pass of formula columns
+    /// keeps the number when it recomputes the same type and values (#439), so
+    /// a kept number always means identical content.
     ///
     /// # It is persisted
     ///

@@ -287,7 +287,14 @@ rollback, `.stf`). It is not a node.
   x', column added, deleted or moved) and *modified* (the content of a column
   created by the link no longer has its fingerprint: only a value edit counts;
   renaming, typing without changing the numbers, adding its own columns cut
-  nothing). Neither enters the targeted recalculation.
+  nothing). Neither enters the targeted recalculation. *Stale* reads column
+  versions, so it follows how versions are drawn (#439): a user's write draws a
+  fresh version even when it changes nothing (pasting the same number, or a
+  change then Ctrl+Z, makes the sheet stale; Recalculate clears it; typing the
+  number a cell already holds sends no command at all, `commit_cell`), while the
+  recalculation pass keeps the version of a formula column it recomputes to the
+  same type and values (a link over such a column is not stale after an
+  unrelated command, a reload or a formula that gives the same numbers).
 - Only the columns of role **Y** are transposed (approved on 2026-10-22): an X
   column, an error bar or a label is skipped, with no x' required; a sheet
   without a Y column is refused. Changing the role of a column makes the
