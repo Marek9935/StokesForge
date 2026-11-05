@@ -2,7 +2,7 @@
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ahash::HashSet;
 use tracing::{info, warn};
@@ -141,6 +141,12 @@ pub struct WindowState {
     /// The state of the frame callback.
     frame_callback_state: FrameCallbackState,
 
+    /// When the outstanding frame callback was asked for (#457).
+    frame_callback_requested_at: Option<Instant>,
+
+    /// Reported occluded because the callback did not come (#457).
+    starved: bool,
+
     viewport: Option<WpViewport>,
     fractional_scale: Option<WpFractionalScaleV1>,
     blur: Option<OrgKdeKwinBlur>,
@@ -196,6 +202,8 @@ impl WindowState {
             fractional_scale,
             frame: None,
             frame_callback_state: FrameCallbackState::None,
+            frame_callback_requested_at: None,
+            starved: false,
             seat_focus: Default::default(),
             has_pending_move: None,
             ime_allowed: false,
@@ -242,6 +250,24 @@ impl WindowState {
     /// The frame callback was received, but not yet sent to the user.
     pub fn frame_callback_received(&mut self) {
         self.frame_callback_state = FrameCallbackState::Received;
+        self.frame_callback_requested_at = None;
+    }
+
+    /// When the outstanding frame callback was asked for, if one is (#457).
+    pub fn frame_callback_requested_at(&self) -> Option<Instant> {
+        match self.frame_callback_state {
+            FrameCallbackState::Requested => self.frame_callback_requested_at,
+            _ => None,
+        }
+    }
+
+    /// Whether the window was reported occluded for lack of a callback (#457).
+    pub fn is_starved(&self) -> bool {
+        self.starved
+    }
+
+    pub fn set_starved(&mut self, starved: bool) {
+        self.starved = starved;
     }
 
     /// Reset the frame callbacks state.
@@ -255,6 +281,7 @@ impl WindowState {
         match self.frame_callback_state {
             FrameCallbackState::None | FrameCallbackState::Received => {
                 self.frame_callback_state = FrameCallbackState::Requested;
+                self.frame_callback_requested_at = Some(Instant::now());
                 surface.frame(&self.queue_handle, surface.clone());
             },
             FrameCallbackState::Requested => (),

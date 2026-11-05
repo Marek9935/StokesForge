@@ -38,6 +38,7 @@ pub mod sink;
 pub use proxy::EventLoopProxy;
 use sink::EventSink;
 
+use super::frame_starvation;
 use super::state::{WindowCompositorUpdate, WinitState};
 use super::window::state::FrameCallbackState;
 use super::{logical_to_physical_rounded, DeviceId, WaylandError, WindowId};
@@ -305,7 +306,10 @@ impl<T: 'static> EventLoop<T> {
                         Some(wait_deadline.saturating_duration_since(start))
                     }
                 };
-                min_timeout(control_flow_timeout, timeout)
+                min_timeout(
+                    min_timeout(control_flow_timeout, timeout),
+                    self.starvation_timeout(),
+                )
             };
 
             // NOTE Ideally we should flush as the last thing we do before polling
@@ -368,6 +372,30 @@ impl<T: 'static> EventLoop<T> {
         };
 
         self.single_iteration(&mut callback, cause);
+    }
+
+    /// Earliest instant a window may turn out starved (#457), as a one-shot
+    /// timeout. `None` when no window waits for a verdict: no periodic wake.
+    fn starvation_timeout(&mut self) -> Option<Duration> {
+        let now = Instant::now();
+        self.with_state(|state| {
+            let requests = state.window_requests.get_mut();
+            let mut soonest: Option<Duration> = None;
+            for (id, window) in state.windows.get_mut().iter() {
+                let Some(request) = requests.get(id) else {
+                    continue;
+                };
+                let window = window.lock().unwrap();
+                let verdict = frame_starvation::assess(
+                    window.frame_callback_requested_at(),
+                    request.redraw_is_requested(),
+                    window.is_starved(),
+                    now,
+                );
+                soonest = min_timeout(soonest, verdict.wake_in);
+            }
+            soonest
+        })
     }
 
     fn single_iteration<F>(&mut self, callback: &mut F, cause: StartCause)
@@ -514,12 +542,12 @@ impl<T: 'static> EventLoop<T> {
         });
 
         for window_id in window_ids.iter() {
-            let event = self.with_state(|state| {
+            let events = self.with_state(|state| {
                 let window_requests = state.window_requests.get_mut();
                 if window_requests.get(window_id).unwrap().take_closed() {
                     mem::drop(window_requests.remove(window_id));
                     mem::drop(state.windows.get_mut().remove(window_id));
-                    return Some(WindowEvent::Destroyed);
+                    return [Some(WindowEvent::Destroyed), None];
                 }
 
                 let mut window = state
@@ -531,23 +559,43 @@ impl<T: 'static> EventLoop<T> {
                     .unwrap();
 
                 if window.frame_callback_state() == FrameCallbackState::Requested {
-                    return None;
+                    // #457: no callback for a while with a redraw wanted means the
+                    // compositor does not draw this window. Say so once.
+                    let verdict = frame_starvation::assess(
+                        window.frame_callback_requested_at(),
+                        window_requests
+                            .get(window_id)
+                            .unwrap()
+                            .redraw_is_requested(),
+                        window.is_starved(),
+                        Instant::now(),
+                    );
+                    if verdict.starved && !window.is_starved() {
+                        window.set_starved(true);
+                        return [Some(WindowEvent::Occluded(true)), None];
+                    }
+                    return [None, None];
                 }
 
                 // Reset the frame callbacks state.
                 window.frame_callback_reset();
-                let mut redraw_requested = window_requests
+                let pending = window_requests
                     .get(window_id)
                     .unwrap()
                     .take_redraw_requested();
+                let woken = frame_starvation::on_callback(window.is_starved(), pending);
+                window.set_starved(false);
 
                 // Redraw the frame while at it.
-                redraw_requested |= window.refresh_frame();
+                let redraw_requested = woken.redraw | window.refresh_frame();
 
-                redraw_requested.then_some(WindowEvent::RedrawRequested)
+                [
+                    woken.occluded_false.then_some(WindowEvent::Occluded(false)),
+                    redraw_requested.then_some(WindowEvent::RedrawRequested),
+                ]
             });
 
-            if let Some(event) = event {
+            for event in events.into_iter().flatten() {
                 callback(
                     Event::WindowEvent {
                         window_id: crate::window::WindowId(*window_id),
