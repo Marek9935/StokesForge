@@ -132,6 +132,24 @@ fn what_is_missing_is_named_before_any_computation() {
     assert!(matches!(form.issues().as_slice(), [Issue::BadModel(_)]));
 }
 
+/// #438: a number an f64 cannot hold is refused at entry like a syntax error,
+/// while the parameter table keeps reading the model (it stays lenient).
+#[test]
+fn a_model_with_an_out_of_range_number_is_refused_with_the_number_sentence() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+    form.setup.fit.set_model(Model::Custom {
+        formula: "a*x+1e-400".to_string(),
+    });
+    let issues = form.issues();
+    assert!(matches!(issues.as_slice(), [Issue::BadModel(Some(_))]));
+    let sentence = stokesforge_app_state::analysis::issue_message(&issues[0]);
+    assert!(sentence.contains("1e-400"), "{sentence}");
+    assert!(sentence.contains("too small"), "{sentence}");
+    assert!(form.draft(f.project.tree()).is_err());
+    assert_eq!(form.setup.fit.param_count(), 1);
+}
+
 /// #260: the draft is described as an `Operation` and `Operation::readiness`
 /// says what is missing, including for the single point or zone.
 #[test]

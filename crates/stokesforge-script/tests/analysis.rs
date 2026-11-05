@@ -173,6 +173,7 @@ fn an_invalid_argument_raises_invalid_value_error_without_writing_anything() {
     let before = columns(&bench);
     for bad in [
         "pyst.analysis.fit(y, x, model='a*')",
+        "pyst.analysis.fit(y, x, model='a*x+1e400')",
         "pyst.analysis.fit(y, x, model='linear', initial={'zz': 1.0})",
         "pyst.analysis.baseline(y, x, method='line', points=[(0, 1)])",
         "pyst.analysis.baseline(y, x, op='nope')",

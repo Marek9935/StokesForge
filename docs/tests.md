@@ -353,7 +353,8 @@ see the failure of a `compile` without a cap rather than a hang); `MAX_*` and
 their edges in `validate` (100 peaks, not 50); `validate` refuses a fit
 without a free parameter (none, or all fixed); `Operation::readiness`
 has one case per variant (`NeedsPoints` with its `have`, `NeedsZone`,
-`BadExpression`, `NoParameter`, `Invalid`); `forget_positions` erases
+`BadExpression` (also a number literal out of the `f64` range, #438: checked before
+`NoParameter`, absent from `validate` and `compile` so stored models keep running), `NoParameter`, `Invalid`); `forget_positions` erases
 exactly ranges, positions, `initial`/`fixed`/`min`/`max`/`shared`, reconvolution
 window, and keeps the method; `FitSpec::auto_initial` filters the range
 (bounds in disorder), ignores fixed parameters and unreadable models.

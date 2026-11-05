@@ -504,8 +504,13 @@ impl Operation {
             Operation::Fit { spec, .. } => match spec.model.compile() {
                 Err(AnalysisError::BadExpression(error)) => Readiness::BadExpression(error),
                 Err(other) => Readiness::Invalid(other),
-                Ok(compiled) if compiled.param_count() == 0 => Readiness::NoParameter,
-                Ok(_) => Readiness::Ready,
+                // Entry only (#438): `compile` and `validate` stay lenient,
+                // a stored model with `1e400` keeps running as before.
+                Ok(compiled) => match spec.model.out_of_range_literal() {
+                    Some(error) => Readiness::BadExpression(error),
+                    None if compiled.param_count() == 0 => Readiness::NoParameter,
+                    None => Readiness::Ready,
+                },
             },
             // An unplaced range (NaN) is not "the whole curve": `run`
             // refuses it (#276), so it remains to be placed.
