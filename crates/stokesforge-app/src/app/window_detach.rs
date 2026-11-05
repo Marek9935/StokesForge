@@ -1639,22 +1639,14 @@ mod tests {
             false,
         );
         paint(vec![pointer(outside, false)], false);
+        // The entry ends through the detached view's own state (#465, T1): a
+        // blocking dialog of the root could not drop it.
         let actions = std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions);
-        assert_eq!(
-            actions,
-            vec![Action::SetNoteText {
-                note,
-                text: "Start more".into()
-            }]
+        assert!(
+            actions.is_empty(),
+            "no deferred action to lose: {actions:?}"
         );
-        assert_eq!(
-            app.state.note_text(note).as_deref(),
-            Some("Start"),
-            "the request waits for the root"
-        );
-        for action in actions {
-            app.state.dispatch(action);
-        }
+        app.state.refresh();
         assert_eq!(app.state.note_text(note).as_deref(), Some("Start more"));
         app.state.dispatch(Action::Undo);
         assert_eq!(app.state.note_text(note).as_deref(), Some("Start"));

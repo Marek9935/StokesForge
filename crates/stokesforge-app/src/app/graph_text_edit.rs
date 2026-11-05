@@ -284,7 +284,7 @@ pub(super) fn open_group_name_editor_in_graph(
     );
 }
 
-fn start_text_editor(
+pub(super) fn start_text_editor(
     ctx: &egui::Context,
     view: &GraphView,
     target: TextEditTarget,
@@ -299,6 +299,49 @@ fn start_text_editor(
         anchor,
     };
     ctx.data_mut(|data| data.insert_temp(text_editor_id(view), editor));
+}
+
+/// The action that validating `editor` sends, if its text changed.
+fn text_editor_action(editor: &TextEditor, graph: NodeId) -> Option<Action> {
+    (editor.buffer != editor.original).then(|| match editor.target {
+        TextEditTarget::Title(target) => Action::SetTextContent {
+            graph,
+            target,
+            text: editor.buffer.clone(),
+        },
+        TextEditTarget::LegendEntry(series) => Action::SetLegendEntryName {
+            graph,
+            series,
+            name: editor.buffer.clone(),
+        },
+        TextEditTarget::GroupName(group) => Action::RenameSeriesGroup {
+            graph,
+            group,
+            name: editor.buffer.clone(),
+        },
+    })
+}
+
+/// Validates the title, legend, group-name or free-text editor still open on
+/// `view`, as a click elsewhere would, for a save or a gesture that may
+/// replace the project (#465, #466). The editors are egui-side, so the shell
+/// does it; the actions are the usual undoable ones.
+pub(super) fn commit_open_text_editors(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    graph: NodeId,
+    actions: &mut Vec<Action>,
+) {
+    let text_id = text_editor_id(view);
+    if let Some(editor) = ctx.data(|data| data.get_temp::<TextEditor>(text_id)) {
+        ctx.data_mut(|data| data.remove::<TextEditor>(text_id));
+        actions.extend(text_editor_action(&editor, graph));
+    }
+    let annotation_id = annotation_editor_id(view);
+    if let Some(editor) = ctx.data(|data| data.get_temp::<AnnotationEditor>(annotation_id)) {
+        ctx.data_mut(|data| data.remove::<AnnotationEditor>(annotation_id));
+        commit_annotation_editor(view, graph, &editor, actions);
+    }
 }
 
 /// Paints the editor of a title or a legend name, and translates its
@@ -373,25 +416,7 @@ pub(super) fn text_editor_ui(
         return;
     }
     if accept || outside {
-        if editor.buffer != editor.original {
-            actions.push(match editor.target {
-                TextEditTarget::Title(target) => Action::SetTextContent {
-                    graph,
-                    target,
-                    text: editor.buffer.clone(),
-                },
-                TextEditTarget::LegendEntry(series) => Action::SetLegendEntryName {
-                    graph,
-                    series,
-                    name: editor.buffer.clone(),
-                },
-                TextEditTarget::GroupName(group) => Action::RenameSeriesGroup {
-                    graph,
-                    group,
-                    name: editor.buffer.clone(),
-                },
-            });
-        }
+        actions.extend(text_editor_action(&editor, graph));
         ctx.data_mut(|data| data.remove::<TextEditor>(id));
         return;
     }
@@ -787,6 +812,48 @@ mod tests {
             focus: false,
             anchor: None,
         }
+    }
+
+    /// #465/#466: a save closes the editors still open and sends their actions,
+    /// as a click elsewhere would; an unchanged editor sends nothing.
+    #[test]
+    fn committing_the_open_editors_sends_their_actions_and_closes_them() {
+        let graph = NodeId::from_raw(5);
+        let mut view = GraphView::new();
+        let ctx = egui::Context::default();
+        let title = TextEditTarget::Title(TextTarget::Title);
+        let at = (egui::pos2(200.0, 200.0), egui::vec2(80.0, 20.0));
+        start_text_editor(&ctx, &view, title, "Spectrum".to_owned(), at);
+        ctx.data_mut(|data| {
+            let mut editor: TextEditor = data.get_temp(text_editor_id(&view)).unwrap();
+            editor.buffer = "Other".to_owned();
+            data.insert_temp(text_editor_id(&view), editor);
+        });
+        let target = AnnotationRef { panel: 0, index: 0 };
+        let note = AnnotationSpec::new("Peak", 1.0, 2.0);
+        start_annotation_editor(&ctx, &mut view, target, note, None);
+        let mut actions = Vec::new();
+        commit_open_text_editors(&ctx, &mut view, graph, &mut actions);
+        assert_eq!(actions.len(), 2, "{actions:?}");
+        assert!(matches!(
+            &actions[0],
+            Action::SetTextContent { text, .. } if text == "Other"
+        ));
+        assert!(matches!(actions[1], Action::SetAnnotation { .. }));
+        assert!(ctx
+            .data(|data| data.get_temp::<TextEditor>(text_editor_id(&view)))
+            .is_none());
+        assert!(ctx
+            .data(|data| data.get_temp::<AnnotationEditor>(annotation_editor_id(&view)))
+            .is_none());
+        // Nothing open, nothing sent.
+        commit_open_text_editors(&ctx, &mut view, graph, &mut actions);
+        assert_eq!(actions.len(), 2);
+        // An untouched editor sends nothing.
+        start_text_editor(&ctx, &view, title, "Spectrum".to_owned(), at);
+        let mut none = Vec::new();
+        commit_open_text_editors(&ctx, &mut view, graph, &mut none);
+        assert!(none.is_empty());
     }
 
     /// Validating the editor of a free text sends only one action, and

@@ -309,6 +309,14 @@ fn save_is_refused_during_a_script() {
     state.dispatch(Action::RunScript);
     assert!(state.script_running());
 
+    // #465: the refusal leaves an entry being typed open (nothing committed).
+    let sheet = state.tree().resolve("[Book1]Sheet1").expect("demo sheet");
+    let column = state.visible_columns(sheet)[0].0;
+    state.begin_edit(column, 0);
+    state.dispatch(Action::Save);
+    assert!(state.editing().is_some(), "the entry stays open");
+    state.cancel_edit();
+
     state.dispatch(Action::Quit {
         pending_edits: false,
     });

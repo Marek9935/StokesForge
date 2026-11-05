@@ -14,7 +14,7 @@ Choose **File ▸ New ▸ New Project** or press <kbd>Ctrl</kbd>+<kbd>N</kbd>. T
 
 If the current project has unsaved changes, StokesForge asks what to do:
 
-- **Save** saves the project, then goes on.
+- **Save** saves the project, then goes on. A cell you are still typing is entered first, so it is saved too.
 - **Discard Changes** goes on and loses the changes since the last save.
 - **Cancel** (or <kbd>Esc</kbd>) keeps the project open.
 
@@ -34,6 +34,8 @@ StokesForge refuses to open a very large file, to protect your computer. The lim
 
 - **File ▸ Save** or <kbd>Ctrl</kbd>+<kbd>S</kbd> saves the project in its file. The first time, you choose where to save.
 - **File ▸ Save As…** or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves under a new name. If the file exists, StokesForge asks before it replaces it.
+
+If you are still typing in a cell, a header field or a note, saving enters what you typed first, in a detached window as well. The same goes for a graph title, legend name or free text you are still editing. A number the cell refuses (out of range) stays open and is not saved.
 
 The title bar shows a dot after the project name while there are unsaved changes. If saving fails, a message explains why and your changes are kept.
 
