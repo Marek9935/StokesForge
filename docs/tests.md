@@ -613,11 +613,17 @@ GitHub CI but report nothing to GitLab (intended, see below).
 **Several orchestrators on `main` (#413).** `ci.yml` cancels a running series when a newer push
 arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the CI of the newest
 `main` that contains your commit (`git merge-base --is-ancestor <commit> origin/main`), not of your
-own commit. To keep pushes orderly, merge and push `main` under the lock
-`scripts/main-lock.sh take "<square> #<n>"` … `release`. The scripts of this workflow
-(`chantier.sh`, `try.sh`, `main-lock.sh`, `workflow-lib.sh`) are tested by
+own commit. To keep pushes orderly, merge and push `main` with
+`scripts/deliver.sh <n> <message-file>` (#449): it takes the `main-lock.sh` lock itself and releases
+it on every exit, stops at the first failure, merges `--no-ff` with the message file, pushes
+without tags (4 retries) and only then writes the real merge commit on the issue's trial entries
+(`suivi.py test merged`); a rerun after a failure does not merge twice, and exit 3 means `main` moved
+and was merged into the branch (recheck, rerun). It stops before the CI and `--release`. The scripts of this workflow
+(`chantier.sh`, `try.sh`, `main-lock.sh`, `deliver.sh`, `workflow-lib.sh`) are tested by
 `scripts/workflow-test.sh`, run by the `fmt` job, and the colour rule by `scripts/suivi-test.py`
 (same job). Besides the colours, briefing and locks, `workflow-test.sh` covers
+(#449) `deliver.sh` in its own sandbox with a bare fake remote (happy path, refusals, held lock, fetch,
+merge and push failures with retries, rerun, record failure, moved `main`, conflict) and
 (#441) `lance` recording the owner session (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`) and a rerun in
 a new session keeping the colour, one record per issue (sibling worktrees `feature<n>b`, detached HEAD),
 `chantier.sh --status [--json]` (six colours in order, `since`/`days` with the
@@ -628,7 +634,7 @@ package `since` date surviving a rerun, `suivi.py check` clean at the end, and `
 unmerged branch, modified or untracked files, ignored files other than `target/`,
 a run from a worktree or off `main`; never `-D` nor `--force`).
 
-`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|list`, `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
+`scripts/suivi-test.py` (stdlib `unittest`, throwaway repository and state folder, the server on port 0) also pins the local server (POST needs `X-Suivi`, foreign `Origin` or `Host` is 403, unsafe id 400, body over 256 KB 413, no `Access-Control-*`, loopback only, ETag 304), `test add|merged|remove|list` (merge-commit check, `--replace`, the 5-entry limit and `--force`, removal by the owning session and its archive), `set` erasing the agent note, the page's `cardLine` (whose turn it is, working or stopped agent from `agent_idle_min`), `import-online` and the `legacy` hold of `migrate`, and parses the page script with `node --check`. It pins the rule
 of `scripts/suivi.py`: a live owner holds (pid exists, same start time, no newer `ended/<sid>`); a
 dead pid, a reused pid or an ended session pauses; an open QCM or a `todo` trial entry with a `try`
 field holds, a finished QCM, an `ok` entry or one without `try` does not; resume takes the previous
