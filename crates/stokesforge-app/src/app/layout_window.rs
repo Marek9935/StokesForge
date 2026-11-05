@@ -14,14 +14,27 @@
 //!   leaves the mode of a graph whose window is no longer the maximised one:
 //!   the Restore button, the Window menu, a close, a delete and a project load
 //!   all end the mode this way, with no maximise left behind.
-//! - **Detached graph.** The OS window is never maximised nor restored by the
-//!   mode: it keeps its size, and the user's own maximise or restore neither
-//!   leaves the mode nor is undone by it. Closing or reattaching leaves the
-//!   mode. WHY: every action of a detached window is drained in the ROOT frame,
-//!   and on Wayland a surface only gets a frame callback (so a
-//!   `RedrawRequested`, eframe `native/run.rs`) while it is visible. A detached
-//!   window maximised over the main window hides it, the root frame never runs
-//!   and the whole application stalls. Do not re-add a maximise here.
+//! - **Detached graph.** The OS window maximises and restores itself
+//!   ([`follow_mode_maximize`]), unless it was maximised at entry; closing or
+//!   reattaching leaves the mode, and so does the Restore button of its header
+//!   (the same exit the floating window's Restore takes through
+//!   [`StokesForgeApp::reconcile_layout_modes`]). A restore done from outside
+//!   the application (an OS shortcut) cannot be told from a maximise the
+//!   compositor has not applied yet, so it leaves the mode alone: the mode
+//!   then works at the smaller size, and Esc still leaves it.
+//!   WHY it is safe: a detached window maximised over the main window hides it,
+//!   and every action of a detached window is drained in the ROOT frame. On
+//!   native Wayland winit only emits `RedrawRequested` once the frame callback
+//!   of the last present has come, and a fully covered surface never gets
+//!   one, so the root frame, and with it the whole application, stopped. The
+//!   vendored winit now reports such a window as occluded after 100 ms without
+//!   a callback while a redraw is wanted (`vendor/winit/STOKESFORGE.md`,
+//!   "Frame starvation"), and eframe then keeps running the occluded root's
+//!   `logic` and `ui` unpainted, about every 100 ms, as long as a viewport is
+//!   visible. The detached window's request wakes the root, the root applies it
+//!   and publishes the result to the viewport in the same pass
+//!   ([`StokesForgeApp::republish_detached_tabs`]). Cost: about 100 ms between
+//!   a command and its paint while the main window is covered.
 //! - **Keys.** The root reads them at the start of the frame, before any
 //!   window is painted ([`StokesForgeApp::begin_layout_frame`]); a detached
 //!   viewport reads them at the top of its own frame. Esc therefore reaches the
@@ -70,7 +83,7 @@ impl StokesForgeApp {
 
     /// Turns the Page Layout Mode of `graph` on or off (`None`: toggles). A
     /// view state: nothing is sent to the model, whatever the placement. Entering
-    /// maximises a floating window (a detached one keeps its size, see the top doc).
+    /// maximises the window (a detached one maximises its OS window itself).
     pub(super) fn toggle_layout_mode(&mut self, graph: NodeId, on: Option<bool>) {
         let now = self
             .read_graph_view(graph, GraphView::layout_mode)
@@ -138,6 +151,32 @@ impl StokesForgeApp {
             },
             other => other,
         }
+    }
+}
+
+/// What a detached graph window remembers of the maximise the mode forced:
+/// `None` outside the mode, else whether the OS window was maximised before.
+pub(super) type ModeMaximize = Option<bool>;
+
+/// Maximises the OS window of a detached graph when its mode is on and restores
+/// it when the mode ends, unless it was maximised at entry. A compositor that
+/// refuses the maximise leaves the mode working at the current size.
+pub(super) fn follow_mode_maximize(ctx: &egui::Context, state: &mut ModeMaximize, in_mode: bool) {
+    match (in_mode, *state) {
+        (true, None) => {
+            let was = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+            *state = Some(was);
+            if !was {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+        }
+        (false, Some(was)) => {
+            *state = None;
+            if !was {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+            }
+        }
+        _ => {}
     }
 }
 
@@ -522,30 +561,41 @@ mod tests {
         root.session.shutdown().unwrap();
     }
 
-    /// A detached window never gets a `Maximized` command from the mode,
-    /// entering or leaving, whatever its OS state; the root window still
-    /// maximises and restores. Witness: re-add a `Maximized` command for
-    /// detached windows in `toggle_layout_mode`/the viewport.
+    /// The OS window of a detached graph maximises on entering and is restored
+    /// on leaving, unless it was already maximised.
     #[test]
-    fn a_detached_window_keeps_its_size_and_a_root_window_still_maximises() {
-        let mut root = Root::new();
-        let tab = root.tab();
-        root.app.detach_tab(tab);
-        root.toggle(true);
-        assert!(root.mode());
-        assert_eq!(root.app.maximized_tab, None, "the root window is not asked");
-        assert!(root.app.layout_entries.is_empty());
-        root.toggle(false);
-        assert!(!root.mode());
-        assert_eq!(root.app.maximized_tab, None);
-        // The root window, unchanged: maximised on entering, restored on leaving.
-        root.app.reattach_tab(tab);
-        root.app.push_floating_tab(tab);
-        root.toggle(true);
-        assert_eq!(root.app.maximized_tab, Some(tab));
-        root.toggle(false);
-        assert_eq!(root.app.maximized_tab, None);
-        root.session.shutdown().unwrap();
+    fn a_detached_window_maximises_with_the_mode_and_restores_unless_it_was() {
+        use super::{follow_mode_maximize, ModeMaximize};
+        let commands =
+            |ctx: &egui::Context, maximized: bool, in_mode: bool, state: &mut ModeMaximize| {
+                let mut input = egui::RawInput::default();
+                input
+                    .viewports
+                    .entry(egui::ViewportId::ROOT)
+                    .or_default()
+                    .maximized = Some(maximized);
+                let mut output =
+                    ctx.run_ui(input, |ui| follow_mode_maximize(ui.ctx(), state, in_mode));
+                output.textures_delta.clear();
+                output.viewport_output[&egui::ViewportId::ROOT]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        egui::ViewportCommand::Maximized(on) => Some(*on),
+                        _ => None,
+                    })
+                    .collect::<Vec<bool>>()
+            };
+        let ctx = egui::Context::default();
+        let mut state: ModeMaximize = None;
+        assert_eq!(commands(&ctx, false, true, &mut state), [true], "enter");
+        assert_eq!(commands(&ctx, true, true, &mut state), Vec::<bool>::new());
+        assert_eq!(commands(&ctx, true, false, &mut state), [false], "leave");
+        // Already maximised at entry: nothing sent either way.
+        let mut state: ModeMaximize = None;
+        assert!(commands(&ctx, true, true, &mut state).is_empty());
+        assert!(commands(&ctx, true, false, &mut state).is_empty());
+        assert_eq!(state, None);
     }
 
     /// A nudge in progress is committed by a leaving: the `SetFreeLayout`
