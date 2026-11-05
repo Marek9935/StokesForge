@@ -200,6 +200,11 @@ The stack guarantees it by construction, and **inside a macro the entries are
 undone strictly in reverse order of insertion**, whatever their
 natures. This is what makes the hybrid hold.
 
+A formula pass runs outside the stack, so a macro's entries replayed in a row
+meet derived columns that no longer fit their deltas; a derived column is made
+to fit and the next pass rewrites it, while ordinary columns stay exact
+(#448).
+
 ## 9. No Python object crosses the actor channel
 
 Three rules, two of which are held by the compiler:
@@ -278,15 +283,30 @@ Two consequences that cross the crates:
   (they follow the tree). One order serves the **whole project**: a formula that
   reads a column of another sheet comes after the formula that writes it, and a
   loop across sheets is a cycle like a local one;
-- **every data write to a column draws a fresh version number**
-  (`Project::next_column_version`, `stokesforge-core`), **and every insertion
+- **every data write by a command draws a fresh version number**, even an
+  identical one (`Project::next_column_version`, `stokesforge-core`): pasting
+  the value a cell already holds, or changing a value and undoing it, gives the
+  column a new number (typing it in the cell sends no command, `commit_cell`), so a transposed sheet over it reads "Out of date" like
+  after any other edit. **The recalculation pass is the one exception (#439):**
+  it draws a number for a formula column only if the type or the values it
+  computes differ from what the column already holds (same type, same length,
+  values equal bit for bit like `ColumnValues`: `NaN == NaN`, `0.0 != -0.0`,
+  text exact); a column recomputed to the same content keeps its number
+  (`write_formula_column`, `stokesforge-session/src/recalc.rs`). Analysis
+  outputs already behaved so (`Project::write_column_data`). **Every insertion
   of a column that already carries a number moves the counter beyond it**
-  (`Project::insert_node`): the comparison relies on "a number never designates
-  two contents of the same column". A primitive of `core` that
-  wrote without this, or an insertion that left the counter below
-  (found in review: `AddColumn` of a column coming from a file or from a
-  snapshot from before a load), would make a stale formula pass for
-  up to date.
+  (`Project::insert_node`). The comparison relies on "a number never designates
+  two contents of the same column", unchanged: what changes is that a number
+  that is **kept** means identical content, and a number that moved no longer
+  proves that a column was **recomputed** — the witness of the economy of the
+  targeted mode is the count of formula columns the passes evaluated
+  (`Snapshot::formula_evaluations`, never in the history nor the `.stf`). A
+  primitive of `core` that wrote without drawing a number, or an insertion that
+  left the counter below (found in review: `AddColumn` of a column coming from
+  a file or from a snapshot from before a load), would make a stale formula
+  pass for up to date. A pass that wrote every formula column on every pass
+  (the full oracle used to) made the links of transposed sheets read stale in
+  that mode only, and the twins' histories differed (#439).
 
 **The binder and the fingerprint (#433).** A kept formula is bound by
 `Tree::pending_bindings` / `next_binding` after every recorded command, **before**

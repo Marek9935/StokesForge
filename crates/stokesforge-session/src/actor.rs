@@ -168,6 +168,13 @@ pub(crate) enum Request {
     /// Tests only: makes the actor panic, to exercise the visible death.
     #[cfg(test)]
     PanicForTest,
+    /// Tests only: runs `edit` on the project, outside the history, like a
+    /// formula pass would (#448).
+    #[cfg(test)]
+    EditForTest {
+        edit: Box<dyn FnOnce(&mut Project) + Send>,
+        reply: Sender<()>,
+    },
 }
 
 /// Tells the gauge that the actor left its loop. Its `Drop` also runs during a
@@ -305,29 +312,41 @@ pub(crate) fn run(
                 }
             }
             Request::Undo { reply } => {
-                let outcome = history.undo(&mut project).map(|reverted| {
-                    reverted.then(|| {
-                        revision += 1;
-                        formulas.run(&mut project);
-                        if purge_orphaned_geometries(&project, &mut geometries) {
-                            geometry_revision += 1;
-                        }
-                        revision
-                    })
-                });
+                // `MacroOpen` touches nothing; any other error may have left
+                // the tree half-undone: the revision advances and the formulas
+                // run, as on success (#448).
+                let macro_open = history.in_macro();
+                let outcome = history.undo(&mut project);
+                let touched = matches!(outcome, Ok(true)) || (outcome.is_err() && !macro_open);
+                let outcome = if touched {
+                    revision += 1;
+                    formulas.run(&mut project);
+                    if purge_orphaned_geometries(&project, &mut geometries) {
+                        geometry_revision += 1;
+                    }
+                    outcome.map(|_| Some(revision))
+                } else {
+                    outcome.map(|_| None)
+                };
                 let _ = reply.send(outcome);
             }
             Request::Redo { reply } => {
-                let outcome = history.redo(&mut project).map(|restored| {
-                    restored.then(|| {
-                        revision += 1;
-                        formulas.run(&mut project);
-                        if purge_orphaned_geometries(&project, &mut geometries) {
-                            geometry_revision += 1;
-                        }
-                        revision
-                    })
-                });
+                // `MacroOpen` touches nothing; any other error may have left
+                // the tree half-redone: the revision advances and the formulas
+                // run, as on success (#448).
+                let macro_open = history.in_macro();
+                let outcome = history.redo(&mut project);
+                let touched = matches!(outcome, Ok(true)) || (outcome.is_err() && !macro_open);
+                let outcome = if touched {
+                    revision += 1;
+                    formulas.run(&mut project);
+                    if purge_orphaned_geometries(&project, &mut geometries) {
+                        geometry_revision += 1;
+                    }
+                    outcome.map(|_| Some(revision))
+                } else {
+                    outcome.map(|_| None)
+                };
                 let _ = reply.send(outcome);
             }
             Request::BeginMacro {
@@ -382,22 +401,25 @@ pub(crate) fn run(
                 let outcome = if history.in_macro() && macro_owner != Some(client) {
                     Err(CommandError::ForeignMacro("abort_macro"))
                 } else {
+                    let macro_open = history.in_macro();
                     let result = history.abort_macro(&mut project);
                     if !history.in_macro() {
                         macro_owner = None;
                     }
-                    result.map(|()| {
+                    // An `abort_macro` amounts to replaying, in one block, the
+                    // undo of each command absorbed into the macro — exactly
+                    // what a series of `Undo`s would do (which recalculate
+                    // afterwards): the formula columns touched by the undone
+                    // work must be recalculated here too, otherwise they would
+                    // stay on values that no formula currently in force
+                    // justifies any more. The same after an error: the abort
+                    // went through every entry (#448), so the tree changed.
+                    // `NotInMacro` touches nothing and changes no revision.
+                    if result.is_ok() || macro_open {
                         revision += 1;
-                        // An `abort_macro` amounts to replaying, in one
-                        // block, the undo of each command absorbed into the
-                        // macro — exactly what a series of `Undo`s would do
-                        // (which recalculate afterwards): the formula columns
-                        // touched by the undone work must be recalculated
-                        // here too, otherwise they would stay on values that
-                        // no formula currently in force justifies any more.
                         formulas.run(&mut project);
-                        revision
-                    })
+                    }
+                    result.map(|()| revision)
                 };
                 let _ = reply.send(outcome);
             }
@@ -422,6 +444,7 @@ pub(crate) fn run(
                     geometry_revision,
                 );
                 snapshot.bound = Arc::new(bound.clone());
+                snapshot.formula_evaluations = formulas.evaluations();
                 let _ = reply.send(snapshot);
             }
             Request::SetWindowGeometry {
@@ -566,6 +589,11 @@ pub(crate) fn run(
             }
             #[cfg(test)]
             Request::PanicForTest => panic!("actor test panic"),
+            #[cfg(test)]
+            Request::EditForTest { edit, reply } => {
+                edit(&mut project);
+                let _ = reply.send(());
+            }
             Request::Shutdown => {
                 // Non-reproducible finding (guide-de-correction-robustesse.md
                 // §7.3, table at the top of `stokesforge-session`): a macro
@@ -750,6 +778,8 @@ fn build_snapshot(
         geometry_revision,
         // Filled by the caller that holds the report (#433).
         bound: Arc::default(),
+        // Filled by the caller that holds the recalculator (#439).
+        formula_evaluations: 0,
     }
 }
 

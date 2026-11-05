@@ -72,9 +72,6 @@ use stokesforge_core::{
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
 
-mod common;
-use common::{link_shapes, strip_links};
-
 // -- draw -----------------------------------------------------------------
 
 /// Formulas drawn, **in letters** (#321): references inside and outside the
@@ -571,6 +568,13 @@ fn initial_project() -> Project {
             )
             .expect("column of Book2");
     }
+    // A formula Y column with an x' in the same worksheet (#439): the sheet can
+    // be transposed over it, and a link over it must stay up to date while the
+    // formula gives the same numbers. `B` is the column to read (letters).
+    let formula_with_x_prime = project
+        .add_column(other_sheet, None, None, Column::from_f64(&[]))
+        .expect("formula column of Book2");
+    with_formula.push((formula_with_x_prime, "B*2"));
     // Formulas are entered in letters once the columns of their worksheet are
     // in place (#321): letters to identifiers.
     for (id, text) in with_formula {
@@ -578,12 +582,21 @@ fn initial_project() -> Project {
             .tree()
             .formula_from_letters(id, text)
             .expect("starting formula");
+        let meta = project
+            .tree()
+            .node(id)
+            .and_then(|node| node.as_column())
+            .expect("column")
+            .meta()
+            .clone();
+        let x_prime = (id == formula_with_x_prime).then_some(2.5);
         project
             .set_column_meta(
                 id,
                 ColumnMeta {
                     formula: Some(formula),
-                    ..Default::default()
+                    x_prime,
+                    ..meta
                 },
             )
             .expect("formula set");
@@ -642,8 +655,8 @@ fn columns_of(tree: &Tree, sheet: Option<NodeId>) -> Vec<NodeId> {
 
 /// Choice in worksheet order, without depending on the hash table. The
 /// computation and the command stay the same as in the real clients.
-/// Worksheets whose Y columns can all be transposed: numeric, with an x', no
-/// formula, and not themselves transposed (same rule as `b23`).
+/// Worksheets whose Y columns can all be transposed: numeric, with an x', formula
+/// columns included (#439), and not themselves transposed (same rule as `b23`).
 fn transposable(tree: &Tree) -> Vec<NodeId> {
     worksheets_of(tree)
         .into_iter()
@@ -655,9 +668,9 @@ fn transposable(tree: &Tree) -> Vec<NodeId> {
                 .collect();
             tree.transpose_link(s).is_none()
                 && !ys.is_empty()
-                && ys.iter().all(|c| {
-                    c.meta().formula.is_none() && c.meta().x_prime.is_some_and(f64::is_finite)
-                })
+                && ys
+                    .iter()
+                    .all(|c| c.meta().x_prime.is_some_and(f64::is_finite))
         })
         .collect()
 }
@@ -1136,6 +1149,25 @@ fn check_versions(twin: &mut Twin, tree: &Tree) -> Option<(NodeId, u64)> {
     None
 }
 
+/// Formula columns of the tree (every one is evaluated by a full pass).
+fn formula_column_count(tree: &Tree) -> u64 {
+    tree.iter()
+        .filter(|(_, node)| node.as_column().is_some_and(|c| c.meta().formula.is_some()))
+        .count() as u64
+}
+
+/// True if a transposed sheet of the tree has a formula column among its
+/// source's inputs.
+fn has_formula_source(tree: &Tree) -> bool {
+    tree.transposes().values().any(|link| {
+        link.inputs.iter().any(|input| {
+            tree.node(input.column)
+                .and_then(|n| n.as_column())
+                .is_some_and(|c| c.meta().formula.is_some())
+        })
+    })
+}
+
 /// What the draw actually reached, counted on the targeted session after
 /// every step that launched a recalculation pass, non-empty formula column by
 /// non-empty formula column.
@@ -1145,9 +1177,16 @@ struct Coverage {
     computed: usize,
     /// No computed cell: unreadable, cycle, missing or empty source.
     not_computed: usize,
-    /// Present before and after a pass, with the same version: spared by the
-    /// targeted pass.
+    /// Formula columns the targeted pass did not evaluate (#439: counted from
+    /// `Snapshot::formula_evaluations`, a kept version no longer shows it):
+    /// spared by the targeted pass.
     spared: usize,
+    /// Unrelated steps accepted with a pass, in which the targeted session
+    /// evaluated nothing and the full one evaluated every formula column (the
+    /// witness of property 3), with formula columns present.
+    unrelated_with_formulas: usize,
+    /// Accepted `Transpose` steps whose source holds a formula column (#439).
+    transpose_over_formula: usize,
     /// Computed columns whose formula reads another sheet or workbook (#403).
     remote_computed: usize,
     /// Steps accepted by both sessions, recalculation pass or not.
@@ -1168,6 +1207,8 @@ impl Coverage {
         self.computed += other.computed;
         self.not_computed += other.not_computed;
         self.spared += other.spared;
+        self.unrelated_with_formulas += other.unrelated_with_formulas;
+        self.transpose_over_formula += other.transpose_over_formula;
         self.remote_computed += other.remote_computed;
         self.accepted += other.accepted;
         self.bindings += other.bindings;
@@ -1178,24 +1219,18 @@ impl Coverage {
         }
     }
 
-    /// `loading`: a `Load` restarts from the versions of the file, and a
-    /// rewritten column may land by chance on the number it carried before —
-    /// comparing the versions on both sides then says nothing, and the count
-    /// would depend on the numbering.
-    fn tally(&mut self, before: &Tree, after: &Tree, loading: bool) {
-        let versions_before = if loading {
-            HashMap::new()
-        } else {
-            versions(before)
-        };
+    /// `evaluated`: formula columns the targeted pass of this step evaluated.
+    fn tally(&mut self, after: &Tree, evaluated: u64) {
+        let mut formula_columns = 0u64;
         for calculation in after.calculations().values() {
             self.calculations += 1;
             self.stale_calculations += usize::from(Calculation::clone(calculation).stale.is_some());
         }
-        for (id, node) in after.iter() {
+        for (_, node) in after.iter() {
             let Some(column) = node.as_column() else {
                 continue;
             };
+            formula_columns += u64::from(column.meta().formula.is_some());
             if column.meta().formula.is_none() || column.is_empty() {
                 continue;
             }
@@ -1215,10 +1250,8 @@ impl Coverage {
             } else {
                 self.not_computed += 1;
             }
-            if versions_before.get(&id) == Some(&column.version()) {
-                self.spared += 1;
-            }
         }
+        self.spared += usize::try_from(formula_columns.saturating_sub(evaluated)).unwrap_or(0);
     }
 }
 
@@ -1234,15 +1267,9 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
     // recalculation pass computes them all, and a load empties the memo.
     // Property 3 holds only once a pass has been made since either one.
     let mut memo_primed = false;
-    // A rejected `AbortMacro` can leave the tree half undone with no pass run
-    // after it (`TypeMismatch` while undoing a `DeleteRows` over a column a
-    // formula made Mixed, found by #433 and tracked in #448; the actor skips
-    // the pass on that error). The next command then catches up, rewriting columns that no
-    // unrelated command touched: not a targeted-recalculation defect, so
-    // property 3 does not judge that one step. Both twins agree (property 1).
-    let mut half_undone = false;
     for (rank, step) in draw.iter().enumerate() {
         let before = targeted.snapshot();
+        let full_evaluations_before = full.snapshot().formula_evaluations;
         let command = command(step, &before.tree, rank);
 
         let targeted_reply = play(
@@ -1284,19 +1311,22 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
                     .collect::<Vec<_>>()
             );
         }
-        // 1. oracle
-        // The links of transposed sheets are compared by shape, without version
-        // numbers (`common`: the full side restamps, #430).
+        // 1. oracle: the trees are equal, transposed links and the version of
+        // every column included — a pass that finds the same content keeps the
+        // version, so the twins number alike (#439).
         prop_assert!(
-            strip_links(&s_targeted.tree) == strip_links(&s_full.tree),
+            s_targeted.tree == s_full.tree,
             "step {rank} ({step:?}): the targeted recalculation diverges from the full recalculation\ntargeted calculations: {:?}\nfull calculations: {:?}",
             s_targeted.tree.calculations(),
             s_full.tree.calculations()
         );
+        // A command that stores an undo entry in one twin and not in the other only
+        // shows as a tree difference at a later Undo; compare histories to catch it
+        // at its step (#439).
         prop_assert_eq!(
-            link_shapes(&s_targeted.tree),
-            link_shapes(&s_full.tree),
-            "step {} ({:?}): transposed-sheet links differ",
+            &s_targeted.history,
+            &s_full.history,
+            "step {} ({:?}): targeted and full histories differ",
             rank,
             step
         );
@@ -1321,11 +1351,16 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
             }
         }
 
-        // 3. targeted: an unrelated command rewrites no column.
+        // 3. targeted: an unrelated command evaluates no formula column and
+        // rewrites no column. The version cannot show an evaluation any more (a
+        // pass that finds the same content keeps it, #439): the count of
+        // evaluated formula columns does; the versions stay checked as well.
+        // Witness: the full session evaluates every formula column.
+        let evaluated_targeted = s_targeted.formula_evaluations - before.formula_evaluations;
+        let evaluated_full = s_full.formula_evaluations - full_evaluations_before;
         if matches!(step, Step::Unrelated)
             && targeted_reply == Reply::AcceptedWithPass
             && memo_primed
-            && !half_undone
         {
             prop_assert_eq!(
                 versions(&before.tree),
@@ -1333,25 +1368,71 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
                 "step {}: an unrelated command rewrote a column",
                 rank
             );
+            prop_assert_eq!(
+                evaluated_targeted,
+                0,
+                "step {}: an unrelated command evaluated a formula column",
+                rank
+            );
+            let formula_columns = formula_column_count(&s_full.tree);
+            prop_assert_eq!(
+                evaluated_full,
+                formula_columns,
+                "step {}: witness, the full session evaluates every formula column",
+                rank
+            );
+            coverage.unrelated_with_formulas += usize::from(formula_columns > 0);
+        }
+        if matches!(step, Step::Transpose { .. })
+            && targeted_reply != Reply::Rejected
+            && has_formula_source(&s_targeted.tree)
+        {
+            coverage.transpose_over_formula += 1;
         }
         let ran_pass = targeted_reply == Reply::AcceptedWithPass;
         if ran_pass {
-            coverage.tally(
-                &before.tree,
-                &s_targeted.tree,
-                matches!(step, Step::Reload | Step::RevertTo { .. }),
-            );
+            coverage.tally(&s_targeted.tree, evaluated_targeted);
             *coverage.per_step.entry(step_name(step)).or_default() += 1;
         }
         memo_primed |= ran_pass;
-        half_undone = (half_undone && !ran_pass)
-            || (matches!(step, Step::AbortMacro) && targeted_reply == Reply::Rejected);
     }
     coverage.bindings = targeted.snapshot().bound.count as usize;
     Ok(coverage)
 }
 
 // -- guard ------------------------------------------------------------------
+
+/// #448, the minimal sequence, named because the fixed draw of the oracle never
+/// reaches it. Sheet 1 column `C` is `A*2` (mixed), the macro deletes a row,
+/// types the constant `1+2` (numeric, so the pass retypes `C`), then aborts: the
+/// replayed `DeleteRows` meets a numeric `C`. The abort must finish and run its
+/// pass, so that the unrelated command after it rewrites no column (property 3,
+/// which is no longer excused after a rejected abort).
+#[test]
+fn b22_an_abort_over_a_retyped_formula_column_leaves_nothing_for_the_next_pass() {
+    let draw = [
+        Step::SetFormula {
+            sheet: 0,
+            column: 2,
+            formula_index: 0,
+        },
+        Step::OpenMacro,
+        Step::DeleteRows {
+            sheet: 0,
+            at: 0,
+            count: 1,
+        },
+        Step::SetFormula {
+            sheet: 0,
+            column: 2,
+            formula_index: 7,
+        },
+        Step::AbortMacro,
+        Step::Unrelated,
+    ];
+    let coverage = run_sequence(&draw).expect("the oracle and the three properties hold");
+    assert!(coverage.per_step.get("AbortMacro").copied().unwrap_or(0) >= 1);
+}
 
 /// The oracle, then the check of what the draw reached: without the latter,
 /// a draw that never set a formula, or whose formulas were all in error, would
@@ -1371,6 +1452,10 @@ fn b22_the_targeted_recalculation_returns_exactly_the_full_recalculation() {
     assert!(total.computed > 1000, "{total:?}");
     assert!(total.not_computed > 100, "{total:?}");
     assert!(total.spared > 1000, "{total:?}");
+    // The witness of property 3 saw formulas to evaluate, and a sheet with a
+    // formula column was transposed (#439).
+    assert!(total.unrelated_with_formulas > 20, "{total:?}");
+    assert!(total.transpose_over_formula > 5, "{total:?}");
     // The formulas that read another sheet or workbook (#403) were reached.
     assert!(total.remote_computed > 100, "{total:?}");
     assert!(total.calculations > 200, "{total:?}");

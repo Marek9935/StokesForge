@@ -99,6 +99,8 @@ The **Output** block decides what is written and how the analysis is kept.
 | **Recalculate automatically** | Recalculates the columns whenever the source data change. When off, the columns are marked out of date instead. |
 | **Warn when R² is low** | Opens a dialog after the calculation when the R² of a fit is below 0.6. |
 
+When **Recalculate automatically** is off and a script deletes a row (`pyst.delete_rows`), undoing that script after a **Recalculate** can leave the result columns out of date, with an empty row and an old value; **Recalculate** puts them right.
+
 **Recalculate automatically** is on by default, except for **Reconvolution**, **Direct Deconvolution** and batches of more than 20 series, because these are slow. For a large batch, the window reminds you that recalculating each change can be slow.
 
 ### Where the results go
@@ -372,6 +374,8 @@ Deleting a column that an analysis uses opens a confirmation, **Column in use**,
 ### Out-of-date results
 
 When a source column changes and **Recalculate automatically** is off, the result columns are marked out of date: the header is tinted, with a warning icon (<img class="icon" src="../images/icons/warning.neutral.svg" alt="">), and the column is grayed out. Its tooltip gives the reason: the source data changed, a source column was deleted, or the last recalculation failed. Use **Recalculate** on the column, or **Analysis ▸ Recalculate Out of Date** for all of them at once.
+
+Inserting or deleting rows in the source sheet also marks a result out of date when **Recalculate automatically** is off. Undo restores the rows but leaves the mark until you use **Recalculate**.
 
 ### Undo
 

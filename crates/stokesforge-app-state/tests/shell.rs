@@ -15797,3 +15797,181 @@ fn duplicating_a_sheet_copy_does_not_stack_the_suffix() {
         "{names:?}"
     );
 }
+
+// -- #465 / #466: a save or a replacing gesture takes the entries still open --
+
+/// Reopens `file` in `state` (clean project: no question) and returns the text
+/// the file holds for `(column named name of Sheet1, row)`.
+fn saved_cell(state: &mut AppState, file: &Path, name: &str, row: usize) -> String {
+    state.dispatch(Action::OpenProject {
+        path: file.display().to_string(),
+        pending_edits: false,
+    });
+    assert!(
+        state.unsaved_pending().is_none(),
+        "reopened without a question"
+    );
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let column = column_id(state, sheet1, name);
+    state.cell_text(column, row)
+}
+
+#[test]
+fn save_commits_the_cell_being_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("projet.stf");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    type_in_cell(&mut state, time, 1, "77");
+    state.dispatch(Action::Save);
+    assert!(state.editing().is_none(), "the entry was taken");
+    assert_eq!(state.cell_text(time, 1), "77");
+    assert_eq!(saved_cell(&mut state, &file, "Time", 1), "77");
+}
+
+#[test]
+fn save_commits_the_header_field_being_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("projet.stf");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    state.begin_header_edit(time, HeaderField::LongName);
+    state.header_editing_mut().unwrap().buffer = "Elapsed".to_string();
+    state.dispatch(Action::Save);
+    assert!(state.header_editing().is_none());
+    state.dispatch(Action::OpenProject {
+        path: file.display().to_string(),
+        pending_edits: false,
+    });
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    assert_eq!(
+        state.header_field_display_text(time, HeaderField::LongName),
+        "Elapsed"
+    );
+}
+
+#[test]
+fn save_commits_the_note_being_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = demo_project();
+    let root = project.root();
+    let note = project
+        .add_note(root, Some("Note1"), "before")
+        .expect("note");
+    let file = dir.path().join("projet.stf");
+    let (_session, mut state) = start(project, &file);
+    state.begin_note_edit(note);
+    state.note_editing_mut().unwrap().buffer = "after".to_string();
+    state.dispatch(Action::Save);
+    assert!(state.note_editing().is_none());
+    state.dispatch(Action::OpenProject {
+        path: file.display().to_string(),
+        pending_edits: false,
+    });
+    assert_eq!(state.note_text(note), Some("after".to_string()));
+}
+
+#[test]
+fn save_as_commits_the_cell_being_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let target = dir.path().join("other.stf");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    type_in_cell(&mut state, time, 1, "77");
+    state.dispatch(Action::SaveAs {
+        path: target.display().to_string(),
+    });
+    assert_eq!(saved_cell(&mut state, &target, "Time", 1), "77");
+}
+
+#[test]
+fn the_save_answer_of_a_replacing_gesture_keeps_the_cell_being_typed() {
+    for gesture in ["quit", "new", "open"] {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let file = dir.path().join("projet.stf");
+        let other = dir.path().join("other.stf");
+        stokesforge_persistence::save(&single_sheet_project(), &other).unwrap();
+        state.dispatch(Action::Save);
+        let sheet1 = sheet_named(state.tree(), "Sheet1");
+        let time = column_id(&state, sheet1, "Time");
+        type_in_cell(&mut state, time, 1, "77");
+        state.dispatch(match gesture {
+            "quit" => Action::Quit {
+                pending_edits: false,
+            },
+            "new" => Action::NewProject {
+                pending_edits: false,
+            },
+            _ => Action::OpenProject {
+                path: other.display().to_string(),
+                pending_edits: false,
+            },
+        });
+        assert!(state.unsaved_pending().is_some(), "{gesture}: asks");
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+        assert_eq!(gesture == "quit", state.take_quit_ready(), "{gesture}");
+        let back = stokesforge_persistence::load(&file).unwrap();
+        assert_eq!(
+            stokesforge_app_state::state::cell_text_in(back.tree(), time, 1),
+            "77",
+            "{gesture}: the file holds the entry"
+        );
+    }
+}
+
+#[test]
+fn cancel_in_unsaved_changes_leaves_the_typed_value_committed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::Save);
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    type_in_cell(&mut state, time, 1, "77");
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+    assert!(!state.take_quit_ready());
+    assert_eq!(state.cell_text(time, 1), "77");
+    state.dispatch(Action::Undo);
+    assert_eq!(state.cell_text(time, 1), "0.5");
+}
+
+#[test]
+fn a_refused_entry_is_left_out_of_the_save_and_stays_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("projet.stf");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    type_in_cell(&mut state, time, 1, "1e400");
+    assert!(state.cell_edit_refusal().is_some());
+    state.dispatch(Action::Save);
+    assert!(file.is_file(), "the save proceeds");
+    assert!(state.editing().is_some(), "the refused entry stays open");
+    let back = stokesforge_persistence::load(&file).unwrap();
+    assert_eq!(
+        stokesforge_app_state::state::cell_text_in(back.tree(), time, 1),
+        "0.5"
+    );
+}
+
+#[test]
+fn an_untouched_entry_on_a_saved_project_does_not_stop_quit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::Save);
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time = column_id(&state, sheet1, "Time");
+    state.begin_edit(time, 1);
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_none(), "nothing to ask");
+    assert!(state.take_quit_ready());
+}

@@ -38,7 +38,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use stokesforge_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, WindowMeta};
-use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Tree, ValueBlock};
+use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Staleness, Tree, ValueBlock};
 use stokesforge_plot::{PlotSpec, SavedColors};
 
 use crate::command::Command;
@@ -620,9 +620,10 @@ impl History {
     /// not an error. `Err(MacroOpen)` if a macro is open.
     ///
     /// An error returned while undoing a `Data` entry should not
-    /// happen (the LIFO invariant guarantees the state is the expected one).
-    /// If it does, the only guarantee is that **the entry was not
-    /// moved between stacks**: the tree itself may be half-undone.
+    /// happen (the LIFO invariant guarantees the state is the expected one),
+    /// except over a derived column, which is made to fit (see
+    /// [`History::abort_macro`]). If it does, the only guarantee is that **the
+    /// entry was not moved between stacks**: the tree itself may be half-undone.
     pub fn undo(&mut self, project: &mut Project) -> CommandResult<bool> {
         if self.in_macro() {
             return Err(CommandError::MacroOpen("undo"));
@@ -765,9 +766,13 @@ impl History {
     /// drops it. An aborted nested macro does **not** touch what the parent
     /// macro has already applied. `Err(NotInMacro)` otherwise.
     ///
-    /// If an undo fails along the way, the error comes up and the macro
-    /// is already removed: the tree may then be half-undone (same
-    /// reservation as [`History::undo`]).
+    /// Abort always finishes: every entry is reverted, in reverse order, even
+    /// after one of them failed, the macro is removed, and the first error (if
+    /// any) is returned at the end. The tree may then be half-undone for the
+    /// entry that failed (same reservation as [`History::undo`]), but never
+    /// for the others, and the history is left consistent. A derived column
+    /// (formula or calculation output) that no longer fits a delta is made to
+    /// fit instead of failing, see the module's "derived columns" helpers.
     ///
     /// An aborted macro leaves **no** trace, including on redo:
     /// when the **outermost** macro is aborted, the redo stack saved at
@@ -779,13 +784,16 @@ impl History {
         let Some((_, entries)) = self.macros.pop() else {
             return Err(CommandError::NotInMacro);
         };
+        let mut first_error = None;
         for pinned in entries.iter().rev() {
-            Self::revert(project, &pinned.entry)?;
+            if let Err(error) = Self::revert(project, &pinned.entry) {
+                first_error.get_or_insert(error);
+            }
         }
         if self.macros.is_empty() {
             self.restore_saved_redo();
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     /// True if at least one macro is open.
@@ -1577,7 +1585,8 @@ impl History {
                 plots,
             } => {
                 for column in columns {
-                    project.delete_column_rows(*column, *at, *count)?;
+                    let at = clamp_on_derived(project, *column, *at);
+                    project.delete_column_rows(*column, at, *count)?;
                 }
                 for (graph, before, _) in plots {
                     project.set_plot_spec(*graph, before.clone())?;
@@ -1588,8 +1597,7 @@ impl History {
                 at, removed, plots, ..
             } => {
                 for (column, block) in removed {
-                    project.insert_column_rows(*column, *at, block.len())?;
-                    project.set_values(*column, *at, block.clone())?;
+                    restore_block(project, *column, *at, block)?;
                 }
                 for (graph, before, _) in plots {
                     project.set_plot_spec(*graph, before.clone())?;
@@ -1598,8 +1606,7 @@ impl History {
             }
             DataDelta::DeleteCells { at, removed, .. } => {
                 for (column, block) in removed {
-                    project.insert_column_rows(*column, *at, block.len())?;
-                    project.set_values(*column, *at, block.clone())?;
+                    restore_block(project, *column, *at, block)?;
                 }
                 Ok(())
             }
@@ -1668,7 +1675,8 @@ impl History {
                 plots,
             } => {
                 for column in columns {
-                    project.insert_column_rows(*column, *at, *count)?;
+                    let at = clamp_on_derived(project, *column, *at);
+                    project.insert_column_rows(*column, at, *count)?;
                 }
                 for (graph, _, after) in plots {
                     project.set_plot_spec(*graph, after.clone())?;
@@ -1682,7 +1690,8 @@ impl History {
                 // only the columns actually affected the first time
                 // must be affected again.
                 for (column, block) in removed {
-                    project.delete_column_rows(*column, *at, block.len())?;
+                    let at = clamp_on_derived(project, *column, *at);
+                    project.delete_column_rows(*column, at, block.len())?;
                 }
                 for (graph, _, after) in plots {
                     project.set_plot_spec(*graph, after.clone())?;
@@ -1694,7 +1703,8 @@ impl History {
                 // columns actually affected the first time are affected
                 // again.
                 for (column, block) in removed {
-                    project.delete_column_rows(*column, *at, block.len())?;
+                    let at = clamp_on_derived(project, *column, *at);
+                    project.delete_column_rows(*column, at, block.len())?;
                 }
                 Ok(())
             }
@@ -1943,6 +1953,97 @@ fn write_row_specs(
         project.set_plot_spec(*graph, after.clone())?;
     }
     Ok(moved)
+}
+
+// ===========================================================================
+// Derived columns (#448)
+// ===========================================================================
+//
+// The formula pass runs outside the history, after every command. Undoing or
+// redoing a macro replays all its data deltas in a row with no pass between
+// them, so a delta's block type or row position can no longer fit a column the
+// pass rewrote (a formula column retyped or resized, the output of a
+// calculation). Such a column holds nothing the user typed: the next pass
+// rewrites it from its source. So, on a misfit only, it is made to fit and the
+// exact path is taken. An ordinary column stays exact and still fails.
+
+/// True if `column` is computed: a formula column or the output of a calculation.
+/// Read only on a misfit, so the fitting path stays bit-for-bit exact.
+fn is_derived(project: &Project, column: NodeId) -> bool {
+    let tree = project.tree();
+    let formula = tree
+        .get(column)
+        .ok()
+        .and_then(|node| node.as_column())
+        .is_some_and(|c| c.meta().formula.is_some());
+    formula || tree.calculation_of_column(column).is_some()
+}
+
+/// Type and length of a column, `None` if it is not one.
+fn column_shape(project: &Project, column: NodeId) -> Option<(ColumnType, usize)> {
+    let target = project.tree().get(column).ok()?.as_column()?;
+    Some((target.column_type(), target.len()))
+}
+
+/// On a misfit of the output of a **manual** calculation (its
+/// "Recalculate automatically" box is off), says so: the output no longer
+/// matches its sources and nothing will rerun it. `Failed` is kept, as the
+/// recalculation's own "mark stale" does. An automatic calculation gets no mark:
+/// its next pass recomputes it.
+fn mark_manual_output_stale(project: &mut Project, column: NodeId) {
+    let Some((id, _)) = project.tree().calculation_of_column(column) else {
+        return;
+    };
+    let Some(calc) = project.tree().calculation(id) else {
+        return;
+    };
+    if !calc.auto_recalc && !matches!(calc.stale, Some(Staleness::Failed(_))) {
+        let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+    }
+}
+
+/// `at`, or the length of `column` when `at` is past its end and the column is
+/// derived (a manual calculation's output is then marked out of date). A call
+/// with a fitting `at` reads nothing but the length.
+fn clamp_on_derived(project: &mut Project, column: NodeId, at: usize) -> usize {
+    match column_shape(project, column) {
+        Some((_, len)) if at > len && is_derived(project, column) => {
+            mark_manual_output_stale(project, column);
+            len
+        }
+        _ => at,
+    }
+}
+
+/// Puts `block` back at `at` in `column`: insert the rows, write the values.
+/// A derived column that does not fit (block type, or `at` past its end) is
+/// first retyped and padded; every primitive draws a fresh version, so the
+/// next pass rewrites the column.
+fn restore_block(
+    project: &mut Project,
+    column: NodeId,
+    at: usize,
+    block: &ValueBlock,
+) -> CoreResult<()> {
+    if let Some((column_type, len)) = column_shape(project, column) {
+        let misfit = !block.fits(column_type) || at > len;
+        if misfit && is_derived(project, column) {
+            mark_manual_output_stale(project, column);
+            if !block.fits(column_type) {
+                let target = match block {
+                    ValueBlock::Float(_) => ColumnType::Numeric,
+                    ValueBlock::Mixed(_) => ColumnType::Mixed,
+                };
+                project.set_column_type(column, target)?;
+            }
+            if at > len {
+                project.set_length(column, at)?;
+            }
+        }
+    }
+    project.insert_column_rows(column, at, block.len())?;
+    project.set_values(column, at, block.clone())?;
+    Ok(())
 }
 
 fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, ColumnValues)> {

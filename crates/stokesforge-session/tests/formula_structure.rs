@@ -2296,12 +2296,11 @@ fn add_folder(h: &SessionHandle, name: &str) {
     .expect("unrelated command");
 }
 
-/// (#430) The link of a transposed sheet records the version of each source
-/// column it read, formula columns included. A reload (whose first pass
-/// rewrites every formula column and renumbers it, same values), an unrelated
-/// command and an undo of an unrelated edit must not make it look stale. The
-/// first pass after a load trusts a link that was up to date in the file and
-/// whose inputs kept their type and values (`trust_loaded_transposes`).
+/// (#430, #439) The link of a transposed sheet records the version of each
+/// source column it read, formula columns included. A reload, an unrelated
+/// command and an undo of an unrelated edit must not make it look stale: the
+/// recalculation pass that recomputes a formula column to the same content
+/// writes nothing, so the column keeps its version, in both modes.
 #[test]
 fn a_transposed_sheet_over_a_formula_column_is_not_stale_after_reload_or_unrelated_commands() {
     let (_s, h) = spawn(transposable(), FormulaRecalc::Targeted);
@@ -2378,13 +2377,12 @@ fn a_link_whose_formula_input_really_changes_on_load_is_stale() {
     assert!(link_state(&h, source).stale, "inputs changed on load");
 }
 
-/// (#430) The trust is one pass only, and in both modes: Full rewrites the
-/// formula columns on every pass, so after the load an unrelated command
-/// makes the link stale again (accepted limit, the oracle only).
+/// (#439) A link up to date in the file stays up to date through the first
+/// pass and every later one, in both modes: the pass keeps the version of a
+/// formula column it recomputes to the same content, so nothing is "trusted
+/// for one pass" any more (the Full oracle used to restamp at the next pass).
 #[test]
-fn the_link_trust_after_load_is_one_pass_only() {
-    // A Full session restamps at every pass, so the file is written by a
-    // Targeted one (link up to date in it) and loaded by a Full one.
+fn a_link_up_to_date_in_the_file_stays_so_after_load_and_an_unrelated_command() {
     let (_t, writer) = spawn(transposable(), FormulaRecalc::Targeted);
     let source = node(&snap(&writer).tree, "[Book1]Sheet1");
     writer
@@ -2393,17 +2391,294 @@ fn the_link_trust_after_load_is_one_pass_only() {
             rows: vec![0, 1],
         })
         .expect("transpose");
-    let dir = scratch("transpose-one-pass");
+    let dir = scratch("transpose-stays-fresh");
     let path = dir.path().join("t.stf");
     writer.save(&path).expect("save");
-    let (_s, h) = spawn(Project::new("Other").expect("project"), FormulaRecalc::Full);
-    h.load(&path).expect("load");
-    assert!(!link_state(&h, source).stale, "trusted on the load pass");
-    add_folder(&h, "Later");
+    for mode in BOTH {
+        let (_s, h) = spawn(Project::new("Other").expect("project"), mode);
+        h.load(&path).expect("load");
+        assert!(!link_state(&h, source).stale, "{mode:?}: on the load pass");
+        add_folder(&h, "Later");
+        assert!(
+            !link_state(&h, source).stale,
+            "{mode:?}: after an unrelated command"
+        );
+    }
+}
+
+/// True if the root holds a folder called `name`.
+fn has_folder(h: &SessionHandle, name: &str) -> bool {
+    let t = snap(h).tree;
+    t.child_by_name(t.root(), name).expect("root").is_some()
+}
+
+/// The two gestures that must store no history entry over a link that is up to
+/// date: transposing the same rows again, and recalculating the link.
+fn run_a_noop_over_an_up_to_date_link(
+    mode: FormulaRecalc,
+    noop: impl Fn(&SessionHandle, NodeId, NodeId),
+) {
+    let (_s, h) = spawn(transposable(), mode);
+    let source = node(&snap(&h).tree, "[Book1]Sheet1");
+    h.execute(Command::TransposeRows {
+        source,
+        rows: vec![0, 1],
+    })
+    .expect("transpose");
+    let sheet = snap(&h).tree.transposed_from(source).expect("link").0;
+    add_folder(&h, "Between");
+    noop(&h, source, sheet);
+    h.undo().expect("undo");
     assert!(
-        link_state(&h, source).stale,
-        "Full restamps on the next pass (accepted limit)"
+        !has_folder(&h, "Between"),
+        "{mode:?}: the undo took back the folder, the gesture before it stored nothing"
     );
+    assert!(
+        snap(&h).tree.node(sheet).is_some(),
+        "{mode:?}: the transposed sheet is still there"
+    );
+    assert!(!link_state(&h, source).stale, "{mode:?}: not stale");
+}
+
+/// (#439) `Transpose, AddFolder, Transpose, Undo`: the second transpose finds
+/// nothing to do and stores no entry, in Full as in Targeted, so the undo
+/// takes back the folder. Witness: a pass that always writes renumbers the
+/// formula column, the link reads stale and the second transpose stores an
+/// entry (Full used to).
+#[test]
+fn transposing_again_over_an_up_to_date_link_stores_nothing() {
+    for mode in BOTH {
+        run_a_noop_over_an_up_to_date_link(mode, |h, source, _sheet| {
+            h.execute(Command::TransposeRows {
+                source,
+                rows: vec![0, 1],
+            })
+            .expect("transpose again");
+        });
+    }
+}
+
+/// (#439) `Transpose, AddFolder, RecalculateTranspose, Undo`: same.
+#[test]
+fn recalculating_an_up_to_date_link_stores_nothing() {
+    for mode in BOTH {
+        run_a_noop_over_an_up_to_date_link(mode, |h, _source, sheet| {
+            h.execute(Command::RecalculateTranspose { sheet })
+                .expect("recalculate");
+        });
+    }
+}
+
+/// (#439) A user's write draws a fresh version even when it changes nothing:
+/// a command writing the value a cell already holds makes the link stale, like another
+/// number would; recalculating clears it. Witness: no fresh version on an
+/// identical write in `Project::set_values`.
+#[test]
+fn writing_the_same_value_in_the_source_makes_the_link_stale() {
+    for mode in BOTH {
+        let (_s, h) = spawn(transposable(), mode);
+        let source = node(&snap(&h).tree, "[Book1]Sheet1");
+        h.execute(Command::TransposeRows {
+            source,
+            rows: vec![0, 1],
+        })
+        .expect("transpose");
+        assert!(!link_state(&h, source).stale, "{mode:?}: fresh");
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[10.0])).expect("write 10 on 10");
+        assert!(
+            link_state(&h, source).stale,
+            "{mode:?}: stale after writing the same value"
+        );
+        let sheet = snap(&h).tree.transposed_from(source).expect("link").0;
+        h.execute(Command::RecalculateTranspose { sheet })
+            .expect("recalculate");
+        assert!(!link_state(&h, source).stale, "{mode:?}: cleared");
+    }
+}
+
+/// (#439) A change then Ctrl+Z, or a change then the old value typed back, leaves
+/// the link stale: the accepted limit (a number never designates two contents,
+/// so an undone or restored column is a new number).
+#[test]
+fn a_changed_then_restored_source_stays_stale() {
+    for mode in BOTH {
+        let (_s, h) = spawn(transposable(), mode);
+        let source = node(&snap(&h).tree, "[Book1]Sheet1");
+        h.execute(Command::TransposeRows {
+            source,
+            rows: vec![0, 1],
+        })
+        .expect("transpose");
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("change");
+        h.undo().expect("undo the change");
+        assert!(
+            link_state(&h, source).stale,
+            "{mode:?}: undone, still stale"
+        );
+        h.execute(enter(b, 0, &[12.0])).expect("change");
+        h.execute(enter(b, 0, &[10.0])).expect("put back by hand");
+        assert!(
+            link_state(&h, source).stale,
+            "{mode:?}: put back, still stale"
+        );
+    }
+}
+
+/// `Sheet1`: Y column B [10,20,30] (x' 1) and D = max(Sheet2!B) (x' 3), a
+/// formula that reads **another sheet**; `Sheet2`: P, Q [4,9,2] (its column B).
+fn reading_another_sheet() -> Project {
+    let mut p = Project::new("P").expect("project");
+    let root = p.root();
+    let book = add_book(&mut p, root, "Book1");
+    let s1 = first_sheet(&p, book);
+    let s2 = p.add_worksheet(book, Some("Sheet2")).expect("Sheet2");
+    add_col(&mut p, s2, "P", &[1.0, 2.0, 3.0]);
+    add_col(&mut p, s2, "Q", &[4.0, 9.0, 2.0]);
+    let b = add_col(&mut p, s1, "B", &[10.0, 20.0, 30.0]);
+    let d = add_col(&mut p, s1, "D", &[]);
+    set_f(&mut p, d, "max(Sheet2!B)");
+    for (col, x) in [(b, 1.0), (d, 3.0)] {
+        let meta = column(p.tree(), col).meta().clone();
+        p.set_column_meta(
+            col,
+            ColumnMeta {
+                x_prime: Some(x),
+                ..meta
+            },
+        )
+        .expect("x'");
+    }
+    p
+}
+
+/// (#439) A formula recomputed to the same numbers keeps its version, so the
+/// link over it is not stale; recomputed to other numbers, it is. Witnesses:
+/// a pass that always writes (the version moves, stale); a pass that compares
+/// the lengths only (the new max is never written, so the values assertion
+/// fails).
+#[test]
+fn a_formula_recomputed_to_the_same_numbers_does_not_make_the_link_stale() {
+    for mode in BOTH {
+        let (_s, h) = spawn(reading_another_sheet(), mode);
+        let source = node(&snap(&h).tree, "[Book1]Sheet1");
+        let d = colat(&snap(&h).tree, "[Book1]Sheet1", "D");
+        let q = colat(&snap(&h).tree, "[Book1]Sheet2", "Q");
+        assert_eq!(nums(&snap(&h).tree, d), some(&[9.0; 3]), "{mode:?}");
+        h.execute(Command::TransposeRows {
+            source,
+            rows: vec![0],
+        })
+        .expect("transpose");
+        assert!(!link_state(&h, source).stale, "{mode:?}: fresh");
+
+        // An edit that does not change the max: D is evaluated, not renumbered.
+        let before = snap(&h);
+        h.execute(enter(q, 2, &[1.0])).expect("lower the 3rd");
+        let after = snap(&h);
+        assert_eq!(
+            after.formula_evaluations - before.formula_evaluations,
+            1,
+            "{mode:?}: D read the edited column and was evaluated"
+        );
+        assert_eq!(nums(&after.tree, d), some(&[9.0; 3]), "{mode:?}");
+        assert_eq!(
+            column(&before.tree, d).version(),
+            column(&after.tree, d).version(),
+            "{mode:?}: same numbers, same version"
+        );
+        assert!(!link_state(&h, source).stale, "{mode:?}: not stale");
+
+        // An edit that changes it.
+        h.execute(enter(q, 1, &[20.0])).expect("raise the max");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, d), some(&[20.0; 3]), "{mode:?}");
+        assert_ne!(
+            column(&after.tree, d).version(),
+            column(&t, d).version(),
+            "{mode:?}: other numbers, fresh version"
+        );
+        assert!(link_state(&h, source).stale, "{mode:?}: stale");
+    }
+}
+
+/// (#439) A formula result that changes only by the sign of a zero is another
+/// content (bit for bit, like `ColumnValues`): it is written with a fresh
+/// version. Witness: comparing as IEEE numbers (0.0 == -0.0) skips the write.
+#[test]
+fn a_formula_going_from_zero_to_negative_zero_is_written_with_a_fresh_version() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s = first_sheet(&p, book);
+        add_col(&mut p, s, "A", &[0.0, 0.0, 0.0]);
+        add_col(&mut p, s, "B", &[1.0, 1.0, 1.0]);
+        let c = add_col(&mut p, s, "C", &[]);
+        set_f(&mut p, c, "A*B");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let (c, b) = (
+            colat(&t, "[Book1]Sheet1", "C"),
+            colat(&t, "[Book1]Sheet1", "B"),
+        );
+        let bits = |t: &Tree| -> Vec<u64> {
+            nums(t, c)
+                .iter()
+                .map(|v| v.expect("number").to_bits())
+                .collect()
+        };
+        assert_eq!(bits(&t), vec![0.0f64.to_bits(); 3], "{mode:?}");
+        let v0 = column(&t, c).version();
+        h.execute(enter(b, 0, &[-1.0, -1.0, -1.0]))
+            .expect("negate B");
+        let t = snap(&h).tree;
+        assert_eq!(
+            bits(&t),
+            vec![(-0.0f64).to_bits(); 3],
+            "{mode:?}: -0.0 written"
+        );
+        assert_ne!(column(&t, c).version(), v0, "{mode:?}: fresh version");
+    }
+}
+
+/// (#439) The pass keeps the number of a formula column it recomputes to the
+/// same content (here after a change of the formula text that gives the same
+/// numbers), and restores a column a user's gesture damaged with a fresh
+/// version. A direct write of values into a formula column is refused
+/// (`FormulaColumnReadOnly`), so the damage is a `DeleteCells`. Both modes
+/// number alike.
+#[test]
+fn the_pass_keeps_the_number_of_an_identical_formula_and_restores_a_damaged_one() {
+    let mut deltas = Vec::new();
+    for mode in BOTH {
+        let (_s, h) = spawn(book_with_c(), mode);
+        let t = snap(&h).tree;
+        let c = colat(&t, "[Book1]Sheet1", "C");
+        let v0 = column(&t, c).version();
+        let before = snap(&h).formula_evaluations;
+        // `B+A` gives the numbers `A+B` gave: evaluated, same content, same number.
+        h.execute(set_meta_formula(&t, c, "B+A"))
+            .expect("other text");
+        let s = snap(&h);
+        assert_eq!(nums(&s.tree, c), some(&[11.0, 22.0, 33.0]), "{mode:?}");
+        assert_eq!(s.formula_evaluations - before, 1, "{mode:?}: evaluated");
+        assert_eq!(column(&s.tree, c).version(), v0, "{mode:?}: same number");
+        // A gesture damages the column: the pass restores it, new number.
+        h.execute(Command::DeleteCells {
+            columns: vec![c],
+            at: 0,
+            count: 1,
+        })
+        .expect("damage");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, c), some(&[11.0, 22.0, 33.0]), "{mode:?}: restored");
+        let restored = column(&t, c).version();
+        assert!(restored > v0, "{mode:?}: fresh number");
+        deltas.push(restored - v0);
+    }
+    assert_eq!(deltas[0], deltas[1], "the twins number alike");
 }
 
 /// (#430) Regression check: after a load, editing a cell of another sheet and

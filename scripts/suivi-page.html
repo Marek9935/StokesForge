@@ -207,39 +207,66 @@ const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
 function cardLine(c,tests,qcms){
   const members=new Set([c.issue].concat(c.issues||[],((c.package&&c.package.subs)||c.subs||[]).map(s=>s.n)).filter(n=>n!=null).map(Number));
   const qcmOpen=(qcms||[]).some(q=>members.has(Number(q.issue)));
-  const todo=(tests||[]).filter(t=>(t.status||'todo')==='todo'&&members.has(Number(t.n!=null?t.n:t.issue))).length;
+  const mine=(tests||[]).filter(t=>members.has(Number(t.n!=null?t.n:t.issue)));
+  const todo=mine.filter(t=>(t.status||'todo')==='todo').length;
+  const tried=mine.filter(t=>t.try);      // merged entries (no `try`) do not count
+  const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok');
   const held=c.held_by||[];
   const note=typeof c.waiting==='string'?c.waiting.trim():'';
   const noteYou=note!==''&&c.wait_kind==='you';
   const parts=[];
   if(qcmOpen)parts.push('répondre au questionnaire');
   if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
+  const requested=readyToMerge&&c.merge_requested===true;      // a request voided by the server arrives false
+  if(readyToMerge&&!requested)parts.push('lancer la fusion');
   if(noteYou)parts.push(note);
   const you=parts.length>0;
   const agent=held.includes('agent');
   const idle=(c.agent_idle_min==null||isNaN(Number(c.agent_idle_min)))?null:Number(c.agent_idle_min);
   const stopped=idle!==null&&idle>=IDLE_MIN;
+  const known=c.listening!==undefined;      // an old server does not send it: keep the old texts
+  const hearing=known&&c.listening===true;
+  const away=idle===null||stopped;          // the agent is not visibly at work
   let text,also='';
   if(you){
     text='À toi : '+parts.join(' · ');
-    if(agent)also=idle===null?'session ouverte':stopped?'agent à l’arrêt, rien ne bouge sans toi':'l’agent travaille';
+    if(parts.length===1&&readyToMerge&&!requested)also='';
+    else if(agent){
+      if(hearing&&away)also='l’agent écoute, il repart à ta réponse';
+      else if(known&&stopped)also='agent à l’arrêt, écris-lui après ta réponse';
+      else also=idle===null?'session ouverte':stopped?'agent à l’arrêt, rien ne bouge sans toi':'l’agent travaille';
+    }
     else if(!held.includes('legacy'))also='rien ne bouge sans toi';
   }else if(agent){
-    text=idle===null?'Session ouverte':!stopped?'L’agent travaille':
+    text=hearing&&away?'L’agent écoute':idle===null?'Session ouverte':!stopped?'L’agent travaille':
       'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
   }
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
+  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:noteYou?'':note,mergeReady:readyToMerge,mergeRequested:requested,mergeNote:''};
   else text='En pause';
-  return {user:you,text:text,also:also,note:noteYou?'':note};
+  return {user:you,text:text,also:also,note:noteYou?'':note,mergeReady:readyToMerge,mergeRequested:requested,
+          mergeNote:requested?'Fusion demandée'+(c.listening===true?'':' · l’agent la lira à sa reprise'):''};
+}
+/* What the merge area shows, from cardLine's fields: the button before the click, the grey note after. */
+function mergeUi(l){
+  if(l.mergeRequested)return {button:false,note:l.mergeNote};
+  if(l.mergeReady)return {button:true,note:''};
+  return {button:false,note:''};
 }
 /*CARDLINE-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
-  if(!l.text&&!l.note)return {user:false,node:null};
+  const mg=mergeUi(l);
+  if(!l.text&&!l.note&&!mg.button&&!mg.note)return {user:false,node:null};
   const w=el('div','wline');
   if(l.text)w.appendChild(el('span','wait'+(l.user?'':' ag'),l.text));
   if(l.also)w.appendChild(el('span','what',l.also));
   if(l.note)w.appendChild(el('span','what',l.note));
+  if(mg.note)w.appendChild(el('span','what',mg.note));
+  if(mg.button){
+    const b=el('button','save mergebtn','Fusionner');b.type='button';b.id='merge-'+c.issue;
+    b.onclick=()=>{b.disabled=true;askMerge(c.issue);};w.appendChild(b);
+  }
   return {user:l.user,node:w};
 }
 function agoText(iso){
@@ -451,6 +478,13 @@ async function send(x,patch){
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
   }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';}
+  etag=null;load();
+}
+async function askMerge(n){
+  try{
+    const r=await fetch('/api/issue/'+encodeURIComponent(n)+'/merge',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Fusion non demandée : les essais ne sont plus tous OK, ou le serveur ne répond pas.';}
   etag=null;load();
 }
 function startPolling(){if(timer==null)timer=setInterval(load,2000);}

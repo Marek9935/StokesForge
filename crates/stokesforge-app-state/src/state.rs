@@ -6994,7 +6994,11 @@ impl AppState {
             self.fail(tr!("error-refresh-failed", failures = failures.join(" ; ")));
             return;
         }
-        if self.handle.begin_macro(MacroKind::RefreshFromFile).is_err() {
+        if self
+            .handle
+            .begin_macro(MacroKind::RefreshFromSource)
+            .is_err()
+        {
             self.fail(tr!("error-refresh-group"));
             return;
         }
@@ -8062,6 +8066,30 @@ impl AppState {
         }
     }
 
+    /// Commits the entries still open (cell, header, note) through their
+    /// usual commands, so that a save or a gesture that may replace the
+    /// project takes what is being typed (#465, #466). An entry the grid
+    /// would refuse stays open and is left out. Never relies on the grid
+    /// losing focus: a blocking dialog clears that action. Returns whether an
+    /// entry was committed. Public so the shell can call it on the view state
+    /// of a detached window (D1 of #465).
+    pub fn commit_open_entries(&mut self) -> bool {
+        let mut committed = false;
+        if self.editing.is_some() && self.cell_edit_refusal().is_none() {
+            self.commit_edit();
+            committed = true;
+        }
+        if self.header_editing.is_some() && self.header_edit_issue().is_none() {
+            self.commit_header_edit();
+            committed = true;
+        }
+        if self.note_editing.is_some() {
+            self.commit_note_edit();
+            committed = true;
+        }
+        committed
+    }
+
     /// Saves; then carries on with the gesture that was waiting for the save
     /// (Save answer, S-F4). A failure is a serious failure (S-M8): blocking
     /// dialog, and the pending gesture is abandoned.
@@ -8074,6 +8102,7 @@ impl AppState {
             self.fail(tr!("error-save-script-running"));
             return false;
         }
+        self.commit_open_entries();
         // Overwriting the source file of a read that discarded data would
         // delete it from disk: ask first (#309, F3). Waiting is not a
         // failure; `after_save` stays pending the answer.
@@ -8641,6 +8670,7 @@ impl AppState {
         if gesture == UnsavedGesture::NewProject && !self.can_new_project() {
             return;
         }
+        self.commit_open_entries();
         if self.has_unsaved_work(pending_edits) {
             self.unsaved_pending = Some(gesture);
         } else {

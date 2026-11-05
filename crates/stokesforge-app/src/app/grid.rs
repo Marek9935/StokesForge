@@ -2849,6 +2849,12 @@ fn edit_cell_widget(
         .filter(|edit| edit.column == column && edit.row == row)
         .map(|edit| edit.buffer.clone());
     if let Some(text) = pending {
+        if matches!(end, inplace_edit::EditEnd::Elsewhere) {
+            // Through the state, not an action: a blocking dialog that took the
+            // focus empties the actions of the frame (#465, T1).
+            state.commit_edit();
+            return;
+        }
         state.cancel_edit();
         if enter && !shift {
             // The handler of `CommitCellAndAdvance` selects the row below once the
@@ -3879,11 +3885,11 @@ mod tests {
         assert!(!bench.neighbor_focused);
     }
 
-    /// Tab validated in a cell pushes the entry to the model
-    /// (`Action::CommitCell`) in the very frame of the key: the typed value is not
-    /// lost along the way.
+    /// Tab validated in a cell puts the entry in the model in the very frame of
+    /// the key: the typed value is not lost along the way. The focus loss that
+    /// Tab causes ends the entry through the state (#465, T1).
     #[test]
-    fn tab_during_editing_pushes_the_entry_in_the_frame_of_the_key() {
+    fn tab_during_editing_commits_the_entry_in_the_frame_of_the_key() {
         let mut bench = Bench::new();
         bench.click_on("101");
         bench.image(vec![egui::Event::Text("7".to_string())]);
@@ -3898,14 +3904,38 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             },
         ]);
-        let first_column = bench.columns[0];
-        assert!(
-            bench.actions.iter().any(|action| matches!(
-                action,
-                Action::CommitCell { column, row: 0, text } if *column == first_column && text == "7"
-            )),
+        assert_eq!(
+            bench.state.cell_text(bench.columns[0], 0),
+            "7",
             "the entry must go to the model: {:?}",
             bench.actions
+        );
+    }
+
+    /// #465, T1: a click elsewhere ends the entry through the state, in the frame
+    /// of the click. An action would be emptied by a blocking dialog that took
+    /// the focus (`blocking_confirmations`) and the typed value would be lost.
+    #[test]
+    fn a_click_elsewhere_commits_the_cell_through_the_state() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.image(vec![egui::Event::Text("7".to_string())]);
+        bench.image(Vec::new());
+        assert!(
+            bench.state.editing().is_some(),
+            "witness: the entry is open"
+        );
+        bench.seen.clear();
+        click_at(&mut bench, egui::pos2(690.0, 410.0));
+        assert!(bench.state.editing().is_none(), "the entry ended");
+        assert_eq!(bench.state.cell_text(bench.columns[0], 0), "7");
+        assert!(
+            !bench
+                .seen
+                .iter()
+                .any(|action| matches!(action, Action::CommitCell { .. })),
+            "no action to lose: {:?}",
+            bench.seen
         );
     }
 

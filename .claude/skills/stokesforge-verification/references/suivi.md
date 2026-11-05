@@ -12,7 +12,13 @@ Read from step 6 to 8 of `stokesforge-verification`, and by `stokesforge-feature
 | `qcm/<id>/data.js`, `answers/<code>.json` | the decisions (injected into the form template when served) and one record per answered card |
 | `removed-tests/` | archive of entries removed by `test remove`; numbers are not reused |
 | `ended/<session>` | touched by the `SessionEnd` hook |
+| `heard/<root>.json` | `{session, seen}`: the answers already reported to the agent (written only by `suivi.py`) |
+| `merge/<root>.json` | `{at, key}`: the user's merge request from the card button; removed by `test merged` |
+| `waits/<root>.json`, `waits/log` | the registered wait `{pid, pid_start, session, started}`; SIGTERM/SIGHUP log |
 | `control.json` | result of the last `scripts/suivi.py check` |
+| `labels.json` | state of the GitLab labels pass (#467): checked_at, ok, reason, synced_at, demote, waiting |
+| `tags.json` | tags already seen (the first run seeds), tags pending, and per tag and issue what was done (comment, card id, closed) |
+| `tagwait/<n>.json` | `tag-wait` declaration: kind `rc`/`final`, jobs, human text, added_at (set by the service once the label is on GitLab) |
 | `ci.json` | last reading of the CI of `main` by the server's watcher (#452): sha, verdict, names, reason, last_red, checked_at |
 
 ## The colour rule
@@ -21,7 +27,7 @@ An issue holds its colour while (a) the Claude session that owns it is alive, or
 
 ## Decision forms, local (#441)
 
-The start and follow-up forms are posed here, not published: `python3 scripts/suivi.py qcm pose <n> data.js --title "…"` (checks and counts the cards, creates `qcm/<n>-<k>/`, prints the id and `http://127.0.0.1:8441/qcm/<id>`). The form appears in « En attente » with its progress; the user answers there (each answer is a file), then presses « J'ai fini » at the bottom of the summary, which sets `finished` and frees the colour unless something else holds it. Agents read the answers with `suivi.py qcm answers <id> [--json]` and list forms with `qcm list [--open] [--issue n]`. Template and card rules: `stokesforge-bug-report/references/decision-form.md`. The published Artifact form stays as the fallback (user away from the PC, or asked).
+The start and follow-up forms are posed here, not published: `python3 scripts/suivi.py qcm pose <n> data.js --title "…"` (checks and counts the cards, creates `qcm/<n>-<k>/`, prints the id and `http://127.0.0.1:8441/qcm/<id>`). The form appears in « En attente » with its progress; the user answers there (each answer is a file), then presses « J'ai fini » at the bottom of the summary, which sets `finished` and frees the colour unless something else holds it. Agents read the answers with `suivi.py qcm answers <id> [--json]` and list forms with `qcm list [--open] [--issue n]`. Template and card rules: `stokesforge-bug-report/references/decision-form.md`. After `qcm pose` the agent ends its turn: it is woken on the answers (§ The agent wakes). The published Artifact form stays as the fallback (user away from the PC, or asked).
 
 ## Trial checklist
 
@@ -31,8 +37,18 @@ Entries are **guided routes**, at most 5 unmerged per issue (`test add` refuses 
 
 1. Write a JSON file: one object, or a list, with `title` (« Parcours 1/3 (3 min) »), optional `intro` (first sentence: what changes), `where` (menu or window steps, English labels as on screen), `steps` (short French imperatives, each « gesture → what you must see »), `expect` (tick OK if every step showed it), `try` (`scripts/try.sh <n>`).
 2. `python3 scripts/suivi.py test add <n> entries.json` creates `tests/<n>-<k>.json`, status `todo`.
-3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Every entry ticked OK (or the user's plain OK) is the merge go-ahead. After a « Retour », fix on the branch and redo the trial: `test remove <n> <id>... [--answered]` (only your own issue or its parent, never a merged entry; an answered entry needs `--answered`, its comment is printed back and named in your report; archived in `removed-tests/`), then `test add`.
+3. The message to the user names the page and the number of entries; the terminal does not repeat the list. Ticks alone are not the go-ahead (§ The agent wakes, merge). After a « Retour », fix on the branch and redo the trial: `test remove <n> <id>... [--answered]` (only your own issue or its parent, never a merged entry; an answered entry needs `--answered`, its comment is printed back and named in your report; archived in `removed-tests/`), then `test add`.
 4. At the merge, `scripts/deliver.sh` runs `test merged <n> <commit>` (sets `commit`, removes `try`); it refuses a commit that is unknown, not on `main`, without the issue's branch while it exists, or not citing #<n>. A repeat with the same commit is « already recorded »; another commit needs `--replace <old>` (`test merged <n> <new> --replace <old>`). Any other usable change adds its entry after the merge with `test add` and a `commit` field. `test list [--issue n]` lists them.
+
+## The agent wakes (#454)
+
+After `qcm pose` or `test add` the agent launches nothing and ends its turn; it never asks the user to say they finished. A `PostToolUse` hook of `.claude/settings.json` runs `suivi.py hook-wait` after any `suivi.py` call on an issue the session owns: it waits on local files and wakes the idle agent. After a wake the agent reads the answers (`qcm answers`, `test list`) and acts; any later `suivi.py` call on the issue re-arms the wait by itself. Without an active hook, fall back to `suivi.py wait <n>` as a background Bash command. Only the session that owns the issue arms.
+
+- **Wake policy** (`should_wake`, the one place): a Retour, a comment on an OK, a finished form (« J'ai fini »), a merge request from the card button, or no `todo` left. A plain OK with entries left wakes nothing. A Retour or comment waits 180 s after the last change of any entry (`SF_SUIVI_WAIT_SETTLE`); a finished form, a merge request or no `todo` left wakes at once.
+- **Merge**: all entries OK does not merge by itself. The agent wakes, checks, announces it is ready. The go-ahead is then the button « Fusionner » on the card (card line « À toi : lancer la fusion ») or the user's word in the terminal. A click writes `merge/<root>.json`; the wait (still armed after all OK until `test merged`) wakes the agent with `#<n> merge requested on the page by the user: this is the go-ahead`, and it delivers with `scripts/deliver.sh` with no further question. Any later change of an entry (Retour, un-tick, comment) voids the request and a re-tick does not bring it back; after a click the card shows « Fusion demandée ». After a merge that changes `suivi.py`, restart the service (`systemctl --user restart stokesforge-suivi`) or the button gets a 404 from the old server.
+- **Card**: « L’agent écoute » / « il repart à ta réponse » (waiting), « écris-lui après ta réponse » (agent stopped), « Réponse reçue : lance #n » (paused, unread answer).
+- **Safety net**: `hook-news` (SessionStart, UserPromptSubmit) prints unread answers; `chantier.sh` runs `suivi.py news <n>` on a claim. A wait never holds a colour.
+- **Limits**: a closed terminal cannot be woken (the answer waits for the next `lance`); a real wait is not proven beyond a few minutes; the hook timeout is 72 h.
 
 ## Pre-trial (#452)
 
@@ -54,7 +70,7 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 
 ## Notifications (W9)
 
-`PushNotification` at three moments: start form ready, trial ready, tracking page updated. The message starts with `<square> #<n>` and carries the local link `http://127.0.0.1:8441/`.
+`PushNotification` at three moments: start form ready, trial ready, tracking page updated. A form or a trial still notifies once; the user answers on the page, not in the terminal. The message starts with `<square> #<n>` and carries the local link `http://127.0.0.1:8441/`.
 
 ## Server
 
@@ -68,6 +84,19 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 - A red stays in `last_red` (shown while the new head is pending or unknown) until a newer head is green. The watcher sends no desktop notification: the page is its only signal.
 - `ci.json` missing, corrupt, or older than 3 polls reads as unknown. The colour rule and the `pending` count do not depend on the CI.
 - Seams for tests: `SF_SUIVI_CI=off` (no thread), `SF_SUIVI_CI_POLL`, `SF_SUIVI_CI_TIMEOUT`.
+
+## GitLab labels and tag report (#467)
+
+`serve` runs a second thread (about 120 s, state `labels.json`) so the GitLab issue list shows where each issue stands. It runs **only for the real state folder**: with `SF_SUIVI_DIR` or `--state` it stays off unless `SF_SUIVI_LABELS=on` (`off` forces it off), so no test can write to GitLab.
+
+- **`en-cours` / `en-pause`**: same reading as the page (`held_by`): a live owner, an open form or a trial to tick with no agent, or `legacy` is `en-cours`; a record that holds nothing is `en-pause`; done, unstarted or no record is none. A package parent is `en-cours` while one of its sub-issues is held; a paused sub beside a held sibling is `en-pause`. The tracking state wins: a hand edit is undone at the next pass. Held to paused waits 10 minutes (`SF_SUIVI_LABELS_SETTLE`, seconds) so a `/clear` does not flap; promotion, done and closure are immediate. A closed issue loses every label of ours and is not labelled again; reopened, it is.
+- **Waiting labels**: `attente-rc` (an `-rcN` or the final tag proves it) and `attente-final` (final tag only). The label alone is the membership, so a hand-placed one works. A waiting label hides `en-pause`; `en-cours` stays if an agent resumes. The service adds one only for a `tag-wait` declaration (once) and removes them at closure.
+- **Writes**: one `PUT` per changed issue with `add_labels` / `remove_labels` (never `labels=`, which replaces the user's labels) and, for a closure, `state_event=close`. Reads per pass: the issues carrying each of our four labels, then the record numbers by `iids[]`, all `state=all`. Any failed, timed-out or empty read writes nothing and tries again at the next poll; the page and `/api/state` do not change (ETag).
+- **Tags**: the service reads `repository/tags` on GitLab each pass (never `releases`: an `-rcN` release is created then deleted). The first run only records what exists. At a new tag, each open issue with a label that tag handles (an rc tag: `attente-rc`; a final tag: both) gets a comment with its job results and, unless a job failed or lacks proof, a card in « En attente » (a trial entry without `try`: it holds no colour). The card OK closes the issue and drops both labels in one `PUT`; Retour keeps it open. A failed job: comment, label kept, no card. A later tag gives a new comment and card; never two for the same tag and issue, restart included (`tags.json`).
+- **Job results** come from the GitHub public API (`actions/runs?event=push&branch=<tag>`, no token, 60 requests per hour, read every 10 minutes while a tag is undecided; seams `SF_SUIVI_TAGJOBS_API`, `SF_SUIVI_TAGJOBS_POLL`, `SF_SUIVI_TAG_CAP`) and `pages` from the GitLab pipeline of the tag. Only the run of the tag's own commit counts. A job missing, still running, skipped or unreadable (403) is no proof; a running job or an unreadable GitHub delays the report (6 h at most). A matrix job (`name (leg)`) is ok only if every leg succeeded; a failed step of a `continue-on-error` job counts as failed. A hand-placed label has no declaration: all release jobs are reported and the card says « relis l'issue ».
+- **Declaring**: `suivi.py tag-wait <n> rc|final [--jobs a,b] [--human "…"]` (or `deliver.sh --wait-tag`), then the label appears within about 2 minutes.
+- **By hand**: `suivi.py labels sync [--dry-run]` runs one label pass (`--dry-run` prints the `PUT`s and writes nothing); `suivi.py tag-check <tag> --dry-run` reads GitLab and GitHub and prints what the service would report for that tag, writing nothing: run it before a tag. `suivi.py status` ends with the last sync (time, ok or failed with the reason) and the issues that wait.
+- **Restart rule**: the service is a user unit; after changing `scripts/suivi.py` restart it (`systemctl --user restart stokesforge-suivi.service`, see `scripts/suivi-install.sh`), else the old code keeps running.
 
 ## Migration and `legacy`
 
