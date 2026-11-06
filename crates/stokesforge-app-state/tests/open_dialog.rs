@@ -210,3 +210,29 @@ fn the_messages_of_a_detached_view_are_pulled_by_the_root_once() {
         .collect();
     assert_eq!(texts, ["clipboard unreadable", "fine"]);
 }
+
+/// #453: a message the detached view said three times in a row is one entry
+/// of its list with a count; the root takes it back as three occurrences, so
+/// its counter moves by three and its own list holds one entry counting three.
+/// Witness: the pull replaying the message once instead of `count` times.
+#[test]
+fn a_repeated_message_of_a_detached_view_is_pulled_with_its_count() {
+    let _language = i18n::test_language(Language::English);
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let book = s.state.tree().parent(s.sheet).unwrap().unwrap();
+    let mut view = s.state.fork_for_detached_view().unwrap();
+    for _ in 0..3 {
+        view.warn("clipboard unreadable".to_string());
+    }
+    let before = s.state.recorded_count();
+    let pulled = s.state.adopt_detached_book_view(&mut view, book);
+    assert_eq!(pulled.len(), 1, "one entry in the view");
+    assert_eq!(pulled[0].count, 3);
+    assert_eq!(s.state.recorded_count(), before + 3);
+    let last = s.state.status_history().last().unwrap();
+    assert_eq!(
+        (last.text.as_str(), last.count),
+        ("clipboard unreadable", 3)
+    );
+}
