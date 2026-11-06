@@ -249,13 +249,13 @@ on the pixel). A node that contains a tree must return the center of its
 row to its parent; limit: the vertical starts at the top of the body, not at the bottom
 of the parent's arrow.
 
-### Dialogs in a detached window (#457)
+### Dialogs and detached windows (#472)
 
-A dialog opened from a detached window is painted by that window, not by the root
-behind it: `app/dialog_host.rs`, rule and tests described in
-[`../windows.md`](../windows.md), "Where a dialog is painted". `main.rs` gives
-eframe an `AppHost`, which forwards `logic`, `ui` and `on_exit` to the application
-with `try_borrow_mut`; the deferred closures reach the application through it.
+A dialog opened from a detached window is painted by the root, in the main window;
+the detached window shows a band. Rule: a content feature works everywhere, a
+global feature stays in the main window. See [`../windows.md`](../windows.md),
+"Where a dialog is painted". `main.rs` hands eframe the `StokesForgeApp` itself;
+the deferred closures never reach the application (they queue requests).
 
 ### Collapsible and detached panels (#100)
 

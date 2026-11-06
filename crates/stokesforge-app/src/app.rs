@@ -142,7 +142,6 @@ mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
-mod dialog_host;
 mod dialogs;
 mod empty_state;
 mod figure_copy;
@@ -160,6 +159,8 @@ mod inplace_edit;
 mod keyboard_shortcuts_window;
 mod layout_window;
 mod list_row;
+#[cfg(test)]
+mod main_dialogs;
 #[cfg(test)]
 mod manual_pages;
 #[cfg(test)]
@@ -198,8 +199,6 @@ mod window_detach;
 mod window_placement;
 mod window_stack;
 mod workbook;
-
-pub use dialog_host::AppHost;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -440,9 +439,11 @@ pub struct StokesForgeApp {
     occlusion_reported: bool,
     /// The state released the closing: the next request is no longer held back.
     quit_confirmed: bool,
-    /// Which window paints the dialogs: the root, or the detached window the
-    /// user works in (#457, [`dialog_host`]).
-    dialog_hosting: dialog_host::HostState,
+    /// Whether a dialog was open in the main window at the end of the previous
+    /// root pass: the opening of one is announced once (#472).
+    dialog_was_open: bool,
+    /// The detached window whose action opened a dialog in this pass (#472).
+    dialog_opener: Option<egui::ViewportId>,
 }
 
 impl StokesForgeApp {
@@ -577,7 +578,8 @@ impl StokesForgeApp {
             close_requested: false,
             occlusion_reported: false,
             quit_confirmed: false,
-            dialog_hosting: dialog_host::HostState::default(),
+            dialog_was_open: false,
+            dialog_opener: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
             screenshot_delay: SCREENSHOT_SETTLE_FRAMES,
         }
@@ -652,8 +654,7 @@ impl StokesForgeApp {
 
     /// Consumes the shortcuts at the context level and turns them into actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        // A dialog hosted by a detached window blocks the main one (#457).
-        if self.state.blocking_dialog() || self.dialog_hosting.open {
+        if self.state.blocking_dialog() {
             return;
         }
         let mut save_as = false;
@@ -1113,7 +1114,6 @@ impl eframe::App for StokesForgeApp {
         );
         self.object_manager_panel(ui, active_tab, &mut actions);
         self.drain_detached_tabs(&ctx, &mut actions);
-        self.update_dialog_host(&ctx);
         self.show_workspace(
             ui,
             active_tab,
@@ -1126,14 +1126,9 @@ impl eframe::App for StokesForgeApp {
         for (tab, rect) in geometry_updates {
             self.remember_window_geometry(tab, rect);
         }
-        // A detached window that hosts the dialogs paints them in its own pass
-        // (#457); the root still keeps the geometry bookkeeping in step.
-        let _ = dialogs::take_modal_painted(&ctx);
-        if self.dialog_hosting.host.is_none() {
-            self.show_edit_dialogs(&ctx, &mut actions);
-        } else {
-            dialogs::sync_dialogs(&ctx, &self.state, &mut actions);
-        }
+        // Every dialog is painted here, by the root, whatever window the
+        // gesture that opened it came from (#472).
+        self.show_edit_dialogs(&ctx, &mut actions);
         if let Some(action) = finish_file_drop(&ctx) {
             actions.push(action);
         }
@@ -1142,8 +1137,6 @@ impl eframe::App for StokesForgeApp {
         }
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
-        self.dialog_hosting.root_painted = dialogs::take_modal_painted(&ctx);
-        self.hosted_dialog_veil(&ctx);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
         // #457: a root covered by a detached window gets no frame callback and would
         // freeze the actions of every window. Only the root opts in to the report:
@@ -1162,7 +1155,6 @@ impl eframe::App for StokesForgeApp {
         self.sync_panel_layout(&mut actions);
         self.drain_layout_actions(&mut actions);
         actions.extend(history);
-        let dispatched = !actions.is_empty();
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
@@ -1170,7 +1162,7 @@ impl eframe::App for StokesForgeApp {
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
         let changed = snapshot_stamp(self.state.snapshot()) != published_stamp;
-        self.wake_dialog_host(&ctx, dispatched, changed);
+        self.announce_opened_dialog(&ctx);
         if changed {
             // A command applied after publication wakes the viewports. The
             // detached windows get their snapshot and their wake-up now, not
@@ -1437,8 +1429,7 @@ impl StokesForgeApp {
     }
 
     /// Paints the dialogs after the CentralPanel, before the deferred application.
-    /// Returns whether the language changed.
-    fn show_edit_dialogs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
+    fn show_edit_dialogs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         // Import window (`Action::ImportFiles`, see the top doc of
         // [`import_window`]): a transient dialog, painted as long as
         // `self.state.import_state()` is `Some`, rather than one more floating
@@ -1471,7 +1462,6 @@ impl StokesForgeApp {
         full_copy_window(ctx, &self.state, actions);
         recovery_window(ctx, &self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
-        language.is_some()
     }
 
     /// Applies the stack changes only after the windows are painted.
@@ -1526,9 +1516,7 @@ impl StokesForgeApp {
             actions.clear();
             self.action_origins.clear();
         }
-        if self.dialog_hosting.host.is_none() {
-            confirmations::show(ctx, &self.state, actions);
-        }
+        confirmations::show(ctx, &self.state, actions);
     }
 
     /// A save, or a gesture that may replace the project, takes the entries
@@ -1614,7 +1602,11 @@ impl StokesForgeApp {
                 .find(|(range, _)| range.contains(&index))
                 .map(|(_, viewport)| *viewport);
             let recorded = self.state.recorded_count();
+            let was_open = self.state.open_dialog().is_some();
             let stop = self.dispatch_one(ctx, action, origin);
+            if !was_open && origin.is_some() && self.state.open_dialog().is_some() {
+                self.dialog_opener = origin;
+            }
             // `dispatch` returns nothing (invariant 10): the counter of
             // recorded messages is the only witness that this action said
             // something. A warning or an error is told in the window the
@@ -1627,6 +1619,64 @@ impl StokesForgeApp {
             }
         }
         window_band::publish_dialog(ctx, self.state.open_dialog());
+    }
+
+    /// A dialog that just opened always belongs to the main window (#472). When
+    /// the person works in a detached window (their gesture opened it, or a
+    /// message arrived on its own while they worked there), that window says so
+    /// in its band, and the main window is asked to come forward: once, here,
+    /// never on each pass. Wayland ignores `Focus`; the band and the system's
+    /// attention request are then the way to find it.
+    ///
+    /// Sending a command to the root also wakes it, which is what makes it paint
+    /// the dialog on its next pass.
+    fn announce_opened_dialog(&mut self, ctx: &egui::Context) {
+        let dialog = self.state.open_dialog();
+        let opened = dialog.is_some() && !self.dialog_was_open;
+        self.dialog_was_open = dialog.is_some();
+        let opener = self.dialog_opener.take();
+        let (true, Some(dialog)) = (opened, dialog) else {
+            return;
+        };
+        let viewport = opener.or_else(|| self.focused_detached_viewport(ctx));
+        let Some(viewport) = viewport.filter(|viewport| self.viewport_is_open(*viewport)) else {
+            return;
+        };
+        window_band::post(
+            ctx,
+            viewport,
+            stokesforge_app_state::state::open_dialog::opened_text(dialog),
+            window_band::BandLevel::Warning,
+        );
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        ctx.send_viewport_cmd_to(
+            egui::ViewportId::ROOT,
+            egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational),
+        );
+    }
+
+    /// The detached window or panel the person works in, if any.
+    fn focused_detached_viewport(&self, ctx: &egui::Context) -> Option<egui::ViewportId> {
+        let open_viewports = self
+            .detached_tabs
+            .keys()
+            .map(egui::ViewportId::from_hash_of)
+            .chain(self.pm_detached.then(project_manager::viewport_id))
+            .chain(
+                self.om_detached
+                    .then(window_detach::object_manager_viewport),
+            )
+            .chain(self.script_detached.then(window_detach::script_viewport));
+        let mut focused = open_viewports.filter(|viewport| {
+            ctx.input(|input| {
+                input
+                    .raw
+                    .viewports
+                    .get(viewport)
+                    .is_some_and(|info| info.focused == Some(true))
+            })
+        });
+        focused.next()
     }
 
     /// Shows, in the band of `viewport`, the newest warning or error recorded

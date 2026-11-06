@@ -31,7 +31,7 @@ mod demo;
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use stokesforge_app::app::{AppHost, StokesForgeApp};
+use stokesforge_app::app::StokesForgeApp;
 use stokesforge_app_state::preferences::Preferences;
 use stokesforge_app_state::startup::{self, StartupSource};
 use stokesforge_app_state::state::AppState;
@@ -128,7 +128,7 @@ fn main() -> anyhow::Result<()> {
             app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
             // The remembered layout of the panels, once, before the first frame (#148).
             app.apply_startup_panels(cc.winit_window().map(|w| w.available_monitors().count()));
-            Ok(Box::new(AppHost::new(app)))
+            Ok(Box::new(app))
         }),
     );
 

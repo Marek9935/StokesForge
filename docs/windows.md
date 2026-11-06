@@ -95,8 +95,8 @@ the interface); the content window goes through `show_window_in_layer`, an
 
 All are painted in `StokesForgeApp::show_edit_dialogs` (`app.rs`), as long as
 their state is open in `AppState`, except the blocking ones (last section).
-They are painted by the window the user works in (#457): the root, or a detached
-window while it has the focus. See "Where a dialog is painted" below.
+They are always painted by the root, whatever window the gesture came from
+(#472). See "Where a dialog is painted" below.
 
 | Window | Nature | Size | Pages or content | Opened from | Identifier, file |
 |---|---|---|---|---|---|
@@ -192,38 +192,35 @@ egui at the head of the next pass of the same viewport (a pointer move too far
 for a click, then the releases), otherwise the title stays "dragged" and every
 second grab does nothing.
 
-## Where a dialog is painted (#457)
+## Where a dialog is painted (#472)
 
-`app/dialog_host.rs`. A dialog is painted by the pass of **one** window, through
-the same code and the same `AppState`: the root, or a detached window (graph,
-workbook, Project Manager, Object Manager, console) that hosts it. The reason is
-the frame starvation of a covered root (above): a dialog painted by a root that
-runs unpainted every 100 ms would show late or never.
+Every dialog is painted by the **root** (`show_edit_dialogs`, `confirmations::show`),
+through the same code and the same `AppState`, whichever window made the gesture
+that opened it. #457 had a detached window paint its own dialogs; at the trial it
+made too many cases (the main window pulled the dialog back, the reverse did not
+exist), and #472 removed it: no `AppHost`, no host rule, no veil.
 
-- `StokesForgeApp::dialog_hosting.host` is `None` (the root paints) or a detached
-  window. While no dialog is shown it follows the focus (the root's own
-  `input.focused` first, then the latest focus a window reported); while one is
-  shown it stays. A host that is closed, reattached, dropped by a project load, or
-  smaller than `HOST_MIN_SIZE` (560 x 170: the footer must fit) falls back to the
-  root, which then paints the dialog.
-- Each detached closure ends with `dialog_host::host_pass`, with none of its locks
-  held. When it is the host it paints `show_edit_dialogs` and the confirmations,
-  then **dispatches the actions itself**: queueing them for the root would leave an
-  answered dialog painted for up to 110 ms and a second click would answer it twice.
-  The root is woken after, and the detached windows get the new snapshot at once.
-- The root skips both painters while a host exists, but still empties the actions of
-  the frame for a blocking dialog, and wakes the host after any pass that dispatched
-  something (an action such as `OpenPlotSettings` does not change the snapshot).
-- While a hosted dialog is open the root paints an invisible veil (`paint_veil`) and
-  `collect_shortcuts` stands aside, so the main window cannot change the model
-  under it. A press on the veil moves the dialog to the root: the way out when the
-  root is raised over a host that then gets no pass.
-- A dialog squeezed by a small hosting window is not remembered at that size.
-- Not covered: object properties (own viewport), `rfd` pickers, local popups.
-- The hosted window cannot be moved or resized while its dialog is open (the
-  backdrop covers its header).
-- Rule: any dialog of the application is painted through this host, never
-  directly in a closure.
+- **The rule.** A content feature works everywhere (a detached window offers what
+  the docked one does); a global feature stays in the main window. A dialog is a
+  global feature: it opens in the main window.
+- **The window of the gesture.** When a gesture made in a detached window (or a
+  message that arrived while the person worked there) opens a dialog,
+  `announce_opened_dialog` (`app.rs`) shows the orange band of that window for
+  5 seconds ("Graph Properties is open in the main window", or "A question is
+  waiting in the main window"), sends `ViewportCommand::Focus` and
+  `RequestUserAttention` to the root **once**, never on each pass, and the command
+  wakes the root, which paints the dialog on its next pass. `Focus` raises the
+  window on Windows and X11 and does nothing on Wayland (`vendor/winit`, empty
+  `focus_window`): the band, the system's attention request and Alt+Tab are the
+  way there. A refused gesture never brings the main window forward.
+- **While a dialog is open** a gesture made in a detached window is refused (#471).
+- **Covered root.** A dialog opened while the root is covered runs unpainted, like
+  the rest of the root (above), and paints in full, with its focus, when the root
+  is uncovered.
+- **The single exception: object properties** (rectangle, arrow, `graph_window.rs`)
+  stays in the window of its graph. It is a small panel of the graph, not a dialog
+  of the application, and it raises no signal.
+- Not covered: `rfd` pickers (system windows), local popups.
 
 ## Outside the catalog
 
