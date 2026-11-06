@@ -2284,7 +2284,8 @@ def build_queue_view():
                          "start": int(i.get("start") or 0)}
         return {"installed": True, "stale": d["stale"], "selected": d["selected"], "effective": d["effective"],
                 "auto": d["auto"], "why": d["why"], "modes": d["modes"], "nproc": d["nproc"],
-                "running": [job(i) for i in d["running"]], "waiting": [job(i) for i in d["waiting"]]}
+                "running": [job(i) for i in d["running"]], "waiting": [job(i) for i in d["waiting"]],
+                "profile_note": str(d.get("profile_note") or "")}
     except Exception:
         return {"installed": False}
 

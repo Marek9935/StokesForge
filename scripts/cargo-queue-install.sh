@@ -68,4 +68,5 @@ installed: $bin/cargo (copy of scripts/cargo-queue.py), $unit, block at the end 
 - Rerun this script after a change of scripts/cargo-queue.py (the copy is not updated by itself).
 - To get the mode control on the tracking page: systemctl --user restart stokesforge-suivi
 - Modes from a terminal: cargo-queue mode full|dev|background, cargo-queue status
+- FullIA also switches the power profile to performance on mains and puts the previous one back on leaving.
 MSG
