@@ -178,5 +178,5 @@ done
 suivi line-clear "$line" > /dev/null
 git worktree remove "$lwt" || die "cannot remove the line worktree $lwt"
 git merge-base --is-ancestor "refs/heads/$line" origin/main && git branch -q -D "$line"
-git push -q origin --delete "$line" 2> /dev/null || true
+git push -q origin --delete "$line" 2> /dev/null || echo "line: could not delete origin/$line: delete it by hand" >&2
 echo "line: $line landed in main as $m; issues closed, label and line removed"

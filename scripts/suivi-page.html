@@ -226,10 +226,10 @@ function lineRow(name,row){
   if(!row||typeof row!=='object')return null;
   const names=a=>(Array.isArray(a)?a:[]).join(', ');
   const v=row.verdict;
-  let cls='unknown',ci='CI inconnue sur '+name;
-  if(v==='green'){cls='green';ci='CI verte sur '+name;}
-  else if(v==='red'){cls='red';ci='CI rouge sur '+name+' : '+(names(row.names)||'cause inconnue');}
-  else if(v==='pending'){cls='pending';ci='CI en cours sur '+name;}
+  let cls='unknown',ci='CI inconnue';
+  if(v==='green'){cls='green';ci='CI verte';}
+  else if(v==='red'){cls='red';ci='CI rouge : '+(names(row.names)||'cause inconnue');}
+  else if(v==='pending'){cls='pending';ci='CI en cours';}
   const is=Array.isArray(row.issues)?row.issues:[];
   const list=is.length?is.map(i=>'#'+i.issue+(i.delivered?' livrée':' en cours')).join(' · '):'aucune issue';
   return {cls:cls,text:name+' : '+ci+' — '+list};

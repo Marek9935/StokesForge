@@ -2946,7 +2946,7 @@ class TestPage(unittest.TestCase):
         # lang: fr begin
         red = self.line_row("PostV1.1", {"verdict": "red", "names": ["fmt"], "issues": [{"issue": 7, "delivered": True}, {"issue": 8, "delivered": False}]})
         self.assertEqual(red["cls"], "red")
-        self.assertEqual(red["text"], "PostV1.1 : CI rouge sur PostV1.1 : fmt — #7 livrée · #8 en cours")
+        self.assertEqual(red["text"], "PostV1.1 : CI rouge : fmt — #7 livrée · #8 en cours")
         self.assertNotEqual(self.line_row("PostV1.1", {"verdict": "weird"})["cls"], "green")
         self.assertNotIn("verte", self.line_row("PostV1.1", {"verdict": "unknown"})["text"])
         self.assertIn("aucune issue", self.line_row("PostV1.1", {"verdict": "green"})["text"])
