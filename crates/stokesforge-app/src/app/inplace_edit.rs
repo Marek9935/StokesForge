@@ -124,6 +124,16 @@ pub(super) fn begin(ctx: &egui::Context, id: egui::Id) -> bool {
     fresh
 }
 
+/// The caller keeps the field open although [`finish`] reported an end (a
+/// gesture refused because a dialog is open in the main window, #471): marks the
+/// field as already seen, so that the next frame does not read it as a new
+/// opening. Without it a `SelectAll` field would select all its text again and
+/// the next keystroke would replace it.
+pub(super) fn keep_open(ctx: &egui::Context, id: egui::Id) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(id.with("inplace_seen"), Seen(pass)));
+}
+
 /// An end of entry (Enter, Tab) pressed in the very frame in which typing
 /// opened a field: the field is only painted the next frame, which applies it.
 #[derive(Clone, Copy)]

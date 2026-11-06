@@ -327,7 +327,6 @@ tabs-previous-worksheets = Afficher les feuilles précédentes
 tabs-next-worksheets = Afficher les feuilles suivantes
 
 detached-workbook-unavailable = Classeur indisponible dans cette fenêtre. Le réattacher à la fenêtre principale
-detached-note-unavailable = Note indisponible dans cette fenêtre. La réattacher à la fenêtre principale
 
 
 window-kind-workbook = Classeur

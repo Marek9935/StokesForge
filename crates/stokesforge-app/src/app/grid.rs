@@ -1437,6 +1437,7 @@ fn header_field_widget(
                     // A dialog is open in the main window: the write would be
                     // refused, so the field stays open with its text (#471).
                     if super::window_band::refuse_entry(ui.ctx()) {
+                        inplace_edit::keep_open(ui.ctx(), id);
                         return;
                     }
                     // Enter, Tab and a click elsewhere always write (#433): a text that does
@@ -2838,6 +2839,7 @@ fn edit_cell_widget(
     // the write would be refused, so the cell stays open with its text and the
     // cursor where it was (#471).
     if super::window_band::refuse_entry(ui.ctx()) {
+        inplace_edit::keep_open(ui.ctx(), shown.response.id);
         return;
     }
     // Enter or Tab on a refused number: the cell stays open. A click elsewhere
@@ -6471,6 +6473,16 @@ mod tests {
             Action::CommitCell { .. } | Action::CommitCellAndAdvance { .. }
         )));
         assert_eq!(take_refusals(&bench.context), vec![window]);
+        // The cursor did not move: the text is not selected, a keystroke appends.
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        bench.image(vec![egui::Event::Text("7".into())]);
+        assert_eq!(
+            bench.state.editing().map(|edit| edit.buffer.as_str()),
+            Some("427"),
+            "typing after the refusal appends"
+        );
         publish_dialog(&bench.context, None);
         bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
         assert!(bench.state.editing().is_none());

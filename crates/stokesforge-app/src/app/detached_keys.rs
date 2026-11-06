@@ -668,3 +668,99 @@ fn a_dialog_in_the_main_window_stops_the_keys_of_the_detached_project_manager() 
     assert!(band.contains("main window"), "{band}");
     bench.finish();
 }
+
+/// The cursor `(column index, row)` of the book's selected sheet in `state`.
+type Cursor = Option<(usize, usize)>;
+
+fn cursor_of(state: &mut AppState, book: stokesforge_core::NodeId) -> Option<(usize, usize)> {
+    use stokesforge_app_state::selection::GridCursor;
+    let sheet = state.selected_sheet_in(book)?;
+    let tree = std::sync::Arc::clone(state.tree());
+    let GridCursor::Data(column, row) = state.selection(sheet)?.anchor(&tree, sheet)? else {
+        return None;
+    };
+    let index = tree
+        .children(sheet)
+        .ok()?
+        .iter()
+        .position(|c| *c == column)?;
+    Some((index, row))
+}
+
+/// Puts the cursor on `(column index, row)` of the fork, types `7` and presses
+/// `keys`; returns the cursor on the fork and on the root once settled.
+fn type_and_press(
+    bench: &mut Bench,
+    from: (usize, usize),
+    keys: Vec<egui::Event>,
+) -> (Cursor, Cursor) {
+    let book = bench.book();
+    let id = bench.id_of(Window::Book);
+    with_view(bench, |view| {
+        let sheet = view.selected_sheet_in(book).unwrap();
+        let column = view.tree().children(sheet).unwrap()[from.0];
+        view.select_cell(sheet, column, from.1);
+    });
+    bench.child_in(id, Pass::child());
+    bench.child_in(
+        id,
+        Pass::child().events(vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            egui::Event::Text("7".into()),
+        ]),
+    );
+    bench.child_in(id, Pass::child());
+    bench.child_in(id, Pass::child());
+    assert!(typed_cell(bench).is_some(), "being edited");
+    bench.child_in(id, Pass::child().events(keys));
+    settle(bench);
+    bench.child_in(id, Pass::child());
+    (
+        with_view(bench, |view| cursor_of(view, book)),
+        cursor_of(&mut bench.app.state, book),
+    )
+}
+
+/// Enter, Shift+Enter and Tab in a cell of a detached workbook, no dialog: the
+/// cursor moves like in the main window, on the fork and on the root. Enter
+/// used to move the root only, and the fork's stale selection overwrote it at
+/// the next adoption. Witness: remove `return_selection_to_detached_books`
+/// from the root pass (Enter cases fail; Tab and Shift+Enter keep passing).
+#[test]
+fn enter_tab_and_shift_enter_in_a_detached_cell_move_the_cursor_like_the_main_window() {
+    let mut bench = bench();
+    let book = bench.book();
+    let (rows, entry) = {
+        let state = &mut bench.app.state;
+        let sheet = state.selected_sheet_in(book).unwrap();
+        (state.entry_row(sheet), state.entry_row(sheet))
+    };
+    assert!(rows >= 2, "the sheet has data");
+    let at = |what: &str, got: (Cursor, Cursor), want| {
+        assert_eq!(got.0, Some(want), "{what}: the fork");
+        assert_eq!(got.1, Some(want), "{what}: the root");
+    };
+    let got = type_and_press(&mut bench, (0, 0), vec![key(egui::Key::Enter)]);
+    at("Enter", got, (0, 1));
+    let got = type_and_press(
+        &mut bench,
+        (0, 1),
+        vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+            chord(egui::Key::Enter, egui::Modifiers::SHIFT),
+        ],
+    );
+    at("Shift+Enter", got, (0, 0));
+    let got = type_and_press(&mut bench, (0, 0), vec![key(egui::Key::Tab)]);
+    at("Tab", got, (1, 0));
+    // The last data row: Enter lands on the entry row; a value typed there adds
+    // the row and the cursor lands on the new entry row.
+    let got = type_and_press(&mut bench, (0, entry - 1), vec![key(egui::Key::Enter)]);
+    at("Enter on the last row", got, (0, entry));
+    let got = type_and_press(&mut bench, (0, entry), vec![key(egui::Key::Enter)]);
+    at("Enter in the entry row", got, (0, entry + 1));
+    let state = &mut bench.app.state;
+    let sheet = state.selected_sheet_in(book).unwrap();
+    assert_eq!(state.entry_row(sheet), entry + 1, "the row was added");
+    bench.finish();
+}

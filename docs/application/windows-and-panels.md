@@ -334,7 +334,8 @@ The real redrawing of the OS windows remains to be checked manually.
 ### Generic detaching of content tabs
 
 `StokesForgeApp::detach_tab`/`reattach_tab`/`show_detached_tabs` generalize the
-mechanism above to `Tab::Book`, `Tab::Graph`, `Tab::Matrix` and `Tab::Note`:
+mechanism above to `Tab::Book` and `Tab::Graph` (`Tab::is_detachable`, #473;
+`detach_tab` ignores a note and a matrix, which stay floating):
 the detach icon opens an OS window; that window offers a
 reattach icon. Closing a detached content window closes only its
 view, without reattaching it or deleting the project data. It stays
@@ -343,23 +344,22 @@ detached at the same time, each in its own `ViewportId`.
 
 **Default sizes of the detached windows** (`show_detached_tabs`):
 `Tab::Graph` opens at 560×540, which holds the reference figure, its
-controls and its header. The rest (`Book`/`Matrix`/`Note`) share a
+controls and its header. The workbook has a
 uniform size of 420×360. The workbook grid keeps the same widths and
 headers in floating and detached windows; a narrow window
-scrolls horizontally. The note and the matrix keep the same size for
-consistency with the other contents.
+scrolls horizontally.
 
 **A single `ViewModel` structure, not one per kind of content.** The PM
-has only one form of content (a read-only tree); the four kinds
+has only one form of content (a read-only tree); the two kinds
 detachable here are very different (virtualized editable grid,
-interactive graph with shape cache, editable text, placeholder).
+interactive graph with shape cache).
 `DetachedTabViewModel` carries one field per kind (`view_state` for a
-workbook or a note, `graph_view` for a graph) rather than four disjoint types to make coexist in the table of
+workbook, `graph_view` for a graph) rather than two disjoint types to make coexist in the table of
 detached tabs — the fields unused for the kind of `Tab` served
 stay at their default value.
 
 **Reading the model is factored out, transient editing is not.**
-`tab_contents` (`app/contents.rs`, with `note_contents` and `matrix_contents`;
+`tab_contents` (`app/contents.rs`, with `note_contents` and `matrix_contents`, used by the floating windows only;
 shared by the floating windows and the maximization area)
 takes `&mut AppState`, which the `'static`, `Send + Sync` closure of
 `show_viewport_deferred` cannot capture — the same problem already solved
@@ -379,14 +379,9 @@ of the root. It calls the same `book_contents`/`grid_contents` as the
 floating workbook; layout, header, selection, menus and grid shortcuts
 thus share the same code. Its selection and its input stay local
 to the window. Before handling its actions, the root takes over their grid
-context, then applies the same undoable commands. The note follows the same
-pattern: its detached window is a local `AppState` view (built by
-`fork_for_detached_view`) and calls `note_contents`, like the floating
-window; only the input buffer (`note_editing`) is local to the window,
-and validation goes out as `Action::SetNoteText`, hence as an undoable command.
-The matrix placeholder, `matrix_contents`, reads only the tree and serves
-as is for both windows: no content function is specific to the
-detached window any more.
+context, then applies the same undoable commands. No content function is
+specific to the detached window. A note and a matrix never detach (#473), so
+`note_contents` and `matrix_contents` have a floating caller only.
 
 `Tab::Graph` escapes this limit: `GraphView` has no global lock on
 `AppState` to respect (its shape cache and its zoom/pan navigation are
@@ -394,7 +389,7 @@ already scoped per graph, in `StokesForgeApp::graph_views`) — `graph_view_cont
 is therefore **literally** the same function for a floating window and a
 detached window; the view itself simply migrates out of `graph_views` for the time
 of the detachment so it stays capturable by the closure without duplicating the
-cache. `Tab::Matrix` has no state to carry (placeholder).
+cache.
 
 `Tab::Script` is not detachable: its input (`AppState::script_source`)
 is a direct field of `AppState`, not a deferred buffer like

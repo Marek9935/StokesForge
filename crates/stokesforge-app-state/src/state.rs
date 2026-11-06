@@ -3551,6 +3551,25 @@ impl AppState {
         pulled
     }
 
+    /// The opposite way of [`Self::adopt_detached_book_view`]: once the
+    /// pass's actions are applied, hands the selection of the workbook's sheets
+    /// back to its local view. Without it, a move made by an action (Enter in a
+    /// cell selects the row below) is overwritten by the view's stale selection
+    /// at the next adoption. Returns whether the view changed.
+    pub fn return_selection_to_detached_view(&self, view: &mut Self, book: NodeId) -> bool {
+        let mut changed = false;
+        for (sheet, _) in self.worksheets_of(book) {
+            if view.selection.get(&sheet) != self.selection.get(&sheet) {
+                changed = true;
+                match self.selection.get(&sheet) {
+                    Some(selection) => view.selection.insert(sheet, selection.clone()),
+                    None => view.selection.remove(&sheet),
+                };
+            }
+        }
+        changed
+    }
+
     /// Last snapshot received.
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot

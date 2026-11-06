@@ -993,8 +993,8 @@ grid, properties pages, import wizard, Object Manager and tab
 strip. The added cases check in particular the range targeted by the type
 menu, the keeping of the format parameters, the layer and series actually
 edited, the independent collapse of the tree groups and the order of the callbacks.
-The detached callback of the note collects its edit and its close before their
-application by the root.
+The detached callback of the workbook collects its close before its
+application by the root; a note and a matrix never detach (#473).
 
 In `app.rs`, the extracted phases are also tested directly: a
 confirmation empties the collected actions, stops the dispatch of those that

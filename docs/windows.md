@@ -148,8 +148,10 @@ The alerts (failure, low R², lost session) share the identifier
 ## Content windows (non-modal)
 
 Workbook, graph, matrix, note: tabs of the workspace, painted as
-confined floating windows (`show_floating_window`) or detached into an OS
-window (`window_detach.rs`), with an icon header (collapse, detach,
+confined floating windows (`show_floating_window`). Only the workbook and the graph
+detach into an OS window (`window_detach.rs`; `Tab::is_detachable`, the single
+source of the header icon and of the guard of `detach_tab`, #473); a note and a
+matrix stay in the main window. The header has an icon header (collapse, detach,
 maximize, close; `HeaderPlacement::Floating` / `Detached`). No footer, no
 imposed initial focus. Default sizes (`window_placement.rs`): workbook
 373 x 420 (two thirds of 560), graph 560 x 460, matrix and note 560 x 420;
@@ -239,7 +241,7 @@ exist), and #472 removed it: no `AppHost`, no host rule, no veil.
 The detached graph, the detached workbook and the three detached panels read
 exactly three keys, Ctrl+Z, Ctrl+Y (with Ctrl+Shift+Z) and Ctrl+S, through
 `shortcuts::read_detached_history_and_save`. The note and the matrix, which
-#473 removes, read none. Everything else global (Ctrl+N, Ctrl+O, Ctrl+E,
+#473 keeps in the main window, never detach. Everything else global (Ctrl+N, Ctrl+O, Ctrl+E,
 Ctrl+", Ctrl+Shift+S, Ctrl+Q) stays in the main window; Help › Keyboard Shortcuts
 and the manual say so.
 

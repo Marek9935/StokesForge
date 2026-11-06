@@ -36,6 +36,16 @@ pub(super) enum Tab {
     Note(NodeId),
 }
 
+impl Tab {
+    /// Can this window leave the main window for an OS window of its own?
+    /// A single source (#473): the Detach icon of the header and the guard
+    /// of `detach_tab` both read it. Only the workbook and the graph detach;
+    /// a note and a matrix stay in the main window.
+    pub(super) fn is_detachable(self) -> bool {
+        matches!(self, Tab::Book(_) | Tab::Graph(_))
+    }
+}
+
 /// Translates a Project Manager window kind into the tab that opens it.
 pub(super) fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
     match kind {
