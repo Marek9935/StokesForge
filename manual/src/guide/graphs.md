@@ -474,7 +474,7 @@ A graph normally lives in the main window. You can move it into a window of its 
 
 A detached graph has the same menus, right-clicks, zoom and pan as a docked one. **Send to** works for it too. Drag and drop from a workbook does not cross from one window to another, so use **Send to** instead.
 
-While **Graph Properties** is open, you cannot change a detached window. Click **OK** or **Cancel** first.
+A dialog such as **Graph Properties** always opens in the main window, even when you asked for it from a detached graph. The detached window shows an orange band that says so, and the main window comes forward where the system allows it (on some systems, use Alt+Tab or the notice the system shows). While it is open, you cannot change a detached window. Click **OK** or **Cancel** first.
 
 ## Common tasks
 

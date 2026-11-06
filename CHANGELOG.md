@@ -77,12 +77,14 @@ without a message, see `docs/persistence.md`).
   do in the detached window still takes effect, about a tenth of a second late
   while the main window is hidden.
 - A dialog opened from a detached window (Graph Properties, About, the import
-  window, a confirmation...) now appears in that window instead of in the main
-  window behind it (#457), where it could stay unseen or show up late when the
-  detached window covers the main one. The main window is locked while it is
-  open; clicking on it brings the dialog back there. A detached window narrower
-  than 560 pixels or shorter than 170 still opens its dialogs in the main
-  window. Ctrl+Z in a text field of a dialog no longer reaches the model.
+  window, a confirmation...) always appears in the main window (#472, which
+  replaces the opposite choice of #457). The detached window shows an orange
+  band for 5 seconds that names the dialog, and the main window is asked to come
+  forward (it does on Windows and X11; on Wayland use the band, the system's
+  notice or Alt+Tab). The rule: a content feature works in every window, a global
+  feature stays in the main window; object properties (rectangle, arrow) are the
+  one exception and stay in their graph's window. Ctrl+Z in a text field of a
+  dialog does not reach the model.
 - Page Layout Mode (#426): **Layout ▸ Page Layout Mode**, and a toolbar button,
   show a graph as a page with rulers, a grid, handles and a settings strip
   (figure size with a padlock shared with Graph Properties, position and size of
