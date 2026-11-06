@@ -213,13 +213,13 @@ You can detach the Project Manager from the menu too: **Window ▸ Detach Projec
 
 A detached panel stays up to date with the project and works as before, except while a dialog is open in the main window: it then refuses the gestures that change something and a band at the bottom of the panel says why. Selecting, opening a window and **Reattach** stay available. The Object Manager follows the graph in the foreground, also when that graph is itself detached.
 
-## Detach a workbook, graph or note
+## Detach a workbook or a graph
 
 Click <img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt=""> **Detach into a separate window** in the window's title bar to move that window out of the main window into its own window. This is useful for a graph on a second screen while you edit data on the first.
 
 The detached window has the same content as before. While a dialog (Graph Properties, Import, About...) is open in the main window, a gesture that changes something in a detached window is refused, and an orange band at the bottom of that window says which dialog to close first. A dialog opened from a detached window also opens in the main window, and the band says so. A value you typed in a cell stays open with its text until then. The band also shows, for 5 seconds, the warnings (orange) and errors (red) of a gesture made in that window; plain information stays in the main status bar. Use its <img class="icon" src="../images/icons/arrow-square-in.neutral.svg" alt=""> **Reattach to the main window** icon to put it back. If you close it, the window is closed like any other and you reopen it from the Project Manager.
 
-You can detach several windows at the same time.
+You can detach several windows at the same time. A note and a matrix always stay in the main window: their title bar has no detach icon.
 
 What follows a detached window:
 

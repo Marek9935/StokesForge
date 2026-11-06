@@ -469,7 +469,7 @@ If no graph is active, the panel says "No graph is active. Click a graph to see 
 
 A graph normally lives in the main window. You can move it into a window of its own, for example onto a second screen.
 
-- Click **Detach into a separate window** in the title bar of the graph, or drag the title bar outside the application.
+- Click **Detach into a separate window** in the title bar of the graph.
 - To bring it back, click **Reattach to the main window**.
 
 A detached graph has the same menus, right-clicks, zoom and pan as a docked one. **Send to** works for it too. Drag and drop from a workbook does not cross from one window to another, so use **Send to** instead.

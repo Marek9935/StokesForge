@@ -37,6 +37,13 @@ without a message, see `docs/persistence.md`).
   dialog. Warnings of the local view of a detached workbook (an unreadable
   clipboard) now show in its window and in the main history.
 
+### Changed
+
+- Only the workbook and the graph detach (#473): a note and a matrix stay in
+  the main window. Their title bar already had no detach icon; the code now
+  refuses it too. The manual no longer says that dragging a title outside the
+  application detaches a window (no such gesture exists).
+
 ### Fixed
 
 - Ctrl+Z, Ctrl+Y and Ctrl+S now work in the detached windows (#459): the graph,

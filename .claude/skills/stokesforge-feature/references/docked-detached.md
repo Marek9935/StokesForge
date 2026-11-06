@@ -12,7 +12,7 @@ Read before touching a UI surface (workbook, graph, note, matrix, fixed panel, g
 
 ## Check
 
-- [ ] one writing per content (`book_contents`, `graph_view_contents`, `note_contents`, `matrix_contents`); otherwise factor, or change both and say so in the report
+- [ ] one writing per content (`book_contents`, `graph_view_contents`; the note and the matrix never detach, #473); otherwise factor, or change both and say so in the report
 - [ ] a new `AppState` field also exists in the detached view when it must apply there
 - [ ] a global shortcut tried with a graph active and a workbook detached; in a detached window only Ctrl+Z, Ctrl+Y and Ctrl+S act (`read_detached_history_and_save`, read before painting, queued after the window's own actions, #459); any other global key stays in the main window
 - [ ] no egui ID computed under `Context::data_mut`
