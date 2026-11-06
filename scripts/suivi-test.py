@@ -2905,7 +2905,10 @@ class TestPage(unittest.TestCase):
         self.assertEqual(self.build_line(dict(bq, auto=True, why="battery"))["auto_note"], "")
         run = [{"pid": 1, "cwd": "/w/_stokesforge/feature476", "command": "cargo test -p x", "start": 1000 - 190}]
         w = self.build_line(dict(bq, running=run, waiting=[{}, {}]))
-        self.assertEqual(w["now"], "Build en cours : feature476 · cargo test -p x · 3 min — 2 en attente")
+        self.assertEqual(w["now"], "Build en cours : feature476 · cargo test -p x · 3 min\n2 en attente")
+        two = run + [{"pid": 2, "cwd": "/w/_stokesforge/feature453", "command": "cargo clippy", "start": 1000 - 70}]
+        self.assertEqual(self.build_line(dict(bq, running=two))["now"],
+                         "Build en cours : feature476 · cargo test -p x · 3 min\nBuild en cours : feature453 · cargo clippy · 1 min")
         self.assertIn("moins d’1 min", self.build_line(dict(bq, running=run), now=1000 - 190 + 20)["now"])
         self.assertIn("périmée", self.build_line(dict(bq, stale=True))["warn"])
         off = self.build_line({"installed": False})

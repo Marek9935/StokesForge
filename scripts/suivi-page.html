@@ -95,6 +95,7 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .buildline label{display:inline-flex;align-items:center;gap:6px;font-weight:700;cursor:pointer}
 .buildline p{margin:0}
+#bnow{white-space:pre-line}
 .buildline .warn{color:var(--warn);font-weight:700}
 .buildline.off{border-style:dashed;color:var(--muted)}
 .empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
@@ -240,13 +241,13 @@ function buildLine(bq,nowSec){
   const modes=Object.keys(BUILD_LABELS).filter(k=>bq.modes&&bq.modes[k]).map(k=>({id:k,label:BUILD_LABELS[k],on:k===bq.selected}));
   const chosen=bq.effective&&bq.effective!==bq.selected&&bq.auto;
   const run=Array.isArray(bq.running)?bq.running:[],wait=Array.isArray(bq.waiting)?bq.waiting:[];
-  let now='Aucun build en cours.';
-  if(run.length){
-    const r=run[0],mins=Math.max(0,Math.floor((nowSec-(r.start||nowSec))/60));
+  /* One line per running build: several run at once in FullIA and Développement. */
+  let now=run.map(r=>{
+    const mins=Math.max(0,Math.floor((nowSec-(r.start||nowSec))/60));
     const dir=String(r.cwd||'').split('/').filter(Boolean).pop()||'?';
-    now='Build en cours : '+dir+' · '+(r.command||'?')+' · '+(mins<1?'moins d’1 min':mins+' min');
-  }
-  if(wait.length)now+=' — '+wait.length+' en attente';
+    return 'Build en cours : '+dir+' · '+(r.command||'?')+' · '+(mins<1?'moins d’1 min':mins+' min');
+  }).join('\n')||'Aucun build en cours.';
+  if(wait.length)now+='\n'+wait.length+' en attente';
   return {installed:true,modes:modes,auto:!!bq.auto,
     auto_note:chosen?'Auto : '+BUILD_LABELS[bq.effective]+' ('+(BUILD_WHY[bq.why]||bq.why)+')':'',
     desc:modeSentence(bq.modes&&bq.modes[bq.effective]),now:now,
