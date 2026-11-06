@@ -345,3 +345,102 @@ fn a_dialog_closed_in_a_small_window_keeps_the_size_the_user_chose() {
     assert_eq!(remembered_size(&bench.ctx, plot), Some(remembered));
     bench.finish();
 }
+
+/// #460. With a dialog open in the main window, the keys of a detached graph in
+/// Page Layout Mode do nothing (Esc, the snap key, the arrows): the mode and
+/// the snap stay, the window's band says why, and the root sleeping after it
+/// published the dialog changes nothing. Once the dialog is closed, Esc leaves
+/// the mode. Witness: remove `stop_keys` from `DetachedTabViewport::show`; or
+/// clear the published signal at each root pass.
+#[test]
+fn a_dialog_in_the_main_window_stops_the_mode_keys_of_a_detached_graph() {
+    let _language =
+        stokesforge_app_state::i18n::test_language(stokesforge_app_state::i18n::Language::English);
+    let mut bench = Bench::new();
+    bench.start();
+    bench.app.toggle_layout_mode(bench.graph, Some(true));
+    for _ in 0..4 {
+        bench.root(Pass::root());
+        bench.child(Pass::child());
+    }
+    let graph = bench.graph;
+    let in_mode = |bench: &Bench| {
+        bench.app.detached_tabs[&bench.tab]
+            .view_model
+            .lock()
+            .unwrap()
+            .graph_view
+            .as_ref()
+            .is_some_and(|view| view.layout_mode())
+    };
+    let snap = |bench: &Bench| super::page_layout::published_snap(&bench.ctx, graph).on;
+    assert!(in_mode(&bench), "the mode is on");
+    let snap_before = snap(&bench);
+
+    bench.app.state.dispatch(Action::OpenAbout);
+    bench.root(Pass::root());
+    // The root then sleeps: no further root pass until the end of the dialog.
+    let shift = egui::Modifiers::SHIFT;
+    let keys = vec![
+        super::test_support::key(egui::Key::Escape),
+        super::test_support::key(egui::Key::G),
+        super::test_support::key(egui::Key::ArrowLeft),
+        egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: shift,
+        },
+    ];
+    let history = bench.app.state.status_history().count();
+    bench.child(Pass::child().events(keys.clone()));
+    assert!(in_mode(&bench), "Esc did not leave the mode");
+    assert_eq!(snap(&bench), snap_before, "the snap key did nothing");
+    assert!(bench.app.state.about_open(), "the dialog is still open");
+    // The note wakes the root, which says why in the window.
+    bench.root(Pass::root());
+    bench.child(Pass::child());
+    let text = band_text(&bench).expect("the band of the window");
+    assert!(text.contains("main window"), "{text}");
+    assert_eq!(
+        bench.app.state.status_history().count(),
+        history + 1,
+        "one history line"
+    );
+    // Many window passes, the root asleep: still stopped.
+    for _ in 0..3 {
+        bench.child(Pass::child().events(keys.clone()));
+        assert!(in_mode(&bench));
+    }
+    // A key release and Alt+Tab ask for nothing.
+    bench.root(Pass::root());
+    window_band::clear(&bench.ctx, bench.child_id());
+    bench.child(Pass::child().events(vec![
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        },
+        egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::ALT,
+        },
+    ]));
+    bench.root(Pass::root());
+    assert_eq!(band_text(&bench), None, "no band for those");
+
+    // The dialog closed: Esc leaves the mode again.
+    bench.app.state.dispatch(Action::CloseAbout);
+    bench.root(Pass::root());
+    bench.child(Pass::child());
+    bench.child(Pass::child().events(vec![super::test_support::key(egui::Key::Escape)]));
+    bench.root(Pass::root());
+    assert!(!in_mode(&bench), "Esc leaves the mode once it is closed");
+    bench.finish();
+}

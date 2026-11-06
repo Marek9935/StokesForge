@@ -824,7 +824,7 @@ fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
 }
 
 /// Records that a modal window is painted in this viewport, in this frame.
-fn mark_modal_shown(ctx: &egui::Context) {
+pub(super) fn mark_modal_shown(ctx: &egui::Context) {
     // Ids read before the lock: `viewport_id` locks the context too.
     let (frame, mark) = (ctx.cumulative_frame_nr(), modal_mark_id(ctx));
     ctx.data_mut(|data| data.insert_temp(mark, frame));

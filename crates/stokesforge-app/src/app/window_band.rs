@@ -117,6 +117,53 @@ pub(super) fn refuse_entry(ctx: &egui::Context) -> bool {
     true
 }
 
+/// The one stop of the keys of a detached window while a dialog is open in the
+/// main window (#460). Called first in each detached closure, before any
+/// reader of the keys (Page Layout Mode, grid, panels, shortcuts).
+///
+/// Key, text and clipboard events are removed from the viewport's input, so
+/// that nothing below acts on them, and the refusal is noted once when a key
+/// was really refused (the root then posts the band, as for a refused
+/// action). Left alone: a viewport with a text field that has, or had in the
+/// previous frame, the keyboard (typing and Esc keep their meaning; a typed
+/// value is guarded at its commit, [`refuse_entry`]), an open popup, and a
+/// modal of this same viewport. Never a band for: a key release, a repeat, an
+/// Alt combination (Alt+Tab belongs to the window manager). Returns whether
+/// the keys were stopped.
+pub(super) fn stop_keys(ctx: &egui::Context) -> bool {
+    if main_dialog(ctx).is_none()
+        || ctx.text_edit_focused()
+        || super::page_layout::field_had_focus(ctx)
+        || egui::Popup::is_any_open(ctx)
+        || super::dialogs::modal_shown(ctx)
+    {
+        return false;
+    }
+    let mut refused = false;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| match event {
+            egui::Event::Key {
+                pressed,
+                repeat,
+                modifiers,
+                ..
+            } => {
+                refused |= *pressed && !*repeat && !modifiers.alt;
+                false
+            }
+            egui::Event::Text(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
+                refused = true;
+                false
+            }
+            _ => true,
+        });
+    });
+    if refused {
+        note_refusal(ctx);
+    }
+    true
+}
+
 /// Shows `text` in the band of `viewport` for [`BAND_LIFETIME`] from `now`,
 /// replacing the band already there (the timer restarts), and wakes that
 /// viewport so that it paints it. The root never has one.
@@ -480,5 +527,206 @@ mod overlay_tests {
         let red = ctx.global_style().visuals.error_fg_color;
         assert!(outline(BandLevel::Warning).contains(&crate::theme::warning_color(dark)));
         assert!(outline(BandLevel::Error).contains(&red));
+    }
+}
+
+#[cfg(test)]
+mod stop_keys_tests {
+    use super::raw_for;
+    use super::*;
+
+    fn w() -> egui::ViewportId {
+        egui::ViewportId::from_hash_of("w")
+    }
+
+    fn key(key: egui::Key, pressed: bool, repeat: bool, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers,
+        }
+    }
+
+    /// One pass of window `w`: runs `stop_keys` first, then `body`; returns the
+    /// events the rest of the pass still saw and whether the keys were stopped.
+    fn pass(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        mut body: impl FnMut(&mut egui::Ui),
+    ) -> (Vec<egui::Event>, bool) {
+        let mut input = raw_for(w());
+        input.events = events;
+        let mut seen = Vec::new();
+        let mut stopped = false;
+        let mut output = ctx.run_ui(input, |ui| {
+            stopped = stop_keys(ui.ctx());
+            seen = ui.ctx().input(|input| input.events.clone());
+            body(ui);
+        });
+        output.textures_delta.clear();
+        (seen, stopped)
+    }
+
+    fn with_dialog() -> egui::Context {
+        let ctx = egui::Context::default();
+        publish_dialog(&ctx, Some(OpenDialog::About));
+        ctx
+    }
+
+    /// Keys, text and clipboard are removed and the refusal is noted once.
+    /// Witness: drop the `retain`, or the `note_refusal` call.
+    #[test]
+    fn a_dialog_in_the_main_window_removes_keys_text_and_clipboard() {
+        let ctx = with_dialog();
+        let pointer = egui::Event::PointerMoved(egui::pos2(3.0, 3.0));
+        let (seen, stopped) = pass(
+            &ctx,
+            vec![
+                key(egui::Key::Z, true, false, egui::Modifiers::COMMAND),
+                egui::Event::Text("z".into()),
+                egui::Event::Copy,
+                egui::Event::Paste("x".into()),
+                pointer.clone(),
+            ],
+            |_| {},
+        );
+        assert!(stopped);
+        assert_eq!(seen, vec![pointer], "only the pointer is left");
+        assert_eq!(take_refusals(&ctx), vec![w()]);
+    }
+
+    /// A key release, a repeat, a lone Alt combination (Alt+Tab) and a pass
+    /// with no key never ask for the band; the events are still removed.
+    /// Witnesses: drop the `pressed`, `repeat` or `alt` test.
+    #[test]
+    fn releases_repeats_and_alt_combinations_never_trigger_the_band() {
+        let ctx = with_dialog();
+        for event in [
+            key(egui::Key::Escape, false, false, egui::Modifiers::NONE),
+            key(egui::Key::Tab, true, false, egui::Modifiers::ALT),
+        ] {
+            let (seen, stopped) = pass(&ctx, vec![event.clone()], |_| {});
+            assert!(stopped);
+            assert!(seen.is_empty());
+            assert!(take_refusals(&ctx).is_empty(), "{event:?}");
+        }
+        let (_, stopped) = pass(&ctx, Vec::new(), |_| {});
+        assert!(stopped);
+        assert!(take_refusals(&ctx).is_empty());
+        // A key held down: egui marks the second press as a repeat itself.
+        let held = key(egui::Key::A, true, false, egui::Modifiers::NONE);
+        pass(&ctx, vec![held.clone()], |_| {});
+        assert_eq!(take_refusals(&ctx), vec![w()], "the first press asks");
+        pass(&ctx, vec![held], |_| {});
+        assert!(take_refusals(&ctx).is_empty(), "the repeat does not");
+    }
+
+    /// Without a dialog, in the root, or with the dialog gone: nothing touched.
+    /// Witness: clear the signal check.
+    #[test]
+    fn without_a_dialog_the_keys_are_left_alone() {
+        let ctx = egui::Context::default();
+        let event = key(egui::Key::A, true, false, egui::Modifiers::NONE);
+        let (seen, stopped) = pass(&ctx, vec![event.clone()], |_| {});
+        assert!(!stopped);
+        assert_eq!(seen, vec![event.clone()]);
+        publish_dialog(&ctx, Some(OpenDialog::About));
+        publish_dialog(&ctx, None);
+        assert!(!pass(&ctx, vec![event.clone()], |_| {}).1);
+        // The root never stops its own keys.
+        publish_dialog(&ctx, Some(OpenDialog::About));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            assert!(!stop_keys(ui.ctx()));
+        });
+        output.textures_delta.clear();
+        assert!(take_refusals(&ctx).is_empty());
+    }
+
+    /// Letters typed in an open field keep working with no band, and the Esc
+    /// that gives the field back is not taken from it.
+    /// Witnesses: drop the `text_edit_focused` test; drop `field_had_focus`.
+    #[test]
+    fn a_focused_text_field_keeps_its_keys() {
+        let ctx = with_dialog();
+        let mut text = String::new();
+        let id = egui::Id::new("field");
+        let field = |ui: &mut egui::Ui, text: &mut String| {
+            let response = ui.add(egui::TextEdit::singleline(text).id(id));
+            response.request_focus();
+            super::super::page_layout::note_field_focus(ui.ctx());
+        };
+        pass(&ctx, Vec::new(), |ui| field(ui, &mut text));
+        let (_, stopped) = pass(&ctx, Vec::new(), |ui| field(ui, &mut text));
+        assert!(!stopped, "the field has the keyboard");
+        let typed = vec![
+            key(egui::Key::A, true, false, egui::Modifiers::NONE),
+            egui::Event::Text("a".into()),
+        ];
+        let (seen, stopped) = pass(&ctx, typed.clone(), |ui| field(ui, &mut text));
+        assert!(!stopped);
+        assert_eq!(seen, typed);
+        assert_eq!(text, "a", "the letter reached the field");
+        assert!(take_refusals(&ctx).is_empty(), "no band");
+        // Esc: egui drops the focus first, the mark of the previous frame says
+        // the field had it.
+        let esc = key(egui::Key::Escape, true, false, egui::Modifiers::NONE);
+        let (seen, stopped) = pass(&ctx, vec![esc.clone()], |_| {});
+        assert!(!stopped);
+        assert_eq!(seen, vec![esc]);
+        assert!(take_refusals(&ctx).is_empty());
+    }
+
+    /// A field focused right now counts even before its end-of-frame mark.
+    /// Witness: drop the `text_edit_focused` test.
+    #[test]
+    fn a_field_focused_this_frame_keeps_its_keys() {
+        let ctx = with_dialog();
+        let mut text = String::new();
+        let field = |ui: &mut egui::Ui, text: &mut String| {
+            ui.add(egui::TextEdit::singleline(text).id(egui::Id::new("f")))
+                .request_focus();
+        };
+        pass(&ctx, Vec::new(), |ui| field(ui, &mut text));
+        let (_, stopped) = pass(&ctx, Vec::new(), |ui| field(ui, &mut text));
+        assert!(!stopped, "no mark was recorded, the field still has it");
+    }
+
+    /// An open popup owns the keys. Witness: drop the popup test.
+    #[test]
+    fn an_open_popup_keeps_its_keys() {
+        let ctx = with_dialog();
+        let id = egui::Id::new("popup");
+        let open = |ui: &mut egui::Ui| {
+            egui::Popup::open_id(ui.ctx(), id);
+            let response = ui.label("anchor");
+            egui::Popup::from_response(&response)
+                .id(id)
+                .open(true)
+                .show(|ui| {
+                    ui.label("inside");
+                });
+        };
+        pass(&ctx, Vec::new(), open);
+        let event = key(egui::Key::ArrowDown, true, false, egui::Modifiers::NONE);
+        let (seen, stopped) = pass(&ctx, vec![event.clone()], open);
+        assert!(!stopped, "popup open");
+        assert_eq!(seen, vec![event]);
+    }
+
+    /// A modal of this same viewport (Object properties) owns the keys.
+    /// Witness: drop the `modal_shown` test.
+    #[test]
+    fn a_modal_of_the_same_window_keeps_its_keys() {
+        let ctx = with_dialog();
+        let event = key(egui::Key::Escape, true, false, egui::Modifiers::NONE);
+        let mut output = ctx.run_ui(raw_for(w()), |ui| {
+            super::super::dialogs::mark_modal_shown(ui.ctx());
+        });
+        output.textures_delta.clear();
+        let (seen, stopped) = pass(&ctx, vec![event.clone()], |_| {});
+        assert!(!stopped);
+        assert_eq!(seen, vec![event]);
     }
 }

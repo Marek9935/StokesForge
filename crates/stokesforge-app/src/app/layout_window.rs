@@ -41,7 +41,9 @@
 //!   window is painted ([`StokesForgeApp::begin_layout_frame`]); a detached
 //!   viewport reads them at the top of its own frame. Esc therefore reaches the
 //!   graph before a workbook painted behind it, and never leaves the mode under
-//!   a modal window (`page_layout::handle_keys`).
+//!   a modal window (`page_layout::handle_keys`). A dialog open in the main
+//!   window stops the keys of every detached viewport before they get here
+//!   ([`super::window_band::stop_keys`], #460).
 //! - **Saved state.** While the mode forces the maximise, the window views
 //!   written to the project report the state from before the mode
 //!   ([`StokesForgeApp::reported_maximized_tab`]): entering the mode and saving

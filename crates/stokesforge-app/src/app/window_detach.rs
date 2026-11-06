@@ -611,6 +611,7 @@ impl StokesForgeApp {
             self.detach_init(PanelKind::Object),
         );
         ctx.show_viewport_deferred(id, builder, move |ui, _class| {
+            super::window_band::stop_keys(ui.ctx());
             live.report(ui.ctx());
             let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
             let mut actions = Vec::new();
@@ -636,6 +637,7 @@ impl StokesForgeApp {
                 }
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
+            super::page_layout::note_field_focus(ui.ctx());
             super::window_band::paint(ui.ctx());
         });
         if changed {
@@ -706,6 +708,7 @@ impl StokesForgeApp {
             self.detach_init(PanelKind::Script),
         );
         ctx.show_viewport_deferred(id, builder, move |ui, _class| {
+            super::window_band::stop_keys(ui.ctx());
             live.report(ui.ctx());
             let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
             let source = model.source.clone();
@@ -730,6 +733,7 @@ impl StokesForgeApp {
                 requests.actions.append(&mut actions);
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
+            super::page_layout::note_field_focus(ui.ctx());
             super::window_band::paint(ui.ctx());
         });
         if changed {
@@ -849,6 +853,7 @@ impl StokesForgeApp {
             egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
             builder,
             move |ui, _class| {
+                super::window_band::stop_keys(ui.ctx());
                 live.report(ui.ctx());
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
@@ -902,6 +907,7 @@ impl StokesForgeApp {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                 }
+                super::page_layout::note_field_focus(ui.ctx());
                 super::window_band::paint(ui.ctx());
             },
         );
@@ -1225,6 +1231,7 @@ impl DetachedTab {
 impl DetachedTabViewport {
     /// The window's frame, then the band.
     fn show(&self, ui: &mut egui::Ui) {
+        super::window_band::stop_keys(ui.ctx());
         self.show_locked(ui);
         super::page_layout::note_field_focus(ui.ctx());
         super::window_band::paint(ui.ctx());
