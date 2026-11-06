@@ -3379,9 +3379,10 @@ mod tests {
 
     fn drain(app: &mut StokesForgeApp, ctx: &egui::Context) -> Vec<Action> {
         let mut actions = Vec::new();
-        ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             app.drain_detached_tabs(ui.ctx(), &mut actions);
         });
+        output.textures_delta.clear();
         actions
     }
 
@@ -3421,6 +3422,157 @@ mod tests {
         send(&app, vec![Action::Undo]);
         assert_eq!(drain(&mut app, &ctx).len(), 1);
         assert_eq!(super::super::window_band::text_at(&ctx, viewport, now), None);
+        session.shutdown().unwrap();
+    }
+
+    /// #471: an action of a detached window that ends in a warning says it in
+    /// that window (here "Nothing to undo"), and in no other. A message with no
+    /// gesture behind it (a job) gives no band; information never does.
+    /// Witnesses: dropping the origin ranges, or the level filter.
+    #[test]
+    fn what_an_action_says_is_told_in_its_own_window_only() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let (session, mut app, viewport) = detached_graph_app();
+        let ctx = egui::Context::default();
+        let now = std::time::Instant::now();
+        let band = |viewport| super::super::window_band::text_at(&ctx, viewport, now);
+        // A message with no origin: a job, the autosave.
+        app.dispatch_actions(&ctx, vec![Action::Undo]);
+        assert_eq!(band(viewport), None, "no gesture behind it: main window only");
+        // Information from a gesture of the window: status bar only.
+        let before = app.state.recorded_count();
+        app.state.notice("fine".into());
+        app.tell_window(&ctx, viewport, before);
+        assert_eq!(band(viewport), None);
+        // A warning of an action drained from the window.
+        send(&app, vec![Action::Undo]);
+        let actions = drain(&mut app, &ctx);
+        assert_eq!(actions.len(), 1);
+        app.dispatch_actions(&ctx, actions);
+        let (text, level) = band(viewport).expect("the band of the window");
+        assert_eq!(text, "Nothing to undo");
+        assert_eq!(level, super::super::window_band::BandLevel::Warning);
+        assert_eq!(band(egui::ViewportId::ROOT), None);
+        session.shutdown().unwrap();
+    }
+
+    /// #471: windows that do nothing get no band by surprise while a dialog is
+    /// open. Witness: pushing an action that no gesture caused.
+    #[test]
+    fn idle_detached_windows_get_no_band_while_a_dialog_is_open() {
+        let (session, mut app, viewport) = detached_graph_app();
+        let ctx = egui::Context::default();
+        app.state.dispatch(Action::OpenAbout);
+        let history = app.state.status_history().count();
+        for _ in 0..10 {
+            assert!(drain(&mut app, &ctx).is_empty());
+        }
+        let now = std::time::Instant::now();
+        assert_eq!(super::super::window_band::text_at(&ctx, viewport, now), None);
+        assert_eq!(app.state.status_history().count(), history);
+        session.shutdown().unwrap();
+    }
+
+    /// #471: the detached console refuses a run while a dialog is open, with
+    /// the band in its own window. Witness: restoring the old drain.
+    #[test]
+    fn the_detached_console_refuses_while_a_dialog_is_open() {
+        let (session, mut app, _) = detached_graph_app();
+        app.detach_script_console();
+        let ctx = egui::Context::default();
+        app.state.dispatch(Action::OpenAbout);
+        app.script_view
+            .as_ref()
+            .unwrap()
+            .requests
+            .lock()
+            .unwrap()
+            .actions
+            .push(Action::RunScript);
+        let mut actions = Vec::new();
+        app.drain_script_console(&ctx, &mut actions);
+        assert!(actions.is_empty());
+        let now = std::time::Instant::now();
+        assert!(
+            super::super::window_band::text_at(&ctx, script_viewport(), now).is_some(),
+            "band in the console"
+        );
+        app.state.dispatch(Action::CloseAbout);
+        app.script_view
+            .as_ref()
+            .unwrap()
+            .requests
+            .lock()
+            .unwrap()
+            .actions
+            .push(Action::RunScript);
+        app.drain_script_console(&ctx, &mut actions);
+        assert_eq!(actions.len(), 1);
+        session.shutdown().unwrap();
+    }
+
+    /// #471: the detached Object Manager lets a selection through and refuses
+    /// the rest. Witness: restoring the old drain, or refusing `Select` too.
+    #[test]
+    fn the_detached_object_manager_refuses_all_but_a_selection() {
+        let (session, mut app, _) = detached_graph_app();
+        let ctx = egui::Context::default();
+        let tree = app.state.tree().clone();
+        app.om_view = Some(DetachedObjectManager {
+            model: Arc::new(Mutex::new(ObjectManagerModel {
+                stamp: (0, 0, 0),
+                tree,
+                graph: None,
+                selection: None,
+                model: None,
+                spec: None,
+                settings: Default::default(),
+            })),
+            requests: Arc::default(),
+        });
+        app.state.dispatch(Action::OpenAbout);
+        app.om_view
+            .as_ref()
+            .unwrap()
+            .requests
+            .lock()
+            .unwrap()
+            .actions
+            .push(Action::Undo);
+        let mut actions = Vec::new();
+        app.drain_object_manager(&ctx, &mut actions);
+        assert!(actions.is_empty());
+        let now = std::time::Instant::now();
+        assert!(super::super::window_band::text_at(&ctx, object_manager_viewport(), now).is_some());
+        session.shutdown().unwrap();
+    }
+
+    /// #471: the detached Project Manager refuses writes while a dialog is open
+    /// (the Delete that Cancel used to bring back). Witness: restoring the old
+    /// drain.
+    #[test]
+    fn the_detached_project_manager_refuses_while_a_dialog_is_open() {
+        let (session, mut app, _) = detached_graph_app();
+        app.pm_detached = true;
+        app.pm_open = false;
+        let ctx = egui::Context::default();
+        app.state.dispatch(Action::OpenAbout);
+        app.pm_requests.lock().unwrap().actions.push(Action::Undo);
+        let (mut open, mut close, mut actions) = (Vec::new(), Vec::new(), Vec::new());
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.show_project_manager(ui, &ui.ctx().clone(), None, &mut open, &mut close, &mut actions);
+        });
+        output.textures_delta.clear();
+        assert!(actions.is_empty());
+        let now = std::time::Instant::now();
+        assert!(super::super::window_band::text_at(
+            &ctx,
+            super::super::project_manager::viewport_id(),
+            now
+        )
+        .is_some());
         session.shutdown().unwrap();
     }
 }

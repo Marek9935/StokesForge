@@ -228,6 +228,16 @@ pub(super) fn paint_at(ctx: &egui::Context, now: Instant) {
 }
 
 #[cfg(test)]
+fn raw_for(viewport: egui::ViewportId) -> egui::RawInput {
+    let mut input = egui::RawInput::default();
+    input.viewport_id = viewport;
+    input
+        .viewports
+        .insert(viewport, egui::ViewportInfo::default());
+    input
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -282,33 +292,38 @@ mod tests {
         let ctx = egui::Context::default();
         publish_dialog(&ctx, Some(OpenDialog::About));
         assert_eq!(main_dialog(&ctx), None, "the root: by construction");
-        let mut input = egui::RawInput::default();
-        input.viewport_id = viewport();
+        let input = raw_for(viewport());
         ctx.begin_pass(input);
         assert_eq!(main_dialog(&ctx), Some(OpenDialog::About));
         publish_dialog(&ctx, None);
         assert_eq!(main_dialog(&ctx), None);
-        let _ = ctx.end_pass();
+        ctx.end_pass().textures_delta.clear();
     }
 
     /// One pass of a viewport that draws the band.
     fn pass(ctx: &egui::Context, now: Instant) -> egui::FullOutput {
-        let mut input = egui::RawInput::default();
-        input.viewport_id = viewport();
+        let mut input = raw_for(viewport());
         input.screen_rect = Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
             egui::vec2(400.0, 300.0),
         ));
-        ctx.run_ui(input, |ui| {
+        let mut output = ctx.run_ui(input, |ui| {
             paint_at(ui.ctx(), now);
-        })
+        });
+        output.textures_delta.clear();
+        output
     }
 
     #[test]
     fn painting_asks_for_one_wake_at_the_deadline_and_none_after() {
         let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let start = Instant::now();
         post_at(&ctx, viewport(), "x".into(), BandLevel::Warning, start);
+        // The overlay lays itself out over its first passes.
+        for _ in 0..3 {
+            pass(&ctx, start + Duration::from_secs(1));
+        }
         let first = pass(&ctx, start + Duration::from_secs(1));
         let delay = first.viewport_output[&viewport()].repaint_delay;
         assert!(
@@ -326,17 +341,17 @@ mod tests {
 #[cfg(test)]
 mod refusal_tests {
     use super::*;
+    use super::raw_for;
 
     #[test]
     fn a_refused_entry_is_noted_for_the_root_once_per_window() {
         let ctx = egui::Context::default();
         publish_dialog(&ctx, Some(OpenDialog::GraphProperties));
-        let mut input = egui::RawInput::default();
-        input.viewport_id = egui::ViewportId::from_hash_of("w");
+        let input = raw_for(egui::ViewportId::from_hash_of("w"));
         ctx.begin_pass(input);
         assert!(refuse_entry(&ctx));
         assert!(refuse_entry(&ctx));
-        let _ = ctx.end_pass();
+        ctx.end_pass().textures_delta.clear();
         assert_eq!(
             take_refusals(&ctx),
             vec![egui::ViewportId::from_hash_of("w")]
@@ -351,10 +366,108 @@ mod refusal_tests {
         publish_dialog(&ctx, Some(OpenDialog::About));
         assert!(!refuse_entry(&ctx), "root: never, even with a dialog");
         publish_dialog(&ctx, None);
-        let mut input = egui::RawInput::default();
-        input.viewport_id = egui::ViewportId::from_hash_of("w");
+        let input = raw_for(egui::ViewportId::from_hash_of("w"));
         ctx.begin_pass(input);
         assert!(!refuse_entry(&ctx));
-        let _ = ctx.end_pass();
+        ctx.end_pass().textures_delta.clear();
+    }
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+    use super::raw_for;
+
+    /// One pass with a button under where the band sits; returns the free
+    /// rectangle before the band is painted and whether the button was clicked.
+    fn pass(
+        ctx: &egui::Context,
+        now: Instant,
+        events: Vec<egui::Event>,
+    ) -> (egui::Rect, bool) {
+        let mut input = raw_for(egui::ViewportId::from_hash_of("band-test"));
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(400.0, 300.0),
+        ));
+        input.events = events;
+        let mut free = egui::Rect::NOTHING;
+        let mut clicked = false;
+        let mut output = ctx.run_ui(input, |ui| {
+            free = ui.available_rect_before_wrap();
+            let button = egui::Rect::from_min_size(egui::pos2(160.0, 262.0), egui::vec2(80.0, 20.0));
+            clicked = ui.put(button, egui::Button::new("under")).clicked();
+            paint_at(ui.ctx(), now);
+        });
+        output.textures_delta.clear();
+        (free, clicked)
+    }
+
+    /// The band is an overlay: the free rectangle (the figure's, in a detached
+    /// graph) is the same with and without it, and a click under it reaches the
+    /// widget. Witness: reserving a row, or making the area interactable.
+    #[test]
+    fn the_band_moves_nothing_and_lets_a_click_through() {
+        let viewport = egui::ViewportId::from_hash_of("band-test");
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let start = Instant::now();
+        let at = start + Duration::from_secs(1);
+        let (without, _) = pass(&ctx, at, Vec::new());
+        post_at(&ctx, viewport, "A fairly long sentence".into(), BandLevel::Warning, start);
+        for _ in 0..3 {
+            pass(&ctx, at, Vec::new());
+        }
+        let (with, _) = pass(&ctx, at, Vec::new());
+        assert_eq!(with, without, "the band moves no content");
+        let target = egui::pos2(200.0, 272.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(&ctx, at, vec![egui::Event::PointerMoved(target)]);
+        let (_, down) = pass(&ctx, at, vec![press(true)]);
+        let (_, up) = pass(&ctx, at, vec![press(false)]);
+        assert!(down || up, "the click under the band reached the button");
+    }
+
+    fn outline(level: BandLevel) -> Vec<egui::Color32> {
+        let viewport = egui::ViewportId::from_hash_of("band-test");
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let start = Instant::now();
+        post_at(&ctx, viewport, "x".into(), level, start);
+        let mut input = raw_for(viewport);
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(400.0, 300.0),
+        ));
+        let mut output = ctx.run_ui(input.clone(), |ui| paint_at(ui.ctx(), start));
+        for _ in 0..3 {
+            output.textures_delta.clear();
+            output = ctx.run_ui(input.clone(), |ui| paint_at(ui.ctx(), start));
+        }
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.stroke.width > 1.0 => Some(rect.stroke.color),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Orange for a warning, red for an error, the status bar's colours.
+    /// Witness: swapping the two arms.
+    #[test]
+    fn a_warning_is_orange_and_an_error_is_red() {
+        let ctx = egui::Context::default();
+        let dark = ctx.global_style().visuals.dark_mode;
+        let red = ctx.global_style().visuals.error_fg_color;
+        assert!(outline(BandLevel::Warning).contains(&crate::theme::warning_color(dark)));
+        assert!(outline(BandLevel::Error).contains(&red));
     }
 }
