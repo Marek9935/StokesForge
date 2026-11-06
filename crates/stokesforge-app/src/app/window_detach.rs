@@ -1148,6 +1148,23 @@ impl StokesForgeApp {
         }
     }
 
+    /// After the actions of the pass: a selection they moved reaches the local
+    /// view of each detached workbook (Enter in a cell selects the row below).
+    pub(super) fn return_selection_to_detached_books(&self, ctx: &egui::Context) {
+        for (tab, detached) in &self.detached_tabs {
+            let Tab::Book(book) = tab else { continue };
+            let mut model = detached
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            if let Some(view) = model.view_state.as_mut() {
+                if self.state.return_selection_to_detached_view(view, *book) {
+                    ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
+                }
+            }
+        }
+    }
+
     pub(super) fn show_detached_tabs(&mut self, ctx: &egui::Context) {
         let Self {
             state,

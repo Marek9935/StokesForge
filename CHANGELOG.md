@@ -46,6 +46,8 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Enter in a cell of a detached workbook moves the cursor to the row below, as
+  in the main window (#470): the move was undone by the window's own selection.
 - Ctrl+Z, Ctrl+Y and Ctrl+S now work in the detached windows (#459): the graph,
   the workbook, the Project Manager, the Object Manager and the console undo,
   redo and save the project, even with the cursor in a cell or a field (the

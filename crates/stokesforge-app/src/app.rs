@@ -1158,6 +1158,7 @@ impl eframe::App for StokesForgeApp {
         self.drain_layout_actions(&mut actions);
         actions.extend(history);
         self.dispatch_actions(&ctx, actions);
+        self.return_selection_to_detached_books(&ctx);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
 
