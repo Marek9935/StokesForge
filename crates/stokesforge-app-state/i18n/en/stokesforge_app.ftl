@@ -2031,6 +2031,7 @@ menu-help = Help
 action-keyboard-shortcuts = Keyboard Shortcuts…
     .hint = Lists the keys and gestures of the application
 keyboard-shortcuts-title = Keyboard Shortcuts
+keyboard-shortcuts-scope = In a detached window only Undo, Redo and Save work. The other shortcuts act in the main window.
 action-about = About StokesForge
     .hint = Shows the version, the license and the project page
 about-title = About StokesForge

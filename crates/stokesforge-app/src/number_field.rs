@@ -920,8 +920,7 @@ mod tests {
         }
     }
 
-    /// #426: a value validated with Enter leaves the field, so the global
-    /// undo shortcut is no longer shadowed by the field's own text undo.
+    /// #426: a value validated with Enter leaves the field.
     #[test]
     fn enter_on_a_typed_value_gives_the_focus_back() {
         let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);

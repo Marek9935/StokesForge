@@ -2028,6 +2028,7 @@ menu-help = Aide
 action-keyboard-shortcuts = Raccourcis clavier…
     .hint = Liste les touches et les gestes de l'application
 keyboard-shortcuts-title = Raccourcis clavier
+keyboard-shortcuts-scope = Dans une fenêtre détachée, seuls Annuler, Rétablir et Enregistrer fonctionnent. Les autres raccourcis agissent dans la fenêtre principale.
 action-about = À propos de StokesForge
     .hint = Affiche la version, la licence et la page du projet
 about-title = À propos de StokesForge

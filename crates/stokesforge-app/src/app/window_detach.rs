@@ -26,6 +26,12 @@
 //! window opened them (#472): a detached window only shows a band that says
 //! where the dialog is (`app.rs`, `announce_opened_dialog`).
 //!
+//! The graph, the workbook and the three panels read Ctrl+Z, Ctrl+Y and Ctrl+S
+//! at the top of their frame, before anything is painted, and queue the actions
+//! after their own (#459, `shortcuts::read_detached_history_and_save`); Ctrl+Q
+//! closes nothing there (`shortcuts::refuse_quit_in_detached`). No other global
+//! key is read in a detached window.
+//!
 //! # Taken from the top doc of `app.rs`
 //!
 //! # Detaching the Project Manager
@@ -2233,7 +2239,8 @@ mod tests {
     /// window itself (Page Layout Mode, focused) reach the model like the same
     /// keys in the main window. The key goes through the detached viewport's own
     /// input and the action is drained to the model through the root.
-    /// Witness: reading the shortcuts only for a workbook.
+    /// Witness: reading the shortcuts only for a workbook (#459 moved the read
+    /// before the painting, for the graph, the workbook and the panels).
     #[test]
     fn undo_and_redo_work_from_a_detached_graph_window() {
         let (session, graph) = plotted_graph();

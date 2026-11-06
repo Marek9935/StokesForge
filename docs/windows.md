@@ -222,8 +222,10 @@ exist), and #472 removed it: no `AppHost`, no host rule, no veil.
   field that has or had the keyboard (typing, and the Esc that gives a field
   back), an open popup, and a modal of the same viewport (Object properties).
   A key release, a key repeat and an Alt combination (Alt+Tab) never trigger
-  the band. Ctrl+Z, Ctrl+Y and Ctrl+S are stopped by the same call, until #459
-  reads them.
+  the band. Ctrl+Z, Ctrl+Y and Ctrl+S are stopped by the same call when the
+  cursor is not in a text field; with the cursor in a field they are read by
+  `read_detached_history_and_save` (next section), refused by the root, and
+  the field's text stays.
 - **Covered root.** A dialog opened while the root is covered runs unpainted, like
   the rest of the root (above), and paints in full, with its focus, when the root
   is uncovered.
@@ -231,6 +233,35 @@ exist), and #472 removed it: no `AppHost`, no host rule, no veil.
   stays in the window of its graph. It is a small panel of the graph, not a dialog
   of the application, and it raises no signal.
 - Not covered: `rfd` pickers (system windows), local popups.
+
+## Ctrl+Z, Ctrl+Y, Ctrl+S in a detached window (#459)
+
+The detached graph, the detached workbook and the three detached panels read
+exactly three keys, Ctrl+Z, Ctrl+Y (with Ctrl+Shift+Z) and Ctrl+S, through
+`shortcuts::read_detached_history_and_save`. The note and the matrix, which
+#473 removes, read none. Everything else global (Ctrl+N, Ctrl+O, Ctrl+E,
+Ctrl+", Ctrl+Shift+S, Ctrl+Q) stays in the main window; Help › Keyboard Shortcuts
+and the manual say so.
+
+- **Read before painting.** The call comes first in the window's frame (after
+  `stop_keys`), so a cell, the console, a name field or the Page Layout Mode
+  never sees the key: one press is one action on one history stack, nothing is
+  undone twice, and a typed text stays as typed (Ctrl+Z undoes the last command,
+  as in the main window).
+- **Queued after the window's own actions** (#398), through the window's
+  `requests.actions`: Ctrl+Z pressed in the frame of a click undoes that click.
+  The root drains them with the dialog refusal of #471, so a dialog open in the
+  main window refuses them, shows the band, and leaves the field untouched.
+- **Ctrl+Shift+S is consumed first and dropped**: Ctrl+S would match it and Save
+  As would save silently.
+- **Ctrl+S with no file yet** queues `Action::Save`; the root opens the system
+  file picker (no band).
+- **Ctrl+Q closes nothing.** egui closes the window where its built-in shortcut
+  (`Options::quit_shortcuts`) is pressed, which lost a typed cell;
+  `refuse_quit_in_detached` consumes it and the window shows the orange band
+  "Quit is in the main window". In the main window Ctrl+Q still asks to quit.
+- **A name field on an object that is gone closes**: the Project Manager prunes
+  `memory.rename` entries whose object left the tree (Ctrl+Z of Add Folder).
 
 ## Outside the catalog
 

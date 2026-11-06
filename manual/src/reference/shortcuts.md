@@ -8,6 +8,8 @@ On macOS, Cmd replaces Ctrl.
 
 The same list is shown by **Help ▸ Keyboard Shortcuts…**.
 
+In a detached window only Undo, Redo and Save work. The other shortcuts act in the main window.
+
 ## General
 
 | Action | Keys |

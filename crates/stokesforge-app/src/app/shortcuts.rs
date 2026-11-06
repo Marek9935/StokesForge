@@ -4,7 +4,10 @@
 //! of undo/redo in the active viewport.
 //!
 //! Moved out of `app.rs` as is (#117). The global consumption of shortcuts,
-//! `collect_shortcuts`, stays in `app.rs` (#115).
+//! `collect_shortcuts`, stays in `app.rs` (#115). A detached window reads
+//! three of them, Undo, Redo and Save, with [`read_detached_history_and_save`]
+//! (#459): a content feature works everywhere, a global feature stays in the
+//! main window.
 //!
 //! **Single registry of keys** (#231, S-K1): every key the application
 //! consumes is a constant of this module (`SHORTCUT_*` for shortcuts, `KEY_*`
