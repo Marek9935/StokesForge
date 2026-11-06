@@ -338,6 +338,7 @@ status-history = Show the last 50 messages
 status-history-title = Messages
 status-history-empty = No messages yet. The messages of your actions will appear here
 status-history-time = { $time } UTC
+status-history-repeated = { $text } (×{ $count })
 status-level-warning = Warning
 status-level-error = Error
 status-formula-now-reads = { $count ->
@@ -653,6 +654,8 @@ history-macro-move-columns = Move Columns
 history-macro-analyze-rows = Analyze Rows
 history-transpose-rows = Transpose Rows
 history-recalculate-transpose = Recalculate Transposed Sheet
+history-transpose-auto-on = Check Recalculate Automatically
+history-transpose-auto-off = Uncheck Recalculate Automatically
 
 ## Undo and Redo
 
@@ -718,6 +721,7 @@ error-formula-unknown-column = Column { $letter } does not exist in this sheet
 error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
 error-formula-deleted-column = Column deleted. Replace #REF with a column letter
 error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
+error-formula-reads-following-sheet = { $sheet } follows { $source }, so { $source } cannot calculate from it. Uncheck Recalculate automatically on { $sheet } first
 error-formula-too-deep = The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)
 error-formula-unknown-function = Unknown function { $name }. Check its spelling
 error-formula-unknown-function-suggestion = Unknown function { $name }. Did you mean { $suggestion }?
@@ -1511,6 +1515,8 @@ analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Direct Deconvolution
 error-model-calculated-column-read-only = This column is produced by a calculation. Detach it from the calculation to edit its values
 error-model-transpose-no-x-prime = Column { $letter } ({ $name }) has no x' value. Set one to analyze a row
+error-model-transpose-source-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check Recalculate automatically
+error-model-calculation-reads-following-sheet = { $sheet } follows { $source }, so { $source } cannot calculate from it. Uncheck Recalculate automatically on { $sheet } first
 error-model-transpose-not-numeric = Column { $letter } ({ $name }) contains text. Only numeric columns allow a row to be analyzed
 
 ## Analysis — names of the columns an operation produces (#181)
@@ -2260,6 +2266,11 @@ transpose-relink = Relink
 transpose-relink-hint = Rewrites the linked columns from { $source } and erases the values edited in them
 transpose-relink-title = Relink transposed sheet
 transpose-relink-confirm = Values edited in the linked columns of { $sheet } will be erased. Undo brings them back
+transpose-auto = Recalculate automatically
+    .hint = Updates { $sheet } whenever { $source } changes. A value typed in it stops the updates until Relink
+    .disabled = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check this box
+transpose-state-stuck = Out of date: { $reason }
+transpose-stuck-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to follow
 
 # Lissage (#324)
 analysis-kind-smooth = Smoothing

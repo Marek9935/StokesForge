@@ -171,7 +171,7 @@ impl AppState {
     /// Opens the window after a successful gesture that orphaned `users`.
     /// Nothing if the list is empty or if the gesture failed.
     pub(super) fn open_column_use(&mut self, users: Vec<ColumnUser>) {
-        if users.is_empty() || self.last_action_failed() {
+        if users.is_empty() || self.gesture_failed() {
             return;
         }
         self.column_use = Some(ColumnUseNotice {

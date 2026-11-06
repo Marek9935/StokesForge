@@ -155,11 +155,26 @@ is ignored on reading. The `//!` of the module says why the panel is an
 `AppState::notice` (information), `warn` (warning) and `fail` (error,
 except in a modal dialog: S-M7) set a leveled `StatusMessage`
 (`StatusLevel`) and add it to a history of `STATUS_HISTORY_LEN` = 50
-messages. An information message clears after `INFO_LIFETIME` (8 s):
-`AppState::expire_status`, called on every frame by
-`sync_window_title_and_status` (`app.rs`), clears the expired one and returns the remaining
-delay — only this instant schedules a repaint, no wake-up when idle.
-Warning and error stay until the next message. A click on the
+messages. A plain message clears after `INFO_LIFETIME` (8 s) and an orange
+after `WARNING_LIFETIME` (30 s): `AppState::expire_status`, called on every
+frame by `sync_window_title_and_status` (`app.rs`), clears the expired one and
+returns the remaining delay — only this instant schedules a repaint, no
+wake-up when idle. A red stays until a later gesture replaces it.
+
+**One rule for the line (S-R18, #453).** Level: red = not done; orange = done
+but not as asked, or needs your eyes; plain = done as asked. Every message
+carries its gesture (`StatusMessage::gesture`): the outermost
+`AppState::dispatch`, a `commit_*` entry point, or, outside both, the message
+itself; the polls and the autosave (`AppState::background`) say messages with
+no gesture. Within one gesture the most serious message takes the line, on a
+tie the last (`AppState::takes_the_line`); a later gesture replaces the line at
+once; a plain message with no gesture never replaces an orange or a red. Every
+message, whether or not it took the line, enters the history, except
+`AppState::progress` (never stored) and the earlier plain lines of the same
+gesture (one gesture = its final plain line plus its orange and red).
+`AppState::gesture_failed` answers "did THIS gesture fail", never from the
+line. The detached-window band reads `messages_since` (the history), not the
+line. A click on the
 bar (`Action::OpenStatusHistory`) opens `status_history_window`. A
 script exception is an error ("Script failed. See the console"). The
 bar no longer displays "Revision N" or "Reopen Last Import…".

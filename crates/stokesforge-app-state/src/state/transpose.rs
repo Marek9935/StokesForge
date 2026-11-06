@@ -16,7 +16,7 @@
 //! link has been edited (the edited values would be overwritten).
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind};
-use stokesforge_core::{NodeId, SeriesRef};
+use stokesforge_core::{CoreError, NodeId, SeriesRef};
 
 use super::{history_text, AppState};
 use crate::analysis::{AnalysisForm, Preset};
@@ -34,6 +34,14 @@ pub struct TransposeInfo {
     pub stale: bool,
     /// A value of a column created by the link has been edited.
     pub modified: bool,
+    /// The box "Recalculate automatically" is checked (#463).
+    pub auto: bool,
+    /// Why the box cannot be checked now (the source calculates from this
+    /// sheet): the sentence of its hover (S-G1). `None` if it can.
+    pub auto_blocked: Option<String>,
+    /// Why a followed sheet is out of date and cannot catch up (a source
+    /// column has text or no x'): the sentence that names the column.
+    pub stuck: Option<String>,
 }
 
 impl AppState {
@@ -42,11 +50,54 @@ impl AppState {
         let tree = &self.snapshot.tree;
         let link = tree.transpose_link(sheet)?;
         let state = link.state(tree);
+        let auto_blocked = (!link.auto_recalc)
+            .then(|| tree.transpose_check_refusal(sheet))
+            .flatten()
+            .and_then(|refusal| match refusal {
+                CoreError::TransposeSourceReadsIt {
+                    letter,
+                    source_sheet,
+                    transposed,
+                } => Some(tr!(
+                    "transpose-auto",
+                    "disabled",
+                    letter = letter.as_str(),
+                    source = source_sheet.as_str(),
+                    sheet = transposed.as_str()
+                )),
+                _ => None,
+            });
+        // Why a followed sheet cannot catch up (#463, T7): a source column it
+        // cannot read (text, no x'), or a source column whose formula reads the
+        // sheet (the follow pass skips a loop: the refused formula stays and its
+        // column has no values).
+        let stuck = (link.auto_recalc && state.stale && !state.modified)
+            .then(|| {
+                stokesforge_core::unfollowable_column(tree, link.source)
+                    .map(|error| errors::model::error_message(&error))
+                    .or_else(|| match tree.transpose_check_refusal(sheet) {
+                        Some(CoreError::TransposeSourceReadsIt {
+                            letter,
+                            source_sheet,
+                            transposed,
+                        }) => Some(tr!(
+                            "transpose-stuck-reads-it",
+                            letter = letter.as_str(),
+                            source = source_sheet.as_str(),
+                            sheet = transposed.as_str()
+                        )),
+                        _ => None,
+                    })
+            })
+            .flatten();
         Some(TransposeInfo {
             source: link.source,
             source_name: tree.node(link.source)?.name().to_string(),
             stale: state.stale,
             modified: state.modified,
+            auto: link.auto_recalc,
+            auto_blocked,
+            stuck,
         })
     }
 
@@ -86,7 +137,7 @@ impl AppState {
                 source: *sheet,
                 rows: wanted,
             });
-            if self.last_action_failed() {
+            if self.gesture_failed() {
                 let _ = self.handle.abort_macro();
                 self.refresh();
                 return;

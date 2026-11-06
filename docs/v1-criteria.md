@@ -171,7 +171,9 @@ unproven is the final content of the notes (CHANGELOG section), read at the one 
 Principle: **a single line as long as nothing diverges**, one more branch the
 day a big work package would prevent shipping a fix. A branch
 is never opened in advance: `vN` is created from `main` on the day of need,
-`release/(N-1).x` from the last tag of the old major version.
+`release/(N-1).x` from the last tag of the old major version. One exception
+(#480): the integration line `PostV1.1`, opened in advance for the work that
+must not reach `main` before the V1.1 tag (see "Integration line" below).
 
 ```
  Phase 1: a single line               Phase 2: a breaking work package
@@ -200,6 +202,22 @@ is never opened in advance: `vN` is created from `main` on the day of need,
   only fixes and small additions; features go into
   `vN`. In `vN`, commits say "Refs #N": "Closes" closes the
   issue only at the merge into `main`.
+- **Integration line `PostV1.1`** (#480). Work that follows the V1.1 is developed now and
+  must not enter `main` before the V1.1 tag. The line is a branch created from `main` by
+  `scripts/line.sh create PostV1.1` (permanent worktree `../_stokesforge/line-PostV1.1`, pushed,
+  CI on every push). An issue declared on it (GitLab label `ligne-PostV1.1`; a sub-issue follows its parent) gets its worktree from `origin/PostV1.1`, is tried
+  as any issue and is delivered into the line by `scripts/deliver.sh`, which merges and pushes the
+  line instead of `main` (same lock, same exit codes). `main` reaches the line by a regular
+  merge (`scripts/line.sh sync PostV1.1`), never the other way before the V1.1 tag. A line merge
+  may not say `Closes #N` (it would close the issue when the line lands): `Refs #N`. The V1.1
+  issues keep targeting `main`, and a branch holding a commit of the line is refused on `main`.
+  At the V1.1 tag the line is merged into `main`, its issues are closed and the branch is removed:
+  `scripts/line.sh land PostV1.1` does it, and refuses until the final tag `v1.1.0` (never an `-rc`) is on
+  `main` and the user's OK on the whole line (`scripts/try.sh PostV1.1`, trial entries of issue #480) is
+  recorded. If `main` is not in the line yet it is merged into the line first (exit 3, recheck, rerun);
+  otherwise the line is merged into `main` with `--no-ff` and pushed, every issue with a `Merge #n:` commit
+  in the merge commit's second-parent range is commented and closed (rerunnable, never closed twice), then
+  the label, the records' `line`, the line worktree and the branch are removed. No branch protection on the line.
 - **The bug is fixed where it was born**: a bug present on `main` is fixed
   on `main`, in an isolated commit, and reaches `vN` by **merging** `main`
   (not by hand copy); a bug of `release/1.x` absent from `main` is

@@ -162,9 +162,9 @@ The **Python Script** panel at the bottom is the script console. You write a scr
 
 ### Status bar
 
-The status bar shows the last message: what was saved or loaded, a warning, or an error. An information message disappears after a few seconds; a warning or an error stays until the next message. **Ready** is shown when there is no message.
+The status bar shows the last message: what was saved or loaded, a warning, or an error. A plain message (done as asked) disappears after a few seconds. An orange message (done, but not as you asked, or worth a look) disappears after 30 seconds. A red message (not done) stays until a later action says something. When one action says several things, the most serious stays on the line; the others are in the list. **Ready** is shown when there is no message.
 
-Click the status bar to open the list of the last 50 messages.
+Click the status bar to open the list of the last 50 messages: for each action, its last plain message and its orange and red messages. A message that faded is still in the list. A long message wraps instead of being cut. The same message said several times in a row is one line with its count, for example **Nothing to undo (×13)**, at the time of the last one.
 
 During long work (an import, a recalculation), the status bar shows its progress and a **Stop** button.
 

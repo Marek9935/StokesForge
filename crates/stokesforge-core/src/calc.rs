@@ -647,7 +647,9 @@ impl Project {
     pub fn add_calculation(&mut self, draft: CalculationDraft) -> CoreResult<NodeId> {
         draft.validate()?;
         let before = self.tree().clone();
-        let result = self.add_calculation_inner(draft);
+        let result = self
+            .add_calculation_inner(draft)
+            .and_then(|id| self.refuse_following_reader(id).map(|()| id));
         if result.is_err() {
             self.replace_tree(before);
         }
@@ -690,6 +692,34 @@ impl Project {
         Ok(id)
     }
 
+    /// Refuses (#463, E1 case 4) a calculation that reads a followed transposed
+    /// sheet while one of its results lands in the source of that sheet: the
+    /// source would calculate from the sheet that follows it.
+    fn refuse_following_reader(&self, id: NodeId) -> CoreResult<()> {
+        let tree = self.tree();
+        let readers = tree.columns_reading_followed_sheet();
+        if readers.is_empty() {
+            return Ok(());
+        }
+        let Some(calc) = tree.calculation(id) else {
+            return Ok(());
+        };
+        for column in calc.outputs.iter().filter_map(|o| o.column) {
+            let Some(sheet) = readers.get(&column) else {
+                continue;
+            };
+            let name = |node: NodeId| tree.node(node).map(|n| n.name().to_string());
+            let source = tree.transpose_link(*sheet).map(|l| l.source);
+            if let (Some(transposed), Some(source)) = (name(*sheet), source.and_then(name)) {
+                return Err(CoreError::CalculationReadsFollowingSheet {
+                    transposed,
+                    source_sheet: source,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Creates the column of `out`, right after `last_after[out.series]`.
     fn insert_output_column(
         &mut self,
@@ -726,7 +756,9 @@ impl Project {
             .cloned()
             .ok_or(CoreError::UnknownNode(id))?;
         let before = self.tree().clone();
-        let result = self.update_calculation_inner(id, &current, draft);
+        let result = self
+            .update_calculation_inner(id, &current, draft)
+            .and_then(|()| self.refuse_following_reader(id));
         if result.is_err() {
             self.replace_tree(before);
         }

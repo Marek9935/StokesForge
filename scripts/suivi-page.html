@@ -85,6 +85,7 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .box.isok{opacity:.75}
 .box.isback{border-color:var(--bad)}
 .banner{border:2px solid var(--warn);background:var(--warn-soft);color:var(--fg);border-radius:12px;padding:12px 16px;font-weight:700}
+#lines{display:flex;flex-direction:column;gap:8px}
 .ciline{border:2px solid var(--line);border-radius:12px;padding:10px 16px;font-weight:700}
 .ciline.green{border-color:var(--ok);background:var(--ok-soft)}
 .ciline.red{border-color:var(--bad);background:var(--bad-soft)}
@@ -103,6 +104,16 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
 details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
 .note{color:var(--muted);font-size:.9rem}
+.strip{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.thumb{position:relative;display:inline-flex;flex-direction:column;gap:4px;max-width:160px}
+.thumb img{display:block;max-width:160px;max-height:120px;border:2px solid var(--line);border-radius:8px;background:var(--bg)}
+.thumb .gone{border:2px dashed var(--line);border-radius:8px;padding:8px;color:var(--muted);font-size:.85rem}
+.thumb button{padding:2px 8px;font-size:.85rem}
+.imgline{color:var(--muted);font-size:.9rem}
+.imgline.bad{color:var(--bad);font-weight:700}
+.sent{display:flex;flex-wrap:wrap;gap:8px}
+.sent .thumb img{max-width:200px;max-height:150px}
+#imgnote{position:sticky;top:56px;z-index:2}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .tabs{display:flex;gap:8px;border-bottom:2px solid var(--line);position:sticky;top:0;background:var(--bg);padding-top:8px;z-index:2}
@@ -132,6 +143,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     <button type="button" id="refresh">Actualiser</button>
   </header>
   <div class="ciline" id="ciline" hidden role="status"></div>
+  <div id="lines" hidden role="status"></div>
   <section class="buildline" id="buildline" hidden aria-label="Mode de build">
     <div class="row">
       <div class="seg" id="bmodes" role="group" aria-label="Mode de build"></div>
@@ -150,6 +162,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
 
   <div class="panel" id="p-attente" role="tabpanel" aria-labelledby="tab-attente">
     <div class="banner" id="banner" hidden></div>
+    <div class="banner" id="imgnote" role="status" hidden></div>
     <div class="filter" id="filter" hidden></div>
     <section aria-labelledby="h-qcm">
       <h2 id="h-qcm">Questionnaires <span class="count" id="n-qcm">–</span></h2>
@@ -185,6 +198,7 @@ const $=id=>document.getElementById(id);
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
 let S=null,etag=null,timer=null,openBack=null,askWithdraw=null,failed=false;
 const drafts={};
+const imgDrafts={};   // per trial entry: {names:[sent or uploaded], busy:n uploads in flight, lines:[refusals]}; survives the re-render
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
 
 /* ---- shared pieces ---- */
@@ -219,6 +233,31 @@ function ciLine(ci){
   return {cls:'unknown',text:'CI inconnue sur main : on ne sait pas si elle passe.'+old};
 }
 /*CILINE-END*/
+/*LINEROW-START*/
+/* One row per integration line (#480), under the CI line of main and never colouring it: the CI state
+   of the line and the issues declared on it (delivered ones marked). row = S.lines[name]. */
+function lineRow(name,row){
+  if(!row||typeof row!=='object')return null;
+  const names=a=>(Array.isArray(a)?a:[]).join(', ');
+  const v=row.verdict;
+  let cls='unknown',ci='CI inconnue';
+  if(v==='green'){cls='green';ci='CI verte';}
+  else if(v==='red'){cls='red';ci='CI rouge : '+(names(row.names)||'cause inconnue');}
+  else if(v==='pending'){cls='pending';ci='CI en cours';}
+  const is=Array.isArray(row.issues)?row.issues:[];
+  const list=is.length?is.map(i=>'#'+i.issue+(i.delivered?' livrée':' en cours')).join(' · '):'aucune issue';
+  return {cls:cls,text:name+' : '+ci+' — '+list};
+}
+/*LINEROW-END*/
+function renderLines(){
+  const box=$('lines');if(!box)return;
+  box.textContent='';
+  Object.keys((S&&S.lines)||{}).sort().forEach(n=>{
+    const l=lineRow(n,S.lines[n]);if(!l)return;
+    box.appendChild(el('div','ciline '+l.cls,l.text));
+  });
+  box.hidden=!box.firstChild;
+}
 function renderCi(){
   const el=$('ciline'),l=ciLine(S&&S.ci);
   if(!l){el.hidden=true;return;}
@@ -351,7 +390,60 @@ function withdrawUi(q,asking){
   const given=n===0?'Aucune réponse donnée.':n===1?'1 réponse déjà donnée.':n+' réponses déjà données.';
   return {asking:true,button:'',question:'Retirer ce formulaire ? '+given,yes:'Oui, retirer',no:'Annuler'};
 }
+/* The merge button names where the merge goes: an issue with an integration line merges into it (#480). */
+function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
 /*CARDLINE-END*/
+/*IMAGES-START*/
+/* Screenshots on a trial entry (#456). Pure functions, no DOM: the limits mirror the server's
+   (MAX_IMAGE 10 Mo, MAX_IMAGES 5), which stays the judge. */
+const IMG_MAX_BYTES=10*1024*1024, IMG_MAX_COUNT=5, IMG_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
+const IMG_NAME=/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
+const IMG_GONE='Capture supprimée (limite de 512 Mo)';
+function imgListed(x){return x&&Array.isArray(x.images)?x.images.filter(n=>typeof n==='string'&&IMG_NAME.test(n)):[];}
+function imgUrl(id,name){return IMG_NAME.test(String(name))?'/api/tests/'+encodeURIComponent(id)+'/images/'+encodeURIComponent(name):null;}
+/* files: [{name,type,size}]; have: images already in the box or uploading. -> {accept, lines}. A mixed
+   drop keeps its images; each refusal gets a line. */
+function imgFilter(files,have){
+  const accept=[],lines=[];let n=have;
+  for(const f of files){
+    const nm=f.name||'image';
+    if(!IMG_TYPES.includes(f.type)){lines.push(nm+' : ce n’est pas une image PNG, JPEG, GIF ou WebP.');continue;}
+    if(f.size>IMG_MAX_BYTES){lines.push(nm+' : plus de 10 Mo, trop lourd.');continue;}
+    if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
+    if(n>=IMG_MAX_COUNT){lines.push(nm+' : '+IMG_MAX_COUNT+' captures au plus par carte.');continue;}
+    accept.push(f);n++;
+  }
+  return {accept:accept,lines:lines};
+}
+function imgUploadLine(status){
+  if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
+  if(status===413)return 'Capture refusée : plus de 10 Mo.';
+  if(status===415)return 'Capture refusée : format non reconnu (PNG, JPEG, GIF ou WebP).';
+  return 'Capture non envoyée : réessaie dans un instant.';
+}
+/* The files of a paste: items = [{kind,type,getAsFile()}]. */
+function imgFromItems(items){
+  const out=[];
+  for(const it of Array.from(items||[])){if(it&&it.kind==='file'&&IMG_TYPES.includes(it.type)){const f=it.getAsFile();if(f)out.push(f);}}
+  return out;
+}
+/* What a click on a box button sends. kind: 'retour' | 'note' | 'ok'. text = the box; names = the box's
+   images. Retour needs text or a screenshot (an empty box refuses). null = refused. */
+function imgPatch(kind,text,names){
+  const v=String(text||'').trim();
+  if(kind==='retour'){if(!v&&!names.length)return null;return {status:'retour',comment:v,images:names.slice()};}
+  if(kind==='ok')return {status:'ok',comment:v,images:names.slice()};
+  return {comment:v,images:names.slice()};
+}
+/* After a send from the box: st = {openBack, drafts, imgDrafts}. Only a successful send closes the box and
+   drops its drafts; a failed one leaves all three, so the text and thumbnails can be sent again. */
+function boxAfterSend(ok,st,id){
+  if(!ok)return st;
+  if(st.openBack&&st.openBack.id===id)st.openBack=null;
+  delete st.drafts[id];delete st.imgDrafts[id];
+  return st;
+}
+/*IMAGES-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
   const mg=mergeUi(l);
@@ -362,7 +454,7 @@ function lineEl(c){
   if(l.note)w.appendChild(el('span','what',l.note));
   if(mg.note)w.appendChild(el('span','what',mg.note));
   if(mg.button){
-    const b=el('button','save mergebtn','Fusionner');b.type='button';b.id='merge-'+c.issue;
+    const b=el('button','save mergebtn',mergeLabel(c));b.type='button';b.id='merge-'+c.issue;
     b.onclick=()=>{b.disabled=true;askMerge(c.issue);};w.appendChild(b);
   }
   return {user:l.user,node:w};
@@ -460,6 +552,82 @@ function colourOf(n){
   const c=S.colours.find(x=>!x.free&&(x.issues||[]).includes(n));if(c)return c.colour;
   const p=S.paused.find(x=>x.issue===n);return p?p.last_colour:'';
 }
+function imgDraft(x){
+  if(!imgDrafts[x.id])imgDrafts[x.id]={names:imgListed(x),busy:0,lines:[],waiters:[]};
+  return imgDrafts[x.id];
+}
+function thumb(id,name,onremove){
+  const w=el('div','thumb');
+  const u=imgUrl(id,name);
+  const gone=()=>{const g=el('div','gone',IMG_GONE);w.replaceChild(g,w.firstChild);};
+  if(u){const a=el('a');a.href=u;a.target='_blank';a.rel='noopener';
+    const im=el('img');im.loading='lazy';im.alt='Capture jointe';im.src=u;im.onerror=gone;a.appendChild(im);w.appendChild(a);}
+  else w.appendChild(el('div','gone',IMG_GONE));
+  if(onremove){const rm=el('button','','Retirer');rm.type='button';rm.setAttribute('aria-label','Retirer cette capture');rm.onclick=onremove;w.appendChild(rm);}
+  return w;
+}
+/* The strip is rebuilt in place from the page-level draft, so a poll re-render or an upload that ends
+   never loses a thumbnail. */
+function renderStrip(id,strip){
+  const st=strip||$('st-'+id),d=imgDrafts[id];if(!st||!d)return;
+  st.replaceChildren();
+  d.names.forEach(n=>st.appendChild(thumb(id,n,()=>{d.names=d.names.filter(m=>m!==n);renderStrip(id,st);})));
+  if(d.busy>0)st.appendChild(el('span','imgline','Envoi de '+d.busy+' capture'+(d.busy>1?'s':'')+'…'));
+  d.lines.forEach(l=>st.appendChild(el('div','imgline bad',l)));
+}
+function imgIdle(d){return d.busy===0?Promise.resolve():new Promise(res=>d.waiters.push(res));}
+async function attach(id,files){
+  const d=imgDrafts[id];if(!d)return;
+  const f=imgFilter(files,d.names.length+d.busy);
+  d.lines=f.lines.slice();renderStrip(id);
+  await Promise.all(f.accept.map(async file=>{
+    d.busy++;renderStrip(id);
+    try{
+      const r=await fetch('/api/tests/'+encodeURIComponent(id)+'/images',{method:'POST',headers:{'X-Suivi':'1','Content-Type':file.type},body:file});
+      if(!r.ok)d.lines.push(imgUploadLine(r.status));
+      else{const j=await r.json();if(typeof j.name==='string'&&IMG_NAME.test(j.name)&&!d.names.includes(j.name))d.names.push(j.name);}
+    }catch(e){d.lines.push(imgUploadLine(0));}
+    d.busy--;renderStrip(id);
+    if(d.busy===0){const w=d.waiters;d.waiters=[];w.forEach(f=>f());}
+  }));
+}
+async function boxSend(x,kind){
+  const d=imgDrafts[x.id]||imgDraft(x);
+  const sv=$('sv-'+x.id);if(sv)sv.disabled=true;
+  await imgIdle(d);                                   // the list goes out once the uploads are done
+  const text=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
+  const patch=imgPatch(kind,text,d.names);
+  if(!patch){if(sv)sv.disabled=false;const t=$('tx-'+x.id);if(t)t.focus();return;}
+  const ok=await send(x,patch,()=>{const st=boxAfterSend(true,{openBack,drafts,imgDrafts},x.id);openBack=st.openBack;});
+  if(!ok){imgNote('Pas enregistré : ton texte et tes captures sont gardés, réessaie dans un instant.');const b=$('sv-'+x.id);if(b)b.disabled=false;}   // the box is still there
+}
+let noteTimer=null;
+function imgNote(text){
+  const n=$('imgnote');n.textContent=text;n.hidden=false;
+  clearTimeout(noteTimer);noteTimer=setTimeout(()=>{n.hidden=true;},7000);
+}
+/* Paste and drop go to the open box; with none open, a line says to open one. */
+function dropToBox(files){
+  if(!files.length)return false;
+  if(!openBack||!imgDrafts[openBack.id]){imgNote('Ouvre d’abord la boîte d’une carte (Retour ou commentaire), puis colle la capture.');return true;}
+  attach(openBack.id,files);return true;
+}
+document.addEventListener('paste',e=>{
+  const cd=e.clipboardData;if(!cd)return;
+  const files=imgFromItems(cd.items);
+  if(!files.length)return;
+  if(cd.getData&&cd.getData('text/plain'))return;       // a paste that carries text stays text
+  if(dropToBox(files))e.preventDefault();
+});
+/* Not named by the hints: a real drag from Files did nothing at the #456 trial (#483). */
+const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
+document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
+document.addEventListener('drop',e=>{
+  if(!hasFiles(e))return;
+  e.preventDefault();
+  const all=Array.from(e.dataTransfer.files||[]);
+  if(all.length)dropToBox(all);
+});
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
   b.appendChild(head(x,x.title||''));
@@ -477,13 +645,16 @@ function testBox(x){
   if(x.status==='ok'||x.status==='retour'){const v=dayText(x.reviewed||'','', x.status==='ok'?'validé le ':'retour envoyé le ');if(v)m.push(v);}if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
   if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
   const editing=openBack&&openBack.id===x.id;
+  const sent=imgListed(x);
   if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
+  if(sent.length&&!editing){b.appendChild(el('div','lbl','Tes captures'));
+    const sn=el('div','sent');sent.forEach(n=>sn.appendChild(thumb(x.id,n)));b.appendChild(sn);}
   const a=el('div','acts');
   const ok=el('button','ok'+(x.status==='ok'?' on':''),x.status==='ok'?'✓ OK':'✓ C’est bon');ok.type='button';ok.id='ok-'+x.id;
-  ok.onclick=()=>send(x,{status:x.status==='ok'?'todo':'ok'});
+  ok.onclick=()=>{if(openBack&&openBack.id===x.id)boxSend(x,'ok');else send(x,{status:x.status==='ok'?'todo':'ok'});};
   const bk=el('button','back'+(x.status==='retour'?' on':''),'Retour');bk.type='button';bk.id='bk-'+x.id;
   bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
-  const cm=el('button','',x.comment?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
+  const cm=el('button','',(x.comment||sent.length)?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
   cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   a.appendChild(ok);a.appendChild(bk);a.appendChild(cm);b.appendChild(a);
   if(editing){
@@ -491,11 +662,23 @@ function testBox(x){
     const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
     t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':'Une remarque, une idée, une précision';
     t.oninput=()=>{drafts[x.id]=t.value;};
+    b.appendChild(t);
+    imgDraft(x);
+    const st=el('div','strip');st.id='st-'+x.id;
+    const ad=el('div','acts');
+    const pick=el('button','','Ajouter une capture');pick.type='button';pick.id='pk-'+x.id;
+    const fi=el('input');fi.type='file';fi.accept=IMG_TYPES.join(',');fi.multiple=true;fi.hidden=true;
+    fi.onchange=()=>{attach(x.id,Array.from(fi.files));fi.value='';};
+    pick.onclick=()=>fi.click();
+    ad.appendChild(pick);ad.appendChild(fi);
+    ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V)'));
+    b.appendChild(ad);b.appendChild(st);
     const r=el('div','acts');
-    const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';
-    sv.onclick=()=>{const v=t.value.trim();if(retour&&!v){t.focus();return;}openBack=null;delete drafts[x.id];send(x,retour?{status:'retour',comment:v}:{comment:v});};
-    const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];renderTests();};
-    r.appendChild(sv);r.appendChild(cn);b.appendChild(t);b.appendChild(r);
+    const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;
+    sv.onclick=()=>boxSend(x,retour?'retour':'note');
+    const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];delete imgDrafts[x.id];renderTests();};
+    r.appendChild(sv);r.appendChild(cn);b.appendChild(r);
+    renderStrip(x.id,st);   // the new strip is not in the document yet: pass it, or the old one gets drawn
   }
   return b;
 }
@@ -531,7 +714,7 @@ function render(){
   const n=S.pending;const pc=$('n-pending');pc.textContent=n;pc.className='count'+(n?' hot':'');
   const taken=S.colours.filter(c=>!c.free).length;
   $('sub').textContent=(n?n+' chose'+(n>1?'s':'')+' à faire':'Rien ne t’attend')+' · '+taken+' couleur'+(taken>1?'s':'')+' prise'+(taken>1?'s':'')+' sur 6';
-  renderCi();renderBuild();renderTests();renderSuivi();
+  renderCi();renderLines();renderBuild();renderTests();renderSuivi();
 }
 
 /* ---- tabs ---- */
@@ -580,13 +763,16 @@ async function load(){
     render();
   }catch(e){failed=true;$('sub').textContent='Le serveur ne répond pas. Il tourne ? systemctl --user status stokesforge-suivi';}
 }
-async function send(x,patch){
+async function send(x,patch,onOk){
+  let ok=true;
   Object.assign(x,patch);renderTests();
   try{
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
-  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';}
+    if(onOk)onOk();
+  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';ok=false;}
   etag=null;load();
+  return ok;
 }
 async function withdrawForm(q){
   askWithdraw=null;

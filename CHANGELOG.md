@@ -26,6 +26,19 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A transposed sheet has a **Recalculate automatically** box, checked by
+  default (#463). Checked, the sheet follows its source by itself; unchecked, it
+  is the snapshot it was (banner, **Recalculate**). A value you type in the
+  sheet is never overwritten: the whole sheet waits until **Relink** or
+  Ctrl+Z. While the box is checked, the source sheet cannot calculate from the
+  transposed sheet (a formula, directly or through another sheet, or an
+  analysis whose result lands in the source), and the box is greyed with the
+  column to fix while one does. Sheets of files saved before this change open
+  unchecked. The `.stf` format keeps version 1 and gains the optional field
+  `auto_recalc` on the link of a transposed sheet: an older version that opens
+  and saves such a file again loses it (the box comes back unchecked, no number
+  is lost).
+
 - A detached window or panel says why a gesture did nothing or failed (#471):
   a band at the bottom of that window, for 5 seconds, orange for a refusal or
   a warning, red for an error. While any dialog is open in the main window, the
@@ -39,6 +52,23 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- One rule for the status bar messages (#453). Within one action, the most
+  serious message stays on the line (a warning is no longer replaced at once by
+  the plain message of the same action, for example when adding a sheet that a
+  kept formula names, or on Ctrl+S over the size limit); the others are in the
+  message list. A warning fades after 30 seconds, an error stays until a later
+  action says something (clicking a sheet tab no longer erases it). A plain
+  message that no action caused (script finished, recalculation stopped,
+  progress) never replaces a warning or an error. The list keeps, per action,
+  its last plain message and its warnings and errors; import progress is no
+  longer stored in it. Refiled: columns dropped by a paste, and a layout or
+  language choice that could not be saved, are now warnings. Refusing a gesture
+  in a detached window shows the band each time. In the message list, a long
+  message wraps, and the same message said again directly after is one line with
+  a count (`Nothing to undo (×13)`) at the time of the last one, so a repeat no
+  longer pushes older messages out of the 50. "Nothing to undo" and "Nothing
+  to redo" are plain messages (no colour), so a detached window shows no band
+  for them.
 - Only the workbook and the graph detach (#473): a note and a matrix stay in
   the main window. Their title bar already had no detach icon; the code now
   refuses it too. The manual no longer says that dragging a title outside the

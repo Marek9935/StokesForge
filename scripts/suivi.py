@@ -8,7 +8,7 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     issues/<n>.json        one record per issue: colour, last_colour, kind
                            (issue|package), parent, subs, name, state, waiting,
                            wait_kind, what, since, owner{session,pid,pid_start,at},
-                           done_at
+                           done_at, line (absent = main; #480, see below)
     ended/<session_id>     empty files touched by the SessionEnd hook
     qcm/<id>/data.js       the decisions (injected into the form template when served)
     qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
@@ -18,8 +18,15 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
                            page's POST and by `test add|merged`)
+    tests/<n>-<k>.images/  screenshots of an entry (#456); the entry's `images` field lists names only
+    qcm/<id>/images/<code>/  screenshots of a form card; the answer's `images` lists names only
     removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
-                           outside tests/ so nothing reads it, and its number is never reused)
+                           outside tests/ so nothing reads it, and its number is never reused;
+                           its screenshots move to removed-tests/<n>-<k>.images/)
+    Screenshots: PNG, JPEG, GIF or WebP, named by the server (content hash), 10 MB and 5 per
+    entry or card. Above MAX_IMAGES_TOTAL (512 MB, all folders together) the oldest files are
+    deleted after an upload; the JSON is never rewritten, a name left without its file is shown
+    as "removed by the size limit".
     control.json           result of the last `check`
 
 THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
@@ -78,10 +85,19 @@ Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or
 session owns: exit 2 with the text on stderr for an event, exit 0 silent otherwise. `hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
 or tells a new session which issues hold unread answers; it always exits 0.
 
+INTEGRATION LINE (#480). An issue may target an integration branch (today `PostV1.1`) instead of `main`.
+The record field `line` names it; absent means `main`. `claim --line L` writes it and every claim rewrites
+it (a claim without `--line` removes it); a sub-issue without its own line inherits its parent's.
+`line <n>` prints the line of an issue (`main` if none): it reads the records only, no git or glab call
+beyond locating the state folder. A declared line whose branch is missing is refused by the scripts that
+need it, never answered with `main`. The permanent worktrees `line-*` are not work-package worktrees:
+`status` and `check` ignore them. The CI watcher polls `main` (ci.json) and every known line
+(ci-line-<name>.json); /api/state carries `lines` = {line: ci view}.
+
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
-Commands: claim, status, set, pause, done, release-line, check, migrate,
+Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
 """
@@ -408,11 +424,39 @@ def new_record(n):
             "since": None, "owner": None, "done_at": None, "legacy": False}
 
 
-def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False, avoid=()):
-    """Claim issue n in `recs` (memory only). Returns the changed records."""
+LINE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+LINE_WT_RE = re.compile(r"^line-")
+
+
+def check_line(line):
+    if not LINE_RE.fullmatch(line or ""):
+        raise Fail("not a line name: %r" % line)
+    return line
+
+
+def line_of(recs, n):
+    """The integration line of issue n: its own `line`, else its parent's, else `main`."""
+    r = recs.get(n)
+    if r is None:
+        return "main"
+    line = r.get("line")
+    if not line and r.get("parent") is not None:
+        line = (recs.get(r["parent"]) or {}).get("line")
+    return line or "main"
+
+
+def is_line_wt(path):
+    """A permanent worktree of an integration line (../_stokesforge/line-<name>), not a work package's."""
+    return bool(LINE_WT_RE.match(os.path.basename(path)))
+
+
+def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False, avoid=(), line=None, set_line=True):
+    """Claim issue n in `recs` (memory only). Returns the changed records.
+    `line` is written on n and replaces any earlier one (None removes it); a parent claimed on
+    behalf of a sub-issue keeps its own (set_line=False)."""
     changed = []
     if parent is not None:
-        p, pc = claim_into(recs, parent, owner, package=True, avoid=avoid)
+        p, pc = claim_into(recs, parent, owner, package=True, avoid=avoid, set_line=False)
         changed += pc
         r = recs.get(n) or new_record(n)
         r["parent"] = parent
@@ -427,6 +471,11 @@ def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False,
     r["colour"] = colour
     r["done_at"] = None
     r["legacy"] = False
+    if set_line:
+        if line and line != "main":
+            r["line"] = line
+        else:
+            r.pop("line", None)
     if package or subs is not None:
         r["kind"] = "package"
     if subs is not None:
@@ -451,18 +500,54 @@ def cmd_claim(a):
             m, _, t = s.partition("=")
             subs.append({"n": int(m), "title": t})
     avoid = a.avoid.split() if a.avoid else []
+    line = check_line(a.line) if a.line else None
     if a.dry_run:
         recs = load_all()
-        r, _ = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid)
+        r, _ = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid, line)
         print(r["colour"])
         return 0
     with Lock():
         recs = load_all()
         time.sleep(float(os.environ.get("SF_SUIVI_SLOW", "0")))   # test seam: widens the race window
-        r, changed = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid)
+        r, changed = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid, line)
         for x in changed:
             save(x)
     print(r["colour"])
+    return 0
+
+
+def cmd_line(a):
+    print(line_of(load_all(), a.issue))
+    return 0
+
+
+def cmd_line_clear(a):
+    """The line has landed: drop `line` from every record that carries it (scripts/line.sh land)."""
+    check_line(a.line)
+    n = 0
+    with Lock():
+        for r in load_all().values():
+            if r.get("line") == a.line:
+                r.pop("line")
+                save(r)
+                n += 1
+    print("%d record%s cleared" % (n, "" if n == 1 else "s"))
+    return 0
+
+
+def cmd_line_trial(a):
+    """Exit 0 if the user's OK on the whole line is recorded: at least one trial entry of issue
+    `issue` whose `try` command ends with `try.sh <line>`, and every such entry OK."""
+    check_line(a.line)
+    mine = [t for t in load_tests(a.issue) if str(t.get("try", "")).strip().endswith("try.sh " + a.line)]
+    if not mine:
+        print("no trial entry of #%d tries the line %s (suivi.py test add %d ...: try \"scripts/try.sh %s\")"
+              % (a.issue, a.line, a.issue, a.line))
+        return 1
+    todo = [t["id"] for t in mine if t.get("status", "todo") != "ok"]
+    if todo:
+        print("the trial of the line %s is not OK yet: %s" % (a.line, ", ".join(todo)))
+        return 1
     return 0
 
 
@@ -599,6 +684,8 @@ def build_status():
     by_issue = {}
     colourless = []
     for w in wts:
+        if is_line_wt(w):
+            continue
         n = issue_of(w)
         if n in recs:
             by_issue.setdefault(n, []).append(os.path.basename(w))
@@ -631,6 +718,7 @@ def build_status():
             "package": {"parent": g, "subs": pkg.get("subs", [])} if pkg else None,
             "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
+            **({"line": line_of(recs, lead["issue"])} if line_of(recs, lead["issue"]) != "main" else {}),
             "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
             **wait_view(recs, g),
             "worktrees": group_wts(g), "since": since, "days": days})
@@ -690,7 +778,7 @@ def cmd_status(a):
 # ------------------------------------------------------------------- check
 def cmd_check(a):
     recs = load_all()
-    wts = worktrees()
+    wts = [w for w in worktrees() if not is_line_wt(w)]
     problems = []
     seen = {}
     for r in recs.values():
@@ -811,16 +899,16 @@ def wait_settle():
 
 def should_wake(events, todos, last_change, now, settle):
     """THE wake policy (#454), the only place that decides. `events` are the unseen ones
-    (kind, status, comment), `todos` the watched `try` entries still `todo`, `last_change` the time
+    (kind, status, comment, images), `todos` the watched `try` entries still `todo`, `last_change` the time
     of the latest change of any watched entry, `settle` the delay in seconds.
     Wake only when the agent has something to do: a finished form, or no `todo` left (at once);
-    a Retour or a comment while entries remain `todo` (settle after the last change of any entry,
+    a Retour, a comment or an image while entries remain `todo` (settle after the last change of any entry,
     each change restarting it). A plain OK with `todo` left wakes nothing and stays unseen."""
     if not events:
         return False
     if any(e["kind"] in ("form", "merge", "withdrawn") for e in events) or todos == 0:
         return True
-    if any(e["status"] == "retour" or e["comment"] for e in events):
+    if any(e["status"] == "retour" or e["comment"] or e.get("images") for e in events):
         return now - last_change >= settle
     return False
 
@@ -891,8 +979,12 @@ def scan_group(members, root=None):
                 mns = os.stat(p).st_mtime_ns
             except OSError:
                 mns = 0
+            imgs = listed_images(t)
             items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime, "mns": mns,
-                          "fp": "%s|%s" % (status, comment), "line": "%s %s%s" % (tid, status, ": " + comment if comment else "")}
+                          "images": imgs,
+                          "fp": "%s|%s" % (status, comment) + ("|" + ",".join(imgs) if imgs else ""),   # no images: BASE_FP stays valid
+                          "line": "\n".join(["%s %s%s" % (tid, status, ": " + comment if comment else "")]
+                                            + image_lines(test_images_dir(tid), imgs))}
         for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
             qid = os.path.basename(os.path.dirname(p))
             meta = read_json(p)
@@ -1243,6 +1335,139 @@ def test_path(tid):
     return os.path.join(tests_dir(), tid + ".json")
 
 
+# ------------------------------------------------------------ images (#456)
+# Screenshots attached to a trial entry (tests/<id>.images/) or a QCM card (qcm/<id>/images/<code>/).
+# The server names the file (content hash + extension from the magic bytes), never the client; an
+# entry or an answer lists names only, never paths. The `*.json` globs do not see these folders.
+MAX_IMAGE = 10 * 1024 * 1024       # bytes per image
+MAX_IMAGES = 5                     # images per entry or card
+# Global cap on every stored screenshot (trial entries, QCM cards, removed-tests/ archives): above it the
+# oldest files (by mtime) are deleted after an upload, files only, never an entry's JSON. The env variable
+# is for the tests (a small cap); nobody sets it for real.
+MAX_IMAGES_TOTAL = int(os.environ.get("SF_SUIVI_MAX_IMAGES_TOTAL") or 512 * 1024 * 1024)
+REMOVED_BY_CAP = "image removed by the size limit: "
+IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+IMAGE_NAME_RE = re.compile(r"[0-9a-f]{24}\.(png|jpg|gif|webp)")
+
+
+def sniff_image(data):
+    """The extension of a PNG, JPEG, GIF or WebP by its magic bytes, else None (SVG and the rest are refused)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def store_image(folder, data, ext):
+    """Write the bytes under their hash name (atomic; the same bytes twice are one file); return the name."""
+    name = "%s.%s" % (hashlib.sha1(data).hexdigest()[:24], ext)
+    path = os.path.join(folder, name)
+    if os.path.isfile(path):
+        os.utime(path)                     # the same bytes again count as new for the size cap
+    else:
+        os.makedirs(folder, exist_ok=True)
+        tmp = os.path.join(folder, ".%s.tmp.%d" % (name, os.getpid()))
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    return name
+
+
+def test_images_dir(tid):
+    return os.path.join(tests_dir(), tid + ".images")
+
+
+def qcm_images_dir(qid, code, archived=False):
+    return os.path.join(removed_qcm_dir() if archived else os.path.join(suivi_dir(), "qcm"), qid, "images", code)
+
+
+def stored_images():
+    """[(mtime, size, path)] of every stored screenshot: trial folders, QCM folders, the removed-tests/ and removed-qcm/ archives."""
+    pats = [os.path.join(tests_dir(), "*.images", "*"), os.path.join(suivi_dir(), "qcm", "*", "images", "*", "*"),
+            os.path.join(removed_dir(), "*.images", "*"), os.path.join(removed_qcm_dir(), "*", "images", "*", "*")]
+    out = []
+    for pat in pats:
+        for p in glob.glob(pat):
+            if not IMAGE_NAME_RE.fullmatch(os.path.basename(p)):
+                continue
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            out.append((st.st_mtime_ns, st.st_size, p))
+    return out
+
+
+def enforce_image_cap(keep):
+    """While the stored screenshots exceed MAX_IMAGES_TOTAL, delete the oldest by mtime, except `keep`
+    (the file just uploaded). Files only: no entry is rewritten, so the state's ETag and the wake do not move."""
+    files = stored_images()
+    total = sum(f[1] for f in files)
+    keep = os.path.abspath(keep)
+    for _, size, p in sorted(files):
+        if total <= MAX_IMAGES_TOTAL:
+            break
+        if os.path.abspath(p) == keep:
+            continue
+        try:
+            os.unlink(p)
+        except OSError:
+            continue
+        total -= size
+        try:
+            os.rmdir(os.path.dirname(p))      # only when the folder is now empty
+        except OSError:
+            pass
+
+
+def check_image_names(value, folder, recorded=()):
+    """(names, None) for a list of at most MAX_IMAGES names of files in `folder` (duplicates dropped), else (None, sentence).
+    A name already in the stored record whose file the size cap removed is dropped silently."""
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return None, "images must be a list of names"
+    names = list(dict.fromkeys(value))
+    if len(names) > MAX_IMAGES:
+        return None, "at most %d images" % MAX_IMAGES
+    for n in list(names):
+        if not IMAGE_NAME_RE.fullmatch(n):
+            return None, "unknown image %r" % n
+        if not os.path.isfile(os.path.join(folder, n)):
+            if n in recorded:
+                names.remove(n)
+                continue
+            return None, "unknown image %r" % n
+    return names, None
+
+
+def prune_images(folder, keep):
+    """Delete the stored images that are not listed (and the folder once empty)."""
+    try:
+        for n in os.listdir(folder):
+            if n not in keep:
+                os.unlink(os.path.join(folder, n))
+        os.rmdir(folder)
+    except OSError:
+        pass
+
+
+def listed_images(rec):
+    """The valid image names an entry or answer lists (junk ignored)."""
+    v = rec.get("images") if isinstance(rec, dict) else None
+    return [n for n in v if isinstance(n, str) and IMAGE_NAME_RE.fullmatch(n)] if isinstance(v, list) else []
+
+
+def image_lines(folder, names):
+    """CLI lines `  image: <absolute path>` for the listed images; one whose file is gone (the size cap
+    deleted it) says so instead of naming a path that does not open."""
+    return [("  image: " + os.path.abspath(os.path.join(folder, n))) if os.path.isfile(os.path.join(folder, n))
+            else "  " + REMOVED_BY_CAP + n for n in names]
+
+
 def load_tests(issue=None):
     out = []
     for p in sorted(glob.glob(os.path.join(tests_dir(), "*.json"))):
@@ -1335,14 +1560,18 @@ def same_commit(stored, ref):
 
 
 def check_merge_commit(issue, commit):
-    """L2: the full hash of `commit`, or Fail. Real commit, on main, containing every
-    feature/<issue>-* branch still there, message citing #<issue>."""
+    """L2: the full hash of `commit`, or Fail. Real commit, on main (on the issue's integration line
+    when its record declares one, #480), containing every feature/<issue>-* branch still there,
+    message citing #<issue>."""
     rc, out = git_rc("rev-parse", "--verify", "--quiet", commit + "^{commit}")
     if rc != 0:
         raise Fail("no such commit in this repository: %s" % commit)
     full = out.strip()
-    if git_rc("merge-base", "--is-ancestor", full, "main")[0] != 0:
-        raise Fail("commit %s is not on main" % commit)
+    line = line_of(load_all(), issue)
+    if line != "main" and git_rc("rev-parse", "--verify", "--quiet", "refs/heads/" + line)[0] != 0:
+        raise Fail("the line %s of #%d has no local branch" % (line, issue))
+    if git_rc("merge-base", "--is-ancestor", full, line)[0] != 0:
+        raise Fail("commit %s is not on %s" % (commit, line))
     rc, out = git_rc("for-each-ref", "--format=%(refname:short)", "refs/heads/feature/%d-*" % issue)
     for br in out.split():
         if git_rc("merge-base", "--is-ancestor", br, full)[0] != 0:
@@ -1396,7 +1625,7 @@ def cmd_test_merged(a):
 
 
 def is_answered(t):
-    return t.get("status", "todo") != "todo" or bool(str(t.get("comment") or "").strip())
+    return t.get("status", "todo") != "todo" or bool(str(t.get("comment") or "").strip()) or bool(listed_images(t))
 
 
 def cmd_test_remove(a):
@@ -1417,11 +1646,18 @@ def cmd_test_remove(a):
             raise Fail("answered entries need --answered: " + "; ".join(
                 "%s [%s] %r" % (tid, t.get("status", "todo"), t.get("comment", "")) for tid, t in answered))
         stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        archived = []
         for tid, t in picked:
             write_json(os.path.join(removed_dir(), tid + ".json"), dict(t, removed_at=stamp))
             os.unlink(test_path(tid))
+            if os.path.isdir(test_images_dir(tid)):
+                dest = os.path.join(removed_dir(), tid + ".images")
+                shutil.move(test_images_dir(tid), dest)
+                archived.append(dest)
     for tid, t in answered:
         print("answered %s [%s] %s" % (tid, t.get("status", "todo"), t.get("comment", "")))
+    for dest in archived:
+        print("images archived: " + os.path.abspath(dest))
     print("%d entr%s removed" % (len(picked), "y" if len(picked) == 1 else "ies"))
     return 0
 
@@ -1430,6 +1666,8 @@ def cmd_test_list(a):
     for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
         print("%s\t%s\t%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
                                 "\t(try)" if t.get("try") else ""))
+        for line in image_lines(test_images_dir(t["id"]), listed_images(t)):
+            print(line)
     return 0
 
 
@@ -1675,6 +1913,8 @@ def cmd_qcm_withdraw(a):
         raise Fail(str(e))
     for code in sorted(answers, key=natural):
         print("answered " + answer_line(code, answers[code]))
+        for extra in image_lines(qcm_images_dir(a.id, code, True), listed_images(answers[code])):
+            print(extra)
     print("%s withdrawn%s" % (a.id, ", answers kept: suivi.py qcm answers %s" % a.id if answers else ""))
     return 0
 
@@ -1689,6 +1929,14 @@ def cmd_qcm_answers(a):
         raise Fail("no such QCM: %s" % a.id)
     answers = load_answers(a.id, archived=archived)
     if a.json:
+        for code, r in answers.items():       # paths are made at display time, never stored
+            lines = image_lines(qcm_images_dir(a.id, code, archived), listed_images(r))
+            paths = [x[len("  image: "):] for x in lines if x.startswith("  image: ")]
+            gone = [x[len("  " + REMOVED_BY_CAP):] for x in lines if x.startswith("  " + REMOVED_BY_CAP)]
+            if paths:
+                r["image_paths"] = paths
+            if gone:
+                r["images_removed_by_size_limit"] = gone
         print(json.dumps({"id": a.id, "meta": meta, "answers": answers}, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     pr = qcm_progress(a.id, meta, archived)
@@ -1696,6 +1944,8 @@ def cmd_qcm_answers(a):
                                                           pr["total"], "withdrawn" if archived else "finished" if meta.get("finished") else "open"))
     for code in sorted(answers, key=natural):
         print(answer_line(code, answers[code]))
+        for extra in image_lines(qcm_images_dir(a.id, code, archived), listed_images(answers[code])):
+            print(extra)
     return 0
 
 
@@ -1711,8 +1961,9 @@ def cmd_qcm_list(a):
 # ------------------------------------------------------------------ server
 MAX_BODY = 256 * 1024
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suivi-page.html")
-# img-src data: lets the inline SVG tab icon load; nothing else is fetched as an image.
-CSP = ("default-src 'none'; img-src data:; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+# img-src data: lets the inline SVG tab icon load; 'self' lets the attached screenshots (#456) load from
+# this server's own image routes; nothing else is fetched as an image.
+CSP = ("default-src 'none'; img-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
        "font-src https://fonts.gstatic.com; connect-src 'self'; base-uri 'none'; form-action 'none'; "
        "frame-ancestors 'none'")
 
@@ -1826,15 +2077,31 @@ def ci_run(cmd, timeout):
     return p.returncode, out, err
 
 
-def ci_poll(prev, now=None):
-    """One reading. Never raises: any doubt is `unknown`."""
+def ci_line_path(line):
+    return os.path.join(suivi_dir(), "ci-line-%s.json" % line)
+
+
+def ci_lines():
+    """The integration lines to watch: those of the records (done ones too: a line waits for its landing)
+    and of the permanent line worktrees."""
+    out = {r["line"] for r in load_all().values() if LINE_RE.fullmatch(str(r.get("line") or ""))}
+    for w in worktrees():
+        if is_line_wt(w):
+            b = git("-C", w, "symbolic-ref", "--short", "HEAD")
+            if LINE_RE.fullmatch(b or ""):
+                out.add(b)
+    return sorted(out - {"main"})
+
+
+def ci_poll(prev, now=None, ref="main"):
+    """One reading of the head of `ref` (main or an integration line). Never raises: any doubt is `unknown`."""
     now = time.time() if now is None else now
     prev = prev if isinstance(prev, dict) else {}
     out = {"checked_at": now, "sha": None, "verdict": "unknown", "names": [], "reason": "",
            "last_red": prev.get("last_red"), "since": prev.get("since")}
     try:
         timeout = float(os.environ.get("SF_SUIVI_CI_TIMEOUT", "60"))
-        rc, text, err = ci_run(["bash", CI_STATUS, "--head"], timeout)
+        rc, text, err = ci_run(["bash", CI_STATUS, "--head", ref], timeout)
         sha, jobs = ci_parse_jobs(text)
         out["sha"] = sha
         if sha is None:
@@ -1866,9 +2133,9 @@ def ci_poll(prev, now=None):
     return out
 
 
-def ci_view():
+def ci_view(path=None):
     """What /api/state shows: computed when read; missing, corrupt or stale is `unknown`."""
-    d = read_json(ci_path())
+    d = read_json(path or ci_path())
     view = {"verdict": "unknown", "names": [], "reason": "no reading yet", "sha": None, "last_red": None}
     if not isinstance(d, dict):
         return view
@@ -1892,6 +2159,12 @@ def ci_loop(path):
     while True:
         try:
             write_json(path, ci_poll(read_json(path)))
+        except Exception:
+            pass
+        try:
+            for ln in ci_lines():
+                lp = ci_line_path(ln)
+                write_json(lp, ci_poll(read_json(lp), ref=ln))
         except Exception:
             pass
         time.sleep(ci_poll_seconds())
@@ -2451,6 +2724,20 @@ def build_auto_loop():
             time.sleep(30)
 
 
+def line_rows():
+    """{line: CI view + the issues declared on the line, delivered or not} for the tracking page (#480)."""
+    recs = load_all()
+    committed = {t.get("n") for t in load_tests() if t.get("commit")}
+    rows = {}
+    for ln in ci_lines():
+        row = ci_view(ci_line_path(ln))
+        row["issues"] = [{"issue": n, "name": r.get("name", ""),
+                          "delivered": bool(r.get("done_at")) or n in committed}
+                         for n, r in sorted(recs.items()) if line_of(recs, n) == ln and r.get("kind") != "package"]
+        rows[ln] = row
+    return rows
+
+
 def build_state():
     s = build_status()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
@@ -2458,6 +2745,7 @@ def build_state():
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
             "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
+            "lines": line_rows(),
             "build_queue": build_queue_view(),
             "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
 
@@ -2471,13 +2759,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     # -- plumbing
-    def send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=()):
+    def send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), cache="no-store"):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", CSP)
         for k, v in extra:
@@ -2541,6 +2829,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not safe_id(path[len("/qcm/"):]):
                 return self.fail(400, "bad id")
             return self.qcm_page(path[len("/qcm/"):])
+        m = re.fullmatch(r"/api/tests/([^/]+)/images/([^/]+)", path)
+        if m:
+            return self.get_image(test_images_dir(m.group(1)) if safe_id(m.group(1)) else None, m.group(2))
+        m = re.fullmatch(r"/api/qcm/([^/]+)/images/([^/]+)/([^/]+)", path)
+        if m:
+            ok = safe_id(m.group(1)) and safe_id(m.group(2))
+            return self.get_image(qcm_images_dir(m.group(1), m.group(2)) if ok else None, m.group(3))
         m = re.fullmatch(r"/api/qcm/([^/]+)/answers", path)
         if m:
             qid = m.group(1)
@@ -2556,6 +2851,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if safe_id(qid) and os.path.isdir(os.path.join(removed_qcm_dir(), qid)):
             return self.fail(410, GONE_TEXT)
         return self.fail(404, "no such QCM")
+
+    def get_image(self, folder, name):
+        """A stored screenshot. The name is checked against the strict pattern (hash + extension), the type
+        comes from the extension through a server table, and a page of another site may not embed it."""
+        if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            return self.fail(403, "cross-site request")
+        if folder is None or not IMAGE_NAME_RE.fullmatch(name):
+            return self.fail(400, "bad id")
+        try:
+            with open(os.path.join(folder, name), "rb") as f:
+                data = f.read()
+        except OSError:
+            return self.fail(404, "no such image")
+        self.send(200, data, IMAGE_TYPES[name.rsplit(".", 1)[1]],
+                  [("Cross-Origin-Resource-Policy", "same-origin")], cache="private, max-age=31536000, immutable")
 
     def qcm_page(self, qid):
         meta = read_json(os.path.join(qcm_dir(qid), "meta.json"))
@@ -2597,10 +2907,75 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.fail(400, "body is not JSON")
             return None
 
+    def read_raw(self):
+        """The raw body of an image upload (not JSON), or None after an error reply. A body shorter than
+        its Content-Length is an error; one longer than MAX_IMAGE is a 413."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.fail(400, "bad Content-Length")
+            return None
+        if length <= 0:
+            self.fail(400, "empty body")
+            return None
+        if length > MAX_IMAGE:
+            left = min(length, 2 * MAX_IMAGE)       # drain, or the client sees a reset instead of the 413
+            while left > 0:
+                try:
+                    chunk = self.rfile.read(min(65536, left))
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                left -= len(chunk)
+            self.fail(413, "image larger than %d bytes" % MAX_IMAGE)
+            return None
+        chunks, left = [], length
+        while left > 0:
+            try:
+                chunk = self.rfile.read(min(65536, left))
+            except OSError:
+                chunk = b""
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        if left:
+            self.fail(400, "body shorter than its Content-Length")
+            return None
+        return b"".join(chunks)
+
+    def upload_image(self, folder):
+        data = self.read_raw()
+        if data is None:
+            return
+        ext = sniff_image(data)
+        if ext is None:
+            return self.fail(415, "not a PNG, JPEG, GIF or WebP image")
+        name = store_image(folder, data, ext)
+        enforce_image_cap(os.path.join(folder, name))
+        self.send(200, json.dumps({"ok": True, "name": name}), "application/json")
+
     def do_POST(self):
         if not self.guard(write=True):
             return
         path = self.route()
+        m = re.fullmatch(r"/api/tests/([^/]+)/images", path)
+        if m:
+            tid = m.group(1)
+            if not safe_id(tid):
+                return self.fail(400, "bad id")
+            if not isinstance(read_json(test_path(tid)), dict):
+                return self.fail(404, "no such trial entry")
+            return self.upload_image(test_images_dir(tid))
+        m = re.fullmatch(r"/api/qcm/([^/]+)/images/([^/]+)", path)
+        if m:
+            qid, code = m.groups()
+            if not safe_id(qid) or not safe_id(code):
+                return self.fail(400, "bad id")
+            if not isinstance(read_json(os.path.join(qcm_dir(qid), "meta.json")), dict):
+                return self.missing_qcm(qid)
+            return self.upload_image(qcm_images_dir(qid, code))
         if path.startswith("/api/tests/"):
             return self.post_test(path[len("/api/tests/"):])
         m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish|withdraw)", path)
@@ -2666,7 +3041,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"ok": True}), "application/json")
         if what == "answer" and (not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"])):
             return self.fail(400, "expected an object with a safe string code")
-        if what == "answer" and not all(isinstance(v, (str, int, bool, type(None))) for v in body.values()):
+        if what == "answer" and not all(isinstance(v, (str, int, bool, type(None))) for k, v in body.items() if k != "images"):
             return self.fail(400, "answer fields must be plain values")
         try:
             with Lock():              # a withdrawal moves the folder: read and write under the same lock
@@ -2678,7 +3053,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
                     write_json(mp, meta)
                 else:
-                    write_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"), body)
+                    ap = os.path.join(qcm_dir(qid), "answers", body["code"] + ".json")
+                    if "images" in body:
+                        names, err = check_image_names(body["images"], qcm_images_dir(qid, body["code"]), listed_images(read_json(ap)))
+                        if err:
+                            return self.fail(400, err)
+                        body = dict(body, images=names)
+                        if not names:
+                            del body["images"]
+                    write_json(ap, body)
+                    prune_images(qcm_images_dir(qid, body["code"]), body.get("images", []))      # the record is the truth
         except Fail as e:
             return self.fail(503, str(e))
         self.send(200, json.dumps({"ok": True}), "application/json")
@@ -2689,8 +3073,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.read_body()
         if body is None:
             return
-        if not isinstance(body, dict) or not ({"status", "comment"} & set(body)):
-            return self.fail(400, "expected an object with status and/or comment")
+        if not isinstance(body, dict) or not ({"status", "comment", "images"} & set(body)):
+            return self.fail(400, "expected an object with status, comment and/or images")
         if "status" in body and body["status"] not in TEST_STATUSES:
             return self.fail(400, "status must be one of %s" % ", ".join(TEST_STATUSES))
         if "comment" in body and not isinstance(body["comment"], str):
@@ -2698,11 +3082,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         t = read_json(test_path(tid))
         if not isinstance(t, dict):
             return self.fail(404, "no such trial entry")
+        if "images" in body:
+            names, err = check_image_names(body["images"], test_images_dir(tid), listed_images(t))
+            if err:
+                return self.fail(400, err)
+            if names:
+                t["images"] = names
+            else:
+                t.pop("images", None)
         for k in ("status", "comment"):
             if k in body:
                 t[k] = body[k]
         t["reviewed"] = datetime.datetime.now().isoformat(timespec="seconds")
         write_json(test_path(tid), t)
+        if "images" in body:
+            prune_images(test_images_dir(tid), t.get("images", []))
         self.send(200, json.dumps({"ok": True}), "application/json")
 
     def other(self):
@@ -2759,6 +3153,14 @@ def parser():
     p.add_argument("--sub", action="append", metavar="N=TITLE", help="a sub-issue (makes the issue a package)")
     p.add_argument("--dry-run", action="store_true", help="print the colour it would take, write nothing")
     p.add_argument("--avoid", help="colours to treat as taken (dry run promises)")
+    p.add_argument("--line", help="the integration branch the issue targets (#480); absent = main, and removes an earlier one")
+    p = add("line-clear", cmd_line_clear, "the line landed: remove `line` from every record that has it")
+    p.add_argument("line")
+    p = add("line-trial", cmd_line_trial, "exit 0 if the trial entries of <issue> that try <line> are all OK")
+    p.add_argument("issue", type=int)
+    p.add_argument("line")
+    p = add("line", cmd_line, "the integration line of an issue (main if none); reads the records only")
+    p.add_argument("issue", type=int)
     p = add("status", cmd_status, "the six colours, paused issues, worktrees without a record")
     p.add_argument("--json", action="store_true")
     p = add("set", cmd_set, "state of an issue")

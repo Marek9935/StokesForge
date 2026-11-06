@@ -1198,6 +1198,10 @@ impl History {
                 project.recalculate_transpose(sheet)?;
                 Ok(structural(before, project, label))
             }
+            Command::SetTransposeAuto { sheet, auto } => {
+                project.set_transpose_auto(sheet, auto)?;
+                Ok(structural(before, project, label))
+            }
             Command::SetCells { .. }
             | Command::SetCellsPromoting { .. }
             | Command::SetColumnType { .. }
@@ -1511,7 +1515,8 @@ impl History {
             | Command::UpdateCalculation { .. }
             | Command::RemoveCalculation { .. }
             | Command::TransposeRows { .. }
-            | Command::RecalculateTranspose { .. } => {
+            | Command::RecalculateTranspose { .. }
+            | Command::SetTransposeAuto { .. } => {
                 unreachable!("apply_data called with a structural command")
             }
         }
@@ -1976,7 +1981,9 @@ fn is_derived(project: &Project, column: NodeId) -> bool {
         .ok()
         .and_then(|node| node.as_column())
         .is_some_and(|c| c.meta().formula.is_some());
-    formula || tree.calculation_of_column(column).is_some()
+    formula
+        || tree.calculation_of_column(column).is_some()
+        || tree.followed_transpose_column(column).is_some()
 }
 
 /// Type and length of a column, `None` if it is not one.
@@ -2125,6 +2132,11 @@ fn restamp_regressed_versions(
             targets.push(id);
         }
     }
+    // Ascending identifier order, never the order of `Tree::iter` (a hash table
+    // with a random seed per tree): two sessions replaying the same history
+    // must draw the same numbers (found by `b22` once the links of followed
+    // transposed sheets recorded them, #463).
+    targets.sort_unstable();
     for id in targets {
         let fresh = project.next_column_version();
         project.restamp_column_version(id, fresh)?;
@@ -2351,6 +2363,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::RemoveCalculation { .. }
         | Command::TransposeRows { .. }
         | Command::RecalculateTranspose { .. }
+        | Command::SetTransposeAuto { .. }
         | Command::SetWindowMeta { .. }
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }

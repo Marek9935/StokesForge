@@ -39,6 +39,16 @@ def jload(path):
     return json.loads(slurp(path))
 
 
+# Minimal files with the real magic bytes (#456); the server only looks at the first bytes.
+IMG = {"png": b"\x89PNG\r\n\x1a\n" + b"png-body", "jpg": b"\xff\xd8\xff\xe0" + b"jpg-body",
+       "gif": b"GIF89a" + b"gif-body", "webp": b"RIFF\x10\x00\x00\x00WEBPVP8 body"}
+IMG_NAME = re.compile(r"[0-9a-f]{24}\.(png|jpg|gif|webp)")
+
+
+def png(tag=b""):
+    return IMG["png"] + tag
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -503,7 +513,7 @@ class TestTestCommands(Base):
 
     def snap_tests(self):
         d = os.path.join(self.state, "tests")
-        return {f: slurp(os.path.join(d, f)) for f in sorted(os.listdir(d))} if os.path.isdir(d) else {}
+        return {f: slurp(os.path.join(d, f)) for f in sorted(os.listdir(d)) if os.path.isfile(os.path.join(d, f))} if os.path.isdir(d) else {}
 
     def put_test(self, tid, **fields):
         os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
@@ -714,6 +724,76 @@ class TestTestCommands(Base):
         self.assertEqual(self.add(7, self.ONE).stdout.strip(), "7-3")
         self.assertEqual(self.run_cli("test", "list", "--issue", "7").stdout.count("\n"), 1)
 
+    def put_image(self, tid, name, data=None):
+        d = os.path.join(self.state, "tests", tid + ".images")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(data or png())
+        return os.path.join(d, name)
+
+    NAME = "0123456789abcdef01234567.png"
+
+    def test_list_prints_the_absolute_path_of_each_image_and_nothing_without(self):
+        self.put_test("7-1", **{"try": "t"})
+        plain = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertEqual(plain, "7-1\ttodo\t7-1\t(try)\n")
+        path = self.put_image("7-1", self.NAME)
+        self.put_test("7-1", images=[self.NAME, "ffffffffffffffffffffffff.png"], **{"try": "t"})   # the 2nd file is missing
+        out = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertEqual(out, plain + "  image: %s\n  image removed by the size limit: ffffffffffffffffffffffff.png\n" % path)
+        self.assertTrue(os.path.isabs(path) and os.path.exists(path))
+
+    def test_qcm_answers_show_the_image_paths_at_display_time_only(self):
+        qd = os.path.join(self.state, "qcm", "7-1")
+        os.makedirs(os.path.join(qd, "answers"))
+        with open(os.path.join(qd, "meta.json"), "w") as f:
+            json.dump({"issue": 7, "title": "T", "cards": 1, "finished": False}, f)
+        ans = {"code": "R1", "question": "Q", "choix": "Yes", "statut": "tranche"}
+        with open(os.path.join(qd, "answers", "R1.json"), "w") as f:
+            json.dump(ans, f)
+        text, js = (self.run_cli("qcm", "answers", "7-1", *x).stdout for x in ((), ("--json",)))
+        self.assertNotIn("image", text + js)
+        path = os.path.join(qd, "images", "R1", self.NAME)
+        os.makedirs(os.path.dirname(path))
+        with open(path, "wb") as f:
+            f.write(png())
+        with open(os.path.join(qd, "answers", "R1.json"), "w") as f:
+            json.dump(dict(ans, images=[self.NAME]), f)
+        out = self.run_cli("qcm", "answers", "7-1").stdout
+        self.assertEqual(out, text + "  image: %s\n" % path)
+        got = json.loads(self.run_cli("qcm", "answers", "7-1", "--json").stdout)["answers"]["R1"]
+        self.assertEqual((got["images"], got["image_paths"]), ([self.NAME], [path]))
+        self.assertNotIn("image_paths", jload(os.path.join(qd, "answers", "R1.json")))
+
+    def test_remove_treats_an_image_as_an_answer_and_archives_the_folder(self):
+        self.claim(7)
+        self.put_test("7-1", images=[self.NAME], **{"try": "t"})
+        self.put_image("7-1", self.NAME)
+        self.put_test("7-2", **{"try": "t"})
+        before = self.snap_tests()
+        r = self.remove(7, "7-1")
+        self.assertNotEqual(r.returncode, 0)                                                # image-only counts as answered
+        self.assertEqual(self.snap_tests(), before)
+        self.assertTrue(os.path.isdir(os.path.join(self.state, "tests", "7-1.images")))
+        r = self.run_cli("test", "remove", "7", "7-1", "7-2", "--answered", env=self.own())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        arch = os.path.join(self.state, "removed-tests", "7-1.images")
+        self.assertIn("images archived: " + arch, r.stdout)
+        self.assertEqual(os.listdir(arch), [self.NAME])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests", "7-1.images")))
+        self.assertEqual(jload(os.path.join(self.state, "removed-tests", "7-1.json"))["images"], [self.NAME])
+        self.assertNotIn("images archived: " + os.path.join(self.state, "removed-tests", "7-2.images"), r.stdout)
+
+    def test_merged_keeps_the_images(self):
+        self.claim(7)
+        self.put_test("7-1", images=[self.NAME], **{"try": "t"})
+        self.put_image("7-1", self.NAME)
+        h = self.feature(7)
+        self.assertEqual(self.merged(7, h).returncode, 0)
+        t = jload(self.tfile("7-1"))
+        self.assertEqual((t["images"], "try" in t), ([self.NAME], False))
+        self.assertTrue(os.path.exists(os.path.join(self.state, "tests", "7-1.images", self.NAME)))
+
     def test_set_erases_the_agent_note_unless_restated(self):
         self.claim(7)
         self.run_cli("set", "7", "--state", "code", "--what", "w", "--wait", "you", "--waiting", "note")
@@ -809,6 +889,8 @@ class TestImportOnline(Base):
 
 
 class ServerBase(Base):
+    EXTRA_ENV = {}
+
     def setUp(self):
         super().setUp()
         self.claim(1, "--name", "One")
@@ -819,7 +901,7 @@ class ServerBase(Base):
         with open(self.entry, "w") as f:
             json.dump({"n": 1, "title": "T", "status": "todo", "try": "scripts/try.sh 1"}, f)
         self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
-                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                     cwd=self.repo, env=dict(self.env, **self.EXTRA_ENV), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(self.stop)
         line = self.proc.stdout.readline()
         m = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
@@ -1069,6 +1151,46 @@ class TestWaitEvents(WaitBase):
         self.entry("1-1", "ok")
         rc, out, _ = self.run_wait(1, timeout="1")
         self.assertTrue(out.startswith("timeout"), out)
+
+    def test_an_image_alone_wakes_like_a_comment_and_names_its_path(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        name = "0123456789abcdef01234567.png"
+        d = os.path.join(self.state, "tests", "1-1.images")
+        os.makedirs(d)
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(png())
+        self.entry("1-1", images=[name])
+        rc, out, _ = self.run_wait(1, timeout="5")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.splitlines()[0], "1-1 todo")
+        self.assertEqual(out.splitlines()[1], "  image: " + os.path.join(d, name))
+        self.assertTrue(os.path.isabs(out.splitlines()[1][len("  image: "):]))
+        self.assertIn("Still open: 2 trial entries", out)
+
+    def test_an_image_waits_for_the_settle_delay_like_a_comment(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        self.entry("1-1", images=["0123456789abcdef01234567.png"])
+        t0 = time.time()
+        rc, out, _ = self.run_wait(1, timeout="5", env={"SF_SUIVI_WAIT_SETTLE": "1.0"})
+        self.assertIn("1-1 todo", out)
+        self.assertGreaterEqual(time.time() - t0, 0.9)
+
+    def test_the_fingerprint_is_unchanged_without_images(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2", "retour", "bad")
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, todos = suivi.scan_group([1])
+        self.assertEqual(items["1-1"]["fp"], suivi.BASE_FP)            # stored `heard/` fingerprints stay valid
+        self.assertEqual(items["1-2"]["fp"], "retour|bad")
+        self.entry("1-1", images=["0123456789abcdef01234567.png"])
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, _ = suivi.scan_group([1])
+        self.assertNotEqual(items["1-1"]["fp"], suivi.BASE_FP)
 
     def test_each_change_restarts_the_delay(self):
         self.owned(1)
@@ -1772,7 +1894,7 @@ class TestAgentIdleServed(ServerBase):
         os.utime(p, (time.time() - 600, time.time() - 600))
         self.put(1, colour=C[0], name="One", owner=self.live_owner("S1"))
         self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
-                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                     cwd=self.repo, env=dict(self.env, **self.EXTRA_ENV), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.port = int(re.search(r":(\d+)/", self.proc.stdout.readline()).group(1))
         status, _, body = self.req("GET", "/api/state")
         self.assertEqual(json.loads(body)["colours"][0]["agent_idle_min"], 10)
@@ -1782,7 +1904,7 @@ class TestServer(ServerBase):
     def test_csp_lets_the_inline_tab_icon_load(self):
         status, headers, _ = self.req("GET", "/")
         csp = {k.lower(): v for k, v in headers.items()}["content-security-policy"]
-        self.assertIn("img-src data:", csp)
+        self.assertIn("img-src 'self' data:", csp)
         self.assertIn("default-src 'none'", csp)
 
     def test_post_without_the_custom_header_is_403_and_writes_nothing(self):
@@ -1907,6 +2029,324 @@ def node_check(js):
         with open(p, "w", encoding="utf-8") as f:
             f.write(js)
         return subprocess.run(["node", "--check", p], capture_output=True, text=True)
+
+
+
+class TestImageCap(ServerBase):
+    """The global cap on stored screenshots (#456, lot 1b): a small cap through the env hook, the CLI in-process."""
+    EXTRA_ENV = {"SF_SUIVI_MAX_IMAGES_TOTAL": "2500"}
+    H = {"X-Suivi": "1", "Content-Type": "image/png"}
+
+    def blob(self, tag, size=1000):
+        return png(tag) + bytes(size)
+
+    def up(self, data, path="/api/tests/1-1/images"):
+        return self.req("POST", path, self.H, data)
+
+    def stored(self, data, path="/api/tests/1-1/images"):
+        status, _, body = self.up(data, path)
+        self.assertEqual(status, 200)
+        return json.loads(body)["name"]
+
+    def folder(self):
+        return os.path.join(self.state, "tests", "1-1.images")
+
+    def age(self, name, secs, folder=None):
+        p = os.path.join(folder or self.folder(), name)
+        t = time.time() - secs
+        os.utime(p, (t, t))
+
+    def exists(self, name, folder=None):
+        return os.path.exists(os.path.join(folder or self.folder(), name))
+
+    def test_the_oldest_files_go_first_and_the_new_one_stays(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        self.age(a, 300)
+        self.age(b, 200)
+        c = self.stored(self.blob(b"c"))                       # 3 x ~1000 > 2500
+        self.assertEqual((self.exists(a), self.exists(b), self.exists(c)), (False, True, True))
+
+    def test_the_file_just_uploaded_stays_even_when_it_is_the_oldest(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        self.age(a, 100)
+        self.age(b, 200)
+        c = self.stored(self.blob(b"c"))
+        self.age(c, 1000)                                       # now the oldest, but new files are judged at upload
+        d = self.stored(self.blob(b"d", 3000))                  # alone above the cap
+        self.assertEqual(os.listdir(self.folder()), [d])
+
+    def test_uploading_the_same_bytes_again_counts_as_new(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        self.age(a, 300)
+        self.age(b, 200)
+        self.assertEqual(self.stored(self.blob(b"a")), a)       # refreshes a: now b is the oldest
+        self.stored(self.blob(b"c"))
+        self.assertEqual((self.exists(a), self.exists(b)), (True, False))
+
+    def test_the_archives_and_the_qcm_folders_are_counted_and_evicted(self):
+        arch = os.path.join(self.state, "removed-tests", "0-1.images")
+        os.makedirs(arch)
+        old = "0123456789abcdef01234567.png"
+        for n, tag in ((old, b"o"), ("1123456789abcdef01234567.png", b"p")):
+            with open(os.path.join(arch, n), "wb") as f:
+                f.write(self.blob(tag))
+        self.age(old, 900, arch)
+        self.age("1123456789abcdef01234567.png", 800, arch)
+        self.stored(self.blob(b"n"))                            # 3 files now > 2500
+        self.assertFalse(self.exists(old, arch))
+        self.assertTrue(self.exists("1123456789abcdef01234567.png", arch))
+
+    def test_a_withdrawn_form_s_screenshots_are_counted_and_evicted(self):
+        arch = os.path.join(self.state, "removed-qcm", "0-1", "images", "R1")
+        os.makedirs(arch)
+        old = "0123456789abcdef01234567.png"
+        for n, tag in ((old, b"o"), ("1123456789abcdef01234567.png", b"p")):
+            with open(os.path.join(arch, n), "wb") as f:
+                f.write(self.blob(tag))
+        self.age(old, 900, arch)
+        self.age("1123456789abcdef01234567.png", 800, arch)
+        self.stored(self.blob(b"n"))                            # 3 files now > 2500
+        self.assertFalse(self.exists(old, arch))
+        self.assertTrue(self.exists("1123456789abcdef01234567.png", arch))
+
+    def test_eviction_rewrites_no_json_and_leaves_the_state_etag_alone(self):
+        a = self.stored(self.blob(b"a"))
+        self.assertEqual(self.req("POST", "/api/tests/1-1", {"X-Suivi": "1", "Content-Type": "application/json"},
+                                  {"images": [a]})[0], 200)
+        self.age(a, 500)
+        tag = self.req("GET", "/api/state")[1]["ETag"]
+        with open(self.entry, "rb") as f:
+            before = f.read()
+        mtime = os.stat(self.entry).st_mtime_ns
+        self.stored(self.blob(b"b"))
+        self.stored(self.blob(b"c"))                            # evicts a
+        self.assertFalse(self.exists(a))
+        with open(self.entry, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(os.stat(self.entry).st_mtime_ns, mtime)
+        self.assertEqual(self.req("GET", "/api/state", {"If-None-Match": tag})[0], 304)
+
+    def test_a_save_drops_a_recorded_missing_name_but_refuses_an_unrecorded_one(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        post = lambda body: self.req("POST", "/api/tests/1-1", {"X-Suivi": "1", "Content-Type": "application/json"}, body)
+        self.assertEqual(post({"images": [a, b]})[0], 200)
+        os.unlink(os.path.join(self.folder(), a))               # what the cap does
+        self.assertEqual(post({"images": [a, b], "comment": "c"})[0], 200)
+        self.assertEqual(jload(self.entry)["images"], [b])
+        self.assertEqual(post({"images": [b, "ffffffffffffffffffffffff.png"]})[0], 400)   # never recorded
+        self.assertEqual(jload(self.entry)["images"], [b])
+
+    def test_a_qcm_save_does_the_same(self):
+        d = os.path.join(self.state, "qcm", "1-1")
+        os.makedirs(os.path.join(d, "answers"))
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "T", "cards": 1, "finished": False}, f)
+        up = "/api/qcm/1-1/images/R1"
+        a, b = self.stored(self.blob(b"a"), up), self.stored(self.blob(b"b"), up)
+        ans = lambda imgs: self.req("POST", "/api/qcm/1-1/answer", {"X-Suivi": "1"}, {"code": "R1", "choix": "Y", "images": imgs})
+        self.assertEqual(ans([a, b])[0], 200)
+        os.unlink(os.path.join(d, "images", "R1", a))
+        self.assertEqual(ans([a, b])[0], 200)
+        self.assertEqual(jload(os.path.join(d, "answers", "R1.json"))["images"], [b])
+        self.assertEqual(ans([b, "ffffffffffffffffffffffff.png"])[0], 400)
+
+
+class TestImageCapCli(Base):
+    """What the CLI says about a name whose file the cap deleted."""
+    NAME = "0123456789abcdef01234567.png"
+
+    def own(self):
+        return self.as_session("S1")
+
+    def test_dangling_names_are_said_to_be_removed_everywhere(self):
+        self.claim(7)
+        d = os.path.join(self.state, "tests")
+        os.makedirs(d)
+        with open(os.path.join(d, "7-1.json"), "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "todo", "try": "t", "images": [self.NAME]}, f)
+        out = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertIn("  image removed by the size limit: " + self.NAME, out)
+        self.assertNotIn("image: ", out.replace("image removed", ""))
+        r = self.run_cli("test", "remove", "7", "7-1", env=self.own())  # still counts as answered
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.run_cli("test", "remove", "7", "7-1", "--answered", env=self.own()).returncode, 0)
+        qd = os.path.join(self.state, "qcm", "7-1")
+        os.makedirs(os.path.join(qd, "answers"))
+        with open(os.path.join(qd, "meta.json"), "w") as f:
+            json.dump({"issue": 7, "title": "T", "cards": 1, "finished": False}, f)
+        with open(os.path.join(qd, "answers", "R1.json"), "w") as f:
+            json.dump({"code": "R1", "choix": "Y", "images": [self.NAME]}, f)
+        text = self.run_cli("qcm", "answers", "7-1").stdout
+        self.assertIn("  image removed by the size limit: " + self.NAME, text)
+        got = json.loads(self.run_cli("qcm", "answers", "7-1", "--json").stdout)["answers"]["R1"]
+        self.assertEqual((got.get("image_paths"), got["images_removed_by_size_limit"]), (None, [self.NAME]))
+
+
+class TestImages(ServerBase):
+    """Screenshots on trial entries and QCM cards (#456): raw upload, strict names, safe GET."""
+    H = {"X-Suivi": "1", "Content-Type": "image/png"}
+
+    def up(self, data, path="/api/tests/1-1/images", headers=None, host="default"):
+        return self.req("POST", path, self.H if headers is None else headers, data, host)
+
+    def folder(self):
+        return os.path.join(self.state, "tests", "1-1.images")
+
+    def files(self):
+        return sorted(os.listdir(self.folder())) if os.path.isdir(self.folder()) else []
+
+    def stored(self, data):
+        status, _, body = self.up(data)
+        self.assertEqual(status, 200)
+        return json.loads(body)["name"]
+
+    def make_qcm(self):
+        d = os.path.join(self.state, "qcm", "1-1")
+        os.makedirs(os.path.join(d, "answers"))
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "T", "cards": 2, "finished": False}, f)
+        return d
+
+    def answer(self, body, qid="1-1"):
+        return self.req("POST", "/api/qcm/%s/answer" % qid, {"X-Suivi": "1"}, dict({"code": "R1", "choix": "Yes"}, **body))
+
+    def test_each_format_is_stored_as_sent_without_touching_the_entry(self):
+        before = self.entry_text()
+        tag = self.req("GET", "/api/state")[1]["ETag"]
+        for ext, data in IMG.items():
+            status, _, body = self.up(data)
+            self.assertEqual(status, 200, ext)
+            name = json.loads(body)["name"]
+            self.assertRegex(name, IMG_NAME)
+            self.assertTrue(name.endswith("." + ext), name)
+            with open(os.path.join(self.folder(), name), "rb") as f:
+                self.assertEqual(f.read(), data)
+        self.assertEqual(self.entry_text(), before)                              # the entry lists images only when sent
+        self.assertEqual(self.req("GET", "/api/state", {"If-None-Match": tag})[0], 304)
+        self.assertEqual(len(self.files()), 4)
+        self.stored(IMG["png"])
+        self.assertEqual(len(self.files()), 4)                                   # same bytes: one file
+
+    def test_what_is_not_a_listed_image_is_refused_and_leaves_no_file(self):
+        for data in (b"<svg xmlns='http://www.w3.org/2000/svg'><script/></svg>", b"hello", b"<html></html>", b"", b"RIFF\0\0\0\0WAVE"):
+            self.assertIn(self.up(data)[0], (400, 415), data)                     # always sent as image/png
+        self.assertEqual(self.files(), [])
+        self.assertFalse(os.path.exists(self.folder()))
+
+    def test_a_body_shorter_than_its_content_length_is_refused(self):
+        import socket
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        s.sendall(("POST /api/tests/1-1/images HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nX-Suivi: 1\r\nContent-Length: %d\r\n\r\n"
+                   % (self.port, len(IMG["png"]) + 50)).encode() + IMG["png"])
+        s.shutdown(socket.SHUT_WR)
+        reply = s.recv(4096)
+        s.close()
+        self.assertTrue(reply.startswith(b"HTTP/1.0 400"), reply)
+        self.assertEqual(self.files(), [])
+
+    def test_upload_guards_and_limits(self):
+        data = IMG["png"]
+        self.assertEqual(self.up(data, headers={"Content-Type": "image/png"})[0], 403)           # no X-Suivi
+        self.assertEqual(self.up(data, headers=dict(self.H, Origin="http://evil.example"))[0], 403)
+        self.assertEqual(self.up(data, host="evil.example")[0], 403)
+        for bad in (".hidden", "a%2Fb", ".."):
+            self.assertEqual(self.up(data, "/api/tests/%s/images" % bad)[0], 400, bad)
+        self.assertEqual(self.up(data, "/api/qcm/1-1/images/.h")[0], 400)
+        self.assertEqual(self.up(data, "/api/tests/9-9/images")[0], 404)
+        self.assertEqual(self.up(data, "/api/qcm/9-9/images/R1")[0], 404)
+        self.assertEqual(self.files(), [])
+        big = IMG["png"] + b"\0" * suivi.MAX_IMAGE                                               # one byte past the cap
+        self.assertEqual(len(big), suivi.MAX_IMAGE + len(IMG["png"]))
+        self.assertEqual(self.up(big)[0], 413)
+        self.assertEqual(self.files(), [])
+        self.assertEqual(self.post(body=b'{"comment":"%s"}' % (b"x" * (256 * 1024 + 10)))[0], 413)   # the JSON cap stays
+
+    def test_get_serves_the_stored_bytes_with_the_server_type_and_safe_headers(self):
+        for ext, data in IMG.items():
+            name = self.stored(data)
+            status, h, body = self.req("GET", "/api/tests/1-1/images/" + name)
+            h = {k.lower(): v for k, v in h.items()}
+            self.assertEqual((status, body), (200, data))
+            self.assertEqual(h["content-type"], suivi.IMAGE_TYPES[ext])
+            self.assertEqual(h["x-content-type-options"], "nosniff")
+            self.assertEqual(h["cross-origin-resource-policy"], "same-origin")
+            self.assertIn("immutable", h["cache-control"])
+            self.assertNotIn("no-store", h["cache-control"])
+        self.assertEqual(self.req("GET", "/api/state")[1]["Cache-Control"], "no-store")
+        self.assertIn("img-src 'self' data:", self.req("GET", "/api/tests/1-1/images/" + name)[1]["Content-Security-Policy"])
+
+    def test_get_refuses_other_names_other_sites_and_other_hosts(self):
+        name = self.stored(IMG["png"])
+        for planted in ("x.svg", "1-1.json", name + ".svg", "ABCDEF0123456789ABCDEF01.png"):
+            with open(os.path.join(self.folder(), planted), "wb") as f:
+                f.write(b"<svg/>")
+            self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + planted)[0], 400, planted)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/..%2f1-1.json")[0], 400)
+        self.assertEqual(self.req("GET", "/api/tests/..%2f/images/" + name)[0], 400)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/0123456789abcdef01234567.png")[0], 404)
+        for site in ("cross-site", "same-site"):
+            self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, {"Sec-Fetch-Site": site})[0], 403, site)
+        for site in ("same-origin", "none"):
+            self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, {"Sec-Fetch-Site": site})[0], 200, site)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, host="evil.example")[0], 403)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, {"Origin": "http://evil.example"})[0], 403)
+
+    def test_the_final_post_lists_images_without_a_comment_and_removes_the_others(self):
+        a, b = self.stored(png(b"a")), self.stored(png(b"b"))
+        status, _, _ = self.post(body={"images": [a]})
+        self.assertEqual(status, 200)
+        t = json.loads(self.entry_text())
+        self.assertEqual((t["images"], t["status"], "comment" in t), ([a], "todo", False))   # status unchanged
+        self.assertEqual(self.files(), [a])                                                  # unlisted file deleted
+        c = self.stored(png(b"c"))
+        self.assertEqual(self.post(body={"status": "ok"})[0], 200)                           # no `images`: left as they are
+        self.assertEqual(json.loads(self.entry_text())["images"], [a])
+        self.assertEqual(self.post(body={"images": [a, a, c]})[0], 200)
+        self.assertEqual(json.loads(self.entry_text())["images"], [a, c])
+        self.assertEqual(self.post(body={"images": []})[0], 200)
+        self.assertNotIn("images", json.loads(self.entry_text()))
+        self.assertFalse(os.path.exists(self.folder()))
+
+    def test_the_final_post_refuses_bad_image_lists_and_changes_nothing(self):
+        a = self.stored(png(b"a"))
+        self.assertEqual(self.post(body={"images": [a]})[0], 200)
+        before, files = self.entry_text(), self.files()
+        names = [self.stored(png(bytes([i]))) for i in range(suivi.MAX_IMAGES)]           # MAX_IMAGES + a = one too many
+        for bad in ("abc", {"x": 1}, [1], ["0123456789abcdef01234567.png"], ["../x"], [a] + names, None):
+            self.assertEqual(self.post(body={"images": bad})[0], 400, bad)
+        self.assertEqual(self.entry_text(), before)
+        self.assertEqual(self.files(), sorted(files + names))
+        self.assertEqual(self.post(body={"images": names})[0], 200)                            # exactly MAX_IMAGES is fine
+
+    def test_an_image_changes_neither_the_colour_nor_the_pending_count(self):
+        held, pending = self.held(C[0]), json.loads(self.req("GET", "/api/state")[2])["pending"]
+        self.assertEqual(self.post(body={"images": [self.stored(IMG["png"])]})[0], 200)
+        self.assertEqual((self.held(C[0]), json.loads(self.req("GET", "/api/state")[2])["pending"]), (held, pending))
+        self.assertIn("essai", self.held(C[0]))
+
+    def test_qcm_answers_take_images_and_any_other_list_stays_refused(self):
+        self.make_qcm()
+        up = "/api/qcm/1-1/images/R1"
+        status, _, body = self.up(IMG["jpg"], up)
+        self.assertEqual(status, 200)
+        name = json.loads(body)["name"]
+        self.assertEqual(self.answer({"images": [name], "commentaire": "see"})[0], 200)
+        rec = jload(os.path.join(self.state, "qcm", "1-1", "answers", "R1.json"))
+        self.assertEqual((rec["images"], rec["commentaire"]), ([name], "see"))
+        status, h, got = self.req("GET", "/api/qcm/1-1/images/R1/" + name)
+        self.assertEqual((status, got, h["Content-Type"]), (200, IMG["jpg"], "image/jpeg"))
+        self.assertEqual(self.req("GET", "/api/qcm/1-1/images/R2/" + name)[0], 404)             # per card
+        self.assertEqual(self.answer({"commentaire": ["a"]})[0], 400)
+        self.assertEqual(self.answer({"images": ["../x"]})[0], 400)
+        self.assertEqual(self.answer({"images": "x"})[0], 400)
+        self.assertEqual(jload(os.path.join(self.state, "qcm", "1-1", "answers", "R1.json"))["images"], [name])
+        other = json.loads(self.up(png(b"o"), up)[2])["name"]
+        self.assertEqual(self.answer({"images": [name]})[0], 200)
+        self.assertEqual(os.listdir(os.path.join(self.state, "qcm", "1-1", "images", "R1")), [name])   # the other is removed
+        self.assertNotEqual(other, name)
+        self.assertEqual(self.answer({"commentaire": "no image now"})[0], 200)                    # the record is the truth
+        self.assertNotIn("images", jload(os.path.join(self.state, "qcm", "1-1", "answers", "R1.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm", "1-1", "images", "R1")))
 
 
 class TestQcm(ServerBase):
@@ -2177,6 +2617,25 @@ class TestQcm(ServerBase):
         self.assertEqual(self.answer("9-9")[0], 404)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_withdrawn_form_keeps_its_screenshots_readable_and_takes_no_more(self):
+        self.claim(1)
+        qid = self.pose()
+        up = "/api/qcm/%s/images/R1" % qid
+        status, _, body = self.req("POST", up, {"X-Suivi": "1", "Content-Type": "image/png"}, png(b"a"))
+        self.assertEqual(status, 200)
+        name = json.loads(body)["name"]
+        self.assertEqual(self.answer(qid, body={"code": "R1", "statut": "tranche", "question": "Q1", "choix": "Yes", "images": [name]})[0], 200)
+        r = self.withdraw(qid, "--answered")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = os.path.join(self.archived(qid), "images", "R1", name)
+        self.assertTrue(os.path.exists(path))
+        self.assertIn("image: " + path, r.stdout)
+        self.assertIn("image: " + path, self.run_cli("qcm", "answers", qid).stdout)
+        self.assertEqual(json.loads(self.run_cli("qcm", "answers", qid, "--json").stdout)["answers"]["R1"]["image_paths"], [path])
+        self.assertEqual(self.req("POST", up, {"X-Suivi": "1", "Content-Type": "image/png"}, png(b"b"))[0], 410)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm", qid)))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_check_reports_two_open_forms_of_one_issue(self):
         a = self.pose()
         self.pose(1, None, "--force")
@@ -2259,6 +2718,67 @@ class TestFormTemplate(unittest.TestCase):
         for needle in ("claude.use('db')", "/api/qcm/", "X-Suivi", "const slots=", ".mslot", "const flow=", "const sheet=", "const tree="):
             self.assertIn(needle, html)
 
+    def form_html(self):
+        with open(TEMPLATE, encoding="utf-8") as f:
+            return f.read()
+
+    def q_js(self, expr):
+        src = re.search(r"/\*QIMG-START\*/(.*)/\*QIMG-END\*/", self.form_html(), re.S).group(1)
+        r = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(JSON.stringify(%s));" % expr], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_changing_the_option_or_skipping_keeps_the_note_and_the_images(self):
+        a = "0123456789abcdef01234567.png"
+        prev = {"i": 1, "note": "n", "images": [a, "../x"]}
+        for fields in ({"i": 0}, {"i": -1}, {"skip": True}):
+            got = self.q_js("mkAns(%s,%s)" % (json.dumps(prev), json.dumps(fields)))
+            self.assertEqual((got["note"], got["images"]), ("n", [a]), fields)            # junk names are not carried
+        self.assertEqual(self.q_js("mkAns(null,{i:0})"), {"note": "", "images": [], "i": 0})
+        self.assertEqual(self.q_js("mkAns({i:2,note:'x'},{skip:true})"), {"note": "x", "images": [], "skip": True})   # the old choice is not carried
+
+    # lang: fr begin
+    def test_form_attach_filter_and_lines_follow_the_page(self):
+        f = lambda t, size=100, name="a": {"name": name, "type": t, "size": size}
+        out = self.q_js("qFilter(%s, 4)" % json.dumps([f("image/png", name="a.png"), f("image/svg+xml", name="x.svg"),
+                                                       f("image/gif", 10 * 1024 * 1024 + 1, "big.gif"), f("image/webp", name="w.webp")]))
+        self.assertEqual([x["name"] for x in out["accept"]], ["a.png"])                      # 4 + 1 = 5, the next is one too many
+        self.assertEqual(len(out["lines"]), 3)
+        self.assertIn("relance-le", self.q_js("qUploadLine(404)"))
+        self.assertIn("10 Mo", self.q_js("qUploadLine(413)"))
+        ok = "0123456789abcdef01234567.png"
+        self.assertEqual(self.q_js("qUrl('1-1','R1',%s)" % json.dumps(ok)), "/api/qcm/1-1/images/R1/" + ok)
+        self.assertIsNone(self.q_js("qUrl('1-1','R1','\"><img src=x onerror=1>')"))
+        got = self.q_js("qFromItems([{kind:'file',type:'image/png',getAsFile:()=>({t:1})},{kind:'file',type:'image/svg+xml',getAsFile:()=>({})},"
+                        "{kind:'string',type:'text/plain'}])")
+        self.assertEqual(got, [{"t": 1}])
+
+    def test_form_never_rebuilds_an_answer_without_its_images_and_always_sends_them(self):
+        html = self.form_html()
+        self.assertNotIn("note:(ans[", html)
+        self.assertNotRegex(html, r"ans\[d\.c\]=\{")                                         # every rebuild goes through mkAns
+        self.assertNotIn("note:(a&&a.note)", html)
+        self.assertIn("record(d,a),{images:qNames(a)}", html)                                 # sent even empty: absent = delete on the server
+        self.assertIn("enqueue(()=>postRecord(d))", html)                                     # saves and uploads are serialized
+        self.assertIn("enqueue(async()=>{", html)
+        self.assertIn("await postRecord(d)", html)
+        self.assertIn("Capture supprimée (limite de 512 Mo)", html)
+        self.assertNotIn("innerHTML", re.search(r"/\*QIMG-START\*/(.*)/\*QIMG-END\*/", html, re.S).group(1))
+
+    def test_form_artifact_mode_has_no_controls_listeners_or_image_in_the_record(self):
+        html = self.form_html()
+        m = re.search(r"const record=\(d,a\)=>\(\{(.*?)\}\);", html)
+        self.assertNotIn("images", m.group(1))                                                # the stored record is unchanged
+        self.assertIn("store.doc('decisions/'+d.c).set(record(d,a))", html)                  # online: record as it was
+        self.assertIn("if(LOCAL)h+='<div><div class=\"lbl\">Captures", html)                  # controls only in local mode
+        self.assertIn("else h+='<div class=\"mdim\">Les captures ne sont possibles que sur la page locale du suivi.</div>'", html)
+        i = html.index("if(LOCAL){\n  document.addEventListener('paste'")
+        self.assertEqual(html.count("addEventListener('paste'"), 1)
+        self.assertEqual(html.count("addEventListener('drop'"), 1)
+        self.assertLess(i, html.index("addEventListener('paste'"))
+        self.assertIn("if(!LOCAL)return;\n  const pk=$('qpick')", html)
+    # lang: fr end
+
 
 
 FAKE_GLAB = r"""#!/usr/bin/env bash
@@ -2270,9 +2790,16 @@ case "$(cat "$FAKE_DIR/mode" 2>/dev/null)" in
     empty) exit 0 ;;
 esac
 case "$*" in
-    *repository/commits*) echo "[{\"id\": \"$(cat "$FAKE_DIR/sha")\"}]" ;;
-    *pipelines*) cat "$FAKE_DIR/pipelines" ;;
-    *graphql*) cat "$FAKE_DIR/jobs" ;;
+    *repository/commits*ref_name=*)
+        ref="$(echo "$*" | sed 's/.*ref_name=\([^&]*\).*/\1/')"
+        f="$FAKE_DIR/sha"; [ ! -f "$FAKE_DIR/sha-$ref" ] || f="$FAKE_DIR/sha-$ref"
+        echo "[{\"id\": \"$(cat "$f")\"}]" ;;
+    *pipelines*)
+        sha="$(echo "$*" | sed 's/.*sha=\([0-9a-f]*\).*/\1/')"
+        if [ -f "$FAKE_DIR/pipelines-$sha" ]; then cat "$FAKE_DIR/pipelines-$sha"; else cat "$FAKE_DIR/pipelines"; fi ;;
+    *graphql*)
+        iid="$(echo "$*" | sed 's/.*iid:"\([0-9]*\)".*/\1/')"
+        if [ -f "$FAKE_DIR/jobs-$iid" ]; then cat "$FAKE_DIR/jobs-$iid"; else cat "$FAKE_DIR/jobs"; fi ;;
     *) echo "[]" ;;
 esac
 """
@@ -2423,6 +2950,21 @@ class TestCiHeads(CiBase):
         r = self.poll(r)
         self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
         self.assertIsNone(r["last_red"])
+
+
+class TestCiLine(CiBase):
+    def test_red_on_the_line_leaves_the_main_verdict_alone(self):
+        nodes = [{"name": "github-actions/" + j, "status": "FAILED" if j == "fmt" else "SUCCESS",
+                  "detailedStatus": {"label": "x"}} for j in suivi.CI_JOBS]
+        self.put_file("jobs-6", json.dumps({"data": {"project": {"pipeline": {"stages": {"nodes": [
+            {"name": "external", "jobs": {"nodes": nodes}}]}}}}}))
+        self.put_file("sha-PostV1.1", SHA_B)
+        self.put_file("pipelines-" + SHA_B, '[{"iid": 6}]')
+        line = suivi.ci_poll(None, ref="PostV1.1")
+        main = suivi.ci_poll(None)
+        self.assertEqual((line["verdict"], line["sha"], line["names"]), ("red", SHA_B, ["fmt"]))
+        self.assertEqual((main["verdict"], main["sha"]), ("green", SHA_A))
+        self.assertIsNone(main["last_red"])
 
 
 class TestCiState(ServerBase):
@@ -2787,6 +3329,17 @@ class TestLabelPass(LabelBase):
         self.save_fake()
         self.run_pass()
         self.assertEqual(self.labels_of(1), ["en-cours"])
+
+    def test_the_line_label_is_the_users_and_is_never_removed(self):
+        # ligne-PostV1.1 (#480) declares an issue's line; the label pass must keep it, even at closure.
+        self.assertNotIn("ligne-PostV1.1", suivi.LABEL_ALL)
+        self.held(1)
+        self.issue(1, ["en-pause", "ligne-PostV1.1"], state="closed")
+        self.issue(2, ["ligne-PostV1.1"], state="opened")
+        self.paused(2)
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["ligne-PostV1.1"])
+        self.assertEqual(self.labels_of(2), ["en-pause", "ligne-PostV1.1"])
 
     def test_issue_without_label_is_found_by_number_not_by_label(self):
         self.held(5)
@@ -3190,6 +3743,43 @@ class TestPage(unittest.TestCase):
         self.assertIn("fmt", p["text"])
         self.assertIsNone(self.ci_line(None))
 
+    def line_row(self, name, row):
+        src = re.search(r"/\*LINEROW-START\*/(.*)/\*LINEROW-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(lineRow(%s,%s)));" % (json.dumps(name), json.dumps(row))
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_line_row_shows_its_ci_and_its_issues_apart_from_main(self):
+        # lang: fr begin
+        red = self.line_row("PostV1.1", {"verdict": "red", "names": ["fmt"], "issues": [{"issue": 7, "delivered": True}, {"issue": 8, "delivered": False}]})
+        self.assertEqual(red["cls"], "red")
+        self.assertEqual(red["text"], "PostV1.1 : CI rouge : fmt — #7 livrée · #8 en cours")
+        self.assertNotEqual(self.line_row("PostV1.1", {"verdict": "weird"})["cls"], "green")
+        self.assertNotIn("verte", self.line_row("PostV1.1", {"verdict": "unknown"})["text"])
+        self.assertIn("aucune issue", self.line_row("PostV1.1", {"verdict": "green"})["text"])
+        # lang: fr end
+        self.assertIsNone(self.line_row("PostV1.1", None))
+        html = self.page()
+        self.assertIn('id="lines"', html)
+
+    def merge_label(self, c):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(mergeLabel(%s)));" % json.dumps(c)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_merge_button_names_the_line_of_the_issue(self):
+        # lang: fr begin
+        self.assertEqual(self.merge_label({"issue": 7, "line": "PostV1.1"}), "Fusionner dans PostV1.1")
+        self.assertEqual(self.merge_label({"issue": 7}), "Fusionner")
+        self.assertEqual(self.merge_label({"issue": 7, "line": "main"}), "Fusionner")
+        # lang: fr end
+        self.assertIn("mergeLabel(c)", self.page())
+
     def test_ci_line_sits_above_the_tabs_outside_the_banner(self):
         html = self.page()
         self.assertLess(html.index('id="ciline"'), html.index('class="tabs"'))
@@ -3252,6 +3842,85 @@ class TestPage(unittest.TestCase):
         self.assertLess(html.index('id="ciline"'), html.index('id="buildline"'))
         self.assertLess(html.index('id="buildline"'), html.index('class="tabs"'))
         self.assertIn("/api/build-mode", html)
+
+    def img_js(self, expr):
+        src = re.search(r"/\*IMAGES-START\*/(.*)/\*IMAGES-END\*/", self.page(), re.S).group(1)
+        r = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(JSON.stringify(%s));" % expr], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    # lang: fr begin
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_attach_filter_checks_type_size_and_count_with_a_line_per_refusal(self):
+        f = lambda t, size=100, name="a": {"name": name, "type": t, "size": size}
+        out = self.img_js("imgFilter(%s, 0)" % json.dumps([
+            f("image/png", name="ok.png"), f("image/svg+xml", name="x.svg"), f("text/plain", name="n.txt"),
+            f("image/webp", 10 * 1024 * 1024 + 1, "big.webp"), f("image/gif", 0, "empty.gif"), f("image/jpeg", name="j.jpg")]))
+        self.assertEqual([a["name"] for a in out["accept"]], ["ok.png", "j.jpg"])             # a mixed drop keeps its images
+        self.assertEqual(len(out["lines"]), 4)
+        self.assertTrue(all(l.split(" : ")[0] in ("x.svg", "n.txt", "big.webp", "empty.gif") for l in out["lines"]))
+        self.assertEqual(self.img_js("imgFilter([%s], 0).accept.length" % json.dumps(f("image/png", 10 * 1024 * 1024))), 1)   # exactly 10 Mo
+        full = self.img_js("imgFilter(%s, 4)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
+        self.assertEqual((len(full["accept"]), len(full["lines"])), (1, 1))                  # 5 per card, uploads in flight counted
+        self.assertIn("5 captures", full["lines"][0])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_what_a_box_button_sends_keeps_the_images_and_refuses_only_an_empty_retour(self):
+        P = lambda kind, text, names: self.img_js("imgPatch(%s,%s,%s)" % tuple(json.dumps(x) for x in (kind, text, names)))
+        self.assertIsNone(P("retour", "  ", []))                                              # an empty box refuses Retour
+        self.assertEqual(P("retour", "", ["a.png"]), {"status": "retour", "comment": "", "images": ["a.png"]})   # the screenshot is enough
+        self.assertEqual(P("retour", " vu ", []), {"status": "retour", "comment": "vu", "images": []})
+        self.assertEqual(P("ok", "tout", ["a.png", "b.png"]), {"status": "ok", "comment": "tout", "images": ["a.png", "b.png"]})   # C'est bon sends the box
+        self.assertEqual(P("ok", "", []), {"status": "ok", "comment": "", "images": []})
+        self.assertEqual(P("note", "", ["a.png"]), {"comment": "", "images": ["a.png"]})         # image-only comment
+        self.assertEqual(P("note", "", []), {"comment": "", "images": []})                       # removing the last one is sent
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_failed_send_from_the_box_keeps_the_box_its_text_and_its_images(self):
+        st = '{openBack:{id:"7-1",mode:"retour"},drafts:{"7-1":"vu","7-2":"x"},imgDrafts:{"7-1":{names:["a.png"]},"7-2":{names:[]}}}'
+        kept = self.img_js("boxAfterSend(false,%s,'7-1')" % st)
+        self.assertEqual(kept["openBack"]["id"], "7-1")
+        self.assertEqual(kept["drafts"]["7-1"], "vu")
+        self.assertEqual(kept["imgDrafts"]["7-1"]["names"], ["a.png"])
+        done = self.img_js("boxAfterSend(true,%s,'7-1')" % st)
+        self.assertIsNone(done["openBack"])
+        self.assertNotIn("7-1", done["drafts"])
+        self.assertNotIn("7-1", done["imgDrafts"])
+        self.assertIn("7-2", done["drafts"])                                                   # another entry's draft stays
+        body = re.search(r"async function boxSend\(.*?\n}\n", self.page(), re.S).group(0)
+        self.assertNotIn("delete drafts", body)                                                # nothing is cleared before the answer
+        self.assertNotIn("openBack=null", body)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_image_urls_encode_the_id_and_refuse_a_name_outside_the_pattern(self):
+        ok = "0123456789abcdef01234567.png"
+        self.assertEqual(self.img_js("imgUrl('7-1', %s)" % json.dumps(ok)), "/api/tests/7-1/images/" + ok)
+        self.assertEqual(self.img_js("imgUrl('a/b', %s)" % json.dumps(ok)), "/api/tests/a%2Fb/images/" + ok)
+        for bad in ('"><img src=x onerror=1>', "../x.png", "0123456789abcdef01234567.svg", "x.png", None):
+            self.assertIsNone(self.img_js("imgUrl('7-1', %s)" % json.dumps(bad)), bad)
+        self.assertEqual(self.img_js("imgListed({images:[%s,'../x','y',3]})" % json.dumps(ok)), [ok])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_upload_failures_and_pastes_have_their_own_lines(self):
+        for st in (400, 404):
+            self.assertIn("relance-le", self.img_js("imgUploadLine(%d)" % st))                   # an old server
+        self.assertIn("10 Mo", self.img_js("imgUploadLine(413)"))
+        self.assertIn("format", self.img_js("imgUploadLine(415)"))
+        self.assertNotIn("relance-le", self.img_js("imgUploadLine(500)"))
+        items = [{"kind": "string", "type": "text/plain"}, {"kind": "file", "type": "image/png"},
+                 {"kind": "file", "type": "application/pdf"}, {"kind": "file", "type": "image/svg+xml"}]
+        got = self.img_js("imgFromItems(%s.map(i=>Object.assign(i,{getAsFile:()=>({type:i.type})})))" % json.dumps(items))
+        self.assertEqual(got, [{"type": "image/png"}])
+
+    def test_the_trial_page_wires_the_screenshots_safely(self):
+        html = self.page()
+        self.assertNotIn("innerHTML", html)                                                       # no name ever goes into markup
+        for needle in ("addEventListener('paste'", "addEventListener('dragover'", "addEventListener('drop'", "im.loading='lazy'",
+                       "const imgDrafts={}", "im.onerror=gone", "Capture supprimée (limite de 512 Mo)", "await imgIdle(d)",
+                       "Ouvre d’abord la boîte"):
+            self.assertIn(needle, html)
+        self.assertIn("(x.comment||sent.length)?'Modifier le commentaire'", html)                # image-only entries can be edited
+    # lang: fr end
 
     def card_line(self, c, tests=(), qcms=()):
         src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
@@ -3437,6 +4106,93 @@ class TestPage(unittest.TestCase):
         self.assertIn("a.href='#attente/issue='+c.issue", html)
         self.assertIn("/^issue=(\\d+)$/", html)
         self.assertIn("x.reviewed||x.date", html)
+
+
+class TestLine(Base):
+    """Integration line (#480): the record field, its inheritance, the merge check, the line worktree."""
+    def gout(self, *a, cwd=None):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd or self.repo,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def line_of(self, n):
+        return self.run_cli("line", str(n)).stdout.strip()
+
+    def put_test(self, tid, **fields):
+        os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
+        with open(os.path.join(self.state, "tests", tid + ".json"), "w") as f:
+            json.dump(dict({"title": tid, "status": "todo", "n": int(tid.split("-")[0])}, **fields), f)
+
+    def test_claim_writes_the_line_and_each_claim_rewrites_it(self):
+        self.claim(7, "--line", "PostV1.1")
+        self.assertEqual((self.rec(7)["line"], self.line_of(7)), ("PostV1.1", "PostV1.1"))
+        self.claim(7)                               # the declaration is gone: back to main
+        self.assertNotIn("line", self.rec(7))
+        self.assertEqual(self.line_of(7), "main")
+        self.assertEqual(self.line_of(99), "main")  # no record
+        self.assertNotEqual(self.run_cli("claim", "8", "--line", "../x").returncode, 0)
+
+    def test_a_sub_issue_inherits_the_line_of_its_parent(self):
+        self.claim(10, "--package", "--line", "PostV1.1")
+        self.claim(11, "--parent", "10")            # the parent claimed for it keeps its line
+        self.assertEqual(self.rec(10)["line"], "PostV1.1")
+        self.assertNotIn("line", self.rec(11))
+        self.assertEqual(self.line_of(11), "PostV1.1")
+        self.assertEqual(suivi.line_of({1: {"issue": 1, "parent": 2}, 2: {"issue": 2, "line": "L"}}, 1), "L")
+
+    def test_merge_commit_is_checked_on_the_line_of_the_issue(self):
+        self.gout("branch", "PostV1.1", "main")
+        self.gout("checkout", "-q", "PostV1.1")
+        self.gout("commit", "-q", "--allow-empty", "-m", "Merge #71: on the line")
+        c71 = self.gout("rev-parse", "HEAD")
+        self.gout("commit", "-q", "--allow-empty", "-m", "Merge #72: on the line")
+        c72 = self.gout("rev-parse", "HEAD")
+        self.gout("checkout", "-q", "main")
+        self.put(71, line="PostV1.1")
+        self.put(72)
+        ok = self.run_cli("test", "merged", "71", c71)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        bad = self.run_cli("test", "merged", "72", c72)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("is not on main", bad.stderr)
+
+    def test_a_declared_line_without_a_branch_is_refused(self):
+        self.put(73, line="Gone")
+        c = self.gout("rev-parse", "HEAD")
+        r = self.run_cli("test", "merged", "73", c)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no local branch", r.stderr)
+
+    def test_line_trial_wants_one_entry_that_tries_the_line_and_all_of_them_ok(self):
+        k = 480
+        r = self.run_cli("line-trial", str(k), "PostV1.1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no trial entry", r.stdout)
+        self.put_test("480-1", **{"try": "scripts/try.sh 480", "status": "ok"})      # the issue's own entry does not count
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 1)
+        self.put_test("480-2", **{"try": "scripts/try.sh PostV1.1", "status": "todo"})
+        r = self.run_cli("line-trial", str(k), "PostV1.1")
+        self.assertEqual((r.returncode, "480-2" in r.stdout), (1, True))
+        self.put_test("480-2", **{"try": "scripts/try.sh PostV1.1", "status": "retour"})
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 1)
+        self.put_test("480-2", **{"try": "scripts/try.sh PostV1.1", "status": "ok"})
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 0)
+        self.put_test("480-3", **{"try": "scripts/try.sh PostV1.1", "status": "todo"})
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 1)
+
+    def test_line_clear_drops_the_line_of_every_record(self):
+        self.put(1, line="PostV1.1")
+        self.put(2, line="Other")
+        self.put(3)
+        self.assertIn("1 record cleared", self.run_cli("line-clear", "PostV1.1").stdout)
+        self.assertNotIn("line", self.rec(1))
+        self.assertEqual(self.rec(2)["line"], "Other")
+
+    def test_line_worktrees_are_not_work_packages(self):
+        self.git("worktree", "add", "-q", os.path.join(self.root, "line-PostV1.1"), "-b", "PostV1.1", "main")
+        r = self.run_cli("check")
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)
+        st = json.loads(self.run_cli("status", "--json").stdout)
+        self.assertEqual(st["colourless"], [])
 
 
 class TestHelp(Base):
