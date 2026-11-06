@@ -3356,4 +3356,71 @@ mod tests {
             active_outline.1,
         );
     }
+
+    /// A detached graph whose `requests.actions` hold `CommitCell`-like writes
+    /// (an undo here: any action), drained by the root.
+    fn detached_graph_app() -> (Session, StokesForgeApp, egui::ViewportId) {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Graph(graph));
+        (session, app, egui::ViewportId::from_hash_of(Tab::Graph(graph)))
+    }
+
+    fn send(app: &StokesForgeApp, actions: Vec<Action>) {
+        let (_, detached) = app.detached_tabs.iter().next().unwrap();
+        detached
+            .requests
+            .lock()
+            .unwrap()
+            .actions
+            .extend(actions);
+    }
+
+    fn drain(app: &mut StokesForgeApp, ctx: &egui::Context) -> Vec<Action> {
+        let mut actions = Vec::new();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.drain_detached_tabs(ui.ctx(), &mut actions);
+        });
+        actions
+    }
+
+    /// #471: with a dialog open in the main window, the actions of a detached
+    /// window are thrown away, its band says which dialog, and the main status
+    /// bar and history get one orange line. The same refusal again restarts the
+    /// band and adds no history line. Witness: posting to the root, or
+    /// `warn` instead of `refuse_outside_main`.
+    #[test]
+    fn a_refused_detached_gesture_shows_the_band_in_its_own_window() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let (session, mut app, viewport) = detached_graph_app();
+        let ctx = egui::Context::default();
+        app.state.dispatch(Action::OpenAbout);
+        let history = app.state.status_history().count();
+        send(&app, vec![Action::Undo]);
+        let actions = drain(&mut app, &ctx);
+        assert!(actions.is_empty(), "the write is refused");
+        let now = std::time::Instant::now();
+        let (text, level) = super::super::window_band::text_at(&ctx, viewport, now)
+            .expect("the band of the window of the gesture");
+        assert!(text.contains("About StokesForge") && text.contains("Close it first"));
+        assert_eq!(level, super::super::window_band::BandLevel::Warning);
+        assert_eq!(
+            super::super::window_band::text_at(&ctx, egui::ViewportId::ROOT, now),
+            None
+        );
+        assert_eq!(app.state.status_history().count(), history + 1);
+        send(&app, vec![Action::Undo]);
+        drain(&mut app, &ctx);
+        assert_eq!(app.state.status_history().count(), history + 1);
+        // Dialog closed: the gesture goes through, no band is posted.
+        app.state.dispatch(Action::CloseAbout);
+        super::super::window_band::clear(&ctx, viewport);
+        send(&app, vec![Action::Undo]);
+        assert_eq!(drain(&mut app, &ctx).len(), 1);
+        assert_eq!(super::super::window_band::text_at(&ctx, viewport, now), None);
+        session.shutdown().unwrap();
+    }
 }
