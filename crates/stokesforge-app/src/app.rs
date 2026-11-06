@@ -160,6 +160,8 @@ mod keyboard_shortcuts_window;
 mod layout_window;
 mod list_row;
 #[cfg(test)]
+mod main_dialogs;
+#[cfg(test)]
 mod manual_pages;
 #[cfg(test)]
 mod manual_screenshots;
@@ -190,8 +192,6 @@ mod tab;
 pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
-#[cfg(test)]
-mod main_dialogs;
 mod transpose_ui;
 mod window_band;
 mod window_chrome;
@@ -1663,7 +1663,10 @@ impl StokesForgeApp {
             .keys()
             .map(egui::ViewportId::from_hash_of)
             .chain(self.pm_detached.then(project_manager::viewport_id))
-            .chain(self.om_detached.then(window_detach::object_manager_viewport))
+            .chain(
+                self.om_detached
+                    .then(window_detach::object_manager_viewport),
+            )
             .chain(self.script_detached.then(window_detach::script_viewport));
         let mut focused = open_viewports.filter(|viewport| {
             ctx.input(|input| {

@@ -60,7 +60,11 @@ fn a_dialog_asked_by_a_detached_window_is_painted_by_the_root_only() {
         rest = bench.root(Pass::root());
     }
     assert_eq!(delay(&rest, bench.child_id()), Duration::MAX, "asleep");
-    assert_eq!(delay(&rest, egui::ViewportId::ROOT), Duration::MAX, "root asleep");
+    assert_eq!(
+        delay(&rest, egui::ViewportId::ROOT),
+        Duration::MAX,
+        "root asleep"
+    );
     bench.queue_in_window(Action::OpenAbout);
     let opening = bench.root(Pass::root());
     assert!(bench.app.state.about_open());
@@ -75,7 +79,10 @@ fn a_dialog_asked_by_a_detached_window_is_painted_by_the_root_only() {
     }
     assert!(painted(&root, &tr!("dialog-close")), "the root paints it");
     let child = bench.child(Pass::child());
-    assert!(!painted(&child, &tr!("dialog-close")), "the window never does");
+    assert!(
+        !painted(&child, &tr!("dialog-close")),
+        "the window never does"
+    );
     bench.finish();
 }
 
@@ -138,7 +145,10 @@ fn a_dialog_opened_while_the_root_was_unfocused_paints_in_full_and_takes_typing(
     );
     bench.root(Pass::root().focused(true));
     let title = bench.app.state.plot_edit().unwrap().spec.title.clone();
-    assert!(title.contains("Zed"), "the first field has the focus: {title:?}");
+    assert!(
+        title.contains("Zed"),
+        "the first field has the focus: {title:?}"
+    );
     bench.finish();
 }
 
@@ -173,7 +183,10 @@ fn the_window_of_the_gesture_says_where_the_dialog_is() {
     bench.queue_in_window(bench.open_plot_settings());
     bench.root(Pass::root());
     let text = band_text(&bench).expect("a band in the window");
-    assert!(text.contains(&tr!("dialog-name-graph-properties")), "{text}");
+    assert!(
+        text.contains(&tr!("dialog-name-graph-properties")),
+        "{text}"
+    );
     let now = Instant::now();
     assert!(window_band::text_at(&bench.ctx, egui::ViewportId::ROOT, now).is_none());
     assert!(
