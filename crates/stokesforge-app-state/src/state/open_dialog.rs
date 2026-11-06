@@ -134,7 +134,10 @@ impl AppState {
             ),
             (self.status_history_open(), OpenDialog::StatusHistory),
             (self.low_r2_list_open(), OpenDialog::LowR2List),
-            (self.keyboard_shortcuts_open(), OpenDialog::KeyboardShortcuts),
+            (
+                self.keyboard_shortcuts_open(),
+                OpenDialog::KeyboardShortcuts,
+            ),
             (self.formula_functions_open(), OpenDialog::FormulaFunctions),
             (self.about_open(), OpenDialog::About),
             (self.preferences_open(), OpenDialog::Preferences),

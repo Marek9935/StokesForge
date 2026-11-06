@@ -229,8 +229,10 @@ pub(super) fn paint_at(ctx: &egui::Context, now: Instant) {
 
 #[cfg(test)]
 fn raw_for(viewport: egui::ViewportId) -> egui::RawInput {
-    let mut input = egui::RawInput::default();
-    input.viewport_id = viewport;
+    let mut input = egui::RawInput {
+        viewport_id: viewport,
+        ..Default::default()
+    };
     input
         .viewports
         .insert(viewport, egui::ViewportInfo::default());
@@ -278,7 +280,13 @@ mod tests {
     fn the_root_never_has_a_band_and_each_window_has_its_own() {
         let ctx = egui::Context::default();
         let now = Instant::now();
-        post_at(&ctx, egui::ViewportId::ROOT, "r".into(), BandLevel::Error, now);
+        post_at(
+            &ctx,
+            egui::ViewportId::ROOT,
+            "r".into(),
+            BandLevel::Error,
+            now,
+        );
         assert_eq!(text_at(&ctx, egui::ViewportId::ROOT, now), None);
         post_at(&ctx, viewport(), "a".into(), BandLevel::Warning, now);
         let other = egui::ViewportId::from_hash_of("other");
@@ -340,8 +348,8 @@ mod tests {
 
 #[cfg(test)]
 mod refusal_tests {
-    use super::*;
     use super::raw_for;
+    use super::*;
 
     #[test]
     fn a_refused_entry_is_noted_for_the_root_once_per_window() {
@@ -375,16 +383,12 @@ mod refusal_tests {
 
 #[cfg(test)]
 mod overlay_tests {
-    use super::*;
     use super::raw_for;
+    use super::*;
 
     /// One pass with a button under where the band sits; returns the free
     /// rectangle before the band is painted and whether the button was clicked.
-    fn pass(
-        ctx: &egui::Context,
-        now: Instant,
-        events: Vec<egui::Event>,
-    ) -> (egui::Rect, bool) {
+    fn pass(ctx: &egui::Context, now: Instant, events: Vec<egui::Event>) -> (egui::Rect, bool) {
         let mut input = raw_for(egui::ViewportId::from_hash_of("band-test"));
         input.screen_rect = Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -395,7 +399,8 @@ mod overlay_tests {
         let mut clicked = false;
         let mut output = ctx.run_ui(input, |ui| {
             free = ui.available_rect_before_wrap();
-            let button = egui::Rect::from_min_size(egui::pos2(160.0, 262.0), egui::vec2(80.0, 20.0));
+            let button =
+                egui::Rect::from_min_size(egui::pos2(160.0, 262.0), egui::vec2(80.0, 20.0));
             clicked = ui.put(button, egui::Button::new("under")).clicked();
             paint_at(ui.ctx(), now);
         });
@@ -414,7 +419,13 @@ mod overlay_tests {
         let start = Instant::now();
         let at = start + Duration::from_secs(1);
         let (without, _) = pass(&ctx, at, Vec::new());
-        post_at(&ctx, viewport, "A fairly long sentence".into(), BandLevel::Warning, start);
+        post_at(
+            &ctx,
+            viewport,
+            "A fairly long sentence".into(),
+            BandLevel::Warning,
+            start,
+        );
         for _ in 0..3 {
             pass(&ctx, at, Vec::new());
         }

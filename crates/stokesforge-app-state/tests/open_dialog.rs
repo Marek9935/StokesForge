@@ -54,9 +54,7 @@ fn open(s: &mut Setup, which: OpenDialog) {
         OpenDialog::KeyboardShortcuts => s.state.dispatch(Action::OpenKeyboardShortcuts),
         OpenDialog::FormulaFunctions => s.state.dispatch(Action::OpenFormulaFunctions),
         OpenDialog::StatusHistory => s.state.dispatch(Action::OpenStatusHistory),
-        OpenDialog::ColumnMetadata => s
-            .state
-            .dispatch(Action::ViewColumnMetadata { column: s.y }),
+        OpenDialog::ColumnMetadata => s.state.dispatch(Action::ViewColumnMetadata { column: s.y }),
         OpenDialog::Analysis => s.state.dispatch(Action::OpenAnalysis {
             preset: Preset::Integrate,
             sheet: s.sheet,
@@ -114,7 +112,8 @@ fn a_question_wins_over_the_dialog_under_it() {
     open(&mut s, OpenDialog::Question);
     assert_eq!(s.state.open_dialog(), Some(OpenDialog::Question));
     assert_eq!(s.state.unsaved_pending(), Some(&UnsavedGesture::NewProject));
-    s.state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+    s.state
+        .dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
     assert_eq!(s.state.open_dialog(), Some(OpenDialog::About));
     s.state.dispatch(Action::CloseAbout);
     assert_eq!(s.state.open_dialog(), None);
@@ -166,11 +165,41 @@ fn a_refusal_reaches_status_and_history_without_touching_the_dialog_footer() {
     assert_eq!(s.state.recorded_count(), before + 1);
     let last = s.state.status().unwrap();
     assert_eq!(last.text, text);
-    assert_eq!(last.level, stokesforge_app_state::state::StatusLevel::Warning);
+    assert_eq!(
+        last.level,
+        stokesforge_app_state::state::StatusLevel::Warning
+    );
 
     // The same sentence again: no new history line.
     let lines = s.state.status_history().count();
     s.state.refuse_outside_main(OpenDialog::Analysis);
     assert_eq!(s.state.status_history().count(), lines);
     assert_eq!(s.state.recorded_count(), before + 1);
+}
+
+/// #471: the messages a forked detached view recorded are pulled by the root at
+/// its drain: recorded at every level in the root status and history, handed
+/// back for the band, and not pulled twice. Witness: dropping the pull.
+#[test]
+fn the_messages_of_a_detached_view_are_pulled_by_the_root_once() {
+    let _language = i18n::test_language(Language::English);
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let book = s.state.tree().parent(s.sheet).unwrap().unwrap();
+    let mut view = s.state.fork_for_detached_view().unwrap();
+    view.warn("clipboard unreadable".to_string());
+    view.notice("fine".to_string());
+    assert!(view.has_local_messages());
+    let before = s.state.recorded_count();
+    let pulled = s.state.adopt_detached_book_view(&mut view, book);
+    assert_eq!(pulled.len(), 2);
+    assert_eq!(s.state.recorded_count(), before + 2);
+    assert!(!view.has_local_messages());
+    assert!(s.state.adopt_detached_book_view(&mut view, book).is_empty());
+    let texts: Vec<_> = s
+        .state
+        .messages_since(before)
+        .map(|m| m.text.as_str())
+        .collect();
+    assert_eq!(texts, ["clipboard unreadable", "fine"]);
 }

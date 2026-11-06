@@ -3364,17 +3364,16 @@ mod tests {
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         app.detach_tab(Tab::Graph(graph));
-        (session, app, egui::ViewportId::from_hash_of(Tab::Graph(graph)))
+        (
+            session,
+            app,
+            egui::ViewportId::from_hash_of(Tab::Graph(graph)),
+        )
     }
 
     fn send(app: &StokesForgeApp, actions: Vec<Action>) {
         let (_, detached) = app.detached_tabs.iter().next().unwrap();
-        detached
-            .requests
-            .lock()
-            .unwrap()
-            .actions
-            .extend(actions);
+        detached.requests.lock().unwrap().actions.extend(actions);
     }
 
     fn drain(app: &mut StokesForgeApp, ctx: &egui::Context) -> Vec<Action> {
@@ -3421,7 +3420,10 @@ mod tests {
         super::super::window_band::clear(&ctx, viewport);
         send(&app, vec![Action::Undo]);
         assert_eq!(drain(&mut app, &ctx).len(), 1);
-        assert_eq!(super::super::window_band::text_at(&ctx, viewport, now), None);
+        assert_eq!(
+            super::super::window_band::text_at(&ctx, viewport, now),
+            None
+        );
         session.shutdown().unwrap();
     }
 
@@ -3440,7 +3442,11 @@ mod tests {
         let band = |viewport| super::super::window_band::text_at(&ctx, viewport, now);
         // A message with no origin: a job, the autosave.
         app.dispatch_actions(&ctx, vec![Action::Undo]);
-        assert_eq!(band(viewport), None, "no gesture behind it: main window only");
+        assert_eq!(
+            band(viewport),
+            None,
+            "no gesture behind it: main window only"
+        );
         // Information from a gesture of the window: status bar only.
         let before = app.state.recorded_count();
         app.state.notice("fine".into());
@@ -3470,7 +3476,10 @@ mod tests {
             assert!(drain(&mut app, &ctx).is_empty());
         }
         let now = std::time::Instant::now();
-        assert_eq!(super::super::window_band::text_at(&ctx, viewport, now), None);
+        assert_eq!(
+            super::super::window_band::text_at(&ctx, viewport, now),
+            None
+        );
         assert_eq!(app.state.status_history().count(), history);
         session.shutdown().unwrap();
     }
@@ -3562,7 +3571,14 @@ mod tests {
         app.pm_requests.lock().unwrap().actions.push(Action::Undo);
         let (mut open, mut close, mut actions) = (Vec::new(), Vec::new(), Vec::new());
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            app.show_project_manager(ui, &ui.ctx().clone(), None, &mut open, &mut close, &mut actions);
+            app.show_project_manager(
+                ui,
+                &ui.ctx().clone(),
+                None,
+                &mut open,
+                &mut close,
+                &mut actions,
+            );
         });
         output.textures_delta.clear();
         assert!(actions.is_empty());
