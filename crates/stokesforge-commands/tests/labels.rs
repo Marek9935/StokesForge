@@ -86,10 +86,11 @@ fn rank(command: &Command) -> usize {
         Command::RecalculateTranspose { .. } => 32,
         Command::InsertCopies { .. } => 33,
         Command::SetFolderOrder { .. } => 34,
+        Command::SetTransposeAuto { .. } => 35,
     }
 }
 
-const VARIANTS: usize = 35;
+const VARIANTS: usize = 36;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -343,6 +344,13 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
         (
             Command::RecalculateTranspose { sheet: w.sheet },
             HistoryLabel::RecalculateTranspose,
+        ),
+        (
+            Command::SetTransposeAuto {
+                sheet: w.sheet,
+                auto: false,
+            },
+            HistoryLabel::SetTransposeAuto { auto: false },
         ),
         (
             Command::AddCalculation {

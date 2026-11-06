@@ -341,3 +341,342 @@ fn removing_the_transposed_sheet_drops_the_link_and_a_copy_is_ordinary() {
     f.project.remove(sheet).unwrap();
     assert!(f.project.tree().transposes().is_empty());
 }
+
+// -- #463: Recalculate automatically -------------------------------------------
+
+fn version(p: &Project, id: NodeId) -> u64 {
+    p.tree().node(id).unwrap().as_column().unwrap().version()
+}
+
+fn formula(p: &mut Project, column: NodeId, text: &str) {
+    let formula = p.tree().formula_from_letters(column, text).unwrap();
+    p.set_column_meta(
+        column,
+        ColumnMeta {
+            formula: Some(formula),
+            ..ColumnMeta::default()
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_new_link_is_checked_and_completing_an_unchecked_one_leaves_it_unchecked() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    assert!(f.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    assert!(!f.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+}
+
+#[test]
+fn following_rewrites_the_rows_of_a_changed_source_and_only_when_checked() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    let cols = children(&f.project, sheet);
+    f.project
+        .set_values(f.cols[1], 0, ValueBlock::Float(vec![40.0]))
+        .unwrap();
+    assert_eq!(state(&f.project, sheet), (true, false));
+    // Unchecked: nothing happens, the snapshot stays as it was.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    assert!(!f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 4.0, 7.0]);
+    // Checked: the row follows and the sheet is up to date.
+    f.project.set_transpose_auto(sheet, true).unwrap();
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 7.0]);
+    assert_eq!(values(&f.project, cols[2]), vec![2.0, 5.0, 8.0]);
+    assert_eq!(state(&f.project, sheet), (false, false));
+    // Up to date: a second call does nothing.
+    assert!(!f.project.follow_transpose(sheet).unwrap());
+}
+
+#[test]
+fn following_keeps_the_version_of_a_column_that_comes_out_the_same() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    let cols = children(&f.project, sheet);
+    // The same value typed again: the source gets a fresh version, the numbers
+    // do not change. Witness: `overwrite` instead of a comparison.
+    f.project
+        .set_values(f.cols[0], 0, ValueBlock::Float(vec![1.0]))
+        .unwrap();
+    assert_eq!(state(&f.project, sheet), (true, false));
+    let before: Vec<u64> = cols.iter().map(|c| version(&f.project, *c)).collect();
+    assert!(
+        !f.project.follow_transpose(sheet).unwrap(),
+        "nothing written"
+    );
+    let after: Vec<u64> = cols.iter().map(|c| version(&f.project, *c)).collect();
+    assert_eq!(before, after);
+    assert_eq!(state(&f.project, sheet), (false, false), "re-read");
+}
+
+#[test]
+fn following_never_overwrites_a_typed_value_nor_recreates_a_deleted_column() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    let cols = children(&f.project, sheet);
+    // Rule 4: a value typed in Row 1 stops the sheet from following.
+    f.project
+        .set_values(cols[1], 0, ValueBlock::Float(vec![-1.0]))
+        .unwrap();
+    f.project
+        .set_values(f.cols[1], 0, ValueBlock::Float(vec![40.0]))
+        .unwrap();
+    assert_eq!(state(&f.project, sheet), (true, true));
+    assert!(!f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(values(&f.project, cols[1])[0], -1.0);
+    assert_eq!(
+        values(&f.project, cols[2]),
+        vec![2.0, 5.0, 8.0],
+        "other rows wait"
+    );
+    // Relink brings it all back.
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 7.0]);
+    // E8: a deleted Row column is not brought back by following.
+    f.project.remove(cols[2]).unwrap();
+    f.project
+        .set_values(f.cols[2], 0, ValueBlock::Float(vec![70.0]))
+        .unwrap();
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(children(&f.project, sheet).len(), 2, "x' and Row 1 only");
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 70.0]);
+}
+
+#[test]
+fn a_source_that_cannot_be_followed_keeps_the_last_numbers_and_names_the_column() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    let mut bare = Column::from_f64(&[0.5, 0.5, 0.5]);
+    bare.set_meta(ColumnMeta::default());
+    f.project
+        .add_column(f.sheet, None, Some("NoXPrime"), bare)
+        .unwrap();
+    let error = f.project.follow_transpose(sheet).unwrap_err();
+    assert!(matches!(error, CoreError::TransposeNoXPrime { ref letter, .. } if letter == "D"));
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 4.0, 7.0]);
+    assert_eq!(state(&f.project, sheet), (true, false), "stays out of date");
+    assert!(matches!(
+        stokesforge_core::unfollowable_column(f.project.tree(), f.sheet),
+        Some(CoreError::TransposeNoXPrime { .. })
+    ));
+}
+
+// Rules 2 and 3 and E1: what counts as "the source calculates from its sheet".
+
+/// Sheet2 in the same book, with one column `P`.
+fn second_sheet(f: &mut Fixture) -> (NodeId, NodeId) {
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let p = f
+        .project
+        .add_column(sheet2, None, Some("P"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    (sheet2, p)
+}
+
+#[test]
+fn a_direct_formula_of_the_source_reading_the_followed_sheet_is_refused() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    let label = f
+        .project
+        .add_column(
+            f.sheet,
+            None,
+            Some("Label"),
+            Column::new(ColumnType::Numeric),
+        )
+        .unwrap();
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    // Strict entry and field: refused / kept with the error.
+    let entry = f.project.tree().formula_for_entry(label, &text);
+    assert!(
+        matches!(
+            entry,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{entry:?}"
+    );
+    let (kept, error) = f.project.tree().formula_keeping(label, &text);
+    assert!(matches!(
+        error,
+        Some(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+    ));
+    // Stored anyway (an older file, a paste): the question sees it, whatever
+    // the role of the column (case 3: a label column).
+    f.project
+        .set_column_meta(
+            label,
+            ColumnMeta {
+                role: ColumnRole::Label,
+                formula: Some(kept),
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+    let readers = f.project.tree().columns_reading_followed_sheet();
+    assert_eq!(readers.get(&label), Some(&sheet));
+    // Rule 3: once unchecked, rechecking is refused, the refusal names the column.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    assert!(f.project.tree().columns_reading_followed_sheet().is_empty());
+    let refusal = f.project.set_transpose_auto(sheet, true).unwrap_err();
+    assert!(
+        matches!(refusal, CoreError::TransposeSourceReadsIt { ref letter, .. } if letter == "D"),
+        "{refusal:?}"
+    );
+    assert!(!f.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    // Remove the formula: the box can be checked again.
+    f.project
+        .set_column_meta(label, ColumnMeta::default())
+        .unwrap();
+    f.project.set_transpose_auto(sheet, true).unwrap();
+    let _ = cols;
+}
+
+#[test]
+fn a_chain_through_another_sheet_is_refused_but_another_sheet_reading_is_not() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let (_sheet2, p) = second_sheet(&mut f);
+    // Sheet2!P reads the followed sheet, nothing comes back: allowed.
+    let tname = name(&f.project, sheet);
+    let text = format!("max('{tname}'!B)");
+    let allowed = f.project.tree().formula_for_entry(p, &text);
+    assert!(allowed.is_ok(), "{allowed:?}");
+    formula(&mut f.project, p, &text);
+    assert!(f.project.tree().columns_reading_followed_sheet().is_empty());
+    // A column of Sheet1 reading Sheet2!P closes the chain: refused.
+    let d = f
+        .project
+        .add_column(f.sheet, None, Some("D"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    let chain = f.project.tree().formula_for_entry(d, "max(Sheet2!A)");
+    assert!(
+        matches!(
+            chain,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{chain:?}"
+    );
+    // And the same entry in the other order: the formula of Sheet2 refused
+    // when Sheet1's column already reads it.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    formula(&mut f.project, d, "max(Sheet2!A)");
+    f.project.set_column_meta(p, ColumnMeta::default()).unwrap();
+    f.project.set_transpose_auto(sheet, true).unwrap();
+    let late = f.project.tree().formula_for_entry(p, &text);
+    assert!(
+        matches!(
+            late,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{late:?}"
+    );
+}
+
+#[test]
+fn an_analysis_reading_the_followed_sheet_may_not_land_in_the_source() {
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{CalculationDraft, OutputDraft, SeriesRef, SeriesResult};
+
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    let draft = |x: NodeId, y: NodeId| CalculationDraft {
+        operation: Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        series: vec![SeriesRef {
+            x: Some(x),
+            y,
+            sigma: None,
+        }],
+        aux: None,
+        outputs: vec![OutputDraft {
+            series: 0,
+            key: "corrected".to_string(),
+            index: None,
+            meta: ColumnMeta::default(),
+            data: vec![1.0, 2.0, 3.0],
+        }],
+        results: vec![SeriesResult::default()],
+        keep_results: false,
+        auto_recalc: true,
+        low_r2_dialog: true,
+    };
+    // Y in the source, x' from the followed sheet: the result lands in the
+    // source (case 4). Refused, and nothing is left behind.
+    let before = f.project.tree().clone();
+    let refused = f.project.add_calculation(draft(cols[0], f.cols[0]));
+    assert!(
+        matches!(
+            refused,
+            Err(CoreError::CalculationReadsFollowingSheet { .. })
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(f.project.tree().as_ref(), before.as_ref());
+    // Analyzing a Row of the followed sheet lands in that sheet: allowed.
+    f.project.add_calculation(draft(cols[0], cols[1])).unwrap();
+    // An analysis with its own box unchecked is refused too (#463, G3).
+    let mut manual = draft(cols[0], f.cols[0]);
+    manual.auto_recalc = false;
+    assert!(
+        matches!(
+            f.project.add_calculation(manual),
+            Err(CoreError::CalculationReadsFollowingSheet { .. })
+        ),
+        "own box unchecked"
+    );
+    // Unchecked, the source may calculate from the sheet.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    f.project
+        .add_calculation(draft(cols[0], f.cols[0]))
+        .unwrap();
+}
+
+#[test]
+fn a_loop_through_two_followed_sheets_is_refused() {
+    let mut f = fixture();
+    let first = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let mut p = Column::from_f64(&[1.0, 2.0, 3.0]);
+    p.set_meta(ColumnMeta {
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project.add_column(sheet2, None, Some("P"), p).unwrap();
+    let second = f.project.transpose_rows(sheet2, &[0]).unwrap();
+    // Added after the link: it is a Y column of Sheet2, so the second sheet
+    // depends on it (the link is an edge of the graph).
+    let q = f
+        .project
+        .add_column(sheet2, None, Some("Q"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    let d = f
+        .project
+        .add_column(f.sheet, None, Some("D"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    // Sheet1!D reads the second sheet: no loop yet.
+    let text = format!("max('{}'!B)", name(&f.project, second));
+    assert!(f.project.tree().formula_for_entry(d, &text).is_ok());
+    formula(&mut f.project, d, &text);
+    // Sheet2!Q reading the first sheet closes the loop D -> second sheet ->
+    // Sheet2 (link) -> Q -> first sheet -> Sheet1 (link) -> D.
+    let closing = format!("max('{}'!B)", name(&f.project, first));
+    let refused = f.project.tree().formula_for_entry(q, &closing);
+    assert!(
+        matches!(
+            refused,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{refused:?}"
+    );
+}

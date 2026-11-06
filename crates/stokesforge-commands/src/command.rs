@@ -372,6 +372,15 @@ pub enum Command {
         /// Transposed sheet.
         sheet: NodeId,
     },
+    /// Checks or unchecks "Recalculate automatically" on a transposed sheet
+    /// (#463). Checking is refused while the source calculates from the sheet.
+    /// Structural: one entry, undo restores the sheet as it was.
+    SetTransposeAuto {
+        /// Transposed sheet.
+        sheet: NodeId,
+        /// The new state of the box.
+        auto: bool,
+    },
     /// Replaces the colors saved in the project, as a whole (saving or
     /// removing a color of the color picker). Data, not structure: no node
     /// moves.
@@ -453,6 +462,9 @@ impl Command {
             },
             Command::TransposeRows { .. } => HistoryLabel::TransposeRows,
             Command::RecalculateTranspose { .. } => HistoryLabel::RecalculateTranspose,
+            Command::SetTransposeAuto { auto, .. } => {
+                HistoryLabel::SetTransposeAuto { auto: *auto }
+            }
             Command::ReplaceAnalysisData { draft, .. } => {
                 HistoryLabel::ReplaceAnalysisData(draft.operation.kind())
             }
@@ -525,6 +537,7 @@ impl Command {
                 | Command::RemoveCalculation { .. }
                 | Command::TransposeRows { .. }
                 | Command::RecalculateTranspose { .. }
+                | Command::SetTransposeAuto { .. }
         )
     }
 }

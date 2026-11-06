@@ -99,7 +99,7 @@ pub use resolve::{
 };
 pub use sheet_refs::{FormulaInput, FormulaInputs};
 pub use transpose::{
-    content_stamp, transposed_name, TransposeLink, TransposeSourceColumn, TransposeState,
-    TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
+    content_stamp, transposed_name, unfollowable_column, TransposeLink, TransposeSourceColumn,
+    TransposeState, TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
 };
 pub use tree::Tree;

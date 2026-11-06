@@ -661,6 +661,30 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
+        name: "analysis-transposed-sheet",
+        setup: |h| {
+            // The first three rows of Kinetics, transposed: the sheet follows its
+            // source, so the banner shows the box checked and nothing out of date.
+            let source = node_named(h, "Kinetics");
+            h.state()
+                ._session
+                .handle()
+                .execute(stokesforge_commands::Command::TransposeRows {
+                    source,
+                    rows: vec![0, 1, 2],
+                })
+                .expect("transposed rows");
+            h.state_mut().app.state.refresh();
+            let name = format!("Kinetics{}", stokesforge_core::TRANSPOSE_MARK);
+            let sheet = node_named(h, &name);
+            act(h, Action::SelectSheet(sheet));
+            let book = Tab::Book(h.state().ids.book1);
+            h.state_mut().app.floating_tabs.retain(|tab| *tab == book);
+            place(h, book, egui::pos2(4.0, 4.0), egui::vec2(560.0, 300.0));
+        },
+        crop: Crop::Rect(workspace_window_rect),
+    },
+    Shot {
         name: "workbooks-workbook-menu",
         setup: |h| {
             show_book_alone(h);

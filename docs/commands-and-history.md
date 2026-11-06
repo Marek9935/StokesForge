@@ -375,8 +375,16 @@ sheet (sheet, x' column, "Row N" columns, link) and
 Both are **structural**
 (tree snapshot: nodes appear, the link is carried by the tree) and atomic — a
 refusal (column without x', text column) restores the tree and pushes nothing.
-Labels: `HistoryLabel::TransposeRows`, `RecalculateTranspose`; group
-`MacroKind::AnalyzeRows`.
+`SetTransposeAuto { sheet, auto }` (#463) checks or unchecks the box
+"Recalculate automatically": structural, one entry, refused when checking
+while the source calculates from the sheet (nothing pushed). Following itself
+is **not** a command: the session pass writes the linked columns outside the
+history, like an analysis pass, so one Ctrl+Z undoes a source edit and the
+sheet follows the restored source. A linked column of a followed sheet is
+*derived* for a macro replay (`is_derived`, #448): a delta that no longer fits
+it is made to fit and the next pass rewrites it.
+Labels: `HistoryLabel::TransposeRows`, `RecalculateTranspose`,
+`SetTransposeAuto`; group `MacroKind::AnalyzeRows`.
 
 - **A single undoable group**: the analysis gesture on a row opens the
   `AnalyzeRows` group (`state/transpose.rs`), executes `TransposeRows`, then

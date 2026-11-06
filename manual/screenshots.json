@@ -160,6 +160,11 @@
     "shows": "The Peak Decomposition window on Graph1: Gaussian peaks with a constant background detected on the spectrum, the preview with the fitted curve and the values of each peak."
   },
   {
+    "image": "analysis-transposed-sheet.png",
+    "page": "guide/analysis.md",
+    "shows": "The transposed sheet of Kinetics in Book1: the banner Transposed from Kinetics with the box Recalculate automatically checked, the x' column and one column per row analysed."
+  },
+  {
     "image": "workbooks-workbook-menu.png",
     "page": "guide/projects-and-workbooks.md",
     "shows": "The Workbook menu of the menu bar, opened on Book1."

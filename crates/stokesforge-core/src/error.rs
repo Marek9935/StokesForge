@@ -95,6 +95,26 @@ pub enum CoreError {
         /// Name of the column.
         name: String,
     },
+    /// Checking "Recalculate automatically" refused (#463): a column of the
+    /// source calculates from the transposed sheet.
+    #[error("cannot follow: column {letter} of {source_sheet} calculates from {transposed}")]
+    TransposeSourceReadsIt {
+        /// Position letter of the column of the source.
+        letter: String,
+        /// Name of the source sheet.
+        source_sheet: String,
+        /// Name of the transposed sheet.
+        transposed: String,
+    },
+    /// An analysis refused (#463): it reads a followed transposed sheet and
+    /// its result lands in the source of that sheet.
+    #[error("{transposed} follows {source_sheet}, so {source_sheet} cannot calculate from it")]
+    CalculationReadsFollowingSheet {
+        /// Name of the followed transposed sheet.
+        transposed: String,
+        /// Name of its source sheet.
+        source_sheet: String,
+    },
 }
 
 /// Result alias of the crate.
