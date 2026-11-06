@@ -192,6 +192,7 @@ pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
 mod transpose_ui;
+mod window_band;
 mod window_chrome;
 mod window_detach;
 mod window_placement;
@@ -250,7 +251,7 @@ use stokesforge_app_state::errors;
 use stokesforge_app_state::i18n;
 use stokesforge_app_state::preferences::Preferences;
 use stokesforge_app_state::state::{
-    active_graph, Action, AppState, ImportDestination, UnsavedChoice,
+    active_graph, Action, AppState, ImportDestination, StatusLevel, UnsavedChoice,
 };
 use stokesforge_app_state::tr;
 
@@ -344,6 +345,13 @@ pub struct StokesForgeApp {
     /// Actions a leaving of the mode committed (a nudge in progress), sent with
     /// the next dispatch.
     layout_actions: Vec<Action>,
+    /// Which window sent which stretch of the pass's action list: the index
+    /// ranges of `actions`, noted at the drains and consumed by
+    /// `dispatch_actions` to say a warning in the window it belongs to (#471).
+    action_origins: Vec<(std::ops::Range<usize>, egui::ViewportId)>,
+    /// The window that asked for the file picker now open, so that a failure
+    /// that follows it (an export that cannot be written) is told there.
+    picker_origin: Option<egui::ViewportId>,
     /// True when the Project Manager is detached into a separate OS window (see
     /// the top doc of `window_detach.rs`, § Detaching the Project Manager). In this state,
     /// [`StokesForgeApp::project_manager_panel`] is simply not painted.
@@ -548,6 +556,8 @@ impl StokesForgeApp {
             maximized_tab,
             layout_entries: HashMap::new(),
             layout_actions: Vec::new(),
+            action_origins: Vec::new(),
+            picker_origin: None,
             pm_detached: false,
             script_collapsed: true,
             panel_memory: panel_memory::PanelMemory::default(),
@@ -785,6 +795,17 @@ impl StokesForgeApp {
     /// Starts the requested pickers, then applies the answer of the one that
     /// has just finished (#192). Never blocks.
     fn poll_file_picker(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let start = actions.len();
+        self.poll_file_picker_result(ctx, actions);
+        // What the picker answers belongs to the window that asked for it.
+        if actions.len() > start {
+            if let Some(viewport) = self.picker_origin.take() {
+                self.action_origins.push((start..actions.len(), viewport));
+            }
+        }
+    }
+
+    fn poll_file_picker_result(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if self.file_picker.is_open() {
             // Safety net: the thread wakes the interface, this covers a lost wake-up.
             ctx.request_repaint_after(Duration::from_millis(250));
@@ -1050,6 +1071,16 @@ impl eframe::App for StokesForgeApp {
 
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
+        window_band::publish_dialog(&ctx, self.state.open_dialog());
+        // Entries refused in a detached window: said through the same path as a
+        // refused action.
+        for viewport in window_band::take_refusals(&ctx) {
+            if let Some(dialog) = self.state.open_dialog() {
+                if self.viewport_is_open(viewport) {
+                    self.refuse_in_window(&ctx, viewport, dialog);
+                }
+            }
+        }
         self.poll_file_picker(&ctx, &mut actions);
         if std::mem::take(&mut self.close_requested) {
             actions.push(Action::Quit {
@@ -1249,19 +1280,22 @@ impl StokesForgeApp {
             // `show_detached_project_manager`) — same moment as the rest of
             // `open_requests`, before painting the fixed panel (which will not
             // be painted this frame anyway) and the `CentralPanel`.
-            let (should_reattach, new_selection, mut new_close) = {
+            let (should_reattach, new_selection, mut new_close, incoming) = {
                 let mut requests = self
                     .pm_requests
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
                 open_requests.append(&mut requests.open);
-                actions.append(&mut requests.actions);
                 (
                     std::mem::take(&mut requests.reattach),
                     requests.selection.take(),
                     std::mem::take(&mut requests.close),
+                    std::mem::take(&mut requests.actions),
                 )
             };
+            // Selecting, opening a window and Reattach stay free; what writes
+            // is refused while a dialog is open in the main window.
+            self.accept_detached_actions(ctx, project_manager::viewport_id(), incoming, actions);
             if let Some(selection) = new_selection {
                 self.pm_selection = selection;
             }
@@ -1295,32 +1329,27 @@ impl StokesForgeApp {
             // asked to be reattached since the last frame.
             let mut to_reattach: Vec<Tab> = Vec::new();
             let mut to_close: Vec<Tab> = Vec::new();
+            let mut incoming: Vec<(egui::ViewportId, Vec<Action>)> = Vec::new();
+            let mut local_messages = Vec::new();
             for (tab, detached) in &self.detached_tabs {
+                let viewport = egui::ViewportId::from_hash_of(tab);
                 if let Tab::Book(book) = tab {
                     let mut model = detached
                         .view_model
                         .lock()
                         .unwrap_or_else(|err| err.into_inner());
                     if let Some(view_state) = model.view_state.as_mut() {
-                        self.state.adopt_detached_book_view(view_state, *book);
+                        local_messages.push((
+                            viewport,
+                            self.state.adopt_detached_book_view(view_state, *book),
+                        ));
                     }
                 }
                 let mut requests = detached
                     .requests
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
-                // During the modal graph properties window, a history
-                // macro is open by the root: letting the actions of a detached
-                // window in would have them absorbed, then undone with the graph
-                // (issue #21). They are refused, with a message.
-                if self.state.plot_settings().is_some() {
-                    if !requests.actions.is_empty() {
-                        requests.actions.clear();
-                        self.state.reject_detached_actions();
-                    }
-                } else {
-                    actions.append(&mut requests.actions);
-                }
+                incoming.push((viewport, std::mem::take(&mut requests.actions)));
                 if std::mem::take(&mut requests.reattach) {
                     to_reattach.push(*tab);
                 }
@@ -1328,13 +1357,69 @@ impl StokesForgeApp {
                     to_close.push(*tab);
                 }
             }
+            // The messages the local view of a workbook recorded: said in its
+            // window when they are warnings or errors (#471).
+            for (viewport, messages) in local_messages {
+                if let Some(message) = messages
+                    .iter()
+                    .rfind(|message| message.level != StatusLevel::Info)
+                {
+                    self.band_in(ctx, viewport, message);
+                }
+            }
+            // During a dialog open in the main window (the modal graph
+            // properties window above all), a history macro is open by the
+            // root: letting the actions of a detached window in would have
+            // them absorbed, then undone with the graph (issue #21). They are
+            // refused, and the window says why.
+            for (viewport, window_actions) in incoming {
+                self.accept_detached_actions(ctx, viewport, window_actions, actions);
+            }
             for tab in to_reattach {
+                window_band::clear(ctx, egui::ViewportId::from_hash_of(tab));
                 self.reattach_tab(tab);
             }
             for tab in to_close {
+                window_band::clear(ctx, egui::ViewportId::from_hash_of(tab));
                 self.close_detached_tab(tab);
             }
         }
+    }
+
+    /// Takes the actions a detached window or panel sent up. While a dialog is
+    /// open in the main window they are thrown away and the window of the
+    /// gesture says why (#471); otherwise they join the pass's list, with their
+    /// origin noted so that what they say is told in that window.
+    pub(super) fn accept_detached_actions(
+        &mut self,
+        ctx: &egui::Context,
+        viewport: egui::ViewportId,
+        incoming: Vec<Action>,
+        actions: &mut Vec<Action>,
+    ) {
+        if incoming.is_empty() {
+            return;
+        }
+        if let Some(dialog) = self.state.open_dialog() {
+            self.refuse_in_window(ctx, viewport, dialog);
+            return;
+        }
+        let start = actions.len();
+        actions.extend(incoming);
+        self.action_origins.push((start..actions.len(), viewport));
+    }
+
+    /// A gesture of `viewport` is refused because `dialog` is open in the main
+    /// window: status bar and history of the main window, and the orange band
+    /// of the window of the gesture.
+    pub(super) fn refuse_in_window(
+        &mut self,
+        ctx: &egui::Context,
+        viewport: egui::ViewportId,
+        dialog: stokesforge_app_state::state::open_dialog::OpenDialog,
+    ) {
+        let text = self.state.refuse_outside_main(dialog);
+        window_band::post(ctx, viewport, text, window_band::BandLevel::Warning);
     }
 
     /// Up-to-date window title (S-R15) and clearing of expired
@@ -1439,6 +1524,7 @@ impl StokesForgeApp {
             // Only the dialog can act on this frame: keyboard, drops and
             // requests of the detached viewports are also blocked.
             actions.clear();
+            self.action_origins.clear();
         }
         if self.dialog_hosting.host.is_none() {
             confirmations::show(ctx, &self.state, actions);
@@ -1521,55 +1607,122 @@ impl StokesForgeApp {
 
     /// A confirmation request also stops the remaining actions of the frame.
     fn dispatch_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
-        for action in actions {
-            // Without a destination, "Save" first asks where to write; the
-            // picker's answer then pushes `Action::Save` (#192). The
-            // Save answer to "Discard Changes · Cancel · Save" (#229) does
-            // the same, once the state has noted the gesture to continue.
-            let action = if matches!(action, Action::ConfirmUnsaved(UnsavedChoice::Save))
-                && self.state.path().is_empty()
-            {
-                self.state.dispatch(action);
-                Action::Save
-            } else {
-                action
-            };
-            let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
-                Action::PickFile(PickRequest::SaveProjectAs {
-                    suggested: suggested_file_name(self.state.path()),
-                })
-            } else {
-                action
-            };
-            if let Action::PickFile(request) = action {
-                let wake = ctx.clone();
-                // Plain paths: the picker's thread looks them up on the disk.
-                let candidates = self.state.folder_candidates(&request);
-                self.file_picker
-                    .start(request, candidates, move || wake.request_repaint());
-                continue;
+        let origins = std::mem::take(&mut self.action_origins);
+        for (index, action) in actions.into_iter().enumerate() {
+            let origin = origins
+                .iter()
+                .find(|(range, _)| range.contains(&index))
+                .map(|(_, viewport)| *viewport);
+            let recorded = self.state.recorded_count();
+            let stop = self.dispatch_one(ctx, action, origin);
+            // `dispatch` returns nothing (invariant 10): the counter of
+            // recorded messages is the only witness that this action said
+            // something. A warning or an error is told in the window the
+            // action came from; information stays in the main status bar.
+            if let Some(viewport) = origin {
+                self.tell_window(ctx, viewport, recorded);
             }
-            if let Action::OpenFolder(folder) = action {
-                if let Err(error) = (self.folder_opener)(&folder) {
-                    self.state.report_folder_open_error(&error);
-                }
-                continue;
-            }
-            if matches!(
-                action,
-                Action::Save
-                    | Action::SaveAs { .. }
-                    | Action::NewProject { .. }
-                    | Action::OpenProject { .. }
-                    | Action::Quit { .. }
-            ) {
-                self.commit_view_entries(ctx);
-            }
-            let action = self.prepare_new_project_action(ctx, action);
-            if self.dispatch_action(ctx, action) {
+            if stop {
                 break;
             }
         }
+        window_band::publish_dialog(ctx, self.state.open_dialog());
+    }
+
+    /// Shows, in the band of `viewport`, the newest warning or error recorded
+    /// since the counter read `recorded`. A window that closed meanwhile gets
+    /// nothing: the message stays in the main status bar and its history.
+    fn tell_window(&self, ctx: &egui::Context, viewport: egui::ViewportId, recorded: u64) {
+        let newest = self
+            .state
+            .messages_since(recorded)
+            .rfind(|message| message.level != StatusLevel::Info);
+        if let Some(message) = newest {
+            self.band_in(ctx, viewport, message);
+        }
+    }
+
+    /// The band of `viewport` for one message, if that window is still open.
+    fn band_in(
+        &self,
+        ctx: &egui::Context,
+        viewport: egui::ViewportId,
+        message: &stokesforge_app_state::state::StatusMessage,
+    ) {
+        if !self.viewport_is_open(viewport) {
+            return;
+        }
+        let level = match message.level {
+            StatusLevel::Info => return,
+            StatusLevel::Warning => window_band::BandLevel::Warning,
+            StatusLevel::Error => window_band::BandLevel::Error,
+        };
+        window_band::post(ctx, viewport, message.text.clone(), level);
+    }
+
+    /// Is `viewport` a detached window or panel that is still open?
+    fn viewport_is_open(&self, viewport: egui::ViewportId) -> bool {
+        self.detached_tabs
+            .keys()
+            .any(|tab| egui::ViewportId::from_hash_of(tab) == viewport)
+            || (self.pm_detached && viewport == project_manager::viewport_id())
+            || (self.om_detached && viewport == window_detach::object_manager_viewport())
+            || (self.script_detached && viewport == window_detach::script_viewport())
+    }
+
+    /// One action of the pass. Returns whether the pass stops there.
+    fn dispatch_one(
+        &mut self,
+        ctx: &egui::Context,
+        action: Action,
+        origin: Option<egui::ViewportId>,
+    ) -> bool {
+        // Without a destination, "Save" first asks where to write; the
+        // picker's answer then pushes `Action::Save` (#192). The
+        // Save answer to "Discard Changes · Cancel · Save" (#229) does
+        // the same, once the state has noted the gesture to continue.
+        let action = if matches!(action, Action::ConfirmUnsaved(UnsavedChoice::Save))
+            && self.state.path().is_empty()
+        {
+            self.state.dispatch(action);
+            Action::Save
+        } else {
+            action
+        };
+        let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
+            Action::PickFile(PickRequest::SaveProjectAs {
+                suggested: suggested_file_name(self.state.path()),
+            })
+        } else {
+            action
+        };
+        if let Action::PickFile(request) = action {
+            let wake = ctx.clone();
+            // Plain paths: the picker's thread looks them up on the disk.
+            let candidates = self.state.folder_candidates(&request);
+            self.picker_origin = origin;
+            self.file_picker
+                .start(request, candidates, move || wake.request_repaint());
+            return false;
+        }
+        if let Action::OpenFolder(folder) = action {
+            if let Err(error) = (self.folder_opener)(&folder) {
+                self.state.report_folder_open_error(&error);
+            }
+            return false;
+        }
+        if matches!(
+            action,
+            Action::Save
+                | Action::SaveAs { .. }
+                | Action::NewProject { .. }
+                | Action::OpenProject { .. }
+                | Action::Quit { .. }
+        ) {
+            self.commit_view_entries(ctx);
+        }
+        let action = self.prepare_new_project_action(ctx, action);
+        self.dispatch_action(ctx, action)
     }
 
     /// Captures the presentation effects before the command, then applies them to its result.

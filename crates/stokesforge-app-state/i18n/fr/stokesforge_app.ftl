@@ -1878,7 +1878,6 @@ error-window-geometry = Impossible de mettre à jour la position de la fenêtre�
 error-column-width = Impossible d'enregistrer la largeur de la colonne : { $cause }
 error-plot-settings-cancel = Impossible d'annuler les propriétés du graphe : { $cause }
 error-plot-settings-undo-group = Les modifications des propriétés du graphe ne pourront pas être annulées en une fois : { $cause }
-error-plot-settings-block-detached = Les propriétés du graphe sont ouvertes. Les valider ou les annuler avant de modifier une fenêtre détachée
 error-preferences-not-saved = Impossible d'enregistrer les préférences : { $cause }
 error-folder-not-utf8 = Ce dossier ne peut pas servir de dossier par défaut : son nom n'est pas du texte valide. Choisir un autre dossier
 error-folder-open = Impossible d'ouvrir le dossier : { $cause }
@@ -2308,3 +2307,10 @@ import-format-numbers-section = Nombres et dates
 import-format-comments-section = Lignes de commentaire
 import-format-file-section = Blocs et encodage
 import-format-skipped-section = Lignes ignorées
+
+# Pourquoi un geste fait hors de la fenêtre principale est refusé (#471).
+dialog-name-graph-properties = Propriétés du graphe
+dialog-name-analysis = Analyse
+refused-dialog-editing = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La valider ou l'annuler d'abord
+refused-dialog-close = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La fermer d'abord
+refused-dialog-question = Une question attend dans la fenêtre principale. Y répondre d'abord

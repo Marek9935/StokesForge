@@ -1434,6 +1434,11 @@ fn header_field_widget(
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
                 Some(end) => {
+                    // A dialog is open in the main window: the write would be
+                    // refused, so the field stays open with its text (#471).
+                    if super::window_band::refuse_entry(ui.ctx()) {
+                        return;
+                    }
                     // Enter, Tab and a click elsewhere always write (#433): a text that does
                     // not read is kept and framed once the field is closed. Escape cancels.
                     let write = match inplace_edit::resolve(end, false, false) {
@@ -2829,6 +2834,12 @@ fn edit_cell_widget(
         state.cancel_edit();
         return;
     }
+    // A dialog is open in the main window (seen from a detached window only):
+    // the write would be refused, so the cell stays open with its text and the
+    // cursor where it was (#471).
+    if super::window_band::refuse_entry(ui.ctx()) {
+        return;
+    }
     // Enter or Tab on a refused number: the cell stays open. A click elsewhere
     // closes without writing anything (as the header does).
     match inplace_edit::resolve(end, false, refusal.is_some()) {
@@ -3018,7 +3029,7 @@ mod tests {
     //! The bench paints the whole workbook ([`book_contents`]) rather than the grid
     //! alone: it is the content shared by the floating workbook and the detached
     //! workbook, hence the path the user takes in both windows.
-    use super::super::test_support::frame_of;
+    use super::super::test_support::frame_in;
 
     use super::super::workbook::book_contents;
     use super::*;
@@ -3126,6 +3137,9 @@ mod tests {
         modal: Option<TestModal>,
         /// How many frames the modal answered Cancel / Close.
         cancels: usize,
+        /// The viewport the bench paints in (the root unless a test moves it
+        /// to a detached window).
+        viewport: egui::ViewportId,
     }
 
     /// The natures of modal window the bench can paint under the workbook.
@@ -3268,6 +3282,7 @@ mod tests {
                 size: egui::vec2(700.0, 420.0),
                 modal: None,
                 cancels: 0,
+                viewport: egui::ViewportId::ROOT,
             };
             for _ in 0..3 {
                 bench.image(Vec::new());
@@ -3281,7 +3296,7 @@ mod tests {
             let modal = self.modal;
             let mut neighbor = false;
             let mut cancelled = false;
-            let output = frame_of(&self.context, self.size, events, |ui| {
+            let output = frame_in(&self.context, self.viewport, self.size, events, |ui| {
                 neighbor = ui.button("before").has_focus();
                 book_contents(ui, state, actions, book);
                 if let Some(modal) = modal {
@@ -6419,6 +6434,44 @@ mod tests {
         for _ in 0..3 {
             bench.image(Vec::new());
         }
+        bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(bench.state.editing().is_none());
+        assert!(bench
+            .seen
+            .iter()
+            .any(|action| matches!(action, Action::CommitCellAndAdvance { .. })));
+    }
+
+    /// #471: in a detached window, with a dialog open in the main window, Enter
+    /// on a typed value keeps the cell open with its text, sends nothing and
+    /// notes the refusal for the root; once the dialog is closed, Enter writes
+    /// it. Witness: removing the guard in `edit_cell_widget`.
+    #[test]
+    fn a_value_typed_in_a_detached_cell_stays_open_while_a_dialog_is_open() {
+        use super::super::window_band::{publish_dialog, take_refusals};
+        use stokesforge_app_state::state::open_dialog::OpenDialog;
+        let mut bench = Bench::new();
+        let window = egui::ViewportId::from_hash_of("detached-grid");
+        bench.viewport = window;
+        publish_dialog(&bench.context, Some(OpenDialog::GraphProperties));
+        let column = bench.columns[0];
+        bench.state.begin_edit(column, 0);
+        bench.state.editing_mut().expect("editing").buffer = "42".to_string();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+        assert_eq!(
+            bench.state.editing().map(|edit| edit.buffer.as_str()),
+            Some("42"),
+            "still open with its text"
+        );
+        assert!(!bench.seen.iter().any(|action| matches!(
+            action,
+            Action::CommitCell { .. } | Action::CommitCellAndAdvance { .. }
+        )));
+        assert_eq!(take_refusals(&bench.context), vec![window]);
+        publish_dialog(&bench.context, None);
         bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
         assert!(bench.state.editing().is_none());
         assert!(bench

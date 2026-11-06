@@ -24,6 +24,19 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Added
+
+- A detached window or panel says why a gesture did nothing or failed (#471):
+  a band at the bottom of that window, for 5 seconds, orange for a refusal or
+  a warning, red for an error. While any dialog is open in the main window, the
+  gestures of the detached workbooks, graphs and panels are refused with
+  "<Dialog> is open in the main window. Apply or cancel it first" (not only
+  for Graph Properties as before). A value typed in a detached cell or header
+  stays open with its text until the dialog is closed. The refusal is in the
+  status bar and the history of the main window, no longer in the footer of the
+  dialog. Warnings of the local view of a detached workbook (an unreadable
+  clipboard) now show in its window and in the main history.
+
 ### Fixed
 
 - A detached window can be grabbed by its title, or resized by its edges, every

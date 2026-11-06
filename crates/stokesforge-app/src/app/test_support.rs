@@ -48,6 +48,23 @@ pub(super) fn frame_of(
     output
 }
 
+/// [`frame_of`] as seen by the viewport `viewport` (a detached window).
+pub(super) fn frame_in(
+    context: &egui::Context,
+    viewport: egui::ViewportId,
+    size: egui::Vec2,
+    events: Vec<egui::Event>,
+    content: impl FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
+    let mut raw = raw_input(size, events);
+    raw.viewport_id = viewport;
+    raw.viewports
+        .insert(viewport, egui::ViewportInfo::default());
+    let mut output = context.run_ui(raw, content);
+    output.textures_delta.clear();
+    output
+}
+
 /// A 1400 × 900 frame with `events`, 0.1 s after the previous one; returns
 /// what was painted. Time advances so that animated scrolling runs to the end
 /// (the tab strip shows the tab chosen by `scroll_to_rect`, spread over 0.3 s

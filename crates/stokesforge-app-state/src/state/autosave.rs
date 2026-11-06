@@ -339,6 +339,11 @@ impl AppState {
         self.autosave.pending_delete = None;
     }
 
+    /// Is the recovery list showing (some recovery copy was found)?
+    pub(super) fn recovery_list_open(&self) -> bool {
+        !self.autosave.found.is_empty()
+    }
+
     /// Is a deletion confirmation waiting? (blocking dialog)
     pub(super) fn recovery_delete_pending(&self) -> bool {
         self.autosave.pending_delete.is_some()
