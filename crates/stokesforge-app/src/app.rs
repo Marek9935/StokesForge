@@ -1163,11 +1163,6 @@ impl eframe::App for StokesForgeApp {
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
         let changed = snapshot_stamp(self.state.snapshot()) != published_stamp;
-        // A dialog opened by a detached window's action is painted by the
-        // root's next pass; nothing else asks for it (the stamp did not change).
-        if dispatched {
-            ctx.request_repaint();
-        }
         self.announce_opened_dialog(&ctx);
         if changed {
             // A command applied after publication wakes the viewports. The
@@ -1633,6 +1628,9 @@ impl StokesForgeApp {
     /// in its band, and the main window is asked to come forward: once, here,
     /// never on each pass. Wayland ignores `Focus`; the band and the system's
     /// attention request are then the way to find it.
+    ///
+    /// Sending a command to the root also wakes it, which is what makes it paint
+    /// the dialog on its next pass.
     fn announce_opened_dialog(&mut self, ctx: &egui::Context) {
         let dialog = self.state.open_dialog();
         let opened = dialog.is_some() && !self.dialog_was_open;
@@ -1656,7 +1654,6 @@ impl StokesForgeApp {
             egui::ViewportId::ROOT,
             egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational),
         );
-        ctx.request_repaint();
     }
 
     /// The detached window or panel the person works in, if any.

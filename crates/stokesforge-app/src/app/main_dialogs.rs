@@ -47,18 +47,23 @@ fn click_at(bench: &mut Bench, last: &egui::FullOutput, label: &str) -> egui::Fu
     output.unwrap()
 }
 
-/// Case 1. A detached graph queues Graph Properties: the root paints it on a
-/// later root pass, the window never; the opening pass wakes the root; at rest
-/// everything sleeps. Witness: remove the root wake after a dispatch.
+/// Case 1. A detached window queues a dialog that changes no snapshot (About):
+/// the root is woken, paints it on a later pass, the window never does; at
+/// rest everything sleeps. Witness: remove the two commands sent to the root by
+/// `announce_opened_dialog`.
 #[test]
 fn a_dialog_asked_by_a_detached_window_is_painted_by_the_root_only() {
     let mut bench = Bench::new();
     bench.start();
-    let rest = bench.root(Pass::root());
+    let mut rest = bench.root(Pass::root());
+    for _ in 0..12 {
+        rest = bench.root(Pass::root());
+    }
     assert_eq!(delay(&rest, bench.child_id()), Duration::MAX, "asleep");
-    bench.queue_in_window(bench.open_plot_settings());
+    assert_eq!(delay(&rest, egui::ViewportId::ROOT), Duration::MAX, "root asleep");
+    bench.queue_in_window(Action::OpenAbout);
     let opening = bench.root(Pass::root());
-    assert!(bench.app.state.plot_settings().is_some());
+    assert!(bench.app.state.about_open());
     assert_eq!(
         delay(&opening, egui::ViewportId::ROOT),
         Duration::ZERO,
@@ -68,9 +73,9 @@ fn a_dialog_asked_by_a_detached_window_is_painted_by_the_root_only() {
     for _ in 0..5 {
         root = bench.root(Pass::root());
     }
-    assert!(painted(&root, &ok()), "the root paints it");
+    assert!(painted(&root, &tr!("dialog-close")), "the root paints it");
     let child = bench.child(Pass::child());
-    assert!(!painted(&child, &ok()), "the window never does");
+    assert!(!painted(&child, &tr!("dialog-close")), "the window never does");
     bench.finish();
 }
 
