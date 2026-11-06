@@ -39,6 +39,11 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- A dialog open in the main window now stops the keys of the detached windows
+  (#460): with Graph Properties (or any dialog) open, Esc, `G` and the arrows of
+  a detached graph in Page Layout Mode, and the keys of a detached workbook, the
+  Object Manager, the Project Manager and the console, do nothing, and the band
+  of that window says why. Letters typed in an open cell or field keep working.
 - A detached window can be grabbed by its title, or resized by its edges, every
   time (#457): before, on Wayland, every second grab did nothing, and moving a
   window could then extend the selected columns of a sheet when the mouse

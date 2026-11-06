@@ -213,7 +213,17 @@ exist), and #472 removed it: no `AppHost`, no host rule, no veil.
   window on Windows and X11 and does nothing on Wayland (`vendor/winit`, empty
   `focus_window`): the band, the system's attention request and Alt+Tab are the
   way there. A refused gesture never brings the main window forward.
-- **While a dialog is open** a gesture made in a detached window is refused (#471).
+- **While a dialog is open** a gesture made in a detached window is refused (#471),
+  and so is a key (#460): `window_band::stop_keys` is the one stop, called first
+  in each of the four detached closures (tab viewport, Object Manager, console,
+  Project Manager), before any key reader. It removes key, text and clipboard
+  events from the viewport's input and notes the refusal for the root, which
+  posts the band (same path as a refused action). It stands aside for a text
+  field that has or had the keyboard (typing, and the Esc that gives a field
+  back), an open popup, and a modal of the same viewport (Object properties).
+  A key release, a key repeat and an Alt combination (Alt+Tab) never trigger
+  the band. Ctrl+Z, Ctrl+Y and Ctrl+S are stopped by the same call, until #459
+  reads them.
 - **Covered root.** A dialog opened while the root is covered runs unpainted, like
   the rest of the root (above), and paints in full, with its focus, when the root
   is uncovered.

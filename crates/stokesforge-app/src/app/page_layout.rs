@@ -260,6 +260,8 @@ pub(super) fn field_had_focus(ctx: &egui::Context) -> bool {
 /// gives a field back is not the Esc that leaves). Called by the root for a
 /// floating graph and at the top of the viewport of a detached one; the edit a
 /// leaving commits is pushed to `actions`. Returns whether the mode was left.
+/// A dialog open in the main window has already removed the keys of a detached
+/// viewport (`window_band::stop_keys`, #460), so nothing is read here then.
 pub(super) fn handle_keys(
     ctx: &egui::Context,
     view: &mut GraphView,
