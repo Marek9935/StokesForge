@@ -511,10 +511,10 @@ function thumb(id,name,onremove){
 }
 /* The strip is rebuilt in place from the page-level draft, so a poll re-render or an upload that ends
    never loses a thumbnail. */
-function renderStrip(id){
-  const st=$('st-'+id),d=imgDrafts[id];if(!st||!d)return;
+function renderStrip(id,strip){
+  const st=strip||$('st-'+id),d=imgDrafts[id];if(!st||!d)return;
   st.replaceChildren();
-  d.names.forEach(n=>st.appendChild(thumb(id,n,()=>{d.names=d.names.filter(m=>m!==n);renderStrip(id);})));
+  d.names.forEach(n=>st.appendChild(thumb(id,n,()=>{d.names=d.names.filter(m=>m!==n);renderStrip(id,st);})));
   if(d.busy>0)st.appendChild(el('span','imgline','Envoi de '+d.busy+' capture'+(d.busy>1?'s':'')+'…'));
   d.lines.forEach(l=>st.appendChild(el('div','imgline bad',l)));
 }
@@ -620,7 +620,7 @@ function testBox(x){
     sv.onclick=()=>boxSend(x,retour?'retour':'note');
     const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];delete imgDrafts[x.id];renderTests();};
     r.appendChild(sv);r.appendChild(cn);b.appendChild(r);
-    renderStrip(x.id);
+    renderStrip(x.id,st);   // the new strip is not in the document yet: pass it, or the old one gets drawn
   }
   return b;
 }

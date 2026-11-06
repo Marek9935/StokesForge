@@ -451,7 +451,7 @@ function summary(){
   let last=0;
   ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+='<div class="grp">'+gname(d)+'</div>';}
     const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
-    h+='<button class="srow '+cls+'" data-i="'+i+'"><span class="c">'+d.c+'</span><span>'+esc(d.t)+'</span><span class="a">'+(a?esc(label(d,a))+(a.note?' — '+esc(a.note):''):'Pas encore vue')+'</span></button>'; });
+    h+='<button class="srow '+cls+'" data-i="'+i+'"><span class="c">'+d.c+'</span><span>'+esc(d.t)+'</span><span class="a">'+(a?esc(label(d,a))+(a.note?' — '+esc(a.note):'')+(qNames(a).length?' · '+qNames(a).length+(qNames(a).length>1?' captures':' capture'):''):'Pas encore vue')+'</span></button>'; });
   return h+'</div>';
 }
 function go(i){cur=Math.max(0,Math.min(ORDER.length-1,i));view='card';lsSet(KEY+'-pos',String(cur));render();window.scrollTo(0,0);}
