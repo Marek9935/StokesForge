@@ -3264,8 +3264,8 @@ class TestPage(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_withdraw_control_asks_first_and_states_how_many_answers_exist(self):
         src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
-        code = src + "\nprocess.stdout.write(JSON.stringify([withdrawUi({recorded:2},false),withdrawUi({recorded:2},true)," \
-                     "withdrawUi({recorded:1},true),withdrawUi({},true)]));"
+        code = src + "\nprocess.stdout.write(JSON.stringify([withdrawUi({progress:{answered:2,total:3}},false),withdrawUi({progress:{answered:2,total:3}},true)," \
+                     "withdrawUi({progress:{answered:1,total:3},recorded:5},true),withdrawUi({progress:{answered:0,total:3},recorded:1},true)]));"
         r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         idle, two, one, none = json.loads(r.stdout)

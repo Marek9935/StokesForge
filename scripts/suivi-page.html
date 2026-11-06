@@ -344,10 +344,10 @@ function mergeUi(l){
   return {button:false,note:''};
 }
 /* The « Retirer » control of a form's box (#479): `asking` = the box is in its confirmation step.
-   q.recorded = the answers already given (the server counts them, « Plus tard » included). */
+   the answers already given = q.progress.answered, the figure « Avancement » shows (« Plus tard » is not one). */
 function withdrawUi(q,asking){
   if(!asking)return {asking:false,button:'Retirer',question:'',yes:'',no:''};
-  const n=Number(q.recorded)||0;
+  const n=Number(q.progress&&q.progress.answered)||0;
   const given=n===0?'Aucune réponse donnée.':n===1?'1 réponse déjà donnée.':n+' réponses déjà données.';
   return {asking:true,button:'',question:'Retirer ce formulaire ? '+given,yes:'Oui, retirer',no:'Annuler'};
 }

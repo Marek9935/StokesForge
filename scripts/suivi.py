@@ -1745,8 +1745,7 @@ def all_qcms():
         if not safe_id(qid) or not isinstance(m, dict):
             continue
         out.append({"id": qid, "issue": m.get("issue"), "title": m.get("title", ""), "finished": bool(m.get("finished")),
-                    "progress": qcm_progress(qid, m), "since": m.get("created", ""),
-                    "recorded": len(load_answers(qid))})
+                    "progress": qcm_progress(qid, m), "since": m.get("created", "")})
     return out
 
 
