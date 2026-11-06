@@ -295,6 +295,14 @@ pub(super) struct DetachedObjectManager {
     requests: Arc<Mutex<ObjectManagerRequests>>,
 }
 
+#[cfg(test)]
+impl DetachedObjectManager {
+    /// The actions the window queued and the root has not drained (tests).
+    pub(super) fn queued_actions(&self) -> Vec<Action> {
+        self.requests.lock().unwrap().actions.clone()
+    }
+}
+
 #[derive(Default)]
 struct ScriptConsoleRequests {
     source: Option<String>,
@@ -305,6 +313,14 @@ struct ScriptConsoleRequests {
 pub(super) struct DetachedScriptConsole {
     model: Arc<Mutex<ScriptConsoleModel>>,
     requests: Arc<Mutex<ScriptConsoleRequests>>,
+}
+
+#[cfg(test)]
+impl DetachedScriptConsole {
+    /// The actions the window queued and the root has not drained (tests).
+    pub(super) fn queued_actions(&self) -> Vec<Action> {
+        self.requests.lock().unwrap().actions.clone()
+    }
 }
 
 /// The detached panels have the home-made frame and a single window action.

@@ -147,9 +147,9 @@ pub(super) fn read_detached_history_and_save(ctx: &egui::Context) -> Vec<Action>
 pub(super) fn refuse_quit_in_detached(ctx: &egui::Context) {
     let shortcuts = ctx.options(|options| options.quit_shortcuts.clone());
     let pressed = ctx.input_mut(|input| {
-        shortcuts
-            .iter()
-            .fold(false, |seen, shortcut| input.consume_shortcut(shortcut) | seen)
+        shortcuts.iter().fold(false, |seen, shortcut| {
+            input.consume_shortcut(shortcut) | seen
+        })
     });
     if pressed {
         super::window_band::post(

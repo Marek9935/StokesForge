@@ -292,9 +292,32 @@ pub(super) mod bench {
         frame: eframe::Frame,
         callbacks: HashMap<egui::ViewportId, Callback>,
         time: f64,
-        child_focused: bool,
+        /// The window that has the keyboard, as the root sees it.
+        focused_child: Option<egui::ViewportId>,
         pub(in crate::app) graph: NodeId,
         pub(in crate::app) tab: Tab,
+        /// The folder of the project file of [`Bench::with_every_window`].
+        dir: Option<tempfile::TempDir>,
+    }
+
+    /// The windows a [`Bench::with_every_window`] detaches (#459).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(in crate::app) enum Window {
+        Graph,
+        Book,
+        ProjectManager,
+        ObjectManager,
+        Console,
+    }
+
+    impl Window {
+        pub(in crate::app) const ALL: [Window; 5] = [
+            Window::Graph,
+            Window::Book,
+            Window::ProjectManager,
+            Window::ObjectManager,
+            Window::Console,
+        ];
     }
 
     impl Bench {
@@ -318,9 +341,57 @@ pub(super) mod bench {
                 frame: eframe::Frame::_new_kittest(),
                 callbacks: HashMap::new(),
                 time: 0.0,
-                child_focused: false,
+                focused_child: None,
                 graph,
                 tab,
+                dir: None,
+            }
+        }
+
+        /// The same project, saved in a file of its own, with the workbook, the
+        /// three panels and the graph all detached (#459).
+        pub(in crate::app) fn with_every_window() -> Self {
+            let mut bench = Self::new();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("keys.stf").to_string_lossy().into_owned();
+            let state = AppState::new(bench.session.handle(), path).unwrap();
+            let graph = bench.graph;
+            let mut app = StokesForgeApp::new(state);
+            let book = app.state.books()[0].0;
+            for tab in [Tab::Graph(graph), Tab::Book(book)] {
+                if !app.floating_tabs.contains(&tab) {
+                    app.floating_tabs.push(tab);
+                }
+                app.detach_tab(tab);
+            }
+            app.detach_project_manager();
+            app.state.set_object_manager_open_for_test(true);
+            app.om_detached = true;
+            app.detach_script_console();
+            bench.app = app;
+            bench.dir = Some(dir);
+            bench
+        }
+
+        pub(in crate::app) fn path(&self) -> std::path::PathBuf {
+            self.dir.as_ref().unwrap().path().join("keys.stf")
+        }
+
+        pub(in crate::app) fn book(&self) -> NodeId {
+            self.app.state.books()[0].0
+        }
+
+        pub(in crate::app) fn id_of(&self, window: Window) -> egui::ViewportId {
+            match window {
+                Window::Graph => egui::ViewportId::from_hash_of(self.tab),
+                Window::Book => egui::ViewportId::from_hash_of(Tab::Book(self.book())),
+                Window::ProjectManager => {
+                    egui::ViewportId::from_hash_of("stokesforge_project_manager_window")
+                }
+                Window::ObjectManager => {
+                    egui::ViewportId::from_hash_of("stokesforge_object_manager_window")
+                }
+                Window::Console => egui::ViewportId::from_hash_of("stokesforge_script_window"),
             }
         }
 
@@ -347,16 +418,18 @@ pub(super) mod bench {
                         ..Default::default()
                     },
                 );
-            } else if let Some(info) = self.callbacks.keys().next().copied() {
-                // The root sees the focus of the window, as eframe reports it.
-                raw.viewports.insert(
-                    info,
-                    egui::ViewportInfo {
-                        parent: Some(egui::ViewportId::ROOT),
-                        focused: Some(self.child_focused),
-                        ..Default::default()
-                    },
-                );
+            } else {
+                // The root sees the focus of the windows, as eframe reports it.
+                for window in self.callbacks.keys() {
+                    raw.viewports.insert(
+                        *window,
+                        egui::ViewportInfo {
+                            parent: Some(egui::ViewportId::ROOT),
+                            focused: Some(self.focused_child == Some(*window)),
+                            ..Default::default()
+                        },
+                    );
+                }
             }
             raw
         }
@@ -377,10 +450,18 @@ pub(super) mod bench {
             output
         }
 
-        /// One pass of the detached window.
+        /// One pass of the detached graph window.
         pub(in crate::app) fn child(&mut self, pass: Pass) -> egui::FullOutput {
-            self.child_focused = pass.focused;
-            let id = self.child_id();
+            self.child_in(self.child_id(), pass)
+        }
+
+        /// One pass of the detached window `id`.
+        pub(in crate::app) fn child_in(
+            &mut self,
+            id: egui::ViewportId,
+            pass: Pass,
+        ) -> egui::FullOutput {
+            self.focused_child = pass.focused.then_some(id);
             let raw = self.raw(pass, id);
             let callback = self
                 .callbacks
@@ -400,6 +481,38 @@ pub(super) mod bench {
             }
         }
 
+        /// [`Self::start`] for every window of [`Self::with_every_window`].
+        pub(in crate::app) fn start_every_window(&mut self) {
+            self.root(Pass::root());
+            for _ in 0..4 {
+                for window in Window::ALL {
+                    self.child_in(self.id_of(window), Pass::child());
+                }
+                self.root(Pass::root());
+            }
+        }
+
+        /// What `window` queued for the root and the root has not drained yet.
+        pub(in crate::app) fn queued_by(&self, window: Window) -> Vec<Action> {
+            match window {
+                Window::Graph => self.app.detached_tabs[&self.tab]
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .actions
+                    .clone(),
+                Window::Book => self.app.detached_tabs[&Tab::Book(self.book())]
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .actions
+                    .clone(),
+                Window::ProjectManager => self.app.pm_requests.lock().unwrap().actions.clone(),
+                Window::ObjectManager => self.app.om_view.as_ref().unwrap().queued_actions(),
+                Window::Console => self.app.script_view.as_ref().unwrap().queued_actions(),
+            }
+        }
+
         pub(in crate::app) fn queue_in_window(&self, action: Action) {
             let detached = &self.app.detached_tabs[&self.tab];
             detached.requests.lock().unwrap().actions.push(action);
@@ -415,6 +528,7 @@ pub(super) mod bench {
 
         pub(in crate::app) fn finish(self) {
             drop(self.app);
+            drop(self.dir);
             self.session.shutdown().unwrap();
         }
     }

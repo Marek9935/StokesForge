@@ -290,6 +290,14 @@ pub(super) fn reveal_folder(ctx: &egui::Context, viewport: egui::ViewportId, fol
     ctx.request_repaint_of(viewport);
 }
 
+/// The text typed in the name field of the panel of `viewport` (tests).
+#[cfg(test)]
+pub(super) fn rename_text_in(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<String> {
+    let key = egui::Id::new(("project_manager_gestures", viewport));
+    ctx.data(|data| data.get_temp::<PmMemory>(key))
+        .and_then(|memory| memory.text)
+}
+
 /// The names being edited in the panel of `viewport` (tests).
 #[cfg(test)]
 pub(super) fn renaming_in(ctx: &egui::Context, viewport: egui::ViewportId) -> Vec<NodeId> {
@@ -658,7 +666,10 @@ pub(super) fn project_manager_contents_from_tree(
         // Nor does a name field stay open on an object that is gone (Ctrl+Z of
         // its creation, #459): the field closes and the arrows work again.
         let present: HashSet<NodeId> = memory.order.iter().map(|entry| entry.node()).collect();
-        let first_gone = memory.rename.first().is_some_and(|id| !present.contains(id));
+        let first_gone = memory
+            .rename
+            .first()
+            .is_some_and(|id| !present.contains(id));
         memory.rename.retain(|id| present.contains(id));
         memory.renamed.retain(|(id, _)| present.contains(id));
         if first_gone {
