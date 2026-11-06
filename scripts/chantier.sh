@@ -56,7 +56,8 @@
 # -D), then prints ONE line saying whether the colour is free or still held; the
 # issue is marked done when its last worktree goes and nothing holds it.
 #
-# Integration line (#480): an issue declared on a line (`declared_line`, one function) gets its
+# Integration line (#480): an issue carrying the GitLab label `ligne-<line>` (e.g. `ligne-PostV1.1`;
+# `declared_line`, the one function that reads it) gets its
 # worktree from origin/<line> instead of origin/main, and its record carries `line` (suivi.py claim
 # --line; a rerun without the declaration puts it back on main). A sub-issue takes its parent's
 # line. An unknown line (no origin/<line>) is refused before anything is created, never replaced
@@ -155,21 +156,37 @@ name_of() {
 }
 
 reserved=""   # colours promised earlier in this dry run
+line_cache="$(mktemp -d)"   # declared lines already read from GitLab in this run
+trap 'rm -rf "$line_cache"' EXIT
 used_lines=""  # integration lines of the issues started in this run (briefing)
 
-# The integration line issue $1 is declared on, empty for `main`. THE one place that learns it:
-# the choice between a GitLab label and a word at launch is open (#480), so today only the test
-# seam answers.
+# The integration line issue $1 is declared on, empty for `main`. THE one place that learns it (#480):
+# the GitLab label `ligne-<line>` on the issue (e.g. `ligne-PostV1.1`), read from the same
+# `glab issue view -F json` as the title. Test seams: SF_ISSUE_LINE_<n> (set, even empty, it answers),
+# and no GitLab read at all when the title comes from a seam (SF_ISSUE_TITLE_<n> / SF_ISSUE_TITLE).
+# A failed read is a refusal, never a quiet `main`.
 declared_line() {
-    local var="SF_ISSUE_LINE_$1"
-    printf '%s\n' "${!var:-}"
+    local var="SF_ISSUE_LINE_$1" tvar="SF_ISSUE_TITLE_$1" json found
+    if [ -n "${!var+x}" ]; then printf '%s\n' "${!var}"; return; fi
+    if [ -f "$line_cache/$1" ]; then cat "$line_cache/$1"; return; fi
+    if [ -n "${!tvar:-}" ] || [ -n "${SF_ISSUE_TITLE:-}" ]; then printf '\n'; return; fi
+    json="$(glab issue view "$1" -F json)" || { echo "chantier: cannot read the labels of #$1 on GitLab; nothing created" >&2; exit 1; }
+    found="$(printf '%s' "$json" | python3 -I -c '
+import json, sys
+labels = json.load(sys.stdin).get("labels") or []
+lines = sorted({l[len("ligne-"):] for l in labels if isinstance(l, str) and l.startswith("ligne-") and len(l) > 6})
+print(" ".join(lines))')" || { echo "chantier: cannot read the labels of #$1; nothing created" >&2; exit 1; }
+    case "$found" in
+    *" "*) echo "chantier: #$1 carries several ligne-* labels ($found); keep one; nothing created" >&2; exit 1 ;;
+    esac
+    printf '%s\n' "$found" | tee "$line_cache/$1"
 }
 
 # Line of issue $1 (own declaration, else its parent's $2); refuses a bad name or a missing branch.
 line_for() {
     local ln
-    ln="$(declared_line "$1")"
-    [ -n "$ln" ] || { [ -z "${2:-}" ] || ln="$(declared_line "$2")"; }
+    # a sub-issue follows its parent and reads no label of its own
+    ln="$(declared_line "${2:-$1}")" || exit 1
     [ -z "$ln" ] || [ "$ln" = main ] || {
         [[ "$ln" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "chantier: not a line name: $ln; nothing created" >&2; exit 1; }
         git -C "$main" rev-parse --verify -q "refs/remotes/origin/$ln" > /dev/null \
@@ -390,8 +407,10 @@ ensure_wt() {
         wbase="origin/$ln"
         case " $used_lines " in *" $ln "*) ;; *) used_lines="${used_lines:+$used_lines }$ln" ;; esac
     fi
-    own="$(declared_line "$n")"       # a sub-issue without its own declaration inherits its parent's
-    [ -z "$own" ] || args+=(--line "$own")
+    if [ -z "$parent" ]; then         # a sub-issue's record carries no line: it inherits its parent's
+        own="$(declared_line "$n")" || exit 1
+        [ -z "$own" ] || args+=(--line "$own")
+    fi
     wt="$root/feature$n"
     if [ -d "$wt" ]; then
         branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || echo '?')"

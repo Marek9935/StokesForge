@@ -88,7 +88,7 @@ need it, never answered with `main`. The permanent worktrees `line-*` are not wo
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
-Commands: claim, line, status, set, pause, done, release-line, check, migrate,
+Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|list, qcm pose|answers|list, import-online, tag-wait, labels sync, tag-check.
 """
@@ -506,6 +506,36 @@ def cmd_line(a):
     return 0
 
 
+def cmd_line_clear(a):
+    """The line has landed: drop `line` from every record that carries it (scripts/line.sh land)."""
+    check_line(a.line)
+    n = 0
+    with Lock():
+        for r in load_all().values():
+            if r.get("line") == a.line:
+                r.pop("line")
+                save(r)
+                n += 1
+    print("%d record%s cleared" % (n, "" if n == 1 else "s"))
+    return 0
+
+
+def cmd_line_trial(a):
+    """Exit 0 if the user's OK on the whole line is recorded: at least one trial entry of issue
+    `issue` whose `try` command ends with `try.sh <line>`, and every such entry OK."""
+    check_line(a.line)
+    mine = [t for t in load_tests(a.issue) if str(t.get("try", "")).strip().endswith("try.sh " + a.line)]
+    if not mine:
+        print("no trial entry of #%d tries the line %s (suivi.py test add %d ...: try \"scripts/try.sh %s\")"
+              % (a.issue, a.line, a.issue, a.line))
+        return 1
+    todo = [t["id"] for t in mine if t.get("status", "todo") != "ok"]
+    if todo:
+        print("the trial of the line %s is not OK yet: %s" % (a.line, ", ".join(todo)))
+        return 1
+    return 0
+
+
 # --------------------------------------------------------------------- set
 def need(recs, n):
     if n not in recs:
@@ -673,6 +703,7 @@ def build_status():
             "package": {"parent": g, "subs": pkg.get("subs", [])} if pkg else None,
             "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
+            **({"line": line_of(recs, lead["issue"])} if line_of(recs, lead["issue"]) != "main" else {}),
             "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
             **wait_view(recs, g),
             "worktrees": group_wts(g), "since": since, "days": days})
@@ -2384,6 +2415,20 @@ def build_auto_loop():
             time.sleep(30)
 
 
+def line_rows():
+    """{line: CI view + the issues declared on the line, delivered or not} for the tracking page (#480)."""
+    recs = load_all()
+    committed = {t.get("n") for t in load_tests() if t.get("commit")}
+    rows = {}
+    for ln in ci_lines():
+        row = ci_view(ci_line_path(ln))
+        row["issues"] = [{"issue": n, "name": r.get("name", ""),
+                          "delivered": bool(r.get("done_at")) or n in committed}
+                         for n, r in sorted(recs.items()) if line_of(recs, n) == ln and r.get("kind") != "package"]
+        rows[ln] = row
+    return rows
+
+
 def build_state():
     s = build_status()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
@@ -2391,7 +2436,7 @@ def build_state():
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
             "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
-            "lines": {ln: ci_view(ci_line_path(ln)) for ln in ci_lines()},
+            "lines": line_rows(),
             "build_queue": build_queue_view(),
             "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
 
@@ -2676,6 +2721,11 @@ def parser():
     p.add_argument("--dry-run", action="store_true", help="print the colour it would take, write nothing")
     p.add_argument("--avoid", help="colours to treat as taken (dry run promises)")
     p.add_argument("--line", help="the integration branch the issue targets (#480); absent = main, and removes an earlier one")
+    p = add("line-clear", cmd_line_clear, "the line landed: remove `line` from every record that has it")
+    p.add_argument("line")
+    p = add("line-trial", cmd_line_trial, "exit 0 if the trial entries of <issue> that try <line> are all OK")
+    p.add_argument("issue", type=int)
+    p.add_argument("line")
     p = add("line", cmd_line, "the integration line of an issue (main if none); reads the records only")
     p.add_argument("issue", type=int)
     p = add("status", cmd_status, "the six colours, paused issues, worktrees without a record")

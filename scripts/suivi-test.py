@@ -2521,6 +2521,17 @@ class TestLabelPass(LabelBase):
         self.run_pass()
         self.assertEqual(self.labels_of(1), ["en-cours"])
 
+    def test_the_line_label_is_the_users_and_is_never_removed(self):
+        # ligne-PostV1.1 (#480) declares an issue's line; the label pass must keep it, even at closure.
+        self.assertNotIn("ligne-PostV1.1", suivi.LABEL_ALL)
+        self.held(1)
+        self.issue(1, ["en-pause", "ligne-PostV1.1"], state="closed")
+        self.issue(2, ["ligne-PostV1.1"], state="opened")
+        self.paused(2)
+        self.run_pass()
+        self.assertEqual(self.labels_of(1), ["ligne-PostV1.1"])
+        self.assertEqual(self.labels_of(2), ["en-pause", "ligne-PostV1.1"])
+
     def test_issue_without_label_is_found_by_number_not_by_label(self):
         self.held(5)
         self.issue(5, [])
@@ -2923,6 +2934,43 @@ class TestPage(unittest.TestCase):
         self.assertIn("fmt", p["text"])
         self.assertIsNone(self.ci_line(None))
 
+    def line_row(self, name, row):
+        src = re.search(r"/\*LINEROW-START\*/(.*)/\*LINEROW-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(lineRow(%s,%s)));" % (json.dumps(name), json.dumps(row))
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_line_row_shows_its_ci_and_its_issues_apart_from_main(self):
+        # lang: fr begin
+        red = self.line_row("PostV1.1", {"verdict": "red", "names": ["fmt"], "issues": [{"issue": 7, "delivered": True}, {"issue": 8, "delivered": False}]})
+        self.assertEqual(red["cls"], "red")
+        self.assertEqual(red["text"], "PostV1.1 : CI rouge sur PostV1.1 : fmt — #7 livrée · #8 en cours")
+        self.assertNotEqual(self.line_row("PostV1.1", {"verdict": "weird"})["cls"], "green")
+        self.assertNotIn("verte", self.line_row("PostV1.1", {"verdict": "unknown"})["text"])
+        self.assertIn("aucune issue", self.line_row("PostV1.1", {"verdict": "green"})["text"])
+        # lang: fr end
+        self.assertIsNone(self.line_row("PostV1.1", None))
+        html = self.page()
+        self.assertIn('id="lines"', html)
+
+    def merge_label(self, c):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(mergeLabel(%s)));" % json.dumps(c)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_merge_button_names_the_line_of_the_issue(self):
+        # lang: fr begin
+        self.assertEqual(self.merge_label({"issue": 7, "line": "PostV1.1"}), "Fusionner dans PostV1.1")
+        self.assertEqual(self.merge_label({"issue": 7}), "Fusionner")
+        self.assertEqual(self.merge_label({"issue": 7, "line": "main"}), "Fusionner")
+        # lang: fr end
+        self.assertIn("mergeLabel(c)", self.page())
+
     def test_ci_line_sits_above_the_tabs_outside_the_banner(self):
         html = self.page()
         self.assertLess(html.index('id="ciline"'), html.index('class="tabs"'))
@@ -3159,6 +3207,11 @@ class TestLine(Base):
     def line_of(self, n):
         return self.run_cli("line", str(n)).stdout.strip()
 
+    def put_test(self, tid, **fields):
+        os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
+        with open(os.path.join(self.state, "tests", tid + ".json"), "w") as f:
+            json.dump(dict({"title": tid, "status": "todo", "n": int(tid.split("-")[0])}, **fields), f)
+
     def test_claim_writes_the_line_and_each_claim_rewrites_it(self):
         self.claim(7, "--line", "PostV1.1")
         self.assertEqual((self.rec(7)["line"], self.line_of(7)), ("PostV1.1", "PostV1.1"))
@@ -3198,6 +3251,31 @@ class TestLine(Base):
         r = self.run_cli("test", "merged", "73", c)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("no local branch", r.stderr)
+
+    def test_line_trial_wants_one_entry_that_tries_the_line_and_all_of_them_ok(self):
+        k = 480
+        r = self.run_cli("line-trial", str(k), "PostV1.1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no trial entry", r.stdout)
+        self.put_test("480-1", **{"try": "scripts/try.sh 480", "status": "ok"})      # the issue's own entry does not count
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 1)
+        self.put_test("480-2", **{"try": "scripts/try.sh PostV1.1", "status": "todo"})
+        r = self.run_cli("line-trial", str(k), "PostV1.1")
+        self.assertEqual((r.returncode, "480-2" in r.stdout), (1, True))
+        self.put_test("480-2", **{"try": "scripts/try.sh PostV1.1", "status": "retour"})
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 1)
+        self.put_test("480-2", **{"try": "scripts/try.sh PostV1.1", "status": "ok"})
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 0)
+        self.put_test("480-3", **{"try": "scripts/try.sh PostV1.1", "status": "todo"})
+        self.assertEqual(self.run_cli("line-trial", str(k), "PostV1.1").returncode, 1)
+
+    def test_line_clear_drops_the_line_of_every_record(self):
+        self.put(1, line="PostV1.1")
+        self.put(2, line="Other")
+        self.put(3)
+        self.assertIn("1 record cleared", self.run_cli("line-clear", "PostV1.1").stdout)
+        self.assertNotIn("line", self.rec(1))
+        self.assertEqual(self.rec(2)["line"], "Other")
 
     def test_line_worktrees_are_not_work_packages(self):
         self.git("worktree", "add", "-q", os.path.join(self.root, "line-PostV1.1"), "-b", "PostV1.1", "main")
