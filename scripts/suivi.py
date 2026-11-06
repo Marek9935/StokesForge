@@ -16,8 +16,15 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
                            page's POST and by `test add|merged`)
+    tests/<n>-<k>.images/  screenshots of an entry (#456); the entry's `images` field lists names only
+    qcm/<id>/images/<code>/  screenshots of a form card; the answer's `images` lists names only
     removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
-                           outside tests/ so nothing reads it, and its number is never reused)
+                           outside tests/ so nothing reads it, and its number is never reused;
+                           its screenshots move to removed-tests/<n>-<k>.images/)
+    Screenshots: PNG, JPEG, GIF or WebP, named by the server (content hash), 10 MB and 5 per
+    entry or card. Above MAX_IMAGES_TOTAL (512 MB, all folders together) the oldest files are
+    deleted after an upload; the JSON is never rewritten, a name left without its file is shown
+    as "removed by the size limit".
     control.json           result of the last `check`
 
 THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
