@@ -2397,6 +2397,67 @@ class TestFormTemplate(unittest.TestCase):
         for needle in ("claude.use('db')", "/api/qcm/", "X-Suivi", "const slots=", ".mslot", "const flow=", "const sheet=", "const tree="):
             self.assertIn(needle, html)
 
+    def form_html(self):
+        with open(TEMPLATE, encoding="utf-8") as f:
+            return f.read()
+
+    def q_js(self, expr):
+        src = re.search(r"/\*QIMG-START\*/(.*)/\*QIMG-END\*/", self.form_html(), re.S).group(1)
+        r = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(JSON.stringify(%s));" % expr], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_changing_the_option_or_skipping_keeps_the_note_and_the_images(self):
+        a = "0123456789abcdef01234567.png"
+        prev = {"i": 1, "note": "n", "images": [a, "../x"]}
+        for fields in ({"i": 0}, {"i": -1}, {"skip": True}):
+            got = self.q_js("mkAns(%s,%s)" % (json.dumps(prev), json.dumps(fields)))
+            self.assertEqual((got["note"], got["images"]), ("n", [a]), fields)            # junk names are not carried
+        self.assertEqual(self.q_js("mkAns(null,{i:0})"), {"note": "", "images": [], "i": 0})
+        self.assertEqual(self.q_js("mkAns({i:2,note:'x'},{skip:true})"), {"note": "x", "images": [], "skip": True})   # the old choice is not carried
+
+    # lang: fr begin
+    def test_form_attach_filter_and_lines_follow_the_page(self):
+        f = lambda t, size=100, name="a": {"name": name, "type": t, "size": size}
+        out = self.q_js("qFilter(%s, 4)" % json.dumps([f("image/png", name="a.png"), f("image/svg+xml", name="x.svg"),
+                                                       f("image/gif", 10 * 1024 * 1024 + 1, "big.gif"), f("image/webp", name="w.webp")]))
+        self.assertEqual([x["name"] for x in out["accept"]], ["a.png"])                      # 4 + 1 = 5, the next is one too many
+        self.assertEqual(len(out["lines"]), 3)
+        self.assertIn("relance-le", self.q_js("qUploadLine(404)"))
+        self.assertIn("10 Mo", self.q_js("qUploadLine(413)"))
+        ok = "0123456789abcdef01234567.png"
+        self.assertEqual(self.q_js("qUrl('1-1','R1',%s)" % json.dumps(ok)), "/api/qcm/1-1/images/R1/" + ok)
+        self.assertIsNone(self.q_js("qUrl('1-1','R1','\"><img src=x onerror=1>')"))
+        got = self.q_js("qFromItems([{kind:'file',type:'image/png',getAsFile:()=>({t:1})},{kind:'file',type:'image/svg+xml',getAsFile:()=>({})},"
+                        "{kind:'string',type:'text/plain'}])")
+        self.assertEqual(got, [{"t": 1}])
+
+    def test_form_never_rebuilds_an_answer_without_its_images_and_always_sends_them(self):
+        html = self.form_html()
+        self.assertNotIn("note:(ans[", html)
+        self.assertNotRegex(html, r"ans\[d\.c\]=\{")                                         # every rebuild goes through mkAns
+        self.assertNotIn("note:(a&&a.note)", html)
+        self.assertIn("record(d,a),{images:qNames(a)}", html)                                 # sent even empty: absent = delete on the server
+        self.assertIn("enqueue(()=>postRecord(d))", html)                                     # saves and uploads are serialized
+        self.assertIn("enqueue(async()=>{", html)
+        self.assertIn("await postRecord(d)", html)
+        self.assertIn("Capture supprimée (limite de 512 Mo)", html)
+        self.assertNotIn("innerHTML", re.search(r"/\*QIMG-START\*/(.*)/\*QIMG-END\*/", html, re.S).group(1))
+
+    def test_form_artifact_mode_has_no_controls_listeners_or_image_in_the_record(self):
+        html = self.form_html()
+        m = re.search(r"const record=\(d,a\)=>\(\{(.*?)\}\);", html)
+        self.assertNotIn("images", m.group(1))                                                # the stored record is unchanged
+        self.assertIn("store.doc('decisions/'+d.c).set(record(d,a))", html)                  # online: record as it was
+        self.assertIn("if(LOCAL)h+='<div><div class=\"lbl\">Captures", html)                  # controls only in local mode
+        self.assertIn("else h+='<div class=\"mdim\">Les captures ne sont possibles que sur la page locale du suivi.</div>'", html)
+        i = html.index("if(LOCAL){\n  document.addEventListener('paste'")
+        self.assertEqual(html.count("addEventListener('paste'"), 1)
+        self.assertEqual(html.count("addEventListener('drop'"), 1)
+        self.assertLess(i, html.index("addEventListener('paste'"))
+        self.assertIn("if(!LOCAL)return;\n  const pk=$('qpick')", html)
+    # lang: fr end
+
 
 
 FAKE_GLAB = r"""#!/usr/bin/env bash
