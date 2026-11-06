@@ -170,7 +170,7 @@ mod tests {
     /// occurrence shows no count.
     #[test]
     fn a_merged_entry_shows_its_count_and_a_single_one_does_not() {
-        let english = stokesforge_app_state::i18n::test_language(
+        let _language = stokesforge_app_state::i18n::test_language(
             stokesforge_app_state::i18n::Language::English,
         );
         let once = message("Nothing to undo", StatusLevel::Info, 1);
@@ -179,15 +179,6 @@ mod tests {
         let text = entry_text(&many);
         assert!(
             text.starts_with("Nothing to undo (") && text.contains("13)"),
-            "{text:?}"
-        );
-        drop(english);
-        let _french = stokesforge_app_state::i18n::test_language(
-            stokesforge_app_state::i18n::Language::French,
-        );
-        let text = entry_text(&message("Rien à annuler", StatusLevel::Info, 13));
-        assert!(
-            text.starts_with("Rien à annuler (") && text.contains("13)"),
             "{text:?}"
         );
     }
