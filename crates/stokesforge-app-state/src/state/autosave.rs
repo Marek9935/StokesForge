@@ -147,6 +147,10 @@ impl AppState {
     /// changed; returns the delay until the next deadline (to schedule the
     /// wake-up), `None` if the save is off.
     pub fn poll_autosave(&mut self, now: Instant) -> Option<Duration> {
+        self.background(|state| state.poll_autosave_pass(now))
+    }
+
+    fn poll_autosave_pass(&mut self, now: Instant) -> Option<Duration> {
         if !self.autosave_enabled() || self.session_lost {
             self.autosave.deadline = None;
             return None;

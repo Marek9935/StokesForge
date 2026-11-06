@@ -370,7 +370,7 @@ impl AppState {
         }
         // The failure goes into the footer of the window (S-M7, #228): it
         // stays open.
-        if !self.last_action_failed() {
+        if !self.gesture_failed() {
             self.remember_analysis(&form);
             // The choice is remembered for this operation only: the Preferences
             // default is not changed by validating a window (#148, M5).
@@ -514,7 +514,7 @@ impl AppState {
         }
         let before: Vec<NodeId> = self.snapshot.tree.calculations().keys().copied().collect();
         self.execute(command);
-        if self.last_action_failed() {
+        if self.gesture_failed() {
             let _ = self.handle.abort_macro();
             self.refresh();
             return;
@@ -544,7 +544,7 @@ impl AppState {
         } else {
             self.add_series_to_graph(graph, panel, columns, None);
         }
-        if self.last_action_failed() {
+        if self.gesture_failed() {
             let _ = self.handle.abort_macro();
             self.refresh();
             return;
@@ -828,7 +828,7 @@ impl AppState {
                     _ => Vec::new(),
                 };
                 self.recalculate_calculations(&stale);
-                if self.status.as_ref().is_some_and(|s| s.is_error()) {
+                if self.gesture_failed() {
                     return;
                 }
             }

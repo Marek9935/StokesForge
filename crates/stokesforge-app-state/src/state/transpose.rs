@@ -86,7 +86,7 @@ impl AppState {
                 source: *sheet,
                 rows: wanted,
             });
-            if self.last_action_failed() {
+            if self.gesture_failed() {
                 let _ = self.handle.abort_macro();
                 self.refresh();
                 return;

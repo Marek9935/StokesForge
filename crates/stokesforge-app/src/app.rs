@@ -764,11 +764,12 @@ impl StokesForgeApp {
     }
 
     /// Saves the bar layout into `preferences.json`; a failure
-    /// is told in the status bar, the layout stays applied.
+    /// is told in the status bar as an orange (done, but not kept), the layout
+    /// stays applied.
     fn save_toolbar_layout(&mut self) {
         let layout = self.toolbars.layout().to_json();
         if let Err(err) = Preferences::load().save_toolbars(layout) {
-            self.state.notice(tr!(
+            self.state.warn(tr!(
                 "status-toolbars-not-saved",
                 detail = errors::io::error_message(&err)
             ));
@@ -781,7 +782,7 @@ impl StokesForgeApp {
     fn choose_language(&mut self, language: i18n::Language) {
         i18n::set_language(language);
         if let Err(err) = Preferences::load().save_language(language.tag()) {
-            self.state.notice(tr!(
+            self.state.warn(tr!(
                 "status-language-not-saved",
                 detail = errors::io::error_message(&err)
             ));

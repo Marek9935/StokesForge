@@ -10,7 +10,7 @@ Read from `stokesforge-ui-texts` when writing a key. Overview and the *why*: `do
 - A number that changes the sentence is a Fluent selector in the `.ftl` (`{ $count -> [one] … *[other] … }`), never an `if` in Rust nor two keys.
 - French (`fr/stokesforge_app.ftl`): infinitive for instructions, only the first letter capitalised, non-breaking space (U+00A0) before « : », « ? » and inside « », same arguments as `en`, French CLDR plural (singular for 0 and 1). A key removed from `en` is removed from `fr`.
 - **History labels** (#46): one `history-*` key per `HistoryLabel` variant (and per form), wired in `stokesforge-app-state/src/history_text.rs`; Title Case, verb first; a user name between “ ”; a column is « Column A ». `stokesforge-app-state/tests/history_text.rs` checks the `en` catalogue and the `Display` of `stokesforge-commands` agree.
-- Status bar messages (`AppState::notice` / `warn` / `fail`): `status-*` for information or warning, `error-*` for a failure.
+- Status bar messages (`AppState::notice` / `warn` / `fail`): `status-*` for information or warning, `error-*` for a failure. Choose the level by S-R18: red (`fail`) = not done; orange (`warn`) = done but not as asked, or needs your eyes; plain (`notice`) = done as asked.
 
 ## What the compiler checks, and what it does not
 
