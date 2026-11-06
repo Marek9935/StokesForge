@@ -3391,6 +3391,69 @@ class TestPage(unittest.TestCase):
         self.assertLess(html.index('id="buildline"'), html.index('class="tabs"'))
         self.assertIn("/api/build-mode", html)
 
+    def img_js(self, expr):
+        src = re.search(r"/\*IMAGES-START\*/(.*)/\*IMAGES-END\*/", self.page(), re.S).group(1)
+        r = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(JSON.stringify(%s));" % expr], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    # lang: fr begin
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_attach_filter_checks_type_size_and_count_with_a_line_per_refusal(self):
+        f = lambda t, size=100, name="a": {"name": name, "type": t, "size": size}
+        out = self.img_js("imgFilter(%s, 0)" % json.dumps([
+            f("image/png", name="ok.png"), f("image/svg+xml", name="x.svg"), f("text/plain", name="n.txt"),
+            f("image/webp", 10 * 1024 * 1024 + 1, "big.webp"), f("image/gif", 0, "empty.gif"), f("image/jpeg", name="j.jpg")]))
+        self.assertEqual([a["name"] for a in out["accept"]], ["ok.png", "j.jpg"])             # a mixed drop keeps its images
+        self.assertEqual(len(out["lines"]), 4)
+        self.assertTrue(all(l.split(" : ")[0] in ("x.svg", "n.txt", "big.webp", "empty.gif") for l in out["lines"]))
+        self.assertEqual(self.img_js("imgFilter([%s], 0).accept.length" % json.dumps(f("image/png", 10 * 1024 * 1024))), 1)   # exactly 10 Mo
+        full = self.img_js("imgFilter(%s, 4)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
+        self.assertEqual((len(full["accept"]), len(full["lines"])), (1, 1))                  # 5 per card, uploads in flight counted
+        self.assertIn("5 captures", full["lines"][0])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_what_a_box_button_sends_keeps_the_images_and_refuses_only_an_empty_retour(self):
+        P = lambda kind, text, names: self.img_js("imgPatch(%s,%s,%s)" % tuple(json.dumps(x) for x in (kind, text, names)))
+        self.assertIsNone(P("retour", "  ", []))                                              # an empty box refuses Retour
+        self.assertEqual(P("retour", "", ["a.png"]), {"status": "retour", "comment": "", "images": ["a.png"]})   # the screenshot is enough
+        self.assertEqual(P("retour", " vu ", []), {"status": "retour", "comment": "vu", "images": []})
+        self.assertEqual(P("ok", "tout", ["a.png", "b.png"]), {"status": "ok", "comment": "tout", "images": ["a.png", "b.png"]})   # C'est bon sends the box
+        self.assertEqual(P("ok", "", []), {"status": "ok", "comment": "", "images": []})
+        self.assertEqual(P("note", "", ["a.png"]), {"comment": "", "images": ["a.png"]})         # image-only comment
+        self.assertEqual(P("note", "", []), {"comment": "", "images": []})                       # removing the last one is sent
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_image_urls_encode_the_id_and_refuse_a_name_outside_the_pattern(self):
+        ok = "0123456789abcdef01234567.png"
+        self.assertEqual(self.img_js("imgUrl('7-1', %s)" % json.dumps(ok)), "/api/tests/7-1/images/" + ok)
+        self.assertEqual(self.img_js("imgUrl('a/b', %s)" % json.dumps(ok)), "/api/tests/a%2Fb/images/" + ok)
+        for bad in ('"><img src=x onerror=1>', "../x.png", "0123456789abcdef01234567.svg", "x.png", None):
+            self.assertIsNone(self.img_js("imgUrl('7-1', %s)" % json.dumps(bad)), bad)
+        self.assertEqual(self.img_js("imgListed({images:[%s,'../x','y',3]})" % json.dumps(ok)), [ok])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_upload_failures_and_pastes_have_their_own_lines(self):
+        for st in (400, 404):
+            self.assertIn("relance-le", self.img_js("imgUploadLine(%d)" % st))                   # an old server
+        self.assertIn("10 Mo", self.img_js("imgUploadLine(413)"))
+        self.assertIn("format", self.img_js("imgUploadLine(415)"))
+        self.assertNotIn("relance-le", self.img_js("imgUploadLine(500)"))
+        items = [{"kind": "string", "type": "text/plain"}, {"kind": "file", "type": "image/png"},
+                 {"kind": "file", "type": "application/pdf"}, {"kind": "file", "type": "image/svg+xml"}]
+        got = self.img_js("imgFromItems(%s.map(i=>Object.assign(i,{getAsFile:()=>({type:i.type})})))" % json.dumps(items))
+        self.assertEqual(got, [{"type": "image/png"}])
+
+    def test_the_trial_page_wires_the_screenshots_safely(self):
+        html = self.page()
+        self.assertNotIn("innerHTML", html)                                                       # no name ever goes into markup
+        for needle in ("addEventListener('paste'", "addEventListener('dragover'", "addEventListener('drop'", "im.loading='lazy'",
+                       "const imgDrafts={}", "im.onerror=gone", "Capture supprimée (limite de 512 Mo)", "await imgIdle(d)",
+                       "Ouvre d’abord la boîte"):
+            self.assertIn(needle, html)
+        self.assertIn("(x.comment||sent.length)?'Modifier le commentaire'", html)                # image-only entries can be edited
+    # lang: fr end
+
     def card_line(self, c, tests=(), qcms=()):
         src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
         code = src + "\nprocess.stdout.write(JSON.stringify(cardLine(%s,%s,%s)));" % (
