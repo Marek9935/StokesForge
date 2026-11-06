@@ -72,7 +72,8 @@ ul.pts li::marker{color:var(--accent)}
 .note{width:100%;min-height:72px;padding:10px;border:2px solid var(--line);border-radius:8px;background:var(--bg);resize:vertical}
 .primary{padding:14px 18px;border-radius:10px;border:0;background:var(--accent);color:var(--accent-fg);font-weight:700;cursor:pointer}
 .sec{padding:12px 16px;border-radius:10px;border:2px solid var(--line);background:var(--panel);cursor:pointer;font-weight:700}
-.sec:disabled{opacity:.45;cursor:default}
+.sec:disabled,.primary:disabled{opacity:.45;cursor:default}
+body.gone .opt,body.gone #acc,body.gone #skip,body.gone #accAll,body.gone #accAllOk,body.gone .note,body.gone #qpick,body.gone .qthumb button{opacity:.45;pointer-events:none}
 nav.bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
 nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap}
 .srow{display:grid;grid-template-columns:3.2rem 1fr;gap:4px 10px;padding:8px 0;border-top:1px solid var(--line);cursor:pointer;background:none;border-inline:0;border-bottom:0;text-align:left;width:100%}
@@ -334,7 +335,7 @@ const QID=((location.pathname.match(/^\/qcm\/([A-Za-z0-9_.-]+)\/?$/)||[])[1])||n
 const LOCAL=!!QID&&(location.hostname==='127.0.0.1'||location.hostname==='localhost');
 if(LOCAL)document.getElementById('goHome').hidden=false;   /* local server only: '/' is the tracking home */
 const KEY='sf-dec-'+(QID?QID+'-':'')+ORDER.map(d=>d.c).join(',');
-let finished=false, finMsg='';
+let finished=false, finMsg='', gone=false;
 let ans={}, cur=0, view='card', confirmAll=false, store=null, sync='';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -388,8 +389,9 @@ const postRecord=d=>{
   // `images` is ALWAYS sent (even empty): a save without it deletes the card's files on the server.
   const body=JSON.stringify(Object.assign(record(d,a),{images:qNames(a)}));
   return fetch('/api/qcm/'+encodeURIComponent(QID)+'/answer',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:body})
-    .then(r=>{if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
+    .then(r=>{if(r.status===404||r.status===410){markGone();return;}if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
 };
+function markGone(){gone=true;sync='Questionnaire retiré : tes réponses ne sont plus enregistrées';paintSync();render();}
 function save(d){
   lsSet(KEY,JSON.stringify(ans)); lsSet(KEY+'-pos',String(cur));
   const a=ans[d.c];
@@ -447,7 +449,7 @@ function summary(){
   if(rest){ if(!confirmAll) h+='<button class="sec" id="accAll">Prendre la recommandation pour les '+rest+' restantes…</button>';
     else h+='<div class="confirm"><b>Appliquer la recommandation aux '+rest+' décisions restantes ?</b><span>Tu pourras encore changer chacune ensuite.</span><div class="row2"><button class="primary" id="accAllOk">Oui, appliquer</button><button class="sec" id="accAllNo">Annuler</button></div></div>'; }
   h+='<div><button class="link" id="copy">Copier le résumé</button> <span class="sync" id="copied"></span></div>';
-  if(LOCAL)h+='<div class="fin"><button class="primary" id="finish"'+(finished?' disabled':'')+'>'+(finished?'Envoyé':'J’ai fini')+'</button><span class="sync" id="finmsg">'+esc(finMsg)+'</span></div>';
+  if(LOCAL)h+='<div class="fin"><button class="primary" id="finish"'+(finished||gone?' disabled':'')+'>'+(finished?'Envoyé':'J’ai fini')+'</button><span class="sync" id="finmsg">'+esc(gone?'Questionnaire retiré.':finMsg)+'</span></div>';
   let last=0;
   ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+='<div class="grp">'+gname(d)+'</div>';}
     const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
@@ -458,6 +460,7 @@ function go(i){cur=Math.max(0,Math.min(ORDER.length-1,i));view='card';lsSet(KEY+
 function choose(d,i){ans[d.c]=mkAns(ans[d.c],{i});save(d);render();
   const el=$('main').querySelector('.opt[data-i="'+i+'"]'); if(el)el.focus(); if(i===-1)$('note').focus();}
 function render(){
+  document.body.classList.toggle('gone',gone);
   $('main').innerHTML=view==='card'?card():summary();
   paintTop();
   $('prev').hidden=view!=='card'; $('skip').hidden=view!=='card'; $('next').hidden=view!=='card';
@@ -480,7 +483,7 @@ function render(){
     if(g('accAllOk'))g('accAllOk').onclick=()=>{ORDER.forEach(d=>{const a=ans[d.c];if(!a||a.skip){ans[d.c]=mkAns(a,{i:0});save(d);}});confirmAll=false;render();};
     if(g('finish'))g('finish').onclick=()=>{ if(finished)return; g('finish').disabled=true;
       fetch('/api/qcm/'+QID+'/finish',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'})
-        .then(r=>{if(!r.ok)throw 0;finished=true;finMsg='';render();}).catch(()=>{finMsg='Envoi impossible : le serveur de suivi répond-il ?';render();}); };
+        .then(r=>{if(r.status===404||r.status===410){gone=true;render();return;}if(!r.ok)throw 0;finished=true;finMsg='';render();}).catch(()=>{finMsg='Envoi impossible : le serveur de suivi répond-il ?';render();}); };
     g('copy').onclick=()=>{const txt=ORDER.map(d=>d.c+' — '+d.t+' : '+(ans[d.c]?label(d,ans[d.c])+(ans[d.c].note?' ('+ans[d.c].note+')':''):'pas vue')).join('\n');
       const ok=()=>g('copied').textContent='Copié';
       try{navigator.clipboard.writeText(txt).then(ok,()=>g('copied').textContent='Copie refusée');}catch(e){g('copied').textContent='Copie refusée';}};
@@ -512,6 +515,7 @@ function qStrip(d){
   (qLines[d.c]||[]).forEach(l=>{const e=document.createElement('div'); e.className='qbad'; e.textContent=l; st.appendChild(e);});
 }
 function qAttach(d,files){
+  if(gone)return;
   const f=qFilter(files,qNames(ans[d.c]).length+(qBusy[d.c]||0));
   qLines[d.c]=f.lines.slice(); qStrip(d);
   f.accept.forEach(file=>{
@@ -520,6 +524,7 @@ function qAttach(d,files){
       let ok=false;
       try{
         const r=await fetch('/api/qcm/'+encodeURIComponent(QID)+'/images/'+encodeURIComponent(d.c),{method:'POST',headers:{'X-Suivi':'1','Content-Type':file.type},body:file});
+        if(r.status===410){qBusy[d.c]--;markGone();return;}      // withdrawn (#479); a 404 may be an old server
         if(!r.ok)qLines[d.c].push(qUploadLine(r.status));
         else{const j=await r.json();
           if(typeof j.name==='string'&&QI_NAME.test(j.name)){

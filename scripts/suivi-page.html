@@ -71,6 +71,8 @@ ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
 .intro{font-weight:600}
 .expect{border-left:4px solid var(--ok);padding-left:12px}
 .meta{color:var(--muted);font-size:.85rem}
+button.wd{padding:8px 14px}
+.wdq{flex:1 0 100%;font-weight:700}
 .acts{display:flex;flex-wrap:wrap;gap:10px}
 button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font-weight:700}
 button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
@@ -194,7 +196,7 @@ const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
 const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
 const $=id=>document.getElementById(id);
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
-let S=null,etag=null,timer=null,openBack=null,failed=false;
+let S=null,etag=null,timer=null,openBack=null,askWithdraw=null,failed=false;
 const drafts={};
 const imgDrafts={};   // per trial entry: {names:[sent or uploaded], busy:n uploads in flight, lines:[refusals]}; survives the re-render
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
@@ -380,6 +382,14 @@ function mergeUi(l){
   if(l.mergeReady)return {button:true,note:''};
   return {button:false,note:''};
 }
+/* The « Retirer » control of a form's box (#479): `asking` = the box is in its confirmation step.
+   the answers already given = q.progress.answered, the figure « Avancement » shows (« Plus tard » is not one). */
+function withdrawUi(q,asking){
+  if(!asking)return {asking:false,button:'Retirer',question:'',yes:'',no:''};
+  const n=Number(q.progress&&q.progress.answered)||0;
+  const given=n===0?'Aucune réponse donnée.':n===1?'1 réponse déjà donnée.':n+' réponses déjà données.';
+  return {asking:true,button:'',question:'Retirer ce formulaire ? '+given,yes:'Oui, retirer',no:'Annuler'};
+}
 /* The merge button names where the merge goes: an issue with an integration line merges into it (#480). */
 function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
 /*CARDLINE-END*/
@@ -525,6 +535,16 @@ function qcmBox(q){
   const b=el('div','box');b.appendChild(head({n:q.issue,name:q.title||('Questionnaire '+q.id),colour:colourOf(q.issue)},null));
   if(q.progress)b.appendChild(el('div','meta','Avancement : '+(typeof q.progress==='object'?(q.progress.answered||0)+' / '+(q.progress.total||'?'):q.progress)));
   const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
+  const u=withdrawUi(q,askWithdraw===q.id);
+  if(!u.asking){
+    const w=el('button','wd',u.button);w.type='button';w.id='wd-'+q.id;
+    w.onclick=()=>{askWithdraw=q.id;renderTests();};b.appendChild(w);
+  }else{
+    const r=el('div','acts');r.appendChild(el('div','wdq',u.question));
+    const y=el('button','back wd',u.yes);y.type='button';y.id='wdy-'+q.id;y.onclick=()=>withdrawForm(q);
+    const n=el('button','wd',u.no);n.type='button';n.id='wdn-'+q.id;n.onclick=()=>{askWithdraw=null;renderTests();};
+    r.appendChild(y);r.appendChild(n);b.appendChild(r);
+  }
   return b;
 }
 function colourSq(n){const c=colourOf(n);return c?Object.keys(COL).find(k=>COL[k]===COL[c])+' ':'';}
@@ -753,6 +773,14 @@ async function send(x,patch,onOk){
   }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';ok=false;}
   etag=null;load();
   return ok;
+}
+async function withdrawForm(q){
+  askWithdraw=null;
+  try{
+    const r=await fetch('/api/qcm/'+encodeURIComponent(q.id)+'/withdraw',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Formulaire non retiré : il est peut-être déjà fini ou retiré, ou le serveur ne répond pas.';}
+  etag=null;load();
 }
 async function askMerge(n){
   try{
