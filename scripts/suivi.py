@@ -796,16 +796,16 @@ def wait_settle():
 
 def should_wake(events, todos, last_change, now, settle):
     """THE wake policy (#454), the only place that decides. `events` are the unseen ones
-    (kind, status, comment), `todos` the watched `try` entries still `todo`, `last_change` the time
+    (kind, status, comment, images), `todos` the watched `try` entries still `todo`, `last_change` the time
     of the latest change of any watched entry, `settle` the delay in seconds.
     Wake only when the agent has something to do: a finished form, or no `todo` left (at once);
-    a Retour or a comment while entries remain `todo` (settle after the last change of any entry,
+    a Retour, a comment or an image while entries remain `todo` (settle after the last change of any entry,
     each change restarting it). A plain OK with `todo` left wakes nothing and stays unseen."""
     if not events:
         return False
     if any(e["kind"] in ("form", "merge") for e in events) or todos == 0:
         return True
-    if any(e["status"] == "retour" or e["comment"] for e in events):
+    if any(e["status"] == "retour" or e["comment"] or e.get("images") for e in events):
         return now - last_change >= settle
     return False
 
@@ -876,8 +876,12 @@ def scan_group(members, root=None):
                 mns = os.stat(p).st_mtime_ns
             except OSError:
                 mns = 0
+            imgs = listed_images(t)
             items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime, "mns": mns,
-                          "fp": "%s|%s" % (status, comment), "line": "%s %s%s" % (tid, status, ": " + comment if comment else "")}
+                          "images": imgs,
+                          "fp": "%s|%s" % (status, comment) + ("|" + ",".join(imgs) if imgs else ""),   # no images: BASE_FP stays valid
+                          "line": "\n".join(["%s %s%s" % (tid, status, ": " + comment if comment else "")]
+                                            + image_lines(test_images_dir(tid), imgs))}
         for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
             qid = os.path.basename(os.path.dirname(p))
             meta = read_json(p)
@@ -1203,6 +1207,86 @@ def test_path(tid):
     return os.path.join(tests_dir(), tid + ".json")
 
 
+# ------------------------------------------------------------ images (#456)
+# Screenshots attached to a trial entry (tests/<id>.images/) or a QCM card (qcm/<id>/images/<code>/).
+# The server names the file (content hash + extension from the magic bytes), never the client; an
+# entry or an answer lists names only, never paths. The `*.json` globs do not see these folders.
+MAX_IMAGE = 10 * 1024 * 1024       # bytes per image
+MAX_IMAGES = 5                     # images per entry or card
+IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+IMAGE_NAME_RE = re.compile(r"[0-9a-f]{24}\.(png|jpg|gif|webp)")
+
+
+def sniff_image(data):
+    """The extension of a PNG, JPEG, GIF or WebP by its magic bytes, else None (SVG and the rest are refused)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def store_image(folder, data, ext):
+    """Write the bytes under their hash name (atomic; the same bytes twice are one file); return the name."""
+    name = "%s.%s" % (hashlib.sha1(data).hexdigest()[:24], ext)
+    path = os.path.join(folder, name)
+    if not os.path.isfile(path):
+        os.makedirs(folder, exist_ok=True)
+        tmp = os.path.join(folder, ".%s.tmp.%d" % (name, os.getpid()))
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    return name
+
+
+def test_images_dir(tid):
+    return os.path.join(tests_dir(), tid + ".images")
+
+
+def qcm_images_dir(qid, code):
+    return os.path.join(suivi_dir(), "qcm", qid, "images", code)
+
+
+def check_image_names(value, folder):
+    """(names, None) for a list of at most MAX_IMAGES names of files in `folder` (duplicates dropped), else (None, sentence)."""
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return None, "images must be a list of names"
+    names = list(dict.fromkeys(value))
+    if len(names) > MAX_IMAGES:
+        return None, "at most %d images" % MAX_IMAGES
+    for n in names:
+        if not IMAGE_NAME_RE.fullmatch(n) or not os.path.isfile(os.path.join(folder, n)):
+            return None, "unknown image %r" % n
+    return names, None
+
+
+def prune_images(folder, keep):
+    """Delete the stored images that are not listed (and the folder once empty)."""
+    try:
+        for n in os.listdir(folder):
+            if n not in keep:
+                os.unlink(os.path.join(folder, n))
+        os.rmdir(folder)
+    except OSError:
+        pass
+
+
+def listed_images(rec):
+    """The valid image names an entry or answer lists (junk ignored)."""
+    v = rec.get("images") if isinstance(rec, dict) else None
+    return [n for n in v if isinstance(n, str) and IMAGE_NAME_RE.fullmatch(n)] if isinstance(v, list) else []
+
+
+def image_lines(folder, names):
+    """CLI lines `  image: <absolute path>` for the listed images that exist."""
+    return ["  image: " + os.path.abspath(os.path.join(folder, n)) for n in names
+            if os.path.isfile(os.path.join(folder, n))]
+
+
 def load_tests(issue=None):
     out = []
     for p in sorted(glob.glob(os.path.join(tests_dir(), "*.json"))):
@@ -1356,7 +1440,7 @@ def cmd_test_merged(a):
 
 
 def is_answered(t):
-    return t.get("status", "todo") != "todo" or bool(str(t.get("comment") or "").strip())
+    return t.get("status", "todo") != "todo" or bool(str(t.get("comment") or "").strip()) or bool(listed_images(t))
 
 
 def cmd_test_remove(a):
@@ -1388,11 +1472,18 @@ def cmd_test_remove(a):
             raise Fail("answered entries need --answered: " + "; ".join(
                 "%s [%s] %r" % (tid, t.get("status", "todo"), t.get("comment", "")) for tid, t in answered))
         stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        archived = []
         for tid, t in picked:
             write_json(os.path.join(removed_dir(), tid + ".json"), dict(t, removed_at=stamp))
             os.unlink(test_path(tid))
+            if os.path.isdir(test_images_dir(tid)):
+                dest = os.path.join(removed_dir(), tid + ".images")
+                shutil.move(test_images_dir(tid), dest)
+                archived.append(dest)
     for tid, t in answered:
         print("answered %s [%s] %s" % (tid, t.get("status", "todo"), t.get("comment", "")))
+    for dest in archived:
+        print("images archived: " + os.path.abspath(dest))
     print("%d entr%s removed" % (len(picked), "y" if len(picked) == 1 else "ies"))
     return 0
 
@@ -1401,6 +1492,8 @@ def cmd_test_list(a):
     for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
         print("%s\t%s\t%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
                                 "\t(try)" if t.get("try") else ""))
+        for line in image_lines(test_images_dir(t["id"]), listed_images(t)):
+            print(line)
     return 0
 
 
@@ -1542,6 +1635,10 @@ def cmd_qcm_answers(a):
         raise Fail("no such QCM: %s" % a.id)
     answers = load_answers(a.id)
     if a.json:
+        for code, r in answers.items():       # paths are made at display time, never stored
+            lines = image_lines(qcm_images_dir(a.id, code), listed_images(r))
+            if lines:
+                r["image_paths"] = [x[len("  image: "):] for x in lines]
         print(json.dumps({"id": a.id, "meta": meta, "answers": answers}, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     pr = qcm_progress(a.id, meta)
@@ -1554,6 +1651,8 @@ def cmd_qcm_answers(a):
         if r.get("commentaire"):
             line += " -- " + r["commentaire"]
         print(line)
+        for extra in image_lines(qcm_images_dir(a.id, code), listed_images(r)):
+            print(extra)
     return 0
 
 
@@ -1569,8 +1668,9 @@ def cmd_qcm_list(a):
 # ------------------------------------------------------------------ server
 MAX_BODY = 256 * 1024
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suivi-page.html")
-# img-src data: lets the inline SVG tab icon load; nothing else is fetched as an image.
-CSP = ("default-src 'none'; img-src data:; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+# img-src data: lets the inline SVG tab icon load; 'self' lets the attached screenshots (#456) load from
+# this server's own image routes; nothing else is fetched as an image.
+CSP = ("default-src 'none'; img-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
        "font-src https://fonts.gstatic.com; connect-src 'self'; base-uri 'none'; form-action 'none'; "
        "frame-ancestors 'none'")
 
@@ -2328,13 +2428,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     # -- plumbing
-    def send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=()):
+    def send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), cache="no-store"):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", CSP)
         for k, v in extra:
@@ -2398,6 +2498,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not safe_id(path[len("/qcm/"):]):
                 return self.fail(400, "bad id")
             return self.qcm_page(path[len("/qcm/"):])
+        m = re.fullmatch(r"/api/tests/([^/]+)/images/([^/]+)", path)
+        if m:
+            return self.get_image(test_images_dir(m.group(1)) if safe_id(m.group(1)) else None, m.group(2))
+        m = re.fullmatch(r"/api/qcm/([^/]+)/images/([^/]+)/([^/]+)", path)
+        if m:
+            ok = safe_id(m.group(1)) and safe_id(m.group(2))
+            return self.get_image(qcm_images_dir(m.group(1), m.group(2)) if ok else None, m.group(3))
         m = re.fullmatch(r"/api/qcm/([^/]+)/answers", path)
         if m:
             qid = m.group(1)
@@ -2407,6 +2514,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = {"finished": bool(meta.get("finished")), "answers": load_answers(qid)}
             return self.send(200, json.dumps(body, ensure_ascii=False), "application/json; charset=utf-8")
         self.fail(404, "not found")
+
+    def get_image(self, folder, name):
+        """A stored screenshot. The name is checked against the strict pattern (hash + extension), the type
+        comes from the extension through a server table, and a page of another site may not embed it."""
+        if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            return self.fail(403, "cross-site request")
+        if folder is None or not IMAGE_NAME_RE.fullmatch(name):
+            return self.fail(400, "bad id")
+        try:
+            with open(os.path.join(folder, name), "rb") as f:
+                data = f.read()
+        except OSError:
+            return self.fail(404, "no such image")
+        self.send(200, data, IMAGE_TYPES[name.rsplit(".", 1)[1]],
+                  [("Cross-Origin-Resource-Policy", "same-origin")], cache="private, max-age=31536000, immutable")
 
     def qcm_page(self, qid):
         meta = read_json(os.path.join(qcm_dir(qid), "meta.json"))
@@ -2448,10 +2570,74 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.fail(400, "body is not JSON")
             return None
 
+    def read_raw(self):
+        """The raw body of an image upload (not JSON), or None after an error reply. A body shorter than
+        its Content-Length is an error; one longer than MAX_IMAGE is a 413."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.fail(400, "bad Content-Length")
+            return None
+        if length <= 0:
+            self.fail(400, "empty body")
+            return None
+        if length > MAX_IMAGE:
+            left = min(length, 2 * MAX_IMAGE)       # drain, or the client sees a reset instead of the 413
+            while left > 0:
+                try:
+                    chunk = self.rfile.read(min(65536, left))
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                left -= len(chunk)
+            self.fail(413, "image larger than %d bytes" % MAX_IMAGE)
+            return None
+        chunks, left = [], length
+        while left > 0:
+            try:
+                chunk = self.rfile.read(min(65536, left))
+            except OSError:
+                chunk = b""
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        if left:
+            self.fail(400, "body shorter than its Content-Length")
+            return None
+        return b"".join(chunks)
+
+    def upload_image(self, folder):
+        data = self.read_raw()
+        if data is None:
+            return
+        ext = sniff_image(data)
+        if ext is None:
+            return self.fail(415, "not a PNG, JPEG, GIF or WebP image")
+        name = store_image(folder, data, ext)
+        self.send(200, json.dumps({"ok": True, "name": name}), "application/json")
+
     def do_POST(self):
         if not self.guard(write=True):
             return
         path = self.route()
+        m = re.fullmatch(r"/api/tests/([^/]+)/images", path)
+        if m:
+            tid = m.group(1)
+            if not safe_id(tid):
+                return self.fail(400, "bad id")
+            if not isinstance(read_json(test_path(tid)), dict):
+                return self.fail(404, "no such trial entry")
+            return self.upload_image(test_images_dir(tid))
+        m = re.fullmatch(r"/api/qcm/([^/]+)/images/([^/]+)", path)
+        if m:
+            qid, code = m.groups()
+            if not safe_id(qid) or not safe_id(code):
+                return self.fail(400, "bad id")
+            if not isinstance(read_json(os.path.join(qcm_dir(qid), "meta.json")), dict):
+                return self.fail(404, "no such QCM")
+            return self.upload_image(qcm_images_dir(qid, code))
         if path.startswith("/api/tests/"):
             return self.post_test(path[len("/api/tests/"):])
         m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish)", path)
@@ -2517,9 +2703,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"ok": True}), "application/json")
         if not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"]):
             return self.fail(400, "expected an object with a safe string code")
-        if not all(isinstance(v, (str, int, bool, type(None))) for v in body.values()):
+        if "images" in body:
+            names, err = check_image_names(body["images"], qcm_images_dir(qid, body["code"]))
+            if err:
+                return self.fail(400, err)
+            body = dict(body, images=names)
+            if not names:
+                del body["images"]
+        if not all(isinstance(v, (str, int, bool, type(None))) for k, v in body.items() if k != "images"):
             return self.fail(400, "answer fields must be plain values")
         write_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"), body)
+        prune_images(qcm_images_dir(qid, body["code"]), body.get("images", []))      # the record is the truth
         self.send(200, json.dumps({"ok": True}), "application/json")
 
     def post_test(self, tid):
@@ -2528,8 +2722,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.read_body()
         if body is None:
             return
-        if not isinstance(body, dict) or not ({"status", "comment"} & set(body)):
-            return self.fail(400, "expected an object with status and/or comment")
+        if not isinstance(body, dict) or not ({"status", "comment", "images"} & set(body)):
+            return self.fail(400, "expected an object with status, comment and/or images")
         if "status" in body and body["status"] not in TEST_STATUSES:
             return self.fail(400, "status must be one of %s" % ", ".join(TEST_STATUSES))
         if "comment" in body and not isinstance(body["comment"], str):
@@ -2537,11 +2731,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         t = read_json(test_path(tid))
         if not isinstance(t, dict):
             return self.fail(404, "no such trial entry")
+        if "images" in body:
+            names, err = check_image_names(body["images"], test_images_dir(tid))
+            if err:
+                return self.fail(400, err)
+            if names:
+                t["images"] = names
+            else:
+                t.pop("images", None)
         for k in ("status", "comment"):
             if k in body:
                 t[k] = body[k]
         t["reviewed"] = datetime.datetime.now().isoformat(timespec="seconds")
         write_json(test_path(tid), t)
+        if "images" in body:
+            prune_images(test_images_dir(tid), t.get("images", []))
         self.send(200, json.dumps({"ok": True}), "application/json")
 
     def other(self):

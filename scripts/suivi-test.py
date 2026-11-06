@@ -39,6 +39,16 @@ def jload(path):
     return json.loads(slurp(path))
 
 
+# Minimal files with the real magic bytes (#456); the server only looks at the first bytes.
+IMG = {"png": b"\x89PNG\r\n\x1a\n" + b"png-body", "jpg": b"\xff\xd8\xff\xe0" + b"jpg-body",
+       "gif": b"GIF89a" + b"gif-body", "webp": b"RIFF\x10\x00\x00\x00WEBPVP8 body"}
+IMG_NAME = re.compile(r"[0-9a-f]{24}\.(png|jpg|gif|webp)")
+
+
+def png(tag=b""):
+    return IMG["png"] + tag
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -490,7 +500,7 @@ class TestTestCommands(Base):
 
     def snap_tests(self):
         d = os.path.join(self.state, "tests")
-        return {f: slurp(os.path.join(d, f)) for f in sorted(os.listdir(d))} if os.path.isdir(d) else {}
+        return {f: slurp(os.path.join(d, f)) for f in sorted(os.listdir(d)) if os.path.isfile(os.path.join(d, f))} if os.path.isdir(d) else {}
 
     def put_test(self, tid, **fields):
         os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
@@ -700,6 +710,76 @@ class TestTestCommands(Base):
         self.assertEqual(self.held(C[0]), ["agent"])                                       # no entry left to hold it
         self.assertEqual(self.add(7, self.ONE).stdout.strip(), "7-3")
         self.assertEqual(self.run_cli("test", "list", "--issue", "7").stdout.count("\n"), 1)
+
+    def put_image(self, tid, name, data=None):
+        d = os.path.join(self.state, "tests", tid + ".images")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(data or png())
+        return os.path.join(d, name)
+
+    NAME = "0123456789abcdef01234567.png"
+
+    def test_list_prints_the_absolute_path_of_each_image_and_nothing_without(self):
+        self.put_test("7-1", **{"try": "t"})
+        plain = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertEqual(plain, "7-1\ttodo\t7-1\t(try)\n")
+        path = self.put_image("7-1", self.NAME)
+        self.put_test("7-1", images=[self.NAME, "ffffffffffffffffffffffff.png"], **{"try": "t"})   # the 2nd file is missing
+        out = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertEqual(out, plain + "  image: %s\n" % path)
+        self.assertTrue(os.path.isabs(path) and os.path.exists(path))
+
+    def test_qcm_answers_show_the_image_paths_at_display_time_only(self):
+        qd = os.path.join(self.state, "qcm", "7-1")
+        os.makedirs(os.path.join(qd, "answers"))
+        with open(os.path.join(qd, "meta.json"), "w") as f:
+            json.dump({"issue": 7, "title": "T", "cards": 1, "finished": False}, f)
+        ans = {"code": "R1", "question": "Q", "choix": "Yes", "statut": "tranche"}
+        with open(os.path.join(qd, "answers", "R1.json"), "w") as f:
+            json.dump(ans, f)
+        text, js = (self.run_cli("qcm", "answers", "7-1", *x).stdout for x in ((), ("--json",)))
+        self.assertNotIn("image", text + js)
+        path = os.path.join(qd, "images", "R1", self.NAME)
+        os.makedirs(os.path.dirname(path))
+        with open(path, "wb") as f:
+            f.write(png())
+        with open(os.path.join(qd, "answers", "R1.json"), "w") as f:
+            json.dump(dict(ans, images=[self.NAME]), f)
+        out = self.run_cli("qcm", "answers", "7-1").stdout
+        self.assertEqual(out, text + "  image: %s\n" % path)
+        got = json.loads(self.run_cli("qcm", "answers", "7-1", "--json").stdout)["answers"]["R1"]
+        self.assertEqual((got["images"], got["image_paths"]), ([self.NAME], [path]))
+        self.assertNotIn("image_paths", jload(os.path.join(qd, "answers", "R1.json")))
+
+    def test_remove_treats_an_image_as_an_answer_and_archives_the_folder(self):
+        self.claim(7)
+        self.put_test("7-1", images=[self.NAME], **{"try": "t"})
+        self.put_image("7-1", self.NAME)
+        self.put_test("7-2", **{"try": "t"})
+        before = self.snap_tests()
+        r = self.remove(7, "7-1")
+        self.assertNotEqual(r.returncode, 0)                                                # image-only counts as answered
+        self.assertEqual(self.snap_tests(), before)
+        self.assertTrue(os.path.isdir(os.path.join(self.state, "tests", "7-1.images")))
+        r = self.run_cli("test", "remove", "7", "7-1", "7-2", "--answered", env=self.own())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        arch = os.path.join(self.state, "removed-tests", "7-1.images")
+        self.assertIn("images archived: " + arch, r.stdout)
+        self.assertEqual(os.listdir(arch), [self.NAME])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests", "7-1.images")))
+        self.assertEqual(jload(os.path.join(self.state, "removed-tests", "7-1.json"))["images"], [self.NAME])
+        self.assertNotIn("images archived: " + os.path.join(self.state, "removed-tests", "7-2.images"), r.stdout)
+
+    def test_merged_keeps_the_images(self):
+        self.claim(7)
+        self.put_test("7-1", images=[self.NAME], **{"try": "t"})
+        self.put_image("7-1", self.NAME)
+        h = self.feature(7)
+        self.assertEqual(self.merged(7, h).returncode, 0)
+        t = jload(self.tfile("7-1"))
+        self.assertEqual((t["images"], "try" in t), ([self.NAME], False))
+        self.assertTrue(os.path.exists(os.path.join(self.state, "tests", "7-1.images", self.NAME)))
 
     def test_set_erases_the_agent_note_unless_restated(self):
         self.claim(7)
@@ -1056,6 +1136,46 @@ class TestWaitEvents(WaitBase):
         self.entry("1-1", "ok")
         rc, out, _ = self.run_wait(1, timeout="1")
         self.assertTrue(out.startswith("timeout"), out)
+
+    def test_an_image_alone_wakes_like_a_comment_and_names_its_path(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        name = "0123456789abcdef01234567.png"
+        d = os.path.join(self.state, "tests", "1-1.images")
+        os.makedirs(d)
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(png())
+        self.entry("1-1", images=[name])
+        rc, out, _ = self.run_wait(1, timeout="5")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.splitlines()[0], "1-1 todo")
+        self.assertEqual(out.splitlines()[1], "  image: " + os.path.join(d, name))
+        self.assertTrue(os.path.isabs(out.splitlines()[1][len("  image: "):]))
+        self.assertIn("Still open: 2 trial entries", out)
+
+    def test_an_image_waits_for_the_settle_delay_like_a_comment(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        self.entry("1-1", images=["0123456789abcdef01234567.png"])
+        t0 = time.time()
+        rc, out, _ = self.run_wait(1, timeout="5", env={"SF_SUIVI_WAIT_SETTLE": "1.0"})
+        self.assertIn("1-1 todo", out)
+        self.assertGreaterEqual(time.time() - t0, 0.9)
+
+    def test_the_fingerprint_is_unchanged_without_images(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2", "retour", "bad")
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, todos = suivi.scan_group([1])
+        self.assertEqual(items["1-1"]["fp"], suivi.BASE_FP)            # stored `heard/` fingerprints stay valid
+        self.assertEqual(items["1-2"]["fp"], "retour|bad")
+        self.entry("1-1", images=["0123456789abcdef01234567.png"])
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, _ = suivi.scan_group([1])
+        self.assertNotEqual(items["1-1"]["fp"], suivi.BASE_FP)
 
     def test_each_change_restarts_the_delay(self):
         self.owned(1)
@@ -1713,7 +1833,7 @@ class TestServer(ServerBase):
     def test_csp_lets_the_inline_tab_icon_load(self):
         status, headers, _ = self.req("GET", "/")
         csp = {k.lower(): v for k, v in headers.items()}["content-security-policy"]
-        self.assertIn("img-src data:", csp)
+        self.assertIn("img-src 'self' data:", csp)
         self.assertIn("default-src 'none'", csp)
 
     def test_post_without_the_custom_header_is_403_and_writes_nothing(self):
@@ -1838,6 +1958,173 @@ def node_check(js):
         with open(p, "w", encoding="utf-8") as f:
             f.write(js)
         return subprocess.run(["node", "--check", p], capture_output=True, text=True)
+
+
+class TestImages(ServerBase):
+    """Screenshots on trial entries and QCM cards (#456): raw upload, strict names, safe GET."""
+    H = {"X-Suivi": "1", "Content-Type": "image/png"}
+
+    def up(self, data, path="/api/tests/1-1/images", headers=None, host="default"):
+        return self.req("POST", path, self.H if headers is None else headers, data, host)
+
+    def folder(self):
+        return os.path.join(self.state, "tests", "1-1.images")
+
+    def files(self):
+        return sorted(os.listdir(self.folder())) if os.path.isdir(self.folder()) else []
+
+    def stored(self, data):
+        status, _, body = self.up(data)
+        self.assertEqual(status, 200)
+        return json.loads(body)["name"]
+
+    def make_qcm(self):
+        d = os.path.join(self.state, "qcm", "1-1")
+        os.makedirs(os.path.join(d, "answers"))
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "T", "cards": 2, "finished": False}, f)
+        return d
+
+    def answer(self, body, qid="1-1"):
+        return self.req("POST", "/api/qcm/%s/answer" % qid, {"X-Suivi": "1"}, dict({"code": "R1", "choix": "Yes"}, **body))
+
+    def test_each_format_is_stored_as_sent_without_touching_the_entry(self):
+        before = self.entry_text()
+        tag = self.req("GET", "/api/state")[1]["ETag"]
+        for ext, data in IMG.items():
+            status, _, body = self.up(data)
+            self.assertEqual(status, 200, ext)
+            name = json.loads(body)["name"]
+            self.assertRegex(name, IMG_NAME)
+            self.assertTrue(name.endswith("." + ext), name)
+            with open(os.path.join(self.folder(), name), "rb") as f:
+                self.assertEqual(f.read(), data)
+        self.assertEqual(self.entry_text(), before)                              # the entry lists images only when sent
+        self.assertEqual(self.req("GET", "/api/state", {"If-None-Match": tag})[0], 304)
+        self.assertEqual(len(self.files()), 4)
+        self.stored(IMG["png"])
+        self.assertEqual(len(self.files()), 4)                                   # same bytes: one file
+
+    def test_what_is_not_a_listed_image_is_refused_and_leaves_no_file(self):
+        for data in (b"<svg xmlns='http://www.w3.org/2000/svg'><script/></svg>", b"hello", b"<html></html>", b"", b"RIFF\0\0\0\0WAVE"):
+            self.assertIn(self.up(data)[0], (400, 415), data)                     # always sent as image/png
+        self.assertEqual(self.files(), [])
+        self.assertFalse(os.path.exists(self.folder()))
+
+    def test_a_body_shorter_than_its_content_length_is_refused(self):
+        import socket
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        s.sendall(("POST /api/tests/1-1/images HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nX-Suivi: 1\r\nContent-Length: %d\r\n\r\n"
+                   % (self.port, len(IMG["png"]) + 50)).encode() + IMG["png"])
+        s.shutdown(socket.SHUT_WR)
+        reply = s.recv(4096)
+        s.close()
+        self.assertTrue(reply.startswith(b"HTTP/1.0 400"), reply)
+        self.assertEqual(self.files(), [])
+
+    def test_upload_guards_and_limits(self):
+        data = IMG["png"]
+        self.assertEqual(self.up(data, headers={"Content-Type": "image/png"})[0], 403)           # no X-Suivi
+        self.assertEqual(self.up(data, headers=dict(self.H, Origin="http://evil.example"))[0], 403)
+        self.assertEqual(self.up(data, host="evil.example")[0], 403)
+        for bad in (".hidden", "a%2Fb", ".."):
+            self.assertEqual(self.up(data, "/api/tests/%s/images" % bad)[0], 400, bad)
+        self.assertEqual(self.up(data, "/api/qcm/1-1/images/.h")[0], 400)
+        self.assertEqual(self.up(data, "/api/tests/9-9/images")[0], 404)
+        self.assertEqual(self.up(data, "/api/qcm/9-9/images/R1")[0], 404)
+        self.assertEqual(self.files(), [])
+        big = IMG["png"] + b"\0" * suivi.MAX_IMAGE                                               # one byte past the cap
+        self.assertEqual(len(big), suivi.MAX_IMAGE + len(IMG["png"]))
+        self.assertEqual(self.up(big)[0], 413)
+        self.assertEqual(self.files(), [])
+        self.assertEqual(self.post(body=b'{"comment":"%s"}' % (b"x" * (256 * 1024 + 10)))[0], 413)   # the JSON cap stays
+
+    def test_get_serves_the_stored_bytes_with_the_server_type_and_safe_headers(self):
+        for ext, data in IMG.items():
+            name = self.stored(data)
+            status, h, body = self.req("GET", "/api/tests/1-1/images/" + name)
+            h = {k.lower(): v for k, v in h.items()}
+            self.assertEqual((status, body), (200, data))
+            self.assertEqual(h["content-type"], suivi.IMAGE_TYPES[ext])
+            self.assertEqual(h["x-content-type-options"], "nosniff")
+            self.assertEqual(h["cross-origin-resource-policy"], "same-origin")
+            self.assertIn("immutable", h["cache-control"])
+            self.assertNotIn("no-store", h["cache-control"])
+        self.assertEqual(self.req("GET", "/api/state")[1]["Cache-Control"], "no-store")
+        self.assertIn("img-src 'self' data:", self.req("GET", "/api/tests/1-1/images/" + name)[1]["Content-Security-Policy"])
+
+    def test_get_refuses_other_names_other_sites_and_other_hosts(self):
+        name = self.stored(IMG["png"])
+        for planted in ("x.svg", "1-1.json", name + ".svg", "ABCDEF0123456789ABCDEF01.png"):
+            with open(os.path.join(self.folder(), planted), "wb") as f:
+                f.write(b"<svg/>")
+            self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + planted)[0], 400, planted)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/..%2f1-1.json")[0], 400)
+        self.assertEqual(self.req("GET", "/api/tests/..%2f/images/" + name)[0], 400)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/0123456789abcdef01234567.png")[0], 404)
+        for site in ("cross-site", "same-site"):
+            self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, {"Sec-Fetch-Site": site})[0], 403, site)
+        for site in ("same-origin", "none"):
+            self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, {"Sec-Fetch-Site": site})[0], 200, site)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, host="evil.example")[0], 403)
+        self.assertEqual(self.req("GET", "/api/tests/1-1/images/" + name, {"Origin": "http://evil.example"})[0], 403)
+
+    def test_the_final_post_lists_images_without_a_comment_and_removes_the_others(self):
+        a, b = self.stored(png(b"a")), self.stored(png(b"b"))
+        status, _, _ = self.post(body={"images": [a]})
+        self.assertEqual(status, 200)
+        t = json.loads(self.entry_text())
+        self.assertEqual((t["images"], t["status"], "comment" in t), ([a], "todo", False))   # status unchanged
+        self.assertEqual(self.files(), [a])                                                  # unlisted file deleted
+        c = self.stored(png(b"c"))
+        self.assertEqual(self.post(body={"status": "ok"})[0], 200)                           # no `images`: left as they are
+        self.assertEqual(json.loads(self.entry_text())["images"], [a])
+        self.assertEqual(self.post(body={"images": [a, a, c]})[0], 200)
+        self.assertEqual(json.loads(self.entry_text())["images"], [a, c])
+        self.assertEqual(self.post(body={"images": []})[0], 200)
+        self.assertNotIn("images", json.loads(self.entry_text()))
+        self.assertFalse(os.path.exists(self.folder()))
+
+    def test_the_final_post_refuses_bad_image_lists_and_changes_nothing(self):
+        a = self.stored(png(b"a"))
+        self.assertEqual(self.post(body={"images": [a]})[0], 200)
+        before, files = self.entry_text(), self.files()
+        names = [self.stored(png(bytes([i]))) for i in range(suivi.MAX_IMAGES)]           # MAX_IMAGES + a = one too many
+        for bad in ("abc", {"x": 1}, [1], ["0123456789abcdef01234567.png"], ["../x"], [a] + names, None):
+            self.assertEqual(self.post(body={"images": bad})[0], 400, bad)
+        self.assertEqual(self.entry_text(), before)
+        self.assertEqual(self.files(), sorted(files + names))
+        self.assertEqual(self.post(body={"images": names})[0], 200)                            # exactly MAX_IMAGES is fine
+
+    def test_an_image_changes_neither_the_colour_nor_the_pending_count(self):
+        held, pending = self.held(C[0]), json.loads(self.req("GET", "/api/state")[2])["pending"]
+        self.assertEqual(self.post(body={"images": [self.stored(IMG["png"])]})[0], 200)
+        self.assertEqual((self.held(C[0]), json.loads(self.req("GET", "/api/state")[2])["pending"]), (held, pending))
+        self.assertIn("essai", self.held(C[0]))
+
+    def test_qcm_answers_take_images_and_any_other_list_stays_refused(self):
+        self.make_qcm()
+        up = "/api/qcm/1-1/images/R1"
+        status, _, body = self.up(IMG["jpg"], up)
+        self.assertEqual(status, 200)
+        name = json.loads(body)["name"]
+        self.assertEqual(self.answer({"images": [name], "commentaire": "see"})[0], 200)
+        rec = jload(os.path.join(self.state, "qcm", "1-1", "answers", "R1.json"))
+        self.assertEqual((rec["images"], rec["commentaire"]), ([name], "see"))
+        status, h, got = self.req("GET", "/api/qcm/1-1/images/R1/" + name)
+        self.assertEqual((status, got, h["Content-Type"]), (200, IMG["jpg"], "image/jpeg"))
+        self.assertEqual(self.req("GET", "/api/qcm/1-1/images/R2/" + name)[0], 404)             # per card
+        self.assertEqual(self.answer({"commentaire": ["a"]})[0], 400)
+        self.assertEqual(self.answer({"images": ["../x"]})[0], 400)
+        self.assertEqual(self.answer({"images": "x"})[0], 400)
+        self.assertEqual(jload(os.path.join(self.state, "qcm", "1-1", "answers", "R1.json"))["images"], [name])
+        other = json.loads(self.up(png(b"o"), up)[2])["name"]
+        self.assertEqual(self.answer({"images": [name]})[0], 200)
+        self.assertEqual(os.listdir(os.path.join(self.state, "qcm", "1-1", "images", "R1")), [name])   # the other is removed
+        self.assertNotEqual(other, name)
+        self.assertEqual(self.answer({"commentaire": "no image now"})[0], 200)                    # the record is the truth
+        self.assertNotIn("images", jload(os.path.join(self.state, "qcm", "1-1", "answers", "R1.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm", "1-1", "images", "R1")))
 
 
 class TestQcm(ServerBase):
