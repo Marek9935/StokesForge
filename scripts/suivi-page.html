@@ -71,6 +71,8 @@ ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
 .intro{font-weight:600}
 .expect{border-left:4px solid var(--ok);padding-left:12px}
 .meta{color:var(--muted);font-size:.85rem}
+button.wd{padding:8px 14px}
+.wdq{flex:1 0 100%;font-weight:700}
 .acts{display:flex;flex-wrap:wrap;gap:10px}
 button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font-weight:700}
 button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
@@ -443,12 +445,12 @@ function qcmBox(q){
   const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
   const u=withdrawUi(q,askWithdraw===q.id);
   if(!u.asking){
-    const w=el('button','',u.button);w.type='button';w.id='wd-'+q.id;
+    const w=el('button','wd',u.button);w.type='button';w.id='wd-'+q.id;
     w.onclick=()=>{askWithdraw=q.id;renderTests();};b.appendChild(w);
   }else{
-    const r=el('div','acts');r.appendChild(el('div','meta',u.question));
-    const y=el('button','back',u.yes);y.type='button';y.id='wdy-'+q.id;y.onclick=()=>withdrawForm(q);
-    const n=el('button','',u.no);n.type='button';n.id='wdn-'+q.id;n.onclick=()=>{askWithdraw=null;renderTests();};
+    const r=el('div','acts');r.appendChild(el('div','wdq',u.question));
+    const y=el('button','back wd',u.yes);y.type='button';y.id='wdy-'+q.id;y.onclick=()=>withdrawForm(q);
+    const n=el('button','wd',u.no);n.type='button';n.id='wdn-'+q.id;n.onclick=()=>{askWithdraw=null;renderTests();};
     r.appendChild(y);r.appendChild(n);b.appendChild(r);
   }
   return b;

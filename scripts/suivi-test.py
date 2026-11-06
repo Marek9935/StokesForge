@@ -2171,7 +2171,9 @@ class TestQcm(ServerBase):
         self.assertEqual(self.answer(qid)[0], 410)
         self.assertEqual(self.req("POST", "/api/qcm/%s/finish" % qid, {"X-Suivi": "1"}, {})[0], 410)
         self.assertFalse(os.path.exists(os.path.join(self.state, "qcm", qid)))
-        self.assertEqual(self.req("GET", "/qcm/" + qid)[0], 410)
+        gone = self.req("GET", "/qcm/" + qid)
+        self.assertEqual(gone[0], 410)
+        self.assertIn("retiré", gone[2].decode("utf-8"))                 # the page a reload shows is French
         self.assertEqual(self.answer("9-9")[0], 404)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")

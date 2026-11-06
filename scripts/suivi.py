@@ -1620,6 +1620,11 @@ def require_issue_owner(n, what):
         raise Fail("#%d belongs to another session (or to none): scripts/chantier.sh %d claims it" % (n, n))
 
 
+# lang: fr begin
+GONE_TEXT = "Ce questionnaire a été retiré : il n’existe plus. Retourne à la page de suivi pour voir ce qui t’attend."
+# lang: fr end
+
+
 class Refused(Fail):
     def __init__(self, msg, code):
         super().__init__(msg)
@@ -2550,7 +2555,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def missing_qcm(self, qid):
         """404 for an unknown form, 410 for one withdrawn (the page says so instead of « server down »)."""
         if safe_id(qid) and os.path.isdir(os.path.join(removed_qcm_dir(), qid)):
-            return self.fail(410, "this form was withdrawn")
+            return self.fail(410, GONE_TEXT)
         return self.fail(404, "no such QCM")
 
     def qcm_page(self, qid):
