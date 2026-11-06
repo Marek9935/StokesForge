@@ -825,49 +825,9 @@ fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
 
 /// Records that a modal window is painted in this viewport, in this frame.
 fn mark_modal_shown(ctx: &egui::Context) {
-    stamp_modal_mark(ctx);
-    let painted = modal_painted_id(ctx);
-    ctx.data_mut(|data| data.insert_temp(painted, true));
-}
-
-/// Only the "a modal is open here" mark, without saying a dialog was painted:
-/// the veil of the root over a dialog hosted elsewhere (#457).
-fn stamp_modal_mark(ctx: &egui::Context) {
     // Ids read before the lock: `viewport_id` locks the context too.
     let (frame, mark) = (ctx.cumulative_frame_nr(), modal_mark_id(ctx));
     ctx.data_mut(|data| data.insert_temp(mark, frame));
-}
-
-fn modal_painted_id(ctx: &egui::Context) -> egui::Id {
-    egui::Id::new(("stokesforge_modal_painted", ctx.viewport_id()))
-}
-
-/// Whether a modal window was painted in this viewport since the last call,
-/// and clears the note: a caller brackets the painting of its dialogs with two
-/// calls to learn whether it painted one in this very pass (#457), with no
-/// frame arithmetic.
-pub(super) fn take_modal_painted(ctx: &egui::Context) -> bool {
-    let painted = modal_painted_id(ctx);
-    ctx.data_mut(|data| data.remove_temp::<bool>(painted))
-        .unwrap_or(false)
-}
-
-/// The blocking layer of the root over a dialog hosted in another window
-/// (#457): invisible like the backdrop of a modal, it takes every click and
-/// marks the viewport modal so the workspace keys stand aside. Returns whether
-/// the pointer was pressed on it: the dialog then moves to this window, the
-/// way out when the window that hosts it is covered and cannot be reached.
-pub(super) fn paint_veil(ctx: &egui::Context) -> bool {
-    stamp_modal_mark(ctx);
-    let screen = ctx.input(|input| input.content_rect());
-    let veil = egui::Area::new(egui::Id::new("stokesforge_hosted_dialog_veil"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(screen.min)
-        .sense(egui::Sense::click_and_drag())
-        .show(ctx, |ui| {
-            ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
-        });
-    veil.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed())
 }
 
 /// Whether a modal window is open in this viewport (#406): painted in this frame

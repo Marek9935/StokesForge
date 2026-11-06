@@ -22,9 +22,9 @@
 //! compositor keeps the button release, so the helper plays it for egui
 //! (#457). Without it every second grab of a title or an edge did nothing.
 //!
-//! The dialogs of the application are painted by the detached window the user
-//! works in, at the end of its closure ([`super::dialog_host::host_pass`], #457),
-//! not by that covered root: see `dialog_host.rs`.
+//! The dialogs of the application are always painted by the root, whatever
+//! window opened them (#472): a detached window only shows a band that says
+//! where the dialog is (`app.rs`, `announce_opened_dialog`).
 //!
 //! # Taken from the top doc of `app.rs`
 //!
@@ -636,7 +636,6 @@ impl StokesForgeApp {
                 }
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
-            super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::ObjectManager);
             super::window_band::paint(ui.ctx());
         });
         if changed {
@@ -731,9 +730,6 @@ impl StokesForgeApp {
                 requests.actions.append(&mut actions);
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
-            // The dispatch of a hosted dialog may read the console's state.
-            drop(model);
-            super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::Console);
             super::window_band::paint(ui.ctx());
         });
         if changed {
@@ -906,10 +902,6 @@ impl StokesForgeApp {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                 }
-                super::dialog_host::host_pass(
-                    ui.ctx(),
-                    super::dialog_host::DialogHost::ProjectManager,
-                );
                 super::window_band::paint(ui.ctx());
             },
         );
@@ -1231,12 +1223,9 @@ impl DetachedTab {
 }
 
 impl DetachedTabViewport {
-    /// The window's frame, then the dialogs when this window hosts them (#457).
-    /// The hosted dialogs dispatch their actions at once and read the locks
-    /// of every detached window, so none is held when they run.
+    /// The window's frame, then the band.
     fn show(&self, ui: &mut egui::Ui) {
         self.show_locked(ui);
-        super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::Tab(self.tab));
         super::page_layout::note_field_focus(ui.ctx());
         super::window_band::paint(ui.ctx());
     }

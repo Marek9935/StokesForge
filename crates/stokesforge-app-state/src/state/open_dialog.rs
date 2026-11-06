@@ -110,6 +110,19 @@ pub fn refusal_text(dialog: OpenDialog) -> String {
     }
 }
 
+/// The sentence a detached window shows when one of its gestures (or a message
+/// that arrived while the person worked in it) opened `dialog` in the main
+/// window (#472).
+#[must_use]
+pub fn opened_text(dialog: OpenDialog) -> String {
+    match dialog.kind() {
+        DialogKind::Question => tr!("opened-question-in-main"),
+        DialogKind::Editing | DialogKind::CloseOnly => {
+            tr!("opened-dialog-in-main", name = dialog.name())
+        }
+    }
+}
+
 impl AppState {
     /// The dialog open in the main window, if any. A question wins over a
     /// dialog, because it is the one that waits for the person.

@@ -214,3 +214,213 @@ pub(super) fn xy_columns(project: &mut Project) -> (NodeId, NodeId) {
         .unwrap();
     (x, y)
 }
+
+/// A root and one detached graph window driven the way eframe drives them:
+/// root passes through [`eframe::App::ui`], window passes through the callback
+/// the root published. A pass is fed its own focus, size and events, which is
+/// what the rules about dialogs, bands and keys depend on (#472).
+pub(super) mod bench {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use eframe::egui;
+    use eframe::App as _;
+    use stokesforge_app_state::state::{Action, AppState, PlotSettingsTab};
+    use stokesforge_core::NodeId;
+    use stokesforge_session::Session;
+
+    use super::super::graph_window::tests::plotted_graph;
+    use super::super::tab::Tab;
+    use super::super::StokesForgeApp;
+
+    type Callback = Arc<dyn Fn(&mut egui::Ui) + Sync + Send>;
+
+    /// What one pass is fed with.
+    #[derive(Clone)]
+    pub(in crate::app) struct Pass {
+        pub(in crate::app) events: Vec<egui::Event>,
+        pub(in crate::app) focused: bool,
+        pub(in crate::app) dt: f64,
+        pub(in crate::app) size: egui::Vec2,
+    }
+
+    impl Pass {
+        /// A root pass: not focused (a detached window is), 50 ms later.
+        pub(in crate::app) fn root() -> Self {
+            Self {
+                events: Vec::new(),
+                focused: false,
+                dt: 0.05,
+                size: egui::vec2(1400.0, 900.0),
+            }
+        }
+
+        /// A window pass: focused.
+        pub(in crate::app) fn child() -> Self {
+            Self {
+                focused: true,
+                ..Self::root()
+            }
+        }
+
+        pub(in crate::app) fn events(mut self, events: Vec<egui::Event>) -> Self {
+            self.events = events;
+            self
+        }
+
+        pub(in crate::app) fn focused(mut self, focused: bool) -> Self {
+            self.focused = focused;
+            self
+        }
+
+        pub(in crate::app) fn size(mut self, width: f32, height: f32) -> Self {
+            self.size = egui::vec2(width, height);
+            self
+        }
+
+        pub(in crate::app) fn dt(mut self, dt: f64) -> Self {
+            self.dt = dt;
+            self
+        }
+    }
+
+    pub(in crate::app) struct Bench {
+        pub(in crate::app) session: Session,
+        pub(in crate::app) app: StokesForgeApp,
+        pub(in crate::app) ctx: egui::Context,
+        frame: eframe::Frame,
+        callbacks: HashMap<egui::ViewportId, Callback>,
+        time: f64,
+        child_focused: bool,
+        pub(in crate::app) graph: NodeId,
+        pub(in crate::app) tab: Tab,
+    }
+
+    impl Bench {
+        /// A project with one graph, detached and not yet painted.
+        pub(in crate::app) fn new() -> Self {
+            let (session, graph) = plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let tab = Tab::Graph(graph);
+            app.detach_tab(tab);
+            let ctx = egui::Context::default();
+            ctx.set_embed_viewports(false);
+            ctx.set_fonts(stokesforge_render_egui::font_definitions());
+            crate::theme::install(&ctx);
+            egui_extras::install_image_loaders(&ctx);
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            Self {
+                session,
+                app,
+                ctx,
+                frame: eframe::Frame::_new_kittest(),
+                callbacks: HashMap::new(),
+                time: 0.0,
+                child_focused: false,
+                graph,
+                tab,
+            }
+        }
+
+        pub(in crate::app) fn child_id(&self) -> egui::ViewportId {
+            egui::ViewportId::from_hash_of(self.tab)
+        }
+
+        fn raw(&mut self, pass: Pass, id: egui::ViewportId) -> egui::RawInput {
+            self.time += pass.dt;
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, pass.size)),
+                time: Some(self.time),
+                events: pass.events,
+                focused: pass.focused,
+                viewport_id: id,
+                ..Default::default()
+            };
+            if id != egui::ViewportId::ROOT {
+                raw.viewports.insert(
+                    id,
+                    egui::ViewportInfo {
+                        parent: Some(egui::ViewportId::ROOT),
+                        focused: Some(pass.focused),
+                        ..Default::default()
+                    },
+                );
+            } else if let Some(info) = self.callbacks.keys().next().copied() {
+                // The root sees the focus of the window, as eframe reports it.
+                raw.viewports.insert(
+                    info,
+                    egui::ViewportInfo {
+                        parent: Some(egui::ViewportId::ROOT),
+                        focused: Some(self.child_focused),
+                        ..Default::default()
+                    },
+                );
+            }
+            raw
+        }
+
+        /// One pass of the root.
+        pub(in crate::app) fn root(&mut self, pass: Pass) -> egui::FullOutput {
+            let raw = self.raw(pass, egui::ViewportId::ROOT);
+            let Self {
+                app, frame, ctx, ..
+            } = self;
+            let mut output = ctx.run_ui(raw, |ui| app.ui(ui, frame));
+            output.textures_delta.clear();
+            for (id, viewport) in &output.viewport_output {
+                if let Some(callback) = &viewport.viewport_ui_cb {
+                    self.callbacks.insert(*id, callback.clone());
+                }
+            }
+            output
+        }
+
+        /// One pass of the detached window.
+        pub(in crate::app) fn child(&mut self, pass: Pass) -> egui::FullOutput {
+            self.child_focused = pass.focused;
+            let id = self.child_id();
+            let raw = self.raw(pass, id);
+            let callback = self
+                .callbacks
+                .get(&id)
+                .expect("the root published it")
+                .clone();
+            let mut output = self.ctx.run_ui(raw, |ui| callback(ui));
+            output.textures_delta.clear();
+            output
+        }
+
+        /// The first passes: the root publishes the window, the window paints.
+        pub(in crate::app) fn start(&mut self) {
+            self.root(Pass::root());
+            for _ in 0..3 {
+                self.child(Pass::child());
+            }
+        }
+
+        pub(in crate::app) fn queue_in_window(&self, action: Action) {
+            let detached = &self.app.detached_tabs[&self.tab];
+            detached.requests.lock().unwrap().actions.push(action);
+        }
+
+        pub(in crate::app) fn open_plot_settings(&self) -> Action {
+            Action::OpenPlotSettings {
+                graph: self.graph,
+                tab: PlotSettingsTab::Graph,
+                axis: None,
+            }
+        }
+
+        pub(in crate::app) fn finish(self) {
+            drop(self.app);
+            self.session.shutdown().unwrap();
+        }
+    }
+
+    /// The repaint delay a pass asked for one viewport.
+    pub(in crate::app) fn delay(output: &egui::FullOutput, id: egui::ViewportId) -> Duration {
+        output.viewport_output[&id].repaint_delay
+    }
+}
