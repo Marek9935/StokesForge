@@ -681,6 +681,21 @@ mod stop_keys_tests {
         assert!(take_refusals(&ctx).is_empty());
     }
 
+    /// A field focused right now counts even before its end-of-frame mark.
+    /// Witness: drop the `text_edit_focused` test.
+    #[test]
+    fn a_field_focused_this_frame_keeps_its_keys() {
+        let ctx = with_dialog();
+        let mut text = String::new();
+        let field = |ui: &mut egui::Ui, text: &mut String| {
+            ui.add(egui::TextEdit::singleline(text).id(egui::Id::new("f")))
+                .request_focus();
+        };
+        pass(&ctx, Vec::new(), |ui| field(ui, &mut text));
+        let (_, stopped) = pass(&ctx, Vec::new(), |ui| field(ui, &mut text));
+        assert!(!stopped, "no mark was recorded, the field still has it");
+    }
+
     /// An open popup owns the keys. Witness: drop the popup test.
     #[test]
     fn an_open_popup_keeps_its_keys() {
