@@ -89,6 +89,7 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 - A red stays in `last_red` (shown while the new head is pending or unknown) until a newer head is green. The watcher sends no desktop notification: the page is its only signal.
 - `ci.json` missing, corrupt, or older than 3 polls reads as unknown. The colour rule and the `pending` count do not depend on the CI.
 - Seams for tests: `SF_SUIVI_CI=off` (no thread), `SF_SUIVI_CI_POLL`, `SF_SUIVI_CI_TIMEOUT`.
+- Integration lines (#480): the thread also reads the head of each line (`ci-status.sh --head <line>`, `ci-line-<name>.json`); `/api/state` carries `lines` = {line: CI view + `issues` declared on it, delivered or not}. The page shows one row per line under the CI line of `main`; a red line never colours `main`. The record field `line` (absent = `main`) is read by `suivi.py line <n>`; `line-trial <issue> <line>` and `line-clear <line>` serve `scripts/line.sh land`. The `line-*` worktrees are not work-package worktrees: `status` and `check` ignore them. The label `ligne-<line>` is the user's: it is not in `LABEL_ALL`, the label pass never touches it.
 
 ## Build modes (#476)
 

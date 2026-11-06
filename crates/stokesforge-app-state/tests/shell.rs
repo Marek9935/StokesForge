@@ -32,7 +32,7 @@ use stokesforge_app_state::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
     AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
     MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, StatusLevel,
-    UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN,
+    UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN, WARNING_LIFETIME,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
 use stokesforge_core::{
@@ -897,7 +897,7 @@ fn undo_and_redo_walk_the_history_both_ways() {
 // -- 6. Undo on empty --
 
 #[test]
-fn undo_on_an_empty_history_is_a_notice_not_an_error() {
+fn undo_on_an_empty_history_is_a_plain_notice() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let before = state.snapshot().revision;
@@ -907,14 +907,14 @@ fn undo_on_an_empty_history_is_a_notice_not_an_error() {
     let status = state.status().expect("a message");
     assert_eq!(
         status.level,
-        StatusLevel::Warning,
-        "\"nothing to undo\" is the counterpart of the greyed-out button: a warning, not an error"
+        StatusLevel::Info,
+        "\"nothing to undo\" is the counterpart of the greyed-out button: plain since #453 (S-R18), neither orange nor red"
     );
     assert_eq!(state.snapshot().revision, before);
 
     state.dispatch(Action::Redo);
     let status = state.status().expect("a message");
-    assert!(!status.is_error());
+    assert_eq!(status.level, StatusLevel::Info);
     assert_eq!(state.snapshot().revision, before);
 }
 
@@ -13172,7 +13172,7 @@ fn an_error_goes_to_the_footer_of_the_open_dialog_only() {
 // -- Status bar: duration, history, title (#230) --
 
 #[test]
-fn an_information_clears_after_eight_seconds_a_warning_does_not() {
+fn an_information_clears_after_eight_seconds_an_orange_after_thirty_a_red_never() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.dispatch(Action::Save);
@@ -13189,13 +13189,121 @@ fn an_information_clears_after_eight_seconds_a_warning_does_not() {
     assert_eq!(state.expire_status(at + INFO_LIFETIME), None);
     assert!(state.status().is_none(), "the information was cleared");
 
-    // A warning stays, whatever its age, and schedules nothing.
-    state.dispatch(Action::Undo);
-    state.dispatch(Action::Undo);
+    // An orange fades after 30 s: one deadline, no ticking (#453, #104).
+    state.warn("careful".to_string());
     let at = state.status().expect("warning").at;
     assert_eq!(state.status().unwrap().level, StatusLevel::Warning);
-    assert_eq!(state.expire_status(at + INFO_LIFETIME * 10), None);
+    assert_eq!(
+        state.expire_status(at + INFO_LIFETIME * 2),
+        Some(WARNING_LIFETIME - INFO_LIFETIME * 2)
+    );
     assert!(state.status().is_some());
+    assert_eq!(state.expire_status(at + WARNING_LIFETIME), None);
+    assert!(state.status().is_none(), "the orange faded");
+    assert!(
+        state
+            .status_history()
+            .any(|m| m.level == StatusLevel::Warning && m.text == "careful"),
+        "what faded stays in the history"
+    );
+
+    // A red stays, whatever its age, and schedules nothing.
+    let sheet = sheet_named(state.tree(), "Sheet1");
+    let column = state.tree().child_by_name(sheet, "Time").unwrap().unwrap();
+    state.dispatch(Action::SetColumnXPrime {
+        column,
+        text: "abc".to_string(),
+    });
+    let red = state.status().expect("error");
+    assert!(red.is_error());
+    let at = red.at;
+    assert_eq!(state.expire_status(at + WARNING_LIFETIME * 100), None);
+    assert!(state.status().is_some());
+}
+
+/// #453: clicking a sheet tab no longer erases the message on the line.
+/// Witness: `self.status = None` back in `select_sheet`.
+#[test]
+fn selecting_a_sheet_keeps_the_message_on_the_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.warn("careful".to_string());
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    state.dispatch(Action::SelectSheet(sheet2));
+    assert_eq!(state.status().map(|m| m.text.as_str()), Some("careful"));
+}
+
+/// #453: an import in progress says its progress on the line without storing
+/// it, and never replaces an orange. The result of the import is a gesture of
+/// its own and replaces the line. Witness: `progress` recording like `notice`.
+#[test]
+fn an_import_in_progress_stores_no_progress_and_keeps_the_orange() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("gros.csv");
+    let mut text = String::new();
+    for i in 0..100_000 {
+        text.push_str(&format!("{i},{},{},{}\n", i * 2, i * 3, i * 4));
+    }
+    std::fs::write(&file, text).unwrap();
+    state.warn("careful".to_string());
+    let lines = state.status_history().count();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("Gros"),
+        paths: vec![file],
+    });
+    let mut polls = 0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while state.import_progress().is_some() {
+        if state.poll_import() {
+            break;
+        }
+        polls += 1;
+        assert_eq!(state.status_history().count(), lines, "no progress stored");
+        assert_eq!(state.status().map(|m| m.text.as_str()), Some("careful"));
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(polls > 3, "the import was seen in progress");
+    assert_ne!(
+        state.status().map(|m| m.text.as_str()),
+        Some("careful"),
+        "the result is a gesture of its own"
+    );
+    assert!(state
+        .status_history()
+        .any(|m| m.text == "careful" && m.level == StatusLevel::Warning));
+}
+
+/// #453 (C6): deleting 60 columns leaves one line in the history, the final
+/// one of the group. Witness: every step recorded as before.
+#[test]
+fn deleting_sixty_columns_writes_one_line_in_the_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = demo_project();
+    let sheet = sheet_named(project.tree(), "Sheet2");
+    let ids: Vec<NodeId> = (0..60)
+        .map(|i| {
+            project
+                .add_column(
+                    sheet,
+                    None,
+                    Some(&format!("C{i}")),
+                    Column::from_f64(&[1.0]),
+                )
+                .unwrap()
+        })
+        .collect();
+    let (_session, mut state) = start(project, &dir.path().join("p.stf"));
+    let sheet = sheet_named(state.tree(), "Sheet2");
+    let lines = state.status_history().count();
+    state.select_column(sheet, ids[0]);
+    state.extend_column_selection(sheet, ids[59]);
+    state.dispatch(Action::DeleteSelectedCells { sheet });
+    assert_eq!(state.status_history().count(), lines + 1);
 }
 
 #[test]
@@ -13203,10 +13311,11 @@ fn the_history_keeps_the_last_fifty_messages_in_order() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     assert_eq!(state.status_history().count(), 0);
-    for _ in 0..STATUS_HISTORY_LEN + 10 {
-        state.dispatch(Action::Undo);
+    for i in 0..STATUS_HISTORY_LEN + 10 {
+        state.notice(format!("message {i}"));
     }
     assert_eq!(state.status_history().count(), STATUS_HISTORY_LEN);
+    assert_eq!(state.status_history().next().unwrap().text, "message 10");
     let times: Vec<_> = state.status_history().map(|m| m.wall).collect();
     assert!(times.windows(2).all(|pair| pair[0] <= pair[1]));
     assert!(!state.status_history_open());
@@ -13214,6 +13323,103 @@ fn the_history_keeps_the_last_fifty_messages_in_order() {
     assert!(state.status_history_open());
     state.dispatch(Action::CloseStatusHistory);
     assert!(!state.status_history_open());
+}
+
+/// #453 (F2, F3): Ctrl+Z thirteen times with nothing to undo is one plain
+/// entry of the history with a count, and the line stays the plain sentence
+/// with a fresh timer each time. Witnesses: no merge in `record`; the
+/// refusal orange again; the count written into the text.
+#[test]
+fn thirteen_empty_undos_are_one_plain_entry_with_a_count() {
+    let _language =
+        stokesforge_app_state::i18n::test_language(stokesforge_app_state::i18n::Language::English);
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    assert!(!state.can_undo());
+    let mut last_at = None;
+    for _ in 0..13 {
+        state.dispatch(Action::Undo);
+        let line = state.status().expect("the line");
+        assert_eq!(line.text, "Nothing to undo");
+        assert_eq!(line.level, StatusLevel::Info, "plain, no colour");
+        assert_eq!(line.count, 1, "the line itself is not counted");
+        assert!(last_at.is_none_or(|at| line.at > at), "a fresh timer");
+        last_at = Some(line.at);
+    }
+    assert_eq!(state.recorded_count(), 13);
+    let entries: Vec<_> = state.status_history().collect();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].text, "Nothing to undo");
+    assert_eq!(entries[0].count, 13);
+    assert_eq!(entries[0].level, StatusLevel::Info);
+    assert_eq!(entries[0].seq, 12, "the rank of the last occurrence");
+    // Redo says the same, plain.
+    state.dispatch(Action::Redo);
+    assert_eq!(state.status().unwrap().text, "Nothing to redo");
+    assert_eq!(state.status().unwrap().level, StatusLevel::Info);
+}
+
+/// #453 (F2): another message between two identical ones, or another level,
+/// breaks the run. Witnesses: merging by text alone; merging with any earlier
+/// entry instead of the last.
+#[test]
+fn another_message_or_another_level_breaks_a_run_of_identical_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let entries = |state: &AppState| -> Vec<(String, StatusLevel, u32)> {
+        state
+            .status_history()
+            .map(|m| (m.text.clone(), m.level, m.count))
+            .collect()
+    };
+    state.warn("careful".to_string());
+    state.notice("other".to_string());
+    state.warn("careful".to_string());
+    state.warn("careful".to_string());
+    assert_eq!(
+        entries(&state),
+        vec![
+            ("careful".to_string(), StatusLevel::Warning, 1),
+            ("other".to_string(), StatusLevel::Info, 1),
+            ("careful".to_string(), StatusLevel::Warning, 2),
+        ]
+    );
+    // Same sentence, other level: a new entry; and a red repeated merges too.
+    state.notice("careful".to_string());
+    state.warn("careful".to_string());
+    let sheet = sheet_named(state.tree(), "Sheet1");
+    let column = state.tree().child_by_name(sheet, "Time").unwrap().unwrap();
+    for _ in 0..2 {
+        state.dispatch(Action::SetColumnXPrime {
+            column,
+            text: "abc".to_string(),
+        });
+    }
+    let all = entries(&state);
+    assert_eq!(all[3], ("careful".to_string(), StatusLevel::Info, 1));
+    assert_eq!(all[4], ("careful".to_string(), StatusLevel::Warning, 1));
+    let red = all.last().unwrap();
+    assert_eq!((red.1, red.2), (StatusLevel::Error, 2), "{all:?}");
+}
+
+/// #453 (F2): a long run of one message pushes no older message out of the
+/// 50 kept. Witness: the merge removed (the repeats evict "message 0").
+#[test]
+fn repeats_do_not_push_older_messages_out_of_the_fifty() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    for i in 0..STATUS_HISTORY_LEN {
+        state.notice(format!("message {i}"));
+    }
+    for _ in 0..30 {
+        state.notice("message 49".to_string());
+    }
+    assert_eq!(state.status_history().count(), STATUS_HISTORY_LEN);
+    assert_eq!(state.status_history().next().unwrap().text, "message 0");
+    assert_eq!(state.status_history().last().unwrap().count, 31);
+    // A different message still evicts the oldest.
+    state.notice("message 50".to_string());
+    assert_eq!(state.status_history().next().unwrap().text, "message 1");
 }
 
 #[test]
@@ -13755,12 +13961,12 @@ mod autosave {
         state.refresh();
         assert!(state.snapshot().history.in_macro);
         let due = t0 + PERIOD;
-        let messages = state.status_history().count();
+        let messages = state.recorded_count();
         let retry = state.poll_autosave(due).expect("re-armed");
         assert!(retry < PERIOD, "closer new attempt: {retry:?}");
         assert!(copies(&recovery).is_empty());
         assert_eq!(
-            state.status_history().count(),
+            state.recorded_count(),
             messages,
             "no message: no warning or error"
         );
@@ -13809,7 +14015,8 @@ mod autosave {
             state
                 .status_history()
                 .filter(|m| m.level == StatusLevel::Warning)
-                .count()
+                .map(|m| m.count as usize)
+                .sum::<usize>()
         };
         let before = warnings(&state);
         state.poll_autosave(t0 + PERIOD);
@@ -13823,6 +14030,37 @@ mod autosave {
                     &std::fs::create_dir_all(obstacle.join("recovery")).unwrap_err()
                 )
             )));
+    }
+
+    /// #453 (F4): an orange said with no gesture (the autosave) still takes the
+    /// line over a red, and both stay in the history; only a plain message
+    /// with no gesture keeps out of the way. Witness: `takes_the_line` letting
+    /// a red stay over an orange with no gesture.
+    #[test]
+    fn an_orange_with_no_gesture_takes_the_line_over_a_red() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
+        let obstacle = dir.path().join("fichier");
+        std::fs::write(&obstacle, b"x").unwrap();
+        state.set_recovery_dir(Some(obstacle.join("recovery")));
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let sheet = sheet_named(state.tree(), "Sheet1");
+        let column = state.tree().child_by_name(sheet, "Time").unwrap().unwrap();
+        state.dispatch(Action::SetColumnXPrime {
+            column,
+            text: "abc".to_string(),
+        });
+        assert!(state.status().unwrap().is_error());
+        state.poll_autosave(t0 + PERIOD);
+        let line = state.status().unwrap();
+        assert_eq!(line.level, StatusLevel::Warning, "{}", line.text);
+        assert_eq!(line.gesture, None, "said by a background pass");
+        assert!(state.status_history().any(|m| m.is_error()));
+        assert!(state
+            .status_history()
+            .any(|m| m.level == StatusLevel::Warning && m.gesture.is_none()));
     }
 
     // -- Deleting the copy --

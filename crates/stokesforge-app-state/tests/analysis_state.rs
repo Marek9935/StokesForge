@@ -1031,7 +1031,7 @@ fn fit(s: &mut Setup, keep: bool, dialog: bool) {
     form.low_r2_dialog = dialog;
     s.state.dispatch(Action::ApplyAnalysis);
     // A low R² is not a failure: the window closes (unless another alert was
-    // already waiting, which `last_action_failed` counts as a failure).
+    // already waiting, which `gesture_failed` counts as a failure).
     if !matches!(s.state.alert(), Some(a) if a.kind == AlertKind::SaveFailed) {
         assert!(s.state.analysis_form().is_none(), "the fit was applied");
     }

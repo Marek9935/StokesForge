@@ -295,3 +295,5 @@ or visual validation from the default Rust tests alone.
 After a merge and push on `main`, delivery includes removing the temporary
 worktree and its merged local branch, following
 [the cleanup in the verification skill](../.agents/skills/stokesforge-verification/SKILL.md#clean-up-after-a-merge-on-main).
+An issue on the integration line `PostV1.1` (#480) is delivered into that line, not `main`: the same cleanup, `scripts/chantier.sh --release <n>` tests the merge against the line,
+and its commits say `Refs #<n>` (see `CLAUDE.md`, Conventions).

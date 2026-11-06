@@ -15,9 +15,9 @@ name: CI
 
 on:
   push:
-    # Linux on all these branches; Windows only outside `feature/**` (see the
+    # Linux on all these branches (PostV1.1: the integration line, #480); Windows only outside `feature/**` (see the
     # `if` of `test-windows`, `test-python-windows` and `dist-windows`).
-    branches: [main, 'feature/**', 'v[0-9]*', 'release/**']
+    branches: [main, PostV1.1, 'feature/**', 'v[0-9]*', 'release/**']
     tags: ['v*']
   pull_request:
 
