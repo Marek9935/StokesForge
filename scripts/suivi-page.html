@@ -560,7 +560,7 @@ function imgNote(text){
 /* Paste and drop go to the open box; with none open, a line says to open one. */
 function dropToBox(files){
   if(!files.length)return false;
-  if(!openBack||!imgDrafts[openBack.id]){imgNote('Ouvre d’abord la boîte d’une carte (Retour ou commentaire), puis colle ou glisse la capture.');return true;}
+  if(!openBack||!imgDrafts[openBack.id]){imgNote('Ouvre d’abord la boîte d’une carte (Retour ou commentaire), puis colle la capture.');return true;}
   attach(openBack.id,files);return true;
 }
 document.addEventListener('paste',e=>{
@@ -570,6 +570,7 @@ document.addEventListener('paste',e=>{
   if(cd.getData&&cd.getData('text/plain'))return;       // a paste that carries text stays text
   if(dropToBox(files))e.preventDefault();
 });
+/* Not named by the hints: a real drag from Files did nothing at the #456 trial (#483). */
 const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
 document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
 document.addEventListener('drop',e=>{
@@ -621,7 +622,7 @@ function testBox(x){
     fi.onchange=()=>{attach(x.id,Array.from(fi.files));fi.value='';};
     pick.onclick=()=>fi.click();
     ad.appendChild(pick);ad.appendChild(fi);
-    ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V), ou glisse-la ici'));
+    ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V)'));
     b.appendChild(ad);b.appendChild(st);
     const r=el('div','acts');
     const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;

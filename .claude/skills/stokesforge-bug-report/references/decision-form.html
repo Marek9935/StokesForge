@@ -435,7 +435,7 @@ function card(){
   h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
   h+='</div></div>';
   h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
-  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V), ou glisse-la ici</span></div></div>';
+  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V)</span></div></div>';
   else h+='<div class="mdim">Les captures ne sont possibles que sur la page locale du suivi.</div>';
   h+='<div class="sync" aria-live="polite">'+esc(sync)+'</div></div>';
   return h;
