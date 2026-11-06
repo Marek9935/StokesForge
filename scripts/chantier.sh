@@ -454,7 +454,7 @@ Steps, in order:
     (stokesforge-feature, section 1); `scripts/suivi.py status`; never edit .suivi.
  2. Agent `perimetre` first: scope; edge cases tagged stated / default / changes behaviour (last = card).
  3. One start form (stokesforge-bug-report/references/decision-form.md): `scripts/suivi.py qcm
-    pose <n> data.js --title "..."`, read with `suivi.py qcm answers <id>`; Artifact only as
+    pose <n> data.js --title "..."`, read with `suivi.py qcm answers <id>` (one open form per issue; withdraw one with `qcm withdraw <id>`); Artifact only as
     fallback. First card: one-line understanding; a package: second card = sub-issue list and
     order. Lots no answer can change start at pose; name them in the report and in `set --what`.
  4. Each change of state: `scripts/suivi.py set <n> --state questions|code|essai|fusion

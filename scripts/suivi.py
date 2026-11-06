@@ -13,6 +13,8 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     qcm/<id>/data.js       the decisions (injected into the form template when served)
     qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
     qcm/<id>/answers/<code>.json   one record per card (written by the page's POST)
+    removed-qcm/<id>/      a form withdrawn by `qcm withdraw` or the page's « Retirer » (#479): the whole
+                           folder moved, meta carries withdrawn_at/_ts/_by; its number is never reused
     tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
                            page's POST and by `test add|merged`)
@@ -81,7 +83,7 @@ until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
-test add|merged|remove|list, qcm pose|answers|list, import-online, tag-wait, labels sync, tag-check.
+test add|merged|remove|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
 """
 import argparse
 import datetime
@@ -287,12 +289,18 @@ def owner_alive(r):
     return True
 
 
-def qcm_open(n):
-    for p in glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json")):
+def qcm_open_ids(n):
+    """The ids of the open (unfinished, not withdrawn) forms of issue `n`."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json")), key=natural):
         m = read_json(p)
         if isinstance(m, dict) and str(m.get("issue")) == str(n) and not m.get("finished"):
-            return True
-    return False
+            out.append(os.path.basename(os.path.dirname(p)))
+    return out
+
+
+def qcm_open(n):
+    return bool(qcm_open_ids(n))
 
 
 def trial_pending(n):
@@ -698,6 +706,13 @@ def cmd_check(a):
     for w in wts:
         if issue_of(w) not in recs:
             problems.append("worktree %s has no record" % os.path.basename(w))
+    by_issue = {}
+    for q in open_qcms():
+        by_issue.setdefault(q["issue"], []).append(q["id"])
+    for n, ids in sorted(by_issue.items(), key=lambda kv: str(kv[0])):
+        if len(ids) > 1:
+            problems.append("issue #%s has %d open forms: %s (withdraw the extra one with qcm withdraw)"
+                            % (n, len(ids), ", ".join(ids)))
     owner = os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
     write_json(os.path.join(suivi_dir(), "control.json"),
                {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": owner, "problems": problems})
@@ -803,7 +818,7 @@ def should_wake(events, todos, last_change, now, settle):
     each change restarting it). A plain OK with `todo` left wakes nothing and stays unseen."""
     if not events:
         return False
-    if any(e["kind"] in ("form", "merge") for e in events) or todos == 0:
+    if any(e["kind"] in ("form", "merge", "withdrawn") for e in events) or todos == 0:
         return True
     if any(e["status"] == "retour" or e["comment"] for e in events):
         return now - last_change >= settle
@@ -893,12 +908,37 @@ def scan_group(members, root=None):
                                    "fp": "finished|" + digest,
                                    "line": "form %s finished, %d/%d answered, read with: suivi.py qcm answers %s"
                                            % (qid, pr["answered"], pr["total"], qid)}
+    items.update(withdrawn_items(members, root))
     req = merge_request(root, items) if root is not None else None
     if req:
         items["merge:%d" % root] = {"id": "merge:%d" % root, "kind": "merge", "status": "", "comment": "", "mtime": 0.0,
                                     "fp": "requested|%s" % req.get("at", ""),
                                     "line": "#%d merge requested on the page by the user: this is the go-ahead" % root}
     return items, forms, todos
+
+
+def withdrawn_items(members, root):
+    """Forms the user withdrew on the page (#479) since the owner of `root` claimed it: one event each,
+    so the waiting agent learns that a form it expects will never be answered."""
+    r = read_json(os.path.join(suivi_dir(), "issues", "%d.json" % root)) if root is not None else None
+    since = float(((r or {}).get("owner") or {}).get("at") or 0)
+    out = {}
+    for m in members:
+        for p in glob.glob(os.path.join(removed_qcm_dir(), "%s-*" % m, "meta.json")):
+            qid = os.path.basename(os.path.dirname(p))
+            meta = read_json(p)
+            if not safe_id(qid) or not isinstance(meta, dict) or not re.fullmatch(r"%d-\d+" % m, qid):
+                continue
+            ts = meta.get("withdrawn_ts")
+            if meta.get("withdrawn_by") != "page" or not isinstance(ts, (int, float)) or ts < since:
+                continue
+            n = len(load_answers(qid, archived=True))
+            out["withdrawn:" + qid] = {
+                "id": "withdrawn:" + qid, "kind": "withdrawn", "status": "", "comment": "", "mtime": 0.0, "fp": "withdrawn|%s" % ts,
+                "line": "form %s withdrawn on the page by the user, %s" % (
+                    qid, "%d answer%s recorded, read with: suivi.py qcm answers %s" % (n, "" if n == 1 else "s", qid)
+                    if n else "no answer recorded: do not wait for it")}
+    return out
 
 
 def unseen_events(items, seen):
@@ -947,7 +987,7 @@ def wait_view(recs, root):
     """Computed `listening` and `unread` of a group: steady values, no timestamp (ETag)."""
     items, _, _ = scan_group(members_of(recs, root), root)
     sid = owner_session(recs.get(root))
-    return {"listening": listening(recs, root), "unread": len(unseen_events(items, load_heard(root, sid))),
+    return {"listening": listening(recs, root), "unread": len([e for e in unseen_events(items, load_heard(root, sid)) if e["kind"] != "withdrawn"]),
             "merge_ready": merge_ready(items), "merge_requested": any(it["kind"] == "merge" for it in items.values())}
 
 
@@ -1071,7 +1111,7 @@ def wait_loop(n, sid, root, timeout, hook):
         time.sleep(min(poll, max(0.01, started + timeout - now)))
 
 
-HOOK_CMD_RE = re.compile(r"suivi\.py\s+(?:(?:qcm\s+(?:pose|answers)|test\s+(?:add|remove|merged)|set|news)\s+(\d+)"
+HOOK_CMD_RE = re.compile(r"suivi\.py\s+(?:(?:qcm\s+(?:pose|answers|withdraw)|test\s+(?:add|remove|merged)|set|news)\s+(\d+)"
                          r"|test\s+list\s+--issue\s+(\d+))")
 
 
@@ -1173,7 +1213,7 @@ def cmd_hook_news(a):
                 if b.get("owner") and owner_alive(b):
                     continue
                 items, _, _ = scan_group(members_of(recs, g), g)
-                if unseen_events(items, load_heard(g, owner_session(b))):
+                if [e for e in unseen_events(items, load_heard(g, owner_session(b))) if e["kind"] != "withdrawn"]:
                     late.append("#%d" % g)
             if late:
                 print("Answers wait for %s (no live session owns them): lance <n> reads them." % ", ".join(late))
@@ -1360,18 +1400,7 @@ def is_answered(t):
 
 
 def cmd_test_remove(a):
-    owner = current_owner()
-    recs = load_all()
-    rec = recs.get(a.issue)
-    if owner is None or rec is None:
-        raise Fail("only the session that owns #%d may remove its trial entries (run scripts/chantier.sh %d first)"
-                   % (a.issue, a.issue))
-    sessions = {str((rec.get("owner") or {}).get("session", ""))}
-    if rec.get("parent") in recs:
-        sessions.add(str((recs[rec["parent"]].get("owner") or {}).get("session", "")))
-    sessions.discard("")
-    if owner["session"] not in sessions:
-        raise Fail("#%d belongs to another session (or to none): scripts/chantier.sh %d claims it" % (a.issue, a.issue))
+    require_issue_owner(a.issue, "remove its trial entries")
     with Lock():
         picked = []
         for tid in a.ids:
@@ -1487,7 +1516,7 @@ def node_run(code, label):
 
 
 def check_form(data):
-    """Syntax-check the page script built with `data`, evaluate the data, return the number of cards."""
+    """Syntax-check the page script built with `data`, evaluate the data, return the cards [{c, t}]."""
     page = inject_qcm(data, "")
     m = re.search(r"<script>(.*)</script>", page, re.S)
     if not m:
@@ -1503,14 +1532,36 @@ def check_form(data):
             raise Fail("the form script has a syntax error:\n%s" % r.stderr.strip())
     head = read_template()
     head = head[head.index("<script>") + len("<script>"):head.index(DATA_START)]
-    out = node_run(head + "\n" + data + "\nprocess.stdout.write(String(D.length));", "data.js")
+    out = node_run(head + "\n" + data + "\nprocess.stdout.write(JSON.stringify(D.map(x=>({c:x.c,t:x.t}))));", "data.js")
     try:
-        n = int(out)
+        cards = json.loads(out)
     except ValueError:
         raise Fail("data.js defines no D array")
-    if n < 1:
+    if not isinstance(cards, list) or len(cards) < 1:
         raise Fail("data.js defines no card")
-    return n
+    return cards
+
+
+def removed_qcm_dir():
+    return os.path.join(suivi_dir(), "removed-qcm")
+
+
+def norm_title(t):
+    return " ".join(str(t or "").split()).casefold()
+
+
+def withdrawn_answered(issue):
+    """[(form id, answered records)] of the withdrawn forms of `issue` that hold a real answer
+    (`plus_tard` is not one)."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(removed_qcm_dir(), "%d-*" % issue, "meta.json")), key=natural):
+        qid = os.path.basename(os.path.dirname(p))
+        if not safe_id(qid) or not re.fullmatch(r"%d-\d+" % issue, qid):
+            continue
+        real = [r for r in load_answers(qid, archived=True).values() if r.get("statut") != "plus_tard"]
+        if real:
+            out.append((qid, real))
+    return out
 
 
 def cmd_qcm_pose(a):
@@ -1520,40 +1571,126 @@ def cmd_qcm_pose(a):
     except OSError as e:
         raise Fail("cannot read %s: %s" % (a.data, e))
     cards = check_form(data)
-    base = os.path.join(suivi_dir(), "qcm")
-    ks = [int(x.rsplit("-", 1)[1]) for x in (os.listdir(base) if os.path.isdir(base) else [])
-          if re.fullmatch(r"%d-\d+" % a.issue, x)]
-    qid = "%d-%d" % (a.issue, max(ks, default=0) + 1)
-    d = qcm_dir(qid)
-    os.makedirs(os.path.join(d, "answers"))
-    with open(os.path.join(d, "data.js"), "w", encoding="utf-8") as f:
-        f.write(data)
-    write_json(os.path.join(d, "meta.json"), {"issue": a.issue, "title": a.title or "", "created": today().isoformat(),
-                                              "cards": cards, "finished": False})
+    with Lock():
+        open_ids = qcm_open_ids(a.issue)
+        if open_ids and not a.force:
+            raise Fail("#%d already has an open form: %s. A new batch is posed after the first one is finished; "
+                       "to drop the open one: suivi.py qcm withdraw %s; to pose anyway (justify it in your "
+                       "report): suivi.py qcm pose %d %s --force (after the data file)"
+                       % (a.issue, ", ".join(open_ids), open_ids[0], a.issue, a.data))
+        old = withdrawn_answered(a.issue)
+        asked = {norm_title(r.get("question")): (qid, r.get("question")) for qid, rs in old for r in rs}
+        repeats = [(c.get("t"), asked[norm_title(c.get("t"))]) for c in cards if norm_title(c.get("t")) in asked]
+        if repeats and not a.force:
+            raise Fail("the new form asks again what a withdrawn form already had answered: %s. Reuse those "
+                       "answers instead (suivi.py qcm answers <id>), or pose anyway with --force after the "
+                       "data file" % "; ".join("%r (answered in %s as %r)" % (t, qid, q) for t, (qid, q) in repeats))
+        for qid, rs in old:
+            sys.stderr.write("suivi: withdrawn form %s holds %d answer%s; do not ask them again. read: suivi.py qcm answers %s\n"
+                             % (qid, len(rs), "" if len(rs) == 1 else "s", qid))
+        ks = []
+        for base in (os.path.join(suivi_dir(), "qcm"), removed_qcm_dir()):
+            ks += [int(x.rsplit("-", 1)[1]) for x in (os.listdir(base) if os.path.isdir(base) else [])
+                   if re.fullmatch(r"%d-\d+" % a.issue, x)]
+        qid = "%d-%d" % (a.issue, max(ks, default=0) + 1)
+        d = qcm_dir(qid)
+        os.makedirs(os.path.join(d, "answers"))
+        with open(os.path.join(d, "data.js"), "w", encoding="utf-8") as f:
+            f.write(data)
+        write_json(os.path.join(d, "meta.json"), {"issue": a.issue, "title": a.title or "", "created": today().isoformat(),
+                                                  "cards": len(cards), "finished": False})
     print(qid)
     print("http://127.0.0.1:%d/qcm/%s" % (int(os.environ.get("SF_SUIVI_PORT", "8441")), qid))
     hint_not_listening(a.issue)
     return 0
 
 
+def require_issue_owner(n, what):
+    """The calling session must own #n or its parent (as `test remove` always required)."""
+    owner = current_owner()
+    recs = load_all()
+    rec = recs.get(n)
+    if owner is None or rec is None:
+        raise Fail("only the session that owns #%d may %s (run scripts/chantier.sh %d first)" % (n, what, n))
+    sessions = {str((rec.get("owner") or {}).get("session", ""))}
+    if rec.get("parent") in recs:
+        sessions.add(str((recs[rec["parent"]].get("owner") or {}).get("session", "")))
+    sessions.discard("")
+    if owner["session"] not in sessions:
+        raise Fail("#%d belongs to another session (or to none): scripts/chantier.sh %d claims it" % (n, n))
+
+
+class Refused(Fail):
+    def __init__(self, msg, code):
+        super().__init__(msg)
+        self.code = code
+
+
+def withdraw_form(qid, by, answered_ok, who=None):
+    """Move the whole folder of an open form to removed-qcm/ (#479). Returns (meta, answers).
+    Raises Refused (code = HTTP status) for an unknown, finished or answered-without-flag form."""
+    if not safe_id(qid):
+        raise Refused("bad id", 400)
+    with Lock():
+        meta = read_json(os.path.join(qcm_dir(qid), "meta.json"))
+        if not isinstance(meta, dict):
+            raise Refused("no such open form: %s%s" % (qid, " (already withdrawn)" if os.path.isdir(
+                os.path.join(removed_qcm_dir(), qid)) else ""), 404)
+        if who is not None:
+            require_issue_owner(int(meta.get("issue")), "withdraw its forms")
+        if meta.get("finished"):
+            raise Refused("%s is finished: a finished form is never withdrawn" % qid, 409)
+        answers = load_answers(qid)
+        if answers and not answered_ok:
+            raise Refused("%s holds %d answer%s; withdraw it with --answered if you mean it (the answers are "
+                          "printed and kept in removed-qcm/%s)" % (qid, len(answers), "" if len(answers) == 1 else "s", qid), 409)
+        os.makedirs(removed_qcm_dir(), exist_ok=True)
+        os.rename(qcm_dir(qid), os.path.join(removed_qcm_dir(), qid))
+        meta.update(withdrawn_at=datetime.datetime.now().isoformat(timespec="seconds"), withdrawn_ts=time.time(),
+                    withdrawn_by=by)
+        write_json(os.path.join(removed_qcm_dir(), qid, "meta.json"), meta)
+    return meta, answers
+
+
+def answer_line(code, r):
+    status = "later" if r.get("statut") == "plus_tard" else ("recommended" if r.get("recommande") else "chosen")
+    line = "%s [%s] %s -> %s" % (code, status, r.get("question", ""), r.get("choix", ""))
+    if r.get("commentaire"):
+        line += " -- " + r["commentaire"]
+    return line
+
+
+def cmd_qcm_withdraw(a):
+    m = re.fullmatch(r"(\d+)-\d+", a.id)
+    if not m:
+        raise Fail("%r is not a form id (<issue>-<k>)" % a.id)
+    try:
+        meta, answers = withdraw_form(a.id, "cli", a.answered, who=True)
+    except Refused as e:
+        raise Fail(str(e))
+    for code in sorted(answers, key=natural):
+        print("answered " + answer_line(code, answers[code]))
+    print("%s withdrawn%s" % (a.id, ", answers kept: suivi.py qcm answers %s" % a.id if answers else ""))
+    return 0
+
+
 def cmd_qcm_answers(a):
     meta = read_json(os.path.join(qcm_dir(a.id), "meta.json")) if safe_id(a.id) else None
+    archived = False
+    if not isinstance(meta, dict) and safe_id(a.id):
+        meta = read_json(os.path.join(removed_qcm_dir(), a.id, "meta.json"))
+        archived = isinstance(meta, dict)
     if not isinstance(meta, dict):
         raise Fail("no such QCM: %s" % a.id)
-    answers = load_answers(a.id)
+    answers = load_answers(a.id, archived=archived)
     if a.json:
         print(json.dumps({"id": a.id, "meta": meta, "answers": answers}, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
-    pr = qcm_progress(a.id, meta)
+    pr = qcm_progress(a.id, meta, archived)
     print("QCM %s (issue #%s) %s: %d/%d answered, %s" % (a.id, meta.get("issue"), meta.get("title", ""), pr["answered"],
-                                                          pr["total"], "finished" if meta.get("finished") else "open"))
+                                                          pr["total"], "withdrawn" if archived else "finished" if meta.get("finished") else "open"))
     for code in sorted(answers, key=natural):
-        r = answers[code]
-        status = "later" if r.get("statut") == "plus_tard" else ("recommended" if r.get("recommande") else "chosen")
-        line = "%s [%s] %s -> %s" % (code, status, r.get("question", ""), r.get("choix", ""))
-        if r.get("commentaire"):
-            line += " -- " + r["commentaire"]
-        print(line)
+        print(answer_line(code, answers[code]))
     return 0
 
 
@@ -1579,9 +1716,10 @@ def qcm_dir(qid):
     return os.path.join(suivi_dir(), "qcm", qid)
 
 
-def load_answers(qid):
+def load_answers(qid, archived=False):
     out = {}
-    for p in sorted(glob.glob(os.path.join(qcm_dir(qid), "answers", "*.json"))):
+    base = os.path.join(removed_qcm_dir(), qid) if archived else qcm_dir(qid)
+    for p in sorted(glob.glob(os.path.join(base, "answers", "*.json"))):
         code = os.path.basename(p)[:-5]
         r = read_json(p)
         if safe_id(code) and isinstance(r, dict):
@@ -1589,8 +1727,8 @@ def load_answers(qid):
     return out
 
 
-def qcm_progress(qid, meta):
-    answered = sum(1 for r in load_answers(qid).values() if r.get("statut") != "plus_tard")
+def qcm_progress(qid, meta, archived=False):
+    answered = sum(1 for r in load_answers(qid, archived).values() if r.get("statut") != "plus_tard")
     return {"answered": answered, "total": meta.get("cards") or 0}
 
 
@@ -1602,7 +1740,8 @@ def all_qcms():
         if not safe_id(qid) or not isinstance(m, dict):
             continue
         out.append({"id": qid, "issue": m.get("issue"), "title": m.get("title", ""), "finished": bool(m.get("finished")),
-                    "progress": qcm_progress(qid, m), "since": m.get("created", "")})
+                    "progress": qcm_progress(qid, m), "since": m.get("created", ""),
+                    "recorded": len(load_answers(qid))})
     return out
 
 
@@ -2403,15 +2542,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             qid = m.group(1)
             meta = read_json(os.path.join(qcm_dir(qid), "meta.json")) if safe_id(qid) else None
             if not isinstance(meta, dict):
-                return self.fail(404, "no such QCM")
+                return self.missing_qcm(qid)
             body = {"finished": bool(meta.get("finished")), "answers": load_answers(qid)}
             return self.send(200, json.dumps(body, ensure_ascii=False), "application/json; charset=utf-8")
         self.fail(404, "not found")
 
+    def missing_qcm(self, qid):
+        """404 for an unknown form, 410 for one withdrawn (the page says so instead of « server down »)."""
+        if safe_id(qid) and os.path.isdir(os.path.join(removed_qcm_dir(), qid)):
+            return self.fail(410, "this form was withdrawn")
+        return self.fail(404, "no such QCM")
+
     def qcm_page(self, qid):
         meta = read_json(os.path.join(qcm_dir(qid), "meta.json"))
         if not isinstance(meta, dict):
-            return self.fail(404, "no such QCM")
+            return self.missing_qcm(qid)
         try:
             with open(os.path.join(qcm_dir(qid), "data.js"), encoding="utf-8") as f:
                 data = f.read()
@@ -2454,7 +2599,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.route()
         if path.startswith("/api/tests/"):
             return self.post_test(path[len("/api/tests/"):])
-        m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish)", path)
+        m = re.fullmatch(r"/api/qcm/([^/]+)/(answer|finish|withdraw)", path)
         if m:
             return self.post_qcm(m.group(1), m.group(2))
         m = re.fullmatch(r"/api/issue/(\d+)/merge", path)
@@ -2507,19 +2652,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.read_body()
         if body is None:
             return
-        meta = read_json(mp)
-        if not isinstance(meta, dict):
-            return self.fail(404, "no such QCM")
-        if what == "finish":
-            meta["finished"] = True
-            meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
-            write_json(mp, meta)
+        if what == "withdraw":
+            try:
+                withdraw_form(qid, "page", True)
+            except Refused as e:
+                return self.fail(e.code, str(e))
+            except Fail as e:
+                return self.fail(503, str(e))
             return self.send(200, json.dumps({"ok": True}), "application/json")
-        if not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"]):
+        if what == "answer" and (not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"])):
             return self.fail(400, "expected an object with a safe string code")
-        if not all(isinstance(v, (str, int, bool, type(None))) for v in body.values()):
+        if what == "answer" and not all(isinstance(v, (str, int, bool, type(None))) for v in body.values()):
             return self.fail(400, "answer fields must be plain values")
-        write_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"), body)
+        try:
+            with Lock():              # a withdrawal moves the folder: read and write under the same lock
+                meta = read_json(mp)
+                if not isinstance(meta, dict):
+                    return self.missing_qcm(qid)
+                if what == "finish":
+                    meta["finished"] = True
+                    meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+                    write_json(mp, meta)
+                else:
+                    write_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"), body)
+        except Fail as e:
+            return self.fail(503, str(e))
         self.send(200, json.dumps({"ok": True}), "application/json")
 
     def post_test(self, tid):
@@ -2666,6 +2823,7 @@ def parser():
     q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)
     for name, fn, h in (("pose", cmd_qcm_pose, "check data.js, create the form qcm/<n>-<k>, print its id and URL"),
                         ("answers", cmd_qcm_answers, "the answers recorded so far (readable, or --json)"),
+                        ("withdraw", cmd_qcm_withdraw, "withdraw an open form (archived in removed-qcm/, answers kept)"),
                         ("list", cmd_qcm_list, "list the forms")):
         x = q.add_parser(name, help=h, allow_abbrev=False)
         x.set_defaults(fn=fn)
@@ -2673,6 +2831,11 @@ def parser():
             x.add_argument("issue", type=int)
             x.add_argument("data")
             x.add_argument("--title", default="")
+            x.add_argument("--force", action="store_true",
+                           help="pose although the issue has an open form or the card repeats an answered question")
+        elif name == "withdraw":
+            x.add_argument("id")
+            x.add_argument("--answered", action="store_true", help="also withdraw a form that holds answers")
         elif name == "answers":
             x.add_argument("id")
             x.add_argument("--json", action="store_true")

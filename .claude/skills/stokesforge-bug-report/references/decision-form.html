@@ -328,7 +328,7 @@ const QID=((location.pathname.match(/^\/qcm\/([A-Za-z0-9_.-]+)\/?$/)||[])[1])||n
 const LOCAL=!!QID&&(location.hostname==='127.0.0.1'||location.hostname==='localhost');
 if(LOCAL)document.getElementById('goHome').hidden=false;   /* local server only: '/' is the tracking home */
 const KEY='sf-dec-'+(QID?QID+'-':'')+ORDER.map(d=>d.c).join(',');
-let finished=false, finMsg='';
+let finished=false, finMsg='', gone=false;
 let ans={}, cur=0, view='card', confirmAll=false, store=null, sync='';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -345,7 +345,7 @@ function save(d){
   const a=ans[d.c];
   if(LOCAL&&a){
     fetch('/api/qcm/'+QID+'/answer',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(record(d,a))})
-      .then(r=>{if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
+      .then(r=>{if(r.status===404||r.status===410){gone=true;sync='Questionnaire retiré : tes réponses ne sont plus enregistrées';paintSync();render();return;}if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
   } else if(store&&a){ store.doc('decisions/'+d.c).set(record(d,a))
     .then(()=>{sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()}); }
 }
@@ -396,7 +396,7 @@ function summary(){
   if(rest){ if(!confirmAll) h+='<button class="sec" id="accAll">Prendre la recommandation pour les '+rest+' restantes…</button>';
     else h+='<div class="confirm"><b>Appliquer la recommandation aux '+rest+' décisions restantes ?</b><span>Tu pourras encore changer chacune ensuite.</span><div class="row2"><button class="primary" id="accAllOk">Oui, appliquer</button><button class="sec" id="accAllNo">Annuler</button></div></div>'; }
   h+='<div><button class="link" id="copy">Copier le résumé</button> <span class="sync" id="copied"></span></div>';
-  if(LOCAL)h+='<div class="fin"><button class="primary" id="finish"'+(finished?' disabled':'')+'>'+(finished?'Envoyé':'J’ai fini')+'</button><span class="sync" id="finmsg">'+esc(finMsg)+'</span></div>';
+  if(LOCAL)h+='<div class="fin"><button class="primary" id="finish"'+(finished||gone?' disabled':'')+'>'+(finished?'Envoyé':'J’ai fini')+'</button><span class="sync" id="finmsg">'+esc(gone?'Questionnaire retiré.':finMsg)+'</span></div>';
   let last=0;
   ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+='<div class="grp">'+gname(d)+'</div>';}
     const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
@@ -428,7 +428,7 @@ function render(){
     if(g('accAllOk'))g('accAllOk').onclick=()=>{ORDER.forEach(d=>{const a=ans[d.c];if(!a||a.skip){ans[d.c]={i:0,note:(a&&a.note)||''};save(d);}});confirmAll=false;render();};
     if(g('finish'))g('finish').onclick=()=>{ if(finished)return; g('finish').disabled=true;
       fetch('/api/qcm/'+QID+'/finish',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'})
-        .then(r=>{if(!r.ok)throw 0;finished=true;finMsg='';render();}).catch(()=>{finMsg='Envoi impossible : le serveur de suivi répond-il ?';render();}); };
+        .then(r=>{if(r.status===404||r.status===410){gone=true;render();return;}if(!r.ok)throw 0;finished=true;finMsg='';render();}).catch(()=>{finMsg='Envoi impossible : le serveur de suivi répond-il ?';render();}); };
     g('copy').onclick=()=>{const txt=ORDER.map(d=>d.c+' — '+d.t+' : '+(ans[d.c]?label(d,ans[d.c])+(ans[d.c].note?' ('+ans[d.c].note+')':''):'pas vue')).join('\n');
       const ok=()=>g('copied').textContent='Copié';
       try{navigator.clipboard.writeText(txt).then(ok,()=>g('copied').textContent='Copie refusée');}catch(e){g('copied').textContent='Copie refusée';}};

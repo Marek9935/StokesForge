@@ -325,6 +325,19 @@ class TestReleaseLine(Base):
         self.assertEqual(self.rec(13)["done_at"], "2026-11-03")
         self.assertIsNone(self.rec(13)["colour"])
 
+    def test_a_withdrawn_form_no_longer_keeps_the_colour(self):
+        self.put(11, colour=C[1], owner=None)
+        d = os.path.join(self.state, "qcm", "11-1")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 11, "finished": False}, f)
+        # lang: fr begin
+        self.assertIn("reste prise : un QCM de l'issue est ouvert", self.run_cli("release-line", "11").stdout)
+        os.makedirs(os.path.join(self.state, "removed-qcm"))
+        os.rename(d, os.path.join(self.state, "removed-qcm", "11-1"))
+        self.assertEqual(self.run_cli("release-line", "11").stdout.strip(), "Couleur %s libérée." % C[1])
+        # lang: fr end
+
     def test_sub_issue_keeps_the_package_colour(self):
         self.put(9, kind="package", colour=C[4], owner=self.live_owner())
         self.put(5, parent=9, colour=C[4], owner=self.live_owner())
@@ -1193,6 +1206,62 @@ class TestWaitEvents(WaitBase):
         self.assertIn("does not own", err)
 
 
+class TestWaitWithdrawn(WaitBase):
+    """#479: a page withdrawal wakes the waiting agent once; a CLI withdrawal wakes nothing."""
+
+    def archived(self, qid, by, answers=0, ts=None):
+        d = os.path.join(self.state, "removed-qcm", qid)
+        os.makedirs(os.path.join(d, "answers"))
+        for k in range(answers):
+            with open(os.path.join(d, "answers", "R%d.json" % (k + 1)), "w") as f:
+                json.dump({"code": "R%d" % (k + 1), "statut": "tranche", "question": "Q"}, f)
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": int(qid.split("-")[0]), "title": "F", "cards": 2, "finished": False, "withdrawn_by": by,
+                       "withdrawn_ts": time.time() if ts is None else ts}, f)
+
+    def test_page_withdrawal_wakes_the_wait_once_naming_the_form(self):
+        self.owned(1)
+        self.entry("1-1")
+        p = self.spawn(1, env={"SF_SUIVI_WAIT_SETTLE": "60"})
+        self.armed()
+        self.archived("1-1", "page", answers=2)
+        rc, out, _ = self.finish(p, 5)
+        self.assertEqual(rc, 0)
+        self.assertIn("form 1-1 withdrawn on the page by the user, 2 answers recorded, read with: suivi.py qcm answers 1-1", out)
+        rc, out, _ = self.run_wait(1, timeout="1")                 # reported once
+        self.assertTrue(out.startswith("timeout"), out)
+
+    def test_page_withdrawal_without_answers_says_so(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.archived("1-1", "page")
+        self.assertIn("1-1 withdrawn on the page by the user, no answer recorded", self.run_wait(1)[1])
+
+    def test_cli_withdrawal_wakes_nothing_and_nothing_left_ends_the_wait(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.archived("1-1", "cli")
+        rc, out, _ = self.run_wait(1, timeout="1")
+        self.assertTrue(out.startswith("timeout"), out)             # a todo is left: still armed, no line
+        os.unlink(os.path.join(self.state, "tests", "1-1.json"))
+        self.assertTrue(self.run_wait(1)[1].startswith("nothing open"))
+
+    def test_a_withdrawal_older_than_the_claim_is_not_news(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.archived("1-1", "page", ts=time.time() - 100)
+        self.assertTrue(self.run_wait(1, timeout="1")[1].startswith("timeout"))
+
+    def test_a_withdrawal_is_never_an_unread_answer(self):
+        self.put(1, colour=None, last_colour=C[0], name="N1")      # paused: nobody owns it
+        self.archived("1-1", "page", answers=1)
+        self.assertEqual(self.status()["paused"][0]["unread"], 0)
+        self.assertEqual(self.hook("S9").stdout, "")
+
+    def hook(self, sid):
+        return self.run_cli("hook-news", env={"CLAUDE_PROJECT_DIR": self.repo}, stdin=json.dumps({"session_id": sid}))
+
+
 class TestWaitExits(WaitBase):
     def test_dead_pid_is_session_gone(self):
         child = subprocess.Popen(["sleep", "30"])
@@ -1478,7 +1547,7 @@ class TestHookWait(WaitBase):
         n = suivi.hook_issue
         for cmd, want in (("cd x && python3 scripts/suivi.py test add 7 f.json", 7), ("python3 -I scripts/suivi.py qcm pose 12 d.js", 12),
                           ("suivi.py test remove 7 7-1", 7), ("suivi.py set 454 --state code", 454), ("suivi.py news 3", 3),
-                          ("suivi.py test merged 7 abc", 7), ("suivi.py qcm answers 7-2", 7), ("suivi.py test list --issue 9", 9),
+                          ("suivi.py test merged 7 abc", 7), ("suivi.py qcm answers 7-2", 7), ("suivi.py qcm withdraw 7-1", 7), ("suivi.py qcm withdraw 7-1 --answered", 7), ("suivi.py qcm pose 12 d.js --force", 12), ("suivi.py test list --issue 9", 9),
                           ("suivi.py status", None), ("suivi.py test list", None), ("suivi.py qcm list --issue 7", None),
                           ("echo 7", None), ("", None)):
             self.assertEqual(n(cmd), want, cmd)
@@ -1849,10 +1918,28 @@ class TestQcm(ServerBase):
         with open(self.data, "w", encoding="utf-8") as f:
             f.write(DATA)
 
-    def pose(self, issue=1, data=None):
-        r = self.run_cli("qcm", "pose", str(issue), data or self.data, "--title", "My <form>")
+    def pose(self, issue=1, data=None, *extra):
+        r = self.run_cli("qcm", "pose", str(issue), data or self.data, "--title", "My <form>", *extra)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.split()[0]
+
+    def finish_form(self, qid):
+        self.assertEqual(self.req("POST", "/api/qcm/%s/finish" % qid, {"X-Suivi": "1"}, {})[0], 200)
+
+    def data_file(self, *titles):
+        """A data.js whose cards R1, R2... carry these titles."""
+        cards = ",\n".join("{c:'R%d',p:%d,t:%s,is:'a',o:[O('A'),O('B')]}" % (i + 1, i + 1, json.dumps(t))
+                           for i, t in enumerate(titles))
+        path = os.path.join(self.tmp.name, "d%d.js" % abs(hash(titles)))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(DATA.split("const D=[")[0] + "const D=[\n" + cards + ",\n];\n")
+        return path
+
+    def withdraw(self, qid, *extra, sid="S1", env=None):
+        return self.run_cli("qcm", "withdraw", qid, *extra, env=self.as_session(sid) if env is None else env)
+
+    def archived(self, qid):
+        return os.path.join(self.state, "removed-qcm", qid)
 
     def answer(self, qid, code="R1", body=None, headers="ok"):
         h = {"X-Suivi": "1", "Content-Type": "application/json"} if headers == "ok" else headers
@@ -1864,6 +1951,7 @@ class TestQcm(ServerBase):
     def test_pose_injects_the_data_block_and_title(self):
         qid = self.pose()
         self.assertEqual(qid, "1-1")
+        self.finish_form(qid)
         self.assertEqual(self.pose(), "1-2")
         status, headers, body = self.req("GET", "/qcm/1-1")
         self.assertEqual(status, 200)
@@ -1874,7 +1962,7 @@ class TestQcm(ServerBase):
         self.assertEqual(text.count("DONNÉES — début"), 1)
         self.assertEqual(self.req("GET", "/qcm/9-9")[0], 404)
         self.assertEqual(self.req("GET", "/qcm/..%2fx")[0], 400)
-        meta = jload(os.path.join(self.state, "qcm", "1-1", "meta.json"))
+        meta = jload(os.path.join(self.state, "qcm", "1-2", "meta.json"))
         self.assertEqual((meta["issue"], meta["cards"], meta["finished"]), (1, 2, False))
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
@@ -1936,7 +2024,7 @@ class TestQcm(ServerBase):
         self.assertEqual(json.loads(self.req("GET", "/api/state")[2])["qcms"], [])
 
     def test_finish_keeps_the_colour_while_another_form_is_open(self):
-        a, b = self.pose(), self.pose()
+        a, b = self.pose(), self.pose(1, None, "--force")
         self.req("POST", "/api/qcm/%s/finish" % a, {"X-Suivi": "1"}, {})
         self.assertEqual(self.held(C[0]), ["qcm"])
 
@@ -1949,6 +2037,205 @@ class TestQcm(ServerBase):
         out = self.run_cli("qcm", "list", "--open").stdout
         self.assertIn("%s\tissue #1\t1/2\topen\tMy <form>" % qid, out)
         self.assertEqual(self.run_cli("qcm", "list", "--issue", "2").stdout, "")
+
+    # ---- #479: one open form per issue, withdrawal
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pose_refuses_a_second_open_form_of_the_issue_and_force_overrides(self):
+        self.assertEqual(self.pose(), "1-1")
+        r = self.run_cli("qcm", "pose", "1", self.data)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("1-1", r.stderr)
+        self.assertIn("--force", r.stderr)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.state, "qcm"))), ["1-1"])
+        self.assertEqual(self.pose(2), "2-1")                    # another issue's open form is none of its business
+        self.assertEqual(self.pose(1, None, "--force"), "1-2")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pose_after_a_finished_form_is_allowed_and_silent(self):
+        qid = self.pose()
+        self.finish_form(qid)
+        r = self.run_cli("qcm", "pose", "1", self.data)
+        self.assertEqual((r.returncode, r.stdout.split()[0]), (0, "1-2"), r.stderr)
+        self.assertNotIn("withdrawn", r.stderr)
+        self.assertNotIn("already", r.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_withdraw_moves_the_whole_folder_and_frees_the_colour(self):
+        self.claim(1)
+        qid = self.pose()
+        img = os.path.join(self.state, "qcm", qid, "images", "c1")
+        os.makedirs(img)
+        with open(os.path.join(img, "x.png"), "wb") as f:
+            f.write(b"png")
+        r = self.withdraw(qid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.archived(qid), "images", "c1", "x.png")))
+        self.assertTrue(os.path.exists(os.path.join(self.archived(qid), "data.js")))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm", qid)))
+        meta = jload(os.path.join(self.archived(qid), "meta.json"))
+        self.assertEqual((meta["withdrawn_by"], "withdrawn_at" in meta), ("cli", True))
+        self.assertEqual(json.loads(self.req("GET", "/api/state")[2])["qcms"], [])
+        self.assertNotIn("qcm", self.held())
+        self.assertEqual(self.run_cli("qcm", "list").stdout, "")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_withdrawn_number_is_never_reused(self):
+        self.claim(1)
+        self.assertEqual(self.pose(), "1-1")
+        self.finish_form("1-1")
+        self.assertEqual(self.pose(), "1-2")
+        self.assertEqual(self.withdraw("1-2").returncode, 0)
+        self.assertEqual(self.pose(), "1-3")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_withdraw_needs_the_owner_session_of_the_issue_or_its_parent(self):
+        qid = self.pose()
+        before = sorted(os.listdir(os.path.join(self.state, "qcm")))
+        self.assertNotEqual(self.withdraw(qid, env={}).returncode, 0)                        # no session
+        os.remove(os.path.join(self.state, "issues", "1.json"))
+        self.assertIn("chantier.sh 1", self.withdraw(qid).stderr)                           # no record
+        self.put(1, colour=C[0])                                                             # no owner
+        self.assertNotEqual(self.withdraw(qid).returncode, 0)
+        self.put(1, colour=C[0], owner=self.live_owner("S2"))
+        self.assertNotEqual(self.withdraw(qid, sid="S1").returncode, 0)                      # another session
+        self.assertNotEqual(self.withdraw(qid, env={}).returncode, 0)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.state, "qcm"))), before)
+        self.assertFalse(os.path.exists(self.archived(qid)))
+        # package: the parent's owner withdraws a sub's form, the sub's owner cannot touch the parent's
+        self.put(9, kind="package", colour=C[1], owner=self.live_owner("S1"))
+        self.put(1, colour=C[1], parent=9, owner=self.live_owner("S2"))
+        self.assertEqual(self.withdraw(qid, sid="S1").returncode, 0)
+        q9 = self.pose(9)
+        self.assertNotEqual(self.withdraw(q9, sid="S2").returncode, 0)
+        self.assertTrue(os.path.isdir(os.path.join(self.state, "qcm", q9)))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_withdraw_of_a_form_with_answers_needs_the_flag_and_keeps_them_readable(self):
+        self.claim(1)
+        qid = self.pose()
+        self.answer(qid, code="R2", body={"code": "R2", "statut": "plus_tard", "question": "Q2", "choix": "Plus tard"})
+        r = self.withdraw(qid)                                   # a `plus_tard` alone is an answer too
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--answered", r.stderr)
+        self.assertTrue(os.path.isdir(os.path.join(self.state, "qcm", qid)))
+        self.assertFalse(os.path.exists(self.archived(qid)))
+        self.answer(qid)
+        r = self.withdraw(qid, "--answered")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("R1 [recommended] Q1 -> Yes -- ok then", r.stdout)
+        self.assertTrue(os.path.exists(os.path.join(self.archived(qid), "answers", "R1.json")))
+        r = self.run_cli("qcm", "answers", qid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("R1 [recommended] Q1 -> Yes -- ok then", r.stdout)
+        self.assertIn("withdrawn", r.stdout)
+        self.assertEqual(json.loads(self.run_cli("qcm", "answers", qid, "--json").stdout)["answers"]["R1"]["choix"], "Yes")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_finished_or_already_withdrawn_form_is_never_withdrawn(self):
+        self.claim(1)
+        qid = self.pose()
+        self.finish_form(qid)
+        for extra in ((), ("--answered",)):
+            r = self.withdraw(qid, *extra)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("finished", r.stderr)
+        self.assertTrue(os.path.isdir(os.path.join(self.state, "qcm", qid)))
+        q2 = self.pose()
+        self.assertEqual(self.withdraw(q2).returncode, 0)
+        r = self.withdraw(q2)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already withdrawn", r.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_page_withdraw_button_endpoint(self):
+        qid = self.pose()
+        self.answer(qid)
+        w = "/api/qcm/%s/withdraw" % qid
+        self.assertEqual(self.req("POST", w, {}, {})[0], 403)                                # no X-Suivi
+        self.assertEqual(self.req("POST", "/api/qcm/9-9/withdraw", {"X-Suivi": "1"}, {})[0], 404)
+        done = self.pose(2)
+        self.finish_form(done)
+        self.assertEqual(self.req("POST", "/api/qcm/%s/withdraw" % done, {"X-Suivi": "1"}, {})[0], 409)
+        self.assertTrue(os.path.isdir(os.path.join(self.state, "qcm", done)))
+        self.assertEqual(self.req("POST", w, {"X-Suivi": "1"}, {})[0], 200)                  # answers do not matter here
+        self.assertTrue(os.path.exists(os.path.join(self.archived(qid), "answers", "R1.json")))
+        self.assertEqual(jload(os.path.join(self.archived(qid), "meta.json"))["withdrawn_by"], "page")
+        self.assertEqual(self.req("POST", w, {"X-Suivi": "1"}, {})[0], 404)
+        self.assertEqual(self.req("GET", "/qcm/" + qid)[0], 410)
+        self.assertEqual(self.req("GET", "/api/qcm/%s/answers" % qid)[0], 410)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_withdrawn_form_is_not_recreated_by_a_late_answer_or_finish(self):
+        qid = self.pose()
+        self.assertEqual(self.req("POST", "/api/qcm/%s/withdraw" % qid, {"X-Suivi": "1"}, {})[0], 200)
+        self.assertEqual(self.answer(qid)[0], 410)
+        self.assertEqual(self.req("POST", "/api/qcm/%s/finish" % qid, {"X-Suivi": "1"}, {})[0], 410)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm", qid)))
+        self.assertEqual(self.req("GET", "/qcm/" + qid)[0], 410)
+        self.assertEqual(self.answer("9-9")[0], 404)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_check_reports_two_open_forms_of_one_issue(self):
+        a = self.pose()
+        self.pose(1, None, "--force")
+        r = self.run_cli("check")
+        self.assertEqual(r.returncode, 1)
+        self.assertRegex(r.stdout, r"issue #1 has 2 open forms: 1-1, 1-2")
+        self.finish_form("1-1")
+        self.assertNotIn("open forms", self.run_cli("check").stdout)       # open + finished: nothing to report
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pose_reminds_of_withdrawn_forms_holding_answers_and_refuses_a_repeated_question(self):
+        self.claim(1)
+        q = self.pose(1, self.data_file("Which colour?", "Which size?"))
+        self.answer(q, code="R1", body={"code": "R1", "statut": "tranche", "question": "Which colour?", "choix": "Red"})
+        self.answer(q, code="R2", body={"code": "R2", "statut": "plus_tard", "question": "Which size?", "choix": "Plus tard"})
+        self.assertEqual(self.withdraw(q, "--answered").returncode, 0)
+        before = sorted(os.listdir(os.path.join(self.state, "qcm"))) if os.path.isdir(os.path.join(self.state, "qcm")) else []
+        # identical title answered: refused, nothing created
+        r = self.run_cli("qcm", "pose", "1", self.data_file("Which colour?", "Something else"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("1-1", r.stderr)
+        self.assertIn("Which colour?", r.stderr)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.state, "qcm"))) if os.path.isdir(os.path.join(self.state, "qcm")) else [], before)
+        # whitespace and case variants are the same question
+        r = self.run_cli("qcm", "pose", "1", self.data_file("  WHICH   colour? ", "Else"))
+        self.assertEqual(r.returncode, 1)
+        # a title that was only « Plus tard » may be asked again; the reminder line is printed (one answer)
+        r = self.run_cli("qcm", "pose", "1", self.data_file("Which size?"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("withdrawn form 1-1 holds 1 answer", r.stderr)
+        self.assertIn("suivi.py qcm answers 1-1", r.stderr)
+        self.assertEqual(r.stdout.split()[0], "1-2")
+        self.finish_form("1-2")
+        # --force overrides the repeat
+        r = self.run_cli("qcm", "pose", "1", self.data_file("Which colour?"), "--force")
+        self.assertEqual((r.returncode, r.stdout.split()[0]), (0, "1-3"), r.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_repeat_check_ignores_empty_withdrawn_forms_other_issues_and_finished_forms(self):
+        self.claim(1)
+        self.claim(2)
+        titles = self.data_file("Which colour?")
+        # a withdrawn form with no answer: no line, no refusal
+        q = self.pose(1, titles)
+        self.assertEqual(self.withdraw(q).returncode, 0)
+        r = self.run_cli("qcm", "pose", "1", titles)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("withdrawn", r.stderr)
+        self.finish_form("1-2")
+        # an answered withdrawn form of another issue changes nothing here
+        q2 = self.pose(2, titles)
+        self.answer(q2, body={"code": "R1", "statut": "tranche", "question": "Which colour?", "choix": "Red"})
+        self.assertEqual(self.withdraw(q2, "--answered").returncode, 0)
+        r = self.run_cli("qcm", "pose", "1", titles)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("withdrawn", r.stderr)
+        # the 463-1 then 463-2 case: a finished (not withdrawn) form with the same title and an answer
+        self.answer("1-3", body={"code": "R1", "statut": "tranche", "question": "Which colour?", "choix": "Red"})
+        self.finish_form("1-3")
+        r = self.run_cli("qcm", "pose", "1", titles)
+        self.assertEqual((r.returncode, r.stdout.split()[0]), (0, "1-4"), r.stderr)
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
@@ -2971,6 +3258,28 @@ class TestPage(unittest.TestCase):
         r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_withdraw_control_asks_first_and_states_how_many_answers_exist(self):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify([withdrawUi({recorded:2},false),withdrawUi({recorded:2},true)," \
+                     "withdrawUi({recorded:1},true),withdrawUi({},true)]));"
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        idle, two, one, none = json.loads(r.stdout)
+        # lang: fr begin
+        self.assertEqual((idle["asking"], idle["button"]), (False, "Retirer"))
+        self.assertEqual((two["asking"], two["question"], two["yes"], two["no"]),
+                         (True, "Retirer ce formulaire ? 2 réponses déjà données.", "Oui, retirer", "Annuler"))
+        self.assertEqual(one["question"], "Retirer ce formulaire ? 1 réponse déjà donnée.")
+        self.assertEqual(none["question"], "Retirer ce formulaire ? Aucune réponse donnée.")
+        # lang: fr end
+
+    def test_withdraw_confirmation_state_lives_outside_the_dom(self):
+        html = self.page()
+        self.assertIn("askWithdraw=null", html)
+        self.assertIn("askWithdraw===q.id", html)
+        self.assertIn("/withdraw'", html)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_says_whose_turn_it_is(self):

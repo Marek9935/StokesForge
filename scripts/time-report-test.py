@@ -143,6 +143,14 @@ class Defects(Logs):
         self.assertGreater(self.h(r, "wait:trial"), 0.9)
         self.assertEqual(self.h(r, "wait:form"), 0)
 
+    def test_withdrawn_form_is_not_a_wait_on_a_form(self):
+        self.session([human(0), bash(7, "b", "scripts/suivi.py qcm pose 9 f.js"), result(8, "b"),
+                      bash(9, "c", "scripts/suivi.py qcm withdraw 9-1"), result(10, "c"), asst(12, "withdrawn"),
+                      human(3610, "hello")])
+        r = self.run_report()
+        self.assertGreater(self.h(r, "wait:nothing"), 0.9)
+        self.assertEqual(self.h(r, "wait:form"), 0)
+
     def test_answered_form_and_merged_trial_are_cleared(self):
         self.session([human(0), bash(5, "a", "scripts/suivi.py test add 9"), result(6, "a"),
                       bash(7, "b", "scripts/suivi.py test merged 9"), result(8, "b"), asst(10, "all done"),

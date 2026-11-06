@@ -181,7 +181,7 @@ const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
 const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
 const $=id=>document.getElementById(id);
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
-let S=null,etag=null,timer=null,openBack=null,failed=false;
+let S=null,etag=null,timer=null,openBack=null,askWithdraw=null,failed=false;
 const drafts={};
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
 
@@ -341,6 +341,14 @@ function mergeUi(l){
   if(l.mergeReady)return {button:true,note:''};
   return {button:false,note:''};
 }
+/* The « Retirer » control of a form's box (#479): `asking` = the box is in its confirmation step.
+   q.recorded = the answers already given (the server counts them, « Plus tard » included). */
+function withdrawUi(q,asking){
+  if(!asking)return {asking:false,button:'Retirer',question:'',yes:'',no:''};
+  const n=Number(q.recorded)||0;
+  const given=n===0?'Aucune réponse donnée.':n===1?'1 réponse déjà donnée.':n+' réponses déjà données.';
+  return {asking:true,button:'',question:'Retirer ce formulaire ? '+given,yes:'Oui, retirer',no:'Annuler'};
+}
 /*CARDLINE-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
@@ -433,6 +441,16 @@ function qcmBox(q){
   const b=el('div','box');b.appendChild(head({n:q.issue,name:q.title||('Questionnaire '+q.id),colour:colourOf(q.issue)},null));
   if(q.progress)b.appendChild(el('div','meta','Avancement : '+(typeof q.progress==='object'?(q.progress.answered||0)+' / '+(q.progress.total||'?'):q.progress)));
   const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
+  const u=withdrawUi(q,askWithdraw===q.id);
+  if(!u.asking){
+    const w=el('button','',u.button);w.type='button';w.id='wd-'+q.id;
+    w.onclick=()=>{askWithdraw=q.id;renderTests();};b.appendChild(w);
+  }else{
+    const r=el('div','acts');r.appendChild(el('div','meta',u.question));
+    const y=el('button','back',u.yes);y.type='button';y.id='wdy-'+q.id;y.onclick=()=>withdrawForm(q);
+    const n=el('button','',u.no);n.type='button';n.id='wdn-'+q.id;n.onclick=()=>{askWithdraw=null;renderTests();};
+    r.appendChild(y);r.appendChild(n);b.appendChild(r);
+  }
   return b;
 }
 function colourSq(n){const c=colourOf(n);return c?Object.keys(COL).find(k=>COL[k]===COL[c])+' ':'';}
@@ -566,6 +584,14 @@ async function send(x,patch){
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
   }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';}
+  etag=null;load();
+}
+async function withdrawForm(q){
+  askWithdraw=null;
+  try{
+    const r=await fetch('/api/qcm/'+encodeURIComponent(q.id)+'/withdraw',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Formulaire non retiré : il est peut-être déjà fini ou retiré, ou le serveur ne répond pas.';}
   etag=null;load();
 }
 async function askMerge(n){
