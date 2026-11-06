@@ -142,6 +142,8 @@ mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
+#[cfg(test)]
+mod detached_keys;
 mod dialogs;
 mod empty_state;
 mod figure_copy;

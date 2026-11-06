@@ -557,7 +557,8 @@ fired).
   widgets. Ctrl+Z while typing in a cell undoes the last **model
   command**, not the last keystroke: this is the expected behavior of a
   spreadsheet, and it is also the limit — the bench cannot tell the two
-  intentions apart.
+  intentions apart. A detached workbook does the same since #459: it reads
+  Ctrl+Z, Ctrl+Y and Ctrl+S at the top of its frame, before the grid.
 - **Only one editable cell at a time**, across all **docked** grids
   (`AppState::editing`). The grid is virtualized
   (`TableBuilder::body().rows()`): a sheet can have a million

@@ -4,7 +4,10 @@
 //! of undo/redo in the active viewport.
 //!
 //! Moved out of `app.rs` as is (#117). The global consumption of shortcuts,
-//! `collect_shortcuts`, stays in `app.rs` (#115).
+//! `collect_shortcuts`, stays in `app.rs` (#115). A detached window reads
+//! three of them, Undo, Redo and Save, with [`read_detached_history_and_save`]
+//! (#459): a content feature works everywhere, a global feature stays in the
+//! main window.
 //!
 //! **Single registry of keys** (#231, S-K1): every key the application
 //! consumes is a constant of this module (`SHORTCUT_*` for shortcuts, `KEY_*`
@@ -113,6 +116,53 @@ pub(super) const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortc
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::S,
 );
+
+/// The three global keys a detached window reads (#459): Ctrl+Z, Ctrl+Y (and
+/// Ctrl+Shift+Z) and Ctrl+S. A content feature works everywhere, a global
+/// feature stays in the main window: nothing else (Ctrl+N, Ctrl+O, Ctrl+E,
+/// Ctrl+Shift+S...) acts from a detached window.
+///
+/// Called **first** in the window's frame, before anything is painted: a text
+/// field that has the keyboard (a cell, the console, a name field) then never
+/// sees the key, so one press is one action on the history stack and the text
+/// being typed stays as it is. The caller appends the result **after** the
+/// actions the frame's own gestures produce (#398), through the window's
+/// `requests.actions`, which the root drains with the dialog refusal of #471.
+///
+/// Ctrl+Shift+S is consumed first and dropped: Ctrl+S would match it too, and
+/// Save As would silently save. The Ctrl+S that reaches the root with no file
+/// yet opens the system file picker there (`Action::Save`).
+pub(super) fn read_detached_history_and_save(ctx: &egui::Context) -> Vec<Action> {
+    ctx.input_mut(|input| input.consume_shortcut(&SHORTCUT_SAVE_AS));
+    let mut actions = Vec::new();
+    collect_undo_redo_shortcuts(ctx, &mut actions);
+    if !super::dialogs::modal_shown(ctx) && ctx.input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
+        actions.push(Action::Save);
+    }
+    actions
+}
+
+/// Ctrl+Q in a detached window quits nothing and closes nothing: the
+/// application quits from the main window only (#459). egui itself would close
+/// the window where the key is pressed (`Options::quit_shortcuts`, read at the
+/// end of the pass), and a typed cell would seem lost. The key is consumed and
+/// the window says where Quit is.
+pub(super) fn refuse_quit_in_detached(ctx: &egui::Context) {
+    let shortcuts = ctx.options(|options| options.quit_shortcuts.clone());
+    let pressed = ctx.input_mut(|input| {
+        shortcuts.iter().fold(false, |seen, shortcut| {
+            input.consume_shortcut(shortcut) | seen
+        })
+    });
+    if pressed {
+        super::window_band::post(
+            ctx,
+            ctx.viewport_id(),
+            tr!("refused-quit-in-main"),
+            super::window_band::BandLevel::Warning,
+        );
+    }
+}
 /// Ctrl+O — choose a project to open.
 pub(super) const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);

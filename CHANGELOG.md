@@ -39,6 +39,16 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- Ctrl+Z, Ctrl+Y and Ctrl+S now work in the detached windows (#459): the graph,
+  the workbook, the Project Manager, the Object Manager and the console undo,
+  redo and save the project, even with the cursor in a cell or a field (the
+  typed text stays, the last command is undone, as in the main window). A
+  dialog open in the main window refuses them with the band. Ctrl+Shift+S saves
+  nothing there. Ctrl+Q in a detached window no longer closes it (a typed cell
+  seemed lost): nothing closes and the band says "Quit is in the main window".
+  A name field of the Project Manager closes when its folder is removed by
+  Undo. Help › Keyboard Shortcuts and the manual say that only Undo, Redo and
+  Save work in a detached window.
 - A dialog open in the main window now stops the keys of the detached windows
   (#460): with Graph Properties (or any dialog) open, Esc, `G` and the arrows of
   a detached graph in Page Layout Mode, and the keys of a detached workbook, the

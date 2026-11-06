@@ -26,6 +26,8 @@ pub(super) fn keyboard_shortcuts_window(
         PlainSize::Content(egui::vec2(480.0, 460.0)),
         |ui| {
             theme::page_scroll_area().show(ui, |ui| {
+                // The detached windows have no menu bar to list their keys (#459).
+                ui.label(theme::secondary_text(tr!("keyboard-shortcuts-scope")));
                 for area in HelpArea::ALL {
                     theme::section_title(ui, area.title());
                     egui::Grid::new(("keyboard_shortcuts", area as u8))

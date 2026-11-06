@@ -40,6 +40,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use fluent_syntax::ast::{Entry, PatternElement};
 use stokesforge_app_state::i18n::{test_language, Language};
+use stokesforge_app_state::tr;
 
 use super::shortcuts::{HelpArea, HELP};
 
@@ -85,6 +86,7 @@ fn shortcuts_page() -> String {
     page.push_str(
         "On macOS, Cmd replaces Ctrl.\n\nThe same list is shown by **Help ▸ Keyboard Shortcuts…**.\n",
     );
+    page.push_str(&format!("\n{}\n", tr!("keyboard-shortcuts-scope")));
     for area in HelpArea::ALL {
         page.push_str(&format!(
             "\n## {}\n\n| Action | Keys |\n|---|---|\n",
