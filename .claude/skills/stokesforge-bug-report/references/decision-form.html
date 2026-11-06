@@ -82,6 +82,12 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .confirm{border:2px solid var(--warn);background:var(--warn-soft);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
 .row2{display:flex;gap:8px;flex-wrap:wrap}
 .sync{font-size:.85rem;color:var(--muted)}
+.qstrip{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-bottom:8px}
+.qthumb{display:inline-flex;flex-direction:column;gap:4px;max-width:160px}
+.qthumb img{display:block;max-width:160px;max-height:120px;border:2px solid var(--line);border-radius:8px;background:var(--bg)}
+.qthumb .gone{border:2px dashed var(--line);border-radius:8px;padding:8px;color:var(--muted);font-size:.85rem}
+.qthumb button{padding:4px 10px;border-radius:8px;border:2px solid var(--line);background:var(--panel);cursor:pointer;font-size:.85rem;font-weight:700}
+.qbad{color:var(--bad);font-size:.9rem;font-weight:700}
 /* maquettes */
 .mrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .mpair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -339,13 +345,56 @@ const pos=parseInt(lsGet(KEY+'-pos')||'0',10); if(pos>=0&&pos<ORDER.length)cur=p
 if(INTRO){$('intro').innerHTML=INTRO;$('introbox').hidden=false;}
 $('h1').textContent=TITRE; document.title=document.title||TITRE;
 
+/*QIMG-START*/
+/* Screenshots on a card (local mode only, #456). Pure functions; limits mirror the server's. An answer is always
+   {i|skip, note, images}: every rebuild goes through mkAns so that no change of option loses its images. */
+const QI_MAX_BYTES=10*1024*1024, QI_MAX=5, QI_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
+const QI_NAME=/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
+const QI_GONE='Capture supprimée (limite de 512 Mo)';
+const qNames=a=>a&&Array.isArray(a.images)?a.images.filter(n=>typeof n==='string'&&QI_NAME.test(n)):[];
+const mkAns=(prev,fields)=>Object.assign({note:(prev&&prev.note)||'',images:qNames(prev)},fields);
+function qUrl(qid,code,name){return QI_NAME.test(String(name))?'/api/qcm/'+encodeURIComponent(qid)+'/images/'+encodeURIComponent(code)+'/'+encodeURIComponent(name):null;}
+function qFilter(files,have){
+  const accept=[],lines=[];let n=have;
+  for(const f of files){
+    const nm=f.name||'image';
+    if(!QI_TYPES.includes(f.type)){lines.push(nm+' : ce n’est pas une image PNG, JPEG, GIF ou WebP.');continue;}
+    if(f.size>QI_MAX_BYTES){lines.push(nm+' : plus de 10 Mo, trop lourd.');continue;}
+    if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
+    if(n>=QI_MAX){lines.push(nm+' : '+QI_MAX+' captures au plus par carte.');continue;}
+    accept.push(f);n++;
+  }
+  return {accept:accept,lines:lines};
+}
+function qUploadLine(status){
+  if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
+  if(status===413)return 'Capture refusée : plus de 10 Mo.';
+  if(status===415)return 'Capture refusée : format non reconnu (PNG, JPEG, GIF ou WebP).';
+  return 'Capture non envoyée : réessaie dans un instant.';
+}
+function qFromItems(items){
+  const out=[];
+  for(const it of Array.from(items||[])){if(it&&it.kind==='file'&&QI_TYPES.includes(it.type)){const f=it.getAsFile();if(f)out.push(f);}}
+  return out;
+}
+/*QIMG-END*/
 function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
+// Uploads and saves go one after the other: a save that lands while an upload is unlisted would delete the file,
+// and the save after it would be refused for an unknown name. The record is built when its turn comes.
+let chain=Promise.resolve();
+const enqueue=fn=>{const p=chain.then(fn,fn);chain=p.catch(()=>{});return p;};
+const postRecord=d=>{
+  const a=ans[d.c]; if(!a)return Promise.resolve();
+  // `images` is ALWAYS sent (even empty): a save without it deletes the card's files on the server.
+  const body=JSON.stringify(Object.assign(record(d,a),{images:qNames(a)}));
+  return fetch('/api/qcm/'+encodeURIComponent(QID)+'/answer',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:body})
+    .then(r=>{if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
+};
 function save(d){
   lsSet(KEY,JSON.stringify(ans)); lsSet(KEY+'-pos',String(cur));
   const a=ans[d.c];
   if(LOCAL&&a){
-    fetch('/api/qcm/'+QID+'/answer',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(record(d,a))})
-      .then(r=>{if(!r.ok)throw 0;sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()});
+    enqueue(()=>postRecord(d));
   } else if(store&&a){ store.doc('decisions/'+d.c).set(record(d,a))
     .then(()=>{sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()}); }
 }
@@ -386,6 +435,8 @@ function card(){
   h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
   h+='</div></div>';
   h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
+  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V)</span></div></div>';
+  else h+='<div class="mdim">Les captures ne sont possibles que sur la page locale du suivi.</div>';
   h+='<div class="sync" aria-live="polite">'+esc(sync)+'</div></div>';
   return h;
 }
@@ -400,11 +451,11 @@ function summary(){
   let last=0;
   ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+='<div class="grp">'+gname(d)+'</div>';}
     const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
-    h+='<button class="srow '+cls+'" data-i="'+i+'"><span class="c">'+d.c+'</span><span>'+esc(d.t)+'</span><span class="a">'+(a?esc(label(d,a))+(a.note?' — '+esc(a.note):''):'Pas encore vue')+'</span></button>'; });
+    h+='<button class="srow '+cls+'" data-i="'+i+'"><span class="c">'+d.c+'</span><span>'+esc(d.t)+'</span><span class="a">'+(a?esc(label(d,a))+(a.note?' — '+esc(a.note):'')+(qNames(a).length?' · '+qNames(a).length+(qNames(a).length>1?' captures':' capture'):''):'Pas encore vue')+'</span></button>'; });
   return h+'</div>';
 }
 function go(i){cur=Math.max(0,Math.min(ORDER.length-1,i));view='card';lsSet(KEY+'-pos',String(cur));render();window.scrollTo(0,0);}
-function choose(d,i){ans[d.c]={i,note:(ans[d.c]||{}).note||''};save(d);render();
+function choose(d,i){ans[d.c]=mkAns(ans[d.c],{i});save(d);render();
   const el=$('main').querySelector('.opt[data-i="'+i+'"]'); if(el)el.focus(); if(i===-1)$('note').focus();}
 function render(){
   $('main').innerHTML=view==='card'?card():summary();
@@ -414,18 +465,19 @@ function render(){
   $('next').textContent=cur===ORDER.length-1?'Résumé →':'Suivant →';
   if(view==='card'){
     const d=ORDER[cur];
-    $('acc').onclick=()=>{ans[d.c]={i:0,note:(ans[d.c]||{}).note||''};save(d);cur<ORDER.length-1?go(cur+1):(view='sum',render());};
+    $('acc').onclick=()=>{ans[d.c]=mkAns(ans[d.c],{i:0});save(d);cur<ORDER.length-1?go(cur+1):(view='sum',render());};
     $('main').querySelectorAll('.opt').forEach(x=>{
       x.onclick=()=>choose(d,+x.dataset.i);
       x.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(d,+x.dataset.i);}};
     });
-    let t;$('note').oninput=e=>{const a=ans[d.c]||{i:-1};a.note=e.target.value;ans[d.c]=a;clearTimeout(t);t=setTimeout(()=>{save(d);paintTop();},500);};
+    qWire(d);
+    let t;$('note').oninput=e=>{const a=ans[d.c]||mkAns(null,{i:-1});a.note=e.target.value;ans[d.c]=a;clearTimeout(t);t=setTimeout(()=>{save(d);paintTop();},500);};
   } else {
     $('main').querySelectorAll('.srow').forEach(x=>x.onclick=()=>go(+x.dataset.i));
     const g=id=>$(id);
     if(g('accAll'))g('accAll').onclick=()=>{confirmAll=true;render();};
     if(g('accAllNo'))g('accAllNo').onclick=()=>{confirmAll=false;render();};
-    if(g('accAllOk'))g('accAllOk').onclick=()=>{ORDER.forEach(d=>{const a=ans[d.c];if(!a||a.skip){ans[d.c]={i:0,note:(a&&a.note)||''};save(d);}});confirmAll=false;render();};
+    if(g('accAllOk'))g('accAllOk').onclick=()=>{ORDER.forEach(d=>{const a=ans[d.c];if(!a||a.skip){ans[d.c]=mkAns(a,{i:0});save(d);}});confirmAll=false;render();};
     if(g('finish'))g('finish').onclick=()=>{ if(finished)return; g('finish').disabled=true;
       fetch('/api/qcm/'+QID+'/finish',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'})
         .then(r=>{if(!r.ok)throw 0;finished=true;finMsg='';render();}).catch(()=>{finMsg='Envoi impossible : le serveur de suivi répond-il ?';render();}); };
@@ -436,17 +488,84 @@ function render(){
 }
 $('prev').onclick=()=>go(cur-1);
 $('next').onclick=()=>{ if(cur===ORDER.length-1){view='sum';render();window.scrollTo(0,0);} else go(cur+1); };
-$('skip').onclick=()=>{const d=ORDER[cur];const a=ans[d.c];if(!a||a.i===undefined||a.skip){ans[d.c]={skip:true,note:(a&&a.note)||''};save(d);}go(cur+1);};
+$('skip').onclick=()=>{const d=ORDER[cur];const a=ans[d.c];if(!a||a.i===undefined||a.skip){ans[d.c]=mkAns(a,{skip:true});save(d);}go(cur+1);};
 $('goSum').onclick=()=>{view='sum';confirmAll=false;render();window.scrollTo(0,0);};
+// ---- captures (mode local seulement : en ligne, aucun bouton ni écouteur)
+const qBusy={}, qLines={};
+function qThumb(d,n){
+  const w=document.createElement('div'); w.className='qthumb';
+  const u=qUrl(QID,d.c,n);
+  const gone=()=>{const g=document.createElement('div'); g.className='gone'; g.textContent=QI_GONE; w.replaceChild(g,w.firstChild);};
+  if(u){const a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener';
+    const im=document.createElement('img'); im.loading='lazy'; im.alt='Capture jointe'; im.src=u; im.onerror=gone; a.appendChild(im); w.appendChild(a);}
+  else{const g=document.createElement('div'); g.className='gone'; g.textContent=QI_GONE; w.appendChild(g);}
+  const rm=document.createElement('button'); rm.type='button'; rm.textContent='Retirer'; rm.setAttribute('aria-label','Retirer cette capture');
+  rm.onclick=()=>{const a=ans[d.c]; if(!a)return; a.images=qNames(a).filter(m=>m!==n); save(d); qStrip(d);};
+  w.appendChild(rm); return w;
+}
+function qStrip(d){
+  const st=$('qstrip'); if(!st||view!=='card'||ORDER[cur]!==d)return;
+  st.replaceChildren();
+  qNames(ans[d.c]).forEach(n=>st.appendChild(qThumb(d,n)));
+  const b=qBusy[d.c]||0;
+  if(b>0){const e=document.createElement('span'); e.className='mdim'; e.textContent='Envoi de '+b+' capture'+(b>1?'s':'')+'…'; st.appendChild(e);}
+  (qLines[d.c]||[]).forEach(l=>{const e=document.createElement('div'); e.className='qbad'; e.textContent=l; st.appendChild(e);});
+}
+function qAttach(d,files){
+  const f=qFilter(files,qNames(ans[d.c]).length+(qBusy[d.c]||0));
+  qLines[d.c]=f.lines.slice(); qStrip(d);
+  f.accept.forEach(file=>{
+    qBusy[d.c]=(qBusy[d.c]||0)+1; qStrip(d);
+    enqueue(async()=>{
+      let ok=false;
+      try{
+        const r=await fetch('/api/qcm/'+encodeURIComponent(QID)+'/images/'+encodeURIComponent(d.c),{method:'POST',headers:{'X-Suivi':'1','Content-Type':file.type},body:file});
+        if(!r.ok)qLines[d.c].push(qUploadLine(r.status));
+        else{const j=await r.json();
+          if(typeof j.name==='string'&&QI_NAME.test(j.name)){
+            const a=ans[d.c]||mkAns(null,{i:-1});      // a screenshot on an unanswered card acts like a comment: « Autre »
+            const cur0=qNames(a);
+            if(!cur0.includes(j.name)&&cur0.length<QI_MAX)cur0.push(j.name);
+            a.images=cur0; ans[d.c]=a; ok=true;}}
+      }catch(e){qLines[d.c].push(qUploadLine(0));}
+      qBusy[d.c]--;
+      if(ok){lsSet(KEY,JSON.stringify(ans)); await postRecord(d);}      // listed at once, in the same turn
+      qStrip(d); paintTop();
+    });
+  });
+}
+function qWire(d){
+  if(!LOCAL)return;
+  const pk=$('qpick'), fi=$('qfile'); if(!pk||!fi)return;
+  pk.onclick=()=>fi.click();
+  fi.onchange=()=>{qAttach(d,Array.from(fi.files)); fi.value='';};
+  qStrip(d);
+}
+if(LOCAL){
+  document.addEventListener('paste',e=>{
+    const cd=e.clipboardData; if(!cd||view!=='card')return;
+    const files=qFromItems(cd.items); if(!files.length)return;
+    if(cd.getData&&cd.getData('text/plain'))return;            // a paste that carries text stays text
+    e.preventDefault(); qAttach(ORDER[cur],files);
+  });
+  const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
+  document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
+  document.addEventListener('drop',e=>{
+    if(!hasFiles(e))return; e.preventDefault();
+    if(view==='card')qAttach(ORDER[cur],Array.from(e.dataTransfer.files||[]));
+  });
+}
 if(/[?&]view=sum\b/.test(location.search))view='sum';
 render();
 // Mode local : relit les réponses déjà enregistrées par le serveur (rechargement, autre onglet).
 if(LOCAL)(async()=>{ try{
   const r=await fetch('/api/qcm/'+QID+'/answers'); if(!r.ok)return; const j=await r.json();
   finished=!!j.finished;
-  Object.keys(j.answers||{}).forEach(code=>{const x=j.answers[code]; const d=D.find(q=>q.c===code); if(!x||!d||ans[d.c])return;
-    if(x.statut==='plus_tard')ans[d.c]={skip:true,note:x.commentaire||''};
-    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]={i,note:x.commentaire||''}; } });
+  Object.keys(j.answers||{}).forEach(code=>{const x=j.answers[code]; const d=D.find(q=>q.c===code); if(!x||!d)return;
+    const imgs=qNames(x);
+    if(ans[d.c]){ if(ans[d.c].images===undefined&&imgs.length)ans[d.c].images=imgs; return; }   // the device wins, but a stale one adopts the server's images
+    if(x.statut==='plus_tard')ans[d.c]=mkAns(null,{skip:true,note:x.commentaire||'',images:imgs});
+    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]=mkAns(null,{i,note:x.commentaire||'',images:imgs}); } });
   render();
 }catch(e){} })();
 // Base partagée (capacité db) : lue après coup, jamais bloquante ; Claude relit la collection « decisions ».
@@ -454,8 +573,8 @@ if(!LOCAL)(async()=>{ try{
   const db=await (window.claude&&window.claude.use?window.claude.use('db'):null); if(!db)return; store=db;
   const snap=await db.collection('decisions').get();
   snap.docs.forEach(s=>{const x=s.data(); const d=D.find(q=>q.c===s.id); if(!x||!d||ans[d.c])return;
-    if(x.statut==='plus_tard')ans[d.c]={skip:true,note:x.commentaire||''};
-    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]={i,note:x.commentaire||''}; } });
+    if(x.statut==='plus_tard')ans[d.c]=mkAns(null,{skip:true,note:x.commentaire||''});
+    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]=mkAns(null,{i,note:x.commentaire||''}); } });
   render();
 }catch(e){} })();
 </script>
