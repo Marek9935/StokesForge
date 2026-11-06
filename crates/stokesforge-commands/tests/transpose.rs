@@ -207,7 +207,10 @@ fn rechecking_is_refused_while_the_source_reads_the_sheet_and_leaves_no_entry() 
     let before = w.project.tree().clone();
     let error = w
         .history
-        .execute(&mut w.project, Command::SetTransposeAuto { sheet, auto: true })
+        .execute(
+            &mut w.project,
+            Command::SetTransposeAuto { sheet, auto: true },
+        )
         .unwrap_err();
     assert!(matches!(
         error,

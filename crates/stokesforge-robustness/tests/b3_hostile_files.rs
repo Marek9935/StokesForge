@@ -1007,8 +1007,10 @@ fn b3_a_followed_sheet_read_by_its_own_source_does_not_loop() {
         }
         let reads = after.node(reader).unwrap().as_column().unwrap();
         assert!(
-            (0..reads.len()).all(|r| matches!(reads.get(r), stokesforge_core::Cell::Float(v) if v.is_nan())
-                || matches!(reads.get(r), stokesforge_core::Cell::Text(None))),
+            (0..reads.len()).all(
+                |r| matches!(reads.get(r), stokesforge_core::Cell::Float(v) if v.is_nan())
+                    || matches!(reads.get(r), stokesforge_core::Cell::Text(None))
+            ),
             "chain: {chain}: the reader is empty"
         );
     }

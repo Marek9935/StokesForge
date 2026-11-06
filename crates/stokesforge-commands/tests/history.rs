@@ -3135,3 +3135,54 @@ fn aborting_over_a_retyped_ordinary_column_fails_after_reverting_everything_else
     twin_history.end_macro(&mut twin.project).unwrap();
     assert_eq!(history.retained_bytes(), twin_history.retained_bytes());
 }
+
+// -- restamping after the undo of a structural entry (#463) ----------------
+
+/// The versions drawn when a structural entry is undone depend only on the
+/// history, never on the iteration order of the tree (a hash table with a
+/// random seed per tree): two sessions replaying the same history end with
+/// the same numbers. Followed transposed sheets record these numbers in their
+/// link, so the targeted pass and the full pass would otherwise disagree.
+#[test]
+fn the_versions_drawn_by_an_undo_do_not_depend_on_the_iteration_order() {
+    fn run() -> Vec<(NodeId, u64)> {
+        let mut f = fixture();
+        let mut columns = Vec::new();
+        for k in 0..40 {
+            let name = format!("C{k}");
+            columns.push(
+                f.project
+                    .add_column(f.sheet1, None, Some(&name), Column::from_f64(&[1.0, 2.0]))
+                    .expect("column"),
+            );
+        }
+        let mut history = History::new();
+        history
+            .execute(
+                &mut f.project,
+                Command::Rename {
+                    id: f.sheet2,
+                    name: "Other".to_string(),
+                },
+            )
+            .expect("a structural entry");
+        for column in &columns {
+            history
+                .execute(&mut f.project, set_cells(*column, 0, &[9.0]))
+                .expect("data entry");
+        }
+        for _ in 0..columns.len() + 1 {
+            assert_eq!(history.undo(&mut f.project), Ok(true));
+        }
+        let mut versions: Vec<(NodeId, u64)> = columns
+            .iter()
+            .map(|id| {
+                let node = f.project.tree().node(*id).expect("node");
+                (*id, node.as_column().expect("column").version())
+            })
+            .collect();
+        versions.sort();
+        versions
+    }
+    assert_eq!(run(), run());
+}

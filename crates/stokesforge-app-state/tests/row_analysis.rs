@@ -240,6 +240,9 @@ fn recalculating_asks_before_erasing_edited_values() {
     open_rows(&mut s, &[1]);
     s.state.dispatch(Action::ApplyAnalysis);
     let sheet = transposed(&s).unwrap();
+    // These cases pin the snapshot banner: the box is unchecked (#463).
+    s.state
+        .dispatch(Action::SetTransposeAuto { sheet, auto: false });
     assert!(!s.state.transpose_info(sheet).unwrap().stale);
 
     // Modified source: stale, updated without a question.
@@ -299,6 +302,9 @@ fn writing_the_same_value_in_the_source_marks_the_sheet_out_of_date() {
     open_rows(&mut s, &[1]);
     s.state.dispatch(Action::ApplyAnalysis);
     let sheet = transposed(&s).unwrap();
+    // These cases pin the snapshot banner: the box is unchecked (#463).
+    s.state
+        .dispatch(Action::SetTransposeAuto { sheet, auto: false });
     assert!(!s.state.transpose_info(sheet).unwrap().stale);
 
     // Row 2 of the first column already holds 2.0.

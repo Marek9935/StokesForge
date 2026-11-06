@@ -631,9 +631,9 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
                 .iter()
                 .copied()
                 .filter(|id| {
-                    tree.node(*id)
-                        .and_then(|n| n.as_column())
-                        .is_some_and(|c| c.meta().formula.is_none() && c.meta().role == ColumnRole::Y)
+                    tree.node(*id).and_then(|n| n.as_column()).is_some_and(|c| {
+                        c.meta().formula.is_none() && c.meta().role == ColumnRole::Y
+                    })
                 })
                 .collect();
             Some(Command::SetCells {

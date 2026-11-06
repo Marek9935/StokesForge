@@ -462,7 +462,9 @@ impl Command {
             },
             Command::TransposeRows { .. } => HistoryLabel::TransposeRows,
             Command::RecalculateTranspose { .. } => HistoryLabel::RecalculateTranspose,
-            Command::SetTransposeAuto { auto, .. } => HistoryLabel::SetTransposeAuto { auto: *auto },
+            Command::SetTransposeAuto { auto, .. } => {
+                HistoryLabel::SetTransposeAuto { auto: *auto }
+            }
             Command::ReplaceAnalysisData { draft, .. } => {
                 HistoryLabel::ReplaceAnalysisData(draft.operation.kind())
             }

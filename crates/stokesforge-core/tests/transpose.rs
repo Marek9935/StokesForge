@@ -405,7 +405,10 @@ fn following_keeps_the_version_of_a_column_that_comes_out_the_same() {
         .unwrap();
     assert_eq!(state(&f.project, sheet), (true, false));
     let before: Vec<u64> = cols.iter().map(|c| version(&f.project, *c)).collect();
-    assert!(!f.project.follow_transpose(sheet).unwrap(), "nothing written");
+    assert!(
+        !f.project.follow_transpose(sheet).unwrap(),
+        "nothing written"
+    );
     let after: Vec<u64> = cols.iter().map(|c| version(&f.project, *c)).collect();
     assert_eq!(before, after);
     assert_eq!(state(&f.project, sheet), (false, false), "re-read");
@@ -426,7 +429,11 @@ fn following_never_overwrites_a_typed_value_nor_recreates_a_deleted_column() {
     assert_eq!(state(&f.project, sheet), (true, true));
     assert!(!f.project.follow_transpose(sheet).unwrap());
     assert_eq!(values(&f.project, cols[1])[0], -1.0);
-    assert_eq!(values(&f.project, cols[2]), vec![2.0, 5.0, 8.0], "other rows wait");
+    assert_eq!(
+        values(&f.project, cols[2]),
+        vec![2.0, 5.0, 8.0],
+        "other rows wait"
+    );
     // Relink brings it all back.
     f.project.recalculate_transpose(sheet).unwrap();
     assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 7.0]);
@@ -479,13 +486,21 @@ fn a_direct_formula_of_the_source_reading_the_followed_sheet_is_refused() {
     let cols = children(&f.project, sheet);
     let label = f
         .project
-        .add_column(f.sheet, None, Some("Label"), Column::new(ColumnType::Numeric))
+        .add_column(
+            f.sheet,
+            None,
+            Some("Label"),
+            Column::new(ColumnType::Numeric),
+        )
         .unwrap();
     let text = format!("max('{}'!B)", name(&f.project, sheet));
     // Strict entry and field: refused / kept with the error.
     let entry = f.project.tree().formula_for_entry(label, &text);
     assert!(
-        matches!(entry, Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })),
+        matches!(
+            entry,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
         "{entry:?}"
     );
     let (kept, error) = f.project.tree().formula_keeping(label, &text);
@@ -543,7 +558,10 @@ fn a_chain_through_another_sheet_is_refused_but_another_sheet_reading_is_not() {
         .unwrap();
     let chain = f.project.tree().formula_for_entry(d, "max(Sheet2!A)");
     assert!(
-        matches!(chain, Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })),
+        matches!(
+            chain,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
         "{chain:?}"
     );
     // And the same entry in the other order: the formula of Sheet2 refused
@@ -554,7 +572,10 @@ fn a_chain_through_another_sheet_is_refused_but_another_sheet_reading_is_not() {
     f.project.set_transpose_auto(sheet, true).unwrap();
     let late = f.project.tree().formula_for_entry(p, &text);
     assert!(
-        matches!(late, Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })),
+        matches!(
+            late,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
         "{late:?}"
     );
 }
@@ -595,7 +616,10 @@ fn an_analysis_reading_the_followed_sheet_may_not_land_in_the_source() {
     let before = f.project.tree().clone();
     let refused = f.project.add_calculation(draft(cols[0], f.cols[0]));
     assert!(
-        matches!(refused, Err(CoreError::CalculationReadsFollowingSheet { .. })),
+        matches!(
+            refused,
+            Err(CoreError::CalculationReadsFollowingSheet { .. })
+        ),
         "{refused:?}"
     );
     assert_eq!(f.project.tree().as_ref(), before.as_ref());
@@ -603,5 +627,46 @@ fn an_analysis_reading_the_followed_sheet_may_not_land_in_the_source() {
     f.project.add_calculation(draft(cols[0], cols[1])).unwrap();
     // Unchecked, the source may calculate from the sheet.
     f.project.set_transpose_auto(sheet, false).unwrap();
-    f.project.add_calculation(draft(cols[0], f.cols[0])).unwrap();
+    f.project
+        .add_calculation(draft(cols[0], f.cols[0]))
+        .unwrap();
+}
+
+#[test]
+fn a_loop_through_two_followed_sheets_is_refused() {
+    let mut f = fixture();
+    let first = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let mut p = Column::from_f64(&[1.0, 2.0, 3.0]);
+    p.set_meta(ColumnMeta {
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project.add_column(sheet2, None, Some("P"), p).unwrap();
+    let second = f.project.transpose_rows(sheet2, &[0]).unwrap();
+    // Added after the link: it is a Y column of Sheet2, so the second sheet
+    // depends on it (the link is an edge of the graph).
+    let q = f
+        .project
+        .add_column(sheet2, None, Some("Q"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    let d = f
+        .project
+        .add_column(f.sheet, None, Some("D"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    // Sheet1!D reads the second sheet: no loop yet.
+    let text = format!("max('{}'!B)", name(&f.project, second));
+    assert!(f.project.tree().formula_for_entry(d, &text).is_ok());
+    formula(&mut f.project, d, &text);
+    // Sheet2!Q reading the first sheet closes the loop D -> second sheet ->
+    // Sheet2 (link) -> Q -> first sheet -> Sheet1 (link) -> D.
+    let closing = format!("max('{}'!B)", name(&f.project, first));
+    let refused = f.project.tree().formula_for_entry(q, &closing);
+    assert!(
+        matches!(
+            refused,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{refused:?}"
+    );
 }

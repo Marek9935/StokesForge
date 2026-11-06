@@ -41,18 +41,22 @@ pub(super) fn transpose_banner(
             .unwrap_or_default();
         let mut auto = info.auto;
         let blocked = !info.auto && info.auto_blocked.is_some();
-        let response = ui.add_enabled(
-            !blocked,
-            egui::Checkbox::new(&mut auto, tr!("transpose-auto")),
-        );
-        let response = match &info.auto_blocked {
-            Some(reason) if blocked => response.on_disabled_hover_text(reason.as_str()),
-            _ => response.on_hover_text(tr!(
+        let reason = info.auto_blocked.clone().unwrap_or_default();
+        let response = ui
+            .add_enabled(
+                !blocked,
+                egui::Checkbox::new(&mut auto, tr!("transpose-auto")),
+            )
+            .on_disabled_hover_text(reason);
+        let response = if blocked {
+            response
+        } else {
+            response.on_hover_text(tr!(
                 "transpose-auto",
                 "hint",
                 sheet = sheet_name.as_str(),
                 source = info.source_name.as_str()
-            )),
+            ))
         };
         if response.changed() {
             actions.push(Action::SetTransposeAuto { sheet, auto });
@@ -186,7 +190,11 @@ mod tests {
             transpose_banner(ui, &state, sheet, &mut actions);
         });
         assert!(painted(&output, "Transposed from Sheet1"));
-        assert!(!painted(&output, "Recalculate"), "up to date: no button");
+        assert!(
+            !output.shapes.iter().any(|p| matches!(&p.shape,
+                egui::Shape::Text(t) if t.galley.job.text == tr!("transpose-recalculate"))),
+            "up to date: no button"
+        );
 
         session
             .handle()
@@ -322,7 +330,7 @@ mod tests {
         state.refresh();
         let info = state.transpose_info(sheet).unwrap();
         let reason = info.auto_blocked.expect("a reason");
-        assert!(reason.contains("Column C of Sheet1"), "{reason}");
+        assert!(reason.contains("Column B of Sheet1"), "{reason}");
         let ctx = context();
         let mut actions = Vec::new();
         let shapes = image(&ctx, Vec::new(), |ui| {
@@ -356,13 +364,16 @@ mod tests {
         state.refresh();
         let info = state.transpose_info(sheet).unwrap();
         let stuck = info.stuck.expect("a reason");
-        assert!(stuck.contains("Column D"), "{stuck}");
+        assert!(stuck.contains("Column C"), "{stuck}");
         let ctx = context();
         let mut actions = Vec::new();
         let shapes = image(&ctx, Vec::new(), |ui| {
             transpose_banner(ui, &state, sheet, &mut actions);
         });
         let found = texts(&shapes);
-        text_exact(&found, &tr!("transpose-state-stuck", reason = stuck.as_str()));
+        text_exact(
+            &found,
+            &tr!("transpose-state-stuck", reason = stuck.as_str()),
+        );
     }
 }

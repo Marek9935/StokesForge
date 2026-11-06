@@ -315,14 +315,14 @@ fn step() -> impl Strategy<Value = Step> {
                 start_row,
             }
         }),
-        6 => (f.clone(), c.clone(), 0..FORMULAS.len()).prop_map(|(sheet, column, formula_index)| {
+        8 => (f.clone(), c.clone(), 0..FORMULAS.len()).prop_map(|(sheet, column, formula_index)| {
             Step::SetFormula {
                 sheet,
                 column,
                 formula_index,
             }
         }),
-        3 => (f.clone(), c.clone()).prop_map(|(sheet, column)| Step::SetPending { sheet, column }),
+        5 => (f.clone(), c.clone()).prop_map(|(sheet, column)| Step::SetPending { sheet, column }),
         1 => (f.clone(), c.clone())
             .prop_map(|(sheet, column)| Step::RemoveFormula { sheet, column }),
         2 => (
@@ -398,7 +398,7 @@ fn step() -> impl Strategy<Value = Step> {
                 automatic,
             }
         ),
-        1 => (0usize..4, any::<bool>())
+        2 => (0usize..4, any::<bool>())
             .prop_map(|(rank, with_columns)| Step::RemoveCalculation { rank, with_columns }),
         3 => (0usize..4, 0usize..8, 0usize..4).prop_map(|(sheet, column, role_index)| {
             Step::SetRole {
@@ -416,13 +416,13 @@ fn step() -> impl Strategy<Value = Step> {
             .prop_map(|(idx, column, seed)| Step::EditSource { idx, column, seed }),
         2 => Just(Step::RecalculateOutOfDate),
         4 => Just(Step::Undo),
-        4 => Just(Step::Redo),
+        9 => Just(Step::Redo),
         2 => (1usize..5).prop_map(|k| Step::UndoThenRedo { k }),
-        1 => Just(Step::OpenMacro),
-        1 => Just(Step::CloseMacro),
-        1 => Just(Step::AbortMacro),
-        1 => Just(Step::Reload),
-        1 => (0usize..8).prop_map(|save_index| Step::RevertTo { save_index }),
+        2 => Just(Step::OpenMacro),
+        2 => Just(Step::CloseMacro),
+        2 => Just(Step::AbortMacro),
+        2 => Just(Step::Reload),
+        3 => (0usize..8).prop_map(|save_index| Step::RevertTo { save_index }),
         3 => Just(Step::Unrelated),
     ]
 }
@@ -1062,9 +1062,9 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
                 .iter()
                 .copied()
                 .filter(|id| {
-                    tree.node(*id)
-                        .and_then(|n| n.as_column())
-                        .is_some_and(|c| c.meta().formula.is_none() && c.meta().role == ColumnRole::Y)
+                    tree.node(*id).and_then(|n| n.as_column()).is_some_and(|c| {
+                        c.meta().formula.is_none() && c.meta().role == ColumnRole::Y
+                    })
                 })
                 .collect();
             Some(Command::SetCells {
