@@ -226,8 +226,10 @@ const BUILD_WHY={away:'absent',battery:'sur batterie'};
 /* One short sentence for a mode, from the table of scripts/cargo-queue.py (MODES) so it cannot drift. */
 function modeSentence(m){
   if(!m)return '';
-  const parts=[m.slots+' build'+(m.slots>1?'s':'')+' à la fois',m.cpu_weight>=100?'priorité normale':'priorité basse'];
-  parts.push(m.cpu_quota_pct==null?'sans plafond':m.cpu_quota_pct+' % du processeur');
+  const cores=m.jobs?(m.slots>1?m.jobs+' cœurs chacun':m.jobs+' cœurs'):'tous les cœurs';
+  const prio=m.cpu_weight>=100?'normale':(m.cpu_weight<=10?'très basse':'basse');
+  const parts=[m.slots+' build'+(m.slots>1?'s':'')+' à la fois',cores,'priorité '+prio];
+  if(m.cpu_quota_pct!=null)parts.push('plafond '+m.cpu_quota_pct+' %');
   if(m.cpus==='ecore')parts.push('cœurs économes');
   return parts.join(', ');
 }

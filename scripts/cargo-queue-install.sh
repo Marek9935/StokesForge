@@ -28,7 +28,7 @@ Description=StokesForge builds (cargo-queue, #476)
 # No ManagedOOMMemoryPressure on purpose: systemd-oomd must not kill builds under MemoryHigh pressure.
 
 [Slice]
-CPUWeight=20
+# No limits here: every queued build applies the current mode to the slice.
 UNIT
 systemctl --user daemon-reload
 

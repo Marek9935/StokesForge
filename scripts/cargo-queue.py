@@ -10,7 +10,8 @@ One stdlib-only file, two roles.
 * CLI: `cargo-queue.py mode [full|dev|background]`, `auto on|off`, `status [--json]`, `apply`.
   suivi.py imports this file to drive the same functions from the tracking page.
 
-The numbers of the modes live only in MODES below.
+The numbers of the modes live only in MODES below. A queued build gets its job count from the mode
+when it starts and keeps it; a live mode change only moves weight, memory, quota and affinity.
 """
 import ctypes
 import fcntl
@@ -25,12 +26,16 @@ import time
 # Per mode. slots: builds running at once. cpu_weight: CPUWeight of the slice (only matters under
 # contention, so the GUI wins). cpu_quota_pct: percent of the whole machine (None = no cap).
 # cpus: None or "ecore" (E-cores only, from /sys/devices/cpu_atom/cpus; ignored when absent).
+# jobs: cargo/nextest/libtest job count given to a queued build (None = cargo's default).
 # memory_high: MemoryHigh of the slice. fallback_nice: nice value when no systemd scope is possible.
-# Provisional values, to be adjusted from the bench.
+# Measured 2026-11-06 (clean workspace build, power-saver 20 W): a 50 % CPUQuota was slower, used more
+# energy and disturbed frames more than `-j 11`; E-cores only was the slowest; MemoryHigh 12G cost no
+# time on a clean test build (anon memory of one test build is 5-6 GiB, the rest is cache). Table in #476.
+# cpu_quota_pct and cpus stay as knobs, unused by the current modes.
 MODES = {
-    "full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "memory_high": "24G", "fallback_nice": 0},
-    "dev": {"slots": 1, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "memory_high": "16G", "fallback_nice": 10},
-    "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": 50, "cpus": None, "memory_high": "16G", "fallback_nice": 19},
+    "full": {"slots": 3, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None, "memory_high": "20G", "fallback_nice": 0},
+    "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11, "memory_high": "20G", "fallback_nice": 10},
+    "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 8, "memory_high": "12G", "fallback_nice": 19},
 }
 DEFAULT_MODE = "dev"
 SLICE = "sfbuild.slice"     # no dash: a dash would nest the slice under another one
@@ -527,6 +532,10 @@ def run_in_scope(real, args, mode, use_scope):
     nice = MODES[mode]["fallback_nice"]
     env = dict(os.environ)
     env[MARKER] = "1"
+    jobs = MODES[mode].get("jobs")
+    if jobs:       # the caller's own value wins; a -j on the command line wins over the variable
+        for k in ("CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS", "RUST_TEST_THREADS"):
+            env.setdefault(k, str(jobs))
 
     def pre():
         try:

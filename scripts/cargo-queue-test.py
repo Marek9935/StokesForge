@@ -38,7 +38,7 @@ def term(s, f):
 signal.signal(signal.SIGTERM, term)
 signal.signal(signal.SIGINT, term)
 d = {"ev": "start", "args": sys.argv[1:], "marker": os.environ.get("SF_CARGO_QUEUE_HELD"), "cwd": os.getcwd(),
-     "foo": os.environ.get("FOO"), "nice": os.nice(0), "ppid_comm": ""}
+     "foo": os.environ.get("FOO"), "nice": os.nice(0), "jobs": [os.environ.get(k) for k in ("CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS", "RUST_TEST_THREADS")]}
 if os.environ.get("FAKE_STDIN"):
     d["stdin"] = sys.stdin.read()
 put(d)
@@ -178,6 +178,13 @@ class Base(unittest.TestCase):
 
 
 class TestQueue(Base):
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.qdir)     # one slot (background), whatever the table says for the default mode
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": "background", "effective": "background"}, f)
+        assert cq.MODES["background"]["slots"] == 1
+
     def test_second_test_waits_for_the_first(self):
         a = self.hold_a()
         b = self.start("test", tag="b", gate="gb")
@@ -319,7 +326,37 @@ class TestQueue(Base):
         out = self.output(p)
         self.assertEqual(out.count("warning"), 1, out)
         self.assertEqual(self.sd_calls(), [])
-        self.assertEqual(self.seen("start", "n")[0]["nice"], cq.MODES["dev"]["fallback_nice"])
+        self.assertEqual(self.seen("start", "n")[0]["nice"], cq.MODES["background"]["fallback_nice"])
+
+    def jobs_env(self, tag):
+        return self.seen("start", tag)[0]["jobs"]
+
+    def test_jobs_env_in_a_mode_with_jobs_not_in_full(self):
+        j = str(cq.MODES["background"]["jobs"])
+        self.assertEqual(self.start("test", tag="j").wait(10), 0)
+        self.assertEqual(self.jobs_env("j"), [j, j, j])
+        with mock.patch.dict(os.environ, self.env):
+            cq.set_mode(selected="full")
+        self.assertIsNone(cq.MODES["full"]["jobs"])
+        self.assertEqual(self.start("test", tag="f").wait(10), 0)
+        self.assertEqual(self.jobs_env("f"), [None, None, None])
+
+    def test_callers_jobs_win(self):
+        self.assertEqual(self.start("test", tag="c", extra={"CARGO_BUILD_JOBS": "3"}).wait(10), 0)
+        j = str(cq.MODES["background"]["jobs"])
+        self.assertEqual(self.jobs_env("c"), ["3", j, j])
+
+    def test_jobs_env_also_without_a_scope(self):
+        self.assertEqual(self.start("test", tag="n", extra={"FAKE_SYSTEMCTL_RC": "1"}).wait(10), 0)
+        self.assertEqual(self.jobs_env("n")[0], str(cq.MODES["background"]["jobs"]))
+
+    def test_run_exec_and_passthrough_have_no_jobs_env(self):
+        self.assertEqual(self.start("run", tag="r").wait(10), 0)
+        first, second = self.seen("start", "r")
+        self.assertEqual(first["jobs"][0], str(cq.MODES["background"]["jobs"]))
+        self.assertEqual(second["jobs"], [None, None, None])
+        self.assertEqual(self.start("fmt", tag="p").wait(10), 0)
+        self.assertEqual(self.jobs_env("p"), [None, None, None])
 
     def test_normal_path_has_no_nice(self):
         self.assertEqual(self.start("test", tag="z").wait(10), 0)
@@ -370,7 +407,7 @@ class TestQueue(Base):
         self.assertFalse(self.seen("start", "b"))
         with mock.patch.dict(os.environ, self.env):
             cq.set_mode(selected="full")
-        self.assertTrue(self.until(lambda: self.seen("start", "b")), "slots 2 should let both run")
+        self.assertTrue(self.until(lambda: self.seen("start", "b")), "more slots should let both run")
         self.assertEqual(len([e for e in self.events() if e["ev"] == "end"]), 0)
 
 
@@ -386,10 +423,13 @@ class TestModes(Base):
         return calls[-1]
 
     def test_set_mode_values_and_scaled_quota(self):
+        m = cq.MODES["background"]
+        patch = mock.patch.dict(m, cpu_quota_pct=50)     # the knob is unused by the shipped table
+        patch.start()
+        self.addCleanup(patch.stop)
         cq.set_mode(selected="background")
         c = self.last_set()
         n = os.cpu_count()
-        m = cq.MODES["background"]
         self.assertIn("--user set-property --runtime sfq-test.slice", c)
         self.assertIn("CPUWeight=%d" % m["cpu_weight"], c)
         self.assertIn("CPUQuota=%d%%" % (n * m["cpu_quota_pct"]), c)
@@ -463,6 +503,7 @@ class TestModes(Base):
         self.assertEqual(set(d["modes"]), {"full", "dev", "background"})
 
     def test_status_lists_running_and_waiting(self):
+        cq.set_mode(selected="background")      # one slot
         a = self.start("test", tag="a", gate="ga")
         self.assertTrue(self.until(lambda: self.seen("start", "a")))
         self.start("test", "-p", "q", tag="b")
