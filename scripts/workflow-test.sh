@@ -500,6 +500,273 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     eq "$rc" 1 "conflict: exit code"
     git -C "$wt" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "conflict: MERGE_HEAD left in the worktree" || true
     lock_free "conflict"
+
+    # ---- Integration line (#480): PostV1.1, its worktree, the delivery, the release, sync.
+    L=PostV1.1
+    lsetup() {   # dsb + the line created + issue 7 declared on it
+        dsb; "$here/line.sh" create $L > /dev/null
+        lwt="$sb/_stokesforge/line-$L"
+        sbsuivi claim 7 --line $L > /dev/null
+    }
+    lhead() { git -C "$lwt" rev-parse HEAD; }
+    rhead() { git -C "$sb/remote.git" rev-parse "refs/heads/$L"; }
+    lcommit() { git -C "$lwt" commit -q --allow-empty -m "$1"; git -C "$lwt" push -q origin $L; }
+    recline() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("line","-"))' "$SF_SUIVI_DIR/issues/$1.json"; }
+    chant() { ( cd "$sb/StokesForge" && "$here/chantier.sh" "$@" ); }
+
+    # create: the branch, the worktree, pushed from main; a second create is refused.
+    dsb; "$here/line.sh" create $L > "$sb/out" 2>&1 || fail "line create: $(cat "$sb/out")"
+    lwt="$sb/_stokesforge/line-$L"
+    eq "$(lhead)" "$(main_head)" "line starts at main"
+    eq "$(rhead)" "$(main_head)" "line pushed"
+    if "$here/line.sh" create $L > /dev/null 2>&1; then fail "second create accepted"; fi
+    lock_free "create"
+
+    # A declared line: the worktree starts from origin/<line>, the record carries it; rerun without
+    # the declaration puts the record back on main.
+    lcommit "line only"
+    export SF_ISSUE_TITLE="Nine"
+    SF_ISSUE_LINE_9=$L chant 9 > "$sb/out" 2>&1 || fail "chantier on a line: $(cat "$sb/out")"
+    eq "$(git -C "$sb/StokesForge" rev-parse feature/9-nine)" "$(lhead)" "worktree based on origin/$L"
+    eq "$(recline 9)" $L "record line"
+    grep -q "^Line $L: " "$sb/out" || fail "briefing line: $(cat "$sb/out")"
+    chant 9 > /dev/null
+    eq "$(recline 9)" - "declaration removed: record back on main"
+    eq "$(sbsuivi line 9)" main "line of 9"
+    # An unknown line is refused, nothing created (no fallback to main).
+    if SF_ISSUE_LINE_10=Nope chant 10 > "$sb/out" 2>&1; then fail "unknown line accepted"; fi
+    grep -q 'origin/Nope does not exist' "$sb/out" || fail "unknown line message: $(cat "$sb/out")"
+    [ ! -e "$sb/_stokesforge/feature10" ] && ! git -C "$sb/StokesForge" rev-parse -q --verify feature/10-nine > /dev/null || fail "unknown line created something"
+    unset SF_ISSUE_TITLE
+
+    # Delivery to the line: M on the line, pushed; main, origin/main and the main checkout untouched,
+    # even dirty and on another branch; the message path is relative.
+    lsetup; base="$(main_head)"
+    git -C "$sb/StokesForge" checkout -q -b other; echo dirt > "$sb/StokesForge/dirt"
+    DMSG=../msg deliver || fail "deliver to the line: $(cat "$sb/out")"
+    m="$(lhead)"
+    eq "$(git -C "$lwt" log -1 --format=%s)" "Merge #7: add x" "line merge message"
+    eq "$(git -C "$lwt" rev-list --parents -n 1 HEAD | wc -w)" 3 "line merge has two parents"
+    eq "$(rhead)" "$m" "line pushed at M"
+    eq "$(git -C "$sb/remote.git" rev-parse refs/heads/main)" "$base" "origin/main moved"
+    eq "$(git -C "$sb/StokesForge" rev-parse refs/heads/main)" "$base" "main moved"
+    eq "$(git -C "$sb/StokesForge" symbolic-ref --short HEAD)" other "main checkout moved"
+    [ -f "$sb/StokesForge/dirt" ] || fail "the main checkout lost its dirt"
+    eq "$(entry_field 7-1 commit)" "$m" "entry at M (on the line)"
+    lock_free "line delivery"
+    # The release tests the merge against the line and deletes the branch from the line worktree.
+    git -C "$sb/StokesForge" checkout -q main; rm "$sb/StokesForge/dirt"
+    ( cd "$sb/StokesForge" && "$here/chantier.sh" --release 7 > "$sb/rout" 2> "$sb/rerr" ) || fail "release of a line issue: $(cat "$sb/rerr")"
+    [ ! -e "$wt" ] && ! git -C "$sb/StokesForge" rev-parse -q --verify feature/7-x > /dev/null || fail "release left the worktree or the branch"
+    [ -d "$lwt" ] || fail "release removed the line worktree"
+    ! grep -q warning "$sb/rerr" || fail "a line release warned: $(cat "$sb/rerr")"
+    # Released only when merged into the LINE: merged into main alone it stays.
+    lsetup
+    git -C "$sb/StokesForge" merge -q --no-ff -m "Merge #7: direct" feature/7-x
+    if ( cd "$sb/StokesForge" && "$here/chantier.sh" --release 7 > /dev/null 2> "$sb/rerr" ); then fail "release accepted a branch not in the line"; fi
+    grep -q "not merged into $L" "$sb/rerr" || fail "release refusal: $(cat "$sb/rerr")"
+    [ -d "$wt" ] && git -C "$sb/StokesForge" rev-parse -q --verify feature/7-x > /dev/null || fail "refused release removed something"
+
+    # The line moved: it is merged into the branch (exit 3); the rerun merges once.
+    lsetup
+    git clone -q "$sb/remote.git" "$sb/other2"
+    git -C "$sb/other2" checkout -q $L
+    git -C "$sb/other2" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "line elsewhere"
+    git -C "$sb/other2" push -q origin $L
+    set +e; deliver; rc=$?; set -e
+    eq "$rc" 3 "line moved: exit code"
+    git -C "$sb/StokesForge" merge-base --is-ancestor "origin/$L" feature/7-x || fail "line moved: the branch lacks the line"
+    eq "$(entry_field 7-1 commit)" "-" "line moved: entry recorded"
+    lock_free "line moved"
+    deliver || fail "rerun after exit 3 on the line: $(cat "$sb/out")"
+    eq "$(git -C "$lwt" log --first-parent --merges --format=%s | grep -c '^Merge #7:')" 1 "one merge on the line"
+
+    # A closing keyword or --wait-tag on a line: refused before the lock.
+    lsetup; lbase="$(lhead)"
+    printf 'Merge #7: add x\n\nCloses #8\n' > "$sb/msgc"
+    if wdeliver 7 "$sb/msgc"; then fail "Closes on a line accepted"; fi
+    grep -q 'Refs #n' "$sb/out" || fail "closing refusal text: $(cat "$sb/out")"
+    if wdeliver --wait-tag rc 7 "$sb/msg"; then fail "--wait-tag on a line accepted"; fi
+    eq "$(lhead)" "$lbase" "refusals moved the line"
+    lock_free "line refusals"
+    [ ! -e "$SF_SUIVI_DIR/tagwait/7.json" ] || fail "a wait was recorded on a line"
+
+    # Main refuses a branch holding a line-only commit; a landed line is fine.
+    dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"; base="$(main_head)"
+    lcommit "line only"
+    git -C "$wt" merge -q --no-edit $L
+    refused "branch with a line-only commit"
+    grep -q 'not on main' "$sb/out" || fail "line-only message: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" merge -q --no-ff -m "Merge line" $L; git -C "$sb/StokesForge" push -q origin main   # the line lands
+    git -C "$wt" merge -q --no-edit main
+    deliver || fail "branch based on a landed line refused: $(cat "$sb/out")"
+
+    # sync: main reaches the line by a merge; a conflict aborts and leaves the line alone.
+    dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"
+    git clone -q "$sb/remote.git" "$sb/other3"
+    git -C "$sb/other3" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "main moves"
+    git -C "$sb/other3" push -q origin main
+    "$here/line.sh" sync $L > "$sb/out" 2>&1 || fail "sync: $(cat "$sb/out")"
+    git -C "$lwt" merge-base --is-ancestor "$(git -C "$sb/other3" rev-parse HEAD)" HEAD || fail "sync: main is not in the line"
+    eq "$(rhead)" "$(lhead)" "sync pushed"
+    lock_free "sync"
+    echo line > "$lwt/f"; git -C "$lwt" commit -q -am "edit f on the line"; git -C "$lwt" push -q origin $L
+    echo main > "$sb/other3/f"; git -C "$sb/other3" -c user.name=o -c user.email=o@o commit -q -am "edit f on main"
+    git -C "$sb/other3" push -q origin main
+    lbase="$(lhead)"
+    if "$here/line.sh" sync $L > "$sb/out" 2>&1; then fail "conflicting sync accepted"; fi
+    eq "$(lhead)" "$lbase" "conflicting sync moved the line"
+    git -C "$lwt" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "sync conflict: MERGE_HEAD left" || true
+    eq "$(rhead)" "$lbase" "conflicting sync pushed"
+    lock_free "sync conflict"
+
+    # ---- A declared line read from the GitLab label ligne-<line> (fake glab); sub-issues follow the parent.
+    mkdir -p "$tmp/labelbin" "$tmp/labels"
+    cat > "$tmp/labelbin/glab" <<'GL'
+#!/usr/bin/env bash
+# fake glab: `issue view N -F json` -> title and the labels in $FAKE_LABELS/N (a JSON array)
+[ "$1 $2" = "issue view" ] || exit 1
+lab="$(cat "$FAKE_LABELS/$3" 2> /dev/null || echo '[]')"
+printf '{"title": "Issue %s", "labels": %s}\n' "$3" "$lab"
+GL
+    chmod +x "$tmp/labelbin/glab"
+    lchant() { ( cd "$sb/StokesForge" && env -u SF_ISSUE_TITLE PATH="$tmp/labelbin:$PATH" FAKE_LABELS="$tmp/labels" "$here/chantier.sh" "$@" ); }
+    dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"; lcommit "line only"
+    echo '["bug","ligne-PostV1.1"]' > "$tmp/labels/12"
+    lchant 12 > "$sb/out" 2>&1 || fail "chantier with the label: $(cat "$sb/out")"
+    eq "$(recline 12)" $L "label declares the line"
+    eq "$(git -C "$sb/StokesForge" rev-parse feature/12-issue-12)" "$(lhead)" "label: worktree based on the line"
+    echo '["bug"]' > "$tmp/labels/12"
+    lchant 12 > /dev/null
+    eq "$(recline 12)" - "label removed, rerun: record back on main"
+    echo '["ligne-PostV1.1"]' > "$tmp/labels/20"; echo '[]' > "$tmp/labels/21"
+    echo '[{"iid": 21, "title": "Sub", "state": "opened", "description": "Parent: #20"}]' > "$sb/sub.json"
+    SF_ISSUES_JSON="$sb/sub.json" SF_ISSUE_BODY_20="- #21" lchant 20 --start 21 > "$sb/out" 2>&1 || fail "sub-issue of a line parent: $(cat "$sb/out")"
+    eq "$(git -C "$sb/StokesForge" rev-parse feature/21-sub)" "$(lhead)" "sub-issue follows the parent's line"
+    eq "$(sbsuivi line 21)" $L "sub-issue line in the record"
+    echo '["ligne-PostV1.1","ligne-Other"]' > "$tmp/labels/22"
+    if lchant 22 > /dev/null 2>&1; then fail "two ligne-* labels accepted"; fi
+
+    # ---- line.sh land
+    mkdir -p "$tmp/landbin"
+    cat > "$tmp/landbin/glab" <<'GL'
+#!/usr/bin/env bash
+# fake glab for `api`: issue state in $FAKE_GL/state-N, labelled issues in $FAKE_GL/labelled, calls logged
+d="$FAKE_GL"; echo "$*" >> "$d/calls"
+shift; method=GET; path=""; fields=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in --method) method="$2"; shift 2 ;; -f) fields+=("$2"); shift 2 ;; *) path="$1"; shift ;; esac
+done
+case "$path" in
+*"/issues?labels="*) printf '[%s]\n' "$(sed 's/[0-9][0-9]*/{"iid": &}/g; s/} {/}, {/g' "$d/labelled")" ;;
+*/notes) n="${path%/notes}"; n="${n##*/}"; echo "$n ${fields[*]}" >> "$d/notes"; echo '{}' ;;
+*/issues/*)
+    n="${path##*/}"
+    if [ "$method" = PUT ]; then
+        for f in "${fields[@]}"; do
+            case "$f" in
+            state_event=close) [ ! -e "$d/failclose-$n" ] || exit 1; echo closed > "$d/state-$n" ;;
+            remove_labels=*) sed -i "s/\b$n\b//" "$d/labelled" ;;
+            esac
+        done
+        echo '{}'
+    else
+        printf '{"state": "%s"}\n' "$(cat "$d/state-$n" 2> /dev/null || echo opened)"
+    fi ;;
+esac
+GL
+    chmod +x "$tmp/landbin/glab"
+    land() { ( cd "$sb/StokesForge" && PATH="$tmp/landbin:$PATH" FAKE_GL="$sb/gl" "$here/line.sh" land $L ) > "$sb/out" 2>&1; }
+    lland_setup() {   # a line holding #7 and #8, the final tag on main, the trial OK on the line
+        lsetup; mkdir -p "$sb/gl"; echo "7 8 12" > "$sb/gl/labelled"
+        wt8="$sb/_stokesforge/feature8"
+        git worktree add -q "$wt8" -b feature/8-y --no-track main
+        git -C "$wt8" commit -q --allow-empty -m work8
+        sbsuivi claim 8 --line $L > /dev/null
+        printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 8"}' > "$sb/e8.json"
+        sbsuivi test add 8 "$sb/e8.json" > /dev/null
+        deliver || fail "land setup, #7: $(cat "$sb/out")"
+        git -C "$wt8" merge -q --no-edit $L
+        echo 'Merge #8: add y' > "$sb/msg8"
+        DN=8 DMSG="$sb/msg8" deliver || fail "land setup, #8: $(cat "$sb/out")"
+        printf '{"title":"whole line","steps":["s"],"expect":"e","try":"scripts/try.sh PostV1.1"}' > "$sb/eline.json"
+        sbsuivi test add 480 "$sb/eline.json" > /dev/null
+        git -C "$sb/StokesForge" tag v1.1.0 main
+    }
+    trial_set() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]=sys.argv[2]; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/480-1.json" "$1"; }
+    trial_ok() { trial_set ok; }
+    notes_of() { grep -c "^$1 " "$sb/gl/notes" 2> /dev/null || true; }
+
+    # Refusals: no tag, a tag off main, an -rc tag only (the trial is OK, so only the tag can refuse), then a
+    # trial not OK. Main and the line stay as they are, GitLab is not called.
+    lland_setup; base="$(main_head)"; lbase="$(lhead)"; trial_ok
+    git -C "$sb/StokesForge" tag -d v1.1.0 > /dev/null
+    if land; then fail "land without the tag accepted"; fi
+    grep -q 'does not exist' "$sb/out" || fail "no-tag message: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" tag v1.1.0 "$lbase"       # on the line only
+    if land; then fail "land with a tag off main accepted"; fi
+    grep -q 'not on main' "$sb/out" || fail "tag off main message: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" tag -d v1.1.0 > /dev/null
+    git -C "$sb/StokesForge" tag v1.1.0-rc1 main
+    if land; then fail "land with an -rc tag only accepted"; fi
+    grep -q 'does not exist' "$sb/out" || fail "rc-only message: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" tag v1.1.0 main
+    trial_set todo
+    if land; then fail "land with the trial not OK accepted"; fi
+    grep -q 'not OK yet' "$sb/out" || fail "trial refusal text: $(cat "$sb/out")"
+    eq "$(main_head)" "$base" "refused land moved main"
+    eq "$(lhead)" "$lbase" "refused land moved the line"
+    lock_free "land refusals"
+    [ ! -e "$sb/gl/calls" ] || fail "a refused land called GitLab: $(cat "$sb/gl/calls")"
+
+    # main moved since the line was last synced: it is merged into the line, pushed, exit 3, main untouched.
+    git clone -q "$sb/remote.git" "$sb/other4"
+    git -C "$sb/other4" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "main moves"
+    git -C "$sb/other4" push -q origin main; trial_ok
+    base="$(git -C "$sb/remote.git" rev-parse refs/heads/main)"
+    set +e; land; rc=$?; set -e
+    eq "$rc" 3 "land with main absent from the line: exit code ($(cat "$sb/out"))"
+    eq "$(git -C "$sb/remote.git" rev-parse refs/heads/main)" "$base" "land exit 3 moved origin/main"
+    git -C "$lwt" merge-base --is-ancestor "$base" HEAD || fail "land exit 3: main is not in the line"
+    eq "$(rhead)" "$(lhead)" "land exit 3 pushed the line"
+    lock_free "land exit 3"
+    [ ! -e "$sb/gl/calls" ] || fail "exit 3 called GitLab"
+
+    # Happy path, with a failure while closing the second issue: rerun finishes, nothing closed twice.
+    touch "$sb/gl/failclose-8"
+    if land; then fail "land with a GitLab failure accepted"; fi
+    m="$(git -C "$sb/remote.git" rev-parse refs/heads/main)"
+    eq "$(git -C "$sb/remote.git" log -1 --format=%s refs/heads/main)" "Merge $L: land the integration line" "land merge message"
+    eq "$(git -C "$sb/remote.git" rev-list --parents -n 1 refs/heads/main | wc -w)" 3 "landing merge has two parents"
+    eq "$(cat "$sb/gl/state-7")" closed "#7 closed"
+    [ ! -e "$sb/gl/state-8" ] || fail "#8 closed despite the failure"
+    lock_free "land partial"
+    [ ! -e "$sb/_stokesforge/land-tmp" ] || fail "temporary worktree left"
+    rm "$sb/gl/failclose-8"
+    land || fail "land rerun: $(cat "$sb/out")"
+    eq "$(git -C "$sb/remote.git" rev-parse refs/heads/main)" "$m" "rerun merged again"
+    eq "$(cat "$sb/gl/state-8")" closed "#8 closed by the rerun"
+    eq "$(notes_of 7)" 1 "#7 commented twice"
+    grep -q "$m" "$sb/gl/notes" || fail "the comment does not cite the merge commit"
+    [ ! -e "$sb/gl/state-12" ] || fail "an issue the line did not deliver was closed"
+    eq "$(tr -d ' \n' < "$sb/gl/labelled")" "" "label left on an issue"
+    eq "$(sbsuivi line 7)" main "records keep the line"
+    [ ! -e "$lwt" ] && ! git -C "$sb/StokesForge" rev-parse -q --verify "refs/heads/$L" > /dev/null || fail "line worktree or branch left"
+    ! git -C "$sb/remote.git" rev-parse -q --verify "refs/heads/$L" > /dev/null || fail "remote line branch left"
+    eq "$(git -C "$sb/StokesForge" rev-parse main)" "$m" "local main not in step"
+    lock_free "land"
+
+    # try.sh on a line: its worktree is built and opened, the log is against main; an unknown line is refused.
+    dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"; lcommit "line only"
+    out="$( cd "$sb/StokesForge" && "$here/try.sh" --dry-run $L )" || fail "try.sh on a line"
+    grep -q "CARGO_TARGET_DIR=$lwt/target" <<< "$out" || fail "try.sh line target: $out"
+    grep -q 'line only' <<< "$out" || fail "try.sh line log: $out"
+    if ( cd "$sb/StokesForge" && "$here/try.sh" --dry-run Nope ) > /dev/null 2>&1; then fail "try.sh on an unknown line accepted"; fi
+    git -C "$lwt" checkout -q -b side; git -C "$lwt" commit -q --allow-empty -m side; git -C "$lwt" checkout -q $L
+    git -C "$lwt" merge -q --no-ff -m "Merge #99: marker" side; git -C "$lwt" push -q origin $L
+    sbsuivi claim 7 --line $L > /dev/null
+    out="$( cd "$sb/StokesForge" && "$here/try.sh" --dry-run 7 )" || fail "try.sh on a line issue"
+    grep -q "== last merges on $L" <<< "$out" && grep -q "not yet on $L" <<< "$out" && grep -q 'Merge #99: marker' <<< "$out" || fail "try.sh issue log against the line: $out"
 )
 
 # No inconsistency left (duplicate colour, record without worktree, worktree without record).
