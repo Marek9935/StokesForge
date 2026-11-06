@@ -2883,7 +2883,7 @@ class TestPage(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_build_line(self):
-        cq = {"full": {"slots": 3, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None},
+        cq = {"full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None},
               "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11},
               "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 8}}
         bq = {"installed": True, "stale": False, "selected": "background", "effective": "background", "auto": False,
@@ -2895,7 +2895,7 @@ class TestPage(unittest.TestCase):
         self.assertEqual(l["desc"], "1 build à la fois, 8 cœurs, priorité très basse")
         self.assertEqual(l["now"], "Aucun build en cours.")
         self.assertEqual(l["auto_note"], "")
-        self.assertEqual(self.build_line(dict(bq, effective="full"))["desc"], "3 builds à la fois, tous les cœurs, priorité normale")
+        self.assertEqual(self.build_line(dict(bq, effective="full"))["desc"], "2 builds à la fois, tous les cœurs, priorité normale")
         self.assertEqual(self.build_line(dict(bq, effective="dev"))["desc"], "2 builds à la fois, 11 cœurs chacun, priorité basse")
         capped = dict(cq, background=dict(cq["background"], cpu_quota_pct=50))
         self.assertEqual(self.build_line(dict(bq, modes=capped))["desc"], "1 build à la fois, 8 cœurs, priorité très basse, plafond 50 %")

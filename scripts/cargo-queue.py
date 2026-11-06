@@ -30,10 +30,11 @@ import time
 # memory_high: MemoryHigh of the slice. fallback_nice: nice value when no systemd scope is possible.
 # Measured 2026-11-06 (clean workspace build, power-saver 20 W): a 50 % CPUQuota was slower, used more
 # energy and disturbed frames more than `-j 11`; E-cores only was the slowest; MemoryHigh 12G cost no
-# time on a clean test build (anon memory of one test build is 5-6 GiB, the rest is cache). Table in #476.
+# time on a clean test build (anon memory of one test build is 5-6 GiB, the rest is cache). Two builds at
+# once gain 14-19 % over two in a row; a third gains 6 % on plain builds and nothing on test builds. Table in #476.
 # cpu_quota_pct and cpus stay as knobs, unused by the current modes.
 MODES = {
-    "full": {"slots": 3, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None, "memory_high": "20G", "fallback_nice": 0},
+    "full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None, "memory_high": "20G", "fallback_nice": 0},
     "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11, "memory_high": "20G", "fallback_nice": 10},
     "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 8, "memory_high": "12G", "fallback_nice": 19},
 }
