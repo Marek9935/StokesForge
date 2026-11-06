@@ -2311,6 +2311,6 @@ import-format-skipped-section = Lignes ignorées
 # Pourquoi un geste fait hors de la fenêtre principale est refusé (#471).
 dialog-name-graph-properties = Propriétés du graphe
 dialog-name-analysis = Analyse
-refused-dialog-editing = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La valider ou l'annuler d'abord
-refused-dialog-close = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La fermer d'abord
+refused-dialog-editing = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La valider ou l'annuler d'abord
+refused-dialog-close = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La fermer d'abord
 refused-dialog-question = Une question attend dans la fenêtre principale. Y répondre d'abord
