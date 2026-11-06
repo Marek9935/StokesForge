@@ -847,6 +847,19 @@ Ruled out: the process-wide language (no in-memory test leaves English), an over
 
 If it comes back: read the failure message in the CI log. It gives the duration, the frame count, the page on screen, the saved folder and the state of the disk probe. Then reopen #447 with that message. Do not loosen the test before reading it.
 
+## Local build queue and build modes (#476)
+
+`scripts/cargo-queue.py` is a `cargo` shim for the development PC (installed by the user with `scripts/cargo-queue-install.sh`, removed by `scripts/cargo-queue-uninstall.sh`; CI never has it). Heavy subcommands (`build`, `check`, `clippy`, `test`, `nextest`, `bench`, `run`...) wait in a local queue, then run in the user slice `sfbuild.slice`. `fmt`, `metadata`, `--version`, `--help` and `rust-analyzer` calls pass straight through; `SF_CARGO_QUEUE=off cargo ...` skips it by hand, `SF_CARGO_QUEUE=first` goes ahead of the other waiters. The three modes (`full`, `dev`, `background`) and their numbers live only in the `MODES` table of the script; the user switches them on the tracking page (`references/suivi.md`) or with `cargo-queue mode ...`. `scripts/cargo-queue-test.py` tests it with a fake cargo, a fake `systemd-run` and `systemctl`, and real `flock`s (in the `fmt` job).
+
+What it changes for tests and for reading times:
+
+- **Time-sensitive tests** (those that measure a duration, #447, #469) may fail while the PC is busy or the mode is `background`. Read the failure first (its message gives the measure); do not loosen a test up front.
+- **The queue wait counts** in `time-report.py`'s "cargo test" and build time.
+- **Foreground limit**: a foreground Bash command is cut at 10 minutes, waiting included. A heavy cargo goes in the background with its log in a file.
+- **Lock order**: the `main` lock (`scripts/main-lock.sh`) first, then the queue; the queue never waits on `main`. `scripts/deliver.sh` may wait in the queue while it holds the `main` lock.
+- `scripts/try.sh` builds with `SF_CARGO_QUEUE=off`: a trial is for the user at the PC and must not wait behind agent builds.
+- The build runs at the slice weight, not `nice`: an unprivileged process cannot lower its nice value again, so a build could not return to full speed when the mode changes.
+
 ## Time report (#452)
 
 `python3 scripts/time-report.py [--since DATE] [--until DATE] [--logs DIR] [--power FILE] [--json]` says where the working time of the Claude sessions goes: per activity (model, tool, cargo test, wait for the user, wait for CI, ...) and per issue. Dates are UTC (`2026-10-31` or `2026-10-31T20:00`). `--logs` defaults to the session logs of this repository's main checkout. Privacy: the logs are private, the tool prints aggregates only (hours, counts, issue numbers), never a prompt, reply, command, title or description; a malformed line is skipped silently.

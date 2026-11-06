@@ -15,6 +15,8 @@
 # --dry-run prints the build and run commands without running them.
 # --release (#474) builds with `cargo build --release` and runs the release binary of the
 # same worktree (debug stays the default, for its build time; debug is much slower to draw).
+# The build skips the cargo queue (#476): a trial is for the user at the PC, who must not wait
+# behind agent builds (SF_CARGO_QUEUE=off on the build command only; the app itself is unchanged).
 set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
 
@@ -58,10 +60,10 @@ fi
 
 export CARGO_TARGET_DIR="$wt/target"
 if [ "$release" = 1 ]; then
-    build=(cargo build --release -p stokesforge-app --manifest-path "$wt/Cargo.toml")
+    build=(env SF_CARGO_QUEUE=off cargo build --release -p stokesforge-app --manifest-path "$wt/Cargo.toml")
     run=("$wt/target/release/stokesforge-app")
 else
-    build=(cargo build -p stokesforge-app --manifest-path "$wt/Cargo.toml")
+    build=(env SF_CARGO_QUEUE=off cargo build -p stokesforge-app --manifest-path "$wt/Cargo.toml")
     run=("$wt/target/debug/stokesforge-app")
 fi
 if [ "$dry" = 1 ]; then

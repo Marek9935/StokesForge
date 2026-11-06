@@ -147,13 +147,16 @@ out="$("$here/try.sh" --dry-run 2)"
 echo "$out" | grep -q "CARGO_TARGET_DIR=$tmp/_stokesforge/feature2/target" || fail "try target: $out"
 grep -q 'STOKESFORGE_DEMO=1' "$here/try.sh" || fail "try.sh opens the demo"
 echo "$out" | grep -q -- "--manifest-path $tmp/_stokesforge/feature2/Cargo.toml" || fail "try manifest"
+# The trial skips the cargo queue (#476), in debug and in release, on the build command only.
+echo "$out" | grep -q 'would build: env SF_CARGO_QUEUE=off cargo build -p stokesforge-app' || fail "try queue bypass: $out"
+echo "$out" | grep -q 'would run: .*SF_CARGO_QUEUE' && fail "try run carries the bypass"
 # --release (#474), before or after the target: release build and binary; absent, neither.
 echo "$out" | grep -q -- '--release' && fail "try dry-run mentions release"
 echo "$out" | grep -q 'target/release' && fail "try dry-run names the release binary"
 for rel in "--dry-run --release 2" "--dry-run 2 --release" "--release --dry-run 2"; do
     # shellcheck disable=SC2086
     rout="$("$here/try.sh" $rel)"
-    echo "$rout" | grep -q 'would build: cargo build --release' || fail "try $rel build: $rout"
+    echo "$rout" | grep -q 'would build: env SF_CARGO_QUEUE=off cargo build --release' || fail "try $rel build: $rout"
     echo "$rout" | grep -q "would run: $tmp/_stokesforge/feature2/target/release/stokesforge-app" || fail "try $rel run: $rout"
 done
 if "$here/try.sh" --dry-run 99 2> "$tmp/err"; then fail "try.sh 99 should fail"; fi
