@@ -3485,6 +3485,22 @@ class TestPage(unittest.TestCase):
         self.assertEqual(P("note", "", []), {"comment": "", "images": []})                       # removing the last one is sent
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_failed_send_from_the_box_keeps_the_box_its_text_and_its_images(self):
+        st = '{openBack:{id:"7-1",mode:"retour"},drafts:{"7-1":"vu","7-2":"x"},imgDrafts:{"7-1":{names:["a.png"]},"7-2":{names:[]}}}'
+        kept = self.img_js("boxAfterSend(false,%s,'7-1')" % st)
+        self.assertEqual(kept["openBack"]["id"], "7-1")
+        self.assertEqual(kept["drafts"]["7-1"], "vu")
+        self.assertEqual(kept["imgDrafts"]["7-1"]["names"], ["a.png"])
+        done = self.img_js("boxAfterSend(true,%s,'7-1')" % st)
+        self.assertIsNone(done["openBack"])
+        self.assertNotIn("7-1", done["drafts"])
+        self.assertNotIn("7-1", done["imgDrafts"])
+        self.assertIn("7-2", done["drafts"])                                                   # another entry's draft stays
+        body = re.search(r"async function boxSend\(.*?\n}\n", self.page(), re.S).group(0)
+        self.assertNotIn("delete drafts", body)                                                # nothing is cleared before the answer
+        self.assertNotIn("openBack=null", body)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_image_urls_encode_the_id_and_refuse_a_name_outside_the_pattern(self):
         ok = "0123456789abcdef01234567.png"
         self.assertEqual(self.img_js("imgUrl('7-1', %s)" % json.dumps(ok)), "/api/tests/7-1/images/" + ok)

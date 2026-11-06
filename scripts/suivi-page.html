@@ -396,6 +396,14 @@ function imgPatch(kind,text,names){
   if(kind==='ok')return {status:'ok',comment:v,images:names.slice()};
   return {comment:v,images:names.slice()};
 }
+/* After a send from the box: st = {openBack, drafts, imgDrafts}. Only a successful send closes the box and
+   drops its drafts; a failed one leaves all three, so the text and thumbnails can be sent again. */
+function boxAfterSend(ok,st,id){
+  if(!ok)return st;
+  if(st.openBack&&st.openBack.id===id)st.openBack=null;
+  delete st.drafts[id];delete st.imgDrafts[id];
+  return st;
+}
 /*IMAGES-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
@@ -541,8 +549,8 @@ async function boxSend(x,kind){
   const text=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
   const patch=imgPatch(kind,text,d.names);
   if(!patch){if(sv)sv.disabled=false;const t=$('tx-'+x.id);if(t)t.focus();return;}
-  openBack=null;delete drafts[x.id];delete imgDrafts[x.id];
-  send(x,patch);
+  const ok=await send(x,patch,()=>{const st=boxAfterSend(true,{openBack,drafts,imgDrafts},x.id);openBack=st.openBack;});
+  if(!ok){imgNote('Pas enregistré : ton texte et tes captures sont gardés, réessaie dans un instant.');const b=$('sv-'+x.id);if(b)b.disabled=false;}   // the box is still there
 }
 let noteTimer=null;
 function imgNote(text){
@@ -705,13 +713,16 @@ async function load(){
     render();
   }catch(e){failed=true;$('sub').textContent='Le serveur ne répond pas. Il tourne ? systemctl --user status stokesforge-suivi';}
 }
-async function send(x,patch){
+async function send(x,patch,onOk){
+  let ok=true;
   Object.assign(x,patch);renderTests();
   try{
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
-  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';}
+    if(onOk)onOk();
+  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';ok=false;}
   etag=null;load();
+  return ok;
 }
 async function askMerge(n){
   try{
