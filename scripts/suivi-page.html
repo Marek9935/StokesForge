@@ -87,6 +87,17 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .ciline.green{border-color:var(--ok);background:var(--ok-soft)}
 .ciline.red{border-color:var(--bad);background:var(--bad-soft)}
 .ciline.pending,.ciline.unknown{border-color:var(--warn);background:var(--warn-soft)}
+.buildline{border:2px solid var(--line);border-radius:12px;padding:10px 16px;display:flex;flex-direction:column;gap:8px}
+.buildline[hidden]{display:none}
+.buildline .row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.seg{display:flex;flex-wrap:wrap;gap:8px}
+.seg button{padding:6px 14px}
+.seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.buildline label{display:inline-flex;align-items:center;gap:6px;font-weight:700;cursor:pointer}
+.buildline p{margin:0}
+#bnow{white-space:pre-line}
+.buildline .warn{color:var(--warn);font-weight:700}
+.buildline.off{border-style:dashed;color:var(--muted)}
 .empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
 details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
 .note{color:var(--muted);font-size:.9rem}
@@ -119,6 +130,17 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     <button type="button" id="refresh">Actualiser</button>
   </header>
   <div class="ciline" id="ciline" hidden role="status"></div>
+  <section class="buildline" id="buildline" hidden aria-label="Mode de build">
+    <div class="row">
+      <div class="seg" id="bmodes" role="group" aria-label="Mode de build"></div>
+      <label><input type="checkbox" id="bauto"> Auto</label>
+    </div>
+    <p id="bauto-note" class="note" hidden></p>
+    <p id="bprofile-note" class="note" hidden></p>
+    <p id="bdesc"></p>
+    <p id="bnow" class="note"></p>
+    <p id="bwarn" class="warn" hidden></p>
+  </section>
   <div class="tabs" role="tablist" aria-label="Pages">
     <button class="tab" role="tab" id="tab-attente" aria-controls="p-attente" type="button">En attente <span class="count" id="n-pending">–</span></button>
     <button class="tab" role="tab" id="tab-suivi" aria-controls="p-suivi" type="button">Suivi</button>
@@ -199,6 +221,72 @@ function renderCi(){
   const el=$('ciline'),l=ciLine(S&&S.ci);
   if(!l){el.hidden=true;return;}
   el.hidden=false;el.className='ciline '+l.cls;el.textContent=l.text;
+}
+/*BUILDLINE-START*/
+const BUILD_LABELS={full:'FullIA',dev:'Développement',background:'Arrière-plan'};
+const BUILD_WHY={away:'absent',battery:'sur batterie'};
+/* Grey line when the power profile of FullIA could not be read, set or put back (#477). */
+const PROFILE_NOTES={'read-failed':'Profil d’énergie illisible : laissé tel quel.',
+  'write-failed':'Profil d’énergie refusé : laissé tel quel.',
+  'restore-failed':'Profil d’énergie non rétabli : nouvel essai dans 30 s.'};
+/* One short sentence for a mode, from the table of scripts/cargo-queue.py (MODES) so it cannot drift. */
+function modeSentence(m){
+  if(!m)return '';
+  const cores=m.jobs?(m.slots>1?m.jobs+' cœurs chacun':m.jobs+' cœurs'):'tous les cœurs';
+  const prio=m.cpu_weight>=100?'normale':(m.cpu_weight<=10?'très basse':'basse');
+  const parts=[m.slots+' build'+(m.slots>1?'s':'')+' à la fois',cores,'priorité '+prio];
+  if(m.cpu_quota_pct!=null)parts.push('plafond '+m.cpu_quota_pct+' %');
+  if(m.cpus==='ecore')parts.push('cœurs économes');
+  if(m.profile)parts.push('profil '+m.profile+' sur secteur');
+  return parts.join(', ');
+}
+/* What the build row shows. bq = S.build_queue, nowSec = Date.now()/1000. */
+function buildLine(bq,nowSec){
+  if(!bq||typeof bq!=='object')return null;
+  if(!bq.installed)return {installed:false,note:'File de builds non installée : lance scripts/cargo-queue-install.sh'};
+  const modes=Object.keys(BUILD_LABELS).filter(k=>bq.modes&&bq.modes[k]).map(k=>({id:k,label:BUILD_LABELS[k],on:k===bq.selected}));
+  const chosen=bq.effective&&bq.effective!==bq.selected&&bq.auto;
+  const run=Array.isArray(bq.running)?bq.running:[],wait=Array.isArray(bq.waiting)?bq.waiting:[];
+  /* One line per running build: several run at once in FullIA and Développement. */
+  let now=run.map(r=>{
+    const mins=Math.max(0,Math.floor((nowSec-(r.start||nowSec))/60));
+    const dir=String(r.cwd||'').split('/').filter(Boolean).pop()||'?';
+    return 'Build en cours : '+dir+' · '+(r.command||'?')+' · '+(mins<1?'moins d’1 min':mins+' min');
+  }).join('\n')||'Aucun build en cours.';
+  if(wait.length)now+='\n'+wait.length+' en attente';
+  return {installed:true,modes:modes,auto:!!bq.auto,
+    profile_note:PROFILE_NOTES[bq.profile_note]||'',
+    auto_note:chosen?'Auto : '+BUILD_LABELS[bq.effective]+' ('+(BUILD_WHY[bq.why]||bq.why)+')':'',
+    desc:modeSentence(bq.modes&&bq.modes[bq.effective]),now:now,
+    warn:bq.stale?'La copie installée est périmée : relance scripts/cargo-queue-install.sh':''};
+}
+/*BUILDLINE-END*/
+function renderBuild(){
+  const el=$('buildline'),l=buildLine(S&&S.build_queue,Date.now()/1000);
+  if(!l){el.hidden=true;return;}
+  el.hidden=false;
+  if(!l.installed){
+    el.className='buildline off';$('bmodes').textContent='';$('bauto').parentNode.hidden=true;
+    $('bauto-note').hidden=true;$('bprofile-note').hidden=true;$('bdesc').textContent=l.note;$('bnow').textContent='';$('bwarn').hidden=true;return;
+  }
+  el.className='buildline';$('bauto').parentNode.hidden=false;
+  const seg=$('bmodes');seg.textContent='';
+  l.modes.forEach(m=>{
+    const b=document.createElement('button');b.type='button';b.textContent=m.label;
+    b.setAttribute('aria-pressed',m.on?'true':'false');b.onclick=()=>sendBuild({mode:m.id});seg.appendChild(b);
+  });
+  $('bauto').checked=l.auto;
+  const an=$('bauto-note');an.hidden=!l.auto_note;an.textContent=l.auto_note;
+  const pn=$('bprofile-note');pn.hidden=!l.profile_note;pn.textContent=l.profile_note;
+  $('bdesc').textContent=l.desc;$('bnow').textContent=l.now;
+  const w=$('bwarn');w.hidden=!l.warn;w.textContent=l.warn;
+}
+async function sendBuild(patch){
+  try{
+    const r=await fetch('/api/build-mode',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Mode de build inchangé : réessaie dans un instant.';}
+  etag=null;load();
 }
 /*CARDLINE-START*/
 const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
@@ -423,7 +511,7 @@ function render(){
   const n=S.pending;const pc=$('n-pending');pc.textContent=n;pc.className='count'+(n?' hot':'');
   const taken=S.colours.filter(c=>!c.free).length;
   $('sub').textContent=(n?n+' chose'+(n>1?'s':'')+' à faire':'Rien ne t’attend')+' · '+taken+' couleur'+(taken>1?'s':'')+' prise'+(taken>1?'s':'')+' sur 6';
-  renderCi();renderTests();renderSuivi();
+  renderCi();renderBuild();renderTests();renderSuivi();
 }
 
 /* ---- tabs ---- */
@@ -492,6 +580,8 @@ function stopPolling(){if(timer!=null){clearInterval(timer);timer=null;}}
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'){etag=null;load();startPolling();}else stopPolling();
 });
+$('bauto').onchange=()=>sendBuild({auto:$('bauto').checked});
+setInterval(()=>{if(document.visibilityState==='visible')renderBuild();},30000);
 $('refresh').onclick=()=>{etag=null;load();};
 load();
 if(document.visibilityState==='visible')startPolling();
