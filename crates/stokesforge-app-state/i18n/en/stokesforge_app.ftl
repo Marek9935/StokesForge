@@ -325,7 +325,6 @@ tabs-previous-worksheets = Show previous sheets
 tabs-next-worksheets = Show next sheets
 
 detached-workbook-unavailable = Workbook unavailable in this window. Reattach it to the main window
-detached-note-unavailable = Note unavailable in this window. Reattach it to the main window
 
 
 window-kind-workbook = Workbook

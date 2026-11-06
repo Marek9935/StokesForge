@@ -754,7 +754,7 @@ pub(super) fn panel_header(
 /// and for the width reserved for the title (#50).
 pub(super) fn shows_detach_and_maximize(placement: HeaderPlacement, tab: Option<Tab>) -> bool {
     match placement {
-        HeaderPlacement::Floating => matches!(tab, Some(Tab::Book(_) | Tab::Graph(_))),
+        HeaderPlacement::Floating => tab.is_some_and(Tab::is_detachable),
         HeaderPlacement::Detached => true,
         HeaderPlacement::Dialog => false,
     }
@@ -832,13 +832,11 @@ pub(super) fn window_header(
     ) {
         actions.close = true;
     }
-    // In MDI, detach/maximize stay reserved to Book/Graph (Matrix/Note
-    // have no such UI path today, even though `show_detached_tabs` already
-    // handles them generically). In a detached window, the four kinds
-    // keep reattach/maximize in all circumstances — it is what
+    // In MDI, detach/maximize are reserved to the detachable kinds
+    // (`Tab::is_detachable`: workbook and graph, #473). A detached window
+    // keeps reattach/maximize in all circumstances — it is what
     // replaces the OS's native title bar removed with it
-    // (`.with_decorations(false)`), so no question of losing a
-    // capability for some tabs.
+    // (`.with_decorations(false)`).
     let show_detach_and_maximize = shows_detach_and_maximize(placement, tab);
     if show_detach_and_maximize {
         let (detach_icon, detach_tooltip) = match placement {
@@ -1449,7 +1447,7 @@ pub(super) mod tests {
             (Some(Tab::Book(id)), HeaderPlacement::Floating),
             (Some(Tab::Matrix(id)), HeaderPlacement::Floating),
             (Some(Tab::Note(id)), HeaderPlacement::Floating),
-            (Some(Tab::Matrix(id)), HeaderPlacement::Detached),
+            (Some(Tab::Book(id)), HeaderPlacement::Detached),
             (Some(Tab::Graph(id)), HeaderPlacement::Detached),
             (None, HeaderPlacement::Dialog),
         ] {

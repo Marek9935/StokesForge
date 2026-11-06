@@ -77,7 +77,8 @@
 //!
 //! [`StokesForgeApp::detach_tab`]/[`StokesForgeApp::reattach_tab`]/
 //! [`StokesForgeApp::show_detached_tabs`] generalize the mechanism above to
-//! [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`] and [`Tab::Note`] — a
+//! [`Tab::Book`] and [`Tab::Graph`] only ([`Tab::is_detachable`], #473: a
+//! note and a matrix stay in the main window) — a
 //! "Detach into a window" button in the header of each floating
 //! window (see § Confined floating windows), symmetric with
 //! "Reattach to the main window" on the detached window side. Several
@@ -90,18 +91,17 @@
 //! B8 (`retours-2026-09-23-bugs.md`): as for a shrunken floating
 //! window (B4), a `Ui` whose children exceed its
 //! `max_rect` still paints them. [`StokesForgeApp::show_detached_tabs`] thus puts
-//! the content of the four kinds in a single bounded, clipped child `Ui`,
+//! the content of the two kinds in a single bounded, clipped child `Ui`,
 //! right before the `match` that routes to each of them.
 //!
 //! # Why no `ViewModel` per content kind as for the PM
 //!
 //! The PM has only one form of content (a read-only tree); the
-//! four window kinds here are frankly different (virtualized editable
-//! grid, interactive graph with shape cache, editable text,
-//! placeholder). Rather than four disjoint `ViewModel`/`Requests`
+//! two window kinds here are frankly different (virtualized editable
+//! grid, interactive graph with shape cache). Rather than two disjoint `ViewModel`/`Requests`
 //! to make coexist in [`StokesForgeApp::detached_tabs`],
 //! [`DetachedTabViewModel`] is a single structure carrying one field per
-//! content kind (`view_state` for a workbook or a note,
+//! content kind (`view_state` for a workbook,
 //! `graph_view` for a graph) — the fields
 //! unused for the kind of `Tab` it serves simply stay at their
 //! default value. Fewer types, a single `Arc<Mutex<_>>` per detached
@@ -143,9 +143,7 @@
 //! in both modes: tabs, headers, widths and gestures can no
 //! longer drift apart in two implementations. Mutating actions rejoin
 //! the main loop after [`AppState::adopt_detached_book_view`]; they
-//! thus keep the single undoable-command path. The note follows the same
-//! pattern: [`note_contents`] on the local view, whose input buffer
-//! ([`AppState::note_editing`]) stays specific to the window.
+//! thus keep the single undoable-command path.
 //!
 //! [`Tab::Graph`] escapes this limit: [`stokesforge_render_egui::GraphView`]
 //! has no global lock on `AppState` to respect (its shape cache and
@@ -156,10 +154,6 @@
 //! duration of the detaching ([`StokesForgeApp::detach_tab`]/[`StokesForgeApp::
 //! reattach_tab`]) to stay an `Arc<Mutex<_>>` the closure can capture
 //! without duplicating the cache.
-//!
-//! [`Tab::Matrix`] has no state to carry (placeholder):
-//! [`matrix_contents`] reads only the tree and is used as is by both
-//! windows.
 //!
 //! # OM and console (#100)
 //!
@@ -183,7 +177,6 @@ use stokesforge_app_state::panel_layout::{DetachAt, PanelKind};
 use stokesforge_app_state::state::{Action, AppState, ProjectTreeNode};
 use stokesforge_app_state::tr;
 
-use super::contents::{matrix_contents, note_contents};
 use super::figure_copy::request_figure_copy;
 use super::file_drop::{begin_file_drop, finish_file_drop};
 use super::graph_window::graph_view_contents;
@@ -455,7 +448,7 @@ pub(super) struct DetachedTab {
 }
 
 /// What a detached window needs to paint. A single structure for
-/// the four detachable kinds rather than four disjoint `ViewModel`s —
+/// the two detachable kinds rather than two disjoint `ViewModel`s —
 /// see the top doc of the module for the trade-off. Each field, except
 /// `snapshot`, makes sense only for one particular kind of [`Tab`]; the
 /// comment says which.
@@ -465,9 +458,9 @@ pub(super) struct DetachedTabViewModel {
     /// only before the very first synchronization (never observable
     /// from outside [`StokesForgeApp::detach_tab`], which sets it at once).
     pub(super) snapshot: Option<Snapshot>,
-    /// `Tab::Book`/`Tab::Note`: [`AppState`] view local to the window, which
+    /// `Tab::Book`: [`AppState`] view local to the window, which
     /// renders the content shared with the floating window (same
-    /// `book_contents`/`note_contents`) while keeping its selection and its
+    /// `book_contents`) while keeping its selection and its
     /// input in progress.
     pub(super) view_state: Option<AppState>,
     /// `Tab::Graph`: the view (shape cache, zoom/pan), moved out of
@@ -965,6 +958,10 @@ impl StokesForgeApp {
         if !self.floating_tabs.contains(&tab) {
             return;
         }
+        // A note and a matrix stay in the main window (#473).
+        if !tab.is_detachable() {
+            return;
+        }
         // The Page Layout Mode ends before the view moves to its own window.
         if let Tab::Graph(graph) = tab {
             self.leave_layout_mode(graph);
@@ -993,7 +990,7 @@ impl StokesForgeApp {
             self.figure_follow.remove(&graph);
         }
         let view_state = match tab {
-            Tab::Book(_) | Tab::Note(_) => self.state.fork_for_detached_view().ok(),
+            Tab::Book(_) => self.state.fork_for_detached_view().ok(),
             _ => None,
         };
         let view_model = DetachedTabViewModel {
@@ -1166,12 +1163,8 @@ impl StokesForgeApp {
             let title = tr!("window-title-detached", name = tab_title(state, tab));
             // `Tab::Graph` starts at a size that contains its reference
             // figure and its return to the initial framing.
-            // The rest (`Book`/`Matrix`/`Note`) shares a uniform size.
-            // The workbook's grid now uses the same widths
-            // and headers as in the floating window.
-            // `Tab::Note` has no grid strictly speaking but gets
-            // the same size as "the others" to stay consistent with
-            // them — this is explicitly intended, not an oversight.
+            // The workbook uses a uniform size; its grid uses the same
+            // widths and headers as in the floating window.
             let size = match tab {
                 Tab::Graph(_) => [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y],
                 _ => [420.0, 360.0],
@@ -1406,7 +1399,7 @@ impl DetachedTabViewport {
             if was_collapsed ^ header_actions.toggle_collapse {
                 return;
             }
-            // Same logical bound for the four kinds: their
+            // Same logical bound for both kinds: their
             // content may overflow, but it must modify neither
             // the Frame nor the viewport's clip rectangle.
             show_window_contents_bounded(ui, |ui| {
@@ -1437,16 +1430,9 @@ impl DetachedTabViewport {
                             root_context.request_repaint_of(egui::ViewportId::ROOT);
                         }
                     }
-                    Tab::Matrix(id) => {
-                        matrix_contents(ui, tree, id);
-                    }
-                    Tab::Note(id) => {
-                        if let Some(view_state) = model.view_state.as_mut() {
-                            note_contents(ui, view_state, &mut requests.actions, id);
-                        } else {
-                            ui.label(tr!("detached-note-unavailable"));
-                        }
-                    }
+                    // Never detached (`Tab::is_detachable`, #473): nothing
+                    // to paint, and no panic (invariant 10).
+                    Tab::Matrix(_) | Tab::Note(_) => {}
                 }
             });
         });
@@ -1619,7 +1605,6 @@ mod tests {
     use super::super::graph_window::graph_drop_target;
     use super::super::graph_window::tests::plotted_graph;
     use super::super::grid::role_label;
-    use super::super::project_manager::tests::find_text_center;
     use super::super::window_chrome::tests::find_icon_centers;
     use super::*;
     use crate::theme;
@@ -1685,21 +1670,19 @@ mod tests {
             .expect("geometry sent to the session")
     }
 
-    /// #124: the owned payload of a note keeps its local input; losing
-    /// focus produces a request, then only the root applies it.
-    /// The OS close is also a request, without reattaching.
+    /// #124: the OS close of a detached workbook is a request for the root,
+    /// not a reattach; the window stays until the root drains it. (Its note
+    /// twin went with the detached note, #473.)
     #[test]
-    fn a_detached_note_defers_its_editing_and_its_closing() {
-        let mut project = Project::new("Detached note").unwrap();
-        let note = project
-            .add_note(project.root(), Some("Journal"), "Start")
-            .unwrap();
-        let session = Session::spawn(project, None).unwrap();
+    fn a_detached_workbook_defers_its_closing() {
+        let (session, _graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
-        let tab = Tab::Note(note);
+        let book = app.state.books()[0].0;
+        let tab = Tab::Book(book);
         app.open_tab(tab);
         app.detach_tab(tab);
+        assert!(app.detached_tabs.contains_key(&tab));
         let context = egui::Context::default();
         context.set_embed_viewports(false);
         context.set_fonts(stokesforge_render_egui::font_definitions());
@@ -1719,7 +1702,7 @@ mod tests {
             .clone()
             .unwrap();
         output.textures_delta.clear();
-        let paint = |events: Vec<egui::Event>, close: bool| {
+        let paint = |close: bool| {
             let mut input = root_input.clone();
             input.viewport_id = viewport_id;
             input.viewports.insert(
@@ -1738,69 +1721,13 @@ mod tests {
                 egui::Pos2::ZERO,
                 egui::vec2(420.0, 360.0),
             ));
-            input.events = events;
             let mut output = context.run_ui(input, |ui| callback(ui));
             output.textures_delta.clear();
-            output
         };
-        paint(Vec::new(), false);
-        let first = paint(Vec::new(), false);
-        let inside = find_text_center(&first.shapes, "Start") + egui::vec2(80.0, 0.0);
-        let pointer = |pos, pressed| egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
-        paint(
-            vec![egui::Event::PointerMoved(inside), pointer(inside, true)],
-            false,
-        );
-        paint(vec![pointer(inside, false)], false);
-        paint(vec![egui::Event::Text(" more".into())], false);
-        {
-            let model = app.detached_tabs[&tab].view_model.lock().unwrap();
-            assert_eq!(
-                model
-                    .view_state
-                    .as_ref()
-                    .unwrap()
-                    .note_editing()
-                    .unwrap()
-                    .buffer,
-                "Start more"
-            );
-        }
-        assert!(app.detached_tabs[&tab]
-            .requests
-            .lock()
-            .unwrap()
-            .actions
-            .is_empty());
-        assert_eq!(app.state.note_text(note).as_deref(), Some("Start"));
-
-        // Not on the title: grabbing it hands the window to the OS and is no
-        // click (#457), so it leaves the focus alone.
-        let outside = egui::pos2(200.0, 36.0);
-        paint(
-            vec![egui::Event::PointerMoved(outside), pointer(outside, true)],
-            false,
-        );
-        paint(vec![pointer(outside, false)], false);
-        // The entry ends through the detached view's own state (#465, T1): a
-        // blocking dialog of the root could not drop it.
-        let actions = std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions);
-        assert!(
-            actions.is_empty(),
-            "no deferred action to lose: {actions:?}"
-        );
-        app.state.refresh();
-        assert_eq!(app.state.note_text(note).as_deref(), Some("Start more"));
-        app.state.dispatch(Action::Undo);
-        assert_eq!(app.state.note_text(note).as_deref(), Some("Start"));
-
+        paint(false);
+        paint(false);
         assert!(!app.detached_tabs[&tab].requests.lock().unwrap().close);
-        paint(Vec::new(), true);
+        paint(true);
         let requests = app.detached_tabs[&tab].requests.lock().unwrap();
         assert!(requests.close, "the OS cross must go back to the root");
         assert!(!requests.reattach, "the cross closes the detached view");
@@ -1808,6 +1735,39 @@ mod tests {
             app.detached_tabs.contains_key(&tab),
             "the closing also waits for its drain"
         );
+    }
+
+    /// #473: only the workbook and the graph detach. A note and a matrix
+    /// stay floating, whoever asks.
+    #[test]
+    fn a_note_and_a_matrix_do_not_detach() {
+        let mut project = Project::new("Not detachable").unwrap();
+        let note = project
+            .add_note(project.root(), Some("Journal"), "Start")
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let matrix_tab = Tab::Matrix(NodeId::from_raw(999));
+        for tab in [Tab::Note(note), matrix_tab] {
+            app.open_tab(tab);
+            assert!(app.floating_tabs.contains(&tab), "{tab:?} must open");
+            app.detach_tab(tab);
+            assert!(
+                app.floating_tabs.contains(&tab),
+                "{tab:?} must stay floating"
+            );
+            assert!(!app.detached_tabs.contains_key(&tab), "{tab:?}");
+        }
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = Tab::Book(app.state.books()[0].0);
+        for tab in [book, Tab::Graph(graph)] {
+            app.detach_tab(tab);
+            assert!(app.detached_tabs.contains_key(&tab), "{tab:?} must detach");
+            assert!(!app.floating_tabs.contains(&tab), "{tab:?}");
+        }
     }
 
     /// #104: no mouse input in the reader viewports; the
