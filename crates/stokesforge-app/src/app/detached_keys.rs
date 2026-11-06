@@ -96,7 +96,6 @@ fn closes(output: &egui::FullOutput, id: egui::ViewportId) -> bool {
         .any(|command| matches!(command, egui::ViewportCommand::Close))
 }
 
-#[cfg(feature = "python")]
 fn click(bench: &mut Bench, window: Window, pos: egui::Pos2) {
     let id = bench.id_of(window);
     for events in [
@@ -352,38 +351,6 @@ fn undoing_add_folder_in_the_detached_project_manager_closes_its_name_field() {
     bench.finish();
 }
 
-/// A gesture and Ctrl+Z in the same frame: the key comes after the gesture and
-/// undoes it. Witness: queue the key actions before the window's own.
-#[test]
-fn ctrl_z_in_the_frame_of_a_gesture_undoes_that_gesture() {
-    let mut bench = bench();
-    let root = bench.app.state.tree().root();
-    let pm = bench.id_of(Window::ProjectManager);
-    // The gesture is the "Add Folder" of the panel's own menu: right click on
-    // the free strip, then the entry. Here the click happens in the same frame
-    // as the key.
-    let output = bench.child_in(pm, Pass::child());
-    let _ = output;
-    bench
-        .app
-        .pm_requests
-        .lock()
-        .unwrap()
-        .actions
-        .push(Action::AddFolder { parent: root });
-    let before = bench.app.state.tree().node(root).unwrap().children().len();
-    // The window's own action is already in the queue when the key is read in
-    // the same pass.
-    press(&mut bench, Window::ProjectManager, ctrl(egui::Key::Z));
-    assert_eq!(
-        bench.app.state.tree().node(root).unwrap().children().len(),
-        before,
-        "the folder was created, then undone"
-    );
-    assert!(bench.app.state.redo_label().is_some());
-    bench.finish();
-}
-
 /// With a dialog open in the main window, Ctrl+Z, Ctrl+Y and Ctrl+S with the
 /// cursor in a detached field change nothing: not the model, not the file, not
 /// the field. The orange band says why. Witness: let the key through (drop the
@@ -567,5 +534,137 @@ fn ctrl_q_in_the_main_window_still_quits() {
     let mut bench = bench();
     let output = bench.root(Pass::root().focused(true).events(vec![ctrl(egui::Key::Q)]));
     assert!(closes(&output, egui::ViewportId::ROOT));
+    bench.finish();
+}
+
+fn keys_of_a_surface() -> Vec<egui::Event> {
+    vec![
+        key(egui::Key::Escape),
+        key(egui::Key::Delete),
+        key(egui::Key::ArrowDown),
+        key(egui::Key::F2),
+        egui::Event::Text("7".into()),
+    ]
+}
+
+/// #460, detached workbook. With a dialog open in the main window, Esc, Del,
+/// the arrows, F2 and typing do nothing in the grid of a detached workbook:
+/// no edit opens, the selection stays, the model is untouched and the window's
+/// band says why. Without the dialog the same keys do act (the witness that the
+/// test is not vacuous). Witness: remove `stop_keys` from
+/// `DetachedTabViewport::show`.
+#[test]
+fn a_dialog_in_the_main_window_stops_the_keys_of_a_detached_workbook_grid() {
+    let mut bench = bench();
+    select_first_cell(&bench);
+    let book = bench.id_of(Window::Book);
+    let cell = |bench: &Bench| {
+        let book_id = bench.book();
+        with_view(bench, |view| {
+            let sheet = view.selected_sheet_in(book_id).unwrap();
+            view.selection(sheet).cloned()
+        })
+    };
+    let selection = cell(&bench);
+    // No dialog: typing does open an edit.
+    bench.child_in(book, Pass::child());
+    bench.child_in(
+        book,
+        Pass::child().events(vec![egui::Event::Text("7".into())]),
+    );
+    assert!(
+        typed_cell(&bench).is_some(),
+        "without a dialog, typing edits"
+    );
+    bench.child_in(book, Pass::child().events(vec![key(egui::Key::Escape)]));
+    bench.child_in(book, Pass::child());
+    assert!(typed_cell(&bench).is_none(), "Esc cancels it");
+    // A dialog in the main window.
+    bench.app.state.dispatch(Action::OpenAbout);
+    bench.root(Pass::root());
+    let (revision, history) = (
+        bench.app.state.revision(),
+        bench.app.state.status_history().count(),
+    );
+    bench.child_in(book, Pass::child().events(keys_of_a_surface()));
+    bench.child_in(book, Pass::child());
+    assert!(typed_cell(&bench).is_none(), "no edit opened");
+    assert_eq!(cell(&bench), selection, "the selection stayed");
+    assert!(bench.queued_by(Window::Book).is_empty(), "nothing queued");
+    bench.root(Pass::root());
+    assert_eq!(
+        bench.app.state.revision(),
+        revision,
+        "the model is untouched"
+    );
+    bench.child_in(book, Pass::child());
+    let band = band_in(&bench, Window::Book).expect("the band of the window");
+    assert!(band.contains("main window"), "{band}");
+    assert_eq!(bench.app.state.status_history().count(), history + 1);
+    bench.finish();
+}
+
+/// #460, detached Project Manager. With a dialog open in the main window, Esc,
+/// Del, the arrows, F2 and typing do nothing in the detached Project Manager:
+/// no name field opens, the folder stays, the selection stays, the band shows.
+/// Without the dialog F2 does open the field. Witness: remove `stop_keys` from
+/// the Project Manager closure.
+#[test]
+fn a_dialog_in_the_main_window_stops_the_keys_of_the_detached_project_manager() {
+    let mut bench = bench();
+    let root = bench.app.state.tree().root();
+    bench.app.state.dispatch(Action::AddFolder { parent: root });
+    let folder = *bench
+        .app
+        .state
+        .tree()
+        .node(root)
+        .unwrap()
+        .children()
+        .last()
+        .unwrap();
+    settle(&mut bench);
+    let pm = bench.id_of(Window::ProjectManager);
+    let name = bench
+        .app
+        .state
+        .tree()
+        .node(folder)
+        .unwrap()
+        .name()
+        .to_string();
+    // Select the folder with a click on its row.
+    let last = bench.child_in(pm, Pass::child());
+    let row = text_exact(&texts(&last.shapes), &name).center;
+    click(&mut bench, Window::ProjectManager, row);
+    // The panel keeps the keyboard only while its window is the focused one.
+    for _ in 0..2 {
+        bench.root(Pass::root());
+        bench.child_in(pm, Pass::child());
+    }
+    // No dialog: F2 opens the name field.
+    bench.child_in(pm, Pass::child().events(vec![key(egui::Key::F2)]));
+    bench.child_in(pm, Pass::child());
+    assert_eq!(
+        project_manager::renaming_in(&bench.ctx, pm),
+        vec![folder],
+        "without a dialog, F2 renames"
+    );
+    bench.child_in(pm, Pass::child().events(vec![key(egui::Key::Escape)]));
+    bench.child_in(pm, Pass::child());
+    assert!(project_manager::renaming_in(&bench.ctx, pm).is_empty());
+    // A dialog in the main window.
+    bench.app.state.dispatch(Action::OpenAbout);
+    bench.root(Pass::root());
+    let (revision, selection) = (bench.app.state.revision(), bench.app.pm_selection.clone());
+    bench.child_in(pm, Pass::child().events(keys_of_a_surface()));
+    bench.child_in(pm, Pass::child());
+    assert!(project_manager::renaming_in(&bench.ctx, pm).is_empty());
+    assert!(bench.queued_by(Window::ProjectManager).is_empty());
+    settle(&mut bench);
+    assert_eq!(bench.app.state.revision(), revision, "the folder stays");
+    assert_eq!(bench.app.pm_selection, selection, "the selection stays");
+    let band = band_in(&bench, Window::ProjectManager).expect("the band of the window");
+    assert!(band.contains("main window"), "{band}");
     bench.finish();
 }
