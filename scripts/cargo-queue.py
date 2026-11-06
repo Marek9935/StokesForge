@@ -117,9 +117,13 @@ def effective_mode():
 # net.hadess.PowerProfiles on the system bus. Never raises, never prompts, never waits long: a refusal ends
 # as a note code in profile.json. The record is the only memory: absent = nothing to put back.
 #   {"set": "performance", "found": "balanced", "wrote": true}   we wrote `set` over `found`
-#   {"wrote": false, "note": "..."}                             we touched nothing (battery, already set, failure)
+#   {"wrote": false, "note": "..."}                             we touched nothing (already set, failure, hands off)
+#   {"wrote": false, "waiting": "balanced"}                     FullIA on battery; `balanced` was active: enter on mains
 # Level based and idempotent: effective mode with a profile and no record = entry; effective mode without one
 # and a record = exit; anything else makes no call. Always called under ModeLock.
+# While the mode has a profile the tick (follow=True) also follows the power source, record in hand: mains =
+# `set`, battery = `found`. The user's own change always wins: a profile other than the one we expect ends our
+# part (record {"wrote": false}) until the mode is left. No record = no entry from the tick (upgrade rule).
 PROFILES = ("power-saver", "balanced", "performance")
 PROFILE_NOTES = {"read-failed": "cannot read the power profile; left as it is",
                  "write-failed": "the power profile change was refused; left as it is",
@@ -184,6 +188,7 @@ def read_profile_record():
     if d["wrote"] and not (d.get("set") in PROFILES and d.get("found") in PROFILES):
         return None
     return {"wrote": d["wrote"], "set": d.get("set"), "found": d.get("found"),
+            "waiting": d.get("waiting") if d.get("waiting") in PROFILES else None,
             "note": d.get("note") if d.get("note") in PROFILE_NOTES else ""}
 
 
@@ -199,8 +204,9 @@ def drop_profile_record():
 
 
 def profile_enter(want):
-    if read_on_battery():
-        return save_profile_record({"wrote": False})
+    if read_on_battery():       # FullIA on battery: nothing written; remember what is active for the way back to mains
+        current = read_profile()
+        return save_profile_record({"wrote": False} if current is None else {"wrote": False, "waiting": current})
     found = read_profile()
     if found is None:
         return save_profile_record({"wrote": False, "note": "read-failed"})
@@ -225,7 +231,29 @@ def profile_exit(rec):
     save_profile_record(dict(rec, note="restore-failed"))
 
 
-def sync_profile(effective, allow_enter=True):
+def profile_follow(want, rec):
+    """The tick, with a record and a mode that has a profile: battery puts `found` back, mains sets `want`."""
+    if rec["wrote"]:
+        if not read_on_battery():
+            return
+        current = read_profile()
+        if current is None:
+            return save_profile_record(dict(rec, note="restore-failed"))
+        if current != rec["set"]:
+            return save_profile_record({"wrote": False})
+        if write_profile(rec["found"]) == "ok":
+            return save_profile_record({"wrote": False, "waiting": rec["found"]})
+        return save_profile_record(dict(rec, note="restore-failed"))
+    if rec["waiting"] and not read_on_battery():
+        current = read_profile()
+        if current is None:
+            return
+        if current == rec["waiting"]:
+            return profile_enter(want)
+        save_profile_record({"wrote": False})
+
+
+def sync_profile(effective, allow_enter=True, follow=False):
     """Bring the power profile in line with the effective mode (None: no mode, put back). Call under ModeLock.
     Never raises."""
     if not profile_enabled():
@@ -238,6 +266,8 @@ def sync_profile(effective, allow_enter=True):
                 profile_enter(want)
         elif not want and rec is not None:
             profile_exit(rec)
+        elif want and follow:
+            profile_follow(want, rec)
     except Exception:
         pass
 
@@ -443,11 +473,11 @@ def set_mode(selected=None, auto=None, effective=None, why=None, apply=True, onl
 
 def profile_exit_pass():
     """Put the power profile back when a record outlives the mode that made it (crash, stale copy, a failed
-    restore). Never enters: a mode.json already in FullIA at upgrade must not start the fans."""
+    restore), and follow the power source while FullIA lasts. Never enters without a record: a mode.json already in FullIA at upgrade must not start the fans."""
     if read_profile_record() is None:
         return
     with ModeLock():
-        sync_profile(read_state()["effective"], allow_enter=False)
+        sync_profile(read_state()["effective"], allow_enter=False, follow=True)
 
 
 def auto_tick():

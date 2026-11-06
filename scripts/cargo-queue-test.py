@@ -674,13 +674,15 @@ class TestProfile(Base):
         self.assertEqual(self.current(), "performance")
         self.assertIsNone(self.record())
 
-    def test_on_battery_nothing_is_called_and_nothing_is_written_when_leaving(self):
+    def test_on_battery_entry_reads_but_writes_nothing_and_leaving_writes_nothing(self):
         self.battery("Discharging")
         cq.set_mode(selected="full")
-        self.assertEqual(self.bus_calls(), [])
-        self.assertEqual(self.record()["wrote"], False)
+        self.assertEqual(len(self.bus_calls()), 1)
+        self.assertIn("get-property", self.bus_calls()[0])
+        self.assertEqual(self.bus_writes(), [])
+        self.assertEqual(self.record(), {"wrote": False, "waiting": "balanced"})
         cq.set_mode(selected="dev")
-        self.assertEqual(self.bus_calls(), [])
+        self.assertEqual(self.bus_writes(), [])
         self.assertIsNone(self.record())
 
     def test_leaving_on_battery_still_restores(self):
@@ -881,6 +883,131 @@ class TestProfile(Base):
         self.assertEqual(self.bus_writes(), [])
         p = self.start("test", tag="x", extra={"FAKE_EXIT": "3"})
         self.assertEqual(p.wait(20), 3, self.output(p))
+
+    # ---- #477 lot 2: while FullIA lasts the tick follows the power source (mains = performance, battery = found)
+    def test_unplugging_in_full_puts_the_found_profile_back_once(self):
+        cq.set_mode(selected="full")
+        self.battery("Discharging")
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+        self.assertEqual(self.current(), "balanced")
+        self.assertEqual(self.record(), {"wrote": False, "waiting": "balanced"})
+        self.assertEqual(cq.read_state()["effective"], "full")
+        n = len(self.bus_calls())
+        cq.auto_tick()
+        self.assertEqual(len(self.bus_calls()), n)
+
+    def test_plugging_back_sets_performance_and_leaving_restores(self):
+        cq.set_mode(selected="full")
+        self.battery("Discharging")
+        cq.auto_tick()
+        self.battery("Charging")
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance", "balanced", "performance"])
+        self.assertEqual(self.record(), {"wrote": True, "set": "performance", "found": "balanced"})
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes()[-1], "balanced")
+        self.assertEqual(self.current(), "balanced")
+        self.assertIsNone(self.record())
+
+    def test_full_entered_on_battery_and_then_plugged_in_enters_at_the_tick(self):
+        self.battery("Discharging")
+        cq.set_mode(selected="full")
+        self.assertEqual(self.bus_writes(), [])
+        self.battery("Charging")
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance"])
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+        self.assertEqual(self.current(), "balanced")
+
+    def test_user_change_while_waiting_on_battery_is_final_for_this_full(self):
+        self.battery("Discharging")
+        cq.set_mode(selected="full")
+        self.user_sets("power-saver")
+        self.battery("Charging")
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), [])
+        self.assertEqual(self.record(), {"wrote": False})
+        n = len(self.bus_calls())
+        for _ in range(3):
+            cq.auto_tick()
+        self.assertEqual(len(self.bus_calls()), n)
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), [])
+        self.assertEqual(self.current(), "power-saver")
+
+    def test_user_change_in_full_on_mains_is_not_overwritten_when_unplugging_or_replugging(self):
+        cq.set_mode(selected="full")
+        self.user_sets("power-saver")
+        self.battery("Discharging")
+        cq.auto_tick()
+        self.battery("Charging")
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance"])
+        self.assertEqual(self.current(), "power-saver")
+        self.assertEqual(self.record(), {"wrote": False})
+
+    def test_found_performance_is_never_written_when_unplugging_and_replugging(self):
+        self.user_sets("performance")
+        cq.set_mode(selected="full")
+        self.battery("Discharging")
+        cq.auto_tick()
+        self.battery("Charging")
+        cq.auto_tick()
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), [])
+        self.assertEqual(self.current(), "performance")
+
+    def test_restore_refused_on_unplug_keeps_the_record_and_the_next_tick_retries(self):
+        cq.set_mode(selected="full")
+        self.battery("Discharging")
+        with mock.patch.dict(os.environ, {"FAKE_BUS_SET_RC": "1"}):
+            cq.auto_tick()
+        self.assertEqual(self.current(), "performance")
+        self.assertEqual(self.record()["wrote"], True)
+        self.assertEqual(self.record()["note"], "restore-failed")
+        cq.auto_tick()
+        self.assertEqual(self.current(), "balanced")
+        self.assertEqual(self.record(), {"wrote": False, "waiting": "balanced"})
+
+    def test_read_failing_on_the_plug_in_tick_changes_nothing_and_the_next_tick_enters(self):
+        self.battery("Discharging")
+        cq.set_mode(selected="full")
+        self.battery("Charging")
+        before = self.record()
+        with mock.patch.dict(os.environ, {"FAKE_BUS_GET_RC": "1"}):
+            cq.auto_tick()
+        self.assertEqual(self.record(), before)
+        self.assertEqual(self.bus_writes(), [])
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance"])
+
+    def test_no_busctl_call_on_mains_with_written_or_on_battery_while_waiting(self):
+        cq.set_mode(selected="full")
+        n = len(self.bus_calls())
+        for _ in range(5):
+            cq.auto_tick()
+        self.assertEqual(len(self.bus_calls()), n)
+        cq.set_mode(selected="dev")
+        self.battery("Discharging")
+        cq.set_mode(selected="full")
+        n = len(self.bus_calls())
+        for _ in range(5):
+            cq.auto_tick()
+        self.assertEqual(len(self.bus_calls()), n)
+
+    def test_six_processes_ticking_right_after_a_plug_in_write_once(self):
+        self.battery("Discharging")
+        cq.set_mode(selected="full")
+        self.battery("Charging")
+        code = ("import importlib.util,sys;s=importlib.util.spec_from_file_location('c',sys.argv[1]);"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.auto_tick()")
+        env = dict(os.environ, FAKE_BUS_GET_SLEEP="0.4")
+        ps = [subprocess.Popen([sys.executable, "-I", "-c", code, SRC], env=env) for _ in range(6)]
+        for p in ps:
+            self.assertEqual(p.wait(60), 0)
+        self.assertEqual(self.bus_writes(), ["performance"])
 
     def test_corrupt_record_reads_as_no_record(self):
         for text in ("{not json", "[]", '{"wrote": "yes"}', '{"wrote": true, "set": "turbo", "found": "balanced"}'):
