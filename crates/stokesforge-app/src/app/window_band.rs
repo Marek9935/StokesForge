@@ -117,6 +117,56 @@ pub(super) fn refuse_entry(ctx: &egui::Context) -> bool {
     true
 }
 
+/// The one stop of the keys of a detached window while a dialog is open in the
+/// main window (#460). Called first in each detached closure, before any
+/// reader of the keys (Page Layout Mode, grid, panels, shortcuts).
+///
+/// Key, text and clipboard events are removed from the viewport's input, so
+/// that nothing below acts on them, and the refusal is noted once when a key
+/// was really refused (the root then posts the band, as for a refused
+/// action). Left alone: a viewport with a text field that has, or had in the
+/// previous frame, the keyboard (typing and Esc keep their meaning; a typed
+/// value is guarded at its commit, [`refuse_entry`]), an open popup, and a
+/// modal of this same viewport. Never a band for: a key release, a repeat, an
+/// Alt combination (Alt+Tab belongs to the window manager). Returns whether
+/// the keys were stopped.
+pub(super) fn stop_keys(ctx: &egui::Context) -> bool {
+    if main_dialog(ctx).is_none()
+        || ctx.text_edit_focused()
+        || super::page_layout::field_had_focus(ctx)
+        || egui::Popup::is_any_open(ctx)
+        || super::dialogs::modal_shown(ctx)
+    {
+        return false;
+    }
+    let mut refused = false;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| match event {
+            egui::Event::Key {
+                pressed,
+                repeat,
+                modifiers,
+                ..
+            } => {
+                refused |= *pressed && !*repeat && !modifiers.alt;
+                false
+            }
+            egui::Event::Text(_)
+            | egui::Event::Copy
+            | egui::Event::Cut
+            | egui::Event::Paste(_) => {
+                refused = true;
+                false
+            }
+            _ => true,
+        });
+    });
+    if refused {
+        note_refusal(ctx);
+    }
+    true
+}
+
 /// Shows `text` in the band of `viewport` for [`BAND_LIFETIME`] from `now`,
 /// replacing the band already there (the timer restarts), and wakes that
 /// viewport so that it paints it. The root never has one.

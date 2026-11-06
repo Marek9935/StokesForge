@@ -247,7 +247,7 @@ pub(super) fn note_field_focus(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(id, focused));
 }
 
-fn field_had_focus(ctx: &egui::Context) -> bool {
+pub(super) fn field_had_focus(ctx: &egui::Context) -> bool {
     let id = field_focus_id(ctx);
     ctx.data(|data| data.get_temp(id)).unwrap_or(false)
 }
