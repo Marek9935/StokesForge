@@ -67,10 +67,29 @@ impl AppState {
                 )),
                 _ => None,
             });
+        // Why a followed sheet cannot catch up (#463, T7): a source column it
+        // cannot read (text, no x'), or a source column whose formula reads the
+        // sheet (the follow pass skips a loop: the refused formula stays and its
+        // column has no values).
         let stuck = (link.auto_recalc && state.stale && !state.modified)
-            .then(|| stokesforge_core::unfollowable_column(tree, link.source))
-            .flatten()
-            .map(|error| errors::model::error_message(&error));
+            .then(|| {
+                stokesforge_core::unfollowable_column(tree, link.source)
+                    .map(|error| errors::model::error_message(&error))
+                    .or_else(|| match tree.transpose_check_refusal(sheet) {
+                        Some(CoreError::TransposeSourceReadsIt {
+                            letter,
+                            source_sheet,
+                            transposed,
+                        }) => Some(tr!(
+                            "transpose-stuck-reads-it",
+                            letter = letter.as_str(),
+                            source = source_sheet.as_str(),
+                            sheet = transposed.as_str()
+                        )),
+                        _ => None,
+                    })
+            })
+            .flatten();
         Some(TransposeInfo {
             source: link.source,
             source_name: tree.node(link.source)?.name().to_string(),

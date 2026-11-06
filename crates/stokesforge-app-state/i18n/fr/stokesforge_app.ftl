@@ -2268,6 +2268,7 @@ transpose-auto = Recalculer automatiquement
     .hint = Met { $sheet } à jour dès que { $source } change. Une valeur saisie dedans arrête les mises à jour jusqu’à Relier de nouveau
     .disabled = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher cette case
 transpose-state-stuck = Pas à jour : { $reason }
+transpose-stuck-reads-it = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour suivre
 
 # Lissage (#324)
 analysis-kind-smooth = Lissage

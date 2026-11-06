@@ -2269,6 +2269,7 @@ transpose-auto = Recalculate automatically
     .hint = Updates { $sheet } whenever { $source } changes. A value typed in it stops the updates until Relink
     .disabled = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check this box
 transpose-state-stuck = Out of date: { $reason }
+transpose-stuck-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to follow
 
 # Lissage (#324)
 analysis-kind-smooth = Smoothing
