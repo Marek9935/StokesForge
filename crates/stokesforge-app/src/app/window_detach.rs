@@ -3407,7 +3407,7 @@ mod tests {
     /// #471: with a dialog open in the main window, the actions of a detached
     /// window are thrown away, its band says which dialog, and the main status
     /// bar and history get one orange line. The same refusal again restarts the
-    /// band and records a new history line (#453: no deduplication by text). Witness: posting to the root, or
+    /// band and merges into that history line as a count (#453). Witness: posting to the root, or
     /// `warn` instead of `refuse_outside_main`.
     #[test]
     fn a_refused_detached_gesture_shows_the_band_in_its_own_window() {
@@ -3431,11 +3431,15 @@ mod tests {
             None
         );
         assert_eq!(app.state.status_history().count(), history + 1);
-        // Refused again: the band shows again, the history records again (#453).
+        // Refused again: the band shows again; the history merges the two into
+        // one entry with a count (#453).
+        let recorded = app.state.recorded_count();
         super::super::window_band::clear(&ctx, viewport);
         send(&app, vec![Action::Undo]);
         drain(&mut app, &ctx);
-        assert_eq!(app.state.status_history().count(), history + 2);
+        assert_eq!(app.state.recorded_count(), recorded + 1);
+        assert_eq!(app.state.status_history().count(), history + 1);
+        assert_eq!(app.state.status_history().last().unwrap().count, 2);
         assert!(super::super::window_band::text_at(&ctx, viewport, now).is_some());
         // Dialog closed: the gesture goes through, no band is posted.
         app.state.dispatch(Action::CloseAbout);
@@ -3450,9 +3454,11 @@ mod tests {
     }
 
     /// #471: an action of a detached window that ends in a warning says it in
-    /// that window (here "Nothing to undo"), and in no other. A message with no
-    /// gesture behind it (a job) gives no band; information never does.
-    /// Witnesses: dropping the origin ranges, or the level filter.
+    /// that window (here a title that makes a Fixed figure grow past its
+    /// reserve), and in no other. A message with no gesture behind it (a job)
+    /// gives no band; information never does, and neither does "Nothing to
+    /// undo", plain since #453 (S-R18). Witnesses: dropping the origin ranges,
+    /// or the level filter; making "Nothing to undo" orange again.
     #[test]
     fn what_an_action_says_is_told_in_its_own_window_only() {
         let _language = stokesforge_app_state::i18n::test_language(
@@ -3474,13 +3480,43 @@ mod tests {
         app.state.notice("fine".into());
         app.tell_window(&ctx, viewport, before);
         assert_eq!(band(viewport), None);
-        // A warning of an action drained from the window.
+        // Ctrl+Z with nothing to undo, from the window: plain, no band (#453).
+        assert!(app.state.undo_label().is_none());
         send(&app, vec![Action::Undo]);
         let actions = drain(&mut app, &ctx);
         assert_eq!(actions.len(), 1);
         app.dispatch_actions(&ctx, actions);
+        assert_eq!(band(viewport), None, "Nothing to undo is plain");
+        let status = app.state.status().expect("the line");
+        assert_eq!(status.text, "Nothing to undo");
+        assert_eq!(
+            status.level,
+            stokesforge_app_state::state::StatusLevel::Info
+        );
+        // A real warning of an action drained from the window: a title makes
+        // a Fixed figure grow past its reserve.
+        let graph = match app.detached_tabs.keys().next() {
+            Some(Tab::Graph(graph)) => *graph,
+            other => panic!("a detached graph, got {other:?}"),
+        };
+        let mut spec = app.state.plot_spec(graph).expect("the spec");
+        spec.title.clear();
+        spec.fixed_figure = true;
+        app.state.dispatch(Action::SetPlotSpec { graph, spec });
+        let mut titled = app.state.plot_spec(graph).expect("the spec");
+        titled.title = "A title".to_owned();
+        send(
+            &app,
+            vec![Action::SetPlotSpec {
+                graph,
+                spec: titled,
+            }],
+        );
+        let actions = drain(&mut app, &ctx);
+        assert_eq!(actions.len(), 1);
+        app.dispatch_actions(&ctx, actions);
         let (text, level) = band(viewport).expect("the band of the window");
-        assert_eq!(text, "Nothing to undo");
+        assert!(text.contains("Fixed"), "{text}");
         assert_eq!(level, super::super::window_band::BandLevel::Warning);
         assert_eq!(band(egui::ViewportId::ROOT), None);
         session.shutdown().unwrap();
@@ -3493,7 +3529,7 @@ mod tests {
         let (session, mut app, viewport) = detached_graph_app();
         let ctx = egui::Context::default();
         app.state.dispatch(Action::OpenAbout);
-        let history = app.state.status_history().count();
+        let recorded = app.state.recorded_count();
         for _ in 0..10 {
             assert!(drain(&mut app, &ctx).is_empty());
         }
@@ -3502,7 +3538,7 @@ mod tests {
             super::super::window_band::text_at(&ctx, viewport, now),
             None
         );
-        assert_eq!(app.state.status_history().count(), history);
+        assert_eq!(app.state.recorded_count(), recorded);
         session.shutdown().unwrap();
     }
 

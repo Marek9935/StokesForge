@@ -49,8 +49,13 @@ without a message, see `docs/persistence.md`).
   progress) never replaces a warning or an error. The list keeps, per action,
   its last plain message and its warnings and errors; import progress is no
   longer stored in it. Refiled: columns dropped by a paste, and a layout or
-  language choice that could not be saved, are now warnings. Refusing a gesture in a detached window records a line
-  each time, and the band shows each time.
+  language choice that could not be saved, are now warnings. Refusing a gesture
+  in a detached window shows the band each time. In the message list, a long
+  message wraps, and the same message said again directly after is one line with
+  a count (`Nothing to undo (×13)`) at the time of the last one, so a repeat no
+  longer pushes older messages out of the 50. "Nothing to undo" and "Nothing
+  to redo" are plain messages (no colour), so a detached window shows no band
+  for them.
 - Only the workbook and the graph detach (#473): a note and a matrix stay in
   the main window. Their title bar already had no detach icon; the code now
   refuses it too. The manual no longer says that dragging a title outside the

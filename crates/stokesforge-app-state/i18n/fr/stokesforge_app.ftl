@@ -340,6 +340,7 @@ status-history = Afficher les 50 derniers messages
 status-history-title = Messages
 status-history-empty = Aucun message pour l'instant. Les messages de vos actions apparaîtront ici
 status-history-time = { $time } UTC
+status-history-repeated = { $text } (×{ $count })
 status-level-warning = Avertissement
 status-level-error = Erreur
 status-formula-now-reads = { $count ->

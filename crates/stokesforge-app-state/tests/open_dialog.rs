@@ -170,12 +170,17 @@ fn a_refusal_reaches_status_and_history_without_touching_the_dialog_footer() {
         stokesforge_app_state::state::StatusLevel::Warning
     );
 
-    // The same sentence again records again (#453): the band reads the history
-    // and must show again, so there is no deduplication by text.
+    // The same sentence again is said again (#453): the band reads the history
+    // by rank and must show again, so the counter moves and the line takes a
+    // fresh timer; the list merges the two into one entry with a count.
     let lines = s.state.status_history().count();
+    let first_seen = s.state.status().unwrap().at;
     s.state.refuse_outside_main(OpenDialog::Analysis);
-    assert_eq!(s.state.status_history().count(), lines + 1);
     assert_eq!(s.state.recorded_count(), before + 2);
+    assert!(s.state.status().unwrap().at > first_seen, "fresh timer");
+    assert_eq!(s.state.status_history().count(), lines);
+    assert_eq!(s.state.status_history().last().unwrap().count, 2);
+    assert_eq!(s.state.messages_since(before + 1).count(), 1);
     assert_eq!(s.state.dialog_error().map(str::to_owned), footer);
 }
 

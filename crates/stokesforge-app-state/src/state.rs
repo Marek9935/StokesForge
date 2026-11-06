@@ -1412,8 +1412,14 @@ pub struct StatusMessage {
     /// for a message said by a background pass (poll, autosave).
     pub gesture: Option<u64>,
     /// Rank of the message among all those ever recorded (see
-    /// [`AppState::messages_since`]).
+    /// [`AppState::messages_since`]). A merged entry holds the rank of its last
+    /// occurrence.
     pub seq: u64,
+    /// How many identical messages in a row this history entry stands for
+    /// (#453): same text and same level, directly following. `1` for a message
+    /// said once and for the one on the status line. The other fields are those
+    /// of the last occurrence.
+    pub count: u32,
 }
 
 impl StatusMessage {
@@ -3571,7 +3577,9 @@ impl AppState {
         source.status = None;
         let pulled: Vec<StatusMessage> = source.status_log.drain(..).collect();
         for message in &pulled {
-            self.record(message.text.clone(), message.level);
+            for _ in 0..message.count {
+                self.record(message.text.clone(), message.level);
+            }
         }
         pulled
     }
@@ -7892,16 +7900,32 @@ impl AppState {
             wall: std::time::SystemTime::now(),
             gesture,
             seq: self.recorded_count,
+            count: 1,
         };
         // One gesture = its final plain line plus its orange and red (#453).
         if let (StatusLevel::Info, Some(gesture)) = (level, gesture) {
             self.status_log
                 .retain(|old| !(old.level == StatusLevel::Info && old.gesture == Some(gesture)));
         }
-        if self.status_log.len() == STATUS_HISTORY_LEN {
-            self.status_log.pop_front();
+        // The same sentence at the same level, directly after, is one entry
+        // with a count (#453): it keeps the time and the rank of the last
+        // occurrence, and costs no place in the 50 kept.
+        if let Some(last) = self
+            .status_log
+            .back_mut()
+            .filter(|last| last.text == message.text && last.level == message.level)
+        {
+            let count = last.count.saturating_add(1);
+            *last = StatusMessage {
+                count,
+                ..message.clone()
+            };
+        } else {
+            if self.status_log.len() == STATUS_HISTORY_LEN {
+                self.status_log.pop_front();
+            }
+            self.status_log.push_back(message.clone());
         }
-        self.status_log.push_back(message.clone());
         self.recorded_count += 1;
         if self.takes_the_line(&message) {
             self.status = Some(message);
@@ -7919,6 +7943,7 @@ impl AppState {
             wall: std::time::SystemTime::now(),
             gesture: None,
             seq: self.recorded_count,
+            count: 1,
         };
         if self.takes_the_line(&message) {
             self.status = Some(message);
@@ -7951,8 +7976,9 @@ impl AppState {
     /// status bar and the history as an orange, **never** through `warn`
     /// (which would wipe the error in the footer of the dialog) nor `fail`
     /// (which would put it in that footer). The same sentence refused again
-    /// records again: the band of the window must show again (#453), so there
-    /// is no deduplication by text.
+    /// is said again: the band of the window must show again (#453), so the
+    /// counter and the status line move at each refusal. Only the history
+    /// merges the repetition into one entry with a count.
     pub fn refuse_outside_main(&mut self, dialog: open_dialog::OpenDialog) -> String {
         let text = open_dialog::refusal_text(dialog);
         self.record(text.clone(), StatusLevel::Warning);
@@ -8260,9 +8286,10 @@ impl AppState {
                 });
                 self.refresh();
             }
-            // Orange (S-R18): the gesture did nothing, and a detached window shows it in
-            // its band (#471).
-            Ok(None) => self.warn(tr!("status-nothing-to-undo")),
+            // Plain, although nothing was done (S-R18, #453): the refusal is
+            // harmless and the button is already greyed. So a detached window
+            // shows no band for it.
+            Ok(None) => self.notice(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -8277,7 +8304,8 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.warn(tr!("status-nothing-to-redo")),
+            // Plain like "Nothing to undo" (S-R18, #453).
+            Ok(None) => self.notice(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
