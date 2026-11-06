@@ -563,7 +563,7 @@ Linux runner is registered; Windows is not affected by this choice.
 | `test-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking; GitHub only, not in `.gitlab-ci.yml`, but published to GitLab through `JOBS` of `scripts/gitlab-status.py` (#412, #452) | `cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands`: the formula engine on Windows (float formatting, paths, stack depth); the first errors go in a `::error` annotation |
 | Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta. Read with `scripts/toolchain-weekly-status.sh` (public GitHub API, no `gh`) |
 | `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md); the notes end with a line "Built with rustc … (Linux) and rustc … (Windows)" (outputs `rustc` of `release-linux` and `dist-windows`, `scripts/rustc-note.sh`), and `release-publish.sh` refuses to publish if one is missing (#412) |
-| `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, the token's role is not allowed to run pipelines on the protected tags `v*`: raise it to Maintainer |
+| `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, check that the protection rule of the tags `v*` still allows the token's role to create tags (see "Settings outside the repository" below) |
 
 The Linux jobs run on the pushed branches `main`, `PostV1.1` (integration line, #480), `feature/**`,
 `v[0-9]*`, `release/**` and on the tags `v*`. `release-linux` and `publier`
@@ -579,8 +579,16 @@ tag exists. An existing tag set again on another target cannot be detected
 in CI; only the protection of the `v*` tags of GitLab holds it.
 
 **Settings outside the repository** (to be done by hand, nothing in the code sets them):
-- `main` protected, no force-push, on GitLab and on GitHub;
-- `v*` tags protected (creation reserved to the Maintainer role) on GitLab;
+- `main` protected on GitLab: force-push and deletion by push refused for everyone, push and merge
+  for Maintainers and above (read it: `glab api projects/86104040/protected_branches`). A rewrite
+  on purpose means removing the rule first (Settings, Repository, Protected branches);
+- `main` is **not** protected on GitHub: GitHub only runs the CI, and the mirror from GitLab
+  is the only writer. A rule there would stop the mirror if the two ever diverged (#481);
+- `v*` tags protected on GitLab: moving or deleting one by push is refused for everyone, deletion
+  only through the GitLab web page or API (read it: `glab api projects/86104040/protected_tags`).
+  Creation is allowed to **Developers + Maintainers**, not Maintainers alone:
+  `GITLAB_RELEASE_TOKEN` has the Developer role, and GitLab creates a release or runs a pipeline
+  on a protected tag only for a user allowed to create that tag (#481);
 - `main` default branch on GitLab: this is what makes "Closes #N"
   work;
 - GitLab, Settings, CI/CD, Runners: instance runners enabled on the project, for
