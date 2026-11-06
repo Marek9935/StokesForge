@@ -90,6 +90,7 @@ import glob
 import hashlib
 import html
 import http.server
+import importlib.util
 import json
 import os
 import re
@@ -2256,6 +2257,57 @@ def labels_status_lines():
     return out
 
 
+# ------------------------------------------------------------ build modes (#476)
+# The queue and the three build modes live in scripts/cargo-queue.py; the page drives them through
+# these few functions. Loaded from this file's own directory, by path (the name has a hyphen).
+_CQ = []
+
+
+def cargo_queue():
+    if not _CQ:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cargo-queue.py")
+        spec = importlib.util.spec_from_file_location("sf_cargo_queue", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _CQ.append(mod)
+    return _CQ[0]
+
+
+def build_queue_view():
+    """What the page shows of the build modes. Stable between two polls (start timestamps, no durations).
+    Any failure reads as not installed: it must never break /api/state."""
+    try:
+        d = cargo_queue().status_dict()
+        if not d["installed"]:
+            return {"installed": False}
+        job = lambda i: {"pid": i.get("pid"), "cwd": str(i.get("cwd") or ""), "command": str(i.get("command") or ""),
+                         "start": int(i.get("start") or 0)}
+        return {"installed": True, "stale": d["stale"], "selected": d["selected"], "effective": d["effective"],
+                "auto": d["auto"], "why": d["why"], "modes": d["modes"], "nproc": d["nproc"],
+                "running": [job(i) for i in d["running"]], "waiting": [job(i) for i in d["waiting"]],
+                "profile_note": str(d.get("profile_note") or "")}
+    except Exception:
+        return {"installed": False}
+
+
+def build_auto_enabled(real_dir):
+    """The auto-mode thread runs for the real state only; SF_SUIVI_BUILD_AUTO=on/off overrides (tests)."""
+    v = os.environ.get("SF_SUIVI_BUILD_AUTO")
+    return v == "on" if v in ("on", "off") else real_dir
+
+
+def build_auto_loop():
+    while True:
+        try:
+            cargo_queue().auto_tick()
+        except Exception:
+            pass
+        try:
+            time.sleep(max(0.05, float(os.environ.get("SF_SUIVI_BUILD_AUTO_POLL", "30"))))
+        except ValueError:
+            time.sleep(30)
+
+
 def build_state():
     s = build_status()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
@@ -2263,6 +2315,7 @@ def build_state():
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
             "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
+            "build_queue": build_queue_view(),
             "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
 
 
@@ -2407,7 +2460,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/issue/(\d+)/merge", path)
         if m:
             return self.post_merge(int(m.group(1)))
+        if path == "/api/build-mode":
+            return self.post_build_mode()
         self.fail(404, "not found")
+
+    def post_build_mode(self):
+        """Select a build mode and/or switch the auto variation (#476)."""
+        body = self.read_body()
+        if body is None:
+            return
+        cq = cargo_queue()
+        if not isinstance(body, dict) or not ({"mode", "auto"} & set(body)):
+            return self.fail(400, "expected an object with mode and/or auto")
+        if "mode" in body and body["mode"] not in cq.MODES:
+            return self.fail(400, "mode must be one of %s" % ", ".join(cq.MODES))
+        if "auto" in body and not isinstance(body["auto"], bool):
+            return self.fail(400, "auto must be true or false")
+        if not build_queue_view()["installed"]:
+            return self.fail(409, "the cargo queue is not installed: run scripts/cargo-queue-install.sh")
+        try:
+            cq.set_mode(selected=body.get("mode"), auto=body.get("auto"))
+        except Exception as e:
+            return self.fail(500, "cannot change the mode: %s" % e)
+        self.send(200, json.dumps({"ok": True, "build_queue": build_queue_view()}), "application/json")
 
     def post_merge(self, n):
         """Record the user's request to merge (the agent merges). Refused unless the merge condition holds now."""
@@ -2491,6 +2566,9 @@ def cmd_serve(a):
     if ci_enabled():
         import threading
         threading.Thread(target=ci_loop, args=(ci_path(),), daemon=True).start()
+    if build_auto_enabled(real_dir):
+        import threading
+        threading.Thread(target=build_auto_loop, daemon=True).start()
     if labels_enabled(real_dir):
         import threading
         threading.Thread(target=labels_loop, args=(labels_path(),), daemon=True).start()

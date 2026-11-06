@@ -57,6 +57,7 @@ jobs:
       - run: scripts/release-tag-test.sh
       - run: scripts/workflow-test.sh
       - run: python3 scripts/suivi-test.py
+      - run: python3 scripts/cargo-queue-test.py
       - run: python3 scripts/driver-test.py
       - run: python3 scripts/time-report-test.py
       - run: rustup component add rustfmt

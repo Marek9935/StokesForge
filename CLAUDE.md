@@ -27,6 +27,7 @@ cargo test -p stokesforge-robustness -- --ignored  # costly benches
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 python3 scripts/french-guard.py              # no French outside exempt places / `lang: fr` markers (#377)
+python3 scripts/cargo-queue-test.py          # the local cargo queue and build modes (#476); install: scripts/cargo-queue-install.sh
 ```
 
 ## Architecture (crates/, dependencies bottom→top)
@@ -103,4 +104,5 @@ Goal: keep the main session's context small, and reserve Opus for judgment, with
 - A search that needs reading **a lot** (more than ten files, or not knowing where to look) goes to the `recherche` agent (`.claude/agents/recherche.md`, Haiku). Read a known file yourself, or do a targeted search (one `rg`, two files): an agent's cold start costs more.
 - Its answer cites `file:line`; re-check yourself any conclusion of **absence** ("does not exist", "nobody calls") and any excerpt you rely on to write code.
 - Never delegated to Haiku: design, data model, commands, invariants, tests (scope by `perimetre`, writing by Sonnet), interface texts, choices to be decided.
+- Heavy cargo may wait in the local queue (#476), and a foreground Bash command is cut at 10 minutes, waiting included: run `cargo test`, `clippy`, `cargo build` in the background with the log in a file, and read the summary from it. `SF_CARGO_QUEUE=off` skips the queue (only for a trial or an emergency).
 - Long output of a command (`cargo test`, `clippy`, `cargo build`): no agent. Redirect the full log to a file (`> "$tmp/test.log" 2>&1`) and show only the summary (`rg -n 'FAILED|panicked|^error|^warning' …`, `tail`); re-read the file if needed rather than rerun.
