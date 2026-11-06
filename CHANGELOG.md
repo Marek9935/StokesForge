@@ -26,6 +26,19 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A transposed sheet has a **Recalculate automatically** box, checked by
+  default (#463). Checked, the sheet follows its source by itself; unchecked, it
+  is the snapshot it was (banner, **Recalculate**). A value you type in the
+  sheet is never overwritten: the whole sheet waits until **Relink** or
+  Ctrl+Z. While the box is checked, the source sheet cannot calculate from the
+  transposed sheet (a formula, directly or through another sheet, or an
+  analysis whose result lands in the source), and the box is greyed with the
+  column to fix while one does. Sheets of files saved before this change open
+  unchecked. The `.stf` format keeps version 1 and gains the optional field
+  `auto_recalc` on the link of a transposed sheet: an older version that opens
+  and saves such a file again loses it (the box comes back unchecked, no number
+  is lost).
+
 - A detached window or panel says why a gesture did nothing or failed (#471):
   a band at the bottom of that window, for 5 seconds, orange for a refusal or
   a warning, red for an error. While any dialog is open in the main window, the

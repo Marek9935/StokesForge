@@ -240,6 +240,9 @@ fn recalculating_asks_before_erasing_edited_values() {
     open_rows(&mut s, &[1]);
     s.state.dispatch(Action::ApplyAnalysis);
     let sheet = transposed(&s).unwrap();
+    // These cases pin the snapshot banner: the box is unchecked (#463).
+    s.state
+        .dispatch(Action::SetTransposeAuto { sheet, auto: false });
     assert!(!s.state.transpose_info(sheet).unwrap().stale);
 
     // Modified source: stale, updated without a question.
@@ -299,6 +302,9 @@ fn writing_the_same_value_in_the_source_marks_the_sheet_out_of_date() {
     open_rows(&mut s, &[1]);
     s.state.dispatch(Action::ApplyAnalysis);
     let sheet = transposed(&s).unwrap();
+    // These cases pin the snapshot banner: the box is unchecked (#463).
+    s.state
+        .dispatch(Action::SetTransposeAuto { sheet, auto: false });
     assert!(!s.state.transpose_info(sheet).unwrap().stale);
 
     // Row 2 of the first column already holds 2.0.
@@ -314,4 +320,33 @@ fn writing_the_same_value_in_the_source_marks_the_sheet_out_of_date() {
     s.state.refresh();
     let info = s.state.transpose_info(sheet).unwrap();
     assert!(info.stale && !info.modified, "wrote 2 on 2: out of date");
+}
+
+/// #463, T7: a followed sheet whose source has a refused formula reading it
+/// cannot catch up, and says which column is in cause (it used to read a plain
+/// "Out of date" with the box checked). Witness: the reason left out of
+/// `transpose_info`.
+#[test]
+fn a_followed_sheet_blocked_by_a_source_formula_names_the_column() {
+    use stokesforge_app_state::state::HeaderField;
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    open_rows(&mut s, &[1]);
+    s.state.dispatch(Action::ApplyAnalysis);
+    let sheet = transposed(&s).unwrap();
+    assert!(s.state.transpose_info(sheet).unwrap().auto, "box checked");
+    let name = s.state.tree().node(sheet).unwrap().name().to_string();
+    s.state.begin_header_edit(s.cols[2], HeaderField::Formula);
+    s.state.header_editing_mut().unwrap().buffer = format!("max('{name}'!B)");
+    s.state.commit_header_edit();
+    s.state.refresh();
+    let info = s.state.transpose_info(sheet).unwrap();
+    assert!(info.auto && info.stale && !info.modified, "{info:?}");
+    assert_eq!(
+        info.stuck.as_deref(),
+        Some(
+            format!("Column C of Sheet1 calculates from {name}. Remove that formula to follow")
+                .as_str()
+        )
+    );
 }

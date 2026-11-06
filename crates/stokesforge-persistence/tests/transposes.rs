@@ -73,3 +73,20 @@ fn two_saves_of_the_same_project_have_the_same_links() {
         load(&b).unwrap().tree().transposes()
     );
 }
+
+/// (#463) The box travels with the file, checked or not.
+#[test]
+fn the_automatic_box_survives_a_round_trip_in_both_states() {
+    let (mut project, _source, sheet) = project();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.stf");
+    assert!(project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    save(&project, &path).unwrap();
+    let back = load(&path).unwrap();
+    assert!(back.tree().transpose_link(sheet).unwrap().auto_recalc);
+    project.set_transpose_auto(sheet, false).unwrap();
+    save(&project, &path).unwrap();
+    let back = load(&path).unwrap();
+    assert!(!back.tree().transpose_link(sheet).unwrap().auto_recalc);
+    assert_eq!(back.tree().transposes(), project.tree().transposes());
+}
