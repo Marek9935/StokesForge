@@ -188,7 +188,6 @@ use super::project_manager::{
     project_manager_contents_from_tree, PmEntry, PmInteraction, PROJECT_MANAGER_WIDTH,
 };
 use super::script_console::{script_model_contents, ScriptConsoleModel};
-use super::shortcuts::collect_undo_redo_shortcuts;
 use super::tab::{tab_node, Tab};
 use super::tab::{tab_title, tab_title_from_tree};
 use super::window_chrome::{
@@ -612,6 +611,9 @@ impl StokesForgeApp {
         );
         ctx.show_viewport_deferred(id, builder, move |ui, _class| {
             super::window_band::stop_keys(ui.ctx());
+            super::shortcuts::refuse_quit_in_detached(ui.ctx());
+            // Read before painting (#459), queued after the window's own actions.
+            let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
             live.report(ui.ctx());
             let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
             let mut actions = Vec::new();
@@ -626,6 +628,7 @@ impl StokesForgeApp {
                     &mut actions,
                 );
             });
+            actions.append(&mut keys);
             if reattach || !actions.is_empty() || !gestures.is_empty() {
                 let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                 requests.reattach |= reattach;
@@ -709,6 +712,9 @@ impl StokesForgeApp {
         );
         ctx.show_viewport_deferred(id, builder, move |ui, _class| {
             super::window_band::stop_keys(ui.ctx());
+            super::shortcuts::refuse_quit_in_detached(ui.ctx());
+            // Read before painting (#459), queued after the window's own actions.
+            let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
             live.report(ui.ctx());
             let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
             let source = model.source.clone();
@@ -724,6 +730,7 @@ impl StokesForgeApp {
                 }
                 script_model_contents(ui, &ctx, &mut model, &mut actions);
             });
+            actions.append(&mut keys);
             if source != model.source || reattach || !actions.is_empty() {
                 let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                 if source != model.source {
@@ -854,6 +861,9 @@ impl StokesForgeApp {
             builder,
             move |ui, _class| {
                 super::window_band::stop_keys(ui.ctx());
+                super::shortcuts::refuse_quit_in_detached(ui.ctx());
+                // Read before painting (#459), queued after the window's own actions.
+                let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
                 live.report(ui.ctx());
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
@@ -883,6 +893,7 @@ impl StokesForgeApp {
                     };
                     project_manager_contents_from_tree(ui, &model.tree, &mut interaction);
                 });
+                actions.append(&mut keys);
                 {
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     if reattach
@@ -1232,6 +1243,7 @@ impl DetachedTabViewport {
     /// The window's frame, then the band.
     fn show(&self, ui: &mut egui::Ui) {
         super::window_band::stop_keys(ui.ctx());
+        super::shortcuts::refuse_quit_in_detached(ui.ctx());
         self.show_locked(ui);
         super::page_layout::note_field_focus(ui.ctx());
         super::window_band::paint(ui.ctx());
@@ -1275,9 +1287,18 @@ impl DetachedTabViewport {
             model.focused = is_active;
             root_context.request_repaint_of(egui::ViewportId::ROOT);
         }
+        // Read before anything is painted (#459): a cell, a field or the Page
+        // Layout Mode never sees these keys. Queued after the window's own
+        // actions, below. Workbook and graph only; the detached note and
+        // matrix read none (#473 removes them).
+        let mut keys = if matches!(self.tab, Tab::Book(_) | Tab::Graph(_)) {
+            super::shortcuts::read_detached_history_and_save(ui.ctx())
+        } else {
+            Vec::new()
+        };
         let (header_actions, frame) =
             self.paint_contents(ui, &mut model, &mut requests, was_collapsed);
-        self.collect_actions(ui, &mut requests);
+        self.collect_actions(ui, &mut requests, &mut keys);
         // A message the local view recorded (an unreadable clipboard...) has no
         // action behind it: only the root can bring it to the band (#471).
         if model
@@ -1410,16 +1431,18 @@ impl DetachedTabViewport {
         (header_actions, frame)
     }
 
-    fn collect_actions(&self, ui: &mut egui::Ui, requests: &mut DetachedTabRequests) {
+    fn collect_actions(
+        &self,
+        ui: &mut egui::Ui,
+        requests: &mut DetachedTabRequests,
+        keys: &mut Vec<Action>,
+    ) {
         let tab = self.tab;
         let root_context = &self.root_context;
-        // The edit shortcuts are read in the context
-        // of the viewport that has the focus, as for the root. Read after the
-        // contents are painted: a text field that has the focus keeps its own
-        // text undo, and the shortcut stands aside once it has lost it (#426).
-        if matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
-            collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
-        }
+        // Undo, Redo and Save, read before the painting (#459), come after
+        // the gestures of this frame: Ctrl+Z pressed in the frame a drag is
+        // released undoes that drag (#398).
+        requests.actions.append(keys);
         if let Some(mut action) = finish_file_drop(ui.ctx()) {
             // Same destination as a floating workbook, even
             // if its grid is collapsed and did not claim the drop.

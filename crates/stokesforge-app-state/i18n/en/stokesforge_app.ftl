@@ -2315,6 +2315,8 @@ dialog-name-analysis = Analysis
 refused-dialog-editing = { $name } is open in the main window. Apply or cancel it first
 refused-dialog-close = { $name } is open in the main window. Close it first
 refused-dialog-question = A question is waiting in the main window. Answer it first
+# Ctrl+Q pressed in a detached window: nothing closes (#459).
+refused-quit-in-main = Quit is in the main window
 
 # Said in the window of the gesture that opened a dialog, which always opens in
 # the main window (#472).

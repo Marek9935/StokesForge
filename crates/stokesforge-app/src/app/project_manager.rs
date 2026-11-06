@@ -655,6 +655,15 @@ pub(super) fn project_manager_contents_from_tree(
         interaction
             .selection
             .retain(|entry| !entry.is_folder() || memory.order.contains(entry));
+        // Nor does a name field stay open on an object that is gone (Ctrl+Z of
+        // its creation, #459): the field closes and the arrows work again.
+        let present: HashSet<NodeId> = memory.order.iter().map(|entry| entry.node()).collect();
+        let first_gone = memory.rename.first().is_some_and(|id| !present.contains(id));
+        memory.rename.retain(|id| present.contains(id));
+        memory.renamed.retain(|(id, _)| present.contains(id));
+        if first_gone {
+            memory.text = None;
+        }
         data.insert_temp(memory_key, memory);
     });
     // RAW-SCROLL(#347): tree: the area under the last row is the drop target of a

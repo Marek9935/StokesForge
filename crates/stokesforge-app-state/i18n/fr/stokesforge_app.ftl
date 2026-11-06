@@ -2314,6 +2314,8 @@ dialog-name-analysis = Analyse
 refused-dialog-editing = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La valider ou l'annuler d'abord
 refused-dialog-close = La fenêtre « { $name } » est ouverte dans la fenêtre principale. La fermer d'abord
 refused-dialog-question = Une question attend dans la fenêtre principale. Y répondre d'abord
+# Ctrl+Q dans une fenêtre détachée : rien ne se ferme (#459).
+refused-quit-in-main = Quitter se fait dans la fenêtre principale
 
 # Dit dans la fenêtre du geste qui a ouvert une fenêtre de dialogue, toujours
 # ouverte dans la fenêtre principale (#472).
