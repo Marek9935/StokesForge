@@ -333,6 +333,8 @@ StokesForge adds a linked sheet named like the source with a `ᵀ` suffix. It ho
 
 Only numeric columns can be transposed. A message names the column, by its letter, when it has no x' value or contains text.
 
+<img src="../images/analysis-transposed-sheet.png" alt="The transposed sheet Kinetics: the banner Transposed from Kinetics with the box Recalculate automatically checked, the x' column and one column per row analysed." width="700">
+
 The transposed sheet shows a banner **Transposed from** followed by the source name, and a box **Recalculate automatically**, checked by default. While it is checked, the sheet follows its source: when you change the source, the rows and the analyses that read them update by themselves. Uncheck it to keep a snapshot. A snapshot shows **Out of date** when the source changed, and **Values edited** when you typed in the linked columns. Press **Recalculate** to refresh the sheet from its source. After you edited values, the button is **Relink**: it also erases your edits, and asks for confirmation first. Undo brings them back.
 
 A value you type in a linked column is never overwritten by itself. The whole sheet then stops following until you press **Relink** or undo your typing; the box stays checked. A source column without x' value or with text also stops it: the banner says **Out of date** and names the column, and the sheet follows again once it is fixed.

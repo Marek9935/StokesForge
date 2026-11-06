@@ -30,8 +30,59 @@ pub(super) fn transpose_banner(
     };
     ui.horizontal_centered(|ui| {
         ui.add_space(theme::SPACE_ITEM);
-        ui.label(tr!("transpose-banner", source = info.source_name.as_str()));
         let warn = theme::stale_color(ui.visuals().dark_mode);
+        let spacing = ui.spacing().item_spacing.x;
+        // What stays whole in a narrow panel, in this order: the button, the box,
+        // "Values edited"; the rest (a long reason, then the origin) is cut with an
+        // ellipsis and read in full on hover. Otherwise Recalculate / Relink is
+        // pushed out of the window.
+        let button = (info.stale || info.modified).then(|| {
+            if info.modified {
+                (
+                    tr!("transpose-relink"),
+                    tr!("transpose-relink-hint", source = info.source_name.as_str()),
+                )
+            } else {
+                (
+                    tr!("transpose-recalculate"),
+                    tr!(
+                        "transpose-recalculate-hint",
+                        source = info.source_name.as_str()
+                    ),
+                )
+            }
+        });
+        let button_width = button.as_ref().map_or(0.0, |(label, _)| {
+            text_width(ui, label) + 2.0 * ui.spacing().button_padding.x + spacing
+        });
+        let modified = tr!("transpose-state-modified");
+        let modified_width = if info.modified {
+            text_width(ui, &modified) + spacing
+        } else {
+            0.0
+        };
+        let auto_label = tr!("transpose-auto");
+        let box_width = ui.spacing().icon_width
+            + ui.spacing().icon_spacing
+            + text_width(ui, &auto_label)
+            + spacing;
+        let state_text = match (&info.stuck, info.stale) {
+            (Some(reason), _) => Some(tr!("transpose-state-stuck", reason = reason.as_str())),
+            (None, true) => Some(tr!("transpose-state-stale")),
+            (None, false) => None,
+        };
+        // The origin keeps at least this much for the states.
+        let state_floor = if state_text.is_some() { 24.0 } else { 0.0 } + 3.0 * spacing + 16.0;
+        ui.scope(|ui| {
+            ui.set_max_width(
+                (ui.available_width() - button_width - modified_width - box_width - state_floor)
+                    .max(24.0),
+            );
+            ui.add(
+                egui::Label::new(tr!("transpose-banner", source = info.source_name.as_str()))
+                    .truncate(),
+            );
+        });
         // The box (#463). Greyed when the source calculates from this sheet:
         // the reason is its own disabled tooltip and names the column (S-G1, S-G2).
         let sheet_name = state
@@ -43,10 +94,7 @@ pub(super) fn transpose_banner(
         let blocked = !info.auto && info.auto_blocked.is_some();
         let reason = info.auto_blocked.clone().unwrap_or_default();
         let response = ui
-            .add_enabled(
-                !blocked,
-                egui::Checkbox::new(&mut auto, tr!("transpose-auto")),
-            )
+            .add_enabled(!blocked, egui::Checkbox::new(&mut auto, auto_label))
             .on_disabled_hover_text(reason);
         let response = if blocked {
             response
@@ -61,41 +109,31 @@ pub(super) fn transpose_banner(
         if response.changed() {
             actions.push(Action::SetTransposeAuto { sheet, auto });
         }
-        match (&info.stuck, info.stale) {
-            (Some(reason), _) => {
-                ui.label(
-                    egui::RichText::new(tr!("transpose-state-stuck", reason = reason.as_str()))
-                        .color(warn),
-                );
-            }
-            (None, true) => {
-                ui.label(egui::RichText::new(tr!("transpose-state-stale")).color(warn));
-            }
-            (None, false) => {}
+        if let Some(text) = state_text {
+            ui.scope(|ui| {
+                ui.set_max_width((ui.available_width() - button_width - modified_width).max(0.0));
+                // A truncated label shows its full text on hover by itself.
+                ui.add(egui::Label::new(egui::RichText::new(text).color(warn)).truncate());
+            });
         }
         if info.modified {
-            ui.label(egui::RichText::new(tr!("transpose-state-modified")).color(warn));
+            ui.label(egui::RichText::new(modified).color(warn));
         }
-        if info.stale || info.modified {
-            let (label, hint) = if info.modified {
-                (
-                    tr!("transpose-relink"),
-                    tr!("transpose-relink-hint", source = info.source_name.as_str()),
-                )
-            } else {
-                (
-                    tr!("transpose-recalculate"),
-                    tr!(
-                        "transpose-recalculate-hint",
-                        source = info.source_name.as_str()
-                    ),
-                )
-            };
+        if let Some((label, hint)) = button {
             if ui.button(label).on_hover_text(hint).clicked() {
                 actions.push(Action::RecalculateTranspose { sheet });
             }
         }
     });
+}
+
+/// Width of `text` in the body font.
+fn text_width(ui: &egui::Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
+        .size()
+        .x
 }
 
 /// Overwriting edited values in the linked columns: confirmation first
@@ -375,5 +413,78 @@ mod tests {
             &found,
             &tr!("transpose-state-stuck", reason = stuck.as_str()),
         );
+    }
+
+    /// In a narrow panel the button still fits when both states show, and a long
+    /// reason is cut instead of pushing it out of the window. Witness: states
+    /// laid out before the button without measuring it.
+    #[test]
+    fn the_button_stays_inside_a_narrow_banner() {
+        for width in [520.0_f32, 460.0] {
+            let inside = |output: &egui::FullOutput, wanted: &str| {
+                output.shapes.iter().any(|p| match &p.shape {
+                    egui::Shape::Text(t) if t.galley.job.text == wanted => {
+                        t.pos.x + t.galley.size().x <= width
+                    }
+                    _ => false,
+                })
+            };
+            // Out of date and Values edited together, box unchecked.
+            let (session, mut state, source, sheet, first) = bench();
+            let row = state.tree().children(sheet).unwrap()[1];
+            let handle = session.handle();
+            handle
+                .execute(stokesforge_commands::Command::SetCells {
+                    column: row,
+                    start: 0,
+                    values: ValueBlock::Float(vec![-1.0]),
+                    expected_version: None,
+                })
+                .unwrap();
+            handle
+                .execute(stokesforge_commands::Command::SetCells {
+                    column: first,
+                    start: 0,
+                    values: ValueBlock::Float(vec![9.0]),
+                    expected_version: None,
+                })
+                .unwrap();
+            state.refresh();
+            let info = state.transpose_info(sheet).unwrap();
+            assert!(info.stale && info.modified);
+            let ctx = context();
+            let mut actions = Vec::new();
+            let output = frame_of(&ctx, egui::vec2(width, 60.0), Vec::new(), |ui| {
+                transpose_banner(ui, &state, sheet, &mut actions);
+            });
+            assert!(
+                inside(&output, &tr!("transpose-relink")),
+                "Relink is cut off"
+            );
+            assert!(inside(&output, &tr!("transpose-state-modified")));
+
+            // A followed sheet with a column that cannot be followed: long reason.
+            handle
+                .execute(stokesforge_commands::Command::SetTransposeAuto { sheet, auto: true })
+                .unwrap();
+            handle
+                .execute(stokesforge_commands::Command::AddColumn {
+                    sheet: source,
+                    index: None,
+                    name: Some("A rather long column name".into()),
+                    column: Column::from_f64(&[1.0, 2.0]),
+                })
+                .unwrap();
+            state.refresh();
+            let output = frame_of(&ctx, egui::vec2(width, 60.0), Vec::new(), |ui| {
+                transpose_banner(ui, &state, sheet, &mut actions);
+            });
+            let button = if state.transpose_info(sheet).unwrap().modified {
+                tr!("transpose-relink")
+            } else {
+                tr!("transpose-recalculate")
+            };
+            assert!(inside(&output, &button), "the button is cut off");
+        }
     }
 }
