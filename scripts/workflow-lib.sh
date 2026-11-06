@@ -30,6 +30,25 @@ sf_worktrees() {
         done
 }
 
+# Integration line of issue $1 (#480): `main` unless its record declares one (a sub-issue
+# inherits its parent's). Reads the records through suivi.py: no git, no glab. A declared line
+# whose branch is missing is the caller's refusal, never a fallback to `main`.
+sf_line_of() {
+    python3 -I "$(dirname "${BASH_SOURCE[0]}")/suivi.py" line "$1"
+}
+
+# Permanent worktree of line $1: ../_stokesforge/line-<line> (absolute, not checked for existence).
+sf_line_dir() { printf '%s/line-%s\n' "$(realpath -m "$(sf_wt_root)")" "$1"; }
+
+# Lines that have a permanent worktree (the branch each one has checked out), one per line.
+sf_lines() {
+    local wt
+    sf_worktrees | while read -r wt; do
+        [ -n "$wt" ] || continue
+        case "$(basename "$wt")" in line-*) git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || true ;; esac
+    done
+}
+
 # Issue number of a worktree, empty if none. The folder name comes first
 # (feature<n>, feature<n><letters> for a second worktree of the same issue, so
 # feature426b is #426; feature4260 is #4260), the branch feature/<n>-<topic> is the

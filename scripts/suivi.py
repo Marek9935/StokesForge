@@ -8,7 +8,7 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     issues/<n>.json        one record per issue: colour, last_colour, kind
                            (issue|package), parent, subs, name, state, waiting,
                            wait_kind, what, since, owner{session,pid,pid_start,at},
-                           done_at
+                           done_at, line (absent = main; #480, see below)
     ended/<session_id>     empty files touched by the SessionEnd hook
     qcm/<id>/data.js       the decisions (injected into the form template when served)
     qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
@@ -76,10 +76,19 @@ Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or
 session owns: exit 2 with the text on stderr for an event, exit 0 silent otherwise. `hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
 or tells a new session which issues hold unread answers; it always exits 0.
 
+INTEGRATION LINE (#480). An issue may target an integration branch (today `PostV1.1`) instead of `main`.
+The record field `line` names it; absent means `main`. `claim --line L` writes it and every claim rewrites
+it (a claim without `--line` removes it); a sub-issue without its own line inherits its parent's.
+`line <n>` prints the line of an issue (`main` if none): it reads the records only, no git or glab call
+beyond locating the state folder. A declared line whose branch is missing is refused by the scripts that
+need it, never answered with `main`. The permanent worktrees `line-*` are not work-package worktrees:
+`status` and `check` ignore them. The CI watcher polls `main` (ci.json) and every known line
+(ci-line-<name>.json); /api/state carries `lines` = {line: ci view}.
+
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
-Commands: claim, status, set, pause, done, release-line, check, migrate,
+Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|list, qcm pose|answers|list, import-online, tag-wait, labels sync, tag-check.
 """
@@ -400,11 +409,39 @@ def new_record(n):
             "since": None, "owner": None, "done_at": None, "legacy": False}
 
 
-def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False, avoid=()):
-    """Claim issue n in `recs` (memory only). Returns the changed records."""
+LINE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+LINE_WT_RE = re.compile(r"^line-")
+
+
+def check_line(line):
+    if not LINE_RE.fullmatch(line or ""):
+        raise Fail("not a line name: %r" % line)
+    return line
+
+
+def line_of(recs, n):
+    """The integration line of issue n: its own `line`, else its parent's, else `main`."""
+    r = recs.get(n)
+    if r is None:
+        return "main"
+    line = r.get("line")
+    if not line and r.get("parent") is not None:
+        line = (recs.get(r["parent"]) or {}).get("line")
+    return line or "main"
+
+
+def is_line_wt(path):
+    """A permanent worktree of an integration line (../_stokesforge/line-<name>), not a work package's."""
+    return bool(LINE_WT_RE.match(os.path.basename(path)))
+
+
+def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False, avoid=(), line=None, set_line=True):
+    """Claim issue n in `recs` (memory only). Returns the changed records.
+    `line` is written on n and replaces any earlier one (None removes it); a parent claimed on
+    behalf of a sub-issue keeps its own (set_line=False)."""
     changed = []
     if parent is not None:
-        p, pc = claim_into(recs, parent, owner, package=True, avoid=avoid)
+        p, pc = claim_into(recs, parent, owner, package=True, avoid=avoid, set_line=False)
         changed += pc
         r = recs.get(n) or new_record(n)
         r["parent"] = parent
@@ -419,6 +456,11 @@ def claim_into(recs, n, owner, name=None, parent=None, subs=None, package=False,
     r["colour"] = colour
     r["done_at"] = None
     r["legacy"] = False
+    if set_line:
+        if line and line != "main":
+            r["line"] = line
+        else:
+            r.pop("line", None)
     if package or subs is not None:
         r["kind"] = "package"
     if subs is not None:
@@ -443,18 +485,54 @@ def cmd_claim(a):
             m, _, t = s.partition("=")
             subs.append({"n": int(m), "title": t})
     avoid = a.avoid.split() if a.avoid else []
+    line = check_line(a.line) if a.line else None
     if a.dry_run:
         recs = load_all()
-        r, _ = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid)
+        r, _ = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid, line)
         print(r["colour"])
         return 0
     with Lock():
         recs = load_all()
         time.sleep(float(os.environ.get("SF_SUIVI_SLOW", "0")))   # test seam: widens the race window
-        r, changed = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid)
+        r, changed = claim_into(recs, a.issue, owner, a.name, a.parent, subs, a.package or bool(subs), avoid, line)
         for x in changed:
             save(x)
     print(r["colour"])
+    return 0
+
+
+def cmd_line(a):
+    print(line_of(load_all(), a.issue))
+    return 0
+
+
+def cmd_line_clear(a):
+    """The line has landed: drop `line` from every record that carries it (scripts/line.sh land)."""
+    check_line(a.line)
+    n = 0
+    with Lock():
+        for r in load_all().values():
+            if r.get("line") == a.line:
+                r.pop("line")
+                save(r)
+                n += 1
+    print("%d record%s cleared" % (n, "" if n == 1 else "s"))
+    return 0
+
+
+def cmd_line_trial(a):
+    """Exit 0 if the user's OK on the whole line is recorded: at least one trial entry of issue
+    `issue` whose `try` command ends with `try.sh <line>`, and every such entry OK."""
+    check_line(a.line)
+    mine = [t for t in load_tests(a.issue) if str(t.get("try", "")).strip().endswith("try.sh " + a.line)]
+    if not mine:
+        print("no trial entry of #%d tries the line %s (suivi.py test add %d ...: try \"scripts/try.sh %s\")"
+              % (a.issue, a.line, a.issue, a.line))
+        return 1
+    todo = [t["id"] for t in mine if t.get("status", "todo") != "ok"]
+    if todo:
+        print("the trial of the line %s is not OK yet: %s" % (a.line, ", ".join(todo)))
+        return 1
     return 0
 
 
@@ -591,6 +669,8 @@ def build_status():
     by_issue = {}
     colourless = []
     for w in wts:
+        if is_line_wt(w):
+            continue
         n = issue_of(w)
         if n in recs:
             by_issue.setdefault(n, []).append(os.path.basename(w))
@@ -623,6 +703,7 @@ def build_status():
             "package": {"parent": g, "subs": pkg.get("subs", [])} if pkg else None,
             "name": (pkg or lead).get("name", ""), "state": lead.get("state", ""),
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
+            **({"line": line_of(recs, lead["issue"])} if line_of(recs, lead["issue"]) != "main" else {}),
             "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
             **wait_view(recs, g),
             "worktrees": group_wts(g), "since": since, "days": days})
@@ -682,7 +763,7 @@ def cmd_status(a):
 # ------------------------------------------------------------------- check
 def cmd_check(a):
     recs = load_all()
-    wts = worktrees()
+    wts = [w for w in worktrees() if not is_line_wt(w)]
     problems = []
     seen = {}
     for r in recs.values():
@@ -1295,14 +1376,18 @@ def same_commit(stored, ref):
 
 
 def check_merge_commit(issue, commit):
-    """L2: the full hash of `commit`, or Fail. Real commit, on main, containing every
-    feature/<issue>-* branch still there, message citing #<issue>."""
+    """L2: the full hash of `commit`, or Fail. Real commit, on main (on the issue's integration line
+    when its record declares one, #480), containing every feature/<issue>-* branch still there,
+    message citing #<issue>."""
     rc, out = git_rc("rev-parse", "--verify", "--quiet", commit + "^{commit}")
     if rc != 0:
         raise Fail("no such commit in this repository: %s" % commit)
     full = out.strip()
-    if git_rc("merge-base", "--is-ancestor", full, "main")[0] != 0:
-        raise Fail("commit %s is not on main" % commit)
+    line = line_of(load_all(), issue)
+    if line != "main" and git_rc("rev-parse", "--verify", "--quiet", "refs/heads/" + line)[0] != 0:
+        raise Fail("the line %s of #%d has no local branch" % (line, issue))
+    if git_rc("merge-base", "--is-ancestor", full, line)[0] != 0:
+        raise Fail("commit %s is not on %s" % (commit, line))
     rc, out = git_rc("for-each-ref", "--format=%(refname:short)", "refs/heads/feature/%d-*" % issue)
     for br in out.split():
         if git_rc("merge-base", "--is-ancestor", br, full)[0] != 0:
@@ -1683,15 +1768,31 @@ def ci_run(cmd, timeout):
     return p.returncode, out, err
 
 
-def ci_poll(prev, now=None):
-    """One reading. Never raises: any doubt is `unknown`."""
+def ci_line_path(line):
+    return os.path.join(suivi_dir(), "ci-line-%s.json" % line)
+
+
+def ci_lines():
+    """The integration lines to watch: those of the records (done ones too: a line waits for its landing)
+    and of the permanent line worktrees."""
+    out = {r["line"] for r in load_all().values() if LINE_RE.fullmatch(str(r.get("line") or ""))}
+    for w in worktrees():
+        if is_line_wt(w):
+            b = git("-C", w, "symbolic-ref", "--short", "HEAD")
+            if LINE_RE.fullmatch(b or ""):
+                out.add(b)
+    return sorted(out - {"main"})
+
+
+def ci_poll(prev, now=None, ref="main"):
+    """One reading of the head of `ref` (main or an integration line). Never raises: any doubt is `unknown`."""
     now = time.time() if now is None else now
     prev = prev if isinstance(prev, dict) else {}
     out = {"checked_at": now, "sha": None, "verdict": "unknown", "names": [], "reason": "",
            "last_red": prev.get("last_red"), "since": prev.get("since")}
     try:
         timeout = float(os.environ.get("SF_SUIVI_CI_TIMEOUT", "60"))
-        rc, text, err = ci_run(["bash", CI_STATUS, "--head"], timeout)
+        rc, text, err = ci_run(["bash", CI_STATUS, "--head", ref], timeout)
         sha, jobs = ci_parse_jobs(text)
         out["sha"] = sha
         if sha is None:
@@ -1723,9 +1824,9 @@ def ci_poll(prev, now=None):
     return out
 
 
-def ci_view():
+def ci_view(path=None):
     """What /api/state shows: computed when read; missing, corrupt or stale is `unknown`."""
-    d = read_json(ci_path())
+    d = read_json(path or ci_path())
     view = {"verdict": "unknown", "names": [], "reason": "no reading yet", "sha": None, "last_red": None}
     if not isinstance(d, dict):
         return view
@@ -1749,6 +1850,12 @@ def ci_loop(path):
     while True:
         try:
             write_json(path, ci_poll(read_json(path)))
+        except Exception:
+            pass
+        try:
+            for ln in ci_lines():
+                lp = ci_line_path(ln)
+                write_json(lp, ci_poll(read_json(lp), ref=ln))
         except Exception:
             pass
         time.sleep(ci_poll_seconds())
@@ -2308,6 +2415,20 @@ def build_auto_loop():
             time.sleep(30)
 
 
+def line_rows():
+    """{line: CI view + the issues declared on the line, delivered or not} for the tracking page (#480)."""
+    recs = load_all()
+    committed = {t.get("n") for t in load_tests() if t.get("commit")}
+    rows = {}
+    for ln in ci_lines():
+        row = ci_view(ci_line_path(ln))
+        row["issues"] = [{"issue": n, "name": r.get("name", ""),
+                          "delivered": bool(r.get("done_at")) or n in committed}
+                         for n, r in sorted(recs.items()) if line_of(recs, n) == ln and r.get("kind") != "package"]
+        rows[ln] = row
+    return rows
+
+
 def build_state():
     s = build_status()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
@@ -2315,6 +2436,7 @@ def build_state():
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
             "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
+            "lines": line_rows(),
             "build_queue": build_queue_view(),
             "pending": len(qcms) + sum(1 for t in tests if t.get("status", "todo") == "todo")}
 
@@ -2598,6 +2720,14 @@ def parser():
     p.add_argument("--sub", action="append", metavar="N=TITLE", help="a sub-issue (makes the issue a package)")
     p.add_argument("--dry-run", action="store_true", help="print the colour it would take, write nothing")
     p.add_argument("--avoid", help="colours to treat as taken (dry run promises)")
+    p.add_argument("--line", help="the integration branch the issue targets (#480); absent = main, and removes an earlier one")
+    p = add("line-clear", cmd_line_clear, "the line landed: remove `line` from every record that has it")
+    p.add_argument("line")
+    p = add("line-trial", cmd_line_trial, "exit 0 if the trial entries of <issue> that try <line> are all OK")
+    p.add_argument("issue", type=int)
+    p.add_argument("line")
+    p = add("line", cmd_line, "the integration line of an issue (main if none); reads the records only")
+    p.add_argument("issue", type=int)
     p = add("status", cmd_status, "the six colours, paused issues, worktrees without a record")
     p.add_argument("--json", action="store_true")
     p = add("set", cmd_set, "state of an issue")

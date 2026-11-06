@@ -83,6 +83,7 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .box.isok{opacity:.75}
 .box.isback{border-color:var(--bad)}
 .banner{border:2px solid var(--warn);background:var(--warn-soft);color:var(--fg);border-radius:12px;padding:12px 16px;font-weight:700}
+#lines{display:flex;flex-direction:column;gap:8px}
 .ciline{border:2px solid var(--line);border-radius:12px;padding:10px 16px;font-weight:700}
 .ciline.green{border-color:var(--ok);background:var(--ok-soft)}
 .ciline.red{border-color:var(--bad);background:var(--bad-soft)}
@@ -130,6 +131,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     <button type="button" id="refresh">Actualiser</button>
   </header>
   <div class="ciline" id="ciline" hidden role="status"></div>
+  <div id="lines" hidden role="status"></div>
   <section class="buildline" id="buildline" hidden aria-label="Mode de build">
     <div class="row">
       <div class="seg" id="bmodes" role="group" aria-label="Mode de build"></div>
@@ -217,6 +219,31 @@ function ciLine(ci){
   return {cls:'unknown',text:'CI inconnue sur main : on ne sait pas si elle passe.'+old};
 }
 /*CILINE-END*/
+/*LINEROW-START*/
+/* One row per integration line (#480), under the CI line of main and never colouring it: the CI state
+   of the line and the issues declared on it (delivered ones marked). row = S.lines[name]. */
+function lineRow(name,row){
+  if(!row||typeof row!=='object')return null;
+  const names=a=>(Array.isArray(a)?a:[]).join(', ');
+  const v=row.verdict;
+  let cls='unknown',ci='CI inconnue';
+  if(v==='green'){cls='green';ci='CI verte';}
+  else if(v==='red'){cls='red';ci='CI rouge : '+(names(row.names)||'cause inconnue');}
+  else if(v==='pending'){cls='pending';ci='CI en cours';}
+  const is=Array.isArray(row.issues)?row.issues:[];
+  const list=is.length?is.map(i=>'#'+i.issue+(i.delivered?' livrée':' en cours')).join(' · '):'aucune issue';
+  return {cls:cls,text:name+' : '+ci+' — '+list};
+}
+/*LINEROW-END*/
+function renderLines(){
+  const box=$('lines');if(!box)return;
+  box.textContent='';
+  Object.keys((S&&S.lines)||{}).sort().forEach(n=>{
+    const l=lineRow(n,S.lines[n]);if(!l)return;
+    box.appendChild(el('div','ciline '+l.cls,l.text));
+  });
+  box.hidden=!box.firstChild;
+}
 function renderCi(){
   const el=$('ciline'),l=ciLine(S&&S.ci);
   if(!l){el.hidden=true;return;}
@@ -341,6 +368,8 @@ function mergeUi(l){
   if(l.mergeReady)return {button:true,note:''};
   return {button:false,note:''};
 }
+/* The merge button names where the merge goes: an issue with an integration line merges into it (#480). */
+function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
 /*CARDLINE-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
@@ -352,7 +381,7 @@ function lineEl(c){
   if(l.note)w.appendChild(el('span','what',l.note));
   if(mg.note)w.appendChild(el('span','what',mg.note));
   if(mg.button){
-    const b=el('button','save mergebtn','Fusionner');b.type='button';b.id='merge-'+c.issue;
+    const b=el('button','save mergebtn',mergeLabel(c));b.type='button';b.id='merge-'+c.issue;
     b.onclick=()=>{b.disabled=true;askMerge(c.issue);};w.appendChild(b);
   }
   return {user:l.user,node:w};
@@ -511,7 +540,7 @@ function render(){
   const n=S.pending;const pc=$('n-pending');pc.textContent=n;pc.className='count'+(n?' hot':'');
   const taken=S.colours.filter(c=>!c.free).length;
   $('sub').textContent=(n?n+' chose'+(n>1?'s':'')+' à faire':'Rien ne t’attend')+' · '+taken+' couleur'+(taken>1?'s':'')+' prise'+(taken>1?'s':'')+' sur 6';
-  renderCi();renderBuild();renderTests();renderSuivi();
+  renderCi();renderLines();renderBuild();renderTests();renderSuivi();
 }
 
 /* ---- tabs ---- */
