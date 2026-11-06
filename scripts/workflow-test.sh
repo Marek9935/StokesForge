@@ -693,20 +693,25 @@ GL
         sbsuivi test add 480 "$sb/eline.json" > /dev/null
         git -C "$sb/StokesForge" tag v1.1.0 main
     }
-    trial_ok() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]="ok"; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/480-1.json"; }
+    trial_set() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]=sys.argv[2]; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/480-1.json" "$1"; }
+    trial_ok() { trial_set ok; }
     notes_of() { grep -c "^$1 " "$sb/gl/notes" 2> /dev/null || true; }
 
-    # Refusals: no tag, a tag off main, an -rc tag only, a trial not OK. Main and the line stay as they are.
-    lland_setup; base="$(main_head)"; lbase="$(lhead)"
+    # Refusals: no tag, a tag off main, an -rc tag only (the trial is OK, so only the tag can refuse), then a
+    # trial not OK. Main and the line stay as they are, GitLab is not called.
+    lland_setup; base="$(main_head)"; lbase="$(lhead)"; trial_ok
     git -C "$sb/StokesForge" tag -d v1.1.0 > /dev/null
     if land; then fail "land without the tag accepted"; fi
+    grep -q 'does not exist' "$sb/out" || fail "no-tag message: $(cat "$sb/out")"
     git -C "$sb/StokesForge" tag v1.1.0 "$lbase"       # on the line only
     if land; then fail "land with a tag off main accepted"; fi
     grep -q 'not on main' "$sb/out" || fail "tag off main message: $(cat "$sb/out")"
     git -C "$sb/StokesForge" tag -d v1.1.0 > /dev/null
     git -C "$sb/StokesForge" tag v1.1.0-rc1 main
     if land; then fail "land with an -rc tag only accepted"; fi
+    grep -q 'does not exist' "$sb/out" || fail "rc-only message: $(cat "$sb/out")"
     git -C "$sb/StokesForge" tag v1.1.0 main
+    trial_set todo
     if land; then fail "land with the trial not OK accepted"; fi
     grep -q 'not OK yet' "$sb/out" || fail "trial refusal text: $(cat "$sb/out")"
     eq "$(main_head)" "$base" "refused land moved main"
@@ -757,9 +762,11 @@ GL
     grep -q "CARGO_TARGET_DIR=$lwt/target" <<< "$out" || fail "try.sh line target: $out"
     grep -q 'line only' <<< "$out" || fail "try.sh line log: $out"
     if ( cd "$sb/StokesForge" && "$here/try.sh" --dry-run Nope ) > /dev/null 2>&1; then fail "try.sh on an unknown line accepted"; fi
+    git -C "$lwt" checkout -q -b side; git -C "$lwt" commit -q --allow-empty -m side; git -C "$lwt" checkout -q $L
+    git -C "$lwt" merge -q --no-ff -m "Merge #99: marker" side; git -C "$lwt" push -q origin $L
     sbsuivi claim 7 --line $L > /dev/null
     out="$( cd "$sb/StokesForge" && "$here/try.sh" --dry-run 7 )" || fail "try.sh on a line issue"
-    grep -q "== last merges on $L" <<< "$out" && grep -q "not yet on $L" <<< "$out" || fail "try.sh issue log against the line: $out"
+    grep -q "== last merges on $L" <<< "$out" && grep -q "not yet on $L" <<< "$out" && grep -q 'Merge #99: marker' <<< "$out" || fail "try.sh issue log against the line: $out"
 )
 
 # No inconsistency left (duplicate colour, record without worktree, worktree without record).

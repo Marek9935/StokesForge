@@ -623,7 +623,10 @@ GitHub CI but report nothing to GitLab (intended, see below).
 `suivi.py line <n>` and `sf_line_of`) starts from `origin/<line>`, is delivered into `<line>` by
 `deliver.sh` (in the permanent worktree `../_stokesforge/line-<line>`, the main checkout untouched, the
 same `main-lock.sh` lock, no closing keyword and no `--wait-tag`) and is released against the line.
-`line.sh create|sync` make the line and bring `main` into it. The CI watcher reads each line's head
+`line.sh create|sync|land` make the line, bring `main` into it and land it (the declaration is the GitLab label
+`ligne-<line>`, never in `LABEL_ALL`; `land` waits for the tag `v1.1.0` on `main` and for the trial entries of
+issue #480 that try the line, and closes the issues from the merge commit through a fake `glab` in the tests).
+The tracking page has one row per line. The CI watcher reads each line's head
 too (`ci-line-<name>.json`, `lines` of `/api/state`). `workflow-test.sh` and `suivi-test.py` cover each
 rule with a witness by mutation.
 
