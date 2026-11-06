@@ -7,11 +7,15 @@ One stdlib-only file, two roles.
   scripts/cargo-queue-install.sh). Heavy subcommands wait in a small local queue (one file per
   waiting cargo, held under flock), then run the real cargo inside a systemd user scope whose
   slice carries the limits of the current mode. Everything else goes straight to the real cargo.
-* CLI: `cargo-queue.py mode [full|dev|background]`, `auto on|off`, `status [--json]`, `apply`.
-  suivi.py imports this file to drive the same functions from the tracking page.
+* CLI: `cargo-queue.py mode [full|dev|background]`, `auto on|off`, `status [--json]`, `apply`,
+  `profile-restore`. suivi.py imports this file to drive the same functions from the tracking page.
 
 The numbers of the modes live only in MODES below. A queued build gets its job count from the mode
 when it starts and keeps it; a live mode change only moves weight, memory, quota and affinity.
+
+Power profile (#477): a mode with a `profile` (FullIA: "performance") switches the GNOME power profile
+on entering the mode, on mains only, and puts back the profile found on entry when the mode is left, unless
+the user changed it in between. What was found lives in `profile.json` (see "power profile" below).
 """
 import ctypes
 import fcntl
@@ -33,10 +37,16 @@ import time
 # time on a clean test build (anon memory of one test build is 5-6 GiB, the rest is cache). Two builds at
 # once gain 14-19 % over two in a row; a third gains 6 % on plain builds and nothing on test builds. Table in #476.
 # cpu_quota_pct and cpus stay as knobs, unused by the current modes.
+# profile: GNOME power profile set while the mode is effective (None = no link, no call at all). Measured
+# 2026-11-06 on mains (#477): `performance` (32 W) against `balanced` (28 W) is 13-16 % faster alone and
+# 21-33 % with two builds at once, for 3-8 % more energy and 6-14 C more; the fans reach 4800-5600 rpm.
 MODES = {
-    "full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None, "memory_high": "20G", "fallback_nice": 0},
-    "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11, "memory_high": "20G", "fallback_nice": 10},
-    "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 6, "memory_high": "12G", "fallback_nice": 19},
+    "full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None, "memory_high": "20G", "fallback_nice": 0,
+             "profile": "performance"},
+    "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11, "memory_high": "20G", "fallback_nice": 10,
+            "profile": None},
+    "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 6, "memory_high": "12G", "fallback_nice": 19,
+                   "profile": None},
 }
 DEFAULT_MODE = "dev"
 SLICE = "sfbuild.slice"     # no dash: a dash would nest the slice under another one
@@ -101,6 +111,155 @@ def write_state(st):
 
 def effective_mode():
     return read_state()["effective"]
+
+
+# ---------------------------------------------------------------- power profile (#477)
+# net.hadess.PowerProfiles on the system bus. Never raises, never prompts, never waits long: a refusal ends
+# as a note code in profile.json. The record is the only memory: absent = nothing to put back.
+#   {"set": "performance", "found": "balanced", "wrote": true}   we wrote `set` over `found`
+#   {"wrote": false, "note": "..."}                             we touched nothing (battery, already set, failure)
+# Level based and idempotent: effective mode with a profile and no record = entry; effective mode without one
+# and a record = exit; anything else makes no call. Always called under ModeLock.
+PROFILES = ("power-saver", "balanced", "performance")
+PROFILE_NOTES = {"read-failed": "cannot read the power profile; left as it is",
+                 "write-failed": "the power profile change was refused; left as it is",
+                 "restore-failed": "cannot put the power profile back; will retry"}
+PROFILE_BUS = ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles", "net.hadess.PowerProfiles")
+
+
+def profile_enabled():
+    """SF_CARGO_QUEUE_PROFILE=on|off overrides; by default on only for the real state (no SF_CARGO_QUEUE_DIR)."""
+    v = os.environ.get("SF_CARGO_QUEUE_PROFILE")
+    return v == "on" if v in ("on", "off") else not os.environ.get("SF_CARGO_QUEUE_DIR")
+
+
+def profile_timeout():
+    try:
+        return max(0.1, float(os.environ.get("SF_CARGO_QUEUE_PROFILE_TIMEOUT", "5")))
+    except ValueError:
+        return 5.0
+
+
+def busctl(*args):
+    """(returncode, stdout); returncode None when the call timed out, 127 when it cannot run."""
+    t = profile_timeout()
+    cmd = ["busctl", "--system", "--allow-interactive-authorization=false", "--timeout=%d" % max(1, int(t)), *args]
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=t)
+    except subprocess.TimeoutExpired:
+        return None, ""
+    except (OSError, subprocess.SubprocessError):
+        return 127, ""
+    return r.returncode, r.stdout
+
+
+def read_profile():
+    """The active profile name, or None when it cannot be read or is not one of the three known names."""
+    rc, out = busctl("get-property", *PROFILE_BUS, "ActiveProfile")
+    m = re.fullmatch(r'\s*s\s+"([a-z-]+)"\s*', out) if rc == 0 else None
+    return m.group(1) if m and m.group(1) in PROFILES else None
+
+
+def write_profile(name):
+    """'ok', 'fail' (refused or cannot run) or 'timeout' (outcome unknown)."""
+    if name not in PROFILES:
+        return "fail"
+    rc, _ = busctl("set-property", *PROFILE_BUS, "ActiveProfile", "s", name)
+    return "timeout" if rc is None else "ok" if rc == 0 else "fail"
+
+
+def profile_record_path():
+    return os.path.join(state_dir(), "profile.json")
+
+
+def read_profile_record():
+    """The record, or None (absent or corrupt: nothing to put back)."""
+    try:
+        with open(profile_record_path()) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("wrote"), bool):
+        return None
+    if d["wrote"] and not (d.get("set") in PROFILES and d.get("found") in PROFILES):
+        return None
+    return {"wrote": d["wrote"], "set": d.get("set"), "found": d.get("found"),
+            "note": d.get("note") if d.get("note") in PROFILE_NOTES else ""}
+
+
+def save_profile_record(rec):
+    write_atomic(profile_record_path(), json.dumps(rec, sort_keys=True) + "\n")
+
+
+def drop_profile_record():
+    try:
+        os.unlink(profile_record_path())
+    except OSError:
+        pass
+
+
+def profile_enter(want):
+    if read_on_battery():
+        return save_profile_record({"wrote": False})
+    found = read_profile()
+    if found is None:
+        return save_profile_record({"wrote": False, "note": "read-failed"})
+    if found == want:
+        return save_profile_record({"wrote": False})
+    save_profile_record({"wrote": True, "set": want, "found": found})      # write-ahead: a crash leaves the trace
+    if write_profile(want) == "fail":
+        save_profile_record({"wrote": False, "note": "write-failed"})
+    # a timeout keeps wrote:true: the exit compares the current profile before writing anything
+
+
+def profile_exit(rec):
+    if not rec["wrote"]:
+        return drop_profile_record()
+    current = read_profile()
+    if current is None:
+        return save_profile_record(dict(rec, note="restore-failed"))
+    if current != rec["set"]:       # the user changed it in between (or it never took): not ours to touch
+        return drop_profile_record()
+    if write_profile(rec["found"]) == "ok":
+        return drop_profile_record()
+    save_profile_record(dict(rec, note="restore-failed"))
+
+
+def sync_profile(effective, allow_enter=True):
+    """Bring the power profile in line with the effective mode (None: no mode, put back). Call under ModeLock.
+    Never raises."""
+    if not profile_enabled():
+        return
+    try:
+        want = MODES[effective].get("profile") if effective else None
+        rec = read_profile_record()
+        if want and rec is None:
+            if allow_enter:
+                profile_enter(want)
+        elif not want and rec is not None:
+            profile_exit(rec)
+    except Exception:
+        pass
+
+
+class ModeLock:
+    """Serialises every writer of mode.json and profile.json, threads included (one fd per open). Readers
+    never take it. Never held inside QueueLock, and busctl is never called inside QueueLock."""
+
+    def __enter__(self):
+        os.makedirs(state_dir(), exist_ok=True)
+        self.fd = os.open(os.path.join(state_dir(), "mode.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        os.close(self.fd)
+
+
+def profile_note():
+    """Note code of the record ('' when none): what the page and the CLI report."""
+    rec = read_profile_record()
+    return rec["note"] if rec else ""
 
 
 # ---------------------------------------------------------------- applying a mode
@@ -251,35 +410,55 @@ def read_on_battery(root=None):
     return False
 
 
-def set_mode(selected=None, auto=None, effective=None, why=None, apply=True):
-    """Write mode.json and apply the effective mode to the slice. Returns the new state."""
-    st = read_state()
-    if selected is not None:
-        if selected not in MODES:
-            raise ValueError("unknown mode: %s" % selected)
-        st["selected"] = selected
-    if auto is not None:
-        st["auto"] = bool(auto)
-    if effective is None:
-        if st["auto"]:
-            effective, why = auto_decide(st["selected"], read_idle_ms(), read_on_battery())
-        else:
-            effective, why = st["selected"], "selected"
-    st["effective"], st["why"] = effective, why or "selected"
-    write_state(st)
+def set_mode(selected=None, auto=None, effective=None, why=None, apply=True, only_if_auto=False):
+    """Write mode.json, sync the power profile and apply the effective mode to the slice. Returns the new
+    state. only_if_auto: give up (state returned as it is) when Auto was switched off meanwhile."""
+    if selected is not None and selected not in MODES:
+        raise ValueError("unknown mode: %s" % selected)
+    idle = battery = None
+    if effective is None and (auto if auto is not None else read_state()["auto"]):
+        idle, battery = read_idle_ms(), read_on_battery()      # slow reads stay outside the lock
+    with ModeLock():
+        st = read_state()
+        if only_if_auto and not st["auto"]:
+            return st
+        if selected is not None:
+            st["selected"] = selected
+        if auto is not None:
+            st["auto"] = bool(auto)
+        if effective is None:
+            if st["auto"]:
+                if idle is None and battery is None:       # Auto came on between the two reads: rare, read now
+                    idle, battery = read_idle_ms(), read_on_battery()
+                effective, why = auto_decide(st["selected"], idle, bool(battery))
+            else:
+                effective, why = st["selected"], "selected"
+        st["effective"], st["why"] = effective, why or "selected"
+        write_state(st)
+        sync_profile(st["effective"])
     if apply:
         apply_mode(st["effective"])
     return st
 
 
+def profile_exit_pass():
+    """Put the power profile back when a record outlives the mode that made it (crash, stale copy, a failed
+    restore). Never enters: a mode.json already in FullIA at upgrade must not start the fans."""
+    if read_profile_record() is None:
+        return
+    with ModeLock():
+        sync_profile(read_state()["effective"], allow_enter=False)
+
+
 def auto_tick():
     """One pass of the auto variation; applies a change of the effective mode. Returns the state."""
+    profile_exit_pass()
     st = read_state()
     if not st["auto"]:
         return st
     eff, why = auto_decide(st["selected"], read_idle_ms(), read_on_battery())
     if (eff, why) != (st["effective"], st["why"]):
-        return set_mode(effective=eff, why=why)
+        return set_mode(effective=eff, why=why, only_if_auto=True)
     return st
 
 
@@ -630,7 +809,14 @@ def status_dict():
     except OSError:
         run, wait = [], []
     return {"installed": installed, "stale": stale, "selected": st["selected"], "effective": st["effective"],
-            "auto": st["auto"], "why": st["why"], "modes": MODES, "nproc": nproc(), "running": run, "waiting": wait}
+            "auto": st["auto"], "why": st["why"], "modes": MODES, "nproc": nproc(), "running": run, "waiting": wait,
+            "profile_note": profile_note()}
+
+
+def report_profile_note():
+    note = profile_note()
+    if note:
+        print("cargo-queue: " + PROFILE_NOTES[note], file=sys.stderr)
 
 
 def main(argv):
@@ -648,6 +834,7 @@ def main(argv):
             return 2
         st = set_mode(selected=rest[0])
         print("mode %s (effective %s)" % (st["selected"], st["effective"]))
+        report_profile_note()
         return 0
     if cmd == "auto":
         if rest not in (["on"], ["off"]):
@@ -655,6 +842,7 @@ def main(argv):
             return 2
         st = set_mode(auto=rest[0] == "on")
         print("auto %s (effective %s, %s)" % (rest[0], st["effective"], st["why"]))
+        report_profile_note()
         return 0
     if cmd == "status":
         d = status_dict()
@@ -668,11 +856,18 @@ def main(argv):
                 print("  running: " + describe_ticket(i, True))
             for i in d["waiting"]:
                 print("  waiting: " + describe_ticket(i, False))
+            if d["profile_note"]:
+                print("  power profile: " + PROFILE_NOTES[d["profile_note"]])
         return 0
     if cmd == "apply":
         ok = apply_mode(effective_mode())
         print("applied %s%s" % (effective_mode(), "" if ok else " (systemctl failed)"))
         return 0 if ok else 1
+    if cmd == "profile-restore":       # used by cargo-queue-uninstall.sh: put the profile back, forget the record
+        with ModeLock():
+            sync_profile(None, allow_enter=False)
+        report_profile_note()
+        return 0
     print("unknown command %r" % cmd, file=sys.stderr)
     return 2
 

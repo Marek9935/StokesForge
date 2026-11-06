@@ -136,6 +136,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
       <label><input type="checkbox" id="bauto"> Auto</label>
     </div>
     <p id="bauto-note" class="note" hidden></p>
+    <p id="bprofile-note" class="note" hidden></p>
     <p id="bdesc"></p>
     <p id="bnow" class="note"></p>
     <p id="bwarn" class="warn" hidden></p>
@@ -224,6 +225,10 @@ function renderCi(){
 /*BUILDLINE-START*/
 const BUILD_LABELS={full:'FullIA',dev:'Développement',background:'Arrière-plan'};
 const BUILD_WHY={away:'absent',battery:'sur batterie'};
+/* Grey line when the power profile of FullIA could not be read, set or put back (#477). */
+const PROFILE_NOTES={'read-failed':'Profil d’énergie illisible : laissé tel quel.',
+  'write-failed':'Profil d’énergie refusé : laissé tel quel.',
+  'restore-failed':'Profil d’énergie non rétabli : nouvel essai dans 30 s.'};
 /* One short sentence for a mode, from the table of scripts/cargo-queue.py (MODES) so it cannot drift. */
 function modeSentence(m){
   if(!m)return '';
@@ -232,6 +237,7 @@ function modeSentence(m){
   const parts=[m.slots+' build'+(m.slots>1?'s':'')+' à la fois',cores,'priorité '+prio];
   if(m.cpu_quota_pct!=null)parts.push('plafond '+m.cpu_quota_pct+' %');
   if(m.cpus==='ecore')parts.push('cœurs économes');
+  if(m.profile)parts.push('profil '+m.profile+' sur secteur');
   return parts.join(', ');
 }
 /* What the build row shows. bq = S.build_queue, nowSec = Date.now()/1000. */
@@ -249,6 +255,7 @@ function buildLine(bq,nowSec){
   }).join('\n')||'Aucun build en cours.';
   if(wait.length)now+='\n'+wait.length+' en attente';
   return {installed:true,modes:modes,auto:!!bq.auto,
+    profile_note:PROFILE_NOTES[bq.profile_note]||'',
     auto_note:chosen?'Auto : '+BUILD_LABELS[bq.effective]+' ('+(BUILD_WHY[bq.why]||bq.why)+')':'',
     desc:modeSentence(bq.modes&&bq.modes[bq.effective]),now:now,
     warn:bq.stale?'La copie installée est périmée : relance scripts/cargo-queue-install.sh':''};
@@ -260,7 +267,7 @@ function renderBuild(){
   el.hidden=false;
   if(!l.installed){
     el.className='buildline off';$('bmodes').textContent='';$('bauto').parentNode.hidden=true;
-    $('bauto-note').hidden=true;$('bdesc').textContent=l.note;$('bnow').textContent='';$('bwarn').hidden=true;return;
+    $('bauto-note').hidden=true;$('bprofile-note').hidden=true;$('bdesc').textContent=l.note;$('bnow').textContent='';$('bwarn').hidden=true;return;
   }
   el.className='buildline';$('bauto').parentNode.hidden=false;
   const seg=$('bmodes');seg.textContent='';
@@ -270,6 +277,7 @@ function renderBuild(){
   });
   $('bauto').checked=l.auto;
   const an=$('bauto-note');an.hidden=!l.auto_note;an.textContent=l.auto_note;
+  const pn=$('bprofile-note');pn.hidden=!l.profile_note;pn.textContent=l.profile_note;
   $('bdesc').textContent=l.desc;$('bnow').textContent=l.now;
   const w=$('bwarn');w.hidden=!l.warn;w.textContent=l.warn;
 }

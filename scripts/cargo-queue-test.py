@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Tests of scripts/cargo-queue.py (#476): stdlib unittest, no user bus, no real cargo.
 
-A fake `cargo`, `systemd-run`, `systemctl` and `gdbus` sit on PATH behind a copy of the shim named
-`cargo`. The flocks are real. Run: python3 scripts/cargo-queue-test.py
+A fake `cargo`, `systemd-run`, `systemctl`, `gdbus` and `busctl` sit on PATH behind a copy of the shim
+named `cargo`. The flocks are real. NOTHING here may reach the real power profile (#477): every test has a
+canary `busctl` whose log must stay empty unless the test opts in (`enable_bus`), and the state folder is
+always a temporary one. Run: python3 scripts/cargo-queue-test.py
 """
 import importlib.util
 import json
@@ -18,6 +20,7 @@ import time
 import unittest
 from unittest import mock
 
+os.environ.pop("SF_CARGO_QUEUE_PROFILE", None)     # a stray value would switch the profile link on for every test
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "cargo-queue.py")
 
@@ -69,6 +72,29 @@ echo "$*" >> "$FAKE_CTLLOG"
 exit "${FAKE_SYSTEMCTL_RC:-0}"
 '''
 
+# Fake `busctl` (system bus, net.hadess.PowerProfiles): the profile is the content of FAKE_BUSSTATE, every
+# call is one line of FAKE_BUSLOG. FAKE_BUS_{GET,SET}_RC fail the call, FAKE_BUS_{GET,SET}_SLEEP make it hang.
+FAKE_BUSCTL = '''#!/usr/bin/python3
+import os, sys, time
+with open(os.environ["FAKE_BUSLOG"], "a") as f:
+    f.write(" ".join(sys.argv[1:]) + "\\n")
+kind = "GET" if "get-property" in sys.argv else "SET" if "set-property" in sys.argv else None
+if kind is None:
+    sys.exit(2)
+seen = ""
+if kind == "GET":      # the value is read before the pause, as on a slow bus: a late answer can be stale
+    with open(os.environ["FAKE_BUSSTATE"]) as f:
+        seen = f.read().strip()
+time.sleep(float(os.environ.get("FAKE_BUS_%s_SLEEP" % kind, "0")))
+if int(os.environ.get("FAKE_BUS_%s_RC" % kind, "0")):
+    sys.exit(int(os.environ["FAKE_BUS_%s_RC" % kind]))
+if kind == "GET":
+    print('s "%s"' % seen)
+else:
+    with open(os.environ["FAKE_BUSSTATE"], "w") as f:
+        f.write(sys.argv[-1])
+'''
+
 
 def script(path, text):
     with open(path, "w") as f:
@@ -89,13 +115,49 @@ class Base(unittest.TestCase):
         script(os.path.join(self.fakedir, "cargo"), FAKE_CARGO)
         script(os.path.join(self.fakedir, "systemd-run"), FAKE_SYSTEMD_RUN)
         script(os.path.join(self.fakedir, "systemctl"), FAKE_SYSTEMCTL)
+        script(os.path.join(self.fakedir, "busctl"), FAKE_BUSCTL)      # the canary: first on PATH, logs every call
         self.log, self.sdlog, self.ctllog = (os.path.join(t, x) for x in ("fake.log", "sd.log", "ctl.log"))
+        self.buslog, self.busstate = os.path.join(t, "bus.log"), os.path.join(t, "bus.state")
+        self.bus_ok = False
+        self.addCleanup(self.check_canary)
         self.env = {"PATH": "%s:%s:/usr/bin:/bin" % (self.shimdir, self.fakedir), "HOME": t,
                     "SF_CARGO_QUEUE_DIR": self.qdir, "SF_CARGO_QUEUE_POLL": "0.05",
                     "FAKE_LOG": self.log, "FAKE_SDLOG": self.sdlog, "FAKE_CTLLOG": self.ctllog,
+                    "FAKE_BUSLOG": self.buslog, "FAKE_BUSSTATE": self.busstate,
                     "SF_CARGO_QUEUE_SLICE": "sfq-test.slice", "SF_CARGO_QUEUE_POWER_DIR": os.path.join(t, "nopower")}
         self.procs = []
         self.addCleanup(self.reap)
+
+    def check_canary(self):
+        if not self.bus_ok:
+            self.assertEqual(self.bus_calls(), [], "a test reached busctl without opting in")
+
+    def bus_calls(self):
+        try:
+            with open(self.buslog) as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    def bus_writes(self):
+        return [c.split()[-1] for c in self.bus_calls() if "set-property" in c]
+
+    def enable_bus(self, found="balanced"):
+        """Opt in: the profile link is on, the fake profile is `found`. Also for this process's environment."""
+        self.bus_ok = True
+        with open(self.busstate, "w") as f:
+            f.write(found)
+        self.env["SF_CARGO_QUEUE_PROFILE"] = "on"
+        p = mock.patch.dict(os.environ, {"SF_CARGO_QUEUE_PROFILE": "on"})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def power(self, root, name, typ, **files):
+        d = os.path.join(root, name)
+        os.makedirs(d, exist_ok=True)
+        for k, v in dict(files, type=typ).items():
+            with open(os.path.join(d, k), "w") as f:
+                f.write(v + "\n")
 
     def reap(self):
         for p in self.procs:
@@ -517,13 +579,6 @@ class TestModes(Base):
         cq.set_mode(auto=False)
         self.assertEqual(cq.read_state()["effective"], "dev")
 
-    def power(self, root, name, typ, **files):
-        d = os.path.join(root, name)
-        os.makedirs(d, exist_ok=True)
-        for k, v in dict(files, type=typ).items():
-            with open(os.path.join(d, k), "w") as f:
-                f.write(v + "\n")
-
     def test_status_json(self):
         d = cq.status_dict()
         self.assertFalse(d["installed"])
@@ -548,6 +603,326 @@ class TestModes(Base):
         self.assertIn("-p q", d["waiting"][0]["command"])
 
 
+class TestProfile(Base):
+    """The FullIA link to the performance power profile (#477). The fake busctl holds the profile."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.dict(os.environ, self.env)
+        p.start()
+        self.addCleanup(p.stop)
+        self.enable_bus("balanced")
+        os.makedirs(self.qdir, exist_ok=True)
+
+    def current(self):
+        with open(self.busstate) as f:
+            return f.read().strip()
+
+    def user_sets(self, name):
+        with open(self.busstate, "w") as f:
+            f.write(name)
+
+    def record(self):
+        try:
+            with open(os.path.join(self.qdir, "profile.json")) as f:
+                return json.load(f)
+        except OSError:
+            return None
+
+    def gdbus(self, ms):
+        script(os.path.join(self.fakedir, "gdbus"), '#!/bin/sh\necho "(uint64 %d,)"\n' % ms)
+
+    def battery(self, status):
+        self.power(os.environ["SF_CARGO_QUEUE_POWER_DIR"], "BAT0", "Battery", status=status)
+
+    def cli(self, *args, extra=None):
+        env = dict(os.environ, **(extra or {}))
+        return subprocess.run([sys.executable, "-I", SRC, *args], env=env, capture_output=True, text=True, timeout=60)
+
+    def test_enter_full_writes_performance_and_leaving_puts_back_what_was_found(self):
+        cq.set_mode(selected="full")
+        self.assertEqual(self.bus_writes(), ["performance"])
+        self.assertEqual(self.current(), "performance")
+        self.assertEqual(self.record(), {"wrote": True, "set": "performance", "found": "balanced"})
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+        self.assertEqual(self.current(), "balanced")
+        self.assertIsNone(self.record())
+
+    def test_busctl_is_asked_without_a_prompt_and_with_a_timeout(self):
+        cq.set_mode(selected="full")
+        for c in self.bus_calls():
+            self.assertIn("--system", c)
+            self.assertIn("--allow-interactive-authorization=false", c)
+            self.assertIn("--timeout=", c)
+            self.assertIn("net.hadess.PowerProfiles", c)
+
+    def test_a_profile_the_user_changed_meanwhile_is_not_touched(self):
+        cq.set_mode(selected="full")
+        self.user_sets("power-saver")
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), ["performance"])
+        self.assertEqual(self.current(), "power-saver")
+        self.assertIsNone(self.record())
+
+    def test_found_performance_writes_nothing_in_or_out(self):
+        self.user_sets("performance")
+        cq.set_mode(selected="full")
+        self.assertEqual(self.record(), {"wrote": False})
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), [])
+        self.assertEqual(self.current(), "performance")
+        self.assertIsNone(self.record())
+
+    def test_on_battery_nothing_is_called_and_nothing_is_written_when_leaving(self):
+        self.battery("Discharging")
+        cq.set_mode(selected="full")
+        self.assertEqual(self.bus_calls(), [])
+        self.assertEqual(self.record()["wrote"], False)
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_calls(), [])
+        self.assertIsNone(self.record())
+
+    def test_leaving_on_battery_still_restores(self):
+        cq.set_mode(selected="full")
+        self.battery("Discharging")
+        cq.set_mode(selected="dev")
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+
+    def test_dev_and_background_never_call_busctl(self):
+        for m in ("dev", "background", "dev", "background"):
+            cq.set_mode(selected=m)
+        cq.set_mode(auto=True)
+        cq.auto_tick()
+        self.assertEqual(self.bus_calls(), [])
+        self.assertIsNone(self.record())
+
+    def test_repeating_full_and_ticking_writes_once(self):
+        for _ in range(3):
+            cq.set_mode(selected="full")
+        for _ in range(3):
+            cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance"])
+        self.assertEqual(len(self.bus_calls()), 2)       # one read, one write
+
+    def test_full_by_away_then_back_to_the_selected_full_keeps_the_profile(self):
+        self.gdbus(0)
+        cq.set_mode(selected="full", auto=True)
+        self.gdbus(700000)
+        cq.auto_tick()
+        self.assertEqual(cq.read_state()["why"], "away")
+        self.gdbus(0)
+        st = cq.auto_tick()
+        self.assertEqual((st["effective"], st["why"]), ("full", "selected"))
+        self.assertEqual(self.bus_writes(), ["performance"])
+
+    def test_auto_enters_when_away_and_restores_when_back(self):
+        self.gdbus(0)
+        cq.set_mode(selected="dev", auto=True)
+        self.assertEqual(self.bus_calls(), [])
+        self.gdbus(700000)
+        cq.auto_tick()
+        self.assertEqual(self.current(), "performance")
+        self.gdbus(0)
+        cq.auto_tick()
+        self.assertEqual(self.current(), "balanced")
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+
+    def test_a_mode_file_left_in_dev_with_a_record_is_restored_by_the_tick_even_with_auto_off(self):
+        cq.set_mode(selected="full")
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": "dev", "effective": "dev", "auto": False, "why": "selected"}, f)
+        cq.auto_tick()
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+        self.assertIsNone(self.record())
+
+    def test_a_mode_file_already_full_without_a_record_is_not_entered_by_the_tick(self):
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": "full", "effective": "full", "auto": True, "why": "selected"}, f)
+        self.gdbus(0)
+        cq.auto_tick()
+        self.assertEqual(self.bus_calls(), [])
+
+    def test_a_writer_that_drops_unknown_keys_cannot_erase_the_record(self):
+        r = self.cli("mode", "full")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(self.qdir, "mode.json")) as f:
+            self.assertEqual(sorted(json.load(f)), ["auto", "effective", "selected", "why"])
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:      # a stale shim copy rewrites the 4 keys it knows
+            json.dump({"selected": "full", "effective": "full", "auto": False, "why": "selected"}, f)
+        r = self.cli("mode", "dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.bus_writes(), ["performance", "balanced"])
+        self.assertEqual(self.current(), "balanced")
+
+    def test_six_processes_ticking_at_once_write_once(self):
+        self.gdbus(0)
+        cq.set_mode(selected="dev", auto=True)
+        # the idle reading is slow, so all six decide "enter" before any of them has written the state
+        script(os.path.join(self.fakedir, "gdbus"), '#!/bin/sh\nsleep 0.4\necho "(uint64 700000,)"\n')
+        code = ("import importlib.util,sys;s=importlib.util.spec_from_file_location('c',sys.argv[1]);"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.auto_tick()")
+        env = dict(os.environ, FAKE_BUS_GET_SLEEP="0.3")
+        ps = [subprocess.Popen([sys.executable, "-I", "-c", code, SRC], env=env) for _ in range(6)]
+        for p in ps:
+            self.assertEqual(p.wait(60), 0)
+        self.assertEqual(self.bus_writes(), ["performance"])
+        self.assertEqual(self.current(), "performance")
+
+    def test_auto_turned_off_during_the_slow_reads_is_not_overwritten(self):
+        self.gdbus(700000)
+        cq.set_mode(selected="dev", auto=False)
+        st = cq.set_mode(effective="full", why="away", only_if_auto=True)
+        self.assertEqual(st["effective"], "dev")
+        self.assertEqual(self.bus_calls(), [])
+
+    # ---- failures end as a note, never as an exception
+    def assert_state_and_slice(self, mode):
+        self.assertEqual(cq.read_state()["effective"], mode)
+        self.assertTrue([c for c in self.ctl_calls() if "set-property" in c])
+
+    def test_no_busctl_at_all(self):
+        os.unlink(os.path.join(self.fakedir, "busctl"))
+        with mock.patch.dict(os.environ, {"PATH": self.fakedir}):      # the real busctl must not be reachable
+            cq.set_mode(selected="full")
+            self.assert_state_and_slice("full")
+            self.assertEqual(cq.status_dict()["profile_note"], "read-failed")
+            r = self.cli("mode", "dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_read_failure_skips_the_entry_with_a_note(self):
+        with mock.patch.dict(os.environ, {"FAKE_BUS_GET_RC": "1"}):
+            cq.set_mode(selected="full")
+            self.assert_state_and_slice("full")
+            self.assertEqual(self.bus_writes(), [])
+            self.assertEqual(cq.status_dict()["profile_note"], "read-failed")
+            r = self.cli("mode", "full")
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("cannot read the power profile", r.stderr)
+            self.assertIn("power profile: cannot read", self.cli("status").stdout)
+        cq.set_mode(selected="dev")
+        self.assertEqual(cq.status_dict()["profile_note"], "")
+        self.assertEqual(self.bus_writes(), [])
+
+    def test_a_value_that_is_not_a_known_profile_reads_as_a_failure(self):
+        self.user_sets("turbo")
+        cq.set_mode(selected="full")
+        self.assertEqual(self.bus_writes(), [])
+        self.assertEqual(cq.status_dict()["profile_note"], "read-failed")
+        self.assertEqual(cq.write_profile("turbo"), "fail")
+        self.assertEqual(self.bus_writes(), [])
+
+    def test_write_refused_leaves_the_profile_and_a_note_and_leaving_writes_nothing(self):
+        with mock.patch.dict(os.environ, {"FAKE_BUS_SET_RC": "1"}):
+            cq.set_mode(selected="full")
+        self.assert_state_and_slice("full")
+        self.assertEqual(cq.status_dict()["profile_note"], "write-failed")
+        self.assertEqual(len(self.bus_writes()), 1)
+        cq.set_mode(selected="dev")
+        self.assertEqual(len(self.bus_writes()), 1)
+        self.assertEqual(self.current(), "balanced")
+
+    def test_hanging_read_is_cut_by_the_timeout(self):
+        with mock.patch.dict(os.environ, {"FAKE_BUS_GET_SLEEP": "20", "SF_CARGO_QUEUE_PROFILE_TIMEOUT": "0.3"}):
+            t0 = time.time()
+            cq.set_mode(selected="full")
+            self.assertLess(time.time() - t0, 5)
+        self.assert_state_and_slice("full")
+        self.assertEqual(cq.status_dict()["profile_note"], "read-failed")
+
+    def test_hanging_write_keeps_the_record_and_the_exit_compares_before_writing(self):
+        with mock.patch.dict(os.environ, {"FAKE_BUS_SET_SLEEP": "20", "SF_CARGO_QUEUE_PROFILE_TIMEOUT": "0.3"}):
+            cq.set_mode(selected="full")
+        self.assertEqual(self.record()["wrote"], True)
+        self.assertEqual(self.current(), "balanced")        # the hung write never landed
+        cq.set_mode(selected="dev")
+        self.assertEqual(len(self.bus_writes()), 1)         # only the hung attempt: nothing to put back
+        self.assertIsNone(self.record())
+
+    def test_refused_restore_keeps_the_record_and_the_next_tick_retries(self):
+        cq.set_mode(selected="full")
+        with mock.patch.dict(os.environ, {"FAKE_BUS_SET_RC": "1"}):
+            cq.set_mode(selected="dev")
+        self.assertEqual(self.current(), "performance")
+        self.assertEqual(self.record()["note"], "restore-failed")
+        self.assertEqual(cq.status_dict()["profile_note"], "restore-failed")
+        cq.auto_tick()
+        self.assertEqual(self.current(), "balanced")
+        self.assertIsNone(self.record())
+
+    def test_unreadable_profile_on_exit_keeps_the_record(self):
+        cq.set_mode(selected="full")
+        with mock.patch.dict(os.environ, {"FAKE_BUS_GET_RC": "1"}):
+            cq.set_mode(selected="dev")
+        self.assertEqual(self.record()["note"], "restore-failed")
+        cq.auto_tick()
+        self.assertEqual(self.current(), "balanced")
+
+    def test_queued_shim_with_failing_busctl_keeps_the_build_exit_code(self):
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:      # leftover record, mode no longer FullIA
+            json.dump({"selected": "dev", "effective": "dev", "auto": True, "why": "selected"}, f)
+        with open(os.path.join(self.qdir, "profile.json"), "w") as f:
+            json.dump({"wrote": True, "set": "performance", "found": "balanced"}, f)
+        self.gdbus(0)
+        p = self.start("test", tag="q", extra={"FAKE_BUS_GET_RC": "1", "FAKE_EXIT": "3"})
+        self.assertEqual(p.wait(20), 3, self.output(p))
+        self.assertTrue(self.seen("start", "q"))
+        self.assertTrue(self.bus_calls())
+
+    def test_an_exception_inside_the_link_never_reaches_the_caller(self):
+        os.mkdir(os.path.join(self.qdir, "profile.json"))      # the record cannot be written: a real exception
+        st = cq.set_mode(selected="full")
+        self.assertEqual(st["effective"], "full")
+        self.assertEqual(self.bus_writes(), [])
+        self.gdbus(700000)
+        cq.set_mode(selected="dev", auto=True)
+        cq.auto_tick()
+        self.assertEqual(cq.read_state()["effective"], "full")
+        self.assertEqual(self.bus_writes(), [])
+        p = self.start("test", tag="x", extra={"FAKE_EXIT": "3"})
+        self.assertEqual(p.wait(20), 3, self.output(p))
+
+    def test_corrupt_record_reads_as_no_record(self):
+        for text in ("{not json", "[]", '{"wrote": "yes"}', '{"wrote": true, "set": "turbo", "found": "balanced"}'):
+            with open(os.path.join(self.qdir, "profile.json"), "w") as f:
+                f.write(text)
+            self.assertIsNone(cq.read_profile_record(), text)
+            self.assertEqual(cq.status_dict()["profile_note"], "")
+
+    def test_profile_restore_verb_puts_back_and_forgets(self):
+        cq.set_mode(selected="full")
+        r = self.cli("profile-restore")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.current(), "balanced")
+        self.assertIsNone(self.record())
+        self.assertEqual(self.cli("profile-restore").returncode, 0)
+        self.assertEqual(len(self.bus_writes()), 2)
+
+    def test_the_link_is_off_by_default_with_a_state_folder_and_on_without_one(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("SF_CARGO_QUEUE_PROFILE")
+            self.assertFalse(cq.profile_enabled())
+            os.environ.pop("SF_CARGO_QUEUE_DIR")
+            self.assertTrue(cq.profile_enabled())
+            os.environ["SF_CARGO_QUEUE_PROFILE"] = "off"
+            self.assertFalse(cq.profile_enabled())
+
+    def test_only_full_is_linked(self):
+        self.assertEqual({k: m["profile"] for k, m in cq.MODES.items()},
+                         {"full": "performance", "dev": None, "background": None})
+
+
+class TestProfileGuard(Base):
+    def test_a_state_folder_without_opt_in_never_calls_busctl(self):
+        with mock.patch.dict(os.environ, self.env):
+            self.assertFalse(cq.profile_enabled())
+            cq.set_mode(selected="full")
+            cq.auto_tick()
+            cq.set_mode(selected="dev")
+        self.assertEqual(self.start("test", tag="g").wait(10), 0)
+        # check_canary asserts the log is still empty
+
+
 class TestInstall(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="cq-install-")
@@ -555,7 +930,9 @@ class TestInstall(unittest.TestCase):
         self.fake = os.path.join(self.tmp, "fakebin")
         os.makedirs(self.fake)
         script(os.path.join(self.fake, "systemctl"), '#!/bin/sh\necho "$*" >> "$HOME/ctl.log"\n')
-        self.env = {"HOME": self.tmp, "PATH": self.fake + ":/usr/bin:/bin"}
+        script(os.path.join(self.fake, "busctl"), FAKE_BUSCTL)     # the real power profile is never reachable from here
+        self.buslog, self.busstate = os.path.join(self.tmp, "bus.log"), os.path.join(self.tmp, "bus.state")
+        self.env = {"HOME": self.tmp, "PATH": self.fake + ":/usr/bin:/bin", "FAKE_BUSLOG": self.buslog, "FAKE_BUSSTATE": self.busstate}
         self.rc = os.path.join(self.tmp, ".bashrc")
 
     def sh(self, name):
@@ -610,6 +987,33 @@ class TestInstall(unittest.TestCase):
     def test_block_puts_the_shim_directory_first_in_path(self):
         self.sh("cargo-queue-install.sh")
         self.assertIn('export PATH="$HOME/.local/share/stokesforge/cargo-queue/bin:$PATH"', self.rc_text())
+
+    def bus_lines(self):
+        try:
+            with open(self.buslog) as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    def test_uninstall_puts_the_power_profile_back_before_removing_anything(self):
+        self.sh("cargo-queue-install.sh")
+        self.assertEqual(self.bus_lines(), [])
+        state = os.path.join(self.tmp, ".local/state/stokesforge/cargo-queue")
+        os.makedirs(state)
+        with open(os.path.join(state, "profile.json"), "w") as f:
+            json.dump({"wrote": True, "set": "performance", "found": "power-saver"}, f)
+        with open(self.busstate, "w") as f:
+            f.write("performance")
+        self.sh("cargo-queue-uninstall.sh")
+        with open(self.busstate) as f:
+            self.assertEqual(f.read(), "power-saver")
+        self.assertFalse(os.path.exists(os.path.join(state, "profile.json")))
+        self.assertTrue(os.path.isdir(state))        # the state folder is kept
+
+    def test_uninstall_without_a_record_calls_nothing(self):
+        self.sh("cargo-queue-install.sh")
+        self.sh("cargo-queue-uninstall.sh")
+        self.assertEqual(self.bus_lines(), [])
 
     def test_slice_name_has_no_dash(self):
         self.assertNotIn("-", cq.SLICE.replace(".slice", ""))

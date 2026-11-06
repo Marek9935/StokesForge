@@ -59,9 +59,20 @@ class Base(unittest.TestCase):
         with open(os.path.join(fake, "systemctl"), "w") as f:
             f.write('#!/bin/sh\necho "$*" >> "%s/ctl.log"\n' % self.tmp.name)
         os.chmod(os.path.join(fake, "systemctl"), 0o755)
-        self.env.update(SF_CARGO_QUEUE_DIR=self.cqdir, SF_CARGO_QUEUE_SLICE="sfq-test.slice", SF_SUIVI_BUILD_AUTO="off",
+        # #477: a canary busctl (the power profile of this PC must never be reached) and a user who is never idle
+        self.buslog = os.path.join(self.tmp.name, "bus.log")
+        for name, body in (("busctl", '#!/bin/sh\necho "$*" >> "%s"\nexit 1\n' % self.buslog),
+                           ("gdbus", '#!/bin/sh\necho "(uint64 0,)"\n')):
+            with open(os.path.join(fake, name), "w") as f:
+                f.write(body)
+            os.chmod(os.path.join(fake, name), 0o755)
+        self.addCleanup(self.check_canary)
+        self.env.update(SF_CARGO_QUEUE_POWER_DIR=os.path.join(self.tmp.name, "nopower"), SF_CARGO_QUEUE_DIR=self.cqdir, SF_CARGO_QUEUE_SLICE="sfq-test.slice", SF_SUIVI_BUILD_AUTO="off",
                         SF_CARGO_QUEUE_INSTALLED=os.path.join(self.tmp.name, "installed-cargo"),
                         PATH=fake + os.pathsep + self.env.get("PATH", "/usr/bin:/bin"))
+
+    def check_canary(self):
+        self.assertFalse(os.path.exists(self.buslog), "a test reached busctl: " + slurp(self.buslog) if os.path.exists(self.buslog) else "")
 
     def git(self, *a, cwd=None):
         subprocess.run(["git", *a], cwd=cwd or self.repo, check=True, capture_output=True)
@@ -889,6 +900,27 @@ class TestBuildMode(ServerBase):
         a = self.req("GET", "/api/state")
         b = self.req("GET", "/api/state")
         self.assertEqual(a[1]["ETag"], b[1]["ETag"])
+
+    def test_corrupt_profile_record_never_breaks_the_state(self):
+        self.install()
+        os.makedirs(self.cqdir)
+        with open(os.path.join(self.cqdir, "profile.json"), "w") as f:
+            f.write("{not json")
+        self.assertEqual(self.state_json()["build_queue"]["profile_note"], "")
+
+    def test_profile_note_reaches_the_page_state(self):
+        self.install()
+        os.makedirs(self.cqdir)
+        with open(os.path.join(self.cqdir, "profile.json"), "w") as f:
+            json.dump({"wrote": False, "note": "write-failed"}, f)
+        self.assertEqual(self.state_json()["build_queue"]["profile_note"], "write-failed")
+        self.assertEqual(self.state_json()["build_queue"]["modes"]["full"]["profile"], "performance")
+        self.assertIsNone(self.state_json()["build_queue"]["modes"]["dev"]["profile"])
+
+    def test_post_full_never_reaches_the_real_profile_here(self):
+        self.install()
+        self.assertEqual(self.mode({"mode": "full"})[0], 200)
+        self.assertEqual(self.state_json()["build_queue"]["effective"], "full")
 
     def test_broken_queue_never_breaks_the_state(self):
         self.install()
@@ -2896,6 +2928,15 @@ class TestPage(unittest.TestCase):
         self.assertEqual(l["now"], "Aucun build en cours.")
         self.assertEqual(l["auto_note"], "")
         self.assertEqual(self.build_line(dict(bq, effective="full"))["desc"], "2 builds à la fois, tous les cœurs, priorité normale")
+        linked = dict(cq, full=dict(cq["full"], profile="performance"))
+        self.assertEqual(self.build_line(dict(bq, modes=linked, effective="full"))["desc"],
+                         "2 builds à la fois, tous les cœurs, priorité normale, profil performance sur secteur")
+        self.assertEqual(self.build_line(dict(bq, modes=linked))["desc"], "1 build à la fois, 6 cœurs, priorité très basse")
+        self.assertEqual(self.build_line(bq)["profile_note"], "")
+        self.assertEqual(self.build_line(dict(bq, profile_note="write-failed"))["profile_note"],
+                         "Profil d’énergie refusé : laissé tel quel.")
+        self.assertIn("non rétabli", self.build_line(dict(bq, profile_note="restore-failed"))["profile_note"])
+        self.assertEqual(self.build_line(dict(bq, profile_note="made-up"))["profile_note"], "")
         self.assertEqual(self.build_line(dict(bq, effective="dev"))["desc"], "2 builds à la fois, 11 cœurs chacun, priorité basse")
         capped = dict(cq, background=dict(cq["background"], cpu_quota_pct=50))
         self.assertEqual(self.build_line(dict(bq, modes=capped))["desc"], "1 build à la fois, 6 cœurs, priorité très basse, plafond 50 %")
