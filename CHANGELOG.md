@@ -39,6 +39,23 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- One rule for the status bar messages (#453). Within one action, the most
+  serious message stays on the line (a warning is no longer replaced at once by
+  the plain message of the same action, for example when adding a sheet that a
+  kept formula names, or on Ctrl+S over the size limit); the others are in the
+  message list. A warning fades after 30 seconds, an error stays until a later
+  action says something (clicking a sheet tab no longer erases it). A plain
+  message that no action caused (script finished, recalculation stopped,
+  progress) never replaces a warning or an error. The list keeps, per action,
+  its last plain message and its warnings and errors; import progress is no
+  longer stored in it. Refiled: columns dropped by a paste, and a layout or
+  language choice that could not be saved, are now warnings. Refusing a gesture
+  in a detached window shows the band each time. In the message list, a long
+  message wraps, and the same message said again directly after is one line with
+  a count (`Nothing to undo (×13)`) at the time of the last one, so a repeat no
+  longer pushes older messages out of the 50. "Nothing to undo" and "Nothing
+  to redo" are plain messages (no colour), so a detached window shows no band
+  for them.
 - Only the workbook and the graph detach (#473): a note and a matrix stay in
   the main window. Their title bar already had no detach icon; the code now
   refuses it too. The manual no longer says that dragging a title outside the

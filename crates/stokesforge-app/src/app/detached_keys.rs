@@ -394,17 +394,23 @@ fn a_dialog_in_the_main_window_refuses_the_three_keys_even_with_the_cursor_in_a_
     bench.finish();
 }
 
-/// Ctrl+Z with nothing to undo shows the orange band in that window only.
-/// Witness: lose the origin of the gesture.
+/// Ctrl+Z with nothing to undo is a plain message since #453 (S-R18): the line
+/// and the history say it, no window shows a band. The orange of a gesture of a
+/// detached window is covered by `what_an_action_says_is_told_in_its_own_window_only`
+/// (`window_detach.rs`) and by the dialog tests of this file. Witness: make the
+/// message orange again.
 #[test]
-fn ctrl_z_with_an_empty_history_says_so_in_that_window_only() {
+fn ctrl_z_with_an_empty_history_is_plain_and_shows_no_band() {
+    let _language =
+        stokesforge_app_state::i18n::test_language(stokesforge_app_state::i18n::Language::English);
     let mut bench = bench();
     assert!(bench.app.state.undo_label().is_none());
     press(&mut bench, Window::Book, ctrl(egui::Key::Z));
-    let band = band_in(&bench, Window::Book).expect("the band of the workbook window");
-    assert!(!band.is_empty());
-    for other in [Window::Graph, Window::ProjectManager, Window::Console] {
-        assert_eq!(band_in(&bench, other), None, "{other:?}: no band");
+    let line = bench.app.state.status().expect("the status line");
+    assert_eq!(line.text, "Nothing to undo");
+    assert_eq!(line.level, stokesforge_app_state::state::StatusLevel::Info);
+    for window in Window::ALL {
+        assert_eq!(band_in(&bench, window), None, "{window:?}: no band");
     }
     bench.finish();
 }

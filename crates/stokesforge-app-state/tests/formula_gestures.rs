@@ -2037,3 +2037,86 @@ fn several_columns_can_be_orange_and_undo_clears_them_all() {
     assert!(!w.state.formula_rewrite_holds(cols[0]));
     assert!(!w.state.formula_rewrite_holds(cols[1]));
 }
+
+// -- one rule for the status line (#453, S-R18) --
+
+/// The orange of a binding stays over the plain message of the same gesture,
+/// which goes to the history only; the line then schedules the orange's own
+/// deadline (30 s), not the plain one's. The next gesture replaces it at once.
+/// Witnesses: `record` always replacing the line; `dispatch` not opening a
+/// gesture (the second Add Column would then tie and keep the orange); the
+/// deadline read from the history.
+#[test]
+fn the_orange_of_a_gesture_stays_over_its_plain_message_and_the_next_gesture_replaces_it() {
+    use stokesforge_app_state::state::{StatusLevel, INFO_LIFETIME, WARNING_LIFETIME};
+    let mut w = world();
+    let e = new_target(&mut w);
+    w.type_formula(e, "A+F");
+    let sheet1 = w.sheet1;
+    let lines = w.state.status_history().count();
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 });
+    let line = w.state.status().unwrap().clone();
+    assert_eq!(line.level, StatusLevel::Warning);
+    assert!(line.text.contains("now reads"), "{}", line.text);
+    let said: Vec<_> = w.state.status_history().skip(lines).collect();
+    assert_eq!(said.len(), 2, "the plain message and the orange");
+    assert!(said.iter().any(|m| m.level == StatusLevel::Info));
+    // The deadline is the orange's.
+    assert_eq!(
+        w.state.expire_status(line.at + INFO_LIFETIME * 2),
+        Some(WARNING_LIFETIME - INFO_LIFETIME * 2)
+    );
+    // The next gesture replaces it at once.
+    w.state.dispatch(Action::AddColumn { sheet: sheet1 });
+    assert_eq!(w.state.status().unwrap().level, StatusLevel::Info);
+}
+
+/// Ctrl+S with the F(x) field open on a comma range: the entry is committed
+/// inside the save gesture, the orange stays and "Saved" goes to the history.
+/// Witness: a nested `dispatch` counted as a new gesture.
+#[test]
+fn saving_with_the_formula_field_open_keeps_the_orange() {
+    use stokesforge_app_state::state::StatusLevel;
+    let mut w = world();
+    let e = new_target(&mut w);
+    w.state.begin_header_edit(e, HeaderField::Formula);
+    w.state.header_editing_mut().unwrap().buffer = "max(B,1,5)".to_string();
+    let lines = w.state.status_history().count();
+    w.state.dispatch(Action::Save);
+    let line = w.state.status().unwrap().clone();
+    assert_eq!(line.level, StatusLevel::Warning, "{}", line.text);
+    assert!(line.text.contains("from 1 to 5"), "{}", line.text);
+    assert!(
+        w.state
+            .status_history()
+            .skip(lines)
+            .any(|m| m.level == StatusLevel::Info && m.text.contains("Saved")),
+        "Saved is in the list"
+    );
+}
+
+/// A red from an earlier gesture is not "this gesture failed": a decimal-comma
+/// cell typed afterwards still says its plain notice (guarded by
+/// `gesture_failed`). Witness: `gesture_failed` that never forgets the last red.
+#[test]
+fn a_red_of_an_earlier_gesture_does_not_make_the_next_one_a_failure() {
+    let mut w = world();
+    let sheet1 = w.sheet1;
+    let cols = w.columns(sheet1);
+    w.state.dispatch(Action::SetColumnXPrime {
+        column: cols[1],
+        text: "abc".to_string(),
+    });
+    assert!(w.status().starts_with("[error]"), "{}", w.status());
+    w.state.dispatch(Action::CommitCell {
+        column: cols[1],
+        row: 0,
+        text: "1,234".to_string(),
+    });
+    assert!(
+        w.state
+            .status_history()
+            .any(|m| m.text.contains("1.234") || m.text.contains("1,234")),
+        "the decimal-comma notice was said"
+    );
+}
