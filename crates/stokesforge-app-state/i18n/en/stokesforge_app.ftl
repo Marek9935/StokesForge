@@ -1879,7 +1879,6 @@ error-window-geometry = Could not update the window position: { $cause }
 error-column-width = Could not save the column width: { $cause }
 error-plot-settings-cancel = Could not cancel the graph properties: { $cause }
 error-plot-settings-undo-group = Changes to the graph properties cannot be undone together: { $cause }
-error-plot-settings-block-detached = Graph properties are open. Apply or cancel them before changing a detached window
 error-preferences-not-saved = Could not save the preferences: { $cause }
 error-folder-not-utf8 = This folder cannot be kept as a default: its name is not valid text. Choose another folder
 error-folder-open = Could not open the folder: { $cause }
@@ -2309,3 +2308,10 @@ import-format-numbers-section = Numbers and Dates
 import-format-comments-section = Comment Lines
 import-format-file-section = Blocks and Encoding
 import-format-skipped-section = Skipped Lines
+
+# Why a gesture made outside the main window is refused (#471).
+dialog-name-graph-properties = Graph Properties
+dialog-name-analysis = Analysis
+refused-dialog-editing = { $name } is open in the main window. Apply or cancel it first
+refused-dialog-close = { $name } is open in the main window. Close it first
+refused-dialog-question = A question is waiting in the main window. Answer it first

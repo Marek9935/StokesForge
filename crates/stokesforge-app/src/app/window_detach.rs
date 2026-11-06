@@ -524,21 +524,55 @@ pub(super) fn panel_viewport(
     }
 }
 
+/// The viewport of the detached Object Manager.
+pub(super) fn object_manager_viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("stokesforge_object_manager_window")
+}
+
+/// The viewport of the detached script console.
+pub(super) fn script_viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("stokesforge_script_window")
+}
+
 impl StokesForgeApp {
     pub(super) fn drain_object_manager(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         let Some(view) = &self.om_view else {
             return;
         };
-        let (gestures, reattach) = {
+        let (incoming, gestures, reattach) = {
             let mut requests = view.requests.lock().unwrap_or_else(|err| err.into_inner());
-            actions.append(&mut requests.actions);
             (
+                std::mem::take(&mut requests.actions),
                 std::mem::take(&mut requests.gestures),
                 std::mem::take(&mut requests.reattach),
             )
         };
+        let viewport = object_manager_viewport();
+        // While a dialog is open in the main window only a selection goes
+        // through: it writes nothing. The rest would open an editor, a window
+        // or an analysis, or write (#471).
+        let dialog = self.state.open_dialog();
+        let mut refused = None;
+        let start = actions.len();
+        if !incoming.is_empty() {
+            match dialog {
+                Some(open) => refused = Some(open),
+                None => actions.extend(incoming),
+            }
+        }
         for (graph, request) in gestures {
-            self.run_object_manager_request(ctx, graph, request, actions);
+            match dialog {
+                Some(open) if !matches!(request, ObjectManagerRequest::Select(_)) => {
+                    refused = Some(open);
+                }
+                _ => self.run_object_manager_request(ctx, graph, request, actions),
+            }
+        }
+        if actions.len() > start {
+            self.action_origins.push((start..actions.len(), viewport));
+        }
+        if let Some(open) = refused {
+            self.refuse_in_window(ctx, viewport, open);
         }
         if reattach {
             self.om_detached = false;
@@ -568,7 +602,7 @@ impl StokesForgeApp {
         let model = Arc::clone(&view.model);
         let requests = Arc::clone(&view.requests);
         let root = ctx.clone();
-        let id = egui::ViewportId::from_hash_of("stokesforge_object_manager_window");
+        let id = object_manager_viewport();
         let live = self.live_window(PanelKind::Object);
         let builder = panel_viewport(
             tr!("action-object-manager"),
@@ -603,6 +637,7 @@ impl StokesForgeApp {
                 root.request_repaint_of(egui::ViewportId::ROOT);
             }
             super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::ObjectManager);
+            super::window_band::paint(ui.ctx());
         });
         if changed {
             ctx.request_repaint_of(id);
@@ -622,14 +657,15 @@ impl StokesForgeApp {
         let Some(view) = &self.script_view else {
             return;
         };
-        let (source, reattach) = {
+        let (source, reattach, incoming) = {
             let mut requests = view.requests.lock().unwrap_or_else(|err| err.into_inner());
-            actions.append(&mut requests.actions);
             (
                 requests.source.take(),
                 std::mem::take(&mut requests.reattach),
+                std::mem::take(&mut requests.actions),
             )
         };
+        self.accept_detached_actions(ctx, script_viewport(), incoming, actions);
         if let Some(source) = source {
             self.state.set_script_source(source);
         }
@@ -662,7 +698,7 @@ impl StokesForgeApp {
         let model = Arc::clone(&view.model);
         let requests = Arc::clone(&view.requests);
         let root = ctx.clone();
-        let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
+        let id = script_viewport();
         let live = self.live_window(PanelKind::Script);
         let builder = panel_viewport(
             tr!("script-title"),
@@ -698,6 +734,7 @@ impl StokesForgeApp {
             // The dispatch of a hosted dialog may read the console's state.
             drop(model);
             super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::Console);
+            super::window_band::paint(ui.ctx());
         });
         if changed {
             ctx.request_repaint_of(id);
@@ -873,6 +910,7 @@ impl StokesForgeApp {
                     ui.ctx(),
                     super::dialog_host::DialogHost::ProjectManager,
                 );
+                super::window_band::paint(ui.ctx());
             },
         );
         if changed {
@@ -1200,6 +1238,7 @@ impl DetachedTabViewport {
         self.show_locked(ui);
         super::dialog_host::host_pass(ui.ctx(), super::dialog_host::DialogHost::Tab(self.tab));
         super::page_layout::note_field_focus(ui.ctx());
+        super::window_band::paint(ui.ctx());
     }
 
     /// The two locks stay held during the whole frame, as before the
@@ -1243,6 +1282,15 @@ impl DetachedTabViewport {
         let (header_actions, frame) =
             self.paint_contents(ui, &mut model, &mut requests, was_collapsed);
         self.collect_actions(ui, &mut requests);
+        // A message the local view recorded (an unreadable clipboard...) has no
+        // action behind it: only the root can bring it to the band (#471).
+        if model
+            .view_state
+            .as_ref()
+            .is_some_and(AppState::has_local_messages)
+        {
+            root_context.request_repaint_of(egui::ViewportId::ROOT);
+        }
         self.apply_window_actions(
             ui,
             &mut model,

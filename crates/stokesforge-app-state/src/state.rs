@@ -84,6 +84,7 @@ use crate::user_colors::UserColors;
 mod analysis;
 mod autosave;
 mod column_use;
+pub mod open_dialog;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
@@ -3099,6 +3100,10 @@ pub struct AppState {
     status: Option<StatusMessage>,
     /// The last 50 status bar messages (S-M6).
     status_log: std::collections::VecDeque<StatusMessage>,
+    /// How many messages were ever recorded: monotonic, unlike `status_log`
+    /// (capped at 50). The shell compares it before and after an action to
+    /// know whether that action said something (#471).
+    recorded_count: u64,
     /// The message history window is open.
     status_history_open: bool,
     /// The project's low R² values by type (#290), recomputed at each snapshot.
@@ -3357,6 +3362,7 @@ impl AppState {
             folder_memory: crate::default_folders::FolderMemory::default(),
             status: None,
             status_log: std::collections::VecDeque::new(),
+            recorded_count: 0,
             status_history_open: false,
             low_r2_groups: Vec::new(),
             low_r2_list_open: false,
@@ -3508,7 +3514,16 @@ impl AppState {
 
     /// Joins the interaction of a detached workbook to the main command
     /// path before its deferred actions are dispatched.
-    pub fn adopt_detached_book_view(&mut self, source: &mut Self, book: NodeId) {
+    ///
+    /// Returns the messages the local view recorded since the last drain (an
+    /// unreadable system clipboard, a refused write...): they are recorded here
+    /// too, at every level, and handed back so that the shell can show the
+    /// warnings and errors in the window they come from (#471).
+    pub fn adopt_detached_book_view(
+        &mut self,
+        source: &mut Self,
+        book: NodeId,
+    ) -> Vec<StatusMessage> {
         if let Some(sheet) = source.selected_sheet_in(book) {
             self.selected_sheets.insert(book, sheet);
         }
@@ -3528,6 +3543,12 @@ impl AppState {
         if let Some(sheet) = source.pending_full_copy.take() {
             self.pending_full_copy = Some(sheet);
         }
+        source.status = None;
+        let pulled: Vec<StatusMessage> = source.status_log.drain(..).collect();
+        for message in &pulled {
+            self.record(message.text.clone(), message.level);
+        }
+        pulled
     }
 
     /// Last snapshot received.
@@ -5395,12 +5416,6 @@ impl AppState {
                 cause = errors::session::error_message(&err)
             )),
         }
-    }
-
-    /// Message shown when actions of a detached window are refused
-    /// because the modal graph properties window is open.
-    pub fn reject_detached_actions(&mut self) {
-        self.fail(tr!("error-plot-settings-block-detached"));
     }
 
     /// Closes the macro of the properties window (one history entry,
@@ -7752,6 +7767,48 @@ impl AppState {
         }
         self.status_log.push_back(message.clone());
         self.status = Some(message);
+        self.recorded_count += 1;
+    }
+
+    /// How many messages were ever recorded (never decreases).
+    #[must_use]
+    pub fn recorded_count(&self) -> u64 {
+        self.recorded_count
+    }
+
+    /// The messages recorded since the counter read `count` (see
+    /// [`AppState::recorded_count`]), oldest first. The history is capped, so
+    /// a burst longer than the cap only returns what it still holds.
+    pub fn messages_since(&self, count: u64) -> impl DoubleEndedIterator<Item = &StatusMessage> {
+        let new = usize::try_from(self.recorded_count.saturating_sub(count)).unwrap_or(usize::MAX);
+        let skip = self.status_log.len().saturating_sub(new);
+        self.status_log.iter().skip(skip)
+    }
+
+    /// Does this forked view hold messages the root has not pulled yet? A view
+    /// forked by [`AppState::fork_for_detached_view`] has no status bar: the
+    /// root takes its messages at its next drain (#471).
+    #[must_use]
+    pub fn has_local_messages(&self) -> bool {
+        !self.status_log.is_empty()
+    }
+
+    /// Records the refusal of a gesture made outside the main window because
+    /// `dialog` is open there (#471) and returns its sentence. It goes to the
+    /// status bar and the history as a warning, **never** through `warn`
+    /// (which would wipe the error in the footer of the dialog) nor `fail`
+    /// (which would put it in that footer). The same sentence refused again
+    /// right after adds no history line.
+    pub fn refuse_outside_main(&mut self, dialog: open_dialog::OpenDialog) -> String {
+        let text = open_dialog::refusal_text(dialog);
+        let repeated = self
+            .status_log
+            .back()
+            .is_some_and(|last| last.level == StatusLevel::Warning && last.text == text);
+        if !repeated {
+            self.record(text.clone(), StatusLevel::Warning);
+        }
+        text
     }
 
     /// Clears the information that is too old (S-M5) and returns the delay
