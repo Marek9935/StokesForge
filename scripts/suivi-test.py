@@ -1981,9 +1981,16 @@ case "$(cat "$FAKE_DIR/mode" 2>/dev/null)" in
     empty) exit 0 ;;
 esac
 case "$*" in
-    *repository/commits*) echo "[{\"id\": \"$(cat "$FAKE_DIR/sha")\"}]" ;;
-    *pipelines*) cat "$FAKE_DIR/pipelines" ;;
-    *graphql*) cat "$FAKE_DIR/jobs" ;;
+    *repository/commits*ref_name=*)
+        ref="$(echo "$*" | sed 's/.*ref_name=\([^&]*\).*/\1/')"
+        f="$FAKE_DIR/sha"; [ ! -f "$FAKE_DIR/sha-$ref" ] || f="$FAKE_DIR/sha-$ref"
+        echo "[{\"id\": \"$(cat "$f")\"}]" ;;
+    *pipelines*)
+        sha="$(echo "$*" | sed 's/.*sha=\([0-9a-f]*\).*/\1/')"
+        if [ -f "$FAKE_DIR/pipelines-$sha" ]; then cat "$FAKE_DIR/pipelines-$sha"; else cat "$FAKE_DIR/pipelines"; fi ;;
+    *graphql*)
+        iid="$(echo "$*" | sed 's/.*iid:"\([0-9]*\)".*/\1/')"
+        if [ -f "$FAKE_DIR/jobs-$iid" ]; then cat "$FAKE_DIR/jobs-$iid"; else cat "$FAKE_DIR/jobs"; fi ;;
     *) echo "[]" ;;
 esac
 """
@@ -2134,6 +2141,21 @@ class TestCiHeads(CiBase):
         r = self.poll(r)
         self.assertEqual((r["verdict"], r["sha"]), ("green", SHA_A))
         self.assertIsNone(r["last_red"])
+
+
+class TestCiLine(CiBase):
+    def test_red_on_the_line_leaves_the_main_verdict_alone(self):
+        nodes = [{"name": "github-actions/" + j, "status": "FAILED" if j == "fmt" else "SUCCESS",
+                  "detailedStatus": {"label": "x"}} for j in suivi.CI_JOBS]
+        self.put_file("jobs-6", json.dumps({"data": {"project": {"pipeline": {"stages": {"nodes": [
+            {"name": "external", "jobs": {"nodes": nodes}}]}}}}}))
+        self.put_file("sha-PostV1.1", SHA_B)
+        self.put_file("pipelines-" + SHA_B, '[{"iid": 6}]')
+        line = suivi.ci_poll(None, ref="PostV1.1")
+        main = suivi.ci_poll(None)
+        self.assertEqual((line["verdict"], line["sha"], line["names"]), ("red", SHA_B, ["fmt"]))
+        self.assertEqual((main["verdict"], main["sha"]), ("green", SHA_A))
+        self.assertIsNone(main["last_red"])
 
 
 class TestCiState(ServerBase):
@@ -3126,6 +3148,63 @@ class TestPage(unittest.TestCase):
         self.assertIn("a.href='#attente/issue='+c.issue", html)
         self.assertIn("/^issue=(\\d+)$/", html)
         self.assertIn("x.reviewed||x.date", html)
+
+
+class TestLine(Base):
+    """Integration line (#480): the record field, its inheritance, the merge check, the line worktree."""
+    def gout(self, *a, cwd=None):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd or self.repo,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def line_of(self, n):
+        return self.run_cli("line", str(n)).stdout.strip()
+
+    def test_claim_writes_the_line_and_each_claim_rewrites_it(self):
+        self.claim(7, "--line", "PostV1.1")
+        self.assertEqual((self.rec(7)["line"], self.line_of(7)), ("PostV1.1", "PostV1.1"))
+        self.claim(7)                               # the declaration is gone: back to main
+        self.assertNotIn("line", self.rec(7))
+        self.assertEqual(self.line_of(7), "main")
+        self.assertEqual(self.line_of(99), "main")  # no record
+        self.assertNotEqual(self.run_cli("claim", "8", "--line", "../x").returncode, 0)
+
+    def test_a_sub_issue_inherits_the_line_of_its_parent(self):
+        self.claim(10, "--package", "--line", "PostV1.1")
+        self.claim(11, "--parent", "10")            # the parent claimed for it keeps its line
+        self.assertEqual(self.rec(10)["line"], "PostV1.1")
+        self.assertNotIn("line", self.rec(11))
+        self.assertEqual(self.line_of(11), "PostV1.1")
+        self.assertEqual(suivi.line_of({1: {"issue": 1, "parent": 2}, 2: {"issue": 2, "line": "L"}}, 1), "L")
+
+    def test_merge_commit_is_checked_on_the_line_of_the_issue(self):
+        self.gout("branch", "PostV1.1", "main")
+        self.gout("checkout", "-q", "PostV1.1")
+        self.gout("commit", "-q", "--allow-empty", "-m", "Merge #71: on the line")
+        c71 = self.gout("rev-parse", "HEAD")
+        self.gout("commit", "-q", "--allow-empty", "-m", "Merge #72: on the line")
+        c72 = self.gout("rev-parse", "HEAD")
+        self.gout("checkout", "-q", "main")
+        self.put(71, line="PostV1.1")
+        self.put(72)
+        ok = self.run_cli("test", "merged", "71", c71)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        bad = self.run_cli("test", "merged", "72", c72)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("is not on main", bad.stderr)
+
+    def test_a_declared_line_without_a_branch_is_refused(self):
+        self.put(73, line="Gone")
+        c = self.gout("rev-parse", "HEAD")
+        r = self.run_cli("test", "merged", "73", c)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no local branch", r.stderr)
+
+    def test_line_worktrees_are_not_work_packages(self):
+        self.git("worktree", "add", "-q", os.path.join(self.root, "line-PostV1.1"), "-b", "PostV1.1", "main")
+        r = self.run_cli("check")
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)
+        st = json.loads(self.run_cli("status", "--json").stdout)
+        self.assertEqual(st["colourless"], [])
 
 
 class TestHelp(Base):

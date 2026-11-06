@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deliver a work package's branch to main in one stop-at-first-failure run (#449).
+# Deliver a work package's branch to main (or to its integration line) in one stop-at-first-failure run (#449).
 #
 #   scripts/deliver.sh [--wait-tag rc|final] <issue-number> <message-file>
 #
@@ -27,6 +27,17 @@
 # keywords); after the push it runs `suivi.py tag-wait <n> <kind>`, and the service then adds the
 # label `attente-rc` / `attente-final` on GitLab (no glab call here).
 #
+# INTEGRATION LINE (#480). If the issue's record declares a line (suivi.py line <n>, e.g. PostV1.1),
+# everything above happens on that line instead of main: in its permanent worktree
+# (../_stokesforge/line-<line>, which must be clean and on the line), pushed as `origin <line>`.
+# The main checkout is only the place the script is run from: it may be dirty or on another
+# branch, and it is never touched. The message may not close anything (`Closes #n`, `Fixes`,
+# `Resolves`: use `Refs #n`; a closing keyword would close the issue when the line lands) and
+# `--wait-tag` is refused; both before the lock. A line that moved is merged into the branch
+# (exit 3), as main is. A delivery to main refuses a branch that holds a commit of a line that
+# is not on main yet (a branch must not drag the line into main); a branch based on a line
+# already landed is fine.
+#
 # Exit: 0 delivered, 1 refused or failed (main unchanged unless M was already merged
 # locally), 2 usage, 3 main moved: it was merged into the branch, recheck and rerun.
 set -euo pipefail
@@ -46,6 +57,14 @@ fi
 n="$1"
 msgfile="$2"
 [ -f "$msgfile" ] && [ -r "$msgfile" ] || die "cannot read the message file $msgfile"
+msgfile="$(realpath "$msgfile")"   # the run may change directory (line worktree)
+line="$(sf_line_of "$n")"
+if [ "$line" != main ]; then
+    [ -z "$wait_tag" ] || die "#$n is on the line $line: --wait-tag is for main, a line merge proves nothing yet"
+    if grep -qiE '\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#[0-9]+' "$msgfile"; then
+        die "#$n is on the line $line: the message may not close an issue (Closes/Fixes/Resolves #n); write Refs #n, the issue closes when the line lands"
+    fi
+fi
 if [ -n "$wait_tag" ] && grep -qiE "\\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#$n\\b" "$msgfile"; then
     die "the message closes #$n (Closes/Fixes/Resolves #$n), but --wait-tag keeps it open until the tag: remove that line"
 fi
@@ -55,14 +74,24 @@ case "$first" in "Merge #$n:"*) ;; *) die "the first line of the message must st
 main="$(sf_main_dir)"
 top="$(realpath "$(git rev-parse --show-toplevel)")"
 [ "$top" = "$(realpath "$main")" ] || die "run it from the main checkout ($main), not from $top"
-[ "$(git symbolic-ref --short HEAD 2> /dev/null || true)" = main ] || die "the main checkout is not on the branch main"
+if [ "$line" = main ]; then
+    [ "$(git symbolic-ref --short HEAD 2> /dev/null || true)" = main ] || die "the main checkout is not on the branch main"
+fi
 
 "$here/main-lock.sh" take "deliver #$n" > /dev/null || exit 1
 trap '"$here/main-lock.sh" release > /dev/null 2>&1 || true' EXIT
 
 suivi() { python3 -I "$here/suivi.py" "$@"; }
 
-[ -z "$(git status --porcelain)" ] || die "the main checkout has modified or untracked files"
+if [ "$line" = main ]; then
+    [ -z "$(git status --porcelain)" ] || die "the main checkout has modified or untracked files"
+else
+    lwt="$(sf_line_dir "$line")"
+    [ "$(git -C "$lwt" symbolic-ref --short HEAD 2> /dev/null || true)" = "$line" ] \
+        || die "the line $line has no worktree $lwt on that branch (scripts/line.sh create $line); never a fallback to main"
+    [ -z "$(git -C "$lwt" status --porcelain)" ] || die "the line worktree $lwt has modified or untracked files"
+    cd "$lwt"   # from here on the checkout is the line's; the main checkout stays as it is
+fi
 
 branches="$(git for-each-ref --format='%(refname:short)' "refs/heads/feature/$n-*")"
 nb="$(printf '%s' "$branches" | grep -c . || true)"
@@ -76,14 +105,14 @@ if [ -n "$branch" ]; then
     fi
 fi
 
-git fetch -q origin main || die "git fetch origin main failed"
-if [ "$(git rev-parse main)" != "$(git rev-parse origin/main)" ]; then
-    if git merge-base --is-ancestor main origin/main; then
-        git merge -q --ff-only origin/main || die "cannot fast-forward main to origin/main"
-    elif git merge-base --is-ancestor origin/main main; then
-        :   # main is ahead: an earlier run merged and did not push
+git fetch -q origin "$line" || die "git fetch origin $line failed"
+if [ "$(git rev-parse "$line")" != "$(git rev-parse "origin/$line")" ]; then
+    if git merge-base --is-ancestor "$line" "origin/$line"; then
+        git merge -q --ff-only "origin/$line" || die "cannot fast-forward $line to origin/$line"
+    elif git merge-base --is-ancestor "origin/$line" "$line"; then
+        :   # the line is ahead: an earlier run merged and did not push
     else
-        die "main and origin/main have diverged; nothing done (never forced)"
+        die "$line and origin/$line have diverged; nothing done (never forced)"
     fi
 fi
 
@@ -95,31 +124,41 @@ while read -r h subj; do
         m="$h"
         [ -z "$branch" ] && break   # branch gone: the newest one; otherwise the oldest wins (keep looping)
     fi
-done < <(git log main --first-parent --format='%H %s')
+done < <(git log "$line" --first-parent --format='%H %s')
 
 if [ -z "$m" ]; then
     [ -n "$branch" ] || die "no branch feature/$n-* and no 'Merge #$n:' commit on main: nothing to deliver"
-    if git merge-base --is-ancestor "$branch" main; then
-        die "$branch has nothing main does not have: nothing to merge"
+    if git merge-base --is-ancestor "$branch" "$line"; then
+        die "$branch has nothing $line does not have: nothing to merge"
     fi
-    if ! git merge-base --is-ancestor main "$branch"; then
-        [ -n "$wt" ] || die "main is not in $branch and the branch has no worktree to merge it in"
-        if ! git -C "$wt" merge --no-edit main > /dev/null 2>&1; then
+    if [ "$line" = main ]; then
+        # A branch built on a line that has not landed would drag the line into main. Landed = on main.
+        for l in $(sf_lines); do
+            git rev-parse --verify -q "refs/heads/$l" > /dev/null || continue
+            for b in $(git merge-base --all "$branch" "refs/heads/$l" 2> /dev/null || true); do
+                git merge-base --is-ancestor "$b" main \
+                    || die "$branch holds the commit $(git rev-parse --short "$b") of the line $l, which is not on main: deliver it to the line, or rebase it on main"
+            done
+        done
+    fi
+    if ! git merge-base --is-ancestor "$line" "$branch"; then
+        [ -n "$wt" ] || die "$line is not in $branch and the branch has no worktree to merge it in"
+        if ! git -C "$wt" merge --no-edit "$line" > /dev/null 2>&1; then
             git -C "$wt" merge --abort > /dev/null 2>&1 || true
-            die "merging main into $branch conflicts; resolve it in $wt, then rerun"
+            die "merging $line into $branch conflicts; resolve it in $wt, then rerun"
         fi
-        echo "deliver: main had moved; it is now merged into $branch. Recheck the branch (stokesforge-verification), then rerun deliver.sh $n $msgfile" >&2
+        echo "deliver: $line had moved; it is now merged into $branch. Recheck the branch (stokesforge-verification), then rerun deliver.sh $n $msgfile" >&2
         exit 3
     fi
     if ! git merge --no-ff -q -F "$msgfile" "$branch" > /dev/null; then
         if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then git merge --abort > /dev/null 2>&1 || true; fi
-        die "the merge of $branch failed; main is unchanged"
+        die "the merge of $branch failed; $line is unchanged"
     fi
     m="$(git rev-parse HEAD)"
 fi
 
 delays="${SF_DELIVER_DELAYS:-2 4 8 16}"
-push_main() { git push -q --no-follow-tags origin main; }
+push_main() { git push -q --no-follow-tags origin "$line"; }
 pushed=0
 if push_main; then pushed=1; else
     for d in $delays; do
@@ -138,4 +177,4 @@ if suivi test list --issue "$n" | grep -q '(try)'; then
 else
     echo "deliver: no entry to try on #$n: no commit recorded"
 fi
-echo "deliver: #$n merged and pushed as $m"
+echo "deliver: #$n merged and pushed as $m$([ "$line" = main ] || echo " on $line")"

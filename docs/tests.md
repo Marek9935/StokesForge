@@ -565,7 +565,7 @@ Linux runner is registered; Windows is not affected by this choice.
 | `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md); the notes end with a line "Built with rustc … (Linux) and rustc … (Windows)" (outputs `rustc` of `release-linux` and `dist-windows`, `scripts/rustc-note.sh`), and `release-publish.sh` refuses to publish if one is missing (#412) |
 | `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, the token's role is not allowed to run pipelines on the protected tags `v*`: raise it to Maintainer |
 
-The Linux jobs run on the pushed branches `main`, `feature/**`,
+The Linux jobs run on the pushed branches `main`, `PostV1.1` (integration line, #480), `feature/**`,
 `v[0-9]*`, `release/**` and on the tags `v*`. `release-linux` and `publier`
 refuse a tag whose commit is an ancestor neither of `origin/main` nor of a
 `release/*` branch (`scripts/release-tag-on-main.sh`, #354), or that does not
@@ -619,6 +619,14 @@ for Linux CI to finish, then a few moments for the report. A more recent push
 on the same reference cancels the running series. Pull requests start
 GitHub CI but report nothing to GitLab (intended, see below).
 
+**Integration line (#480).** An issue whose record carries `line` (`suivi.py claim --line`, read by
+`suivi.py line <n>` and `sf_line_of`) starts from `origin/<line>`, is delivered into `<line>` by
+`deliver.sh` (in the permanent worktree `../_stokesforge/line-<line>`, the main checkout untouched, the
+same `main-lock.sh` lock, no closing keyword and no `--wait-tag`) and is released against the line.
+`line.sh create|sync` make the line and bring `main` into it. The CI watcher reads each line's head
+too (`ci-line-<name>.json`, `lines` of `/api/state`). `workflow-test.sh` and `suivi-test.py` cover each
+rule with a witness by mutation.
+
 **Several orchestrators on `main` (#413).** `ci.yml` cancels a running series when a newer push
 arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the CI of the newest
 `main` that contains your commit (`git merge-base --is-ancestor <commit> origin/main`), not of your
@@ -628,7 +636,7 @@ it on every exit, stops at the first failure, merges `--no-ff` with the message 
 without tags (4 retries) and only then writes the real merge commit on the issue's trial entries
 (`suivi.py test merged`); a rerun after a failure does not merge twice, and exit 3 means `main` moved
 and was merged into the branch (recheck, rerun). It stops before the CI and `--release`. The scripts of this workflow
-(`chantier.sh`, `try.sh`, `main-lock.sh`, `deliver.sh`, `workflow-lib.sh`) are tested by
+(`chantier.sh`, `try.sh`, `main-lock.sh`, `deliver.sh`, `line.sh`, `workflow-lib.sh`) are tested by
 `scripts/workflow-test.sh`, run by the `fmt` job, and the colour rule by `scripts/suivi-test.py`
 (same job). `scripts/try.sh` builds in debug; `scripts/try.sh --release <n>` (#474) builds and runs the release binary of the same worktree, because debug draws about 23 frames/s against 120 in release (#340): rerun in release before diagnosing a slowness seen at a trial. Besides the colours, briefing and locks, `workflow-test.sh` covers
 (#449) `deliver.sh` in its own sandbox with a bare fake remote (happy path, refusals, held lock, fetch,

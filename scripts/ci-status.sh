@@ -2,7 +2,8 @@
 # Results of the Linux CI (GitHub) read from GitLab, for one commit.
 #
 #   scripts/ci-status.sh [commit]     # HEAD by default
-#   scripts/ci-status.sh --head       # the head of `main` on GitLab, jobs only (#452)
+#   scripts/ci-status.sh --head [ref] # the head of `main` (or of the branch `ref`, an integration line, #480)
+#                                     # on GitLab, jobs only (#452)
 #
 # Prints one status per job `github-actions/<job>` (with the failing step and
 # the first cause on failure), then the commit comments posted by the reporter
@@ -20,9 +21,11 @@ command -v glab > /dev/null || { echo "glab is required (glab auth login)" >&2; 
 head_mode=0
 if [ "${1:-}" = "--head" ]; then
     head_mode=1
-    sha="$(glab api "projects/$PROJECT_ID/repository/commits?ref_name=main&per_page=1" \
+    ref="${2:-main}"
+    [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "not a branch name: $ref" >&2; exit 1; }
+    sha="$(glab api "projects/$PROJECT_ID/repository/commits?ref_name=$ref&per_page=1" \
         | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")')"
-    [ -n "$sha" ] || { echo "GitLab returned no commit for main" >&2; exit 1; }
+    [ -n "$sha" ] || { echo "GitLab returned no commit for $ref" >&2; exit 1; }
     echo "HEAD $sha"
 else
     sha="$(git rev-parse "${1:-HEAD}")"

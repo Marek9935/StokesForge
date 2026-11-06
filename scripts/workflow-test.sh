@@ -500,6 +500,125 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     eq "$rc" 1 "conflict: exit code"
     git -C "$wt" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "conflict: MERGE_HEAD left in the worktree" || true
     lock_free "conflict"
+
+    # ---- Integration line (#480): PostV1.1, its worktree, the delivery, the release, sync.
+    L=PostV1.1
+    lsetup() {   # dsb + the line created + issue 7 declared on it
+        dsb; "$here/line.sh" create $L > /dev/null
+        lwt="$sb/_stokesforge/line-$L"
+        sbsuivi claim 7 --line $L > /dev/null
+    }
+    lhead() { git -C "$lwt" rev-parse HEAD; }
+    rhead() { git -C "$sb/remote.git" rev-parse "refs/heads/$L"; }
+    lcommit() { git -C "$lwt" commit -q --allow-empty -m "$1"; git -C "$lwt" push -q origin $L; }
+    recline() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("line","-"))' "$SF_SUIVI_DIR/issues/$1.json"; }
+    chant() { ( cd "$sb/StokesForge" && "$here/chantier.sh" "$@" ); }
+
+    # create: the branch, the worktree, pushed from main; a second create is refused.
+    dsb; "$here/line.sh" create $L > "$sb/out" 2>&1 || fail "line create: $(cat "$sb/out")"
+    lwt="$sb/_stokesforge/line-$L"
+    eq "$(lhead)" "$(main_head)" "line starts at main"
+    eq "$(rhead)" "$(main_head)" "line pushed"
+    if "$here/line.sh" create $L > /dev/null 2>&1; then fail "second create accepted"; fi
+    lock_free "create"
+
+    # A declared line: the worktree starts from origin/<line>, the record carries it; rerun without
+    # the declaration puts the record back on main.
+    lcommit "line only"
+    export SF_ISSUE_TITLE="Nine"
+    SF_ISSUE_LINE_9=$L chant 9 > "$sb/out" 2>&1 || fail "chantier on a line: $(cat "$sb/out")"
+    eq "$(git -C "$sb/StokesForge" rev-parse feature/9-nine)" "$(lhead)" "worktree based on origin/$L"
+    eq "$(recline 9)" $L "record line"
+    grep -q "^Line $L: " "$sb/out" || fail "briefing line: $(cat "$sb/out")"
+    chant 9 > /dev/null
+    eq "$(recline 9)" - "declaration removed: record back on main"
+    eq "$(sbsuivi line 9)" main "line of 9"
+    # An unknown line is refused, nothing created (no fallback to main).
+    if SF_ISSUE_LINE_10=Nope chant 10 > "$sb/out" 2>&1; then fail "unknown line accepted"; fi
+    grep -q 'origin/Nope does not exist' "$sb/out" || fail "unknown line message: $(cat "$sb/out")"
+    [ ! -e "$sb/_stokesforge/feature10" ] && ! git -C "$sb/StokesForge" rev-parse -q --verify feature/10-nine > /dev/null || fail "unknown line created something"
+    unset SF_ISSUE_TITLE
+
+    # Delivery to the line: M on the line, pushed; main, origin/main and the main checkout untouched,
+    # even dirty and on another branch; the message path is relative.
+    lsetup; base="$(main_head)"
+    git -C "$sb/StokesForge" checkout -q -b other; echo dirt > "$sb/StokesForge/dirt"
+    DMSG=../msg deliver || fail "deliver to the line: $(cat "$sb/out")"
+    m="$(lhead)"
+    eq "$(git -C "$lwt" log -1 --format=%s)" "Merge #7: add x" "line merge message"
+    eq "$(git -C "$lwt" rev-list --parents -n 1 HEAD | wc -w)" 3 "line merge has two parents"
+    eq "$(rhead)" "$m" "line pushed at M"
+    eq "$(git -C "$sb/remote.git" rev-parse refs/heads/main)" "$base" "origin/main moved"
+    eq "$(git -C "$sb/StokesForge" rev-parse refs/heads/main)" "$base" "main moved"
+    eq "$(git -C "$sb/StokesForge" symbolic-ref --short HEAD)" other "main checkout moved"
+    [ -f "$sb/StokesForge/dirt" ] || fail "the main checkout lost its dirt"
+    eq "$(entry_field 7-1 commit)" "$m" "entry at M (on the line)"
+    lock_free "line delivery"
+    # The release tests the merge against the line and deletes the branch from the line worktree.
+    git -C "$sb/StokesForge" checkout -q main; rm "$sb/StokesForge/dirt"
+    ( cd "$sb/StokesForge" && "$here/chantier.sh" --release 7 > "$sb/rout" 2> "$sb/rerr" ) || fail "release of a line issue: $(cat "$sb/rerr")"
+    [ ! -e "$wt" ] && ! git -C "$sb/StokesForge" rev-parse -q --verify feature/7-x > /dev/null || fail "release left the worktree or the branch"
+    [ -d "$lwt" ] || fail "release removed the line worktree"
+    ! grep -q warning "$sb/rerr" || fail "a line release warned: $(cat "$sb/rerr")"
+    # Released only when merged into the LINE: merged into main alone it stays.
+    lsetup
+    git -C "$sb/StokesForge" merge -q --no-ff -m "Merge #7: direct" feature/7-x
+    if ( cd "$sb/StokesForge" && "$here/chantier.sh" --release 7 > /dev/null 2> "$sb/rerr" ); then fail "release accepted a branch not in the line"; fi
+    grep -q "not merged into $L" "$sb/rerr" || fail "release refusal: $(cat "$sb/rerr")"
+    [ -d "$wt" ] && git -C "$sb/StokesForge" rev-parse -q --verify feature/7-x > /dev/null || fail "refused release removed something"
+
+    # The line moved: it is merged into the branch (exit 3); the rerun merges once.
+    lsetup
+    git clone -q "$sb/remote.git" "$sb/other2"
+    git -C "$sb/other2" checkout -q $L
+    git -C "$sb/other2" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "line elsewhere"
+    git -C "$sb/other2" push -q origin $L
+    set +e; deliver; rc=$?; set -e
+    eq "$rc" 3 "line moved: exit code"
+    git -C "$sb/StokesForge" merge-base --is-ancestor "origin/$L" feature/7-x || fail "line moved: the branch lacks the line"
+    eq "$(entry_field 7-1 commit)" "-" "line moved: entry recorded"
+    lock_free "line moved"
+    deliver || fail "rerun after exit 3 on the line: $(cat "$sb/out")"
+    eq "$(git -C "$lwt" log --first-parent --merges --format=%s | grep -c '^Merge #7:')" 1 "one merge on the line"
+
+    # A closing keyword or --wait-tag on a line: refused before the lock.
+    lsetup; lbase="$(lhead)"
+    printf 'Merge #7: add x\n\nCloses #8\n' > "$sb/msgc"
+    if wdeliver 7 "$sb/msgc"; then fail "Closes on a line accepted"; fi
+    grep -q 'Refs #n' "$sb/out" || fail "closing refusal text: $(cat "$sb/out")"
+    if wdeliver --wait-tag rc 7 "$sb/msg"; then fail "--wait-tag on a line accepted"; fi
+    eq "$(lhead)" "$lbase" "refusals moved the line"
+    lock_free "line refusals"
+    [ ! -e "$SF_SUIVI_DIR/tagwait/7.json" ] || fail "a wait was recorded on a line"
+
+    # Main refuses a branch holding a line-only commit; a landed line is fine.
+    dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"; base="$(main_head)"
+    lcommit "line only"
+    git -C "$wt" merge -q --no-edit $L
+    refused "branch with a line-only commit"
+    grep -q 'not on main' "$sb/out" || fail "line-only message: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" merge -q --no-ff -m "Merge line" $L; git -C "$sb/StokesForge" push -q origin main   # the line lands
+    git -C "$wt" merge -q --no-edit main
+    deliver || fail "branch based on a landed line refused: $(cat "$sb/out")"
+
+    # sync: main reaches the line by a merge; a conflict aborts and leaves the line alone.
+    dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"
+    git clone -q "$sb/remote.git" "$sb/other3"
+    git -C "$sb/other3" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "main moves"
+    git -C "$sb/other3" push -q origin main
+    "$here/line.sh" sync $L > "$sb/out" 2>&1 || fail "sync: $(cat "$sb/out")"
+    git -C "$lwt" merge-base --is-ancestor "$(git -C "$sb/other3" rev-parse HEAD)" HEAD || fail "sync: main is not in the line"
+    eq "$(rhead)" "$(lhead)" "sync pushed"
+    lock_free "sync"
+    echo line > "$lwt/f"; git -C "$lwt" commit -q -am "edit f on the line"; git -C "$lwt" push -q origin $L
+    echo main > "$sb/other3/f"; git -C "$sb/other3" -c user.name=o -c user.email=o@o commit -q -am "edit f on main"
+    git -C "$sb/other3" push -q origin main
+    lbase="$(lhead)"
+    if "$here/line.sh" sync $L > "$sb/out" 2>&1; then fail "conflicting sync accepted"; fi
+    eq "$(lhead)" "$lbase" "conflicting sync moved the line"
+    git -C "$lwt" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "sync conflict: MERGE_HEAD left" || true
+    eq "$(rhead)" "$lbase" "conflicting sync pushed"
+    lock_free "sync conflict"
 )
 
 # No inconsistency left (duplicate colour, record without worktree, worktree without record).

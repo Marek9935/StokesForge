@@ -15,6 +15,8 @@
 # --dry-run prints the build and run commands without running them.
 # --release (#474) builds with `cargo build --release` and runs the release binary of the
 # same worktree (debug stays the default, for its build time; debug is much slower to draw).
+# An issue declared on an integration line (#480, suivi.py line <n>) is read against that line:
+# the last merges are those of the line and "not yet on" names the line (`try.sh main` unchanged).
 # The build skips the cargo queue (#476): a trial is for the user at the PC, who must not wait
 # behind agent builds (SF_CARGO_QUEUE=off on the build command only; the app itself is unchanged).
 set -euo pipefail
@@ -51,11 +53,17 @@ else
     fi
 fi
 
-echo "== last merges on main"
-git -C "$main" log --first-parent --merges -5 --format='%h %s' main
+line=main
+[ "$target" = main ] || line="$(sf_line_of "$target")"
+if [ "$line" != main ] && ! git -C "$main" rev-parse --verify -q "refs/heads/$line" > /dev/null; then
+    echo "#$target is on the line $line, but the branch $line does not exist here (scripts/line.sh create $line)" >&2
+    exit 1
+fi
+echo "== last merges on $line"
+git -C "$main" log --first-parent --merges -5 --format='%h %s' "$line"
 if [ "$target" != main ]; then
-    echo "== commits of $(git -C "$wt" symbolic-ref --short HEAD) not yet on main"
-    git -C "$wt" log --format='%h %s' main..HEAD
+    echo "== commits of $(git -C "$wt" symbolic-ref --short HEAD) not yet on $line"
+    git -C "$wt" log --format='%h %s' "$line..HEAD"
 fi
 
 export CARGO_TARGET_DIR="$wt/target"

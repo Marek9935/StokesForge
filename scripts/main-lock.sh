@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# The lock on `main`: one orchestrator at a time merges and pushes.
+# The lock on `main`: one orchestrator at a time merges and pushes. It is also THE lock of an
+# integration line (#480, scripts/line.sh, deliver.sh to a line): one lock for every branch
+# that receives merges, held for seconds (git only, no cargo under it).
 #
 #   scripts/main-lock.sh take <name> [--dry-run]   # name = "<square> #<n>"
 #   scripts/main-lock.sh release [--dry-run]

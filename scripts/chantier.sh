@@ -56,7 +56,14 @@
 # -D), then prints ONE line saying whether the colour is free or still held; the
 # issue is marked done when its last worktree goes and nothing holds it.
 #
-# Test seams: SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
+# Integration line (#480): an issue declared on a line (`declared_line`, one function) gets its
+# worktree from origin/<line> instead of origin/main, and its record carries `line` (suivi.py claim
+# --line; a rerun without the declaration puts it back on main). A sub-issue takes its parent's
+# line. An unknown line (no origin/<line>) is refused before anything is created, never replaced
+# by main. `--release` of a line issue tests the merge against the line and deletes the branch from
+# the line worktree (../_stokesforge/line-<line>, scripts/line.sh create).
+#
+# Test seams: SF_ISSUE_LINE_<n> (the declared line of issue <n>), SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
 # `glab issue view` lookup; SF_ISSUES_JSON (a file with the JSON of `glab issue
 # list`) replaces the sub-issue search, SF_ISSUE_BODY_<n> the parent's description;
 # SF_NO_FETCH=1 skips `git fetch`, SF_TODAY=YYYY-MM-DD fixes today, SF_SUIVI_DIR
@@ -148,6 +155,30 @@ name_of() {
 }
 
 reserved=""   # colours promised earlier in this dry run
+used_lines=""  # integration lines of the issues started in this run (briefing)
+
+# The integration line issue $1 is declared on, empty for `main`. THE one place that learns it:
+# the choice between a GitLab label and a word at launch is open (#480), so today only the test
+# seam answers.
+declared_line() {
+    local var="SF_ISSUE_LINE_$1"
+    printf '%s\n' "${!var:-}"
+}
+
+# Line of issue $1 (own declaration, else its parent's $2); refuses a bad name or a missing branch.
+line_for() {
+    local ln
+    ln="$(declared_line "$1")"
+    [ -n "$ln" ] || { [ -z "${2:-}" ] || ln="$(declared_line "$2")"; }
+    [ -z "$ln" ] || [ "$ln" = main ] || {
+        [[ "$ln" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "chantier: not a line name: $ln; nothing created" >&2; exit 1; }
+        git -C "$main" rev-parse --verify -q "refs/remotes/origin/$ln" > /dev/null \
+            || { echo "chantier: #$1 is declared on the line $ln, but origin/$ln does not exist (scripts/line.sh create $ln); nothing created" >&2; exit 1; }
+        printf '%s\n' "$ln"
+        return 0
+    }
+    printf '\n'
+}
 
 # Open sub-issues of issue $1, one "<number><TAB><title>" line each, in the order
 # the parent's description first mentions them, then by number (#419).
@@ -238,14 +269,29 @@ release_wt() {
         echo "release: run it from the main checkout ($main), not from $top" >&2
         return 1
     fi
-    if [ "$(git -C "$main" symbolic-ref --short HEAD 2> /dev/null)" != main ]; then
-        echo "release: the main checkout is not on the branch main" >&2
-        return 1
+    local line target lwt=""
+    issue="$(sf_issue_of "$wt")"
+    line="$(sf_line_of "$issue")"
+    target=HEAD
+    if [ "$line" = main ]; then
+        if [ "$(git -C "$main" symbolic-ref --short HEAD 2> /dev/null)" != main ]; then
+            echo "release: the main checkout is not on the branch main" >&2
+            return 1
+        fi
+    else
+        # A line issue is tested against its line, whatever the main checkout has out (#480).
+        lwt="$(sf_line_dir "$line")"
+        if ! git -C "$lwt" rev-parse --git-dir > /dev/null 2>&1 \
+            || [ "$(git -C "$lwt" symbolic-ref --short HEAD 2> /dev/null)" != "$line" ]; then
+            echo "release: #$issue is on the line $line, but $lwt is not its worktree (scripts/line.sh create $line); nothing removed" >&2
+            return 1
+        fi
+        target="refs/heads/$line"
     fi
     branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || true)"
     ref="${branch:-$(git -C "$wt" rev-parse HEAD)}"
-    if ! git -C "$main" merge-base --is-ancestor "$ref" HEAD; then
-        echo "release: ${branch:-HEAD of $wt} is not merged into main; nothing removed" >&2
+    if ! git -C "$main" merge-base --is-ancestor "$ref" "$target"; then
+        echo "release: ${branch:-HEAD of $wt} is not merged into $line; nothing removed" >&2
         return 1
     fi
     dirty="$(git -C "$wt" status --porcelain)"
@@ -258,7 +304,6 @@ release_wt() {
         printf 'release: %s has ignored files other than target/, nothing removed:\n%s\n' "$wt" "$ignored" >&2
         return 1
     fi
-    issue="$(sf_issue_of "$wt")"
     # V2 (#441): every delivered issue has at least one trial entry, unless --no-trial.
     if [ "$no_trial" = 0 ] && [ -z "$(suivi test list --issue "$issue")" ]; then
         echo "release: #$issue has no trial entry (scripts/suivi.py test add); add one, or pass --no-trial; nothing removed" >&2
@@ -270,8 +315,10 @@ release_wt() {
         return 0
     fi
     git -C "$main" worktree remove "$wt" > /dev/null || return 1
-    if [ -n "$branch" ]; then git -C "$main" branch -d "$branch" > /dev/null || return 1; fi
+    # `branch -d` tests against the HEAD of the checkout it runs in: the line worktree for a line issue.
+    if [ -n "$branch" ]; then git -C "${lwt:-$main}" branch -d "$branch" > /dev/null || return 1; fi
     suivi release-line "$issue" --mark-done
+    [ "$line" = main ] || return 0   # a line merge closes nothing: no "stays open" warning (#480)
     # #467: an issue left open on purpose must have declared its wait (local git and files only).
     local merge_msg
     merge_msg="$(git -C "$main" log HEAD --first-parent --grep="^Merge #$issue:" --format=%B -n 1)"
@@ -337,6 +384,14 @@ ensure_wt() {
     local n="$1" title="$2" parent="${3:-}" pcolour="${4:-}" args
     args=(--name "$(name_of "$title")")
     [ -z "$parent" ] || args+=(--parent "$parent")
+    local ln wbase="$base" own
+    ln="$(line_for "$n" "$parent")"   # refuses (exit 1) before anything is created
+    if [ -n "$ln" ]; then
+        wbase="origin/$ln"
+        case " $used_lines " in *" $ln "*) ;; *) used_lines="${used_lines:+$used_lines }$ln" ;; esac
+    fi
+    own="$(declared_line "$n")"       # a sub-issue without its own declaration inherits its parent's
+    [ -z "$own" ] || args+=(--line "$own")
     wt="$root/feature$n"
     if [ -d "$wt" ]; then
         branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || echo '?')"
@@ -355,11 +410,11 @@ ensure_wt() {
             colour="$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")" || exit 1
             reserved="$reserved $colour"
         fi
-        echo "would run: git worktree add $wt -b $branch --no-track $base"
+        echo "would run: git worktree add $wt -b $branch --no-track $wbase"
     else
         suivi claim --dry-run "$n" "${args[@]}" > /dev/null || exit 1   # refuse before creating anything
         mkdir -p "$root"
-        git -C "$main" worktree add "$wt" -b "$branch" --no-track "$base"
+        git -C "$main" worktree add "$wt" -b "$branch" --no-track "$wbase"
         colour="$(suivi claim "$n" "${args[@]}")" || exit 1
     fi
 }
@@ -392,15 +447,18 @@ for n in "${issues[@]}"; do
     fi
     # A package: one colour for all of it (the record of the parent).
     pname="$(name_of "$title")"
+    pline="$(declared_line "$n")"
+    pargs=(--package --name "$pname")
+    [ -z "$pline" ] || pargs+=(--line "$pline")
     subargs=()
     while IFS=$'\t' read -r m mt; do
         [ -z "$m" ] || subargs+=(--sub "$m=$mt")
     done <<< "${kids[$n]}"
     if [ "$dry" = 1 ]; then
-        pcolour="$(suivi claim --dry-run "$n" --package --name "$pname" --avoid "$reserved")" || exit 1
+        pcolour="$(suivi claim --dry-run "$n" "${pargs[@]}" --avoid "$reserved")" || exit 1
         reserved="$reserved $pcolour"
     else
-        pcolour="$(suivi claim "$n" --package --name "$pname" "${subargs[@]}")" || exit 1
+        pcolour="$(suivi claim "$n" "${pargs[@]}" "${subargs[@]}")" || exit 1
     fi
     note="Package $pcolour #$n $pname: sub-issues, in this order (second card of the start form, after the understanding card; the user removes or adds one):"
     k=0
@@ -437,6 +495,7 @@ echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the tr
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
+[ -z "$used_lines" ] || echo "Line $used_lines: deliver with scripts/deliver.sh (merges into the line, never main); write Refs #<n>, not Closes: the issue stays open until the line lands."
 for x in "${pkgnotes[@]:-}"; do [ -z "$x" ] || printf '%s\n' "$x"; done
 tags=""
 for x in "${names[@]}"; do tags="${tags:+$tags · }$x"; done
