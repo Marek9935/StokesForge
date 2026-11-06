@@ -71,13 +71,50 @@ pub(super) fn publish_dialog(ctx: &egui::Context, dialog: Option<OpenDialog>) {
 /// The dialog open in the main window, seen from a viewport other than the
 /// root. The root itself gets `None`: its own dialogs are no reason to refuse
 /// its own gestures.
-#[allow(dead_code)] // read by the typed-text guard and by the key stop of #460
 pub(super) fn main_dialog(ctx: &egui::Context) -> Option<OpenDialog> {
     if ctx.viewport_id() == egui::ViewportId::ROOT {
         return None;
     }
     ctx.data(|data| data.get_temp::<Option<OpenDialog>>(dialog_signal_id()))
         .flatten()
+}
+
+fn refusals_id() -> egui::Id {
+    egui::Id::new("stokesforge_window_refusals")
+}
+
+/// A viewport other than the root says "this gesture was refused" without
+/// being able to touch the main state: the root takes the note at its next
+/// pass ([`take_refusals`]) and runs the same refusal as for an action.
+pub(super) fn note_refusal(ctx: &egui::Context) {
+    let viewport = ctx.viewport_id();
+    if viewport == egui::ViewportId::ROOT {
+        return;
+    }
+    ctx.data_mut(|data| {
+        let list = data.get_temp_mut_or_default::<Vec<egui::ViewportId>>(refusals_id());
+        if !list.contains(&viewport) {
+            list.push(viewport);
+        }
+    });
+    ctx.request_repaint_of(egui::ViewportId::ROOT);
+}
+
+/// The viewports that noted a refusal since the last call.
+pub(super) fn take_refusals(ctx: &egui::Context) -> Vec<egui::ViewportId> {
+    ctx.data_mut(|data| data.remove_temp::<Vec<egui::ViewportId>>(refusals_id()))
+        .unwrap_or_default()
+}
+
+/// Is a typed value refused right now? In a detached window with a dialog open
+/// in the main window: the entry stays open, the refusal is noted for the root
+/// and this returns `true`. Never in the root.
+pub(super) fn refuse_entry(ctx: &egui::Context) -> bool {
+    if main_dialog(ctx).is_none() {
+        return false;
+    }
+    note_refusal(ctx);
+    true
 }
 
 /// Shows `text` in the band of `viewport` for [`BAND_LIFETIME`] from `now`,
@@ -283,5 +320,41 @@ mod tests {
             after.viewport_output[&viewport()].repaint_delay > Duration::from_secs(3600),
             "nothing is asked once the band is gone"
         );
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    #[test]
+    fn a_refused_entry_is_noted_for_the_root_once_per_window() {
+        let ctx = egui::Context::default();
+        publish_dialog(&ctx, Some(OpenDialog::GraphProperties));
+        let mut input = egui::RawInput::default();
+        input.viewport_id = egui::ViewportId::from_hash_of("w");
+        ctx.begin_pass(input);
+        assert!(refuse_entry(&ctx));
+        assert!(refuse_entry(&ctx));
+        let _ = ctx.end_pass();
+        assert_eq!(
+            take_refusals(&ctx),
+            vec![egui::ViewportId::from_hash_of("w")]
+        );
+        assert!(take_refusals(&ctx).is_empty());
+    }
+
+    #[test]
+    fn nothing_is_refused_without_a_dialog_or_in_the_root() {
+        let ctx = egui::Context::default();
+        assert!(!refuse_entry(&ctx), "root: never");
+        publish_dialog(&ctx, Some(OpenDialog::About));
+        assert!(!refuse_entry(&ctx), "root: never, even with a dialog");
+        publish_dialog(&ctx, None);
+        let mut input = egui::RawInput::default();
+        input.viewport_id = egui::ViewportId::from_hash_of("w");
+        ctx.begin_pass(input);
+        assert!(!refuse_entry(&ctx));
+        let _ = ctx.end_pass();
     }
 }

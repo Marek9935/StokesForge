@@ -203,7 +203,9 @@ Cancel aborts it and restores the previous graph
 (`AppState::cancel_plot_settings`). During the macro, undo/redo and
 save are refused (`stokesforge-commands`), as are the writes of a
 detached window (another sender identity: refused by the session) and the
-actions it sends up to the root (`reject_detached_actions`). Every
+actions it sends up to the root: `AppState::open_dialog` (every dialog, not
+only this one) makes the root refuse them and the window of the gesture say
+why in its 5-second band (`app/window_band.rs`, #471). Every
 grouped operation ends with `AppState::end_grouped_macro`, which refreshes
 the snapshot (otherwise `can_undo`/the label stay stale, issue #22). The window is built
 from the same building block as the content windows (`show_window_in_layer`,

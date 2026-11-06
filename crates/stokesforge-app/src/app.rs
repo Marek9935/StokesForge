@@ -1072,6 +1072,15 @@ impl eframe::App for StokesForgeApp {
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
         window_band::publish_dialog(&ctx, self.state.open_dialog());
+        // Entries refused in a detached window: said through the same path as a
+        // refused action.
+        for viewport in window_band::take_refusals(&ctx) {
+            if let Some(dialog) = self.state.open_dialog() {
+                if self.viewport_is_open(viewport) {
+                    self.refuse_in_window(&ctx, viewport, dialog);
+                }
+            }
+        }
         self.poll_file_picker(&ctx, &mut actions);
         if std::mem::take(&mut self.close_requested) {
             actions.push(Action::Quit {

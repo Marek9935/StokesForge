@@ -1434,6 +1434,11 @@ fn header_field_widget(
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
                 Some(end) => {
+                    // A dialog is open in the main window: the write would be
+                    // refused, so the field stays open with its text (#471).
+                    if super::window_band::refuse_entry(ui.ctx()) {
+                        return;
+                    }
                     // Enter, Tab and a click elsewhere always write (#433): a text that does
                     // not read is kept and framed once the field is closed. Escape cancels.
                     let write = match inplace_edit::resolve(end, false, false) {
@@ -2827,6 +2832,12 @@ fn edit_cell_widget(
     };
     if end == inplace_edit::EditEnd::Cancel {
         state.cancel_edit();
+        return;
+    }
+    // A dialog is open in the main window (seen from a detached window only):
+    // the write would be refused, so the cell stays open with its text and the
+    // cursor where it was (#471).
+    if super::window_band::refuse_entry(ui.ctx()) {
         return;
     }
     // Enter or Tab on a refused number: the cell stays open. A click elsewhere
