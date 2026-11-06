@@ -16,7 +16,7 @@ both and states the rule in one sentence, so nobody has to open an issue. The
 (writing of texts). The letters give the subject: N numbers, D data display,
 T texts, M messages, F windows, G disabled, C choices, L layout,
 K keyboard and mouse, X cross-cutting, P long tasks; `S-R1` to `S-R16` are
-the rulings of the second decision form of #217, `S-R17` comes from #433.
+the rulings of the second decision form of #217, `S-R17` comes from #433, `S-R18` from #453.
 
 ## How to read this page
 
@@ -66,12 +66,12 @@ mechanics.
 | S-M1 | `aide-trois-niveaux` | Three help levels: plain text (2 lines), "?" icon for the reminder of a field, bare tooltip only for buttons, icons, tabs, menus. |
 | S-M2 | `pas-de-bulle-nue-sur-un-champ` | A bare tooltip on a form field is forbidden. |
 | S-M3 | `bulle-de-bouton` | Icon-only button: name, effect, shortcut; text button: effect and shortcut without repeating the label. |
-| S-M4 | `barre-etat-trois-niveaux` | The status bar distinguishes information, warning (warning tint) and error (red, icon). |
-| S-M5 | `information-qui-s-efface` | An information message fades after ≈ 8 s; warning and error stay until the next action. |
-| S-M6 | `historique-des-messages` | A click on the status bar shows the last 50 messages, timestamped. |
+| S-M4 | `barre-etat-trois-niveaux` | The status bar distinguishes plain (done as asked), orange (done but not as asked, or needs your eyes) and red (not done), by the rule S-R18. Exception: "Nothing to undo" and "Nothing to redo" are plain, although nothing was done (harmless, the buttons are already greyed). |
+| S-M5 | `information-qui-s-efface` | A plain message fades after ≈ 8 s; an orange fades after 30 s; a red stays until a later gesture says something that replaces it. What faded stays in the history. |
+| S-M6 | `historique-des-messages` | A click on the status bar shows the last 50 messages, timestamped. A long sentence wraps, the time staying on the left of the first line. The same sentence at the same level, said again directly after, is one line with a count (`Nothing to undo (×13)`) at the time of the last one; any other message between them breaks the run; a repeat takes no place among the 50. |
 | S-M7 | `erreur-dans-le-pied` | An error raised in a modal window goes in the footer of that window, never in the status bar. |
 | S-M8 | `echec-grave-en-dialogue` | A serious failure outside a window (failed save, unreadable project) is a blocking dialog with a possible action. |
-| S-M9 | `un-canal-par-information` | A piece of information has a single channel, apart from the two exceptions of S-R13. |
+| S-M9 | `un-canal-par-information` | A piece of information has a single channel, apart from the written exceptions of S-R13. |
 | S-M10 | `erreur-de-script-renvoi` | A script error says "Script failed. See the console" in the status bar (flagged as an error); the detail is in the console. |
 | S-M11 | `barre-etat-sans-revision` | No "Revision N" and no "Reopen Last Import…" in the status bar. |
 | S-F1 | `reglages-en-direct-ou-brouillon` | Visible object: live change, OK/Cancel; action that creates: draft, and button named by its verb. |
@@ -138,11 +138,12 @@ two rules above:
 | S-R10 | `champ-vide-selon-auto` | An emptied field means Auto if it has an Auto, otherwise it is refused. |
 | S-R11 | `apercu-texte-et-nombres-apres-pause` | Previews recompute while typing after a pause, text as well as numbers; the rest applies on Enter. |
 | S-R12 | `fleche-seulement-avec-valeurs` | `▼` only when the quantities table offers values; click in the text = everything selected. |
-| S-R13 | `canal-unique-deux-exceptions` | A single channel per piece of information, with written exceptions: script error (status bar + console), reason of the disabled button (footer + tooltip), and the reason of a formula the field kept or rewrote (S-R17: cell frame and tooltip + status bar and its history, #433). |
+| S-R13 | `canal-unique-deux-exceptions` | A single channel per piece of information, with written exceptions: script error (status bar + console), reason of the disabled button (footer + tooltip), the reason of a formula the field kept or rewrote (S-R17: cell frame and tooltip + status bar and its history, #433), and the refusal or warning of a gesture made in a detached window (band of that window for 5 s + status bar and history of the main window, #471, #453). |
 | S-R14 | `pied-erreur-avant-raison` | In the footer of a dialog, the error comes before the reason of the disabled button; the reason comes back when the error disappears. |
 | S-R15 | `barre-etat-sans-contenu-permanent` | No permanent content in the status bar (neither revision nor import link). |
 | S-R16 | `opacite-sans-slider` | Opacity is a field, not a slider. |
 | S-R17 | `texte-reecrit-orange-dix-secondes` | A text the field rewrote, typed or pasted (a decimal comma in a range, #433) is kept as rewritten, the cell is orange for 10 s with a tooltip, and the sentence is also in the status bar and its history. |
+| S-R18 | `un-message-une-regle` | One rule for every status message (#453). Level: red = not done; orange = done but not as asked, or needs your eyes; plain = done as asked. Line: within one gesture the most serious message stays, on a tie the last, the others go only to the history; the next gesture may replace the line at once; a plain message with no gesture (script finished, recalculation stopped, progress) never replaces an orange or a red. History: one gesture = its final plain line plus its orange and red; progress is never stored. Detached window: the band reads the orange and red entries of the history, a refusal repeated shows the band again (the history merges the repeats into one line with a count, S-M6, but each one is still said: the band and the status line restart). An orange or a red with no gesture still takes the line, over a red as over anything (only a plain message with no gesture keeps out of the way); both stay in the history. Exception: "Nothing to undo" and "Nothing to redo" are plain although nothing was done: the refusal is harmless and the button is already greyed, so a detached window shows no band for Ctrl+Z with nothing to undo (#453). |
 
 ## Building blocks and guards
 
@@ -475,16 +476,19 @@ History: #224.
   drawing the red frame of dialog fields, which would cross the grid lines;
   it never takes the focus whose loss ends the edit.
 - **Status bar** (#230): normal information, warning in the warning
-  tint, error in red with an icon (S-M4). An information message fades
-  after ≈ 8 s; warning and error stay until the next action
-  (S-M5). A click shows the last 50 messages, timestamped (S-M6). Neither
+  tint, error in red with an icon (S-M4, rule S-R18). A plain message fades
+  after ≈ 8 s, an orange after 30 s, a red stays until a later gesture says
+  something that replaces it (S-M5); within one gesture the most serious
+  message stays on the line. A click shows the last 50 messages, timestamped (S-M6). Neither
   "Revision N" nor "Reopen Last Import…" (which stays in File) (S-M11 → S-R15).
 - **Window title**: project name, "•" as long as it is not
   saved: "essai.stf • — StokesForge".
-- **A single channel per piece of information** (S-M9 → S-R13), two written exceptions: a
+- **A single channel per piece of information** (S-M9 → S-R13), written exceptions: a
   script error shows "Script failed. See the console" in the status
   bar (S-M10: the exception is flagged as an error); the reason of a disabled
-  primary button is in the footer of the dialog **and** in its tooltip (S-F10).
+  primary button is in the footer of the dialog **and** in its tooltip (S-F10); the
+  refusal of a gesture made in a detached window is in the band of that window
+  **and** in the status bar of the main window (#453).
 - **Error in a modal window** (S-M7, in place #228): never in the status
   bar; message area of the footer, to the left of the buttons, common to all
   dialogs (`AppState::dialog_error`, `dialogs::sync_dialogs`).

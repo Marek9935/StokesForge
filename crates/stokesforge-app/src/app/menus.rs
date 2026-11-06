@@ -914,23 +914,48 @@ fn low_r2_badge(ui: &mut egui::Ui, total: usize, actions: &mut Vec<Action>) {
 
 /// A message line according to its level: normal text, text in the warning
 /// tint with its triangle, or red text with its cross. Shared by the status
-/// bar and the history window.
+/// bar and the history window. One line, never wrapped: the status bar keeps
+/// its height.
 pub(super) fn status_line(ui: &mut egui::Ui, status: &stokesforge_app_state::state::StatusMessage) {
+    status_line_text(ui, status.level, &status.text, false);
+}
+
+/// [`status_line`] for any text of the level. With `wrap`, a long sentence
+/// wraps in the width left on the row instead of running past it (the history
+/// window, #453).
+pub(super) fn status_line_text(
+    ui: &mut egui::Ui,
+    level: stokesforge_app_state::state::StatusLevel,
+    text: &str,
+    wrap: bool,
+) {
     use crate::icons::{icon_image, Icon, IconRole};
     use stokesforge_app_state::state::StatusLevel;
-    match status.level {
+    let label = |text: egui::RichText| {
+        let label = egui::Label::new(text);
+        if wrap {
+            label.wrap()
+        } else {
+            label
+        }
+    };
+    match level {
         StatusLevel::Info => {
-            ui.label(&status.text);
+            ui.add(label(egui::RichText::new(text)));
         }
         StatusLevel::Warning => {
             ui.add(icon_image(Icon::Stale, IconRole::Neutral))
                 .on_hover_text(tr!("status-level-warning"));
-            ui.colored_label(ui.visuals().warn_fg_color, &status.text);
+            ui.add(label(
+                egui::RichText::new(text).color(ui.visuals().warn_fg_color),
+            ));
         }
         StatusLevel::Error => {
             ui.add(icon_image(Icon::Close, IconRole::Danger))
                 .on_hover_text(tr!("status-level-error"));
-            ui.colored_label(ui.visuals().error_fg_color, &status.text);
+            ui.add(label(
+                egui::RichText::new(text).color(ui.visuals().error_fg_color),
+            ));
         }
     }
 }
