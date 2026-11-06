@@ -308,7 +308,8 @@ rollback, `.stf`). It is not a node.
   stays checked), never recreates a deleted "Row N" column (Relink, or
   analysing that row again, does), and leaves the numbers as they are when a
   source column has text or no x' (banner "Out of date: Column D has no x'
-  value…", resumes once fixed). *Stale* is read from the tree on every pass, so
+  value…" on a second line under the banner row, in full, resumes once
+  fixed). *Stale* is read from the tree on every pass, so
   the targeted and full modes follow alike; what following reads (versions, x',
   role, order of the source columns) is all in `TransposeLink::inputs`.
   **The source may not calculate from its followed sheet** (rules 2 and 3,

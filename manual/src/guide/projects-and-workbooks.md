@@ -426,7 +426,7 @@ When you analyse the rows of a sheet (see [Analysis](analysis.md)), StokesForge 
 
 A band at the top of this sheet tells you where it comes from, and holds the box **Recalculate automatically**, checked by default: the sheet then follows its source by itself. Uncheck it to keep a snapshot of the source:
 
-- **Out of date** appears when the source has changed since (or, with the box checked, when a column of the source cannot be followed: the band names it).
+- **Out of date** appears when the source has changed since (or, with the box checked, when a column of the source cannot be followed: the band names it in full on a second line, in orange, under the first one; the line goes away once the column is fixed).
 - **Values edited** appears when you changed a value of the linked columns.
 - **Recalculate** rewrites the linked columns from the source. If you have edited values, the button is **Relink** and asks for confirmation, because it erases your edits. Undo brings them back.
 

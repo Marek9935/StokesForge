@@ -625,6 +625,16 @@ fn an_analysis_reading_the_followed_sheet_may_not_land_in_the_source() {
     assert_eq!(f.project.tree().as_ref(), before.as_ref());
     // Analyzing a Row of the followed sheet lands in that sheet: allowed.
     f.project.add_calculation(draft(cols[0], cols[1])).unwrap();
+    // An analysis with its own box unchecked is refused too (#463, G3).
+    let mut manual = draft(cols[0], f.cols[0]);
+    manual.auto_recalc = false;
+    assert!(
+        matches!(
+            f.project.add_calculation(manual),
+            Err(CoreError::CalculationReadsFollowingSheet { .. })
+        ),
+        "own box unchecked"
+    );
     // Unchecked, the source may calculate from the sheet.
     f.project.set_transpose_auto(sheet, false).unwrap();
     f.project

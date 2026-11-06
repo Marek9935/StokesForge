@@ -180,6 +180,16 @@ fn the_english_catalogue_matches_the_display_of_the_label() {
     }
 }
 
+/// The box of a transposed sheet (#463) keeps its two history labels, whatever
+/// the banner says.
+#[test]
+fn the_transpose_box_labels_are_check_and_uncheck_recalculate_automatically() {
+    let english = build_loader(Language::English);
+    let label = |auto| history_text_in(&english, &HistoryLabel::SetTransposeAuto { auto });
+    assert_eq!(label(true), "Check Recalculate Automatically");
+    assert_eq!(label(false), "Uncheck Recalculate Automatically");
+}
+
 /// The two cases of the issue: the plural is Fluent's (CLDR rules).
 #[test]
 fn insert_rows_pluralizes_through_fluent() {
