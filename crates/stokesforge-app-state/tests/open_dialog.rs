@@ -170,11 +170,13 @@ fn a_refusal_reaches_status_and_history_without_touching_the_dialog_footer() {
         stokesforge_app_state::state::StatusLevel::Warning
     );
 
-    // The same sentence again: no new history line.
+    // The same sentence again records again (#453): the band reads the history
+    // and must show again, so there is no deduplication by text.
     let lines = s.state.status_history().count();
     s.state.refuse_outside_main(OpenDialog::Analysis);
-    assert_eq!(s.state.status_history().count(), lines);
-    assert_eq!(s.state.recorded_count(), before + 1);
+    assert_eq!(s.state.status_history().count(), lines + 1);
+    assert_eq!(s.state.recorded_count(), before + 2);
+    assert_eq!(s.state.dialog_error().map(str::to_owned), footer);
 }
 
 /// #471: the messages a forked detached view recorded are pulled by the root at

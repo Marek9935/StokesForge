@@ -8260,8 +8260,9 @@ impl AppState {
                 });
                 self.refresh();
             }
-            // Nothing to undo: the state is what was asked, so a plain message (S-R18).
-            Ok(None) => self.notice(tr!("status-nothing-to-undo")),
+            // Orange (S-R18): the gesture did nothing, and a detached window shows it in
+            // its band (#471).
+            Ok(None) => self.warn(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -8276,7 +8277,7 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.notice(tr!("status-nothing-to-redo")),
+            Ok(None) => self.warn(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }

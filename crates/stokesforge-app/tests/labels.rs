@@ -77,6 +77,7 @@ const CALLS: &[&str] = &[
     "notice",
     "warn",
     "fail",
+    "progress",
 ];
 
 /// The free functions of the application that place a label (#169):
@@ -647,6 +648,7 @@ fn the_guard_sees_a_literal_in_every_call_form() {
         // The status bar (#216): direct literal, through `format!`, or on a new line.
         r#"fn f(&mut self) { self.notice("Terminé".to_string()); }"#,
         r#"fn f(&mut self) { self.fail(format!("Failed: {}", e)); }"#,
+        r#"fn f(&mut self) { self.progress("Importing".to_string()); }"#,
         "fn f(&mut self) {\n    self.fail(\n        \"Impossible\".to_string(),\n    );\n}",
     ] {
         assert_eq!(find_violations(code).len(), 1, "not seen: {code}");
@@ -855,7 +857,7 @@ fn the_dead_keys_guard_reads_both_crates() {
     assert_eq!(dead_keys("key-a = A\nkey-b = B\n", &[file]), ["key-b"]);
 }
 
-/// The state's `notice`/`fail` is guarded: the status bar messages
+/// The state's `notice`/`warn`/`fail`/`progress` is guarded: the status bar messages
 /// (`AppState::notice`/`fail`) are `tr!` calls, and the guard reads `state.rs` — from
 /// the neighbor crate since #263 (prefix `app-state/`). Removing that crate from
 /// the reading makes this test fail: without it, most messages would no

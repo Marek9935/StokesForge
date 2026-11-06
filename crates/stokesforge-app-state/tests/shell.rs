@@ -32,7 +32,7 @@ use stokesforge_app_state::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
     AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
     MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, StatusLevel,
-    UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN,
+    UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN, WARNING_LIFETIME,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
 use stokesforge_core::{
@@ -13172,7 +13172,7 @@ fn an_error_goes_to_the_footer_of_the_open_dialog_only() {
 // -- Status bar: duration, history, title (#230) --
 
 #[test]
-fn an_information_clears_after_eight_seconds_a_warning_does_not() {
+fn an_information_clears_after_eight_seconds_an_orange_after_thirty_a_red_never() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.dispatch(Action::Save);
@@ -13189,13 +13189,121 @@ fn an_information_clears_after_eight_seconds_a_warning_does_not() {
     assert_eq!(state.expire_status(at + INFO_LIFETIME), None);
     assert!(state.status().is_none(), "the information was cleared");
 
-    // A warning stays, whatever its age, and schedules nothing.
-    state.dispatch(Action::Undo);
-    state.dispatch(Action::Undo);
+    // An orange fades after 30 s: one deadline, no ticking (#453, #104).
+    state.warn("careful".to_string());
     let at = state.status().expect("warning").at;
     assert_eq!(state.status().unwrap().level, StatusLevel::Warning);
-    assert_eq!(state.expire_status(at + INFO_LIFETIME * 10), None);
+    assert_eq!(
+        state.expire_status(at + INFO_LIFETIME * 2),
+        Some(WARNING_LIFETIME - INFO_LIFETIME * 2)
+    );
     assert!(state.status().is_some());
+    assert_eq!(state.expire_status(at + WARNING_LIFETIME), None);
+    assert!(state.status().is_none(), "the orange faded");
+    assert!(
+        state
+            .status_history()
+            .any(|m| m.level == StatusLevel::Warning && m.text == "careful"),
+        "what faded stays in the history"
+    );
+
+    // A red stays, whatever its age, and schedules nothing.
+    let sheet = sheet_named(state.tree(), "Sheet1");
+    let column = state.tree().child_by_name(sheet, "Time").unwrap().unwrap();
+    state.dispatch(Action::SetColumnXPrime {
+        column,
+        text: "abc".to_string(),
+    });
+    let red = state.status().expect("error");
+    assert!(red.is_error());
+    let at = red.at;
+    assert_eq!(state.expire_status(at + WARNING_LIFETIME * 100), None);
+    assert!(state.status().is_some());
+}
+
+/// #453: clicking a sheet tab no longer erases the message on the line.
+/// Witness: `self.status = None` back in `select_sheet`.
+#[test]
+fn selecting_a_sheet_keeps_the_message_on_the_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.warn("careful".to_string());
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    state.dispatch(Action::SelectSheet(sheet2));
+    assert_eq!(state.status().map(|m| m.text.as_str()), Some("careful"));
+}
+
+/// #453: an import in progress says its progress on the line without storing
+/// it, and never replaces an orange. The result of the import is a gesture of
+/// its own and replaces the line. Witness: `progress` recording like `notice`.
+#[test]
+fn an_import_in_progress_stores_no_progress_and_keeps_the_orange() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("gros.csv");
+    let mut text = String::new();
+    for i in 0..100_000 {
+        text.push_str(&format!("{i},{},{},{}\n", i * 2, i * 3, i * 4));
+    }
+    std::fs::write(&file, text).unwrap();
+    state.warn("careful".to_string());
+    let lines = state.status_history().count();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("Gros"),
+        paths: vec![file],
+    });
+    let mut polls = 0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while state.import_progress().is_some() {
+        if state.poll_import() {
+            break;
+        }
+        polls += 1;
+        assert_eq!(state.status_history().count(), lines, "no progress stored");
+        assert_eq!(state.status().map(|m| m.text.as_str()), Some("careful"));
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(polls > 3, "the import was seen in progress");
+    assert_ne!(
+        state.status().map(|m| m.text.as_str()),
+        Some("careful"),
+        "the result is a gesture of its own"
+    );
+    assert!(state
+        .status_history()
+        .any(|m| m.text == "careful" && m.level == StatusLevel::Warning));
+}
+
+/// #453 (C6): deleting 60 columns leaves one line in the history, the final
+/// one of the group. Witness: every step recorded as before.
+#[test]
+fn deleting_sixty_columns_writes_one_line_in_the_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = demo_project();
+    let sheet = sheet_named(project.tree(), "Sheet2");
+    let ids: Vec<NodeId> = (0..60)
+        .map(|i| {
+            project
+                .add_column(
+                    sheet,
+                    None,
+                    Some(&format!("C{i}")),
+                    Column::from_f64(&[1.0]),
+                )
+                .unwrap()
+        })
+        .collect();
+    let (_session, mut state) = start(project, &dir.path().join("p.stf"));
+    let sheet = sheet_named(state.tree(), "Sheet2");
+    let lines = state.status_history().count();
+    state.select_column(sheet, ids[0]);
+    state.extend_column_selection(sheet, ids[59]);
+    state.dispatch(Action::DeleteSelectedCells { sheet });
+    assert_eq!(state.status_history().count(), lines + 1);
 }
 
 #[test]

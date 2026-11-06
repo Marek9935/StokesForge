@@ -3407,7 +3407,7 @@ mod tests {
     /// #471: with a dialog open in the main window, the actions of a detached
     /// window are thrown away, its band says which dialog, and the main status
     /// bar and history get one orange line. The same refusal again restarts the
-    /// band and adds no history line. Witness: posting to the root, or
+    /// band and records a new history line (#453: no deduplication by text). Witness: posting to the root, or
     /// `warn` instead of `refuse_outside_main`.
     #[test]
     fn a_refused_detached_gesture_shows_the_band_in_its_own_window() {
@@ -3431,9 +3431,12 @@ mod tests {
             None
         );
         assert_eq!(app.state.status_history().count(), history + 1);
+        // Refused again: the band shows again, the history records again (#453).
+        super::super::window_band::clear(&ctx, viewport);
         send(&app, vec![Action::Undo]);
         drain(&mut app, &ctx);
-        assert_eq!(app.state.status_history().count(), history + 1);
+        assert_eq!(app.state.status_history().count(), history + 2);
+        assert!(super::super::window_band::text_at(&ctx, viewport, now).is_some());
         // Dialog closed: the gesture goes through, no band is posted.
         app.state.dispatch(Action::CloseAbout);
         super::super::window_band::clear(&ctx, viewport);
