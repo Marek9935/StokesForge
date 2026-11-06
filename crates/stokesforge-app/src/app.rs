@@ -1155,7 +1155,6 @@ impl eframe::App for StokesForgeApp {
         self.sync_panel_layout(&mut actions);
         self.drain_layout_actions(&mut actions);
         actions.extend(history);
-        let dispatched = !actions.is_empty();
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
