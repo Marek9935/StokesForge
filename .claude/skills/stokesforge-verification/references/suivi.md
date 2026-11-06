@@ -89,6 +89,12 @@ A retour **after** the merge becomes a GitLab issue through `stokesforge-bug-rep
 - `ci.json` missing, corrupt, or older than 3 polls reads as unknown. The colour rule and the `pending` count do not depend on the CI.
 - Seams for tests: `SF_SUIVI_CI=off` (no thread), `SF_SUIVI_CI_POLL`, `SF_SUIVI_CI_TIMEOUT`.
 
+## Build modes (#476)
+
+A row under the CI line sets how builds behave on this PC: « FullIA » (user away, no CPU cap), « Développement » (user at the PC, work keeps moving), « Arrière-plan » (builds really limited), plus a checkbox « Auto » (off by default: battery gives « Arrière-plan », 10 minutes without input gives « FullIA », otherwise the chosen mode). One sentence under the buttons describes the effective mode from the `MODES` table of `scripts/cargo-queue.py`, where all the numbers live; a second line names the running build and how many wait. A build typed by the user in a terminal (tty, no `CLAUDECODE`) skips the wait but is listed as running. Without the installed shim the row is one grey line naming `scripts/cargo-queue-install.sh`; a stale installed copy adds a warning to rerun it.
+
+`/api/state` carries `build_queue` (`{"installed": false}` when absent; start timestamps, never durations, so the ETag holds). `POST /api/build-mode` takes `{"mode": "full|dev|background"}` and/or `{"auto": true|false}` behind the same guard as the other writes (400 unknown mode or bad body, 409 not installed) and applies the slice limits at once, also to running builds. A build keeps the job count (`jobs` of the mode) it started with; only weight, memory, quota and affinity change live. `serve` runs a 30 s thread for Auto only on the real state (seam `SF_SUIVI_BUILD_AUTO=on|off`). After a merge that changes `suivi.py`, restart the service to get the control.
+
 ## GitLab labels and tag report (#467)
 
 `serve` runs a second thread (about 120 s, state `labels.json`) so the GitLab issue list shows where each issue stands. It runs **only for the real state folder**: with `SF_SUIVI_DIR` or `--state` it stays off unless `SF_SUIVI_LABELS=on` (`off` forces it off), so no test can write to GitLab.

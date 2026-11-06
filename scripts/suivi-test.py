@@ -52,6 +52,16 @@ class Base(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "SF_"))}
         self.env["SF_TODAY"] = "2026-11-03"
         self.env["SF_SUIVI_CI"] = "off"     # the CI watcher would call glab and the network (#452)
+        # The build modes (#476) never touch the real queue or the real systemd: own state, a fake systemctl.
+        self.cqdir = os.path.join(self.tmp.name, "cq")
+        fake = os.path.join(self.tmp.name, "fakebin")
+        os.makedirs(fake)
+        with open(os.path.join(fake, "systemctl"), "w") as f:
+            f.write('#!/bin/sh\necho "$*" >> "%s/ctl.log"\n' % self.tmp.name)
+        os.chmod(os.path.join(fake, "systemctl"), 0o755)
+        self.env.update(SF_CARGO_QUEUE_DIR=self.cqdir, SF_CARGO_QUEUE_SLICE="sfq-test.slice", SF_SUIVI_BUILD_AUTO="off",
+                        SF_CARGO_QUEUE_INSTALLED=os.path.join(self.tmp.name, "installed-cargo"),
+                        PATH=fake + os.pathsep + self.env.get("PATH", "/usr/bin:/bin"))
 
     def git(self, *a, cwd=None):
         subprocess.run(["git", *a], cwd=cwd or self.repo, check=True, capture_output=True)
@@ -820,6 +830,74 @@ class ServerBase(Base):
     def entry_text(self):
         with open(self.entry) as f:
             return f.read()
+
+class TestBuildMode(ServerBase):
+    """The build mode control (#476): state key and POST route."""
+
+    def state_json(self):
+        st, _, body = self.req("GET", "/api/state")
+        self.assertEqual(st, 200)
+        return json.loads(body)
+
+    def install(self):
+        shutil.copy(os.path.join(HERE, "cargo-queue.py"), self.env["SF_CARGO_QUEUE_INSTALLED"])
+
+    def mode(self, body, **kw):
+        return self.post("/api/build-mode", body=body, **kw)
+
+    def test_not_installed_reads_as_such_and_refuses_writes(self):
+        self.assertEqual(self.state_json()["build_queue"], {"installed": False})
+        self.assertEqual(self.mode({"mode": "full"})[0], 409)
+        self.assertFalse(os.path.exists(os.path.join(self.cqdir, "mode.json")))
+
+    def test_installed_state_carries_modes_and_selection(self):
+        self.install()
+        bq = self.state_json()["build_queue"]
+        self.assertTrue(bq["installed"] and not bq["stale"])
+        self.assertEqual((bq["selected"], bq["effective"], bq["auto"]), ("dev", "dev", False))
+        self.assertEqual(set(bq["modes"]), {"full", "dev", "background"})
+        self.assertEqual((bq["running"], bq["waiting"]), ([], []))
+
+    def test_stale_copy_is_flagged(self):
+        self.install()
+        with open(self.env["SF_CARGO_QUEUE_INSTALLED"], "a") as f:
+            f.write("# old\n")
+        self.assertTrue(self.state_json()["build_queue"]["stale"])
+
+    def test_post_selects_a_mode_and_applies_it(self):
+        self.install()
+        st, _, body = self.mode({"mode": "background"})
+        self.assertEqual(st, 200, body)
+        bq = self.state_json()["build_queue"]
+        self.assertEqual((bq["selected"], bq["effective"]), ("background", "background"))
+        self.assertIn("set-property --runtime sfq-test.slice", slurp(os.path.join(self.tmp.name, "ctl.log")))
+        st, _, _ = self.mode({"auto": True})
+        self.assertEqual(st, 200)
+        self.assertTrue(self.state_json()["build_queue"]["auto"])
+
+    def test_post_validation_and_guard(self):
+        self.install()
+        self.assertEqual(self.mode({"mode": "turbo"})[0], 400)
+        self.assertEqual(self.mode({"auto": "yes"})[0], 400)
+        self.assertEqual(self.mode({})[0], 400)
+        self.assertEqual(self.mode({"mode": "full"}, headers={"Content-Type": "application/json"})[0], 403)
+        self.assertEqual(self.mode({"mode": "full"}, host="evil.example:80")[0], 403)
+        self.assertEqual(self.state_json()["build_queue"]["selected"], "dev")
+
+    def test_state_does_not_change_between_polls(self):
+        self.install()
+        a = self.req("GET", "/api/state")
+        b = self.req("GET", "/api/state")
+        self.assertEqual(a[1]["ETag"], b[1]["ETag"])
+
+    def test_broken_queue_never_breaks_the_state(self):
+        self.install()
+        os.makedirs(self.cqdir)
+        with open(os.path.join(self.cqdir, "mode.json"), "w") as f:
+            f.write("{not json")
+        bq = self.state_json()["build_queue"]
+        self.assertEqual(bq["selected"], "dev")
+
 
 class WaitBase(Base):
     """`suivi.py wait` (#454): background processes polling every 0.05 s, `--timeout` as the guard."""
@@ -2795,6 +2873,55 @@ class TestPage(unittest.TestCase):
         html = self.page()
         self.assertLess(html.index('id="ciline"'), html.index('class="tabs"'))
         self.assertNotIn("'ciline'", html.split("function renderTests")[1].split("function render()")[0])
+
+    def build_line(self, bq, now=1000.0):
+        src = re.search(r"/\*BUILDLINE-START\*/(.*)/\*BUILDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify(buildLine(%s,%s)));" % (json.dumps(bq), now)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_build_line(self):
+        cq = {"full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None},
+              "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11},
+              "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 6}}
+        bq = {"installed": True, "stale": False, "selected": "background", "effective": "background", "auto": False,
+              "why": "selected", "modes": cq, "running": [], "waiting": []}
+        # lang: fr begin
+        l = self.build_line(bq)
+        self.assertEqual([(m["label"], m["on"]) for m in l["modes"]],
+                         [("FullIA", False), ("Développement", False), ("Arrière-plan", True)])
+        self.assertEqual(l["desc"], "1 build à la fois, 6 cœurs, priorité très basse")
+        self.assertEqual(l["now"], "Aucun build en cours.")
+        self.assertEqual(l["auto_note"], "")
+        self.assertEqual(self.build_line(dict(bq, effective="full"))["desc"], "2 builds à la fois, tous les cœurs, priorité normale")
+        self.assertEqual(self.build_line(dict(bq, effective="dev"))["desc"], "2 builds à la fois, 11 cœurs chacun, priorité basse")
+        capped = dict(cq, background=dict(cq["background"], cpu_quota_pct=50))
+        self.assertEqual(self.build_line(dict(bq, modes=capped))["desc"], "1 build à la fois, 6 cœurs, priorité très basse, plafond 50 %")
+        a = self.build_line(dict(bq, auto=True, effective="full", why="away"))
+        self.assertEqual(a["auto_note"], "Auto : FullIA (absent)")
+        self.assertTrue(a["auto"])
+        self.assertEqual(self.build_line(dict(bq, auto=True, why="battery"))["auto_note"], "")
+        run = [{"pid": 1, "cwd": "/w/_stokesforge/feature476", "command": "cargo test -p x", "start": 1000 - 190}]
+        w = self.build_line(dict(bq, running=run, waiting=[{}, {}]))
+        self.assertEqual(w["now"], "Build en cours : feature476 · cargo test -p x · 3 min\n2 en attente")
+        two = run + [{"pid": 2, "cwd": "/w/_stokesforge/feature453", "command": "cargo clippy", "start": 1000 - 70}]
+        self.assertEqual(self.build_line(dict(bq, running=two))["now"],
+                         "Build en cours : feature476 · cargo test -p x · 3 min\nBuild en cours : feature453 · cargo clippy · 1 min")
+        self.assertIn("moins d’1 min", self.build_line(dict(bq, running=run), now=1000 - 190 + 20)["now"])
+        self.assertIn("périmée", self.build_line(dict(bq, stale=True))["warn"])
+        off = self.build_line({"installed": False})
+        self.assertFalse(off["installed"])
+        self.assertIn("scripts/cargo-queue-install.sh", off["note"])
+        self.assertIsNone(self.build_line(None))
+        # lang: fr end
+
+    def test_build_row_sits_under_the_ci_line(self):
+        html = self.page()
+        self.assertLess(html.index('id="ciline"'), html.index('id="buildline"'))
+        self.assertLess(html.index('id="buildline"'), html.index('class="tabs"'))
+        self.assertIn("/api/build-mode", html)
 
     def card_line(self, c, tests=(), qcms=()):
         src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
