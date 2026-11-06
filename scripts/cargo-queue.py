@@ -36,7 +36,7 @@ import time
 MODES = {
     "full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None, "memory_high": "20G", "fallback_nice": 0},
     "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11, "memory_high": "20G", "fallback_nice": 10},
-    "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 8, "memory_high": "12G", "fallback_nice": 19},
+    "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 6, "memory_high": "12G", "fallback_nice": 19},
 }
 DEFAULT_MODE = "dev"
 SLICE = "sfbuild.slice"     # no dash: a dash would nest the slice under another one
@@ -355,6 +355,13 @@ def snapshot():
     return run, wait
 
 
+def typed_by_user():
+    """A person typed this in a terminal: stderr is a tty and no agent marker. SF_CARGO_QUEUE=first keeps
+    its own meaning (head of the queue, still waits for a slot), so it never counts as typed."""
+    return (sys.stderr.isatty() and not os.environ.get("CLAUDECODE")
+            and os.environ.get("SF_CARGO_QUEUE") != "first")
+
+
 def human_prio():
     if os.environ.get("SF_CARGO_QUEUE") == "first":
         return 0
@@ -405,8 +412,13 @@ def describe_ticket(info, running):
 
 
 def wait_turn(ticket):
-    """Block until this ticket may run. Prints who is ahead."""
+    """Block until this ticket may run. Prints who is ahead. A command typed by the user skips the wait."""
     last_key, last_print, last_auto = None, 0.0, 0.0
+    if typed_by_user():     # the user's own terminal starts at once; the ticket still counts as running
+        with QueueLock():
+            list_tickets(purge=True, own=ticket.name)
+            ticket.promote()
+        return
     while True:
         now = time.time()
         if now - last_auto > 10:

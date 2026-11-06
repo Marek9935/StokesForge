@@ -2885,20 +2885,20 @@ class TestPage(unittest.TestCase):
     def test_build_line(self):
         cq = {"full": {"slots": 2, "cpu_weight": 100, "cpu_quota_pct": None, "cpus": None, "jobs": None},
               "dev": {"slots": 2, "cpu_weight": 20, "cpu_quota_pct": None, "cpus": None, "jobs": 11},
-              "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 8}}
+              "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 6}}
         bq = {"installed": True, "stale": False, "selected": "background", "effective": "background", "auto": False,
               "why": "selected", "modes": cq, "running": [], "waiting": []}
         # lang: fr begin
         l = self.build_line(bq)
         self.assertEqual([(m["label"], m["on"]) for m in l["modes"]],
                          [("FullIA", False), ("Développement", False), ("Arrière-plan", True)])
-        self.assertEqual(l["desc"], "1 build à la fois, 8 cœurs, priorité très basse")
+        self.assertEqual(l["desc"], "1 build à la fois, 6 cœurs, priorité très basse")
         self.assertEqual(l["now"], "Aucun build en cours.")
         self.assertEqual(l["auto_note"], "")
         self.assertEqual(self.build_line(dict(bq, effective="full"))["desc"], "2 builds à la fois, tous les cœurs, priorité normale")
         self.assertEqual(self.build_line(dict(bq, effective="dev"))["desc"], "2 builds à la fois, 11 cœurs chacun, priorité basse")
         capped = dict(cq, background=dict(cq["background"], cpu_quota_pct=50))
-        self.assertEqual(self.build_line(dict(bq, modes=capped))["desc"], "1 build à la fois, 8 cœurs, priorité très basse, plafond 50 %")
+        self.assertEqual(self.build_line(dict(bq, modes=capped))["desc"], "1 build à la fois, 6 cœurs, priorité très basse, plafond 50 %")
         a = self.build_line(dict(bq, auto=True, effective="full", why="away"))
         self.assertEqual(a["auto_note"], "Auto : FullIA (absent)")
         self.assertTrue(a["auto"])

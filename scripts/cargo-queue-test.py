@@ -7,6 +7,7 @@ A fake `cargo`, `systemd-run`, `systemctl` and `gdbus` sit on PATH behind a copy
 import importlib.util
 import json
 import os
+import pty
 import shutil
 import signal
 import stat
@@ -109,13 +110,13 @@ class Base(unittest.TestCase):
                 except OSError:
                     pass
 
-    def start(self, *args, tag="", gate=None, extra=None, shim=None, cwd=None, stdin=None):
+    def start(self, *args, tag="", gate=None, extra=None, shim=None, cwd=None, stdin=None, stderr=None):
         env = dict(self.env, FAKE_TAG=tag)
         if gate:
             env["FAKE_GATE"] = os.path.join(self.tmp, gate)
         env.update(extra or {})
         out = open(os.path.join(self.tmp, "out-%s-%d" % (tag or "x", len(self.procs))), "w+")
-        p = subprocess.Popen([shim or self.shim, *args], env=env, cwd=cwd or self.tmp, stdout=out, stderr=out,
+        p = subprocess.Popen([shim or self.shim, *args], env=env, cwd=cwd or self.tmp, stdout=out, stderr=stderr if stderr is not None else out,
                              stdin=stdin if stdin is not None else subprocess.DEVNULL)
         p.outfile = out
         self.procs.append(p)
@@ -377,6 +378,40 @@ class TestQueue(Base):
         env = dict(self.env, PATH=self.shimdir + ":/usr/bin:/bin")
         p = subprocess.run([self.shim, "fmt"], env=env, cwd=self.tmp, timeout=10, capture_output=True, text=True)
         self.assertEqual(p.returncode, 127)
+
+    def pty_start(self, *args, **kw):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        p = self.start(*args, stderr=slave, **kw)
+        os.close(slave)
+        return p
+
+    def test_typed_command_jumps_a_full_queue_and_counts_as_running(self):
+        self.hold_a()
+        u = self.pty_start("test", tag="u", gate="gu")
+        self.assertTrue(self.until(lambda: self.seen("start", "u")), "a command typed by the user waited")
+        with mock.patch.dict(os.environ, self.env):
+            run, wait = cq.snapshot()
+        self.assertEqual(sorted(r["pid"] for r in run), sorted([u.pid, self.procs[0].pid]))
+        self.assertEqual(len(self.sd_calls()), 2, "still runs in the slice")
+        b = self.start("test", tag="b")
+        self.idle()
+        self.assertFalse(self.seen("start", "b"))
+        self.assertTrue(self.until(lambda: "2 ahead" in self.output(b)), self.output(b))
+
+    def test_agent_pipe_and_first_still_wait(self):
+        self.hold_a()
+        cases = {"agent": dict(extra={"CLAUDECODE": "1"}), "first": dict(extra={"SF_CARGO_QUEUE": "first"})}
+        procs = {k: self.pty_start("test", tag=k, **v) for k, v in cases.items()}
+        procs["pipe"] = self.start("test", tag="pipe", stderr=subprocess.PIPE)
+        self.idle()
+        for k in procs:
+            self.assertFalse(self.seen("start", k), "%s did not wait" % k)
+        self.assertTrue(all(p.poll() is None for p in procs.values()))
+        for p in procs.values():
+            p.kill()
+            if p.stderr:
+                p.stderr.close()
 
     def test_arrival_order_and_priority(self):
         self.hold_a()
