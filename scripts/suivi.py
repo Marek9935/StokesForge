@@ -1213,6 +1213,11 @@ def test_path(tid):
 # entry or an answer lists names only, never paths. The `*.json` globs do not see these folders.
 MAX_IMAGE = 10 * 1024 * 1024       # bytes per image
 MAX_IMAGES = 5                     # images per entry or card
+# Global cap on every stored screenshot (trial entries, QCM cards, removed-tests/ archives): above it the
+# oldest files (by mtime) are deleted after an upload, files only, never an entry's JSON. The env variable
+# is for the tests (a small cap); nobody sets it for real.
+MAX_IMAGES_TOTAL = int(os.environ.get("SF_SUIVI_MAX_IMAGES_TOTAL") or 512 * 1024 * 1024)
+REMOVED_BY_CAP = "image removed by the size limit: "
 IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 IMAGE_NAME_RE = re.compile(r"[0-9a-f]{24}\.(png|jpg|gif|webp)")
 
@@ -1234,7 +1239,9 @@ def store_image(folder, data, ext):
     """Write the bytes under their hash name (atomic; the same bytes twice are one file); return the name."""
     name = "%s.%s" % (hashlib.sha1(data).hexdigest()[:24], ext)
     path = os.path.join(folder, name)
-    if not os.path.isfile(path):
+    if os.path.isfile(path):
+        os.utime(path)                     # the same bytes again count as new for the size cap
+    else:
         os.makedirs(folder, exist_ok=True)
         tmp = os.path.join(folder, ".%s.tmp.%d" % (name, os.getpid()))
         with open(tmp, "wb") as f:
@@ -1251,15 +1258,60 @@ def qcm_images_dir(qid, code):
     return os.path.join(suivi_dir(), "qcm", qid, "images", code)
 
 
-def check_image_names(value, folder):
-    """(names, None) for a list of at most MAX_IMAGES names of files in `folder` (duplicates dropped), else (None, sentence)."""
+def stored_images():
+    """[(mtime, size, path)] of every stored screenshot: trial folders, QCM folders, removed-tests/ archives."""
+    pats = [os.path.join(tests_dir(), "*.images", "*"), os.path.join(suivi_dir(), "qcm", "*", "images", "*", "*"),
+            os.path.join(removed_dir(), "*.images", "*")]
+    out = []
+    for pat in pats:
+        for p in glob.glob(pat):
+            if not IMAGE_NAME_RE.fullmatch(os.path.basename(p)):
+                continue
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            out.append((st.st_mtime_ns, st.st_size, p))
+    return out
+
+
+def enforce_image_cap(keep):
+    """While the stored screenshots exceed MAX_IMAGES_TOTAL, delete the oldest by mtime, except `keep`
+    (the file just uploaded). Files only: no entry is rewritten, so the state's ETag and the wake do not move."""
+    files = stored_images()
+    total = sum(f[1] for f in files)
+    keep = os.path.abspath(keep)
+    for _, size, p in sorted(files):
+        if total <= MAX_IMAGES_TOTAL:
+            break
+        if os.path.abspath(p) == keep:
+            continue
+        try:
+            os.unlink(p)
+        except OSError:
+            continue
+        total -= size
+        try:
+            os.rmdir(os.path.dirname(p))      # only when the folder is now empty
+        except OSError:
+            pass
+
+
+def check_image_names(value, folder, recorded=()):
+    """(names, None) for a list of at most MAX_IMAGES names of files in `folder` (duplicates dropped), else (None, sentence).
+    A name already in the stored record whose file the size cap removed is dropped silently."""
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         return None, "images must be a list of names"
     names = list(dict.fromkeys(value))
     if len(names) > MAX_IMAGES:
         return None, "at most %d images" % MAX_IMAGES
-    for n in names:
-        if not IMAGE_NAME_RE.fullmatch(n) or not os.path.isfile(os.path.join(folder, n)):
+    for n in list(names):
+        if not IMAGE_NAME_RE.fullmatch(n):
+            return None, "unknown image %r" % n
+        if not os.path.isfile(os.path.join(folder, n)):
+            if n in recorded:
+                names.remove(n)
+                continue
             return None, "unknown image %r" % n
     return names, None
 
@@ -1282,9 +1334,10 @@ def listed_images(rec):
 
 
 def image_lines(folder, names):
-    """CLI lines `  image: <absolute path>` for the listed images that exist."""
-    return ["  image: " + os.path.abspath(os.path.join(folder, n)) for n in names
-            if os.path.isfile(os.path.join(folder, n))]
+    """CLI lines `  image: <absolute path>` for the listed images; one whose file is gone (the size cap
+    deleted it) says so instead of naming a path that does not open."""
+    return [("  image: " + os.path.abspath(os.path.join(folder, n))) if os.path.isfile(os.path.join(folder, n))
+            else "  " + REMOVED_BY_CAP + n for n in names]
 
 
 def load_tests(issue=None):
@@ -1637,8 +1690,12 @@ def cmd_qcm_answers(a):
     if a.json:
         for code, r in answers.items():       # paths are made at display time, never stored
             lines = image_lines(qcm_images_dir(a.id, code), listed_images(r))
-            if lines:
-                r["image_paths"] = [x[len("  image: "):] for x in lines]
+            paths = [x[len("  image: "):] for x in lines if x.startswith("  image: ")]
+            gone = [x[len("  " + REMOVED_BY_CAP):] for x in lines if x.startswith("  " + REMOVED_BY_CAP)]
+            if paths:
+                r["image_paths"] = paths
+            if gone:
+                r["images_removed_by_size_limit"] = gone
         print(json.dumps({"id": a.id, "meta": meta, "answers": answers}, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     pr = qcm_progress(a.id, meta)
@@ -2616,6 +2673,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if ext is None:
             return self.fail(415, "not a PNG, JPEG, GIF or WebP image")
         name = store_image(folder, data, ext)
+        enforce_image_cap(os.path.join(folder, name))
         self.send(200, json.dumps({"ok": True, "name": name}), "application/json")
 
     def do_POST(self):
@@ -2704,7 +2762,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not isinstance(body, dict) or not isinstance(body.get("code"), str) or not safe_id(body["code"]):
             return self.fail(400, "expected an object with a safe string code")
         if "images" in body:
-            names, err = check_image_names(body["images"], qcm_images_dir(qid, body["code"]))
+            old = read_json(os.path.join(qcm_dir(qid), "answers", body["code"] + ".json"))
+            names, err = check_image_names(body["images"], qcm_images_dir(qid, body["code"]), listed_images(old))
             if err:
                 return self.fail(400, err)
             body = dict(body, images=names)
@@ -2732,7 +2791,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not isinstance(t, dict):
             return self.fail(404, "no such trial entry")
         if "images" in body:
-            names, err = check_image_names(body["images"], test_images_dir(tid))
+            names, err = check_image_names(body["images"], test_images_dir(tid), listed_images(t))
             if err:
                 return self.fail(400, err)
             if names:

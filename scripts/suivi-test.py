@@ -727,7 +727,7 @@ class TestTestCommands(Base):
         path = self.put_image("7-1", self.NAME)
         self.put_test("7-1", images=[self.NAME, "ffffffffffffffffffffffff.png"], **{"try": "t"})   # the 2nd file is missing
         out = self.run_cli("test", "list", "--issue", "7").stdout
-        self.assertEqual(out, plain + "  image: %s\n" % path)
+        self.assertEqual(out, plain + "  image: %s\n  image removed by the size limit: ffffffffffffffffffffffff.png\n" % path)
         self.assertTrue(os.path.isabs(path) and os.path.exists(path))
 
     def test_qcm_answers_show_the_image_paths_at_display_time_only(self):
@@ -876,6 +876,8 @@ class TestImportOnline(Base):
 
 
 class ServerBase(Base):
+    EXTRA_ENV = {}
+
     def setUp(self):
         super().setUp()
         self.claim(1, "--name", "One")
@@ -886,7 +888,7 @@ class ServerBase(Base):
         with open(self.entry, "w") as f:
             json.dump({"n": 1, "title": "T", "status": "todo", "try": "scripts/try.sh 1"}, f)
         self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
-                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                     cwd=self.repo, env=dict(self.env, **self.EXTRA_ENV), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(self.stop)
         line = self.proc.stdout.readline()
         m = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
@@ -1823,7 +1825,7 @@ class TestAgentIdleServed(ServerBase):
         os.utime(p, (time.time() - 600, time.time() - 600))
         self.put(1, colour=C[0], name="One", owner=self.live_owner("S1"))
         self.proc = subprocess.Popen([sys.executable, "-I", SUIVI, "serve", "--port", "0", "--state", self.state],
-                                     cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                     cwd=self.repo, env=dict(self.env, **self.EXTRA_ENV), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.port = int(re.search(r":(\d+)/", self.proc.stdout.readline()).group(1))
         status, _, body = self.req("GET", "/api/state")
         self.assertEqual(json.loads(body)["colours"][0]["agent_idle_min"], 10)
@@ -1958,6 +1960,144 @@ def node_check(js):
         with open(p, "w", encoding="utf-8") as f:
             f.write(js)
         return subprocess.run(["node", "--check", p], capture_output=True, text=True)
+
+
+
+class TestImageCap(ServerBase):
+    """The global cap on stored screenshots (#456, lot 1b): a small cap through the env hook, the CLI in-process."""
+    EXTRA_ENV = {"SF_SUIVI_MAX_IMAGES_TOTAL": "2500"}
+    H = {"X-Suivi": "1", "Content-Type": "image/png"}
+
+    def blob(self, tag, size=1000):
+        return png(tag) + bytes(size)
+
+    def up(self, data, path="/api/tests/1-1/images"):
+        return self.req("POST", path, self.H, data)
+
+    def stored(self, data, path="/api/tests/1-1/images"):
+        status, _, body = self.up(data, path)
+        self.assertEqual(status, 200)
+        return json.loads(body)["name"]
+
+    def folder(self):
+        return os.path.join(self.state, "tests", "1-1.images")
+
+    def age(self, name, secs, folder=None):
+        p = os.path.join(folder or self.folder(), name)
+        t = time.time() - secs
+        os.utime(p, (t, t))
+
+    def exists(self, name, folder=None):
+        return os.path.exists(os.path.join(folder or self.folder(), name))
+
+    def test_the_oldest_files_go_first_and_the_new_one_stays(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        self.age(a, 300)
+        self.age(b, 200)
+        c = self.stored(self.blob(b"c"))                       # 3 x ~1000 > 2500
+        self.assertEqual((self.exists(a), self.exists(b), self.exists(c)), (False, True, True))
+
+    def test_the_file_just_uploaded_stays_even_when_it_is_the_oldest(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        self.age(a, 100)
+        self.age(b, 200)
+        c = self.stored(self.blob(b"c"))
+        self.age(c, 1000)                                       # now the oldest, but new files are judged at upload
+        d = self.stored(self.blob(b"d", 3000))                  # alone above the cap
+        self.assertEqual(os.listdir(self.folder()), [d])
+
+    def test_uploading_the_same_bytes_again_counts_as_new(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        self.age(a, 300)
+        self.age(b, 200)
+        self.assertEqual(self.stored(self.blob(b"a")), a)       # refreshes a: now b is the oldest
+        self.stored(self.blob(b"c"))
+        self.assertEqual((self.exists(a), self.exists(b)), (True, False))
+
+    def test_the_archives_and_the_qcm_folders_are_counted_and_evicted(self):
+        arch = os.path.join(self.state, "removed-tests", "0-1.images")
+        os.makedirs(arch)
+        old = "0123456789abcdef01234567.png"
+        for n, tag in ((old, b"o"), ("1123456789abcdef01234567.png", b"p")):
+            with open(os.path.join(arch, n), "wb") as f:
+                f.write(self.blob(tag))
+        self.age(old, 900, arch)
+        self.age("1123456789abcdef01234567.png", 800, arch)
+        self.stored(self.blob(b"n"))                            # 3 files now > 2500
+        self.assertFalse(self.exists(old, arch))
+        self.assertTrue(self.exists("1123456789abcdef01234567.png", arch))
+
+    def test_eviction_rewrites_no_json_and_leaves_the_state_etag_alone(self):
+        a = self.stored(self.blob(b"a"))
+        self.assertEqual(self.req("POST", "/api/tests/1-1", {"X-Suivi": "1", "Content-Type": "application/json"},
+                                  {"images": [a]})[0], 200)
+        self.age(a, 500)
+        tag = self.req("GET", "/api/state")[1]["ETag"]
+        with open(self.entry, "rb") as f:
+            before = f.read()
+        mtime = os.stat(self.entry).st_mtime_ns
+        self.stored(self.blob(b"b"))
+        self.stored(self.blob(b"c"))                            # evicts a
+        self.assertFalse(self.exists(a))
+        with open(self.entry, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(os.stat(self.entry).st_mtime_ns, mtime)
+        self.assertEqual(self.req("GET", "/api/state", {"If-None-Match": tag})[0], 304)
+
+    def test_a_save_drops_a_recorded_missing_name_but_refuses_an_unrecorded_one(self):
+        a, b = self.stored(self.blob(b"a")), self.stored(self.blob(b"b"))
+        post = lambda body: self.req("POST", "/api/tests/1-1", {"X-Suivi": "1", "Content-Type": "application/json"}, body)
+        self.assertEqual(post({"images": [a, b]})[0], 200)
+        os.unlink(os.path.join(self.folder(), a))               # what the cap does
+        self.assertEqual(post({"images": [a, b], "comment": "c"})[0], 200)
+        self.assertEqual(jload(self.entry)["images"], [b])
+        self.assertEqual(post({"images": [b, "ffffffffffffffffffffffff.png"]})[0], 400)   # never recorded
+        self.assertEqual(jload(self.entry)["images"], [b])
+
+    def test_a_qcm_save_does_the_same(self):
+        d = os.path.join(self.state, "qcm", "1-1")
+        os.makedirs(os.path.join(d, "answers"))
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 1, "title": "T", "cards": 1, "finished": False}, f)
+        up = "/api/qcm/1-1/images/R1"
+        a, b = self.stored(self.blob(b"a"), up), self.stored(self.blob(b"b"), up)
+        ans = lambda imgs: self.req("POST", "/api/qcm/1-1/answer", {"X-Suivi": "1"}, {"code": "R1", "choix": "Y", "images": imgs})
+        self.assertEqual(ans([a, b])[0], 200)
+        os.unlink(os.path.join(d, "images", "R1", a))
+        self.assertEqual(ans([a, b])[0], 200)
+        self.assertEqual(jload(os.path.join(d, "answers", "R1.json"))["images"], [b])
+        self.assertEqual(ans([b, "ffffffffffffffffffffffff.png"])[0], 400)
+
+
+class TestImageCapCli(Base):
+    """What the CLI says about a name whose file the cap deleted."""
+    NAME = "0123456789abcdef01234567.png"
+
+    def own(self):
+        return self.as_session("S1")
+
+    def test_dangling_names_are_said_to_be_removed_everywhere(self):
+        self.claim(7)
+        d = os.path.join(self.state, "tests")
+        os.makedirs(d)
+        with open(os.path.join(d, "7-1.json"), "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "todo", "try": "t", "images": [self.NAME]}, f)
+        out = self.run_cli("test", "list", "--issue", "7").stdout
+        self.assertIn("  image removed by the size limit: " + self.NAME, out)
+        self.assertNotIn("image: ", out.replace("image removed", ""))
+        r = self.run_cli("test", "remove", "7", "7-1", env=self.own())  # still counts as answered
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.run_cli("test", "remove", "7", "7-1", "--answered", env=self.own()).returncode, 0)
+        qd = os.path.join(self.state, "qcm", "7-1")
+        os.makedirs(os.path.join(qd, "answers"))
+        with open(os.path.join(qd, "meta.json"), "w") as f:
+            json.dump({"issue": 7, "title": "T", "cards": 1, "finished": False}, f)
+        with open(os.path.join(qd, "answers", "R1.json"), "w") as f:
+            json.dump({"code": "R1", "choix": "Y", "images": [self.NAME]}, f)
+        text = self.run_cli("qcm", "answers", "7-1").stdout
+        self.assertIn("  image removed by the size limit: " + self.NAME, text)
+        got = json.loads(self.run_cli("qcm", "answers", "7-1", "--json").stdout)["answers"]["R1"]
+        self.assertEqual((got.get("image_paths"), got["images_removed_by_size_limit"]), (None, [self.NAME]))
 
 
 class TestImages(ServerBase):
