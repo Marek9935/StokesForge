@@ -256,6 +256,23 @@ enum Step {
     RecalculateTranspose {
         idx: usize,
     },
+    /// Checks or unchecks "Recalculate automatically" on a linked sheet (#463).
+    ToggleAuto {
+        idx: usize,
+    },
+    /// A value typed in a Y column of the source of a linked sheet (#463): a
+    /// followed sheet catches up with it in the same pass.
+    EditSource {
+        idx: usize,
+        column: usize,
+        seed: usize,
+    },
+    /// A value typed by hand in a linked column of a transposed sheet (#463).
+    TypeInRow {
+        idx: usize,
+        column: usize,
+        seed: usize,
+    },
     /// "Recalculate Out of Date": reruns the stale calculations.
     RecalculateOutOfDate,
     Undo,
@@ -390,8 +407,13 @@ fn step() -> impl Strategy<Value = Step> {
                 role_index,
             }
         }),
-        1 => (0usize..4).prop_map(|idx| Step::Transpose { idx }),
+        3 => (0usize..4).prop_map(|idx| Step::Transpose { idx }),
         3 => (0usize..4).prop_map(|idx| Step::RecalculateTranspose { idx }),
+        4 => (0usize..4).prop_map(|idx| Step::ToggleAuto { idx }),
+        2 => (0usize..4, 0usize..4, 0usize..50)
+            .prop_map(|(idx, column, seed)| Step::TypeInRow { idx, column, seed }),
+        6 => (0usize..4, 0usize..4, 0usize..50)
+            .prop_map(|(idx, column, seed)| Step::EditSource { idx, column, seed }),
         2 => Just(Step::RecalculateOutOfDate),
         4 => Just(Step::Undo),
         4 => Just(Step::Redo),
@@ -431,6 +453,9 @@ const STEP_NAMES: &[&str] = &[
     "SetRole",
     "Transpose",
     "RecalculateTranspose",
+    "ToggleAuto",
+    "TypeInRow",
+    "EditSource",
     "RecalculateOutOfDate",
     "Undo",
     "Redo",
@@ -470,6 +495,9 @@ fn step_name(step: &Step) -> &'static str {
         Step::SetRole { .. } => "SetRole",
         Step::Transpose { .. } => "Transpose",
         Step::RecalculateTranspose { .. } => "RecalculateTranspose",
+        Step::ToggleAuto { .. } => "ToggleAuto",
+        Step::TypeInRow { .. } => "TypeInRow",
+        Step::EditSource { .. } => "EditSource",
         Step::RecalculateOutOfDate => "RecalculateOutOfDate",
         Step::Undo => "Undo",
         Step::Redo => "Redo",
@@ -1019,6 +1047,45 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
             let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
             pick(&linked, idx).map(|sheet| Command::RecalculateTranspose { sheet })
         }
+        Step::ToggleAuto { idx } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            let sheet = pick(&linked, idx)?;
+            let auto = !tree.transpose_link(sheet)?.auto_recalc;
+            Some(Command::SetTransposeAuto { sheet, auto })
+        }
+        Step::EditSource { idx, column, seed } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            let source = tree.transpose_link(pick(&linked, idx)?)?.source;
+            let ys: Vec<NodeId> = tree
+                .children(source)
+                .ok()?
+                .iter()
+                .copied()
+                .filter(|id| {
+                    tree.node(*id)
+                        .and_then(|n| n.as_column())
+                        .is_some_and(|c| c.meta().formula.is_none() && c.meta().role == ColumnRole::Y)
+                })
+                .collect();
+            Some(Command::SetCells {
+                column: pick(&ys, column)?,
+                start: seed % 2,
+                values: ValueBlock::Float(vec![seed as f64 + 0.25]),
+                expected_version: None,
+            })
+        }
+        Step::TypeInRow { idx, column, seed } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            let link = tree.transpose_link(pick(&linked, idx)?)?;
+            let mut columns = vec![link.x_column];
+            columns.extend(link.rows.iter().map(|r| r.column));
+            Some(Command::SetCells {
+                column: pick(&columns, column)?,
+                start: 0,
+                values: ValueBlock::Float(vec![seed as f64 + 0.5]),
+                expected_version: None,
+            })
+        }
         Step::RecalculateOutOfDate
         | Step::Undo
         | Step::Redo
@@ -1187,6 +1254,9 @@ struct Coverage {
     unrelated_with_formulas: usize,
     /// Accepted `Transpose` steps whose source holds a formula column (#439).
     transpose_over_formula: usize,
+    /// Steps after which a followed transposed sheet caught up with its source
+    /// by itself (#463).
+    follows: usize,
     /// Computed columns whose formula reads another sheet or workbook (#403).
     remote_computed: usize,
     /// Steps accepted by both sessions, recalculation pass or not.
@@ -1209,6 +1279,7 @@ impl Coverage {
         self.spared += other.spared;
         self.unrelated_with_formulas += other.unrelated_with_formulas;
         self.transpose_over_formula += other.transpose_over_formula;
+        self.follows += other.follows;
         self.remote_computed += other.remote_computed;
         self.accepted += other.accepted;
         self.bindings += other.bindings;
@@ -1389,6 +1460,29 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
         {
             coverage.transpose_over_formula += 1;
         }
+        // What following did, with no gesture on the sheet (#463).
+        for (sheet, link) in s_targeted.tree.transposes() {
+            let Some(old) = before.tree.transpose_link(*sheet) else {
+                continue;
+            };
+            if link.auto_recalc
+                && old.auto_recalc
+                && link.inputs != old.inputs
+                && !link.state(&s_targeted.tree).stale
+                && !matches!(
+                    step,
+                    Step::Transpose { .. }
+                        | Step::RecalculateTranspose { .. }
+                        | Step::Undo
+                        | Step::Redo
+                        | Step::UndoThenRedo { .. }
+                        | Step::Reload
+                        | Step::RevertTo { .. }
+                )
+            {
+                coverage.follows += 1;
+            }
+        }
         let ran_pass = targeted_reply == Reply::AcceptedWithPass;
         if ran_pass {
             coverage.tally(&s_targeted.tree, evaluated_targeted);
@@ -1456,6 +1550,8 @@ fn b22_the_targeted_recalculation_returns_exactly_the_full_recalculation() {
     // formula column was transposed (#439).
     assert!(total.unrelated_with_formulas > 20, "{total:?}");
     assert!(total.transpose_over_formula > 5, "{total:?}");
+    // Sheets that follow their source by themselves (#463).
+    assert!(total.follows >= 20, "{total:?}");
     // The formulas that read another sheet or workbook (#403) were reached.
     assert!(total.remote_computed > 100, "{total:?}");
     assert!(total.calculations > 200, "{total:?}");

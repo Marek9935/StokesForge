@@ -135,6 +135,24 @@ enum Step {
     RecalculateTranspose {
         idx: usize,
     },
+    /// Checks or unchecks "Recalculate automatically" on a linked sheet (#463).
+    ToggleAuto {
+        idx: usize,
+    },
+    /// A value typed in a Y column of the source of a linked sheet (#463): a
+    /// followed sheet catches up with it in the same pass.
+    EditSource {
+        idx: usize,
+        column: usize,
+        seed: usize,
+    },
+    /// A value typed by hand in a linked column of a transposed sheet (#463):
+    /// a followed sheet must stop following, never overwrite it.
+    TypeInRow {
+        idx: usize,
+        column: usize,
+        seed: usize,
+    },
     /// Copy a workbook (0) or a folder (1) through encode/decode, back into the
     /// same project (`external` false) or as if it came from another one.
     Paste {
@@ -187,6 +205,11 @@ fn step() -> impl Strategy<Value = Step> {
         3 => (0usize..3, i.clone()).prop_map(|(kind, idx)| Step::RemoveNode { kind, idx }),
         3 => i.clone().prop_map(|idx| Step::Transpose { idx }),
         2 => i.clone().prop_map(|idx| Step::RecalculateTranspose { idx }),
+        3 => i.clone().prop_map(|idx| Step::ToggleAuto { idx }),
+        1 => (i.clone(), 0usize..4, 0usize..50)
+            .prop_map(|(idx, column, seed)| Step::TypeInRow { idx, column, seed }),
+        6 => (i.clone(), 0usize..4, 0usize..50)
+            .prop_map(|(idx, column, seed)| Step::EditSource { idx, column, seed }),
         3 => (0usize..2, i.clone(), any::<bool>(), i.clone())
             .prop_map(|(kind, idx, external, target)| Step::Paste { kind, idx, external, target }),
         2 => (i.clone(), i.clone()).prop_map(|(a, b)| Step::PasteMany { a, b }),
@@ -220,6 +243,9 @@ fn step_name(step: &Step) -> &'static str {
         Step::RemoveNode { .. } => "RemoveFolder",
         Step::Transpose { .. } => "Transpose",
         Step::RecalculateTranspose { .. } => "RecalculateTranspose",
+        Step::ToggleAuto { .. } => "ToggleAuto",
+        Step::TypeInRow { .. } => "TypeInRow",
+        Step::EditSource { .. } => "EditSource",
         Step::Paste {
             external: false, ..
         } => "PasteSame",
@@ -590,6 +616,46 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
             let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
             pick(&linked, idx).map(|sheet| Command::RecalculateTranspose { sheet })
         }
+        Step::ToggleAuto { idx } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            let sheet = pick(&linked, idx)?;
+            let auto = !tree.transpose_link(sheet)?.auto_recalc;
+            Some(Command::SetTransposeAuto { sheet, auto })
+        }
+        Step::EditSource { idx, column, seed } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            let source = tree.transpose_link(pick(&linked, idx)?)?.source;
+            let ys: Vec<NodeId> = tree
+                .children(source)
+                .ok()?
+                .iter()
+                .copied()
+                .filter(|id| {
+                    tree.node(*id)
+                        .and_then(|n| n.as_column())
+                        .is_some_and(|c| c.meta().formula.is_none() && c.meta().role == ColumnRole::Y)
+                })
+                .collect();
+            Some(Command::SetCells {
+                column: pick(&ys, column)?,
+                start: seed % 2,
+                values: ValueBlock::Float(vec![seed as f64 + 0.25]),
+                expected_version: None,
+            })
+        }
+        Step::TypeInRow { idx, column, seed } => {
+            let linked: Vec<NodeId> = tree.transposes().keys().copied().collect();
+            let link = tree.transpose_link(pick(&linked, idx)?)?;
+            let mut columns = vec![link.x_column];
+            columns.extend(link.rows.iter().map(|r| r.column));
+            let column = pick(&columns, column)?;
+            Some(Command::SetCells {
+                column,
+                start: 0,
+                values: ValueBlock::Float(vec![seed as f64 + 0.5]),
+                expected_version: None,
+            })
+        }
         Step::Paste {
             kind,
             idx,
@@ -763,6 +829,11 @@ struct Coverage {
     /// Accepted `Transpose` / `RecalculateTranspose` steps that changed nothing
     /// and stored no history entry, with such a link in the tree (#439).
     noop_over_formula_link: usize,
+    /// Steps after which a followed transposed sheet caught up with its source
+    /// by itself (#463): its link re-read the source with no gesture on it.
+    follows: usize,
+    /// Steps after which a followed sheet held a typed value and stood still.
+    typed_stops: usize,
     per_step: BTreeMap<&'static str, usize>,
 }
 
@@ -775,6 +846,8 @@ impl Coverage {
         self.bindings += other.bindings;
         self.reload_fresh_formula_link += other.reload_fresh_formula_link;
         self.noop_over_formula_link += other.noop_over_formula_link;
+        self.follows += other.follows;
+        self.typed_stops += other.typed_stops;
         for (k, v) in other.per_step {
             *self.per_step.entry(k).or_default() += v;
         }
@@ -873,6 +946,32 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
         {
             coverage.noop_over_formula_link += 1;
         }
+        // 0c. what following did (#463), counted on the targeted side.
+        for (sheet, link) in st.tree.transposes() {
+            let Some(old) = before.tree.transpose_link(*sheet) else {
+                continue;
+            };
+            let new_state = link.state(&st.tree);
+            if link.auto_recalc
+                && old.auto_recalc
+                && link.inputs != old.inputs
+                && !new_state.stale
+                && !matches!(
+                    step,
+                    Step::Transpose { .. }
+                        | Step::RecalculateTranspose { .. }
+                        | Step::Undo
+                        | Step::Redo
+                        | Step::UndoThenRedo { .. }
+                        | Step::Reload
+                )
+            {
+                coverage.follows += 1;
+            }
+            if link.auto_recalc && new_state.modified && new_state.stale {
+                coverage.typed_stops += 1;
+            }
+        }
         // 1. twin oracle: the trees are equal, transposed links and the version
         // of every column included — the twins number alike (#439).
         prop_assert!(
@@ -935,6 +1034,10 @@ fn b23_formulas_stay_exact_across_structural_gestures() {
         // over a formula column, and a gesture over it that stores no entry.
         assert!(total.reload_fresh_formula_link >= 1, "{total:?}");
         assert!(total.noop_over_formula_link >= 1, "{total:?}");
+        // The draw reaches #463: sheets that follow their source by themselves,
+        // and a typed value that stops one.
+        assert!(total.follows >= 20, "{total:?}");
+        assert!(total.typed_stops >= 1, "{total:?}");
     }
     if cases >= 64 {
         // Every structural gesture was accepted, with a pass, at least a few times.

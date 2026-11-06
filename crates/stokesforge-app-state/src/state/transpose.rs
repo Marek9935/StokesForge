@@ -16,7 +16,7 @@
 //! link has been edited (the edited values would be overwritten).
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind};
-use stokesforge_core::{NodeId, SeriesRef};
+use stokesforge_core::{CoreError, NodeId, SeriesRef};
 
 use super::{history_text, AppState};
 use crate::analysis::{AnalysisForm, Preset};
@@ -34,6 +34,14 @@ pub struct TransposeInfo {
     pub stale: bool,
     /// A value of a column created by the link has been edited.
     pub modified: bool,
+    /// The box "Recalculate automatically" is checked (#463).
+    pub auto: bool,
+    /// Why the box cannot be checked now (the source calculates from this
+    /// sheet): the sentence of its hover (S-G1). `None` if it can.
+    pub auto_blocked: Option<String>,
+    /// Why a followed sheet is out of date and cannot catch up (a source
+    /// column has text or no x'): the sentence that names the column.
+    pub stuck: Option<String>,
 }
 
 impl AppState {
@@ -42,11 +50,35 @@ impl AppState {
         let tree = &self.snapshot.tree;
         let link = tree.transpose_link(sheet)?;
         let state = link.state(tree);
+        let auto_blocked = (!link.auto_recalc)
+            .then(|| tree.transpose_check_refusal(sheet))
+            .flatten()
+            .and_then(|refusal| match refusal {
+                CoreError::TransposeSourceReadsIt {
+                    letter,
+                    source_sheet,
+                    transposed,
+                } => Some(tr!(
+                    "transpose-auto",
+                    "disabled",
+                    letter = letter.as_str(),
+                    source = source_sheet.as_str(),
+                    sheet = transposed.as_str()
+                )),
+                _ => None,
+            });
+        let stuck = (link.auto_recalc && state.stale && !state.modified)
+            .then(|| stokesforge_core::unfollowable_column(tree, link.source))
+            .flatten()
+            .map(|error| errors::model::error_message(&error));
         Some(TransposeInfo {
             source: link.source,
             source_name: tree.node(link.source)?.name().to_string(),
             stale: state.stale,
             modified: state.modified,
+            auto: link.auto_recalc,
+            auto_blocked,
+            stuck,
         })
     }
 

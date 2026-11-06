@@ -248,6 +248,12 @@ pub enum HistoryLabel {
     TransposeRows,
     /// Refreshing a transposed sheet from its source (#253).
     RecalculateTranspose,
+    /// Checking or unchecking "Recalculate automatically" on a transposed
+    /// sheet (#463).
+    SetTransposeAuto {
+        /// The new state of the box.
+        auto: bool,
+    },
     /// Targeted edit of the graph content, always by replacing the spec.
     EditPlotSpec(PlotEditKind),
     /// A group of actions undone as one block.
@@ -483,6 +489,12 @@ impl fmt::Display for HistoryLabel {
             }
             HistoryLabel::TransposeRows => f.write_str("Transpose Rows"),
             HistoryLabel::RecalculateTranspose => f.write_str("Recalculate Transposed Sheet"),
+            HistoryLabel::SetTransposeAuto { auto: true } => {
+                f.write_str("Check Recalculate Automatically")
+            }
+            HistoryLabel::SetTransposeAuto { auto: false } => {
+                f.write_str("Uncheck Recalculate Automatically")
+            }
             HistoryLabel::Macro(kind) => kind.fmt(f),
         }
     }

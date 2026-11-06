@@ -653,6 +653,8 @@ history-macro-move-columns = Déplacer des colonnes
 history-macro-analyze-rows = Analyser des lignes
 history-transpose-rows = Transposer les lignes
 history-recalculate-transpose = Recalculer la feuille transposée
+history-transpose-auto-on = Cocher Recalculer automatiquement
+history-transpose-auto-off = Décocher Recalculer automatiquement
 
 ## Annuler et rétablir
 
@@ -717,6 +719,7 @@ error-formula-unknown-column = La colonne { $letter } n'existe pas dans cette fe
 error-formula-self-reference = Une formule ne peut pas faire référence à sa propre colonne ({ $letter })
 error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne
 error-formula-cycle = Des formules se renvoient l'une à l'autre en boucle. Retirer l'une des références
+error-formula-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d’abord Recalculer automatiquement sur { $sheet }
 error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)
 error-formula-unknown-function = Fonction { $name } inconnue. Vérifier son orthographe
 error-formula-unknown-function-suggestion = Fonction { $name } inconnue. Vouliez-vous écrire { $suggestion } ?
@@ -1510,6 +1513,8 @@ analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Déconvolution directe
 error-model-calculated-column-read-only = Cette colonne est produite par un calcul. La détacher du calcul pour modifier ses valeurs
 error-model-transpose-no-x-prime = La colonne { $letter } ({ $name }) n’a pas de x'. Lui en donner un pour analyser une ligne
+error-model-transpose-source-reads-it = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher Recalculer automatiquement
+error-model-calculation-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d’abord Recalculer automatiquement sur { $sheet }
 error-model-transpose-not-numeric = La colonne { $letter } ({ $name }) contient du texte. Seules des colonnes numériques permettent d’analyser une ligne
 
 ## Analysis — names of the columns an operation produces (#181)
@@ -2259,6 +2264,10 @@ transpose-relink = Relier de nouveau
 transpose-relink-hint = Réécrit les colonnes liées depuis { $source } et efface les valeurs qui y ont été modifiées
 transpose-relink-title = Relier de nouveau la feuille transposée
 transpose-relink-confirm = Les valeurs modifiées dans les colonnes liées de { $sheet } seront effacées. Annuler les rétablit
+transpose-auto = Recalculer automatiquement
+    .hint = Met { $sheet } à jour dès que { $source } change. Une valeur saisie dedans arrête les mises à jour jusqu’à Relier de nouveau
+    .disabled = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher cette case
+transpose-state-stuck = Pas à jour : { $reason }
 
 # Lissage (#324)
 analysis-kind-smooth = Lissage

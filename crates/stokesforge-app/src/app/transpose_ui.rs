@@ -32,8 +32,42 @@ pub(super) fn transpose_banner(
         ui.add_space(theme::SPACE_ITEM);
         ui.label(tr!("transpose-banner", source = info.source_name.as_str()));
         let warn = theme::stale_color(ui.visuals().dark_mode);
-        if info.stale {
-            ui.label(egui::RichText::new(tr!("transpose-state-stale")).color(warn));
+        // The box (#463). Greyed when the source calculates from this sheet:
+        // the reason is its own disabled tooltip and names the column (S-G1, S-G2).
+        let sheet_name = state
+            .tree()
+            .node(sheet)
+            .map(|node| node.name().to_string())
+            .unwrap_or_default();
+        let mut auto = info.auto;
+        let blocked = !info.auto && info.auto_blocked.is_some();
+        let response = ui.add_enabled(
+            !blocked,
+            egui::Checkbox::new(&mut auto, tr!("transpose-auto")),
+        );
+        let response = match &info.auto_blocked {
+            Some(reason) if blocked => response.on_disabled_hover_text(reason.as_str()),
+            _ => response.on_hover_text(tr!(
+                "transpose-auto",
+                "hint",
+                sheet = sheet_name.as_str(),
+                source = info.source_name.as_str()
+            )),
+        };
+        if response.changed() {
+            actions.push(Action::SetTransposeAuto { sheet, auto });
+        }
+        match (&info.stuck, info.stale) {
+            (Some(reason), _) => {
+                ui.label(
+                    egui::RichText::new(tr!("transpose-state-stuck", reason = reason.as_str()))
+                        .color(warn),
+                );
+            }
+            (None, true) => {
+                ui.label(egui::RichText::new(tr!("transpose-state-stale")).color(warn));
+            }
+            (None, false) => {}
         }
         if info.modified {
             ui.label(egui::RichText::new(tr!("transpose-state-modified")).color(warn));
@@ -136,6 +170,8 @@ mod tests {
             first.get_or_insert(id);
         }
         let sheet = project.transpose_rows(source, &[0]).unwrap();
+        // These cases pin the snapshot banner (#253): the box is unchecked.
+        project.set_transpose_auto(sheet, false).unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), "t.stf".into()).unwrap();
         (session, state, source, sheet, first.unwrap())
@@ -231,5 +267,102 @@ mod tests {
                 .any(|t| t.text == tr!("transpose-relink-title"));
         }
         assert!(shown, "the confirmation opens");
+    }
+
+    // -- #463: Recalculate automatically --------------------------------------
+
+    /// A checked sheet shows the box checked; clicking it sends the action that
+    /// unchecks. Witness: the banner without the box.
+    #[test]
+    fn the_box_is_checked_by_default_and_a_click_unchecks_it() {
+        let (session, mut state, _source, sheet, _first) = bench();
+        session
+            .handle()
+            .execute(stokesforge_commands::Command::SetTransposeAuto { sheet, auto: true })
+            .unwrap();
+        state.refresh();
+        assert!(state.transpose_info(sheet).unwrap().auto);
+        let ctx = context();
+        let mut actions = Vec::new();
+        let shapes = image(&ctx, Vec::new(), |ui| {
+            transpose_banner(ui, &state, sheet, &mut actions);
+        });
+        let found = texts(&shapes);
+        let label = text_exact(&found, &tr!("transpose-auto"));
+        click(&ctx, label.center, egui::PointerButton::Primary, |ui| {
+            transpose_banner(ui, &state, sheet, &mut actions);
+        });
+        assert_eq!(
+            actions,
+            vec![Action::SetTransposeAuto { sheet, auto: false }]
+        );
+    }
+
+    /// The source calculates from the unchecked sheet: the box is greyed and a
+    /// click does nothing; the reason names the column (S-G1, S-G2). Witness: a
+    /// box that is always enabled.
+    #[test]
+    fn the_box_is_greyed_while_the_source_calculates_from_the_sheet() {
+        let (session, mut state, source, sheet, _first) = bench();
+        let tree = state.tree().clone();
+        let reader = *tree.children(source).unwrap().last().unwrap();
+        let name = tree.node(sheet).unwrap().name().to_string();
+        let text = format!("max('{name}'!B)");
+        let formula = tree.formula_from_letters(reader, &text).unwrap();
+        session
+            .handle()
+            .execute(stokesforge_commands::Command::SetColumnMeta {
+                column: reader,
+                meta: ColumnMeta {
+                    formula: Some(formula),
+                    ..ColumnMeta::default()
+                },
+            })
+            .unwrap();
+        state.refresh();
+        let info = state.transpose_info(sheet).unwrap();
+        let reason = info.auto_blocked.expect("a reason");
+        assert!(reason.contains("Column C of Sheet1"), "{reason}");
+        let ctx = context();
+        let mut actions = Vec::new();
+        let shapes = image(&ctx, Vec::new(), |ui| {
+            transpose_banner(ui, &state, sheet, &mut actions);
+        });
+        let found = texts(&shapes);
+        let label = text_exact(&found, &tr!("transpose-auto"));
+        click(&ctx, label.center, egui::PointerButton::Primary, |ui| {
+            transpose_banner(ui, &state, sheet, &mut actions);
+        });
+        assert!(actions.is_empty(), "{actions:?}");
+    }
+
+    /// A followed sheet that cannot catch up reads Out of date and names the
+    /// column (E7).
+    #[test]
+    fn a_followed_sheet_that_cannot_catch_up_names_the_column() {
+        let (session, mut state, source, sheet, _first) = bench();
+        let handle = session.handle();
+        handle
+            .execute(stokesforge_commands::Command::SetTransposeAuto { sheet, auto: true })
+            .unwrap();
+        handle
+            .execute(stokesforge_commands::Command::AddColumn {
+                sheet: source,
+                index: None,
+                name: Some("New".into()),
+                column: Column::from_f64(&[1.0, 2.0]),
+            })
+            .unwrap();
+        state.refresh();
+        let info = state.transpose_info(sheet).unwrap();
+        let stuck = info.stuck.expect("a reason");
+        assert!(stuck.contains("Column D"), "{stuck}");
+        let ctx = context();
+        let mut actions = Vec::new();
+        let shapes = image(&ctx, Vec::new(), |ui| {
+            transpose_banner(ui, &state, sheet, &mut actions);
+        });
+        let found = texts(&shapes);
+        text_exact(&found, &tr!("transpose-state-stuck", reason = stuck.as_str()));
     }
 }

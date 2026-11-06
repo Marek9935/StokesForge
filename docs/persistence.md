@@ -739,6 +739,13 @@ written: they are derived on reading, hence the importance of the column version
 (written by the file) and of the content fingerprints (FNV-1a written in hard code, stable
 from one Rust version to another).
 
+`TransposeRecord::auto_recalc` (#463, the "Recalculate automatically" box) is an
+additive `#[serde(default)]` field: **absent means unchecked**, so a file written
+before the box opens with its sheets as the snapshots they were, and
+`FORMAT_VERSION` stays 1. A 1.0 that opens and saves such a file again loses the
+field: the box is unchecked when reopened later, no number is lost
+(CHANGELOG).
+
 On load, the first recalculation pass recomputes the formula columns, and a
 column that gets the same type and values keeps its version (#439: the pass
 writes nothing then). A link that was up to date in the file therefore stays so

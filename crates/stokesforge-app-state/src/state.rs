@@ -650,6 +650,14 @@ pub enum Action {
     },
     /// Answer to this confirmation (`true`: overwrite and update).
     ConfirmTransposeRelink(bool),
+    /// Checks or unchecks "Recalculate automatically" on a transposed sheet
+    /// (#463). Checking can be refused: the status bar says why.
+    SetTransposeAuto {
+        /// The transposed sheet.
+        sheet: NodeId,
+        /// The new state of the box.
+        auto: bool,
+    },
     /// Reopens one of the last analyses run (#249) on the current
     /// selection: the window opens with its settings; with `run` (Ctrl+click)
     /// it is run at once if nothing is missing.
@@ -5053,6 +5061,11 @@ impl AppState {
                 _ => FormulaError::Cycle,
             });
         }
+        if let Some(follow) = tree.formula_follow_error(column, None) {
+            // The source of a followed transposed sheet cannot calculate from
+            // it (#463): kept and uncomputed, like a loop.
+            return Some(follow);
+        }
         if let Err(compile_error) = formula.compile() {
             // The kept text read strictly says why precisely (`Z` names no
             // column); a formula that compiles is **not** re-read: an old
@@ -5944,6 +5957,9 @@ impl AppState {
             Action::OpenRowAnalysis { preset, rows } => self.open_row_analysis(&preset, &rows),
             Action::RecalculateTranspose { sheet } => self.recalculate_transpose(sheet),
             Action::ConfirmTransposeRelink(accept) => self.confirm_transpose_relink(accept),
+            Action::SetTransposeAuto { sheet, auto } => {
+                self.execute(Command::SetTransposeAuto { sheet, auto });
+            }
             Action::OpenRecentAnalysis { index, run, target } => {
                 self.open_recent_analysis(index, run, target)
             }

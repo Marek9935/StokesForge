@@ -160,6 +160,19 @@ impl Tree {
             .map(|(sheet, link)| (*sheet, link.as_ref()))
     }
 
+    /// The followed transposed sheet (box "Recalculate automatically"
+    /// checked, #463) whose link keeps `column` up to date: its x' or one of
+    /// its Row columns. Such a column is derived, like a formula column.
+    pub fn followed_transpose_column(&self, column: NodeId) -> Option<NodeId> {
+        self.transposes
+            .iter()
+            .find(|(_, link)| {
+                link.auto_recalc
+                    && (link.x_column == column || link.rows.iter().any(|r| r.column == column))
+            })
+            .map(|(sheet, _)| *sheet)
+    }
+
     /// The same tree, with these links — for persistence.
     pub fn with_transposes(mut self, transposes: BTreeMap<NodeId, Arc<TransposeLink>>) -> Self {
         self.transposes = transposes;

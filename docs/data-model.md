@@ -279,7 +279,7 @@ rollback, `.stf`). It is not a node.
   again reuses its column. Long names "Row N of Source"; the unit of the "Row N"
   columns is that of the columns of the source when it is common. The model has
   no unit for x': the x' column carries none.
-- **Recalculable snapshot, no live link.** The link keeps what it read
+- **Recalculable snapshot, or followed (#463).** The link keeps what it read
   (`TransposeSourceColumn`: identifier, version and x' of each column of the
   source, in order) and the fingerprint of the content of each column it wrote
   (`content_stamp`, FNV-1a, stable). Two states are **derived** from the tree,
@@ -287,7 +287,7 @@ rollback, `.stf`). It is not a node.
   x', column added, deleted or moved) and *modified* (the content of a column
   created by the link no longer has its fingerprint: only a value edit counts;
   renaming, typing without changing the numbers, adding its own columns cut
-  nothing). Neither enters the targeted recalculation. *Stale* reads column
+  nothing). Neither is stored. *Stale* reads column
   versions, so it follows how versions are drawn (#439): a user's write draws a
   fresh version even when it changes nothing (pasting the same number, or a
   change then Ctrl+Z, makes the sheet stale; Recalculate clears it; typing the
@@ -295,6 +295,35 @@ rollback, `.stf`). It is not a node.
   recalculation pass keeps the version of a formula column it recomputes to the
   same type and values (a link over such a column is not stale after an
   unrelated command, a reload or a formula that gives the same numbers).
+- **Recalculate automatically (#463).** `TransposeLink::auto_recalc` is the box
+  of the banner: checked by default on a new link, unchecked on a file written
+  before the box existed. Checked, the sheet **follows** its source: the pass of
+  the session (`Recalculator::run_follows`, between the formulas and the
+  calculations, repeated within `MAX_ROUNDS`) calls `Project::follow_transpose`
+  outside the history, like an analysis pass (one Ctrl+Z undoes the source edit
+  and the sheet follows the restored source; the follow has no entry). It
+  rewrites only a column whose numbers differ (a column recomputed to the same
+  numbers keeps its version, #439), never a *modified* sheet (rule 4: a value
+  typed in the sheet stops the whole sheet until Relink or Ctrl+Z, the box
+  stays checked), never recreates a deleted "Row N" column (Relink, or
+  analysing that row again, does), and leaves the numbers as they are when a
+  source column has text or no x' (banner "Out of date: Column D has no x'
+  value…", resumes once fixed). *Stale* is read from the tree on every pass, so
+  the targeted and full modes follow alike; what following reads (versions, x',
+  role, order of the source columns) is all in `TransposeLink::inputs`.
+  **The source may not calculate from its followed sheet** (rules 2 and 3,
+  `Tree::columns_reading_followed_sheet`): a column of the source, whatever its
+  role, whose formula reads the sheet directly or through another sheet, or the
+  output of an analysis that reads it, is refused at entry
+  (`FormulaError::ReadsFollowingSheet`, the field keeps the text, empty and
+  framed, like a loop; `CoreError::CalculationReadsFollowingSheet`), blanked by
+  the formula pass and the sheet is not followed when a file, a Move or a paste
+  brings one; checking the box is refused while one exists
+  (`CoreError::TransposeSourceReadsIt`, greyed with its reason). Another sheet
+  reading the followed sheet is allowed as long as nothing comes back into the
+  source; the frozen reference of a correction is a copy. A file opened with a
+  followed sheet already out of date keeps it so until its source changes
+  (`Recalculator::follow_hold`, same rule as A1).
 - Only the columns of role **Y** are transposed (approved on 2026-10-22): an X
   column, an error bar or a label is skipped, with no x' required; a sheet
   without a Y column is refused. Changing the role of a column makes the

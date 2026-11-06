@@ -53,10 +53,11 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::TransposeRows => 30,
         HistoryLabel::RecalculateTranspose => 31,
         HistoryLabel::SortFolder { .. } => 32,
+        HistoryLabel::SetTransposeAuto { .. } => 33,
     }
 }
 
-const VARIANTS: usize = 33;
+const VARIANTS: usize = 34;
 
 /// Each variant, in **each** of its forms (known target or not, 0, 1 and
 /// several rows, each kind of group).
@@ -72,6 +73,8 @@ fn all_labels() -> Vec<HistoryLabel> {
         HistoryLabel::AddColumn,
         HistoryLabel::TransposeRows,
         HistoryLabel::RecalculateTranspose,
+        HistoryLabel::SetTransposeAuto { auto: true },
+        HistoryLabel::SetTransposeAuto { auto: false },
         HistoryLabel::DeleteColumn { column: None },
         HistoryLabel::DeleteColumn {
             column: Some(ColumnRef(1)),

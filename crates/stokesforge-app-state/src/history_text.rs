@@ -117,6 +117,8 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         }
         HistoryLabel::TransposeRows => tr!("history-transpose-rows"),
         HistoryLabel::RecalculateTranspose => tr!("history-recalculate-transpose"),
+        HistoryLabel::SetTransposeAuto { auto: true } => tr!("history-transpose-auto-on"),
+        HistoryLabel::SetTransposeAuto { auto: false } => tr!("history-transpose-auto-off"),
         HistoryLabel::EditPlotSpec(kind) => match kind {
             PlotEditKind::Visibility => tr!("history-plot-visibility"),
             PlotEditKind::RenameSeries => tr!("history-plot-rename-series"),

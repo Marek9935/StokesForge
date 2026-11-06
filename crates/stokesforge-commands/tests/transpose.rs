@@ -149,3 +149,102 @@ fn the_analyze_rows_macro_undoes_sheet_and_link_in_one_step() {
     assert!(!w.history.undo(&mut w.project).unwrap(), "a single group");
     let _ = &w.cols;
 }
+
+// -- #463: Recalculate automatically -------------------------------------------
+
+fn transposed(w: &mut World) -> NodeId {
+    let source = w.sheet;
+    run(
+        w,
+        Command::TransposeRows {
+            source,
+            rows: vec![0],
+        },
+    );
+    *w.project.tree().transposes().keys().next().unwrap()
+}
+
+#[test]
+fn the_box_toggle_is_one_entry_that_undo_and_redo_restore() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    assert!(w.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    let checked = w.project.tree().clone();
+    run(&mut w, Command::SetTransposeAuto { sheet, auto: false });
+    assert!(!w.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    let unchecked = w.project.tree().clone();
+    assert!(w.history.undo(&mut w.project).unwrap());
+    assert_eq!(w.project.tree().as_ref(), checked.as_ref());
+    assert!(w.history.redo(&mut w.project).unwrap());
+    assert_eq!(w.project.tree().as_ref(), unchecked.as_ref());
+}
+
+#[test]
+fn rechecking_is_refused_while_the_source_reads_the_sheet_and_leaves_no_entry() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    run(&mut w, Command::SetTransposeAuto { sheet, auto: false });
+    // A column of the source reads the transposed sheet (allowed while unchecked).
+    let reader = w
+        .project
+        .add_column(w.sheet, None, Some("R"), Column::from_f64(&[0.0, 0.0]))
+        .unwrap();
+    let name = w.project.tree().node(sheet).unwrap().name().to_string();
+    let formula = w
+        .project
+        .tree()
+        .formula_from_letters(reader, &format!("max('{name}'!B)"))
+        .unwrap();
+    w.project
+        .set_column_meta(
+            reader,
+            ColumnMeta {
+                formula: Some(formula),
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+    let before = w.project.tree().clone();
+    let error = w
+        .history
+        .execute(&mut w.project, Command::SetTransposeAuto { sheet, auto: true })
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::TransposeSourceReadsIt { .. })
+    ));
+    assert_eq!(w.project.tree().as_ref(), before.as_ref());
+    // The refused command left no entry: the unchecking is the last one.
+    assert!(w.history.undo(&mut w.project).unwrap());
+    assert!(w.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+}
+
+/// The pass rewrites the linked columns of a followed sheet outside the
+/// history, so a macro replayed over them meets a column that no longer fits
+/// its delta: a followed link column is derived and is made to fit (#448); the
+/// same column of an unchecked sheet holds the user's snapshot and stays exact.
+/// Witness: `is_derived` unchanged.
+#[test]
+fn a_macro_over_a_followed_link_column_finishes_but_not_over_an_unchecked_one() {
+    for followed in [true, false] {
+        let mut w = world();
+        let sheet = transposed(&mut w);
+        if !followed {
+            run(&mut w, Command::SetTransposeAuto { sheet, auto: false });
+        }
+        let row = w.project.tree().children(sheet).unwrap()[1];
+        w.history.begin_macro(MacroKind::PasteCells).unwrap();
+        run(
+            &mut w,
+            Command::DeleteCells {
+                columns: vec![row],
+                at: 2,
+                count: 1,
+            },
+        );
+        // The pass that follows the source cuts the column short.
+        w.project.set_length(row, 1).unwrap();
+        let outcome = w.history.abort_macro(&mut w.project);
+        assert_eq!(outcome.is_ok(), followed, "followed: {followed}");
+    }
+}
