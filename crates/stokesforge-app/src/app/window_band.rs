@@ -151,10 +151,7 @@ pub(super) fn stop_keys(ctx: &egui::Context) -> bool {
                 refused |= *pressed && !*repeat && !modifiers.alt;
                 false
             }
-            egui::Event::Text(_)
-            | egui::Event::Copy
-            | egui::Event::Cut
-            | egui::Event::Paste(_) => {
+            egui::Event::Text(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
                 refused = true;
                 false
             }
