@@ -1359,20 +1359,25 @@ impl SaveTarget {
 }
 
 /// Severity of a status bar message (S-M4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StatusLevel {
-    /// Normal information: fades by itself after [`INFO_LIFETIME`] (S-M5).
+    /// Plain: done as asked (S-R18). Fades by itself after [`INFO_LIFETIME`]
+    /// (S-M5).
     Info,
-    /// Warning: "impossible for now" (undo with nothing to undo), not a
-    /// failure. Stays until the next message.
+    /// Orange: done, but not as asked, or needs your eyes (S-R18). Fades by
+    /// itself after [`WARNING_LIFETIME`]; stays in the history.
     Warning,
-    /// Failure (unreadable path, script in error). Stays until the next
-    /// message.
+    /// Red: not done (unreadable path, script in error). Stays on the line
+    /// until a later gesture says something that replaces it.
     Error,
 }
 
 /// How long an information is displayed before it fades (S-M5).
 pub const INFO_LIFETIME: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// How long an orange (warning) stays on the line before it fades (#453, S-M5).
+/// A red never fades. A faded message stays in the history.
+pub const WARNING_LIFETIME: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Number of messages kept for the status bar history (S-M6).
 pub const STATUS_HISTORY_LEN: usize = 50;
@@ -1403,6 +1408,12 @@ pub struct StatusMessage {
     pub at: std::time::Instant,
     /// Wall-clock time of emission (for the history).
     pub wall: std::time::SystemTime,
+    /// The gesture that said it (#453): messages of one gesture share it. `None`
+    /// for a message said by a background pass (poll, autosave).
+    pub gesture: Option<u64>,
+    /// Rank of the message among all those ever recorded (see
+    /// [`AppState::messages_since`]).
+    pub seq: u64,
 }
 
 impl StatusMessage {
@@ -3104,6 +3115,18 @@ pub struct AppState {
     /// (capped at 50). The shell compares it before and after an action to
     /// know whether that action said something (#471).
     recorded_count: u64,
+    /// Number of the current (or last) gesture: one per outermost `dispatch`,
+    /// and one per message said outside any `dispatch` (#453). A message
+    /// carries it; the status bar rule compares it.
+    gesture_id: u64,
+    /// How deep the `dispatch` calls nest: the outermost call is the gesture.
+    gesture_depth: u32,
+    /// Above zero while a background pass runs (poll, autosave): its messages
+    /// belong to no gesture (#453).
+    background_depth: u32,
+    /// The gesture that last reported a failure on the status line; read by
+    /// `gesture_failed`.
+    last_error_gesture: Option<u64>,
     /// The message history window is open.
     status_history_open: bool,
     /// The project's low R² values by type (#290), recomputed at each snapshot.
@@ -3166,7 +3189,6 @@ pub struct AppState {
     formula_rewrites: Vec<FormulaRewrite>,
     /// Sentences of the comma rewrites made by the paste in progress, the
     /// first of which the status bar shows once the paste is done.
-    paste_warnings: Vec<String>,
     /// The formula the field wrote when it rewrote a comma range, kept so the
     /// orange state lives only while the column still holds it (#433): red,
     /// undone, replaced or removed, it is gone.
@@ -3363,6 +3385,10 @@ impl AppState {
             status: None,
             status_log: std::collections::VecDeque::new(),
             recorded_count: 0,
+            gesture_id: 0,
+            gesture_depth: 0,
+            background_depth: 0,
+            last_error_gesture: None,
             status_history_open: false,
             low_r2_groups: Vec::new(),
             low_r2_list_open: false,
@@ -3384,7 +3410,6 @@ impl AppState {
             formula_refusal_memo: std::cell::RefCell::new(None),
             formula_issue_memo: std::cell::RefCell::new(None),
             formula_rewrites: Vec::new(),
-            paste_warnings: Vec::new(),
             seen_bound: 0,
             grid_clipboard: None,
             clipboard_text: None,
@@ -5093,7 +5118,6 @@ impl AppState {
     /// Forgets every pending or remembered comma rewrite (Undo, Redo).
     fn clear_formula_rewrite(&mut self) {
         self.formula_rewrites.clear();
-        self.paste_warnings.clear();
     }
 
     /// Forgets the pending sentence and the rewrite of `column`: a warning for
@@ -5184,6 +5208,10 @@ impl AppState {
     /// Commits the header entry in progress. No effect if there is no
     /// entry open.
     pub fn commit_header_edit(&mut self) {
+        self.gesture(Self::commit_header_edit_in_gesture);
+    }
+
+    fn commit_header_edit_in_gesture(&mut self) {
         let Some(edit) = self.header_editing.take() else {
             return;
         };
@@ -5257,6 +5285,10 @@ impl AppState {
     /// Commits the entry in progress (equivalent to [`Action::CommitCell`] on the
     /// buffer). No effect if there is no entry open.
     pub fn commit_edit(&mut self) {
+        self.gesture(Self::commit_edit_in_gesture);
+    }
+
+    fn commit_edit_in_gesture(&mut self) {
         let Some(edit) = self.editing.take() else {
             return;
         };
@@ -5297,6 +5329,10 @@ impl AppState {
     /// Commits the note entry in progress (equivalent to [`Action::SetNoteText`]
     /// on the buffer). No effect if there is no entry open.
     pub fn commit_note_edit(&mut self) {
+        self.gesture(Self::commit_note_edit_in_gesture);
+    }
+
+    fn commit_note_edit_in_gesture(&mut self) {
         let Some(edit) = self.note_editing.take() else {
             return;
         };
@@ -5458,6 +5494,10 @@ impl AppState {
     /// of an unmodified text field would stack a history entry
     /// identical to the previous one; see the head doc of [`PlotEdit`].
     pub fn commit_plot_edit(&mut self) {
+        self.gesture(Self::commit_plot_edit_in_gesture);
+    }
+
+    fn commit_plot_edit_in_gesture(&mut self) {
         let Some(edit) = self.plot_edit.clone() else {
             return;
         };
@@ -5666,6 +5706,32 @@ impl AppState {
     /// Python script" at the top of this module. This is what makes this method
     /// safe to call from the rendering loop for any action.
     pub fn dispatch(&mut self, action: Action) {
+        self.gesture(|state| state.dispatch_action(action));
+    }
+
+    /// Runs `body` as one gesture (#453): the messages it says belong
+    /// together. Nested calls (a `dispatch` inside a `dispatch`) join the
+    /// outermost one.
+    fn gesture<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> R {
+        if self.gesture_depth == 0 {
+            self.gesture_id += 1;
+        }
+        self.gesture_depth += 1;
+        let result = body(self);
+        self.gesture_depth -= 1;
+        result
+    }
+
+    /// Runs `body` as a background pass (#453): a poll, the autosave. The
+    /// messages it says belong to no gesture.
+    fn background<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> R {
+        self.background_depth += 1;
+        let result = body(self);
+        self.background_depth -= 1;
+        result
+    }
+
+    fn dispatch_action(&mut self, action: Action) {
         // A dialog error does not outlive its dialog: the gesture that
         // opens another one starts from an empty footer.
         if !self.modal_dialog_open() {
@@ -6617,6 +6683,10 @@ impl AppState {
     /// feature, where this method never does anything): safe to call
     /// every frame without a prior test.
     pub fn poll_script(&mut self) {
+        self.background(Self::poll_script_pass);
+    }
+
+    fn poll_script_pass(&mut self) {
         #[cfg(feature = "python")]
         {
             let received = match &self.pending_script {
@@ -6844,7 +6914,7 @@ impl AppState {
                     reply,
                     ready: None,
                 });
-                self.notice(tr!("status-import-progress", done = 0, total = total));
+                self.progress(tr!("status-import-progress", done = 0, total = total));
             }
             Err(err) => self.fail(tr!(
                 "error-import-start",
@@ -6898,7 +6968,7 @@ impl AppState {
                         job.done.load(std::sync::atomic::Ordering::Relaxed),
                         job.total,
                     );
-                    self.notice(tr!("status-import-progress", done = done, total = total));
+                    self.progress(tr!("status-import-progress", done = done, total = total));
                     return false;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -6913,6 +6983,13 @@ impl AppState {
         if self.plot_settings.is_some() {
             return false;
         }
+        // Applying the result is a gesture of its own (#453).
+        self.gesture(Self::apply_ready_import)
+    }
+
+    /// The second half of [`AppState::poll_import`]: the analysis is done,
+    /// creates the sheets.
+    fn apply_ready_import(&mut self) -> bool {
         let Some(mut job) = self.import_job.take() else {
             return false;
         };
@@ -6923,12 +7000,7 @@ impl AppState {
         if applied {
             let count = reply.items.len();
             self.apply_import(job.destination, reply.items);
-            if job.dropped.is_some()
-                && self
-                    .status
-                    .as_ref()
-                    .is_some_and(|status| !status.is_error())
-            {
+            if job.dropped.is_some() && !self.gesture_failed() {
                 self.notice(tr!(
                     "status-import-dropped",
                     count = count,
@@ -7773,20 +7845,84 @@ impl AppState {
         self.record(text, StatusLevel::Error);
     }
 
-    /// Sets the current message and adds it to the history (S-M6, last 50).
+    /// The gesture a message said right now belongs to (#453): the one in
+    /// progress inside `dispatch`, none inside a background pass, otherwise
+    /// the message is its own gesture.
+    fn message_gesture(&mut self) -> Option<u64> {
+        if self.gesture_depth > 0 {
+            Some(self.gesture_id)
+        } else if self.background_depth > 0 {
+            None
+        } else {
+            self.gesture_id += 1;
+            Some(self.gesture_id)
+        }
+    }
+
+    /// Does `message` take the status line from the one on it (#453, S-R18)?
+    ///
+    /// - Within one gesture, the most serious stays; on a tie, the last.
+    /// - A plain message with no gesture never replaces an orange or a red.
+    /// - Otherwise the newer gesture replaces the line at once.
+    fn takes_the_line(&self, message: &StatusMessage) -> bool {
+        let Some(line) = &self.status else {
+            return true;
+        };
+        if message.gesture.is_some() && message.gesture == line.gesture {
+            return message.level >= line.level;
+        }
+        !(message.gesture.is_none()
+            && message.level == StatusLevel::Info
+            && line.level != StatusLevel::Info)
+    }
+
+    /// Says a message: it enters the history (S-M6, last 50) and takes the
+    /// status line if [`Self::takes_the_line`] allows it.
     fn record(&mut self, text: String, level: StatusLevel) {
+        let gesture = self.message_gesture();
+        if level == StatusLevel::Error {
+            if let Some(gesture) = gesture {
+                self.last_error_gesture = Some(gesture);
+            }
+        }
         let message = StatusMessage {
             text,
             level,
             at: std::time::Instant::now(),
             wall: std::time::SystemTime::now(),
+            gesture,
+            seq: self.recorded_count,
         };
+        // One gesture = its final plain line plus its orange and red (#453).
+        if let (StatusLevel::Info, Some(gesture)) = (level, gesture) {
+            self.status_log
+                .retain(|old| !(old.level == StatusLevel::Info && old.gesture == Some(gesture)));
+        }
         if self.status_log.len() == STATUS_HISTORY_LEN {
             self.status_log.pop_front();
         }
         self.status_log.push_back(message.clone());
-        self.status = Some(message);
         self.recorded_count += 1;
+        if self.takes_the_line(&message) {
+            self.status = Some(message);
+        }
+    }
+
+    /// Says the progress of a long task (an import): a plain message with no
+    /// gesture that is **never** stored in the history (#453), so a long task
+    /// neither wipes the list nor replaces an orange or a red.
+    fn progress(&mut self, text: String) {
+        let message = StatusMessage {
+            text,
+            level: StatusLevel::Info,
+            at: std::time::Instant::now(),
+            wall: std::time::SystemTime::now(),
+            gesture: None,
+            seq: self.recorded_count,
+        };
+        if self.takes_the_line(&message) {
+            self.status = Some(message);
+        }
     }
 
     /// How many messages were ever recorded (never decreases).
@@ -7799,9 +7935,7 @@ impl AppState {
     /// [`AppState::recorded_count`]), oldest first. The history is capped, so
     /// a burst longer than the cap only returns what it still holds.
     pub fn messages_since(&self, count: u64) -> impl DoubleEndedIterator<Item = &StatusMessage> {
-        let new = usize::try_from(self.recorded_count.saturating_sub(count)).unwrap_or(usize::MAX);
-        let skip = self.status_log.len().saturating_sub(new);
-        self.status_log.iter().skip(skip)
+        self.status_log.iter().filter(move |m| m.seq >= count)
     }
 
     /// Does this forked view hold messages the root has not pulled yet? A view
@@ -7814,36 +7948,34 @@ impl AppState {
 
     /// Records the refusal of a gesture made outside the main window because
     /// `dialog` is open there (#471) and returns its sentence. It goes to the
-    /// status bar and the history as a warning, **never** through `warn`
+    /// status bar and the history as an orange, **never** through `warn`
     /// (which would wipe the error in the footer of the dialog) nor `fail`
     /// (which would put it in that footer). The same sentence refused again
-    /// right after adds no history line.
+    /// records again: the band of the window must show again (#453), so there
+    /// is no deduplication by text.
     pub fn refuse_outside_main(&mut self, dialog: open_dialog::OpenDialog) -> String {
         let text = open_dialog::refusal_text(dialog);
-        let repeated = self
-            .status_log
-            .back()
-            .is_some_and(|last| last.level == StatusLevel::Warning && last.text == text);
-        if !repeated {
-            self.record(text.clone(), StatusLevel::Warning);
-        }
+        self.record(text.clone(), StatusLevel::Warning);
         text
     }
 
-    /// Clears the information that is too old (S-M5) and returns the delay
-    /// left before the next deadline, to schedule **that one** repaint: no
-    /// periodic wake-up at rest. Warnings and errors stay.
+    /// Clears the plain message older than [`INFO_LIFETIME`] and the orange
+    /// older than [`WARNING_LIFETIME`] (S-M5), and returns the delay left
+    /// before the next deadline, to schedule **that one** repaint: no periodic
+    /// wake-up at rest (#104). A red stays. The history keeps what faded.
     pub fn expire_status(&mut self, now: std::time::Instant) -> Option<std::time::Duration> {
         let message = self.status.as_ref()?;
-        if message.level != StatusLevel::Info {
-            return None;
-        }
+        let lifetime = match message.level {
+            StatusLevel::Info => INFO_LIFETIME,
+            StatusLevel::Warning => WARNING_LIFETIME,
+            StatusLevel::Error => return None,
+        };
         let age = now.saturating_duration_since(message.at);
-        if age >= INFO_LIFETIME {
+        if age >= lifetime {
             self.status = None;
             None
         } else {
-            Some(INFO_LIFETIME - age)
+            Some(lifetime - age)
         }
     }
 
@@ -7900,9 +8032,13 @@ impl AppState {
         }
     }
 
-    /// Did the last gesture fail? Error in the dialog footer or in the status
-    /// bar.
-    pub(crate) fn last_action_failed(&self) -> bool {
+    /// Did THIS gesture fail? An error in the dialog footer, a blocking
+    /// dialog, or a red message said by the gesture in progress (#453). It
+    /// does not read the status line: another message of the same gesture, or
+    /// the line of an earlier gesture, changes nothing to the answer. Outside
+    /// any `dispatch`, each message is its own gesture, so the answer is that
+    /// of the last message said.
+    pub(crate) fn gesture_failed(&self) -> bool {
         // The low R² warning (#288) is not a failure: the gesture that opened
         // it succeeded.
         self.dialog_error.is_some()
@@ -7910,7 +8046,7 @@ impl AppState {
                 .alert
                 .as_ref()
                 .is_some_and(|alert| alert.kind != AlertKind::LowRSquared)
-            || self.status.as_ref().is_some_and(StatusMessage::is_error)
+            || self.last_error_gesture == Some(self.gesture_id)
     }
 
     /// Sends a command to the actor and reports the result.
@@ -8029,10 +8165,12 @@ impl AppState {
     /// To call at every frame: resumes when a recalculation that the
     /// interface did not wait for has just finished. Never blocks.
     pub fn poll_recalc(&mut self) {
-        self.check_session();
-        if self.recalc_since.is_some() && self.handle.recalc_running().is_none() {
-            self.finish_recalc();
-        }
+        self.background(|state| {
+            state.check_session();
+            if state.recalc_since.is_some() && state.handle.recalc_running().is_none() {
+                state.finish_recalc();
+            }
+        });
     }
 
     /// Has the session actor disappeared (panic, #310)? In that case, **once
@@ -8122,7 +8260,8 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.warn(tr!("status-nothing-to-undo")),
+            // Nothing to undo: the state is what was asked, so a plain message (S-R18).
+            Ok(None) => self.notice(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -8137,7 +8276,7 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.warn(tr!("status-nothing-to-redo")),
+            Ok(None) => self.notice(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -8150,6 +8289,10 @@ impl AppState {
     /// entry was committed. Public so the shell can call it on the view state
     /// of a detached window (D1 of #465).
     pub fn commit_open_entries(&mut self) -> bool {
+        self.gesture(Self::commit_open_entries_in_gesture)
+    }
+
+    fn commit_open_entries_in_gesture(&mut self) -> bool {
         let mut committed = false;
         if self.editing.is_some() && self.cell_edit_refusal().is_none() {
             self.commit_edit();
@@ -8665,7 +8808,7 @@ impl AppState {
                 let text = crate::tr!("status-loaded", path = self.path.as_str());
                 self.notice(text);
                 // An unreadable calculation is discarded (invariant 10) but
-                // reported: the message replaces "Loaded" in the status bar (#278).
+                // reported: this orange stays on the line over "Loaded", whatever the order (S-R18, #278).
                 if let Some(text) = discarded_calculations_text(&report) {
                     self.warn(text);
                 }
@@ -8864,7 +9007,6 @@ impl AppState {
         };
         self.selected_sheets.insert(book, id);
         self.editing = None;
-        self.status = None;
     }
 
     /// Transport to publish by the viewport that receives the copy gesture.
@@ -9306,7 +9448,7 @@ impl AppState {
             .map(|id| Command::RemoveNode { id })
             .collect();
         self.execute_object_group(MacroKind::DeleteObjects, commands);
-        if !users.is_empty() && !self.last_action_failed() {
+        if !users.is_empty() && !self.gesture_failed() {
             self.notice(tr!("object-delete-used", graphs = users.join(", ")));
         }
         self.open_column_use(readers);
@@ -9531,7 +9673,7 @@ impl AppState {
             let readers = self.column_users_before(&[sheet]);
             self.editing = None;
             self.execute(Command::RemoveNode { id: sheet });
-            if !users.is_empty() && !self.last_action_failed() {
+            if !users.is_empty() && !self.gesture_failed() {
                 self.notice(tr!("sheet-delete-used", graphs = users.join(", ")));
             }
             self.open_column_use(readers);
@@ -9610,17 +9752,16 @@ impl AppState {
         // up entirely numeric without any of its cells ever having been
         // explicitly "number", typically after fixing an "n/a" left as the
         // only non-numeric value.
-        // Not after a refused write: the conversion would replace the error message
-        // and look like a success.
-        if kind == ColumnType::Mixed && !self.last_action_failed() {
+        // Not after a refused write: the conversion would say a success next to the
+        // error.
+        if kind == ColumnType::Mixed && !self.gesture_failed() {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
         // Discreet notice (#311, S-R6): "1,234" is read as 1.234, not one
-        // thousand two hundred thirty-four. Set after `execute` (which rewrites
-        // the status), and only for a Numeric or Mixed cell input that
+        // thousand two hundred thirty-four. Only for a Numeric or Mixed cell input that
         // succeeded.
         if matches!(kind, ColumnType::Numeric | ColumnType::Mixed)
-            && !self.last_action_failed()
+            && !self.gesture_failed()
             && stokesforge_core::number_format::looks_like_thousands_separator(&text)
         {
             if let Some(value) = stokesforge_core::number_format::parse_input(&text) {
@@ -10128,7 +10269,7 @@ impl AppState {
             }
         });
         // A refused write (formula column) is followed by no conversion.
-        if repromote && !self.last_action_failed() {
+        if repromote && !self.gesture_failed() {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
         if own_macro {
@@ -10136,21 +10277,18 @@ impl AppState {
         }
     }
 
-    /// Status set when the copy overflows the sheet (#311): `columns` columns
+    /// Orange said when the copy overflows the sheet (#311): `columns` columns
     /// beyond the right edge, `fields` header rows beyond Formula (field
-    /// paste anchored low). What overflows is dropped, never added. Set
-    /// **after** the writes (each command rewrites the status), and only if
-    /// none failed: an error (formula column) stays displayed. A single
-    /// message if both overflow.
-    fn notice_dropped(&mut self, columns: usize, fields: usize) {
-        if self.last_action_failed() {
-            return;
-        }
+    /// paste anchored low). What overflows is dropped, never added: done, but
+    /// not as asked, so it is an orange (S-R18, #453) that stays over the
+    /// plain messages of the same paste. A red of the same paste still wins.
+    /// A single message if both overflow.
+    fn warn_dropped(&mut self, columns: usize, fields: usize) {
         match (columns, fields) {
             (0, 0) => {}
-            (columns, 0) => self.notice(tr!("status-paste-columns-dropped", count = columns)),
-            (0, fields) => self.notice(tr!("status-paste-fields-dropped", count = fields)),
-            (columns, fields) => self.notice(tr!(
+            (columns, 0) => self.warn(tr!("status-paste-columns-dropped", count = columns)),
+            (0, fields) => self.warn(tr!("status-paste-fields-dropped", count = fields)),
+            (columns, fields) => self.warn(tr!(
                 "status-paste-columns-fields-dropped",
                 columns = columns,
                 fields = fields
@@ -10220,7 +10358,7 @@ impl AppState {
                 }
                 // Header rows dropped: the low anchor pushes them beyond
                 // Formula (`writes` keeps only those that fit).
-                self.notice_dropped(
+                self.warn_dropped(
                     Self::dropped_columns(column_count, targets.len()),
                     rows.len() - writes.len(),
                 );
@@ -10260,7 +10398,7 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
-                self.notice_dropped(Self::dropped_columns(column_count, targets.len()), 0);
+                self.warn_dropped(Self::dropped_columns(column_count, targets.len()), 0);
             }
             // Copied fields + anchor on a data cell, or copied data rows +
             // anchor on a header field: different kinds, nothing is pasted
@@ -10390,9 +10528,9 @@ impl AppState {
         if grouped {
             self.end_grouped_macro();
         }
-        self.notice_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
-        // The refusal of a formula goes last: the other fields and the values
-        // are pasted, the status bar says what is not.
+        self.warn_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
+        // The other fields and the values are pasted, the status bar says what
+        // is not.
         self.fail_formula_paste(&refusals);
     }
 
@@ -10401,13 +10539,7 @@ impl AppState {
     /// formulas are stored, framed, the other columns went through. Nothing if
     /// every formula computes.
     fn fail_formula_paste(&mut self, refusals: &[(NodeId, String)]) {
-        // A rewrite of a comma range by the paste: its sentence is the
-        // status, unless an error wins (the error sentence is set below).
-        let warnings = std::mem::take(&mut self.paste_warnings);
         let Some((first, reason)) = refusals.first() else {
-            if let Some(sentence) = warnings.into_iter().next() {
-                self.warn(sentence);
-            }
             return;
         };
         let letters = |column: &NodeId| {
@@ -10471,8 +10603,10 @@ impl AppState {
         if field == HeaderField::Formula && !text.trim().is_empty() {
             return match self.write_formula_text(column, &text) {
                 FormulaWrite::Clean => None,
+                // Said at once: within the paste, the orange stays on the line
+                // over the plain messages of the writes that follow (S-R18).
                 FormulaWrite::Warned(sentence) => {
-                    self.paste_warnings.push(sentence);
+                    self.warn(sentence);
                     None
                 }
                 FormulaWrite::Kept(sentence) => Some(sentence),
@@ -10756,7 +10890,7 @@ impl AppState {
             ));
         }
         self.refresh();
-        if closed.is_ok() && !self.last_action_failed() {
+        if closed.is_ok() && !self.gesture_failed() {
             if let Some(label @ HistoryLabel::Macro(_)) = self.snapshot.history.undo_label.clone() {
                 self.notice(history_text(&label));
             }
@@ -10851,12 +10985,10 @@ impl AppState {
             self.fail(tr!("error-import-group"));
             return;
         }
-        // Accumulated rather than passed to `self.fail` along the loop:
-        // `self.fail`/`self.notice` replace `self.status` without combining it
-        // with what it already carried, so one `self.fail` per failing file
-        // would have been overwritten by the next. Everything ends up in a
-        // single message, a failure as soon as at least one file failed, so
-        // that it shows.
+        // Accumulated rather than passed to `self.fail` along the loop: a red
+        // per failing file would leave only the last one on the line.
+        // Everything ends up in a single message, a failure as soon as at least
+        // one file failed.
         let mut failures: Vec<String> = Vec::new();
         for item in &items {
             if let Err(failure) = &item.table {
@@ -11859,10 +11991,8 @@ impl AppState {
     /// the snapshot (this is the trap of this task: without this gesture, the
     /// grid would stay frozen although the model changed).
     ///
-    /// The message is set **before** `refresh`, as in [`AppState::
-    /// execute`]: if the refresh fails (actor unreachable), it overwrites
-    /// this message with the error; more serious, it must win, not the
-    /// reverse.
+    /// If the refresh that follows fails (actor unreachable), its red wins over
+    /// this plain message, whatever the order (S-R18).
     #[cfg(feature = "python")]
     fn finish_script_run(&mut self, outcome: ScriptOutcome) {
         let interrupted = outcome.interrupted;
