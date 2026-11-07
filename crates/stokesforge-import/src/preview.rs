@@ -107,6 +107,10 @@ pub struct PreviewLine {
     /// Line number in the original file, 1-based.
     pub number: usize,
     pub role: LineRole,
+    /// Sub-header roles the line carries (empty unless `role` is a
+    /// sub-header one); `role` is the first of them, see
+    /// [`SubheaderRoleSet::primary`].
+    pub subheader_roles: SubheaderRoleSet,
     pub text: String,
     /// Cell by cell, only for a data line within the `recipe.preview_lines`
     /// window; `None` for any other line, including a data line beyond this
@@ -190,6 +194,7 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
         lines.push(PreviewLine {
             number: i + 1,
             role,
+            subheader_roles: layout.subheader_roles[i],
             text: layout.raw[i].to_string(),
             cells,
         });
@@ -202,26 +207,59 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     })
 }
 
-/// Role of a sub-header line, 1-based **within the sub-header block**
-/// (independent of the number of main header lines before it). A line that
-/// falls in several assigned ranges (unlikely but possible: nothing prevents
-/// the user from overlapping two roles) follows the priority `long_name` >
-/// `unit` > `comment` > `x_prime`, documented here rather than carrying
-/// several roles at once, which [`LineRole`] does not model.
-pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> LineRole {
+/// The sub-header roles a single line carries (#488): Long Name, Units,
+/// Comments and x'. A sub-header line may fall in several assigned ranges at
+/// once (e.g. `12.5,13` read both as long names and as x' values); the import
+/// reads each role range independently, so the preview shows every role of
+/// the line rather than one of them. [`LineRole`] stays the line's zone;
+/// this set is the detail of a sub-header line (empty for any other line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SubheaderRoleSet {
+    pub long_name: bool,
+    pub unit: bool,
+    pub comment: bool,
+    pub x_prime: bool,
+}
+
+impl SubheaderRoleSet {
+    /// True if the line carries no assigned role.
+    pub fn is_empty(&self) -> bool {
+        !(self.long_name || self.unit || self.comment || self.x_prime)
+    }
+
+    /// The roles of the set, in the fixed order L, U, C, X'.
+    pub fn roles(&self) -> Vec<LineRole> {
+        [
+            (self.long_name, LineRole::SubheaderLongName),
+            (self.unit, LineRole::SubheaderUnit),
+            (self.comment, LineRole::SubheaderComment),
+            (self.x_prime, LineRole::SubheaderXPrime),
+        ]
+        .into_iter()
+        .filter_map(|(on, role)| on.then_some(role))
+        .collect()
+    }
+
+    /// The single [`LineRole`] standing for the line (colour, code): the first
+    /// role in the order L, U, C, X', or plain `Subheader` if the set is empty.
+    pub fn primary(&self) -> LineRole {
+        self.roles().first().copied().unwrap_or(LineRole::Subheader)
+    }
+}
+
+/// Roles of a sub-header line, 1-based **within the sub-header block**
+/// (independent of the number of main header lines before it): every role
+/// whose range contains the line (#488; before, a fixed priority kept only
+/// one). `same_line_name_unit` still ignores Units, as the import does.
+pub(crate) fn subheader_line_roles(sub_index: usize, roles: &SubheaderRoles) -> SubheaderRoleSet {
     let contains = |range: Option<crate::recipe::SubheaderLineRange>| {
         range.is_some_and(|r| r.from <= sub_index && sub_index <= r.to)
     };
-    if contains(roles.long_name) {
-        LineRole::SubheaderLongName
-    } else if !roles.same_line_name_unit && contains(roles.unit) {
-        LineRole::SubheaderUnit
-    } else if contains(roles.comment) {
-        LineRole::SubheaderComment
-    } else if contains(roles.x_prime) {
-        LineRole::SubheaderXPrime
-    } else {
-        LineRole::Subheader
+    SubheaderRoleSet {
+        long_name: contains(roles.long_name),
+        unit: !roles.same_line_name_unit && contains(roles.unit),
+        comment: contains(roles.comment),
+        x_prime: contains(roles.x_prime),
     }
 }
 
@@ -344,6 +382,60 @@ mod tests {
             ]
         );
         assert_eq!(result.total_data_lines, 2);
+    }
+
+    fn roles_of(
+        range_l: Option<(usize, usize)>,
+        range_x: Option<(usize, usize)>,
+    ) -> SubheaderRoles {
+        let r = |o: Option<(usize, usize)>| o.map(|(from, to)| SubheaderLineRange { from, to });
+        SubheaderRoles {
+            long_name: r(range_l),
+            x_prime: r(range_x),
+            ..SubheaderRoles::default()
+        }
+    }
+
+    #[test]
+    fn subheader_line_in_two_ranges_carries_both_roles() {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: 1,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = roles_of(Some((1, 1)), Some((1, 1)));
+        let result = preview(b"12.5,13\n1,2\n", &recipe).unwrap();
+        let line = &result.lines[0];
+        assert_eq!(
+            line.subheader_roles,
+            SubheaderRoleSet {
+                long_name: true,
+                x_prime: true,
+                ..SubheaderRoleSet::default()
+            }
+        );
+        assert_eq!(line.role, LineRole::SubheaderLongName);
+        assert!(result.lines[1].subheader_roles.is_empty());
+    }
+
+    #[test]
+    fn same_line_name_unit_ignores_an_overlapping_unit_range() {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: 1,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = SubheaderRoles {
+            long_name: Some(SubheaderLineRange::single(1)),
+            unit: Some(SubheaderLineRange::single(1)),
+            same_line_name_unit: true,
+            ..SubheaderRoles::default()
+        };
+        let result = preview(b"T (K),P (bar)\n1,2\n", &recipe).unwrap();
+        let set = result.lines[0].subheader_roles;
+        assert!(set.long_name && !set.unit);
     }
 
     #[test]

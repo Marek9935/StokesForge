@@ -491,6 +491,27 @@ mod tests {
     use crate::recipe::{HeaderSkip, ImportRecipe};
 
     #[test]
+    fn one_subheader_line_feeds_two_overlapping_roles() {
+        use crate::recipe::{HeaderLayout, SubheaderLineRange, SubheaderRoles};
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: 1,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = SubheaderRoles {
+            long_name: Some(SubheaderLineRange::single(1)),
+            x_prime: Some(SubheaderLineRange::single(1)),
+            ..SubheaderRoles::default()
+        };
+        let table = parse(b"12.5,13\n1,2\n", &recipe).unwrap();
+        assert_eq!(table.columns[0].long_name.as_deref(), Some("12.5"));
+        assert_eq!(table.columns[1].long_name.as_deref(), Some("13"));
+        assert_eq!(table.columns[0].x_prime, Some(12.5));
+        assert_eq!(table.columns[1].x_prime, Some(13.0));
+    }
+
+    #[test]
     fn binary_file_gives_not_text_without_panicking() {
         let bytes: &[u8] = &[0xff, 0xfe, 0x00, 0x01, 0x02];
         let recipe = ImportRecipe::new("default");

@@ -487,3 +487,47 @@ fn automatic_data_end_follows_the_day_month_order() {
     assert_eq!(rows(DateOrder::MonthFirst), 3);
     assert_eq!(rows(DateOrder::DayFirst), 4);
 }
+
+/// Every sub-header line of the preview carries exactly the roles whose range
+/// contains it (#488), overlapping ranges included.
+#[test]
+fn subheader_roles_are_the_ranges_containing_the_line() {
+    use stokesforge_import::{HeaderLayout, SubheaderLineRange, SubheaderRoles};
+    let range = |from, to| Some(SubheaderLineRange { from, to });
+    let mut recipe = ImportRecipe::new("Audit");
+    recipe.header_layout = HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 4,
+        auto_detect: false,
+    };
+    recipe.subheader_roles = SubheaderRoles {
+        long_name: range(1, 2),
+        unit: range(2, 3),
+        comment: range(3, 3),
+        x_prime: range(1, 4),
+        same_line_name_unit: false,
+    };
+    let bytes = b"a,b\nc,d\ne,f\n1,2\n9,9\n";
+    let shown = preview(bytes, &recipe).expect("preview");
+    for (i, line) in shown.lines.iter().take(4).enumerate() {
+        let n = i + 1;
+        let inside = |r: Option<SubheaderLineRange>| r.is_some_and(|r| r.from <= n && n <= r.to);
+        let set = line.subheader_roles;
+        assert_eq!(
+            set.long_name,
+            inside(recipe.subheader_roles.long_name),
+            "L, line {n}"
+        );
+        assert_eq!(set.unit, inside(recipe.subheader_roles.unit), "U, line {n}");
+        assert_eq!(
+            set.comment,
+            inside(recipe.subheader_roles.comment),
+            "C, line {n}"
+        );
+        assert_eq!(
+            set.x_prime,
+            inside(recipe.subheader_roles.x_prime),
+            "X', line {n}"
+        );
+    }
+}

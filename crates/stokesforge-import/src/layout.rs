@@ -7,7 +7,7 @@
 
 use crate::numbers::NumberFormat;
 use crate::parse::{resolve_separator, EffectiveSeparator, ImportError};
-use crate::preview::LineRole;
+use crate::preview::{LineRole, SubheaderRoleSet};
 use crate::recipe::{HeaderSkip, ImportRecipe};
 
 /// The split of a text according to a recipe.
@@ -20,6 +20,9 @@ pub(crate) struct Layout<'a> {
     pub end: usize,
     /// Role of each line of `raw`; `Blank` outside `start..end`.
     pub roles: Vec<LineRole>,
+    /// Sub-header roles of each line of `raw` (#488); empty for any line that
+    /// is not a sub-header line.
+    pub subheader_roles: Vec<SubheaderRoleSet>,
     /// Indices (in `raw`) of the header lines, main then sub-header.
     pub header: Vec<usize>,
     /// Position, in `header`, of the first sub-header line.
@@ -98,6 +101,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     }
 
     let mut roles = vec![LineRole::Blank; raw.len()];
+    let mut subheader_roles = vec![SubheaderRoleSet::default(); raw.len()];
     let mut header: Vec<usize> = Vec::new();
     let mut idx = start;
     let subheader_start;
@@ -113,7 +117,9 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         subheader_start = header.len();
         let sub_n = recipe.header_layout.subheader_lines.min(end - idx);
         for s in 0..sub_n {
-            roles[idx] = crate::preview::subheader_line_role(s + 1, &recipe.subheader_roles);
+            let set = crate::preview::subheader_line_roles(s + 1, &recipe.subheader_roles);
+            roles[idx] = set.primary();
+            subheader_roles[idx] = set;
             header.push(idx);
             idx += 1;
         }
@@ -236,6 +242,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         start,
         end,
         roles,
+        subheader_roles,
         header,
         subheader_start,
         column_header,

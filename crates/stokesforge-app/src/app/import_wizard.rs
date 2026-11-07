@@ -2142,12 +2142,14 @@ mod tests {
                 PreviewLine {
                     number: 1,
                     role: LineRole::MainHeader,
+                    subheader_roles: Default::default(),
                     text: "TITLE".into(),
                     cells: None,
                 },
                 PreviewLine {
                     number: 2,
                     role: LineRole::Data,
+                    subheader_roles: Default::default(),
                     text: "1.5;abc".into(),
                     cells: Some(vec![
                         PreviewCell {
@@ -2163,6 +2165,7 @@ mod tests {
                 PreviewLine {
                     number: 3,
                     role: LineRole::Footer,
+                    subheader_roles: Default::default(),
                     text: "END".into(),
                     cells: None,
                 },
