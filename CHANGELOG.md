@@ -78,6 +78,11 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- The third-party notices (`THIRD-PARTY-LICENSES.txt`) are readable by every
+  user (#486): the file was written with mode 600 and an installation by the
+  RPM, the DEB or `install.sh --system` kept it, so a normal user could not
+  open it. The RPM and the DEB now declare the glibc of the archive (2.35):
+  an older system refuses the package instead of failing at start.
 - **Recalculate**, **Relink** and Analyze Rows on a checked transposed sheet no
   longer empty a row while a column of the source calculates from that sheet
   (#484). They are refused and say why (Column C of Sheet1 calculates from

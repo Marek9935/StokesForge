@@ -4,6 +4,7 @@
 #   NFPM_PKG_VERSION  X.Y.Z or X.Y.Z~rcN (already in the form of both formats)
 #   @STAGE@           the staging tree (opt/stokesforge/, usr/share/…), substituted
 #   @SCRIPTS@         scripts/linux-packages (preinst, copyright), substituted
+#   @GLIBC_FLOOR@     GLIBC_FLOOR of scripts/glibc-floor.env, substituted (#486)
 name: stokesforge
 arch: amd64
 platform: linux
@@ -21,7 +22,10 @@ license: GPL-3.0-or-later
 
 # The graphics libraries are loaded at run time (dlopen), so no scan finds
 # them: declared by hand, by soname for the RPM and by package for the DEB.
+# The C library is declared too, at the floor of the archive (#389): an older
+# system refuses the package instead of failing at start.
 depends:
+  - libc.so.6(GLIBC_@GLIBC_FLOOR@)(64bit)
   - libvulkan.so.1()(64bit)
   - libwayland-client.so.0()(64bit)
   - libwayland-egl.so.1()(64bit)
@@ -38,6 +42,7 @@ recommends:
 overrides:
   deb:
     depends:
+      - libc6 (>= @GLIBC_FLOOR@)
       - libvulkan1
       - libwayland-client0
       - libwayland-egl1
