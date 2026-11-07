@@ -52,6 +52,19 @@ without a message, see `docs/persistence.md`).
   dialog. Warnings of the local view of a detached workbook (an unreadable
   clipboard) now show in its window and in the main history.
 
+- Copy, paste and duplicate a folder in the Project Manager (#391): what is
+  inside the copy reads the copy (a graph of the copied folder plots the copied
+  workbook), and what is outside is still read from the original. Windows copied
+  together in one gesture keep each other the same way. Pasting a folder into
+  another project brings what it plots.
+- An empty **entry row** (marked `*`) is always shown below the last row of a
+  sheet (#440), also in a new workbook, which has no row yet. Typing in it
+  creates the row, and one Undo removes it. It is not data: not saved, not
+  plotted, not part of Select All.
+- User manual (#364, #365, #366, #367): the guide chapters, the Shortcuts, Mouse
+  gestures and Interface texts references (generated from the application) and
+  reproducible screenshots are written, published with each release.
+
 ### Changed
 
 - One rule for the status bar messages (#453). Within one action, the most
@@ -110,10 +123,65 @@ without a message, see `docs/persistence.md`).
   time (#457): before, on Wayland, every second grab did nothing, and moving a
   window could then extend the selected columns of a sheet when the mouse
   passed over the column letters. Present on `main` too.
+- Esc closes a dialog that is open over a visible workbook (#406): the grid
+  no longer takes the key first. While a dialog is open, the keys of the grid
+  and of the Project Manager stand aside.
+- Saving includes what you are still typing (#465, #466): Ctrl+S, Save As and
+  the **Save** answer of the Unsaved Changes question first enter the open
+  cell, header field or note, in a detached window too, and the graph title,
+  legend name or free text being edited. A number the cell refuses stays open
+  and is left out of the save.
+- Undoing or redoing a group of changes over formula columns or calculation
+  results no longer stops half way (#448): the columns are made to fit and
+  recalculated. A manual calculation whose result had to be refitted is marked
+  out of date.
+- Inserting or deleting rows beyond the last row of the data, when that moves a
+  series plotted by rows, now adds its Undo step (#436).
+- The axis line, the edge of the plot area, is a target like the numbers of the
+  axis (#385): double-click it to open Graph Properties on that axis, even when
+  a curve runs along the edge.
+- Tick labels never overlap (#397): the number of labels follows the length of
+  the axis, so a short axis writes fewer numbers.
+- On Windows, dropping files from Explorer onto the application reads the real
+  position of the cursor (#383), so the drop reaches the window under it.
 
 ### Changed
 
 - The logo in `assets/logo/` is now under GPL-3.0-or-later, like the code (#450).
+- Project Manager (#423): a click selects a window or a folder and opens
+  nothing; a double-click opens a window or opens or closes a folder, and
+  Enter does the same on the selection. There is no more slow click to rename:
+  use F2. Left and Right close and open a folder, Shift with Up or Down
+  extends the selection, **Cut** then **Paste** moves entries into the
+  selected folder in one Undo step, and a copy keeps its name when the
+  destination folder does not use it. While the panel has the focus, Ctrl+C,
+  Ctrl+X, Ctrl+V, Delete, F2, Ctrl+D and the arrows act on it, not on the graph
+  or workbook in front.
+- Layer numbers sit at the top left of the layer's own cell (#395), above its
+  plot area, instead of at the corner of the graph window. Overlay layers of one
+  cell have their badges side by side.
+- **Graph Properties** > **Axes** (#396) lists the four sides, Bottom, Left,
+  Right and Top, on every layer, each axis named where it is drawn. A side that
+  another layer of the same plot area already uses is greyed, with the reason on
+  hover. An overlay layer has an **Own scale** box on its Top and Right sides.
+  A mirror axis and an overlay axis cannot share a side.
+- Primary tabs are on top and secondary tabs are vertical at the left (#393):
+  the Preferences rubrics are across the top and the tabs inside a page (Display,
+  the axes of Graph Properties) are listed at the left.
+- Secondary text (help, reasons) is one step smaller than body text, 11 pt, and
+  empty states or labels beside a result are dimmed at body size (#392). The
+  header rows of a sheet (x', Long Name, Units, Comments, F(x)) are no longer
+  dimmed.
+- In a cell, a refused entry or a formula in error tints the cell instead of
+  drawing a red frame (#410). The **?** icon of the F(x)= help sits in the next
+  cell, so the field keeps the whole width of its cell.
+- Pages that scroll keep a margin under their last control (#347).
+- The history entry of **Refresh from Source** reads "Refresh from Source", like
+  its menu (#451).
+- Opening a menu and moving the pointer over another menu title opens that one
+  without a click (#343). With no menu open, hovering opens nothing.
+- The Formula Functions help and the manual say that `mod(-1e-20, 3)` is 3,
+  like Python and Excel (#412).
 - A transposed sheet over a formula column no longer says "Out of date" when
   the formula still gives the same numbers, nor after reopening the file (#439).
   The recalculation now keeps the version of a formula column it recomputes to
@@ -516,8 +584,7 @@ without a message, see `docs/persistence.md`).
   never touches projects, preferences or recovery copies.
 
 - User manual skeleton (#362): `manual/`, built with mdBook, attached to each
-  release and published on GitLab Pages for final versions. Chapters are
-  still to be written.
+  release and published on GitLab Pages for final versions.
 
 ### Removed
 
@@ -607,6 +674,13 @@ without a message, see `docs/persistence.md`).
   change.
 - The robustness probes are renamed `stokesforge-alloc-probe` and
   `stokesforge-stack-probe` (arguments `build`, `undo`, `clear`, `drop`).
+
+## [1.0.1] - 2026-10-27
+
+License fix only (#348), with no code change: StokesForge is under the pure
+GPL-3.0-or-later, with no additional permission. The extension exception for
+`pyst` of 1.0.0 is removed (`LICENSE-EXCEPTION` deleted). An additional
+permission is asked of the author, case by case.
 
 ## [1.0.0] - 2026-10-27
 
