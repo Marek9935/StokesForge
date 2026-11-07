@@ -1514,7 +1514,7 @@ analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Déconvolution directe
 error-model-calculated-column-read-only = Cette colonne est produite par un calcul. La détacher du calcul pour modifier ses valeurs
 error-model-transpose-no-x-prime = La colonne { $letter } ({ $name }) n’a pas de x'. Lui en donner un pour analyser une ligne
-error-model-transpose-source-reads-it = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher Recalculer automatiquement
+error-model-transpose-source-reads-it = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour suivre
 error-model-calculation-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d’abord Recalculer automatiquement sur { $sheet }
 error-model-transpose-not-numeric = La colonne { $letter } ({ $name }) contient du texte. Seules des colonnes numériques permettent d’analyser une ligne
 
@@ -2269,7 +2269,6 @@ transpose-auto = Recalculer automatiquement
     .hint = Met { $sheet } à jour dès que { $source } change. Une valeur saisie dedans arrête les mises à jour jusqu’à Relier de nouveau
     .disabled = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher cette case
 transpose-state-stuck = Pas à jour : { $reason }
-transpose-stuck-reads-it = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour suivre
 
 # Lissage (#324)
 analysis-kind-smooth = Lissage

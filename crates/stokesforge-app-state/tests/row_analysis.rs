@@ -350,3 +350,116 @@ fn a_followed_sheet_blocked_by_a_source_formula_names_the_column() {
         )
     );
 }
+
+// -- #484: a checked sheet with a reader refuses Recalculate, Relink, Analyze Rows
+
+/// A followed sheet of row 2 whose source column C keeps a refused formula
+/// reading it: the sheet is out of date and stuck. Returns the sheet.
+fn followed_with_a_reader(s: &mut Setup) -> NodeId {
+    use stokesforge_app_state::state::HeaderField;
+    open_rows(s, &[1]);
+    s.state.dispatch(Action::ApplyAnalysis);
+    let sheet = transposed(s).unwrap();
+    let sheet_name = name(s, sheet);
+    s.state.begin_header_edit(s.cols[2], HeaderField::Formula);
+    s.state.header_editing_mut().unwrap().buffer = format!("max('{sheet_name}'!B)");
+    s.state.commit_header_edit();
+    s.state.refresh();
+    sheet
+}
+
+fn type_in_the_sheet(s: &mut Setup, sheet: NodeId) {
+    let row = s.state.tree().children(sheet).unwrap()[1];
+    s.session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: row,
+            start: 0,
+            values: stokesforge_core::ValueBlock::Float(vec![-7.0]),
+            expected_version: None,
+        })
+        .unwrap();
+    s.state.refresh();
+}
+
+/// Witness: the old catalog sentence (it said "to check Recalculate
+/// automatically"), or the refusal removed from `recalculate_transpose_inner`.
+#[test]
+fn recalculate_of_a_followed_sheet_with_a_reader_says_why_and_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let sheet = followed_with_a_reader(&mut s);
+    let info = s.state.transpose_info(sheet).unwrap();
+    assert!(info.stale && !info.modified);
+    let stuck = info.stuck.clone().expect("a reason");
+    let undo_before = s.state.can_undo();
+    let tree_before = s.state.tree().clone();
+    s.state.dispatch(Action::RecalculateTranspose { sheet });
+    let status = s.state.status().expect("a message");
+    assert_eq!(
+        status.level,
+        stokesforge_app_state::state::StatusLevel::Error
+    );
+    assert_eq!(status.text, stuck);
+    assert!(status.text.ends_with("Remove that formula to follow"));
+    let after = s.state.transpose_info(sheet).unwrap();
+    assert!(after.stale);
+    assert_eq!(after.stuck, Some(stuck));
+    assert_eq!(s.state.can_undo(), undo_before);
+    assert_eq!(s.state.tree().as_ref(), tree_before.as_ref());
+}
+
+/// Witness: the pre-check removed from `recalculate_transpose` (the question
+/// would be asked, then refused).
+#[test]
+fn relink_with_a_reader_is_refused_before_the_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let sheet = followed_with_a_reader(&mut s);
+    type_in_the_sheet(&mut s, sheet);
+    assert!(s.state.transpose_info(sheet).unwrap().modified);
+    s.state.dispatch(Action::RecalculateTranspose { sheet });
+    assert_eq!(s.state.pending_transpose_relink(), None);
+    let status = s.state.status().expect("a message");
+    assert_eq!(
+        status.level,
+        stokesforge_app_state::state::StatusLevel::Error
+    );
+    assert!(status.text.ends_with("Remove that formula to follow"));
+    assert!(s.state.transpose_info(sheet).unwrap().modified, "kept");
+}
+
+/// Witness: the call removed from `transpose_rows_inner` (a form would open).
+#[test]
+fn analyzing_a_row_of_a_stale_modified_sheet_with_a_reader_opens_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let sheet = followed_with_a_reader(&mut s);
+    type_in_the_sheet(&mut s, sheet);
+    let undo_before = s.state.can_undo();
+    open_rows(&mut s, &[2]);
+    assert!(s.state.analysis_form().is_none(), "no form");
+    let status = s.state.status().expect("the reason");
+    assert_eq!(
+        status.level,
+        stokesforge_app_state::state::StatusLevel::Error
+    );
+    assert!(status.text.ends_with("Remove that formula to follow"));
+    assert_eq!(s.state.can_undo(), undo_before);
+    // No group left open: the next write files itself alone and Undo takes it.
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    s.state.dispatch(Action::Undo);
+    assert_eq!(s.state.can_undo(), undo_before);
+}
+
+#[test]
+fn analyzing_a_row_of_an_unchecked_sheet_with_a_reader_opens_the_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let sheet = followed_with_a_reader(&mut s);
+    s.state
+        .dispatch(Action::SetTransposeAuto { sheet, auto: false });
+    open_rows(&mut s, &[2]);
+    assert!(s.state.analysis_form().is_some(), "form opens");
+    s.state.dispatch(Action::CloseAnalysis);
+}

@@ -516,6 +516,18 @@ impl Tree {
         })
     }
 
+    /// #484: the refusal of an explicit Recalculate, Relink or Analyze Rows on
+    /// `sheet`: `None` unless its box is checked, otherwise
+    /// [`Self::transpose_check_refusal`]. Same predicate as the follow pass
+    /// uses to skip a checked sheet; an unchecked sheet with such a reader
+    /// stays legal.
+    pub fn transpose_loop_refusal(&self, sheet: NodeId) -> Option<crate::error::CoreError> {
+        if !self.transpose_link(sheet)?.auto_recalc {
+            return None;
+        }
+        self.transpose_check_refusal(sheet)
+    }
+
     /// Rule 2 of #463 for one column: the error to show when the stored
     /// formula of `column` (or `candidate`, a formula being entered) makes the
     /// source of a followed sheet calculate from that sheet. A candidate is

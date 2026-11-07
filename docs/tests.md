@@ -1333,7 +1333,8 @@ One layer, one file, one witness tested by mutation:
   not rewritten until its source changes (load hold), a stored forbidden formula
   is blanked and blocks following; `commands/tests/transpose.rs`: the toggle is
   one entry, rechecking is refused with no entry, a macro over a followed link
-  column finishes (`is_derived`); `persistence`: round trip of both states, a
+  column finishes (`is_derived`), Recalculate and Analyze Rows are refused with no
+  entry on a checked sheet with a reader and allowed once unchecked or cleared (#484); `persistence`: round trip of both states, a
   record without the field is unchecked; `b3`: a followed sheet read by its own
   source does not loop.
 - `stokesforge-session/tests/formula_structure.rs` (#430, #439, links over formula columns,

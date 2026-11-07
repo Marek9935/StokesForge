@@ -90,7 +90,7 @@ impl HostError {
             CoreError::TransposeNoXPrime { .. } | CoreError::TransposeNotNumeric { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
-            // #463: a formula or a calculation that would read the checked
+            // #463, #484: a formula or a calculation that would read the checked
             // transposed sheet of its own source (a loop) is refused as a value.
             CoreError::TransposeSourceReadsIt { .. }
             | CoreError::CalculationReadsFollowingSheet { .. } => {

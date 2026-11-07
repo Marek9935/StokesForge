@@ -377,7 +377,11 @@ Both are **structural**
 refusal (column without x', text column) restores the tree and pushes nothing.
 `SetTransposeAuto { sheet, auto }` (#463) checks or unchecks the box
 "Recalculate automatically": structural, one entry, refused when checking
-while the source calculates from the sheet (nothing pushed). Following itself
+while the source calculates from the sheet (nothing pushed). Likewise
+`RecalculateTranspose`, and `TransposeRows` on an existing sheet, are refused
+with the same error while the box is checked and the source calculates from the
+sheet (#484, `Tree::transpose_loop_refusal`; nothing pushed, an open
+`AnalyzeRows` group is aborted by the caller). Following itself
 is **not** a command: the session pass writes the linked columns outside the
 history, like an analysis pass, so one Ctrl+Z undoes a source edit and the
 sheet follows the restored source. A linked column of a followed sheet is

@@ -251,3 +251,222 @@ fn a_macro_over_a_followed_link_column_finishes_but_not_over_an_unchecked_one() 
         assert_eq!(outcome.is_ok(), followed, "followed: {followed}");
     }
 }
+
+// -- #484: Recalculate, Relink and Analyze Rows refuse a loop -------------------
+
+/// Adds a column to the source that calculates from the transposed sheet, as a
+/// formula entered while the box was unchecked (or kept by the pass). It has an
+/// x' so that the text / no x' refusal does not come first.
+fn add_reader(w: &mut World, sheet: NodeId) -> NodeId {
+    let reader = w
+        .project
+        .add_column(w.sheet, None, Some("R"), {
+            let mut column = Column::from_f64(&[0.0, 0.0]);
+            column.set_meta(ColumnMeta {
+                x_prime: Some(9.0),
+                ..ColumnMeta::default()
+            });
+            column
+        })
+        .unwrap();
+    let name = w.project.tree().node(sheet).unwrap().name().to_string();
+    let formula = w
+        .project
+        .tree()
+        .formula_from_letters(reader, &format!("max('{name}'!B)"))
+        .unwrap();
+    w.project
+        .set_column_meta(
+            reader,
+            ColumnMeta {
+                formula: Some(formula),
+                x_prime: Some(9.0),
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+    reader
+}
+
+fn remove_formula(w: &mut World, reader: NodeId) {
+    w.project
+        .set_column_meta(
+            reader,
+            ColumnMeta {
+                x_prime: Some(9.0),
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+}
+
+fn execute_err(w: &mut World, command: Command) -> stokesforge_commands::CommandError {
+    w.history.execute(&mut w.project, command).unwrap_err()
+}
+
+#[test]
+fn recalculate_is_refused_while_a_checked_sheet_has_a_reader_and_leaves_no_entry() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    add_reader(&mut w, sheet);
+    assert!(
+        w.project
+            .tree()
+            .transpose_link(sheet)
+            .unwrap()
+            .state(w.project.tree())
+            .stale
+    );
+    let before = w.project.tree().clone();
+    let error = execute_err(&mut w, Command::RecalculateTranspose { sheet });
+    match error {
+        stokesforge_commands::CommandError::Core(CoreError::TransposeSourceReadsIt {
+            letter,
+            ..
+        }) => assert_eq!(letter, "D"),
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(w.project.tree().as_ref(), before.as_ref());
+    // The refused command left no entry: undo takes the transposition.
+    assert!(w.history.undo(&mut w.project).unwrap());
+    assert!(w.project.tree().transposes().is_empty());
+}
+
+#[test]
+fn recalculate_of_an_unchecked_sheet_with_a_reader_refreshes_the_link() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    run(&mut w, Command::SetTransposeAuto { sheet, auto: false });
+    let reader = add_reader(&mut w, sheet);
+    run(&mut w, Command::RecalculateTranspose { sheet });
+    let link = w.project.tree().transpose_link(sheet).unwrap();
+    assert!(link.inputs.iter().any(|i| i.column == reader));
+}
+
+#[test]
+fn recalculate_works_once_the_box_is_unchecked() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    add_reader(&mut w, sheet);
+    let error = execute_err(&mut w, Command::RecalculateTranspose { sheet });
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::TransposeSourceReadsIt { .. })
+    ));
+    run(&mut w, Command::SetTransposeAuto { sheet, auto: false });
+    run(&mut w, Command::RecalculateTranspose { sheet });
+}
+
+#[test]
+fn recalculate_works_once_the_formula_is_removed_and_the_sheet_is_then_up_to_date() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    let reader = add_reader(&mut w, sheet);
+    remove_formula(&mut w, reader);
+    let tree = w.project.tree();
+    assert!(tree.transpose_link(sheet).unwrap().state(tree).stale);
+    run(&mut w, Command::RecalculateTranspose { sheet });
+    let tree = w.project.tree();
+    assert!(!tree.transpose_link(sheet).unwrap().state(tree).stale);
+}
+
+#[test]
+fn analyzing_a_row_of_a_stale_checked_sheet_with_a_reader_is_refused_with_no_entry() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    add_reader(&mut w, sheet);
+    let before = w.project.tree().clone();
+    let source = w.sheet;
+    let error = execute_err(
+        &mut w,
+        Command::TransposeRows {
+            source,
+            rows: vec![0],
+        },
+    );
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::TransposeSourceReadsIt { .. })
+    ));
+    assert_eq!(w.project.tree().as_ref(), before.as_ref());
+    assert!(w.history.undo(&mut w.project).unwrap());
+    assert!(w.project.tree().transposes().is_empty());
+}
+
+#[test]
+fn a_modified_checked_sheet_with_a_reader_gets_no_new_row() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    let row = w.project.tree().children(sheet).unwrap()[1];
+    run(
+        &mut w,
+        Command::SetCells {
+            column: row,
+            start: 0,
+            values: ValueBlock::Float(vec![-1.0]),
+            expected_version: None,
+        },
+    );
+    add_reader(&mut w, sheet);
+    let columns = w.project.tree().children(sheet).unwrap().len();
+    let source = w.sheet;
+    let error = execute_err(
+        &mut w,
+        Command::TransposeRows {
+            source,
+            rows: vec![1],
+        },
+    );
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::TransposeSourceReadsIt { .. })
+    ));
+    assert_eq!(w.project.tree().children(sheet).unwrap().len(), columns);
+}
+
+/// Option A of #484: refused even when nothing would be written (an existing
+/// row of a modified sheet). Witness: guarding the call with `refresh` or a
+/// new row.
+#[test]
+fn an_existing_row_of_a_modified_checked_sheet_with_a_reader_is_refused_too() {
+    let mut w = world();
+    let sheet = transposed(&mut w);
+    let row = w.project.tree().children(sheet).unwrap()[1];
+    run(
+        &mut w,
+        Command::SetCells {
+            column: row,
+            start: 0,
+            values: ValueBlock::Float(vec![-1.0]),
+            expected_version: None,
+        },
+    );
+    add_reader(&mut w, sheet);
+    let before = w.project.tree().clone();
+    let source = w.sheet;
+    let error = execute_err(
+        &mut w,
+        Command::TransposeRows {
+            source,
+            rows: vec![0],
+        },
+    );
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::TransposeSourceReadsIt { .. })
+    ));
+    assert_eq!(w.project.tree().as_ref(), before.as_ref());
+    // No entry: undo takes the typed value, not a TransposeRows.
+    assert!(w.history.undo(&mut w.project).unwrap());
+    let typed_back = w
+        .project
+        .tree()
+        .node(row)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap()
+        .to_vec();
+    assert_ne!(typed_back[0], -1.0);
+}

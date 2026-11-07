@@ -76,6 +76,12 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- **Recalculate**, **Relink** and Analyze Rows on a checked transposed sheet no
+  longer empty a row while a column of the source calculates from that sheet
+  (#484). They are refused and say why (Column C of Sheet1 calculates from
+  Sheet1ᵀ. Remove that formula to follow): the sheet keeps its last numbers and
+  stays out of date. Relink says so before asking for confirmation. An
+  unchecked sheet is not concerned.
 - Enter in a cell of a detached workbook moves the cursor to the row below, as
   in the main window (#470): the move was undone by the window's own selection.
 - Ctrl+Z, Ctrl+Y and Ctrl+S now work in the detached windows (#459): the graph,
