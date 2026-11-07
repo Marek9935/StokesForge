@@ -218,7 +218,8 @@ in the metadata with `keep_footer_metadata`.
 `ImportRecipe::keep_header_metadata` (true), `keep_footer_metadata` (false) and
 `excluded_metadata` (excluded keys or sections) drive `ParsedTable::metadata()`
 (`crate::metadata`, key / value lines, `[...]` sections, lines without a key
-kept as they are). `stokesforge-app` copies them into `ColumnMeta::file_metadata`
+kept as they are; a sub-header line carrying a role (`Layout::subheader_roles`,
+the preview's own) is not metadata, #488). `stokesforge-app` copies them into `ColumnMeta::file_metadata`
 of each imported column — in the "Import" macro, with no
 edit command: read-only. Display: "Metadata" row of the header ("📋 N
 keys"), click → modal viewing window (`column_metadata_window`).

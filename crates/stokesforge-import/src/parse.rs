@@ -396,9 +396,16 @@ pub(crate) fn table_from_layout(
         }
     }
 
+    // A sub-header line that carries a role (Long Name, Units, Comments, x')
+    // is read as such, not as metadata (#488); the roles are the preview's
+    // (`layout.subheader_roles`), so both agree. The column names line is
+    // not part of `header_lines` at all.
     let metadata = crate::metadata::split_lines(
         header_lines
             .iter()
+            .zip(&layout.header)
+            .filter(|(_, &raw_index)| layout.subheader_roles[raw_index].is_empty())
+            .map(|(line, _)| line)
             .filter(|_| recipe.keep_header_metadata)
             .chain(footer_lines.iter().filter(|_| recipe.keep_footer_metadata))
             .map(String::as_str),
@@ -707,6 +714,59 @@ mod tests {
         assert_eq!(long_names(&table), [Some("Absorbance"), Some("Time")]);
         assert_eq!(table.columns[0].unit.as_deref(), Some("AU"));
         assert_eq!(table.columns[1].unit.as_deref(), Some("s"));
+    }
+
+    fn metadata_pairs(table: &ParsedTable) -> Vec<(&str, &str)> {
+        table
+            .metadata()
+            .iter()
+            .map(|m| (m.key.as_str(), m.value.as_str()))
+            .collect()
+    }
+
+    /// #488: the lines read as Long Name / Units are not metadata.
+    #[test]
+    fn sub_header_lines_with_a_role_are_not_metadata() {
+        use crate::recipe::SubheaderRoles;
+        let mut recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, 1),
+                unit: range(2, 2),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        recipe.header_layout.main_header_lines = 2;
+        recipe.separator = crate::recipe::Separator::Semicolon;
+        let table = parse(
+            b"Instrument;Demo\nSample;S-12\nWavelength;Absorbance\nnm;AU\n1;2\n",
+            &recipe,
+        )
+        .unwrap();
+        assert_eq!(
+            metadata_pairs(&table),
+            [("Instrument", "Demo"), ("Sample", "S-12")]
+        );
+        assert_eq!(table.columns[0].unit.as_deref(), Some("nm"));
+    }
+
+    /// #488: a sub-header line without any role stays metadata.
+    #[test]
+    fn a_sub_header_line_without_a_role_stays_metadata() {
+        use crate::recipe::SubheaderRoles;
+        let mut recipe = recipe_with_roles(
+            3,
+            SubheaderRoles {
+                long_name: range(1, 1),
+                unit: range(3, 3),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        recipe.separator = crate::recipe::Separator::Semicolon;
+        let table = parse(b"Name;Name2\nnote;kept\nnm;AU\n1;2\n", &recipe).unwrap();
+        assert_eq!(metadata_pairs(&table), [("note", "kept")]);
     }
 
     #[test]

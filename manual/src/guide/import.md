@@ -275,6 +275,8 @@ A file often starts with information about the measurement: the date, the instru
 
 The **File metadata** list shows every key and section found in the file. Uncheck a key or a section to drop it.
 
+A sub-header line that you use as Long Name, Units, Comments or x' (Step 3) is read as such: it is not listed here. A sub-header line with no role stays in the list.
+
 ## Step 6: destination
 
 <img src="../images/import-wizard-destination.png" alt="Step 6 of the Import Wizard, Destination: where the data goes, saving a template and the Auto-select criteria." width="1000">

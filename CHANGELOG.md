@@ -28,7 +28,7 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
-- Import: **Long Name** and **Comments** can span several sub-header lines (joined with a space), **Units** and **x'** read one line, and x' takes the first number of its text (`t=12.5 s` gives 12.5) (#488). The recipe gains the optional field `join_lines` (`.stf` stays version 1): a project saved before keeps its first-line reading on Refresh from Source, and an older version that saves it again drops the field.
+- Import: **Long Name** and **Comments** can span several sub-header lines (joined with a space), **Units** and **x'** read one line, and x' takes the first number of its text (`t=12.5 s` gives 12.5) (#488). The recipe gains the optional field `join_lines` (`.stf` stays version 1): a project saved before keeps its first-line reading on Refresh from Source, and an older version that saves it again drops the field. Saved import templates all read the new way, and a sub-header line used as Long Name, Units, Comments or x' is no longer listed as file metadata.
 - A transposed sheet has a **Recalculate automatically** box, checked by
   default (#463). Checked, the sheet follows its source by itself; unchecked, it
   is the snapshot it was (banner, **Recalculate**). A value you type in the
