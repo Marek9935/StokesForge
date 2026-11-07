@@ -159,7 +159,7 @@ See [Axes](../guide/graphs.md#axes) and [Zoom and pan](../guide/graphs.md#zoom-a
 | Message | What to do |
 |---|---|
 | "There are already three overlaid layers in this graph" | A graph holds at most three overlay layers. |
-| "Graph properties are open. Apply or cancel them before changing a detached window" | Click **OK** or **Cancel** in **Graph Properties**. |
+| "… is open in the main window. Apply or cancel it first" | Click **OK** or **Cancel** in the window the message names, in the main window. |
 | "Apply or cancel the graph properties before dropping files" | Close **Graph Properties** first. |
 
 ## Analysis

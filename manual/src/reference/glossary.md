@@ -40,7 +40,7 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 **Delimiter**. The character that separates the values on a line of an imported file. See [Delimiter](../guide/import.md#delimiter).
 
-**Detached window**. A workbook, graph, note or panel that you moved out of the main window, into a window of its own, for example onto a second screen. See [Windows in the workspace](../guide/interface.md#windows-in-the-workspace).
+**Detached window**. A workbook, graph or panel that you moved out of the main window, into a window of its own, for example onto a second screen. See [Windows in the workspace](../guide/interface.md#windows-in-the-workspace).
 
 ## F
 

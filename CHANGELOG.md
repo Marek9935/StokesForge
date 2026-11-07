@@ -24,6 +24,8 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+## [1.1.0] - undated
+
 ### Added
 
 - A transposed sheet has a **Recalculate automatically** box, checked by
