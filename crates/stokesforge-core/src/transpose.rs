@@ -243,6 +243,8 @@ impl Project {
     ///   refreshed first. Modified, it is not overwritten: the new
     ///   columns are read from the current state of the source, and the link
     ///   keeps its reading (it stays stale).
+    /// - A checked sheet whose source has a column calculating from it is
+    ///   refused (`CoreError::TransposeSourceReadsIt`, #484), before any write.
     pub fn transpose_rows(&mut self, source: NodeId, rows: &[usize]) -> CoreResult<NodeId> {
         let before = self.tree().clone();
         let result = self.transpose_rows_inner(source, rows);
@@ -281,6 +283,14 @@ impl Project {
         } else {
             link.state(self.tree())
         };
+        // #484: a checked sheet whose source has a column calculating from it
+        // is refused in every state, even when nothing would be read from the
+        // source. A fresh sheet has no loop.
+        if !fresh_sheet {
+            if let Some(refusal) = self.tree().transpose_loop_refusal(sheet) {
+                return Err(refusal);
+            }
+        }
         // A stale, untouched sheet is refreshed first: it would otherwise be
         // inconsistent (new columns longer than the old ones).
         let refresh = fresh_sheet || (state.stale && !state.modified);
@@ -320,7 +330,9 @@ impl Project {
     /// Refreshes the transposed sheet `sheet` from its source: rewrites
     /// the values of all its linked columns (those the user edited
     /// lose their changes), recreates those that disappeared and
-    /// re-reads the source. Atomic.
+    /// re-reads the source. Atomic. Refused with
+    /// `CoreError::TransposeSourceReadsIt` (#484) while the box is checked
+    /// and a column of the source calculates from the sheet.
     pub fn recalculate_transpose(&mut self, sheet: NodeId) -> CoreResult<()> {
         let before = self.tree().clone();
         let result = self.recalculate_transpose_inner(sheet);
@@ -336,6 +348,9 @@ impl Project {
                 CoreError::Structure(format!("{sheet} is not a transposed sheet"))
             })?;
         let inputs = self.checked_transpose_inputs(link.source)?;
+        if let Some(refusal) = self.tree().transpose_loop_refusal(sheet) {
+            return Err(refusal);
+        }
         let rows: Vec<usize> = link.rows.iter().map(|r| r.row).collect();
         self.write_transpose(sheet, &mut link, &inputs, true, &rows)?;
         link.inputs = inputs;

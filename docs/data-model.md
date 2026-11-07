@@ -320,7 +320,11 @@ rollback, `.stf`). It is not a node.
   framed, like a loop; `CoreError::CalculationReadsFollowingSheet`), blanked by
   the formula pass and the sheet is not followed when a file, a Move or a paste
   brings one; checking the box is refused while one exists
-  (`CoreError::TransposeSourceReadsIt`, greyed with its reason). Another sheet
+  (`CoreError::TransposeSourceReadsIt`, greyed with its reason); so are
+  `RecalculateTranspose` and `TransposeRows` on an existing checked sheet
+  while one exists (#484, `Tree::transpose_loop_refusal`, after the text / no
+  x' check, before any write: the blanked column would give empty cells). An
+  unchecked sheet is not concerned. Another sheet
   reading the followed sheet is allowed as long as nothing comes back into the
   source; the frozen reference of a correction is a copy. A file opened with a
   followed sheet already out of date keeps it so until its source changes

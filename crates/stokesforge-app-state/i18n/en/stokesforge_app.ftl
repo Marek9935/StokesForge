@@ -1515,7 +1515,7 @@ analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Direct Deconvolution
 error-model-calculated-column-read-only = This column is produced by a calculation. Detach it from the calculation to edit its values
 error-model-transpose-no-x-prime = Column { $letter } ({ $name }) has no x' value. Set one to analyze a row
-error-model-transpose-source-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check Recalculate automatically
+error-model-transpose-source-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to follow
 error-model-calculation-reads-following-sheet = { $sheet } follows { $source }, so { $source } cannot calculate from it. Uncheck Recalculate automatically on { $sheet } first
 error-model-transpose-not-numeric = Column { $letter } ({ $name }) contains text. Only numeric columns allow a row to be analyzed
 
@@ -2270,7 +2270,6 @@ transpose-auto = Recalculate automatically
     .hint = Updates { $sheet } whenever { $source } changes. A value typed in it stops the updates until Relink
     .disabled = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check this box
 transpose-state-stuck = Out of date: { $reason }
-transpose-stuck-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to follow
 
 # Lissage (#324)
 analysis-kind-smooth = Smoothing
