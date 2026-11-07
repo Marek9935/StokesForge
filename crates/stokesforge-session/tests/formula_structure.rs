@@ -3266,3 +3266,62 @@ fn a_stored_formula_reading_the_followed_sheet_is_blanked_and_blocks_following()
             .is_err());
     }
 }
+
+/// #484: Recalculate on a followed sheet whose source keeps a formula reading
+/// it is refused (the column is blanked, so the gesture would write empty
+/// cells): the rows and the link are untouched and the sheet stays out of
+/// date; once the formula is removed the sheet follows by itself. Witness: the
+/// loop check removed from `recalculate_transpose_inner` (empty cells appear).
+#[test]
+fn recalculate_is_refused_while_a_kept_formula_reads_the_followed_sheet() {
+    for mode in BOTH {
+        let mut p = transposable();
+        let source = p.tree().resolve("[Book1]Sheet1").expect("sheet");
+        let sheet = p.transpose_rows(source, &[0, 1]).expect("transpose");
+        let label = add_col(&mut p, source, "L", &[1.0, 1.0, 1.0]);
+        let tname = p.tree().node(sheet).expect("sheet").name().to_string();
+        let (kept, _error) = p
+            .tree()
+            .formula_keeping(label, &format!("max('{tname}'!B)"));
+        p.set_column_meta(
+            label,
+            ColumnMeta {
+                x_prime: Some(4.0),
+                formula: Some(kept),
+                ..Default::default()
+            },
+        )
+        .expect("kept formula");
+        let (_s, h) = spawn(p, mode);
+        let (sheet, cols) = followed(&h, source);
+        assert!(link_state(&h, source).stale, "{mode:?}: out of date");
+        let before = snap(&h).tree;
+        let error = h
+            .execute(Command::RecalculateTranspose { sheet })
+            .expect_err("refused");
+        assert!(
+            format!("{error:?}").contains("TransposeSourceReadsIt"),
+            "{mode:?}: {error:?}"
+        );
+        let after = snap(&h).tree;
+        for column in &cols {
+            assert_eq!(nums(&before, *column), nums(&after, *column), "{mode:?}");
+        }
+        assert_eq!(
+            before.transpose_link(sheet).expect("link").inputs,
+            after.transpose_link(sheet).expect("link").inputs,
+            "{mode:?}: link untouched"
+        );
+        assert!(link_state(&h, source).stale, "{mode:?}: still out of date");
+        // Removing the formula: the sheet follows alone, no gesture needed.
+        h.execute(Command::SetColumnMeta {
+            column: label,
+            meta: ColumnMeta {
+                x_prime: Some(4.0),
+                ..Default::default()
+            },
+        })
+        .expect("formula removed");
+        assert!(!link_state(&h, source).stale, "{mode:?}: follows alone");
+    }
+}

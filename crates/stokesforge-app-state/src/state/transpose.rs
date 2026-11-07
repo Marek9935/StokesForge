@@ -75,18 +75,9 @@ impl AppState {
             .then(|| {
                 stokesforge_core::unfollowable_column(tree, link.source)
                     .map(|error| errors::model::error_message(&error))
-                    .or_else(|| match tree.transpose_check_refusal(sheet) {
-                        Some(CoreError::TransposeSourceReadsIt {
-                            letter,
-                            source_sheet,
-                            transposed,
-                        }) => Some(tr!(
-                            "transpose-stuck-reads-it",
-                            letter = letter.as_str(),
-                            source = source_sheet.as_str(),
-                            sheet = transposed.as_str()
-                        )),
-                        _ => None,
+                    .or_else(|| {
+                        tree.transpose_check_refusal(sheet)
+                            .map(|error| errors::model::error_message(&error))
                     })
             })
             .flatten();
@@ -198,6 +189,12 @@ impl AppState {
             return;
         };
         if info.modified {
+            // #484: refuse before asking to overwrite what the refusal would
+            // keep anyway.
+            if let Some(refusal) = self.snapshot.tree.transpose_loop_refusal(sheet) {
+                self.fail(errors::model::error_message(&refusal));
+                return;
+            }
             self.pending_transpose_relink = Some(sheet);
             return;
         }

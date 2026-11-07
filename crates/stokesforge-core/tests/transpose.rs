@@ -680,3 +680,118 @@ fn a_loop_through_two_followed_sheets_is_refused() {
         "{refused:?}"
     );
 }
+
+// -- #484: Recalculate, Relink and Analyze Rows refuse a loop -------------------
+
+/// Stores the formula `text` on `column` the way an older file or a paste does
+/// (kept although refused), with the given role and x'.
+fn store_kept(p: &mut Project, column: NodeId, text: &str, role: ColumnRole, x_prime: Option<f64>) {
+    let (kept, _error) = p.tree().formula_keeping(column, text);
+    p.set_column_meta(
+        column,
+        ColumnMeta {
+            role,
+            formula: Some(kept),
+            x_prime,
+            ..ColumnMeta::default()
+        },
+    )
+    .unwrap();
+}
+
+fn y_column(project: &mut Project, sheet: NodeId, name: &str) -> NodeId {
+    project
+        .add_column(sheet, None, Some(name), Column::from_f64(&[0.0, 0.0, 0.0]))
+        .unwrap()
+}
+
+fn assert_reads_it(result: Result<(), CoreError>, expected_letter: &str) {
+    match result {
+        Err(CoreError::TransposeSourceReadsIt { letter, .. }) => {
+            assert_eq!(letter, expected_letter)
+        }
+        other => panic!("expected TransposeSourceReadsIt, got {other:?}"),
+    }
+}
+
+#[test]
+fn recalculate_is_refused_for_a_chain_through_a_second_sheet() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let (_sheet2, p) = second_sheet(&mut f);
+    let tname = name(&f.project, sheet);
+    store_kept(
+        &mut f.project,
+        p,
+        &format!("max('{tname}'!B)"),
+        ColumnRole::Y,
+        None,
+    );
+    let d = y_column(&mut f.project, f.sheet, "D");
+    store_kept(
+        &mut f.project,
+        d,
+        "max(Sheet2!A)",
+        ColumnRole::Y,
+        Some(30.0),
+    );
+    let before = f.project.tree().clone();
+    assert_reads_it(f.project.recalculate_transpose(sheet), "D");
+    assert_eq!(f.project.tree().as_ref(), before.as_ref());
+}
+
+#[test]
+fn recalculate_is_refused_for_a_loop_through_two_followed_sheets() {
+    let mut f = fixture();
+    let first = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let mut p = Column::from_f64(&[1.0, 2.0, 3.0]);
+    p.set_meta(ColumnMeta {
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project.add_column(sheet2, None, Some("P"), p).unwrap();
+    let second = f.project.transpose_rows(sheet2, &[0]).unwrap();
+    let q = y_column(&mut f.project, sheet2, "Q");
+    let d = y_column(&mut f.project, f.sheet, "D");
+    let to_second = format!("max('{}'!B)", name(&f.project, second));
+    let to_first = format!("max('{}'!B)", name(&f.project, first));
+    store_kept(&mut f.project, d, &to_second, ColumnRole::Y, Some(30.0));
+    store_kept(&mut f.project, q, &to_first, ColumnRole::Y, Some(6.0));
+    assert_reads_it(f.project.recalculate_transpose(first), "D");
+    assert_reads_it(f.project.recalculate_transpose(second), "B");
+}
+
+#[test]
+fn recalculate_is_refused_for_a_label_column_reading_the_sheet() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let label = y_column(&mut f.project, f.sheet, "Label");
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    store_kept(&mut f.project, label, &text, ColumnRole::Label, None);
+    assert_reads_it(f.project.recalculate_transpose(sheet), "D");
+}
+
+#[test]
+fn recalculate_is_not_refused_because_another_sheet_reads_the_followed_one() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let (_sheet2, p) = second_sheet(&mut f);
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    store_kept(&mut f.project, p, &text, ColumnRole::Y, None);
+    f.project.recalculate_transpose(sheet).unwrap();
+}
+
+#[test]
+fn a_reader_without_x_prime_is_refused_as_no_x_prime_before_the_loop() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let d = y_column(&mut f.project, f.sheet, "D");
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    store_kept(&mut f.project, d, &text, ColumnRole::Y, None);
+    let error = f.project.recalculate_transpose(sheet).unwrap_err();
+    assert!(
+        matches!(error, CoreError::TransposeNoXPrime { .. }),
+        "{error:?}"
+    );
+}

@@ -95,8 +95,9 @@ pub enum CoreError {
         /// Name of the column.
         name: String,
     },
-    /// Checking "Recalculate automatically" refused (#463): a column of the
-    /// source calculates from the transposed sheet.
+    /// Checking "Recalculate automatically" refused (#463), and so are
+    /// Recalculate, Relink and Analyze Rows on a checked sheet (#484): a
+    /// column of the source calculates from the transposed sheet.
     #[error("cannot follow: column {letter} of {source_sheet} calculates from {transposed}")]
     TransposeSourceReadsIt {
         /// Position letter of the column of the source.
