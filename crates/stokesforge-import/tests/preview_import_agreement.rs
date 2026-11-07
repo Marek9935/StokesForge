@@ -488,8 +488,9 @@ fn automatic_data_end_follows_the_day_month_order() {
     assert_eq!(rows(DateOrder::DayFirst), 4);
 }
 
-/// Every sub-header line of the preview carries exactly the roles whose range
-/// contains it (#488), overlapping ranges included.
+/// Every sub-header line of the preview carries exactly the roles the import
+/// reads on it (#488): Long Name and Comments over their whole range, Units
+/// and x' on their `from` line only; overlapping ranges included.
 #[test]
 fn subheader_roles_are_the_ranges_containing_the_line() {
     use stokesforge_import::{HeaderLayout, SubheaderLineRange, SubheaderRoles};
@@ -506,19 +507,25 @@ fn subheader_roles_are_the_ranges_containing_the_line() {
         comment: range(3, 3),
         x_prime: range(1, 4),
         same_line_name_unit: false,
+        join_lines: true,
     };
     let bytes = b"a,b\nc,d\ne,f\n1,2\n9,9\n";
     let shown = preview(bytes, &recipe).expect("preview");
     for (i, line) in shown.lines.iter().take(4).enumerate() {
         let n = i + 1;
         let inside = |r: Option<SubheaderLineRange>| r.is_some_and(|r| r.from <= n && n <= r.to);
+        let on_from = |r: Option<SubheaderLineRange>| r.is_some_and(|r| r.from == n);
         let set = line.subheader_roles;
         assert_eq!(
             set.long_name,
             inside(recipe.subheader_roles.long_name),
             "L, line {n}"
         );
-        assert_eq!(set.unit, inside(recipe.subheader_roles.unit), "U, line {n}");
+        assert_eq!(
+            set.unit,
+            on_from(recipe.subheader_roles.unit),
+            "U, line {n}"
+        );
         assert_eq!(
             set.comment,
             inside(recipe.subheader_roles.comment),
@@ -526,8 +533,39 @@ fn subheader_roles_are_the_ranges_containing_the_line() {
         );
         assert_eq!(
             set.x_prime,
-            inside(recipe.subheader_roles.x_prime),
+            on_from(recipe.subheader_roles.x_prime),
             "X', line {n}"
         );
     }
+}
+
+/// The imported long name is read on the lines the preview colours as Long
+/// Name: the two agree on the joined range (#488).
+#[test]
+fn the_colored_lines_are_the_lines_the_import_reads() {
+    use stokesforge_import::{parse, HeaderLayout, SubheaderLineRange, SubheaderRoles};
+    let mut recipe = ImportRecipe::new("Audit");
+    recipe.header_layout = HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 3,
+        auto_detect: false,
+    };
+    recipe.subheader_roles = SubheaderRoles {
+        long_name: Some(SubheaderLineRange { from: 1, to: 2 }),
+        unit: Some(SubheaderLineRange { from: 3, to: 3 }),
+        join_lines: true,
+        ..SubheaderRoles::default()
+    };
+    let bytes = b"A,B\na,b\nm,s\n1,2\n";
+    let shown = preview(bytes, &recipe).expect("preview");
+    let coloured: Vec<bool> = shown
+        .lines
+        .iter()
+        .take(3)
+        .map(|l| l.subheader_roles.long_name)
+        .collect();
+    assert_eq!(coloured, [true, true, false]);
+    let table = parse(bytes, &recipe).unwrap();
+    assert_eq!(table.columns[0].long_name.as_deref(), Some("A a"));
+    assert_eq!(table.columns[0].unit.as_deref(), Some("m"));
 }

@@ -4999,6 +4999,101 @@ fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
     assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
 }
 
+/// #488: a recipe that goes through the wizard (first saved template, template
+/// picked from the list, last import reopened, new template) ends with the
+/// current reading of the sub-header roles, without showing as modified.
+#[test]
+fn a_recipe_going_through_the_wizard_joins_the_sub_header_lines() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    // Two templates saved before the field: they read the first line only.
+    let mut store = RecipeStore::default();
+    for name in ["Old A", "Old B"] {
+        let mut old = ImportRecipe::new(name);
+        old.subheader_roles.join_lines = false;
+        store.upsert(old);
+    }
+    store.save().expect("writes the isolated templates");
+
+    state.open_import(book);
+    let import = state.import_state().expect("import window open");
+    assert!(import.recipe.subheader_roles.join_lines, "first template");
+    assert!(!state.import_recipe_modified());
+
+    let other = if state.import_state().unwrap().recipe.name == "Old A" {
+        "Old B"
+    } else {
+        "Old A"
+    };
+    state.select_import_recipe(other);
+    let import = state.import_state().expect("import window open");
+    assert_eq!(import.recipe.name, other);
+    assert!(import.recipe.subheader_roles.join_lines, "picked template");
+    assert!(!state.import_recipe_modified());
+
+    state.new_import_recipe();
+    assert!(
+        state
+            .import_state()
+            .unwrap()
+            .recipe
+            .subheader_roles
+            .join_lines
+    );
+}
+
+/// #488: "Refresh from Source" re-reads with the stored recipe as it is: a
+/// column imported with the old reading (`join_lines` false) keeps reading the
+/// first line of a multi-line range.
+#[test]
+fn refreshing_from_the_source_keeps_the_stored_sub_header_reading() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = write_csv(dir.path(), "old.csv", "A,B\na,b\n1,2\n");
+    let mut recipe = ImportRecipe::new("Old reading");
+    recipe.header_layout = stokesforge_import::HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 2,
+        auto_detect: false,
+    };
+    recipe.subheader_roles = stokesforge_import::SubheaderRoles {
+        long_name: Some(stokesforge_import::SubheaderLineRange { from: 1, to: 2 }),
+        join_lines: false,
+        ..Default::default()
+    };
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file],
+    });
+    let sheet = sheet_named(state.tree(), "old");
+    let stored = |state: &AppState| {
+        let columns = state.visible_columns(sheet);
+        let source = state.column_meta(columns[0].0).import_source.unwrap();
+        ImportRecipe::from_json(&source.recipe_json).unwrap()
+    };
+    assert!(!stored(&state).subheader_roles.join_lines);
+    assert_eq!(
+        state
+            .column_meta(state.visible_columns(sheet)[0].0)
+            .long_name,
+        "A"
+    );
+
+    write_csv(dir.path(), "old.csv", "C,D\nc,d\n5,6\n");
+    state.dispatch(Action::RefreshFromSource { sheet });
+    assert!(state.status().is_some_and(|s| !s.is_error()));
+    assert!(
+        !stored(&state).subheader_roles.join_lines,
+        "the refresh keeps the stored reading"
+    );
+}
+
 /// S-T1 (#224): during typing, the import previews keep the previous
 /// recipe until 0.3 s without change; outside typing, a change is
 /// immediate.
@@ -5513,6 +5608,7 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
         comment: Some(stokesforge_import::SubheaderLineRange::single(3)),
         x_prime: Some(stokesforge_import::SubheaderLineRange::single(4)),
         same_line_name_unit: false,
+        join_lines: true,
     };
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),

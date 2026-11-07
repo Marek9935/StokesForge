@@ -149,12 +149,14 @@ rather than making the load fail.
   A recipe that never touches it keeps the `HeaderSkip` behavior
   from before this work package, identically — minimize breakage, the same policy
   as the "mixed-type columns" work package.
-- **A subheader role range is read only on its first line**
-  (`SubheaderRoles::long_name`/`unit`/`comment`, field `from`). A range
-  `18` to `18` (OriginLab's reference example) does not suffer from it; a
-  real multi-line range spread across different columns is not
-  implemented — no instrument format met in the test fixtures
-  needed it. To extend if a real case requires it, not before.
+- **A subheader role range** (`SubheaderRoles::long_name`/`unit`/`comment`/
+  `x_prime`). *Decision reopened by #488:* Long Name and Comments **join** the
+  lines of their range (tokens of a column, empty ones skipped, one space
+  between), when the recipe carries `join_lines`; Units and x' read the `from`
+  line only. A recipe written before the field (`join_lines` false, serde
+  default) keeps the old reading, the first line only, so a stored range
+  `1` to `2` does not change meaning in an old `.stf` (invariant 12). A recipe
+  that goes through the import wizard is switched to `join_lines` true.
 - **The specification's `count_from_bottom` ("Line number start from
   bottom") was not implemented.** Unlike the other fields, an
   incorrect implementation would have been worse than its absence (counting from

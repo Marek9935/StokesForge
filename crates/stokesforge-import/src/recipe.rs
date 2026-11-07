@@ -393,9 +393,11 @@ pub struct SubheaderRoles {
     pub long_name: Option<SubheaderLineRange>,
     pub unit: Option<SubheaderLineRange>,
     pub comment: Option<SubheaderLineRange>,
-    /// Line whose every numeric token becomes the x' value
-    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) of its column: the
-    /// time of a spectrum, in a kinetic series.
+    /// Line whose tokens give the x' value
+    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) of their column: the
+    /// time of a spectrum, in a kinetic series. The value is the **first
+    /// number found in the token** (`t=12.5 s` gives 12.5; so `Sample-3`
+    /// gives -3, accepted); no number, no x'. Only the `from` line is read.
     #[serde(default)]
     pub x_prime: Option<SubheaderLineRange>,
     /// When checked, `unit` is ignored: each token of the `long_name` line is
@@ -404,9 +406,33 @@ pub struct SubheaderRoles {
     /// parentheses keeps all its text as the long name and gives an empty
     /// unit, rather than cutting arbitrarily (see `crate::parse::parse`).
     pub same_line_name_unit: bool,
+    /// #488: `long_name` and `comment` ranges of several lines are **joined**
+    /// (the tokens of a column over the range, empty ones skipped, one space
+    /// between). `false` is the reading of recipes written before: only the
+    /// first line of the range. `Units` and x' read their `from` line only,
+    /// whatever this says. Additive field (`serde(default)` = `false`, so an
+    /// old template or `.stf` keeps its reading, invariant 12); a recipe that
+    /// goes through the import wizard is switched to `true`, as is
+    /// [`ImportRecipe::new`].
+    #[serde(default)]
+    pub join_lines: bool,
+}
+
+impl SubheaderLineRange {
+    /// Last line really read when the role joins its lines: a `to` before
+    /// `from` (or empty) means the single line `from`.
+    pub fn last_joined(&self) -> usize {
+        self.to.max(self.from)
+    }
 }
 
 impl ImportRecipe {
+    /// Puts the recipe on the current reading of the sub-header roles
+    /// (`join_lines`, #488). Called when a recipe enters the import wizard.
+    pub fn adopt_joined_lines(&mut self) {
+        self.subheader_roles.join_lines = true;
+    }
+
     /// Kind chosen for column `index` (`Auto` by default).
     pub fn column_kind(&self, index: usize) -> ColumnKind {
         self.column_kinds.get(index).copied().unwrap_or_default()
@@ -446,7 +472,10 @@ impl ImportRecipe {
             has_column_header_row: false,
             name_source: NameSource::Filename,
             header_layout: HeaderLayout::default(),
-            subheader_roles: SubheaderRoles::default(),
+            subheader_roles: SubheaderRoles {
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
             skip_chars: 0,
             preview_lines: default_preview_lines(),
             data_end: DataEnd::default(),
@@ -484,7 +513,14 @@ mod tests {
         assert!(!recipe.has_column_header_row);
         assert_eq!(recipe.name_source, NameSource::Filename);
         assert_eq!(recipe.header_layout, HeaderLayout::default());
-        assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
+        assert_eq!(
+            recipe.subheader_roles,
+            SubheaderRoles {
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+            "a new recipe joins the lines of a role (#488)"
+        );
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
         assert_eq!(recipe.data_end, DataEnd::None);
@@ -544,6 +580,7 @@ mod tests {
                 comment: None,
                 x_prime: None,
                 same_line_name_unit: false,
+                join_lines: true,
             },
             skip_chars: 5,
             preview_lines: 50,
@@ -579,6 +616,21 @@ mod tests {
     /// in its JSON) must keep loading, with the new fields at their default
     /// values. `#[serde(default)]` is what keeps this promise; this test
     /// checks it rather than assuming it.
+    /// Sub-header roles stored before `join_lines` (#488) read with the old
+    /// reading (first line only); a new recipe joins.
+    #[test]
+    fn roles_without_join_lines_keep_the_old_reading() {
+        let old = r#"{"long_name":{"from":1,"to":2},"unit":null,"comment":null,"same_line_name_unit":false}"#;
+        let roles: SubheaderRoles = serde_json::from_str(old).unwrap();
+        assert!(!roles.join_lines);
+        assert_eq!(roles.long_name, Some(SubheaderLineRange { from: 1, to: 2 }));
+        assert!(ImportRecipe::new("t").subheader_roles.join_lines);
+        let mut recipe = ImportRecipe::new("t");
+        recipe.subheader_roles = roles;
+        recipe.adopt_joined_lines();
+        assert!(recipe.subheader_roles.join_lines);
+    }
+
     #[test]
     fn json_recipe_older_than_the_work_package_loads_with_the_defaults() {
         let json_before_work_package = r#"{

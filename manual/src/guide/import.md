@@ -212,7 +212,9 @@ Then tell StokesForge what each subheader line holds. Each of these roles has a 
 | **Comments** | The comments of each column |
 | **x'** | The x' value of each column, such as the time of a spectrum in a kinetic series |
 
-Check **Combined line** when the long name and the units share one line, written like `Absorbance (a.u.)`. The text in parentheses becomes the unit, and the rest becomes the long name. The **Units** role then disappears, because the **Long Name** line carries both.
+**Long Name** and **Comments** may span several lines: with **from** 1 **to** 2, the texts of each column are joined with a space (an empty cell adds nothing). **Units** and **x'** read one line only, so their row has just **from**. The x' value is the first number found in the text: `t=12.5 s` gives 12.5, and a text without a number gives no x'. A project saved by an earlier version keeps its own reading (first line of the range only) on **Refresh from Source**; opening its import in the wizard switches it to the lines joined.
+
+Check **Combined line** when the long name and the units share one line, written like `Absorbance (a.u.)`. The text in parentheses becomes the unit, and the rest becomes the long name; when the Long Name covers several lines, they are joined first. The **Units** role then disappears, because the **Long Name** line carries both.
 
 ### Names in first line
 

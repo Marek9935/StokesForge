@@ -6783,6 +6783,7 @@ impl AppState {
         });
         let mut recipe = recipe;
         recipe.unify_header();
+        recipe.adopt_joined_lines();
         let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
             active_book,
@@ -7239,7 +7240,9 @@ impl AppState {
         self.open_import(book);
         if let Some(import) = &mut self.import_state {
             import.recipe = last.recipe.clone();
-            import.baseline = last.recipe;
+            // Reopened in the wizard: current reading of the sub-header roles.
+            import.recipe.adopt_joined_lines();
+            import.baseline = import.recipe.clone();
             import.save_as_name = import.recipe.name.clone();
             if let ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll =
                 last.destination
@@ -7304,6 +7307,7 @@ impl AppState {
             if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
                 let mut recipe = recipe.clone();
                 recipe.unify_header();
+                recipe.adopt_joined_lines();
                 state.recipe = recipe.clone();
                 state.baseline = recipe.clone();
                 state.save_as_name = recipe.name.clone();
@@ -7412,6 +7416,7 @@ impl AppState {
             }
         };
         recipe.unify_header();
+        recipe.adopt_joined_lines();
         let Some(state) = &mut self.import_state else {
             return;
         };

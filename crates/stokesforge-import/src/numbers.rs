@@ -79,6 +79,64 @@ impl NumberFormat {
         }
     }
 
+    /// The **first number found in the token** (x' of a sub-header line, #488):
+    /// `t=12.5 s` gives 12.5, `-3e-2min` gives -0.03, a decimal comma is read
+    /// when the format says so. `NaN` when the token holds no number (or a
+    /// non-finite one). The substring found goes through [`Self::parse`], the
+    /// same reading as a data cell. A sign glued to the digits belongs to the
+    /// number, so `Sample-3` gives -3 (accepted). The thousands separator, if
+    /// any, is kept only between two digits.
+    pub fn first_number(&self, token: &str) -> f64 {
+        let chars: Vec<char> = token.chars().collect();
+        let decimal = match self.decimal {
+            DecimalStyle::Comma => ',',
+            _ => '.',
+        };
+        let digit_at = |i: usize| chars.get(i).is_some_and(char::is_ascii_digit);
+        for start in 0..chars.len() {
+            let mut i = start;
+            if matches!(chars[i], '+' | '-') {
+                i += 1;
+            }
+            let mut seen_digit = false;
+            while i < chars.len() {
+                if chars[i].is_ascii_digit() {
+                    seen_digit = true;
+                    i += 1;
+                } else if seen_digit && Some(chars[i]) == self.thousands && digit_at(i + 1) {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if i < chars.len() && chars[i] == decimal && digit_at(i + 1) {
+                seen_digit = true;
+                i += 1;
+                while digit_at(i) {
+                    i += 1;
+                }
+            }
+            if !seen_digit {
+                continue;
+            }
+            if i < chars.len() && matches!(chars[i], 'e' | 'E') {
+                let mut j = i + 1;
+                if j < chars.len() && matches!(chars[j], '+' | '-') {
+                    j += 1;
+                }
+                if digit_at(j) {
+                    while digit_at(j) {
+                        j += 1;
+                    }
+                    i = j;
+                }
+            }
+            let found: String = chars[start..i].iter().collect();
+            return self.parse(&found);
+        }
+        f64::NAN
+    }
+
     /// Does the token have the shape of a number, infinity included? For
     /// structure decisions (automatic data end, sub-header): an `inf` line is
     /// a data line, not the end of the file.
@@ -145,6 +203,26 @@ mod tests {
     ) -> NumberFormat {
         let missing: Vec<String> = missing.iter().map(|s| s.to_string()).collect();
         NumberFormat::new(decimal, thousands, &missing, lines.iter().copied())
+    }
+
+    #[test]
+    fn first_number_reads_the_first_number_of_a_token() {
+        let dot = fmt(DecimalStyle::Dot, None, &[], &[]);
+        assert_eq!(dot.first_number("t=12.5 s"), 12.5);
+        assert_eq!(dot.first_number("12.5"), 12.5);
+        assert_eq!(dot.first_number("-3e-2min"), -0.03);
+        assert_eq!(dot.first_number("Sample-3"), -3.0);
+        assert_eq!(dot.first_number("2em"), 2.0);
+        assert_eq!(dot.first_number("1.2.3"), 1.2);
+        assert_eq!(dot.first_number("t=.5"), 0.5);
+        assert!(dot.first_number("abc").is_nan());
+        assert!(dot.first_number("-").is_nan());
+        assert!(dot.first_number("").is_nan());
+        assert!(dot.first_number("1e400").is_nan());
+        let comma = fmt(DecimalStyle::Comma, None, &[], &[]);
+        assert_eq!(comma.first_number("t=12,5 s"), 12.5);
+        let thousands = fmt(DecimalStyle::Dot, Some(','), &[], &[]);
+        assert_eq!(thousands.first_number("N=1,234.5 K"), 1234.5);
     }
 
     #[test]

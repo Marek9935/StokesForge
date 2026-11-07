@@ -30,6 +30,6 @@ Read from `stokesforge-import` to find where a piece of the import lives. Each m
 | first data lines swallowed | `HeaderSkip` / `HeaderLayout` |
 | trailing junk lines (sums, notes) | `footer_skip_lines`, or `data_end` (`DataEnd::Auto` cuts at the first non-numeric X once armed) |
 | column names missing or wrong | `has_column_header_row`, `NameSource` |
-| long name / unit / comment / x' misplaced (#164) | `SubheaderRoles` |
+| long name / unit / comment / x' misplaced (#164) | `SubheaderRoles` (Long Name and Comments join their range when `join_lines`, Units and x' read `from` only, x' = first number of the token, #488; `join_lines` false = old stored reading) |
 | parasitic prefix on every line | the leading-character removal of data lines |
 | `°C` garbled | `decode` (forced encoding vs `Auto`) |

@@ -403,6 +403,7 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
             comment: Some(SubheaderLineRange { from: 4, to: 5 }),
             x_prime: Some(SubheaderLineRange::single(6)),
             same_line_name_unit: true,
+            join_lines: true,
         },
         skip_chars: 5,
         preview_lines: 33,

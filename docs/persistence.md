@@ -222,6 +222,18 @@ and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
 (literal values); changing it would make every calculation of the files already
 written stale on reading.
 
+## Import recipe: `join_lines` (#488)
+
+`SubheaderRolesRecord` (the recipe stored with the source of an imported
+column) gained `join_lines` (`bool`, `#[serde(default)]`): Long Name and
+Comments ranges of several sub-header lines are joined with a space. **Absent
+means false, the reading from before: the first line of the range only**, so a
+stored range `1` to `2` keeps its meaning in an older file and `FORMAT_VERSION`
+stays 1 (changing the meaning of the range would have raised it). Refresh from
+Source keeps the stored value; a recipe opened in the import wizard is switched
+to true. Witness `tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens
+and saves the file again loses the field (CHANGELOG).
+
 ## Frame sizes: additive fields (#394)
 
 `PlotSpecRecord` gained `frame_widths` and `frame_heights` (`Vec<f64>`, points;

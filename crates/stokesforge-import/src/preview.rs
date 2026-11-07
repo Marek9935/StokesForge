@@ -252,14 +252,20 @@ impl SubheaderRoleSet {
 /// whose range contains the line (#488; before, a fixed priority kept only
 /// one). `same_line_name_unit` still ignores Units, as the import does.
 pub(crate) fn subheader_line_roles(sub_index: usize, roles: &SubheaderRoles) -> SubheaderRoleSet {
-    let contains = |range: Option<crate::recipe::SubheaderLineRange>| {
-        range.is_some_and(|r| r.from <= sub_index && sub_index <= r.to)
+    // Long Name and Comments cover their whole range when the recipe joins
+    // its lines; Units and x' (and a recipe written before) only `from`:
+    // the colour is what the import reads.
+    let contains = |range: Option<crate::recipe::SubheaderLineRange>, joined: bool| {
+        range.is_some_and(|r| {
+            let last = if joined { r.last_joined() } else { r.from };
+            r.from <= sub_index && sub_index <= last
+        })
     };
     SubheaderRoleSet {
-        long_name: contains(roles.long_name),
-        unit: !roles.same_line_name_unit && contains(roles.unit),
-        comment: contains(roles.comment),
-        x_prime: contains(roles.x_prime),
+        long_name: contains(roles.long_name, roles.join_lines),
+        unit: !roles.same_line_name_unit && contains(roles.unit, false),
+        comment: contains(roles.comment, roles.join_lines),
+        x_prime: contains(roles.x_prime, false),
     }
 }
 
@@ -367,6 +373,7 @@ mod tests {
             comment: None,
             x_prime: None,
             same_line_name_unit: false,
+            join_lines: true,
         };
         let bytes = b"Instrument XYZ\nTemperature,Pressure\ndegC,bar\n1,2\n3,4\n";
         let result = preview(bytes, &recipe).unwrap();

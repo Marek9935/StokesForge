@@ -216,6 +216,8 @@ pub(crate) struct SubheaderRolesRecord {
     #[serde(default)]
     pub(crate) x_prime: Option<SubheaderLineRangeRecord>,
     pub(crate) same_line_name_unit: bool,
+    #[serde(default)]
+    pub(crate) join_lines: bool,
 }
 
 // ── Conversions ─────────────────────────────────────────────────────────
@@ -414,6 +416,7 @@ impl From<&r::SubheaderRoles> for SubheaderRolesRecord {
             comment: value.comment.as_ref().map(Into::into),
             x_prime: value.x_prime.as_ref().map(Into::into),
             same_line_name_unit: value.same_line_name_unit,
+            join_lines: value.join_lines,
         }
     }
 }
@@ -426,6 +429,7 @@ impl From<SubheaderRolesRecord> for r::SubheaderRoles {
             comment: value.comment.map(Into::into),
             x_prime: value.x_prime.map(Into::into),
             same_line_name_unit: value.same_line_name_unit,
+            join_lines: value.join_lines,
         }
     }
 }

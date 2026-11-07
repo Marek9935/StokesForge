@@ -143,7 +143,7 @@ fn decimal_label(decimal: DecimalStyle) -> String {
 
 /// A "from … to …" row assigning a subheader role (see [`import_window`]): a
 /// checkbox to enable/disable the role (`None` vs `Some`), two counters for
-/// the range. `id_source` tells the three roles
+/// the range (`single_line`: only « from », Units and x' read one line, #488). `id_source` tells the three roles
 /// (`long_name`/`unit`/`comment`) apart; without it they would share the same
 /// auto-generated id (same relative position in their respective `if`
 /// branches) and step on each other.
@@ -153,6 +153,7 @@ fn subheader_role_row(
     label: String,
     hint: String,
     range: &mut Option<stokesforge_import::SubheaderLineRange>,
+    single_line: bool,
 ) {
     ui.push_id(id_source, |ui| {
         ui.horizontal(|ui| {
@@ -172,8 +173,13 @@ fn subheader_role_row(
                     &mut r.from,
                     &quantities::LINE_NUMBER,
                 );
-                ui.label(tr!("import-header-range-to"));
-                number_field(ui, "import_range_to", &mut r.to, &quantities::LINE_NUMBER);
+                if single_line {
+                    // Units and x' read one line (#488): no « to ».
+                    r.to = r.from;
+                } else {
+                    ui.label(tr!("import-header-range-to"));
+                    number_field(ui, "import_range_to", &mut r.to, &quantities::LINE_NUMBER);
+                }
             }
         });
     });
@@ -981,6 +987,7 @@ fn import_header_controls(
                 tr!("import-header-role-long-name"),
                 tr!("import-header-role-long-name", "hint"),
                 &mut recipe.subheader_roles.long_name,
+                false,
             )
         });
         if !recipe.subheader_roles.same_line_name_unit {
@@ -991,6 +998,7 @@ fn import_header_controls(
                     tr!("import-header-role-units"),
                     tr!("import-header-role-units", "hint"),
                     &mut recipe.subheader_roles.unit,
+                    true,
                 )
             });
         }
@@ -1001,6 +1009,7 @@ fn import_header_controls(
                 tr!("import-header-role-comments"),
                 tr!("import-header-role-comments", "hint"),
                 &mut recipe.subheader_roles.comment,
+                false,
             )
         });
         rows.field(|ui| {
@@ -1010,6 +1019,7 @@ fn import_header_controls(
                 tr!("import-header-role-x-prime"),
                 tr!("import-header-role-x-prime", "hint"),
                 &mut recipe.subheader_roles.x_prime,
+                true,
             )
         });
     }
