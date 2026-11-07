@@ -6783,7 +6783,6 @@ impl AppState {
         });
         let mut recipe = recipe;
         recipe.unify_header();
-        recipe.adopt_joined_lines();
         let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
             active_book,
@@ -7307,7 +7306,6 @@ impl AppState {
             if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
                 let mut recipe = recipe.clone();
                 recipe.unify_header();
-                recipe.adopt_joined_lines();
                 state.recipe = recipe.clone();
                 state.baseline = recipe.clone();
                 state.save_as_name = recipe.name.clone();
@@ -7416,6 +7414,7 @@ impl AppState {
             }
         };
         recipe.unify_header();
+        // A template file is not read by the store loader: adopt here.
         recipe.adopt_joined_lines();
         let Some(state) = &mut self.import_state else {
             return;

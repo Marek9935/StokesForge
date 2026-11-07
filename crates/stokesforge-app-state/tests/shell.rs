@@ -5045,6 +5045,40 @@ fn a_recipe_going_through_the_wizard_joins_the_sub_header_lines() {
     );
 }
 
+/// #488: a template saved before `join_lines` is applied by a file drop (no
+/// wizard) with the new reading: the Long Name lines 1..2 are joined.
+#[test]
+fn a_drop_with_a_template_saved_before_join_lines_joins_the_long_name() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let mut old = ImportRecipe::new("Old two-line names");
+    old.header_layout = stokesforge_import::HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 2,
+        auto_detect: false,
+    };
+    old.subheader_roles = stokesforge_import::SubheaderRoles {
+        long_name: Some(stokesforge_import::SubheaderLineRange { from: 1, to: 2 }),
+        join_lines: false,
+        ..Default::default()
+    };
+    old.auto_match.extensions = vec!["csv".into()];
+    let mut store = RecipeStore::default();
+    store.upsert(old);
+    store.save().expect("writes the isolated template");
+    let file = write_csv(dir.path(), "two_lines.csv", "Abs,Abs2\nlow,high\n1,2\n");
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    let sheet = sheet_named(state.tree(), "two_lines");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(state.column_meta(columns[0].0).long_name, "Abs low");
+}
+
 /// #488: "Refresh from Source" re-reads with the stored recipe as it is: a
 /// column imported with the old reading (`join_lines` false) keeps reading the
 /// first line of a multi-line range.
