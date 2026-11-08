@@ -21,6 +21,11 @@
 //! [`decode`] turns bytes into text before any splitting: UTF-8, UTF-16 with a
 //! byte order mark, and as a fallback Windows-1252, the code page of device
 //! software on Windows.
+//!
+//! [`origin`] reads the workbooks of an Origin project (`.opj`), the binary
+//! format Horiba's software writes: books, sheets, columns with their long
+//! names, units and values. It is not a text format and goes through no
+//! recipe.
 
 pub mod choose;
 pub mod config_dir;
@@ -33,6 +38,7 @@ pub mod decode;
 mod layout;
 pub mod metadata;
 mod numbers;
+pub mod origin;
 pub mod parse;
 pub mod preview;
 pub mod recent;
