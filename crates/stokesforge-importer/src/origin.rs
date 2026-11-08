@@ -79,9 +79,17 @@ fn non_blank<'a>(preferred: &'a str, fallback: &'a str) -> &'a str {
     }
 }
 
-/// The name of a book: its long name if not blank, else its short name.
+/// The name of a book: the first non-blank line of its long name (Horiba
+/// labels hold a second line, such as `Spectral Acquisition[Emission]`, that a
+/// workbook name cannot carry), else its short name.
 pub fn origin_book_name(book: &OriginBook) -> &str {
-    non_blank(&book.long_name, &book.short_name)
+    let first_line = book
+        .long_name
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    non_blank(first_line, &book.short_name)
 }
 
 /// A sheet to create.
@@ -370,6 +378,12 @@ mod tests {
         ]);
         assert_eq!(origin_book_name(&project.books[0]), "Book1");
         assert_eq!(origin_book_name(&project.books[1]), "Long");
+        let two_lines = read(vec![book(
+            "Book3",
+            "  \r\nSample A\r\nSpectral Acquisition[Emission]",
+            vec![sheet("Data", vec![col("A", OriginDesignation::Y)])],
+        )]);
+        assert_eq!(origin_book_name(&two_lines.books[0]), "Sample A");
         let columns = &project.books[0].sheets[0].columns;
         let name = |c: &OriginColumn| {
             make_origin_column(&project.books[0], c)
