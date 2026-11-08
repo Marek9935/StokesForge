@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x]
-//!                   [--out project.stf] FILE...   # FILE: text, or Origin .opj
+//!                   [--out project.stf] FILE...   # FILE: text, or Origin .opj/.opju
 //! stokesforge-cli recipes            # lists the saved templates
 //! stokesforge-cli run [--project input.stf] [--out output.stf] script.pyst
 //! ```
@@ -29,7 +29,7 @@ use stokesforge_import::{choose_recipe, FilesLayout, ImportRecipe, RecipeStore};
 
 const USAGE: &str = "usage:
   stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.stf] FILE...
-      (an Origin .opj file is imported book by book, Data sheets only; --recipe and --layout do not apply to it)
+      (an Origin .opj or .opju file is imported book by book, Data sheets only; --recipe and --layout do not apply to it)
   stokesforge-cli recipes
   stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst\n  stokesforge-cli --version";
 

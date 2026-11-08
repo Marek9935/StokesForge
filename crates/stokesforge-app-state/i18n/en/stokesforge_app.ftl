@@ -713,7 +713,9 @@ error-import-no-data = No data found after the header. Check the number of heade
 error-import-whitespace-thousands = A space cannot both separate the columns and group the thousands. Choose another delimiter or another thousands separator
 error-import-file = { $path }: { $detail }
 error-import-origin-not-origin = The file is not an Origin project
-error-import-origin-opju = Origin files in the .opju format cannot be opened yet. Save the project as .opj from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as .opj
+error-import-origin-opju-unsupported = This .opju file uses a part of the format StokesForge cannot read yet. Save the project as .opj from Origin, or open it in the free Origin Viewer and save it as .opj
+error-import-origin-too-many-cells = The Origin file holds too many cells to be opened
+error-import-origin-too-much-text = The Origin file holds too much text to be opened
 error-import-origin-version = This Origin file was saved by a version StokesForge cannot read
 error-import-origin-truncated = The Origin file is incomplete. It may have been cut short by a copy or a download
 error-import-origin-bad-structure = The Origin file is damaged: its structure is not valid
@@ -1992,6 +1994,7 @@ origin-import-summary = To create: { $sheets ->
     [one] { $books } workbook
    *[other] { $books } workbooks
     }
+origin-import-partial = Part of this file could not be read: some workbooks may lack names
 origin-import-accept =
     Import
     .hint = Creates a workbook for each checked workbook of the list (Enter)

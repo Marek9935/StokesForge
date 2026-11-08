@@ -26,14 +26,16 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
-- Origin projects (#490): an `.opj` file dropped on the window, picked in the
+- Origin projects (#490, #492): an `.opj` or `.opju` file dropped on the window, picked in the
   Import Wizard or reached by File > Import opens the "Import from Origin"
   window instead of the wizard. It lists the workbooks and sheets of the
   project (several files at once are listed together) with a check box for
   each; Import creates one workbook per checked Origin workbook, named after
   its long name, with the Horiba information in the columns' metadata. Only
-  workbooks are read: graphs and matrices are left out. `.opju` is not read
-  yet. The CLI and `pyst.import_file` import the `Data` sheets of an `.opj`.
+  workbooks are read: graphs and matrices are left out. `.opju` files
+  (Origin 2018 and later) are read the same way; when part of one cannot be
+  read, the window says so and some workbooks may lack names. The CLI and
+  `pyst.import_file` import the `Data` sheets of an `.opj` or `.opju`.
 
 - A detached window or panel says why a gesture did nothing or failed (#471):
   a band at the bottom of that window, for 5 seconds, orange for a refusal or

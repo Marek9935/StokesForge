@@ -712,7 +712,9 @@ error-import-no-data = Aucune donnée après l'en-tête. Vérifier le nombre de 
 error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les colonnes et grouper les milliers. Choisir un autre séparateur de colonnes ou de milliers
 error-import-file = { $path } : { $detail }
 error-import-origin-not-origin = Le fichier n'est pas un projet Origin
-error-import-origin-opju = Les fichiers Origin au format .opju ne peuvent pas encore être ouverts. Enregistrer le projet en .opj depuis Origin 2018 à 2022b, ou l'ouvrir dans Origin Viewer (gratuit) et l'enregistrer en .opj
+error-import-origin-opju-unsupported = Ce fichier .opju utilise une partie du format que StokesForge ne sait pas encore lire. Enregistrer le projet en .opj depuis Origin, ou l'ouvrir dans Origin Viewer (gratuit) et l'enregistrer en .opj
+error-import-origin-too-many-cells = Le fichier Origin contient trop de cellules pour être ouvert
+error-import-origin-too-much-text = Le fichier Origin contient trop de texte pour être ouvert
 error-import-origin-version = Ce fichier Origin a été enregistré par une version que StokesForge ne sait pas lire
 error-import-origin-truncated = Le fichier Origin est incomplet. Il a peut-être été coupé pendant une copie ou un téléchargement
 error-import-origin-bad-structure = Le fichier Origin est abîmé : sa structure n'est pas valide
@@ -1991,6 +1993,7 @@ origin-import-summary = À créer : { $sheets ->
     [one] { $books } classeur
    *[other] { $books } classeurs
     }
+origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs peuvent manquer de nom
 origin-import-accept =
     Importer
     .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)

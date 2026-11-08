@@ -16,7 +16,7 @@ A few things to know:
 - A binary file is refused with the message "The file is not readable text".
 - An empty file is refused with "The file is empty".
 - A column that mixes numbers and text is **not** an error. StokesForge keeps it, with the type **Mixed**.
-- Origin projects (`.opj`) are not text files. They open their own window, described in [Origin projects (.opj)](#origin-projects-opj).
+- Origin projects (`.opj`, `.opju`) are not text files. They open their own window, described in [Origin projects (.opj and .opju)](#origin-projects-opj-and-opju).
 - Project files (`.stf`) are never imported. If you drop one on the window, it opens as a project in a new window.
 
 ## Open the Import Wizard
@@ -367,11 +367,11 @@ The values are rewritten in place. The columns keep their identity, so graphs th
 
 The entry is greyed out when no column of the sheet can be read again from its file, for example a sheet imported from an Origin project.
 
-## Origin projects (.opj)
+## Origin projects (.opj and .opju)
 
-StokesForge reads the **workbooks** of an Origin project saved as `.opj`. Graphs and matrices of the project are left out.
+StokesForge reads the **workbooks** of an Origin project saved as `.opj` or `.opju` (Origin 2018 and later). Graphs and matrices of the project are left out.
 
-An `.opj` never goes through the Import Wizard. Drop it on the window, choose it with **Add Files…** in the wizard, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the wizard is open, the file moves to the new window and the wizard closes when nothing else is left in it.
+An `.opj` or `.opju` never goes through the Import Wizard. Drop it on the window, choose it with **Add Files…** in the wizard, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the wizard is open, the file moves to the new window and the wizard closes when nothing else is left in it.
 
 ### The Import from Origin window
 
@@ -399,13 +399,13 @@ These columns do not remember a source file, so **Refresh from Source** does not
 
 **File ▸ Import ▸ Reopen Last Import…** brings the **Import from Origin** window back on the same files, with the same sheets checked, so you can change your choice and import again. If the import is still the last thing you did, StokesForge undoes it first.
 
-### `.opju` files
+### When a file cannot be read completely
 
-Files saved as `.opju` (Origin 2018b and later) are not read yet. Save the project as `.opj` from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as `.opj`.
+Some `.opju` files use a part of the format StokesForge does not read yet. If only the part that holds the workbook names is concerned, the window opens and shows the note "Part of this file could not be read: some workbooks may lack names". If the data themselves cannot be read, the file is refused with a message; save the project as `.opj` from Origin, or open it in the free Origin Viewer and save it as `.opj`.
 
 ### From the command line and scripts
 
-`stokesforge-cli import` and `pyst.import_file` read an `.opj` without a window: they import the `Data` sheets of each workbook (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook.
+`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they import the `Data` sheets of each workbook (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook.
 
 ## Common problems
 

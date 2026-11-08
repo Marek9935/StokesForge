@@ -127,6 +127,9 @@ pub struct OriginFileView {
     pub file_name: String,
     /// Its books.
     pub books: Vec<OriginBookView>,
+    /// Part of the file could not be read (an `.opju` read as far as it goes):
+    /// the chooser says so.
+    pub partial: bool,
 }
 
 impl AppState {
@@ -150,6 +153,7 @@ impl AppState {
             .map(|file| OriginFileView {
                 path: file.path.clone(),
                 file_name: file_name(&file.path),
+                partial: file.project.partial,
                 books: file
                     .project
                     .books

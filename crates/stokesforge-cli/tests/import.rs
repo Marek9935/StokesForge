@@ -205,3 +205,40 @@ fn a_truncated_origin_file_names_the_file_and_does_not_panic() {
         "{output}"
     );
 }
+
+#[test]
+fn an_opju_project_gives_the_same_workbooks_as_its_opj_twin() {
+    let dir = isolated();
+    let mut projects = Vec::new();
+    for name in ["opj", "opju"] {
+        let out_path = dir.path().join(format!("{name}.stf"));
+        let (result, output) = run(&[
+            "import",
+            "--out",
+            out_path.to_str().unwrap(),
+            &fixture(&format!("origin/synthetic.{name}")),
+        ]);
+        result.unwrap();
+        assert!(output.contains("Origin book \"Sample book\""), "{output}");
+        projects.push(load(&out_path));
+    }
+    for project in &projects {
+        assert!(project.resolve_path("[Sample book]Note").is_err());
+        assert!(
+            project.resolve_path("[Sample book]Data").is_ok(),
+            "the Data sheet of the Origin book"
+        );
+    }
+    let values = |project: &stokesforge_core::Project| {
+        let sheet = project.resolve_path("[Sample book]Data").unwrap();
+        let columns = project.tree().node(sheet).unwrap().children().to_vec();
+        columns
+            .iter()
+            .map(|id| {
+                let column = project.tree().node(*id).unwrap().as_column().unwrap();
+                (column.meta().long_name.clone(), column.meta().unit.clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(values(&projects[0]), values(&projects[1]));
+}

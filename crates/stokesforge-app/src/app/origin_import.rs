@@ -72,6 +72,9 @@ pub(super) fn origin_import_window(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for (file_index, file) in files.iter().enumerate() {
+                        if file.partial {
+                            ui.label(theme::dimmed_text(tr!("origin-import-partial")));
+                        }
                         if files.len() == 1 {
                             ui.label(theme::bold(&file.file_name))
                                 .on_hover_text(file.path.display().to_string());
