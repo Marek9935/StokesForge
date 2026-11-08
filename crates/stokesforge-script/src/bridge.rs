@@ -661,7 +661,8 @@ pub(crate) fn remove_shape(
     set_graph_spec(session, id, spec)
 }
 
-/// Imports a file into a new workbook, one sheet per plane. All the
+/// Imports a file into a new workbook, one sheet per plane (an Origin `.opj`:
+/// one workbook per book, see [`import_origin_file`]). All the
 /// analysis and conversion stay those of the CLI and the application.
 /// File errors are detected before the first command; an
 /// application error aborts the macro, leaving no partial import.
@@ -673,6 +674,16 @@ pub(crate) fn import_file(
     recipe_name: Option<&str>,
 ) -> Result<Vec<(NodeId, u64)>, HostError> {
     let session = context.session();
+    let bytes = std::fs::read(path)
+        .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?;
+    if stokesforge_importer::is_origin_path(path) || stokesforge_importer::is_origin_bytes(&bytes) {
+        if recipe_name.is_some() {
+            return Err(HostError::InvalidValue(
+                "templates do not apply to Origin files".into(),
+            ));
+        }
+        return import_origin_file(context, path);
+    }
     let store = stokesforge_import::RecipeStore::load();
     let recipe = match recipe_name {
         Some(name) => store
@@ -681,13 +692,9 @@ pub(crate) fn import_file(
             .find(|r| r.name == name)
             .cloned()
             .ok_or_else(|| HostError::InvalidValue(format!("unknown template \"{name}\"")))?,
-        None => {
-            let bytes = std::fs::read(path)
-                .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?;
-            stokesforge_import::choose_recipe(store.recipes(), path, &bytes)
-                .cloned()
-                .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Untitled"))
-        }
+        None => stokesforge_import::choose_recipe(store.recipes(), path, &bytes)
+            .cloned()
+            .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Untitled")),
     };
     let items = stokesforge_importer::import_items(path, &recipe);
     if let Some(error) = items.iter().find_map(|item| item.table.as_ref().err()) {
@@ -755,6 +762,95 @@ pub(crate) fn import_file(
         Err(error) => {
             session.abort_macro().map_err(HostError::from_session)?;
             // Abort undoes the write: the versions read are stale.
+            context.forget_versions();
+            Err(error)
+        }
+    }
+}
+
+/// `import_file` for an Origin project: one workbook per book, one sheet per
+/// `Data` sheet (see `stokesforge_importer::default_origin_selection`), all in
+/// one `Import` macro.
+fn import_origin_file(
+    context: &ScriptContext,
+    path: &Path,
+) -> Result<Vec<(NodeId, u64)>, HostError> {
+    let session = context.session();
+    let project = stokesforge_importer::read_origin_file(path)
+        .map_err(|failure| HostError::InvalidValue(failure.to_string()))?;
+    let selection = stokesforge_importer::default_origin_selection(&project);
+    let plans = stokesforge_importer::plan_origin_import(&project, &selection);
+    if plans.is_empty() {
+        return Err(HostError::InvalidValue("no column to import".into()));
+    }
+    context.begin_write()?;
+    session
+        .begin_macro(MacroKind::Import)
+        .map_err(HostError::from_session)?;
+    let result = (|| {
+        let snapshot = session.snapshot().map_err(HostError::from_session)?;
+        let root = snapshot.tree.root();
+        let epoch = snapshot.epoch;
+        let mut sheets = Vec::new();
+        for book_plan in plans {
+            // A name the project refuses (or already used) keeps an automatic one.
+            let book = add_created_node(
+                session,
+                root,
+                Command::AddEmptyWorkbook {
+                    parent: root,
+                    name: Some(book_plan.name),
+                },
+            )
+            .or_else(|error| match error {
+                HostError::InvalidValue(_) => add_created_node(
+                    session,
+                    root,
+                    Command::AddEmptyWorkbook {
+                        parent: root,
+                        name: None,
+                    },
+                ),
+                _ => Err(error),
+            })?;
+            let origin_book = &project.books[book_plan.book];
+            for sheet_plan in book_plan.sheets {
+                let sheet = add_created_node(
+                    session,
+                    book,
+                    Command::AddWorksheet {
+                        book,
+                        name: Some(sheet_plan.name),
+                    },
+                )
+                .or_else(|error| match error {
+                    HostError::InvalidValue(_) => {
+                        add_created_node(session, book, Command::AddWorksheet { book, name: None })
+                    }
+                    _ => Err(error),
+                })?;
+                for column in &origin_book.sheets[sheet_plan.sheet].columns {
+                    session
+                        .execute(Command::AddColumn {
+                            sheet,
+                            index: None,
+                            name: None,
+                            column: stokesforge_importer::make_origin_column(origin_book, column),
+                        })
+                        .map_err(HostError::from_session)?;
+                }
+                sheets.push((sheet, epoch));
+            }
+        }
+        Ok(sheets)
+    })();
+    match result {
+        Ok(sheets) => {
+            session.end_macro().map_err(HostError::from_session)?;
+            Ok(sheets)
+        }
+        Err(error) => {
+            session.abort_macro().map_err(HostError::from_session)?;
             context.forget_versions();
             Err(error)
         }

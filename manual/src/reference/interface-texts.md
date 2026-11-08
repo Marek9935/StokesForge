@@ -76,6 +76,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Hide | Masquer |
 | Horizontal Center | Centre horizontal |
 | Import | Importer |
+| Import from Origin | Importer depuis Origin |
 | Import Template | Importer un modèle |
 | Import Wizard | Assistant d'import |
 | Import… | Importer… |

@@ -105,6 +105,32 @@ creates new sheets, even if the recipe of the last import replaced or merged a
 sheet. The File › Import › Reopen Last
 Import… link takes its files back into the wizard.
 
+**Origin projects (`.opj`, #490), state side.** An `.opj` never goes to the
+text wizard. Routing is by extension only (`is_origin_path`, no I/O on the
+interface thread): the same background job as above reads it
+(`ImportReply::origin`, `read_origin_file`), and `apply_ready_import` hands the
+parsed projects (shared by `Arc`) to `AppState::add_origin_reads`, which opens
+the **chooser** (`state/origin_import.rs`: files, books, sheets with column and
+row counts, ticks from `default_origin_selection`, minus sheets with no column)
+or extends it (a path already there is not added twice). An unreadable file is
+one red message built by `errors::import::failure_message`. An Origin-only job
+skips the recipe part entirely (no empty "Import" entry, no "0 of 0"); a mixed
+drop imports the text files the usual way (their own entry) and opens the
+chooser for the rest. The chooser is painted only while the wizard is closed
+(`origin_import_open`), so two modal dialogs never show together: an `.opj`
+added to the open wizard (Add Files…, a drop) is taken out of its files, read in
+the background and announced by a status message; a wizard left with no file is
+closed, a wizard that still holds text files stays and the chooser shows when it
+closes. While the chooser is open a drop adds `.opj` files to it and refuses the
+other files with a message. `Action::ImportOrigin` creates one workbook per
+ticked book and one sheet per ticked sheet in one `MacroKind::Import` group (one
+history entry, one undo); a name the model would refuse (invalid, or already a
+sibling's, case aside) is not sent: the object keeps its automatic name and
+nothing is said. Origin columns have no import source, so Refresh from Source
+stays greyed for them. Reopen Last Import after an Origin import undoes it (if
+still on top) and reopens the chooser on the same parsed files and ticks; the
+most recent import, text or Origin, decides between wizard and chooser.
+
 The same gesture is wired in the detached windows: on a workbook, the
 destination stays that workbook; on a graph, a note, a matrix or the
 Project Manager, a new workbook. Drops are isolated per viewport and their

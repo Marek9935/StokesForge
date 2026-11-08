@@ -165,6 +165,11 @@
     "shows": "The Workbook menu of the menu bar, opened on Book1."
   },
   {
+    "image": "import-origin-chooser.png",
+    "page": "guide/import.md",
+    "shows": "The Import from Origin window opened on a small synthetic Origin project: the file name, its workbooks with their check boxes (a dash when only some sheets are checked) and short names, each sheet with its number of columns and rows, the line \"To create: ... sheets in ... workbooks\" under the list, and the footer Check All, Check None, Cancel and Import."
+  },
+  {
     "image": "scripting-console.png",
     "feature": "python",
     "page": "scripting/console.md",

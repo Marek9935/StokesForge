@@ -530,6 +530,7 @@ pub mod import {
         let detail = match &failure.cause {
             ImportFailureCause::Read(message) => super::fallback(message),
             ImportFailureCause::Parse(error) => error_message(error),
+            ImportFailureCause::Origin(error) => super::origin::error_message(error),
         };
         tr!(
             "error-import-file",
@@ -587,6 +588,89 @@ pub mod import {
             assert_eq!(
                 failure_message(&failure),
                 "/data/a.csv: No such file or directory"
+            );
+        }
+    }
+}
+
+/// Errors of an Origin project file (`stokesforge-import::origin`). Offsets
+/// and sizes of the raw `Display` are not shown to the user.
+pub mod origin {
+    use stokesforge_import::origin::OriginError;
+
+    use crate::tr;
+
+    /// The sentence of an [`OriginError`].
+    pub fn error_message(error: &OriginError) -> String {
+        match error {
+            OriginError::NotOrigin => tr!("error-import-origin-not-origin"),
+            OriginError::OpjuNotSupported => tr!("error-import-origin-opju"),
+            OriginError::UnsupportedVersion { .. } => tr!("error-import-origin-version"),
+            OriginError::Truncated { .. } => tr!("error-import-origin-truncated"),
+            OriginError::BadDelimiter { .. } => tr!("error-import-origin-bad-structure"),
+            OriginError::SizeOutOfRange { .. } => tr!("error-import-origin-item-too-large"),
+            OriginError::TooDeep => tr!("error-import-origin-too-deep"),
+            OriginError::ShortRecord { .. } => tr!("error-import-origin-short-item"),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn every_variant() -> Vec<OriginError> {
+            let samples = vec![
+                OriginError::NotOrigin,
+                OriginError::OpjuNotSupported,
+                OriginError::UnsupportedVersion { version: 1.0 },
+                OriginError::Truncated { offset: 16 },
+                OriginError::BadDelimiter { offset: 16 },
+                OriginError::SizeOutOfRange {
+                    offset: 16,
+                    size: 99,
+                },
+                OriginError::TooDeep,
+                OriginError::ShortRecord { what: "a header" },
+            ];
+            let mut seen = [false; 8];
+            for sample in &samples {
+                let index = match sample {
+                    OriginError::NotOrigin => 0,
+                    OriginError::OpjuNotSupported => 1,
+                    OriginError::UnsupportedVersion { .. } => 2,
+                    OriginError::Truncated { .. } => 3,
+                    OriginError::BadDelimiter { .. } => 4,
+                    OriginError::SizeOutOfRange { .. } => 5,
+                    OriginError::TooDeep => 6,
+                    OriginError::ShortRecord { .. } => 7,
+                };
+                seen[index] = true;
+            }
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
+            samples
+        }
+
+        #[test]
+        fn every_variant_has_its_sentence_and_no_jargon() {
+            for error in every_variant() {
+                crate::errors::tests_support::check(&error, &error_message(&error));
+            }
+        }
+
+        #[test]
+        fn offsets_are_not_shown_and_each_variant_has_its_own_sentence() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let sentences: Vec<String> = every_variant().iter().map(error_message).collect();
+            for sentence in &sentences {
+                assert!(!sentence.contains("0x") && !sentence.contains("offset"));
+            }
+            let mut sorted = sentences.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(
+                sorted.len(),
+                sentences.len(),
+                "two variants share a sentence"
             );
         }
     }

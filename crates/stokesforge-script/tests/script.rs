@@ -277,6 +277,97 @@ fn python_import_chooses_the_template_automatically() {
     assert!(source.recipe_json.contains("Jasco (semicolon)"));
 }
 
+/// An Origin `.opj` imports one workbook per book and one sheet per `Data`
+/// sheet, in a single undoable gesture; a template is refused; a truncated
+/// file changes nothing.
+#[test]
+fn python_import_reads_origin_workbooks_in_one_gesture() {
+    use stokesforge_import::origin::synthetic::{self, Column as OColumn};
+    use stokesforge_import::origin::OriginDesignation;
+    let bench = bench();
+    let dir = tempfile::tempdir().unwrap();
+    let sheet = |name: &str, columns: Vec<OColumn>| synthetic::Sheet {
+        name: name.into(),
+        columns,
+    };
+    let x = || OColumn::numbers("A", OriginDesignation::X, &[1.0, 2.0, 3.0]);
+    let book = |short: &str, long: &str| synthetic::Book {
+        short_name: short.into(),
+        long_name: long.into(),
+        sheets: vec![sheet("Data", vec![x()]), sheet("Raw", vec![x()])],
+        horiba_xml: None,
+    };
+    let bytes = synthetic::write_project(&synthetic::Project {
+        // Two books with the same long name: the second keeps an automatic name.
+        books: vec![book("B1", "Run"), book("B2", "Run")],
+        ..synthetic::Project::default()
+    });
+    let path = dir.path().join("runs.opj");
+    std::fs::write(&path, &bytes).unwrap();
+    let before = bench.session.snapshot().unwrap();
+
+    execute(
+        &bench,
+        &format!(
+            "sheets = pyst.import_file({:?})\nassert len(sheets) == 2\n",
+            path.to_str().unwrap()
+        ),
+    );
+    let imported = bench.session.snapshot().unwrap();
+    let existing = before
+        .tree
+        .node(before.tree.root())
+        .unwrap()
+        .children()
+        .len();
+    let all = imported.tree.node(imported.tree.root()).unwrap().children();
+    let books = &all[existing..];
+    assert_eq!(books.len(), 2);
+    assert_eq!(imported.tree.node(books[0]).unwrap().name(), "Run");
+    assert_ne!(imported.tree.node(books[1]).unwrap().name(), "Run");
+    for &book in books {
+        let sheets = imported.tree.node(book).unwrap().children();
+        assert_eq!(sheets.len(), 1, "Data only");
+        assert_eq!(imported.tree.node(sheets[0]).unwrap().name(), "Data");
+        let column = imported
+            .tree
+            .node(imported.tree.node(sheets[0]).unwrap().children()[0]);
+        let meta = column.unwrap().as_column().unwrap().meta();
+        assert_eq!(meta.role, stokesforge_core::ColumnRole::X);
+        assert!(meta.import_source.is_none());
+    }
+    execute(&bench, "assert pyst.undo()\n");
+    assert_eq!(*bench.session.snapshot().unwrap().tree, *before.tree);
+
+    let refused = bench
+        .engine
+        .run(&format!(
+            "pyst.import_file({:?}, recipe='Jasco (semicolon)')",
+            path.to_str().unwrap()
+        ))
+        .unwrap();
+    assert!(refused
+        .error
+        .as_deref()
+        .is_some_and(|e| e.contains("templates do not apply to Origin files")));
+    let truncated = dir.path().join("cut.opj");
+    std::fs::write(&truncated, &bytes[..bytes.len() / 2]).unwrap();
+    let cut = bench
+        .engine
+        .run(&format!(
+            "pyst.import_file({:?})",
+            truncated.to_str().unwrap()
+        ))
+        .unwrap();
+    assert!(cut
+        .error
+        .as_deref()
+        .is_some_and(|e| e.contains("InvalidValueError")));
+    let after = bench.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert!(!after.history.in_macro);
+}
+
 /// Unknown template, missing or binary file: no mutation and no macro left
 /// open. An interface macro is never absorbed.
 #[test]

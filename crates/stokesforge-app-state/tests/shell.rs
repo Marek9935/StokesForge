@@ -16213,3 +16213,549 @@ fn an_untouched_entry_on_a_saved_project_does_not_stop_quit() {
     assert!(state.unsaved_pending().is_none(), "nothing to ask");
     assert!(state.take_quit_ready());
 }
+
+/// The Origin chooser (#490): an `.opj` reached by a drop or the wizard goes
+/// to a chooser, is read on the background thread, and imports in one
+/// history entry.
+mod origin_import {
+    use super::*;
+    use stokesforge_app_state::state::open_dialog::OpenDialog;
+    use stokesforge_app_state::tr;
+    use stokesforge_import::origin::synthetic;
+    use stokesforge_import::origin::OriginDesignation;
+
+    fn column(short: &str, designation: OriginDesignation, values: &[f64]) -> synthetic::Column {
+        synthetic::Column::numbers(short, designation, values)
+    }
+
+    fn sheet(name: &str, columns: Vec<synthetic::Column>) -> synthetic::Sheet {
+        synthetic::Sheet {
+            name: name.into(),
+            columns,
+        }
+    }
+
+    fn book(short: &str, long: &str, sheets: Vec<synthetic::Sheet>) -> synthetic::Book {
+        synthetic::Book {
+            short_name: short.into(),
+            long_name: long.into(),
+            sheets,
+            horiba_xml: None,
+        }
+    }
+
+    /// Two books. The first is called like the demo workbook (`Book1`) and has
+    /// the three kinds of sheets (`Graph`, `Data`, `Note`); the second has no
+    /// `Data` sheet, so its default tick is its sheet with columns.
+    fn standard_books() -> Vec<synthetic::Book> {
+        use OriginDesignation::{X, Y};
+        vec![
+            book(
+                "A",
+                "Book1",
+                vec![
+                    sheet("Graph", vec![column("G", Y, &[1.0])]),
+                    sheet(
+                        "Data",
+                        vec![
+                            column("X", X, &[1.0, 2.0, 3.0]),
+                            column("Y", Y, &[10.0, 20.0, 30.0]),
+                        ],
+                    ),
+                    sheet("Note", vec![column("N", Y, &[5.0])]),
+                ],
+            ),
+            book(
+                "B",
+                "Kinetics",
+                vec![sheet(
+                    "Sheet1",
+                    vec![column("T", X, &[0.0, 1.0]), column("S", Y, &[4.0, 5.0])],
+                )],
+            ),
+        ]
+    }
+
+    fn write_opj(path: &Path, books: Vec<synthetic::Book>) {
+        let bytes = synthetic::write_project(&synthetic::Project {
+            books,
+            ..synthetic::Project::default()
+        });
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn standard_opj(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        write_opj(&path, standard_books());
+        path
+    }
+
+    fn drop_paths(state: &mut AppState, paths: Vec<PathBuf>) {
+        state.dispatch(Action::DropFiles {
+            paths,
+            target_book: None,
+        });
+        wait_import(state);
+    }
+
+    fn root_names(state: &AppState) -> Vec<String> {
+        let tree = state.tree();
+        let root = tree.root();
+        tree.node(root)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|id| tree.node(*id).unwrap().name().to_string())
+            .collect()
+    }
+
+    fn ticks(state: &AppState) -> Vec<Vec<Vec<bool>>> {
+        state
+            .origin_import_files()
+            .iter()
+            .map(|file| {
+                file.books
+                    .iter()
+                    .map(|b| b.sheets.iter().map(|s| s.ticked).collect())
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn history_len_probe(state: &AppState) -> (bool, Option<String>) {
+        (state.can_undo(), state.undo_label())
+    }
+
+    fn no_red_message_ever(state: &AppState) {
+        assert!(
+            state.status_history().all(|message| !message.is_error()),
+            "a red message was said"
+        );
+    }
+
+    #[test]
+    fn dropping_an_opj_opens_the_chooser_and_runs_no_command() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+
+        drop_paths(&mut state, vec![opj.clone()]);
+
+        assert!(state.origin_import_open());
+        assert_eq!(state.open_dialog(), Some(OpenDialog::OriginImport));
+        assert!(state.import_state().is_none(), "never the text wizard");
+        assert_eq!(history_len_probe(&state), probe, "no command ran");
+        assert!(same_tree(&state, &tree_before));
+        let files = state.origin_import_files();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, opj);
+        assert_eq!(files[0].file_name, "kinetics.opj");
+        assert_eq!(files[0].books[0].name, "Book1");
+        assert_eq!(files[0].books[0].short_name, "A");
+        let data = &files[0].books[0].sheets[1];
+        assert_eq!(
+            (data.name.as_str(), data.columns, data.rows),
+            ("Data", 2, 3)
+        );
+        // Default ticks: the `Data` sheet of the first book; the only sheet of
+        // the second book, which has no `Data` sheet.
+        assert_eq!(
+            ticks(&state),
+            vec![vec![vec![false, true, false], vec![true]]]
+        );
+        assert_eq!(state.origin_import_blocker(), None);
+        assert_eq!(
+            state.origin_import_summary(),
+            Some(tr!("origin-import-summary", books = 2, sheets = 2))
+        );
+    }
+
+    fn same_tree(state: &AppState, before: &std::sync::Arc<Tree>) -> bool {
+        **state.tree() == **before
+    }
+
+    #[test]
+    fn importing_creates_one_workbook_per_book_in_one_history_entry() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+        drop_paths(&mut state, vec![opj.clone()]);
+        // Also take the `Graph` sheet of the first book.
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 0,
+            sheet: 0,
+        });
+
+        state.dispatch(Action::ImportOrigin);
+
+        assert!(!state.origin_import_open(), "the chooser closed");
+        assert_eq!(state.open_dialog(), None);
+        // `Book1` is taken by the demo workbook: automatic name, no message.
+        let names = root_names(&state);
+        assert_eq!(names.len(), 3, "{names:?}");
+        assert!(names.contains(&"Kinetics".to_string()), "{names:?}");
+        let auto = names
+            .iter()
+            .find(|name| !matches!(name.as_str(), "Book1" | "Kinetics"))
+            .expect("the workbook whose Origin name is taken");
+        let first = book_named(state.tree(), auto);
+        let sheets = state.worksheets_of(first);
+        let sheet_names: Vec<_> = sheets.iter().map(|(_, name)| name.clone()).collect();
+        assert_eq!(sheet_names, vec!["Graph", "Data"]);
+        let columns = state.visible_columns(sheets[1].0);
+        assert_eq!(columns.len(), 2);
+        assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
+        assert_eq!(cell_f64(&state, columns[1].0, 2), 30.0);
+        assert!(
+            !state.can_refresh_from_source(sheets[1].0),
+            "an Origin column has no file to read again"
+        );
+        let kinetics = book_named(state.tree(), "Kinetics");
+        assert_eq!(state.worksheets_of(kinetics).len(), 1);
+        no_red_message_ever(&state);
+        assert_eq!(
+            state.status().unwrap().text,
+            tr!("status-import-origin-done", books = 2, sheets = 3)
+        );
+        assert_eq!(state.take_imported_paths(), vec![opj]);
+
+        // One history entry: a single undo removes everything.
+        assert_eq!(
+            state.undo_label().unwrap(),
+            tr!(
+                "history-undo-entry",
+                label = history_text(&HistoryLabel::Macro(MacroKind::Import))
+            )
+        );
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before));
+        assert_eq!(history_len_probe(&state), probe, "no second entry left");
+    }
+
+    #[test]
+    fn a_refused_origin_name_keeps_the_automatic_name_without_a_message() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("names.opj");
+        let data = || vec![column("X", OriginDesignation::X, &[1.0])];
+        write_opj(
+            &opj,
+            vec![book(
+                "A",
+                "Bad/Name",
+                // Two sheets with the same name (case aside), one invalid.
+                vec![
+                    sheet("Data", data()),
+                    sheet("data", data()),
+                    sheet("S!1", data()),
+                ],
+            )],
+        );
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::CheckAllOriginSheets);
+
+        state.dispatch(Action::ImportOrigin);
+
+        no_red_message_ever(&state);
+        let names = root_names(&state);
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(!names.iter().any(|name| name.contains('/')), "{names:?}");
+        let created = book_named(state.tree(), &names[1]);
+        let sheets: Vec<String> = state
+            .worksheets_of(created)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        assert_eq!(sheets.len(), 3);
+        assert_eq!(sheets[0], "Data");
+        assert!(sheets[1].to_lowercase() != "data", "{sheets:?}");
+        assert!(!sheets[2].contains('!'), "{sheets:?}");
+    }
+
+    #[test]
+    fn cancelling_leaves_the_history_and_the_project_alone() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+        drop_paths(&mut state, vec![opj]);
+
+        state.dispatch(Action::CancelOriginImport);
+
+        assert!(!state.origin_import_open());
+        assert!(state.origin_import_files().is_empty());
+        assert!(same_tree(&state, &tree_before));
+        assert_eq!(history_len_probe(&state), probe);
+        assert!(state.take_imported_paths().is_empty());
+    }
+
+    #[test]
+    fn check_none_blocks_the_import_and_check_all_ticks_every_sheet_with_columns() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("empty-sheet.opj");
+        let mut books = standard_books();
+        books[1].sheets.push(sheet("Empty", Vec::new()));
+        write_opj(&opj, books);
+        drop_paths(&mut state, vec![opj]);
+        let tree_before = state.tree().clone();
+
+        state.dispatch(Action::CheckNoOriginSheets);
+        assert_eq!(
+            state.origin_import_blocker(),
+            Some(tr!("disabled-origin-import-nothing-ticked"))
+        );
+        assert_eq!(state.origin_import_summary(), None);
+        state.dispatch(Action::ImportOrigin);
+        assert!(state.origin_import_open(), "Import did nothing");
+        assert!(same_tree(&state, &tree_before));
+
+        state.dispatch(Action::CheckAllOriginSheets);
+        assert_eq!(state.origin_import_blocker(), None);
+        assert_eq!(
+            ticks(&state),
+            vec![vec![vec![true, true, true], vec![true, false]]],
+            "a sheet with no column is never ticked"
+        );
+        // A sheet with no column cannot be toggled on either.
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 1,
+        });
+        assert_eq!(ticks(&state)[0][1], vec![true, false]);
+        // A book ticks and unticks as a whole.
+        state.dispatch(Action::SetOriginBookTicked {
+            file: 0,
+            book: 0,
+            ticked: false,
+        });
+        assert_eq!(ticks(&state)[0][0], vec![false, false, false]);
+        assert_eq!(ticks(&state)[0][1], vec![true, false]);
+    }
+
+    #[test]
+    fn a_truncated_opj_makes_one_red_message_and_no_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("cut.opj");
+        let bytes = synthetic::write_project(&synthetic::Project {
+            books: standard_books(),
+            ..synthetic::Project::default()
+        });
+        std::fs::write(&opj, &bytes[..synthetic::FIRST_DATASET_OFFSET + 3]).unwrap();
+        let probe = history_len_probe(&state);
+
+        drop_paths(&mut state, vec![opj.clone()]);
+
+        assert!(!state.origin_import_open());
+        let status = state.status().unwrap();
+        assert!(status.is_error());
+        assert!(
+            status.text.contains(&tr!("error-import-origin-truncated")),
+            "{}",
+            status.text
+        );
+        assert!(status.text.contains("cut.opj"), "{}", status.text);
+        assert_eq!(history_len_probe(&state), probe, "no empty Import entry");
+    }
+
+    #[test]
+    fn two_opj_files_make_one_chooser_and_one_history_entry() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let tree_before = state.tree().clone();
+        let first = standard_opj(dir.path(), "one.opj");
+        let second = dir.path().join("two.opj");
+        write_opj(
+            &second,
+            vec![book(
+                "C",
+                "Other",
+                vec![sheet(
+                    "Data",
+                    vec![column("X", OriginDesignation::X, &[1.0])],
+                )],
+            )],
+        );
+
+        drop_paths(&mut state, vec![first.clone(), second.clone()]);
+        assert_eq!(state.origin_import_files().len(), 2);
+        // The same file again is not added twice.
+        drop_paths(&mut state, vec![first.clone()]);
+        assert_eq!(state.origin_import_files().len(), 2);
+
+        state.dispatch(Action::ImportOrigin);
+        assert_eq!(root_names(&state).len(), 1 + 3, "{:?}", root_names(&state));
+        assert_eq!(state.take_imported_paths(), vec![first, second]);
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before), "one undo removes all");
+    }
+
+    #[test]
+    fn reopening_the_last_import_after_an_origin_import_brings_the_chooser_back() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let csv = dir.path().join("measure.csv");
+        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        drop_paths(&mut state, vec![csv.clone()]);
+        let after_csv = state.tree().clone();
+        assert!(state.can_reopen_last_import());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj.clone()]);
+        // A change to the default ticks, to prove they come back.
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 0,
+            sheet: 2,
+        });
+        let ticked = ticks(&state);
+        state.dispatch(Action::ImportOrigin);
+        assert_eq!(root_names(&state).len(), 4);
+
+        state.dispatch(Action::ReopenLastImport);
+
+        assert!(same_tree(&state, &after_csv), "the Origin import is undone");
+        assert_eq!(root_names(&state).len(), 2, "the CSV workbook stays");
+        assert!(state.origin_import_open());
+        assert!(state.import_state().is_none());
+        assert_eq!(ticks(&state), ticked, "same files, same ticks");
+        assert_eq!(state.origin_import_files()[0].path, opj);
+        assert_eq!(state.take_imported_paths().len(), 2, "csv then opj");
+    }
+
+    #[test]
+    fn a_text_import_after_an_origin_import_reopens_the_wizard() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::ImportOrigin);
+        let csv = dir.path().join("measure.csv");
+        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        drop_paths(&mut state, vec![csv.clone()]);
+
+        state.dispatch(Action::ReopenLastImport);
+
+        assert!(!state.origin_import_open());
+        assert_eq!(state.import_state().expect("wizard").paths, vec![csv]);
+    }
+
+    #[test]
+    fn a_mixed_drop_imports_the_csv_and_opens_the_chooser_for_the_opj() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let tree_before = state.tree().clone();
+        let csv = dir.path().join("measure.csv");
+        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+
+        drop_paths(&mut state, vec![csv, opj]);
+
+        sheet_named(state.tree(), "measure");
+        assert!(state.origin_import_open());
+        assert!(state.import_state().is_none());
+        state.dispatch(Action::ImportOrigin);
+        // Two history entries: the Origin import, then the CSV one.
+        state.dispatch(Action::Undo);
+        sheet_named(state.tree(), "measure");
+        assert_eq!(root_names(&state).len(), 2);
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before));
+    }
+
+    #[test]
+    fn an_opj_added_to_the_wizard_leaves_it_for_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let csv = dir.path().join("measure.csv");
+        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        let left = tr!("status-import-origin-left-wizard", count = 1);
+
+        // The wizard holds a text file: it stays, the chooser waits behind it.
+        state.open_import(None);
+        state.add_import_paths(vec![csv.clone(), opj.clone()]);
+        assert_eq!(state.import_state().unwrap().paths, vec![csv.clone()]);
+        wait_import(&mut state);
+        assert!(state.status_history().any(|message| message.text == left));
+        // An Origin-only job has nothing for the recipes: no "0 of 0".
+        let nothing = tr!("status-import-done", imported = 0, total = 0);
+        assert!(!state
+            .status_history()
+            .any(|message| message.text == nothing));
+        assert!(!state.origin_import_open(), "one dialog at a time");
+        assert_eq!(state.open_dialog(), Some(OpenDialog::ImportWizard));
+        state.cancel_import();
+        assert!(
+            state.origin_import_open(),
+            "it shows when the wizard closes"
+        );
+        state.dispatch(Action::CancelOriginImport);
+
+        // The wizard holds nothing else: it closes, the chooser opens alone.
+        state.open_import(None);
+        state.add_import_paths(vec![opj.clone()]);
+        assert!(state.import_state().is_none());
+        wait_import(&mut state);
+        assert!(state.origin_import_open());
+
+        // The same through a drop while the wizard is open.
+        state.dispatch(Action::CancelOriginImport);
+        state.open_import(None);
+        drop_paths(&mut state, vec![opj]);
+        assert!(state.import_state().is_none());
+        assert!(state.origin_import_open());
+    }
+
+    #[test]
+    fn the_chooser_takes_only_opj_files_from_a_drop() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        let other = dir.path().join("other.opj");
+        write_opj(&other, standard_books());
+        drop_paths(&mut state, vec![opj]);
+        let tree_before = state.tree().clone();
+        let csv = dir.path().join("measure.csv");
+        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+
+        drop_paths(&mut state, vec![csv, other]);
+
+        assert_eq!(
+            state.origin_import_files().len(),
+            2,
+            "the second opj joined"
+        );
+        assert!(same_tree(&state, &tree_before), "the csv was not imported");
+        assert!(state
+            .status_history()
+            .any(|message| message.text == tr!("status-origin-drop-refused")));
+    }
+
+    #[test]
+    fn the_refresh_reason_is_true_for_columns_that_cannot_be_read_again() {
+        assert_eq!(
+            tr!("disabled-no-source-file"),
+            "No column of this sheet can be read again from its file"
+        );
+    }
+}
