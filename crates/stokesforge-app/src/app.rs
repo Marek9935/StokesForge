@@ -171,6 +171,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod origin_import;
 mod os_gesture;
 mod page_layout;
 mod panel_memory;
@@ -222,6 +223,7 @@ use grid::keyboard_focus_outside_grid;
 use import_wizard::import_window;
 use keyboard_shortcuts_window::keyboard_shortcuts_window;
 use object_manager_ui::{select_manager_target, selected_manager_target};
+use origin_import::origin_import_window;
 use plot_settings::{column_metadata_window, plot_settings_window};
 use preferences_window::preferences_window;
 use recovery::recovery_window;
@@ -1442,6 +1444,7 @@ impl StokesForgeApp {
         // possibly pushes is dispatched this frame like any
         // other action.
         import_window(ctx, &mut self.state, actions);
+        origin_import_window(ctx, &self.state, actions);
         // Graph properties window: same family of transient
         // dialog as the import window, painted as long as
         // `self.state.plot_settings()` is `Some`.
@@ -1820,12 +1823,14 @@ impl StokesForgeApp {
         } else {
             egui::ViewportId::ROOT
         };
+        // The Origin chooser creates its workbooks in one go, like an
+        // immediate text import (#490): they open the same way.
         let new_import_books_after = if matches!(
             action,
             Action::ImportFiles {
                 destination: ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll,
                 ..
-            }
+            } | Action::ImportOrigin
         ) {
             let root = self.state.tree().root();
             self.state

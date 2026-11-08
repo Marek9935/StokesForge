@@ -672,6 +672,11 @@ const SHOTS: &[Shot] = &[
         },
         crop: Crop::Rect(menu_rect),
     },
+    Shot {
+        name: "import-origin-chooser",
+        setup: open_origin_chooser,
+        crop: Crop::Rect(dialog_rect),
+    },
     // The Python console needs the embedded interpreter: only with the
     // `python` feature (scripts/manual-screenshots.sh runs both builds).
     #[cfg(feature = "python")]
@@ -815,6 +820,29 @@ fn open_wizard(h: &mut Harness<'static, Bench>, step: ImportStep) {
     if let Some(import) = h.state_mut().app.state.import_state_mut() {
         import.step = step;
     }
+}
+
+/// The Import from Origin window open on the committed synthetic project
+/// `test/import/origin/synthetic.opj` (never a private file).
+fn open_origin_chooser(h: &mut Harness<'static, Bench>) {
+    empty_workspace(h);
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/import/origin/synthetic.opj");
+    let state = &mut h.state_mut().app.state;
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: None,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while h.state().app.state.import_progress().is_some() {
+        h.state_mut().app.state.poll_import();
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(
+        h.state().app.state.origin_import_open(),
+        "the chooser is open"
+    );
+    settle(h);
 }
 
 /// The analysis window open on the series of `Graph1`.

@@ -1991,6 +1991,23 @@ origin-import-summary = À créer : { $sheets ->
     [one] { $books } classeur
    *[other] { $books } classeurs
     }
+origin-import-accept =
+    Importer
+    .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)
+origin-import-check-all =
+    Tout cocher
+    .hint = Coche toutes les feuilles qui ont des colonnes
+origin-import-check-none =
+    Ne rien cocher
+    .hint = Décoche toutes les feuilles
+origin-import-book-hint = Coche ou décoche toutes les feuilles de ce classeur
+origin-import-sheet-size = { $columns ->
+    [one] { $columns } colonne
+   *[other] { $columns } colonnes
+}, { $rows ->
+    [one] { $rows } ligne
+   *[other] { $rows } lignes
+}
 status-import-dropped = { $count ->
     [one] { $count } fichier importé avec le modèle « { $models } »
    *[other] { $count } fichiers importés avec le modèle « { $models } »
@@ -2030,6 +2047,7 @@ disabled-nothing-to-redo = Rien à rétablir
 disabled-new-project-busy = Terminez ou annulez d'abord le script, l'import ou la modification en cours
 disabled-no-source-file = Aucune colonne de cette feuille ne peut être relue depuis son fichier
 disabled-origin-import-nothing-ticked = Cochez d'abord au moins une feuille
+disabled-origin-sheet-empty = Cette feuille n'a aucune colonne à importer
 disabled-no-last-import = Aucun import terminé à rouvrir
 disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
 disabled-no-window = Aucune fenêtre à agrandir
