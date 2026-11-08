@@ -104,6 +104,85 @@ pub struct ImportRecipe {
     /// same recipe, its own header included.
     #[serde(default)]
     pub block_split: BlockSplit,
+    /// The main header runs up to and including the first
+    /// line whose trimmed text equals this marker (case-insensitive), wherever
+    /// it is; the `subheader_lines` are counted after it. One recipe then fits
+    /// files whose header blocks have different lengths (JASCO `XYDATA`). When
+    /// the marker is not found, `header_layout.main_header_lines` is used.
+    #[serde(default)]
+    pub main_until_marker: Option<String>,
+    /// Values read from `KEY<sep>VALUE` lines of the header
+    /// and of the footer and put in the Long Name / Units / Comments of the
+    /// columns; see [`HeaderProp`].
+    #[serde(default)]
+    pub header_props: Vec<HeaderProp>,
+    /// In the data zone, a line whose first token is text (not
+    /// a number, not a missing token) is a comment, not a data row. A table
+    /// interrupted by one-line segment titles then reads as one table.
+    #[serde(default)]
+    pub skip_text_rows: bool,
+    /// How the file is read. `Table` is the line-and-column
+    /// engine; `Jcamp` reads the numeric tables of a JCAMP-DX file
+    /// ([`crate::jcamp`]), one table per spectrum.
+    #[serde(default)]
+    pub format: FileFormat,
+    /// With `subheader_roles.same_line_name_unit`, each token
+    /// of the long-name line reads `name/unit` (Netzsch: `Temp./°C`,
+    /// `DSC/(mW/mg)`), split at the **first** `/` that is followed by a unit;
+    /// the outer parentheses of the unit and the leading `#`s of the name are
+    /// dropped. A token without such a `/` falls back to the bracket reading.
+    #[serde(default)]
+    pub name_unit_slash: bool,
+    /// The unit tokens of the `unit` role are read without
+    /// their surrounding square brackets (Avantes: `[nm]` gives `nm`).
+    #[serde(default)]
+    pub strip_unit_brackets: bool,
+}
+
+/// The engine that reads a file.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum FileFormat {
+    /// Lines of delimited fields, driven by the rest of the recipe.
+    #[default]
+    Table,
+    /// JCAMP-DX: the file describes its own tables (compressed forms, several
+    /// spectra, units in the header).
+    Jcamp,
+}
+
+/// Field of a column filled from a header property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum PropField {
+    LongName,
+    Units,
+    Comment,
+}
+
+/// Columns a header property applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum PropTarget {
+    /// The first column.
+    X,
+    /// Every column but the first.
+    Y,
+    All,
+}
+
+/// A `KEY<sep>VALUE` line of the header or footer (`XUNITS;NANOMETERS`,
+/// `TITLE: my sample`, `##XUNITS=1/CM`) whose value fills `field` of the
+/// `target` columns. It only fills an empty field: the
+/// sub-header roles win. For a `Name [unit]` value, Long Name takes the name,
+/// Units takes the bracket.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct HeaderProp {
+    pub key: String,
+    pub field: PropField,
+    pub target: PropTarget,
+    /// Units only: `NANOMETERS` -> `nm`, `1/CM` -> `cm⁻¹`...
+    #[serde(default)]
+    pub short_unit: bool,
 }
 
 /// Split of a file into independent data blocks.
@@ -494,6 +573,12 @@ impl ImportRecipe {
             import_mode: ImportMode::NewSheet,
             files_layout: FilesLayout::SheetPerFile,
             block_split: BlockSplit::None,
+            main_until_marker: None,
+            header_props: Vec::new(),
+            skip_text_rows: false,
+            format: FileFormat::Table,
+            name_unit_slash: false,
+            strip_unit_brackets: false,
         }
     }
 }
@@ -604,6 +689,17 @@ mod tests {
             import_mode: ImportMode::AddRows,
             files_layout: FilesLayout::SharedX,
             block_split: BlockSplit::BeforeLine("TITLE".into()),
+            main_until_marker: Some("XYDATA".into()),
+            header_props: vec![HeaderProp {
+                key: "XUNITS".into(),
+                field: PropField::Units,
+                target: PropTarget::X,
+                short_unit: true,
+            }],
+            skip_text_rows: true,
+            format: FileFormat::Jcamp,
+            name_unit_slash: true,
+            strip_unit_brackets: true,
         };
         let json = serde_json::to_string(&recipe).unwrap();
         assert!(json.contains("MonthFirst"));
@@ -651,5 +747,6 @@ mod tests {
         assert_eq!(recipe.data_end, DataEnd::None);
         assert!(recipe.keep_header_metadata, "everything is kept by default");
         assert_eq!(recipe.date_order, DateOrder::DayFirst);
+        assert!(!recipe.name_unit_slash && !recipe.strip_unit_brackets);
     }
 }

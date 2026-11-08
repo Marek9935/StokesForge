@@ -207,6 +207,260 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     })
 }
 
+/// The whole file, line by line, with the
+/// zone of every line, for a file grid. Unlike [`FilePreview`] it
+/// holds **every** line (the grid is virtualised on the UI side) and tokenises
+/// a line only on request ([`FileMap::cells`]).
+#[derive(Debug)]
+pub struct FileMap {
+    text: String,
+    ranges: Vec<(usize, usize)>,
+    /// Zone of every file line (`Blank` outside the analysed zone, and
+    /// everywhere when the recipe leaves no data: see `error`).
+    pub roles: Vec<LineRole>,
+    pub subheader_roles: Vec<SubheaderRoleSet>,
+    /// Index (0-based) of the first non-blank line.
+    pub first: usize,
+    /// End (exclusive) of the analysed zone.
+    pub end: usize,
+    /// First and last data line (0-based), when the recipe gives data.
+    pub data_range: Option<(usize, usize)>,
+    /// Column names line, when the recipe has one.
+    pub column_header: Option<usize>,
+    /// Why the recipe gives no data (the grid is still shown).
+    pub error: Option<ImportError>,
+    pub block_count: usize,
+    separator: crate::parse::EffectiveSeparator,
+    numbers: NumberFormat,
+    /// Identity of this map (a fresh number per [`file_map`] call), so that a
+    /// cache built from it can tell when the map changed.
+    pub serial: u64,
+}
+
+/// A token of a [`FileMap`] line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapCell {
+    pub text: String,
+    /// Would be kept as text in a mixed column (data lines only).
+    pub is_text: bool,
+}
+
+impl FileMap {
+    pub fn line_count(&self) -> usize {
+        self.ranges.len()
+    }
+
+    pub fn line(&self, index: usize) -> &str {
+        self.ranges
+            .get(index)
+            .map_or("", |&(a, b)| &self.text[a..b])
+    }
+
+    /// Glyph that stands for the delimiter between two cells.
+    pub fn separator_glyph(&self) -> &'static str {
+        match &self.separator {
+            crate::parse::EffectiveSeparator::Char('\t') => "\u{21E5}",
+            crate::parse::EffectiveSeparator::Char(',') => ",",
+            crate::parse::EffectiveSeparator::Char(';') => ";",
+            crate::parse::EffectiveSeparator::Char('|') => "|",
+            crate::parse::EffectiveSeparator::Char(_) => "\u{00B7}",
+            crate::parse::EffectiveSeparator::Whitespace => "\u{00B7}",
+            crate::parse::EffectiveSeparator::Fixed(_) => "\u{2502}",
+        }
+    }
+
+    /// The delimiter as the cut bar shows it.
+    pub fn separator_char(&self) -> Option<char> {
+        match &self.separator {
+            crate::parse::EffectiveSeparator::Char(c) => Some(*c),
+            _ => None,
+        }
+    }
+
+    pub fn is_whitespace_separated(&self) -> bool {
+        matches!(self.separator, crate::parse::EffectiveSeparator::Whitespace)
+    }
+
+    pub fn decimal_is_comma(&self) -> bool {
+        self.numbers.decimal == crate::recipe::DecimalStyle::Comma
+    }
+
+    /// Tokens of line `index`, untrimmed, borrowed from the text (no copy).
+    pub fn tokens(&self, index: usize, recipe: &ImportRecipe) -> Vec<&str> {
+        let line = crate::layout::skip_str(self.line(index), recipe.skip_chars);
+        self.separator.tokenize(line)
+    }
+
+    /// Would `token` of column `column` be kept as text in a mixed column?
+    pub fn token_is_text(&self, column: usize, token: &str, recipe: &ImportRecipe) -> bool {
+        crate::parse::read_cell(
+            token,
+            recipe.column_kind(column),
+            &self.numbers,
+            recipe.date_order,
+        )
+        .1
+        .is_some()
+    }
+
+    /// The number `token` of column `column` is read as, when it is read as one
+    /// (`None`: text, an empty cell or a missing-value marker).
+    pub fn token_number(&self, column: usize, token: &str, recipe: &ImportRecipe) -> Option<f64> {
+        let (value, text) = crate::parse::read_cell(
+            token,
+            recipe.column_kind(column),
+            &self.numbers,
+            recipe.date_order,
+        );
+        (text.is_none() && value.is_finite()).then_some(value)
+    }
+
+    /// Tokens of line `index`. `is_text` is filled for data lines only.
+    pub fn cells(&self, index: usize, recipe: &ImportRecipe) -> Vec<MapCell> {
+        let line = crate::layout::skip_str(self.line(index), recipe.skip_chars);
+        let data = self.roles.get(index) == Some(&LineRole::Data);
+        self.separator
+            .tokenize(line)
+            .into_iter()
+            .enumerate()
+            .map(|(column, token)| MapCell {
+                text: token.trim().to_string(),
+                is_text: data
+                    && crate::parse::read_cell(
+                        token,
+                        recipe.column_kind(column),
+                        &self.numbers,
+                        recipe.date_order,
+                    )
+                    .1
+                    .is_some(),
+            })
+            .collect()
+    }
+
+    /// Value part of a `KEY<delimiter>VALUE` line (or `KEY: VALUE`, `KEY=VALUE`):
+    /// `(key, value)`, both trimmed, when the line has that shape.
+    pub fn key_value(&self, index: usize) -> Option<(String, String)> {
+        let line = self.line(index);
+        let by_delimiter = match &self.separator {
+            crate::parse::EffectiveSeparator::Char(c) => line.split_once(*c),
+            _ => None,
+        };
+        let (key, value) = by_delimiter
+            .filter(|(k, _)| !k.trim().is_empty())
+            .or_else(|| line.split_once([':', '=']))?;
+        let key = key.trim();
+        if key.is_empty() || key.chars().count() > 40 {
+            return None;
+        }
+        Some((key.to_string(), value.trim().to_string()))
+    }
+}
+
+/// Builds the [`FileMap`] of `bytes` for `recipe`. `Err` only for a file that
+/// cannot be shown at all (empty, binary): a recipe that leaves no data still
+/// gives a map (`error` says why), so the user can fix it on the grid.
+pub fn file_map(bytes: &[u8], recipe: &ImportRecipe) -> Result<FileMap, ImportError> {
+    if bytes.is_empty() {
+        return Err(ImportError::Empty);
+    }
+    let text = crate::decode::decode_with(bytes, recipe.encoding)?.into_owned();
+    let blocks = crate::layout::split_blocks(&text, &recipe.block_split);
+    let block_count = blocks.len().max(1);
+    let first_block = blocks.first().copied().unwrap_or(&text);
+    let mut ranges = Vec::new();
+    let raw = crate::layout::split_lines(&text);
+    for line in &raw {
+        let at = line.as_ptr() as usize - text.as_ptr() as usize;
+        ranges.push((at, at + line.len()));
+    }
+    let n = ranges.len();
+    let mut map = FileMap {
+        ranges,
+        roles: vec![LineRole::Blank; n],
+        subheader_roles: vec![SubheaderRoleSet::default(); n],
+        first: 0,
+        end: n,
+        data_range: None,
+        column_header: None,
+        error: None,
+        block_count,
+        serial: {
+            static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        },
+        separator: crate::parse::EffectiveSeparator::Whitespace,
+        numbers: NumberFormat::new(
+            recipe.decimal,
+            recipe.thousands,
+            &recipe.missing_tokens,
+            std::iter::empty(),
+        ),
+        text: String::new(),
+    };
+    match crate::layout::analyze(first_block, recipe) {
+        Ok(layout) => {
+            for (i, r) in layout.roles.iter().enumerate().take(n) {
+                map.roles[i] = *r;
+            }
+            for (i, r) in layout.subheader_roles.iter().enumerate().take(n) {
+                map.subheader_roles[i] = *r;
+            }
+            map.first = layout.start;
+            map.end = layout.end;
+            map.column_header = layout.column_header;
+            map.data_range = layout
+                .data
+                .first()
+                .zip(layout.data.last())
+                .map(|(a, b)| (*a, *b));
+            map.separator = layout.separator.clone();
+            map.numbers = layout.numbers.clone();
+        }
+        Err(error) => {
+            // No data: guess the delimiter and the decimal from the first
+            // non-blank lines, so the grid still shows the file.
+            let lines: Vec<&str> = raw
+                .iter()
+                .copied()
+                .filter(|l| !l.trim().is_empty())
+                .take(60)
+                .collect();
+            if let Some(first_line) = lines.first() {
+                map.first = raw.iter().position(|l| !l.trim().is_empty()).unwrap_or(0);
+                let numbers = NumberFormat::resolve(recipe, lines.iter().copied());
+                if let Ok(separator) = resolve_separator(
+                    &recipe.separator,
+                    lines.last().unwrap_or(first_line),
+                    numbers.decimal,
+                    None,
+                ) {
+                    map.separator = separator;
+                }
+                map.numbers = numbers;
+            }
+            map.error = Some(error);
+        }
+    }
+    map.text = text;
+    Ok(map)
+}
+
+/// One role per file line (no 500-line cap), with the sub-header
+/// roles of the line.
+pub fn line_roles(
+    bytes: &[u8],
+    recipe: &ImportRecipe,
+) -> Result<Vec<(LineRole, SubheaderRoleSet)>, ImportError> {
+    let map = file_map(bytes, recipe)?;
+    Ok(map
+        .roles
+        .iter()
+        .copied()
+        .zip(map.subheader_roles.iter().copied())
+        .collect())
+}
+
 /// The sub-header roles a single line carries (#488): Long Name, Units,
 /// Comments and x'. A sub-header line may fall in several assigned ranges at
 /// once (e.g. `12.5,13` read both as long names and as x' values); the import

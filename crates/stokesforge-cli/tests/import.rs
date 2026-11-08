@@ -66,8 +66,8 @@ fn imports_a_jasco_file_with_the_model_chosen_from_its_content() {
     assert!(output.contains("Jasco (semicolon)"), "{output}");
     let project = load(&out_path);
     let sheet = project
-        .resolve_path("[Import]jasco_uvvis_semicolon")
-        .expect("worksheet named after the file");
+        .resolve_path("[Import]Fixture_Jasco_UVVis")
+        .expect("worksheet named after the TITLE key");
     let columns: Vec<_> = project.tree().node(sheet).unwrap().children().to_vec();
     assert_eq!(columns.len(), 2);
     let first = project

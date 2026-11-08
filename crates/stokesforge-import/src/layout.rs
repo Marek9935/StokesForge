@@ -107,8 +107,20 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     let subheader_start;
     // Two header modes: as soon as `header_layout` counts a line, it
     // replaces `recipe.header` (see `docs/import-preview-work-package.md`).
-    if recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0 {
-        let main_n = recipe.header_layout.main_header_lines.min(end - idx);
+    if recipe.header_layout.main_header_lines > 0
+        || recipe.header_layout.subheader_lines > 0
+        || recipe.main_until_marker.is_some()
+    {
+        // A marker line ends the main header wherever it is.
+        let by_marker = recipe.main_until_marker.as_ref().and_then(|marker| {
+            let marker = marker.trim().to_lowercase();
+            (idx..end)
+                .find(|&i| raw[i].trim().to_lowercase() == marker)
+                .map(|i| i + 1 - idx)
+        });
+        let main_n = by_marker
+            .unwrap_or(recipe.header_layout.main_header_lines)
+            .min(end - idx);
         for _ in 0..main_n {
             roles[idx] = LineRole::MainHeader;
             header.push(idx);
@@ -225,11 +237,28 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     if kept == 0 {
         return Err(ImportError::NoDataRows);
     }
-    let data: Vec<usize> = candidates[..kept].to_vec();
+    let mut data: Vec<usize> = candidates[..kept].to_vec();
+    if recipe.skip_text_rows {
+        // A text line inside the data zone (a segment title) is a comment. Only
+        // lines that survived the data end cut are looked at.
+        data.retain(|&i| {
+            let line = skip_str(raw[i], recipe.skip_chars);
+            let is_text = separator.tokenize(line).first().is_some_and(|token| {
+                !token.trim().is_empty() && !numbers.is_numeric(token) && !numbers.is_missing(token)
+            });
+            if is_text {
+                roles[i] = LineRole::Comment;
+            }
+            !is_text
+        });
+        if data.is_empty() {
+            return Err(ImportError::NoDataRows);
+        }
+    }
     for &i in &data {
         roles[i] = LineRole::Data;
     }
-    let last_data = data[kept - 1];
+    let last_data = data[data.len() - 1];
     for role in roles.iter_mut().take(end).skip(last_data + 1) {
         if matches!(*role, LineRole::Blank | LineRole::Data) {
             *role = LineRole::Footer;

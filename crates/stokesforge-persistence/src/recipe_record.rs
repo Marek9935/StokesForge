@@ -568,6 +568,13 @@ impl From<ImportRecipeRecord> for r::ImportRecipe {
             import_mode: value.import_mode.into(),
             files_layout: value.files_layout.into(),
             block_split: value.block_split.into(),
+            // #488 L2: the new recipe fields are stored from here on.
+            main_until_marker: None,
+            header_props: Vec::new(),
+            skip_text_rows: false,
+            format: r::FileFormat::Table,
+            name_unit_slash: false,
+            strip_unit_brackets: false,
         }
     }
 }

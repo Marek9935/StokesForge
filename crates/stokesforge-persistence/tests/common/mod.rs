@@ -427,5 +427,12 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
         import_mode: ImportMode::AddRows,
         files_layout: FilesLayout::SharedX,
         block_split: BlockSplit::BeforeLine("XYDATA".into()),
+        // #488 L2: the new recipe fields are stored from here on.
+        main_until_marker: None,
+        header_props: Vec::new(),
+        skip_text_rows: false,
+        format: FileFormat::Table,
+        name_unit_slash: false,
+        strip_unit_brackets: false,
     }
 }

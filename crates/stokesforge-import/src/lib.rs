@@ -30,14 +30,19 @@ mod datetime;
 #[doc(hidden)]
 pub use datetime::parse_datetime as parse_datetime_for_agreement;
 pub mod decode;
+pub mod instrument;
+pub mod jcamp;
 mod layout;
 pub mod metadata;
 mod numbers;
 pub mod parse;
 pub mod preview;
+pub mod props;
 pub mod recent;
 pub mod recipe;
+pub mod sniff;
 pub mod store;
+mod thousands;
 
 pub use choose::choose_recipe;
 pub use decode::*;

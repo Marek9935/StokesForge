@@ -57,6 +57,9 @@ impl NumberFormat {
 
     /// Is this (non-empty) token a missing-value marker?
     pub fn is_missing(&self, token: &str) -> bool {
+        if self.missing.is_empty() {
+            return false;
+        }
         let token = token.trim().to_lowercase();
         !token.is_empty() && self.missing.contains(&token)
     }
@@ -141,7 +144,60 @@ impl NumberFormat {
     /// structure decisions (automatic data end, sub-header): an `inf` line is
     /// a data line, not the end of the file.
     pub fn is_numeric(&self, token: &str) -> bool {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() && !self.is_missing(trimmed) && self.has_number_shape(trimmed) {
+            return true;
+        }
         !self.parse_raw(token).is_nan()
+    }
+
+    /// `[sign] digits [. digits] [e [sign] digits]` once normalised, with a
+    /// digit in the mantissa: the plain shape every such token parses as
+    /// (possibly to infinity, still not `NaN`). Reads the token in place, no
+    /// copy and no float parse; anything else is left to the full reading.
+    fn has_number_shape(&self, trimmed: &str) -> bool {
+        let mut chars = trimmed
+            .chars()
+            .filter_map(|c| {
+                if Some(c) == self.thousands
+                    || (self.thousands == Some(' ') && matches!(c, '\u{a0}' | '\u{202f}'))
+                {
+                    None
+                } else if self.decimal == DecimalStyle::Comma && c == ',' {
+                    Some('.')
+                } else {
+                    Some(c)
+                }
+            })
+            .peekable();
+        if matches!(chars.peek(), Some('+' | '-')) {
+            chars.next();
+        }
+        let mut digits = 0usize;
+        while chars.next_if(char::is_ascii_digit).is_some() {
+            digits += 1;
+        }
+        if chars.next_if_eq(&'.').is_some() {
+            while chars.next_if(char::is_ascii_digit).is_some() {
+                digits += 1;
+            }
+        }
+        if digits == 0 {
+            return false;
+        }
+        if chars.next_if(|c| matches!(c, 'e' | 'E')).is_some() {
+            if matches!(chars.peek(), Some('+' | '-')) {
+                chars.next();
+            }
+            let mut exp = 0usize;
+            while chars.next_if(char::is_ascii_digit).is_some() {
+                exp += 1;
+            }
+            if exp == 0 {
+                return false;
+            }
+        }
+        chars.next().is_none()
     }
 
     fn parse_raw(&self, token: &str) -> f64 {
@@ -149,18 +205,63 @@ impl NumberFormat {
         if trimmed.is_empty() || self.is_missing(trimmed) {
             return f64::NAN;
         }
-        let mut normalized = String::with_capacity(trimmed.len());
-        for c in trimmed.chars() {
+        if self.needs_normalising(trimmed) {
+            self.parse_normalised(trimmed)
+        } else {
+            trimmed.parse::<f64>().unwrap_or(f64::NAN)
+        }
+    }
+
+    /// Does the token hold a char the reading rewrites or drops (a thousands
+    /// char, or a comma read as the decimal)? When not, it parses as it is.
+    fn needs_normalising(&self, trimmed: &str) -> bool {
+        let thousands = self.thousands.is_some_and(|t| {
+            trimmed.contains(t) || (t == ' ' && trimmed.contains(['\u{a0}', '\u{202f}']))
+        });
+        thousands || (self.decimal == DecimalStyle::Comma && trimmed.contains(','))
+    }
+
+    /// The general path: drops the thousands chars, turns a decimal comma
+    /// into a dot, then parses.
+    fn parse_normalised(&self, trimmed: &str) -> f64 {
+        // The char as read once normalised, `None` when dropped.
+        let mapped = |c: char| {
             if Some(c) == self.thousands
                 || (self.thousands == Some(' ') && matches!(c, '\u{a0}' | '\u{202f}'))
             {
-                continue;
+                None
+            } else if self.decimal == DecimalStyle::Comma && c == ',' {
+                Some('.')
+            } else {
+                Some(c)
             }
-            normalized.push(match (self.decimal, c) {
-                (DecimalStyle::Comma, ',') => '.',
-                (_, c) => c,
-            });
+        };
+        // Short tokens (nearly all of them) are rewritten on the stack.
+        let mut buf = [0u8; 64];
+        if trimmed.len() <= buf.len() {
+            let mut len = 0;
+            for c in trimmed.chars().filter_map(mapped) {
+                len += c.encode_utf8(&mut buf[len..]).len();
+            }
+            return std::str::from_utf8(&buf[..len])
+                .ok()
+                .and_then(|text| text.parse::<f64>().ok())
+                .unwrap_or(f64::NAN);
         }
+        // Long token: dots in the normalised text are the kept dots plus the
+        // commas read as the decimal. Two cannot parse: skip the copy (a whole
+        // row read as one token).
+        let kept_dots = self.thousands != Some('.');
+        let comma_dots = self.decimal == DecimalStyle::Comma && self.thousands != Some(',');
+        let dots = trimmed
+            .bytes()
+            .filter(|&b| (kept_dots && b == b'.') || (comma_dots && b == b','))
+            .count();
+        if dots > 1 {
+            return f64::NAN;
+        }
+        let mut normalized = String::with_capacity(trimmed.len());
+        normalized.extend(trimmed.chars().filter_map(mapped));
         normalized.parse::<f64>().unwrap_or(f64::NAN)
     }
 }
@@ -284,5 +385,91 @@ mod tests {
         }
         assert!(!f.is_missing("abc"));
         assert!(!f.is_missing(""));
+    }
+
+    #[test]
+    fn parse_raw_fast_path_agrees_with_the_normalising_path() {
+        let tokens = [
+            "1",
+            "-1",
+            "+1",
+            "1.5",
+            "1,5",
+            "-1,5e-3",
+            "1.5E+3",
+            "1e3",
+            ".5",
+            "5.",
+            "1,234.5",
+            "1.234,5",
+            "1 234,5",
+            "1\u{a0}234,5",
+            "1\u{202f}234",
+            "1'234.5",
+            "inf",
+            "-Infinity",
+            "NaN",
+            "1e400",
+            "abc",
+            "",
+            " ",
+            " 12 ",
+            "--",
+            "N/A",
+            "n/a",
+            "1,2,3",
+            "1..2",
+            "-",
+            "+",
+            "0x10",
+            "1_000",
+            "1,",
+            ",5",
+            "1e",
+            "1e+",
+            "e5",
+            "1.e3",
+            "+.e1",
+            ".",
+            "1e5.5",
+            "1e-5",
+        ];
+        for decimal in [DecimalStyle::Dot, DecimalStyle::Comma] {
+            for thousands in [None, Some(','), Some('.'), Some(' '), Some('\'')] {
+                let f = fmt(decimal, thousands, &["--", "n/a"], &[]);
+                for token in tokens {
+                    let slow = f.parse_normalised(token.trim());
+                    let got = if token.trim().is_empty() || f.is_missing(token.trim()) {
+                        f64::NAN
+                    } else {
+                        f.parse_raw(token)
+                    };
+                    let want = if token.trim().is_empty() || f.is_missing(token.trim()) {
+                        f64::NAN
+                    } else {
+                        slow
+                    };
+                    assert_eq!(
+                        f.is_numeric(token),
+                        !got.is_nan(),
+                        "is_numeric {decimal:?} {thousands:?} {token:?}"
+                    );
+                    assert!(
+                        got.to_bits() == want.to_bits() || (got.is_nan() && want.is_nan()),
+                        "{decimal:?} {thousands:?} {token:?}: {got} vs {want}"
+                    );
+                }
+            }
+        }
+        // A few pinned values.
+        let f = fmt(DecimalStyle::Comma, Some(' '), &[], &[]);
+        assert_eq!(f.parse_raw("1\u{a0}234,5"), 1234.5);
+        assert_eq!(f.parse_raw("-1,5e-3"), -0.0015);
+        assert!(f.parse_raw("1.2.3").is_nan());
+        assert!(f.parse_raw("inf").is_infinite());
+        let d = fmt(DecimalStyle::Dot, Some(','), &[], &[]);
+        assert_eq!(d.parse_raw("1,234.5"), 1234.5);
+        assert!(!d.needs_normalising("12.5"));
+        assert!(d.needs_normalising("1,2"));
     }
 }

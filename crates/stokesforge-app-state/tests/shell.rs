@@ -5428,7 +5428,8 @@ fn importing_resolves_series_name_from_a_header_key_when_the_column_has_no_name_
     });
 
     let tree = state.tree();
-    let sheet = sheet_named(tree, "spectrum");
+    // The TITLE key names the sheet as well as the series.
+    let sheet = sheet_named(tree, "MySample");
     let columns = state.visible_columns(sheet);
     assert_eq!(state.column_meta(columns[0].0).long_name, "X");
     assert_eq!(
@@ -10569,7 +10570,7 @@ fn dropping_a_jasco_file_picks_the_saved_model_automatically() {
     assert!(state.import_state().is_none(), "read without wizard");
     let status = state.status().expect("message");
     assert!(status.text.contains("Jasco (semicolon)"), "{}", status.text);
-    let sheet = sheet_named(state.tree(), "jasco_uvvis_semicolon");
+    let sheet = sheet_named(state.tree(), "Fixture_Jasco_UVVis");
     let columns = state.visible_columns(sheet);
     assert_eq!(cell_f64(&state, columns[0].0, 0), 800.0);
     assert_eq!(column_type(&state, columns[0].0), ColumnType::Numeric);

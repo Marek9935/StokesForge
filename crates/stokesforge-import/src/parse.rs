@@ -197,6 +197,18 @@ pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTab
         return Err(ImportError::Empty);
     }
     let text = crate::decode::decode_with(bytes, recipe.encoding)?;
+    if recipe.format == crate::recipe::FileFormat::Jcamp {
+        let (tables, nmr_only) = jcamp_tables(&text, recipe);
+        if !tables.is_empty() {
+            return Ok(tables);
+        }
+        if nmr_only {
+            // NMR is out of scope: never read its numbers as a plain table.
+            return Err(ImportError::NoDataRows);
+        }
+        // Not a JCAMP-DX file (a template applied to another file): read it
+        // as a table.
+    }
     let mut tables = Vec::new();
     let mut last_error = ImportError::Empty;
     for block in crate::layout::split_blocks(&text, &recipe.block_split) {
@@ -210,6 +222,64 @@ pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTab
     } else {
         Ok(tables)
     }
+}
+
+/// One two-column table (x then y) per JCAMP-DX block that has points. The
+/// y column carries the block title as its long name; the units come from
+/// `XUNITS` / `YUNITS`; the header records of the block are kept so that
+/// [`ParsedTable::header_value`] and the metadata work.
+fn jcamp_tables(text: &str, recipe: &ImportRecipe) -> (Vec<ParsedTable>, bool) {
+    let separator = EffectiveSeparator::Char('=');
+    let file = crate::jcamp::read(text);
+    let nmr_only = file.nmr_blocks > 0 && file.blocks.iter().all(|b| b.points() == 0);
+    let tables = file
+        .blocks
+        .into_iter()
+        .filter(|block| block.points() > 0)
+        .map(|block| {
+            let n = block.points();
+            let unit = |raw: &Option<String>| raw.as_deref().map(crate::props::short_unit);
+            let title = Some(block.title.clone()).filter(|t| !t.is_empty());
+            let x = ParsedColumn {
+                name: None,
+                values: block.x[..n].to_vec(),
+                texts: vec![None; n],
+                long_name: None,
+                unit: unit(&block.xunits),
+                comment: None,
+                x_prime: None,
+                datetime: false,
+            };
+            let y = ParsedColumn {
+                name: None,
+                values: block.y[..n].to_vec(),
+                texts: vec![None; n],
+                long_name: title,
+                unit: unit(&block.yunits),
+                comment: block.data_type.clone(),
+                x_prime: None,
+                datetime: false,
+            };
+            let metadata = crate::metadata::split_lines(
+                block
+                    .header
+                    .iter()
+                    .filter(|_| recipe.keep_header_metadata)
+                    .map(String::as_str),
+                &separator,
+                recipe,
+            );
+            ParsedTable {
+                columns: vec![x, y],
+                warnings: Vec::new(),
+                header_lines: block.header,
+                footer_lines: Vec::new(),
+                metadata,
+                separator: separator.clone(),
+            }
+        })
+        .collect();
+    (tables, nmr_only)
 }
 
 /// Builds the table of a [`crate::layout::Layout`]: columns, sub-headers,
@@ -285,31 +355,44 @@ pub(crate) fn table_from_layout(
     });
 
     let long_names = role_values(long_name_line, join);
+    // `name/unit` tokens (Netzsch) are split at the first `/`.
+    let split_token = |token: &str| {
+        if recipe.name_unit_slash {
+            crate::props::split_name_unit_slash(token)
+        } else {
+            crate::props::split_name_unit(token)
+        }
+    };
     let units = if recipe.subheader_roles.same_line_name_unit {
-        // Same line as `long_name`: each token has the form "Name (unit)".
-        // Without recognized parentheses, the whole token stays the long name
-        // and the unit stays empty.
+        // Same line as `long_name`: each token has the form "Name (unit)" or
+        // "Name [unit]". Without recognized brackets, the whole token stays the
+        // long name and the unit stays empty.
         long_names.as_ref().map(|names| {
             names
                 .iter()
-                .map(|n| match (n.find('('), n.find(')')) {
-                    (Some(open), Some(close)) if open < close => {
-                        n[open + 1..close].trim().to_string()
-                    }
-                    _ => String::new(),
-                })
+                .map(|n| split_token(n).1.unwrap_or_default())
                 .collect()
         })
     } else {
-        role_values(unit_line, false)
+        role_values(unit_line, false).map(|units: Vec<String>| {
+            if recipe.strip_unit_brackets {
+                units
+                    .iter()
+                    .map(|u| crate::props::strip_square_brackets(u))
+                    .collect()
+            } else {
+                units
+            }
+        })
     };
     let long_names = if recipe.subheader_roles.same_line_name_unit {
         long_names.map(|names| {
             names
                 .into_iter()
-                .map(|n| match n.find('(') {
-                    Some(open) => n[..open].trim().to_string(),
-                    None => n,
+                .map(|n| match split_token(&n) {
+                    (name, Some(_)) => name,
+                    (name, None) if recipe.name_unit_slash => name,
+                    _ => n,
                 })
                 .collect()
         })
@@ -338,7 +421,7 @@ pub(crate) fn table_from_layout(
         .collect();
 
     let num_cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let columns: Vec<ParsedColumn> = (0..num_cols)
+    let mut columns: Vec<ParsedColumn> = (0..num_cols)
         .map(|c| {
             let name = column_names
                 .as_ref()
@@ -383,6 +466,33 @@ pub(crate) fn table_from_layout(
         .iter()
         .map(|line| (*line).to_string())
         .collect();
+
+    // Header properties fill the fields the sub-header left empty.
+    for prop in &recipe.header_props {
+        let value = crate::props::find_value(
+            header_lines
+                .iter()
+                .chain(footer_lines.iter())
+                .map(String::as_str),
+            &prop.key,
+        );
+        let Some(text) = value.and_then(|v| crate::props::prop_text(prop, &v)) else {
+            continue;
+        };
+        for (index, column) in columns.iter_mut().enumerate() {
+            if !crate::props::applies_to(prop.target, index) {
+                continue;
+            }
+            let slot = match prop.field {
+                crate::recipe::PropField::LongName => &mut column.long_name,
+                crate::recipe::PropField::Units => &mut column.unit,
+                crate::recipe::PropField::Comment => &mut column.comment,
+            };
+            if slot.is_none() {
+                *slot = Some(text.clone());
+            }
+        }
+    }
 
     let mut warnings = Vec::new();
     if let Some(declared) = lookup_header_value(&header_lines, separator, "NPOINTS") {

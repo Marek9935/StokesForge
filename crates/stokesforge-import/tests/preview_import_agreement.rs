@@ -569,3 +569,104 @@ fn the_colored_lines_are_the_lines_the_import_reads() {
     assert_eq!(table.columns[0].long_name.as_deref(), Some("A a"));
     assert_eq!(table.columns[0].unit.as_deref(), Some("m"));
 }
+
+/// A table interrupted by text lines. The detector sets
+/// `skip_text_rows`; the preview marks the titles as comments and shows as many
+/// data lines as the import reads rows.
+#[test]
+fn text_rows_in_data_are_skipped_the_same_way() {
+    let bytes =
+        b"Run\n\tTime\tWeight\n\t0.5\t7.0\n\t1.5\t7.1\n1) Scan\n\t2.5\t7.2\n\t3.5\t7.3\n\nnote\n";
+    let sniffed = stokesforge_import::sniff::sniff(bytes, "f").unwrap();
+    let recipe = sniffed.recipe;
+    assert!(recipe.skip_text_rows);
+    let table = parse(bytes, &recipe).unwrap();
+    let shown = preview(bytes, &recipe).unwrap();
+    assert_eq!(table.row_count(), 4);
+    assert_eq!(shown.total_data_lines, table.row_count());
+    let role_of = |text: &str| {
+        shown
+            .lines
+            .iter()
+            .find(|l| l.text.trim() == text)
+            .map(|l| l.role)
+    };
+    assert_eq!(role_of("1) Scan"), Some(LineRole::Comment));
+    assert_eq!(role_of("note"), Some(LineRole::Footer));
+    assert_same_split(bytes, &recipe);
+}
+
+/// Counts what the import reads and what the preview colours as data, and
+/// checks they are the same lines.
+fn assert_same_rows(bytes: &[u8], recipe: &ImportRecipe) -> usize {
+    let table = parse(bytes, recipe).expect("import");
+    let shown = preview(bytes, recipe).expect("preview");
+    assert_eq!(shown.total_data_lines, table.row_count());
+    table.row_count()
+}
+
+/// `main_until_marker`: two JASCO-like headers of different lengths, one
+/// recipe; the preview and the import both start the sub-header after the
+/// marker line.
+#[test]
+fn a_header_marker_gives_the_same_table_in_both_for_headers_of_any_length() {
+    let short = b"TITLE\ta\nXYDATA\nnm\n1\t2.5\n2\t3.5\n";
+    let long = b"TITLE\ta\nXUNITS\tNM\nYUNITS\tABS\nNPOINTS\t2\nXYDATA\nnm\n1\t2.5\n2\t3.5\n";
+    let mut recipe = ImportRecipe::new("m");
+    recipe.separator = Separator::Tab;
+    recipe.decimal = DecimalStyle::Dot;
+    recipe.main_until_marker = Some("XYDATA".into());
+    recipe.header_layout.main_header_lines = 1;
+    recipe.header_layout.subheader_lines = 1;
+    assert_eq!(assert_same_rows(short, &recipe), 2);
+    assert_eq!(assert_same_rows(long, &recipe), 2);
+    assert_eq!(
+        parse(short, &recipe).unwrap().columns[0].unit,
+        parse(long, &recipe).unwrap().columns[0].unit
+    );
+}
+
+/// `header_props`: a `KEY;VALUE` line of the header is a header line for the
+/// preview too, and the data rows do not move.
+#[test]
+fn header_properties_do_not_change_the_rows_the_preview_shows() {
+    let bytes = b"XUNITS;NANOMETERS\nTITLE;sample\n1;2\n2;3\n";
+    let mut recipe = ImportRecipe::new("p");
+    recipe.separator = Separator::Semicolon;
+    recipe.header_layout.main_header_lines = 2;
+    recipe.header_props = vec![stokesforge_import::HeaderProp {
+        key: "XUNITS".into(),
+        field: stokesforge_import::PropField::Units,
+        target: stokesforge_import::PropTarget::X,
+        short_unit: true,
+    }];
+    assert_eq!(assert_same_rows(bytes, &recipe), 2);
+    let table = parse(bytes, &recipe).unwrap();
+    assert_eq!(table.columns[0].unit.as_deref(), Some("nm"));
+}
+
+/// `name_unit_slash` and `strip_unit_brackets` only change the names and
+/// units; both sides read the same rows.
+#[test]
+fn name_and_unit_readings_do_not_change_the_rows() {
+    let bytes = b"Temp./C;DSC/(mW/mg)\n[nm];[au]\n1;2\n2;3\n";
+    let mut recipe = ImportRecipe::new("n");
+    recipe.separator = Separator::Semicolon;
+    recipe.header_layout.main_header_lines = 0;
+    recipe.header_layout.subheader_lines = 2;
+    let plain = assert_same_rows(bytes, &recipe);
+    recipe.name_unit_slash = true;
+    recipe.strip_unit_brackets = true;
+    assert_eq!(assert_same_rows(bytes, &recipe), plain);
+}
+
+/// `format` Jcamp: the import reads the decoded table; the preview shows the
+/// lines of the file without failing on them.
+#[test]
+fn a_jcamp_recipe_imports_the_decoded_points() {
+    let bytes = b"##TITLE=t\n##JCAMP-DX=4.24\n##FIRSTX=1\n##LASTX=3\n##XYDATA=(X++(Y..Y))\n1 5 6 7\n##END=\n";
+    let mut recipe = ImportRecipe::new("j");
+    recipe.format = stokesforge_import::FileFormat::Jcamp;
+    assert_eq!(parse(bytes, &recipe).unwrap().row_count(), 3);
+    assert!(preview(bytes, &recipe).is_ok());
+}
