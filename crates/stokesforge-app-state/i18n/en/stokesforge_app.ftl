@@ -712,6 +712,14 @@ error-import-empty = The file is empty
 error-import-no-data = No data found after the header. Check the number of header lines
 error-import-whitespace-thousands = A space cannot both separate the columns and group the thousands. Choose another delimiter or another thousands separator
 error-import-file = { $path }: { $detail }
+error-import-origin-not-origin = The file is not an Origin project
+error-import-origin-opju = Origin files in the .opju format cannot be opened yet. Save the project as .opj from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as .opj
+error-import-origin-version = This Origin file was saved by a version StokesForge cannot read
+error-import-origin-truncated = The Origin file is incomplete. It may have been cut short by a copy or a download
+error-import-origin-bad-structure = The Origin file is damaged: its structure is not valid
+error-import-origin-item-too-large = The Origin file is damaged: an item is larger than the file
+error-import-origin-too-deep = The Origin file is too complex to be read
+error-import-origin-short-item = The Origin file is damaged: an item is incomplete
 
 # Formulas
 error-formula-syntax = The formula is incomplete or not valid. Check the operators and the parentheses

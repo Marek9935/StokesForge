@@ -20,6 +20,7 @@ The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application
 7. **No recipe in production code** (#378): the program carries no template; the user saves their own. Test templates live in `test/import/test_recipes.json` (a `RecipeStore` file), copied into a redirected config folder by the tests that need them.
 8. **A mixed-type column is not an import failure** (invariant 10): keep it, never refuse the file.
 9. **Origin `.opj` is not a text import** (#490): `origin/` reads the books of a binary project (port of liborigin, GPL header lines kept, `vendor/liborigin/NOTICE`); it has no recipe. Its tests use the generator `origin::synthetic` and `test/import/origin/synthetic.opj`; real files stay private (`tests/origin_private.rs`, ignored). Every read is checked (invariant 10).
+   Conversion to the model lives in `stokesforge-importer/src/origin.rs`: detection `is_origin_path` (`.opj`/`.opju`) and `is_origin_bytes` (`CPYA`/`CPYUA`), `read_origin_file`, `default_origin_selection` (per book: the `Data` sheets, else every sheet with columns), `plan_origin_import` (one workbook per book, one sheet per ticked sheet) and `make_origin_column` (roles, long name falling back to the short name, the book's Horiba block as `file_metadata`, **no `import_source`**: no Refresh from Source for Origin). The CLI and `pyst.import_file` use these with the default selection; no template applies.
 
 Module map and symptom → field table: [references/modules-and-symptoms.md](references/modules-and-symptoms.md).
 

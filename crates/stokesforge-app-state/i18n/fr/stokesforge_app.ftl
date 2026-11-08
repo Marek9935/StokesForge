@@ -711,6 +711,14 @@ error-import-empty = Le fichier est vide
 error-import-no-data = Aucune donnée après l'en-tête. Vérifier le nombre de lignes d'en-tête
 error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les colonnes et grouper les milliers. Choisir un autre séparateur de colonnes ou de milliers
 error-import-file = { $path } : { $detail }
+error-import-origin-not-origin = Le fichier n'est pas un projet Origin
+error-import-origin-opju = Les fichiers Origin au format .opju ne peuvent pas encore être ouverts. Enregistrer le projet en .opj depuis Origin 2018 à 2022b, ou l'ouvrir dans Origin Viewer (gratuit) et l'enregistrer en .opj
+error-import-origin-version = Ce fichier Origin a été enregistré par une version que StokesForge ne sait pas lire
+error-import-origin-truncated = Le fichier Origin est incomplet. Il a peut-être été coupé pendant une copie ou un téléchargement
+error-import-origin-bad-structure = Le fichier Origin est abîmé : sa structure n'est pas valide
+error-import-origin-item-too-large = Le fichier Origin est abîmé : un élément est plus grand que le fichier
+error-import-origin-too-deep = Le fichier Origin est trop complexe pour être lu
+error-import-origin-short-item = Le fichier Origin est abîmé : un élément est incomplet
 
 # Formules
 error-formula-syntax = La formule est incomplète ou invalide. Vérifier les opérateurs et les parenthèses
