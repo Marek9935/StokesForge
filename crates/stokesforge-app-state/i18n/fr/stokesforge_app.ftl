@@ -1971,6 +1971,26 @@ status-script-none-running = Aucun script en cours
 error-import-not-open = La fenêtre d'import est fermée
 error-template-import-read = Impossible de lire le modèle { $path } : { $cause }
 error-template-import-invalid = Le modèle { $path } n'est pas valide : { $detail }
+status-import-origin-done = Import terminé : { $sheets ->
+    [one] { $sheets } feuille
+   *[other] { $sheets } feuilles
+} dans { $books ->
+    [one] { $books } classeur
+   *[other] { $books } classeurs
+    }
+status-import-origin-left-wizard = { $count ->
+    [one] Le fichier Origin a été déplacé
+   *[other] { $count } fichiers Origin ont été déplacés
+} de l'assistant d'import vers la fenêtre « Importer depuis Origin »
+status-origin-drop-refused = Seuls les fichiers Origin peuvent être ajoutés ici. Les autres fichiers déposés n'ont pas été importés
+origin-import-title = Importer depuis Origin
+origin-import-summary = À créer : { $sheets ->
+    [one] { $sheets } feuille
+   *[other] { $sheets } feuilles
+} dans { $books ->
+    [one] { $books } classeur
+   *[other] { $books } classeurs
+    }
 status-import-dropped = { $count ->
     [one] { $count } fichier importé avec le modèle « { $models } »
    *[other] { $count } fichiers importés avec le modèle « { $models } »
@@ -2008,7 +2028,8 @@ disabled-nothing-to-undo = Rien à annuler
 disabled-copy-last-format = Au moins un format doit être offert
 disabled-nothing-to-redo = Rien à rétablir
 disabled-new-project-busy = Terminez ou annulez d'abord le script, l'import ou la modification en cours
-disabled-no-source-file = Aucune colonne de cette feuille ne vient d'un fichier
+disabled-no-source-file = Aucune colonne de cette feuille ne peut être relue depuis son fichier
+disabled-origin-import-nothing-ticked = Cochez d'abord au moins une feuille
 disabled-no-last-import = Aucun import terminé à rouvrir
 disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
 disabled-no-window = Aucune fenêtre à agrandir

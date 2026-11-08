@@ -364,7 +364,7 @@ Each imported column remembers the file it came from and the settings used. When
 
 The values are rewritten in place. The columns keep their identity, so graphs that use them stay valid. The number of rows follows the longest of the new contents. It shrinks only if all the columns of the sheet are refreshed; columns that hold a formula are not a reason to keep the rows, they are recomputed on the new length. A column you typed by hand is never cut, so it keeps the rows.
 
-The entry is greyed out when no column of the sheet comes from a file.
+The entry is greyed out when no column of the sheet can be read again from its file, for example a sheet imported from an Origin project.
 
 ## Common problems
 

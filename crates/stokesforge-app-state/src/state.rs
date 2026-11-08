@@ -85,10 +85,12 @@ mod analysis;
 mod autosave;
 mod column_use;
 pub mod open_dialog;
+mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
+pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
 /// How long a command waits for the formula recalculation it started to
 /// finish before handing control back to the interface (#239): a recalculation
@@ -561,9 +563,38 @@ pub enum Action {
         /// Files to import.
         paths: Vec<std::path::PathBuf>,
     },
-    /// Reopens the last import in the wizard, to correct it: if it is still
-    /// the last history entry, it is undone first.
+    /// Reopens the last import in the wizard (or in the Origin chooser when
+    /// the last import was an Origin one), to correct it: if it is still the
+    /// last history entry, it is undone first.
     ReopenLastImport,
+    /// Origin chooser (#490): ticks or unticks one sheet of the file at rank
+    /// `file`, book `book`. A sheet with no column cannot be ticked.
+    ToggleOriginSheet {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the book in the file.
+        book: usize,
+        /// Rank of the sheet in the book.
+        sheet: usize,
+    },
+    /// Origin chooser: ticks or unticks every sheet (with columns) of a book.
+    SetOriginBookTicked {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the book in the file.
+        book: usize,
+        /// The new state of its sheets.
+        ticked: bool,
+    },
+    /// Origin chooser: ticks every sheet that has columns.
+    CheckAllOriginSheets,
+    /// Origin chooser: unticks every sheet.
+    CheckNoOriginSheets,
+    /// Origin chooser: creates the ticked workbooks and sheets, in one
+    /// history entry. Nothing happens while nothing is ticked.
+    ImportOrigin,
+    /// Origin chooser: closes it without importing anything.
+    CancelOriginImport,
     /// Refreshes the imported columns of `sheet` from their source files
     /// (reread with the stored recipe), **in place**: the columns keep
     /// their identity, so the graphs that plot them stay valid.
@@ -2774,6 +2805,9 @@ struct ImportReply {
     items: Vec<ImportItem>,
     unreadable: Vec<PathBuf>,
     models: Vec<String>,
+    /// The Origin projects among the files (#490): read here, on the
+    /// background thread, and given to the chooser instead of the recipes.
+    origin: Vec<origin_import::OriginRead>,
 }
 
 /// Import in progress on a background thread: reading and analyzing the files
@@ -3291,6 +3325,12 @@ pub struct AppState {
     recovery_dir: Option<PathBuf>,
     /// Last successful import, to resume it in the wizard.
     last_import: Option<LastImport>,
+    /// Last successful Origin import (#490), when it is more recent than
+    /// `last_import`: the chooser reopens on the same files and ticks.
+    last_origin_import: Option<Vec<origin_import::OriginFile>>,
+    /// The Origin chooser (#490), when open. It is painted only while the
+    /// import wizard is closed ([`AppState::origin_import_open`]).
+    origin_import: Option<origin_import::OriginChooser>,
     /// Files imported successfully, to be added to the recent files by the
     /// window layer ([`AppState::take_imported_paths`]).
     recent_to_record: Vec<PathBuf>,
@@ -3441,6 +3481,8 @@ impl AppState {
             quit_without_prompt: false,
             recovery_dir: crate::recovery::default_dir(),
             last_import: None,
+            last_origin_import: None,
+            origin_import: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
             script_output: None,
@@ -3830,7 +3872,10 @@ impl AppState {
     /// Is a content modal dialog open (import, graph properties,
     /// analysis)? Its errors then go in its footer (S-M7).
     fn modal_dialog_open(&self) -> bool {
-        self.import_state.is_some() || self.plot_settings.is_some() || self.analysis.is_some()
+        self.import_state.is_some()
+            || self.origin_import_open()
+            || self.plot_settings.is_some()
+            || self.analysis.is_some()
     }
 
     /// The remembered size and position of each kind of dialog (S-F8).
@@ -5973,6 +6018,16 @@ impl AppState {
                 paths,
             } => self.start_import(destination, ImportSource::Menu(recipe), paths),
             Action::ReopenLastImport => self.reopen_last_import(),
+            Action::ToggleOriginSheet { file, book, sheet } => {
+                self.toggle_origin_sheet(file, book, sheet);
+            }
+            Action::SetOriginBookTicked { file, book, ticked } => {
+                self.set_origin_book_ticked(file, book, ticked);
+            }
+            Action::CheckAllOriginSheets => self.check_all_origin_sheets(true),
+            Action::CheckNoOriginSheets => self.check_all_origin_sheets(false),
+            Action::ImportOrigin => self.import_origin(),
+            Action::CancelOriginImport => self.origin_import = None,
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,
@@ -6659,6 +6714,7 @@ impl AppState {
                     self.pending_analysis_replacement = false;
                     self.pending_stale_export = None;
                     self.column_use = None;
+                    self.origin_import = None;
                     self.pending_full_copy = None;
                     self.pending_overwrite = None;
                     self.pending_discarded_save = None;
@@ -6806,8 +6862,21 @@ impl AppState {
         }
         let plan = file_drop_plan(&paths, target_book);
         self.projects_to_open.extend(plan.projects);
+        // The Origin chooser is open (#490): it takes Origin projects only.
+        if self.origin_import_open() {
+            let (origin, others): (Vec<PathBuf>, Vec<PathBuf>) = plan
+                .data
+                .into_iter()
+                .partition(|path| stokesforge_importer::is_origin_path(path));
+            if !others.is_empty() {
+                self.warn(tr!("status-origin-drop-refused"));
+            }
+            self.route_origin_paths(origin);
+            return;
+        }
         // The wizard is open: the drop adds the files to it instead of
-        // importing them on top.
+        // importing them on top (an Origin project among them goes to the
+        // chooser, see `add_import_paths`).
         if self.import_state.is_some() {
             self.add_import_paths(plan.data);
             return;
@@ -6864,6 +6933,7 @@ impl AppState {
                     items: Vec::new(),
                     unreadable: Vec::new(),
                     models: Vec::new(),
+                    origin: Vec::new(),
                 };
                 // One template per file for a drop: the automatic choice
                 // (extension, name, content signature), otherwise the last
@@ -6875,6 +6945,13 @@ impl AppState {
                 for path in paths {
                     if worker_stop.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
+                    }
+                    // An Origin project has no recipe: the chooser takes it.
+                    if stokesforge_importer::is_origin_path(&path) {
+                        let read = stokesforge_importer::read_origin_file(&path).map(Arc::new);
+                        reply.origin.push((path, read));
+                        worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        continue;
                     }
                     match (&source, &store) {
                         (ImportSource::Drop { fallback, .. }, Some(store)) => {
@@ -7001,10 +7078,15 @@ impl AppState {
         let Some(mut job) = self.import_job.take() else {
             return false;
         };
-        let Some(reply) = job.ready.take() else {
+        let Some(mut reply) = job.ready.take() else {
             return false;
         };
-        let applied = job.dropped.is_none() || !reply.items.is_empty();
+        let origin = std::mem::take(&mut reply.origin);
+        // A job made of Origin projects only has nothing for the recipes: it
+        // must not open an empty "Import" entry nor say "0 of 0".
+        let origin_only =
+            reply.items.is_empty() && reply.unreadable.is_empty() && !origin.is_empty();
+        let applied = !origin_only && (job.dropped.is_none() || !reply.items.is_empty());
         if applied {
             let count = reply.items.len();
             self.apply_import(job.destination, reply.items);
@@ -7028,6 +7110,7 @@ impl AppState {
                 }
             }
         }
+        self.add_origin_reads(origin);
         applied
     }
 
@@ -7199,13 +7282,19 @@ impl AppState {
 
     /// A last import exists and can be resumed in the wizard.
     pub fn can_reopen_last_import(&self) -> bool {
-        self.last_import.is_some() && self.import_job.is_none()
+        (self.last_import.is_some() || self.last_origin_import.is_some())
+            && self.import_job.is_none()
     }
 
     /// [`Action::ReopenLastImport`]: undoes the last import if it is still
     /// at the top of the history (otherwise the correction would be added instead of
     /// replacing it), then reopens the wizard on its files and its recipe.
     fn reopen_last_import(&mut self) {
+        // The most recent import wins: an Origin one reopens the chooser.
+        if self.last_origin_import.is_some() {
+            self.reopen_origin_import();
+            return;
+        }
         let Some(last) = self.last_import.clone() else {
             self.fail(tr!("error-import-nothing-to-reopen"));
             return;
@@ -7300,11 +7389,13 @@ impl AppState {
     /// it has no place here). No effect if the window is not
     /// open.
     pub fn set_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
+        let (paths, routed) = self.take_origin_paths_out_of_wizard(paths);
         if let Some(state) = &mut self.import_state {
             state.paths = paths;
             state.preview_index = 0;
             state.bytes.borrow_mut().clear();
         }
+        self.close_wizard_if_emptied(routed);
     }
 
     /// Adds `paths` to the wizard's files (drop while it is
@@ -7314,6 +7405,7 @@ impl AppState {
     /// automatic choice of the template (extension, name, content signature)
     /// can replace it: the message says which one was chosen.
     pub fn add_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
+        let (paths, routed) = self.take_origin_paths_out_of_wizard(paths);
         let was_empty = self
             .import_state
             .as_ref()
@@ -7328,6 +7420,7 @@ impl AppState {
         if was_empty && !self.import_recipe_modified() {
             self.choose_import_recipe_automatically();
         }
+        self.close_wizard_if_emptied(routed);
     }
 
     /// Chooses, from the file shown, the template that matches it
@@ -9008,6 +9101,8 @@ impl AppState {
                 self.analysis = None;
                 self.import_state = None;
                 self.last_import = None;
+                self.last_origin_import = None;
+                self.origin_import = None;
                 self.delete_repeat = None;
                 self.applied_revision = 0;
                 self.refresh();
@@ -10983,6 +11078,12 @@ impl AppState {
         recipe: stokesforge_import::ImportRecipe,
         paths: Vec<PathBuf>,
     ) {
+        // An Origin project is never read here, on the calling thread: it goes
+        // to the chooser through the background import (#490).
+        let (origin, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths
+            .into_iter()
+            .partition(|path| stokesforge_importer::is_origin_path(path));
+        self.route_origin_paths(origin);
         if paths.is_empty() {
             return;
         }
@@ -11096,6 +11197,7 @@ impl AppState {
                 ..
             }) = first_ok
             {
+                self.last_origin_import = None;
                 self.last_import = Some(LastImport {
                     destination,
                     recipe: first_recipe.clone(),
@@ -11170,19 +11272,7 @@ impl AppState {
         name: &str,
         failures: &mut Vec<String>,
     ) -> Option<NodeId> {
-        let previous = self
-            .snapshot
-            .tree
-            .node(book)
-            .and_then(|node| node.children().last().copied());
-        self.execute(Command::AddWorksheet { book, name: None });
-        let sheet = self
-            .snapshot
-            .tree
-            .node(book)
-            .and_then(|node| node.children().last().copied())
-            .filter(|sheet| Some(*sheet) != previous);
-        let Some(sheet) = sheet else {
+        let Some(sheet) = self.add_bare_sheet(book) else {
             failures.push(tr!("error-import-create-sheet", name = name));
             return None;
         };
@@ -11191,6 +11281,21 @@ impl AppState {
             name: name.to_string(),
         });
         Some(sheet)
+    }
+
+    /// Adds a sheet with its automatic name to `book` and finds it again.
+    fn add_bare_sheet(&mut self, book: NodeId) -> Option<NodeId> {
+        let previous = self
+            .snapshot
+            .tree
+            .node(book)
+            .and_then(|node| node.children().last().copied());
+        self.execute(Command::AddWorksheet { book, name: None });
+        self.snapshot
+            .tree
+            .node(book)
+            .and_then(|node| node.children().last().copied())
+            .filter(|sheet| Some(*sheet) != previous)
     }
 
     /// "Active workbook" mode outside a new sheet: replaces the content of

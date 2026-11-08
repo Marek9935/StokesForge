@@ -1972,6 +1972,26 @@ status-script-none-running = No script is running
 error-import-not-open = The import window is closed
 error-template-import-read = Could not read the template { $path }: { $cause }
 error-template-import-invalid = The template { $path } is not valid: { $detail }
+status-import-origin-done = Imported { $sheets ->
+    [one] { $sheets } sheet
+   *[other] { $sheets } sheets
+} in { $books ->
+    [one] { $books } workbook
+   *[other] { $books } workbooks
+    }
+status-import-origin-left-wizard = { $count ->
+    [one] The Origin file was
+   *[other] { $count } Origin files were
+} moved from the Import Wizard to the Import from Origin window
+status-origin-drop-refused = Only Origin files can be added here. The other dropped files were not imported
+origin-import-title = Import from Origin
+origin-import-summary = To create: { $sheets ->
+    [one] { $sheets } sheet
+   *[other] { $sheets } sheets
+} in { $books ->
+    [one] { $books } workbook
+   *[other] { $books } workbooks
+    }
 status-import-dropped = { $count ->
     [one] { $count } file imported with template “{ $models }”
    *[other] { $count } files imported with template “{ $models }”
@@ -2011,7 +2031,8 @@ disabled-nothing-to-redo = Nothing to redo
 disabled-new-project-busy = Finish or cancel the running script, import or edit first
 disabled-column-type-formula = This column is computed by a formula. Remove the formula to change its type
 disabled-column-type-calculated = This column is produced by a calculation. Detach it from the calculation to change its type
-disabled-no-source-file = No column of this sheet comes from a file
+disabled-no-source-file = No column of this sheet can be read again from its file
+disabled-origin-import-nothing-ticked = Check at least one sheet first
 disabled-no-last-import = No finished import to reopen
 disabled-needs-sheet = Bring a workbook sheet to the front first
 disabled-no-window = No window to maximize
