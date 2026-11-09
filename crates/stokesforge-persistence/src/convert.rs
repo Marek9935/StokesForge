@@ -9,9 +9,9 @@ use stokesforge_core::{
     FormulaPart, MixedCell, Node, NodeId, NodeKind, RemoteRef, ValueBlock, WindowMeta,
 };
 use stokesforge_plot::{
-    AnnotationSpec, AxisScale, AxisSpec, FreeFrame, FreePage, LayerPlacement, LegendPosition,
-    LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec,
-    ShapeKind, ShapeSpec, SymbolShape, SymbolSpec, TickDirection,
+    AnnotationSpec, AxisScale, AxisSpec, FreeFrame, FreePage, GridSlack, LayerPlacement,
+    LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec, PlotType, SeriesAxis,
+    SeriesSpec, ShapeKind, ShapeSpec, SymbolShape, SymbolSpec, TickDirection,
 };
 
 use stokesforge_import::recipe::ImportRecipe;
@@ -19,14 +19,14 @@ use stokesforge_import::recipe::ImportRecipe;
 use crate::recipe_record::ImportSourceRecord;
 use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, FreeFrameRecord,
-    FreePageRecord, GroupGradientRecord, GroupNameRecord, KindRecord, LayerPlacementRecord,
-    LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord,
-    OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RemoteRefRecord,
-    RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord,
-    ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord,
-    TextAnchorRecord, TextFontRecord, TickDirectionRecord, TypeRecord, ValuesRecord,
-    WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER,
-    MIXED_TAG_TEXT,
+    FreePageRecord, GridSlackRecord, GroupGradientRecord, GroupNameRecord, KindRecord,
+    LayerPlacementRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord,
+    NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord,
+    RemoteRefRecord, RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord,
+    SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
+    TextAlignRecord, TextAnchorRecord, TextFontRecord, TickDirectionRecord, TypeRecord,
+    ValuesRecord, WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY,
+    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Upper bound of a panel coordinate (`row`/`column`) read from a file
@@ -810,6 +810,12 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
             width: page.width,
             height: page.height,
         }),
+        grid_slack: spec.grid_slack.map(|slack| GridSlackRecord {
+            left: slack.left,
+            top: slack.top,
+            right: slack.right,
+            bottom: slack.bottom,
+        }),
     }
 }
 
@@ -847,6 +853,12 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
             top: page.top,
             width: page.width,
             height: page.height,
+        }),
+        grid_slack: record.grid_slack.map(|slack| GridSlack {
+            left: slack.left,
+            top: slack.top,
+            right: slack.right,
+            bottom: slack.bottom,
         }),
     })
 }
@@ -1347,6 +1359,35 @@ mod tests {
         let none = PlotSpec::empty("none");
         let back = record_to_plot_spec(plot_spec_to_record(&none)).unwrap();
         assert_eq!(back.free_page, None);
+    }
+
+    /// #505: the empty space around a grid round-trips as written, and a graph
+    /// without any stays without. Witness: the field dropped by one direction
+    /// of the conversion.
+    #[test]
+    fn a_grid_slack_round_trips_and_none_stays_none() {
+        let slack = GridSlack {
+            left: 0.0,
+            top: 12.5,
+            right: 3.25,
+            bottom: 1e300,
+        };
+        let spec = PlotSpec {
+            grid_slack: Some(slack),
+            ..PlotSpec::empty("slack")
+        };
+        let back = record_to_plot_spec(plot_spec_to_record(&spec)).unwrap();
+        assert_eq!(back.grid_slack, Some(slack));
+        let none = PlotSpec::empty("none");
+        let back = record_to_plot_spec(plot_spec_to_record(&none)).unwrap();
+        assert_eq!(back.grid_slack, None);
+        let bytes = rmp_serde::to_vec_named(&plot_spec_to_record(&none)).unwrap();
+        assert!(
+            !bytes.windows(10).any(|w| w == b"grid_slack"),
+            "absent when unset"
+        );
+        let bytes = rmp_serde::to_vec_named(&plot_spec_to_record(&spec)).unwrap();
+        assert!(bytes.windows(10).any(|w| w == b"grid_slack"));
     }
 
     /// #398: an unreadable layer background reads Auto (invariant 10).

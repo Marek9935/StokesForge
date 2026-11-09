@@ -1680,6 +1680,7 @@ mod tests {
             placement: LayerPlacement::Grid,
             free_cells: Vec::new(),
             free_origin: (0.0, 0.0),
+            grid_slack: [0; 4],
         }
     }
 

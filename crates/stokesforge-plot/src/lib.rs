@@ -113,7 +113,7 @@ pub use series::{
 };
 pub use shape::{ShapeKind, ShapeRef, ShapeSpec};
 pub use spec::{
-    LayerPlacement, Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE,
+    GridSlack, LayerPlacement, Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE,
     FALLBACK_FRAME, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_CELL, MIN_FRAME_SIZE, TRANSPARENT,
 };
 pub use style::{

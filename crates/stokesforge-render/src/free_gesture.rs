@@ -195,6 +195,42 @@ pub fn graph_boxes(spec: &PlotSpec, layout: &FigureLayout) -> Vec<GraphBox> {
         .collect()
 }
 
+/// Extra room kept around the graph boxes by [`page_fitted_to_layers`], in
+/// points, on top of the margin every box already carries in its bands (#505,
+/// decision S3: the margin of a new figure, so none more).
+pub const FIT_PAGE_EXTRA_MARGIN: f64 = 0.0;
+
+/// The page that fits the graph boxes (#505): the bounding box of their outer
+/// rectangles (frame, axis bands and the margin they keep), grown by
+/// [`FIT_PAGE_EXTRA_MARGIN`] and brought into `[MIN_PAGE_EXTENT,
+/// MAX_FIGURE_EXTENT]`. The boxes do not move: the page is what changes.
+/// `None` without a box, or if a number is not finite.
+pub fn page_fitted_to_layers(boxes: &[GraphBox]) -> Option<FreePage> {
+    if boxes.is_empty() {
+        return None;
+    }
+    let (mut left, mut top) = (f64::INFINITY, f64::INFINITY);
+    let (mut right, mut bottom) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for graph in boxes {
+        let o = graph.outer;
+        left = left.min(o.left);
+        top = top.min(o.top);
+        right = right.max(o.left + o.width);
+        bottom = bottom.max(o.top + o.height);
+    }
+    let all = [left, top, right, bottom];
+    if all.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let margin = FIT_PAGE_EXTRA_MARGIN;
+    Some(FreePage {
+        left: left - margin,
+        top: top - margin,
+        width: (right - left + 2.0 * margin).clamp(MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT),
+        height: (bottom - top + 2.0 * margin).clamp(MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT),
+    })
+}
+
 /// Every box mapped affinely from the page `from` to the page `to`: its outer
 /// rectangle follows, the frame is [`GraphBox::frame_for`] of it. `(base,
 /// frame)` per box, in the order given.
@@ -1168,6 +1204,7 @@ mod tests {
             placement: LayerPlacement::Free,
             free_cells: cells,
             free_origin: (0.0, 0.0),
+            grid_slack: [0; 4],
         }
     }
 

@@ -124,14 +124,14 @@ pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use free_gesture::{
     boundary_group, figure_to_stored, graph_boxes, layout_handle_at, moved_boundary, moved_box,
-    nudged_box, resized_page, scaled_to_page, stored_to_figure, BoundaryGroup, FreeHandle,
-    GraphBox, Guide, LayoutHandle, LayoutReach, Snap, BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX,
-    EDGE_REACH_PX, INNER_REACH_SHARE, MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT,
-    TOUCH_TOLERANCE_POINTS,
+    nudged_box, page_fitted_to_layers, resized_page, scaled_to_page, stored_to_figure,
+    BoundaryGroup, FreeHandle, GraphBox, Guide, LayoutHandle, LayoutReach, Snap,
+    BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX, EDGE_REACH_PX, FIT_PAGE_EXTRA_MARGIN, INNER_REACH_SHARE,
+    MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
-    grid_cell_at, grid_corners, grid_handle_at, locked_corner_delta, resized_frames, scaled_axis,
-    scaled_frames, splitter, GridCorner, GridHandle,
+    grid_cell_at, grid_corners, grid_handle_at, locked_corner_delta, resized_edge, resized_frames,
+    scaled_axis, scaled_frames, splitter, EdgeSide, GridCorner, GridHandle, OuterEdge,
 };
 pub use hit::{
     component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,
