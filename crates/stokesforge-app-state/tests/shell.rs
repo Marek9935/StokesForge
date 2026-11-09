@@ -16248,7 +16248,13 @@ fn the_guide_shows_until_dont_show_again_and_show_guide_brings_it_back() {
     state.import_guide_show();
     assert!(state.import_guide_open(), "Show Guide brings it back");
     // The choice is in the preferences file, not in a temporary file.
-    assert!(Preferences::load_from(Some(file)).import_guide_hidden());
+    assert!(Preferences::load_from(Some(file.clone())).import_guide_hidden());
+    // Closed with the box unticked, the guide comes back with the next window.
+    state.import_guide_finish(false);
+    assert!(!state.import_guide_hidden());
+    assert!(!Preferences::load_from(Some(file)).import_guide_hidden());
+    state.open_import(None::<NodeId>);
+    assert!(state.import_guide_open(), "unticked: shown again");
     session.shutdown().unwrap();
 }
 

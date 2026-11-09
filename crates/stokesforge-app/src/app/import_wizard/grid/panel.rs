@@ -1,4 +1,4 @@
-//! the left panel of the Import Wizard, built
+//! The left panel of the import screen, built
 //! with the building blocks of the application. From top to bottom: the format
 //! sentence (each value opens a menu), the block of the points to check, the
 //! offer to save a template, « What was found » as readable rows. The model
@@ -10,15 +10,17 @@ use std::sync::Arc;
 use eframe::egui;
 use egui::{vec2, Rect, Sense, Stroke};
 use stokesforge_app_state::state::{
-    AppState, Confidence, FoundGroup, FoundRole, FoundRow, Offer, Piece, CheckFinding, CheckKind,
-    CheckView,
+    AdvancedChange, AdvancedSetting, AppState, CheckFinding, CheckKind, CheckView, Confidence,
+    Evidence, FoundGroup, FoundRole, FoundRow, Offer, Piece, ToCheckPoint, ToCheckSource,
+    ADVANCED_SETTINGS,
 };
 use stokesforge_app_state::tr;
-use stokesforge_import::{DecimalStyle, Encoding, Separator};
+use stokesforge_import::{BlockSplit, DateOrder, DecimalStyle, Encoding, Separator};
 
 use super::check::{self, CheckCmd};
-use super::{encoding_label, GridOut, GridUi};
-use crate::app::hover_help::hover_help;
+use super::{encoding_label, same_variant, GridOut, GridUi};
+use crate::app::form::{choice as form_choice, choice_by, form, ChoiceOption};
+use crate::app::hover_help::{help_text, hover_help};
 use crate::app::list_row::{with_list_row_height, ListRowBackground, LIST_ROW_HEIGHT};
 use crate::app::menu_sections::{menu_choice, MenuSections};
 use crate::app::{cursors, dialogs};
@@ -75,8 +77,9 @@ pub(super) fn left_panel(ui: &mut egui::Ui, rect: Rect, l: Left<'_>) {
                     egui::RichText::new(note).color(theme::warning_color(ui.visuals().dark_mode)),
                 );
             }
-            warnings_block(ui, &view, gs, out);
+            warnings_block(ui, state, &view, gs, out);
             found_rows(ui, state, &view, gs, out);
+            advanced_fold(ui, state);
         });
     // A « To check » tag was clicked: its evidence stays framed for a moment.
     if let Some((ev, since)) = gs.pinned.clone() {
@@ -479,18 +482,26 @@ fn plain(f: &CheckFinding) -> String {
 }
 
 /// The frame that says what is not sure: a warning border, a light warning
-/// fill, one sentence per doubt, what the file does not say, and the
-/// « Check Now » button that starts the review.
-fn warnings_block(ui: &mut egui::Ui, view: &CheckView, gs: &mut GridUi, out: &mut GridOut) {
+/// fill, one block per point to check (its sentence: a click shows where it
+/// comes from in the file and settles nothing; « Mark as Checked » beside it
+/// settles it; a tie between two templates offers the other one), what the
+/// file does not say, and the « Check Now » button that starts the review.
+fn warnings_block(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    view: &CheckView,
+    gs: &mut GridUi,
+    out: &mut GridOut,
+) {
     let dark = ui.visuals().dark_mode;
     let warn = theme::warning_color(dark);
-    let doubts: Vec<&CheckFinding> = view.doubts();
+    let points = state.to_check();
     let missing: Vec<&CheckFinding> = view
         .findings
         .iter()
         .filter(|f| f.confidence == Confidence::Missing)
         .collect();
-    if doubts.is_empty() && missing.is_empty() {
+    if points.is_empty() && missing.is_empty() {
         return;
     }
     ui.add_space(theme::SPACE_SECTION);
@@ -501,37 +512,104 @@ fn warnings_block(ui: &mut egui::Ui, view: &CheckView, gs: &mut GridUi, out: &mu
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            if !doubts.is_empty() {
+            if !points.is_empty() {
                 ui.label(
-                    theme::section_heading(tr!("import-check-warn-title", count = doubts.len()))
+                    theme::section_heading(tr!("import-check-warn-title", count = points.len()))
                         .size(16.0)
                         .color(warn),
                 );
                 ui.add_space(theme::SPACE_ITEM);
-                for f in &doubts {
-                    let r = ui.add(egui::Label::new(plain(f)).wrap().sense(Sense::hover()));
-                    if r.hovered() {
-                        check::focus_hint(gs, &f.evidence, theme::accent());
-                    }
-                    if !f.detail.is_empty() {
-                        ui.label(theme::secondary_text(f.detail.clone()));
-                    }
+                for point in &points {
+                    to_check_point(ui, view, point, gs, out);
                 }
             }
             for f in &missing {
                 let r = ui.add(egui::Label::new(plain(f)).wrap().sense(Sense::hover()));
                 r.on_hover_text(tr!("import-check-missing-tip"));
             }
-            if !doubts.is_empty() {
-                ui.add_space(theme::SPACE_SECTION);
-                let button = egui::Button::new(theme::bold(tr!("import-check-warn-check-now")))
-                    .fill(ui.visuals().selection.bg_fill)
-                    .min_size(vec2(dialogs::FOOTER_BUTTON_SIZE.x + 24.0, 28.0));
-                if cursors::clickable(ui.add(button)).clicked() {
-                    out.check.push(CheckCmd::ReviewStart(None));
-                }
+            if view.doubts().is_empty() {
+                return;
+            }
+            ui.add_space(theme::SPACE_SECTION);
+            let button = egui::Button::new(theme::bold(tr!("import-check-warn-check-now")))
+                .fill(ui.visuals().selection.bg_fill)
+                .min_size(vec2(dialogs::FOOTER_BUTTON_SIZE.x + 24.0, 28.0));
+            if cursors::clickable(ui.add(button)).clicked() {
+                out.check.push(CheckCmd::ReviewStart(None));
             }
         });
+}
+
+/// One point to check: its sentence, « Mark as Checked » beside it, and, for
+/// a tie, one button per other template.
+fn to_check_point(
+    ui: &mut egui::Ui,
+    view: &CheckView,
+    point: &ToCheckPoint,
+    gs: &mut GridUi,
+    out: &mut GridOut,
+) {
+    // The lines it comes from: the finding's own cells when it is a finding.
+    let evidence: Vec<Evidence> = match &point.source {
+        ToCheckSource::Finding(kind) => view
+            .finding(*kind)
+            .map(|f| f.evidence.clone())
+            .unwrap_or_default(),
+        _ => point
+            .lines
+            .iter()
+            .map(|line| Evidence {
+                line: *line,
+                cell: None,
+            })
+            .collect(),
+    };
+    ui.horizontal_top(|ui| {
+        let button_w = 120.0;
+        ui.allocate_ui_with_layout(
+            vec2((ui.available_width() - button_w).max(80.0), 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                let sense = if evidence.is_empty() {
+                    Sense::hover()
+                } else {
+                    Sense::click()
+                };
+                let r = ui.add(egui::Label::new(point.sentence.clone()).wrap().sense(sense));
+                if !evidence.is_empty() {
+                    let r = cursors::clickable(r).on_hover_text(tr!("import-check-tag-check-go"));
+                    if r.hovered() {
+                        check::focus_hint(gs, &evidence, theme::accent());
+                    }
+                    if r.clicked() {
+                        // Shows where to look; settles nothing.
+                        let now = ui.input(|i| i.time);
+                        gs.pinned = Some((evidence.clone(), now));
+                    }
+                }
+                if let ToCheckSource::Tie { others } = &point.source {
+                    ui.horizontal_wrapped(|ui| {
+                        for name in others {
+                            let button = ui
+                                .button(tr!("import-tie-use", name = name.clone()))
+                                .on_hover_text(tr!("import-tie-use", "hint"));
+                            if button.clicked() {
+                                out.check.push(CheckCmd::UseTemplate(name.clone()));
+                            }
+                        }
+                    });
+                }
+            },
+        );
+        if ui
+            .button(tr!("import-check-mark-checked"))
+            .on_hover_text(tr!("import-check-mark-checked", "hint"))
+            .clicked()
+        {
+            out.check.push(CheckCmd::MarkPoint(point.id.clone()));
+        }
+    });
+    ui.add_space(theme::SPACE_ITEM);
 }
 
 /// The card of the end of a review: what was decided.
@@ -601,7 +679,8 @@ fn offer_card(ui: &mut egui::Ui, offer: &Offer, out: &mut GridOut) {
                     out.check.push(CheckCmd::NotNow);
                 }
             });
-            let manage = ui.add(egui::Button::new(tr!("import-template-offer-manage")).frame(false));
+            let manage =
+                ui.add(egui::Button::new(tr!("import-template-offer-manage")).frame(false));
             if cursors::clickable(manage).clicked() {
                 out.check.push(CheckCmd::ManageOpen);
             }
@@ -823,4 +902,165 @@ fn key_of(state: &AppState, view: &CheckView, row: &FoundRow) -> Option<String> 
         });
     }
     view.finding(row.kind).and_then(|f| f.key.clone())
+}
+
+// -- Advanced ----------------------------------------------------------------------
+
+/// A text field whose draft survives the frames while it has the focus (the
+/// recipe stores the parsed value, which would eat a trailing comma as you
+/// type). Returns the new text when the user changed it.
+fn draft_text(ui: &mut egui::Ui, salt: &str, current: &str, width: f32) -> Option<String> {
+    let id = ui.make_persistent_id(("stokesforge_import_advanced_text", salt));
+    let draft_id = id.with("draft");
+    let editing = ui.memory(|memory| memory.has_focus(id));
+    let mut text = if editing {
+        ui.data(|data| data.get_temp::<String>(draft_id))
+            .unwrap_or_else(|| current.to_string())
+    } else {
+        current.to_string()
+    };
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .desired_width(width),
+    );
+    if response.has_focus() || response.changed() {
+        ui.data_mut(|data| data.insert_temp(draft_id, text.clone()));
+    }
+    response.changed().then_some(text)
+}
+
+/// The rare settings (date order, characters removed, blocks, missing values,
+/// comment prefix, skipped lines), in a fold closed by default at the bottom
+/// of the panel. A setting that is not at its default value also reads as a
+/// sentence just above the fold, so nothing set here stays hidden.
+fn advanced_fold(ui: &mut egui::Ui, state: &mut AppState) {
+    let sentences = state.import_advanced_sentences();
+    if !sentences.is_empty() {
+        ui.add_space(theme::SPACE_SECTION * 2.0);
+        theme::section_title(ui, tr!("import-advanced-set-title"));
+        for sentence in &sentences {
+            ui.add(egui::Label::new(format!("• {sentence}")).wrap());
+        }
+    }
+    let Some(recipe) = state.import_state().map(|i| i.recipe.clone()) else {
+        return;
+    };
+    let mut changes: Vec<AdvancedChange> = Vec::new();
+    ui.add_space(theme::SPACE_SECTION * 2.0);
+    form(ui, "stokesforge_import_advanced_form", |f| {
+        f.collapsible(
+            "stokesforge_import_advanced",
+            tr!("import-advanced-title"),
+            |f| {
+                for setting in ADVANCED_SETTINGS {
+                    let label = setting.label();
+                    f.row(label, |ui| match setting {
+                        AdvancedSetting::DateOrder => {
+                            let mut order = recipe.date_order;
+                            let options = [
+                                ChoiceOption::new(
+                                    DateOrder::DayFirst,
+                                    tr!("import-advanced-date-day-first"),
+                                ),
+                                ChoiceOption::new(
+                                    DateOrder::MonthFirst,
+                                    tr!("import-advanced-date-month-first"),
+                                ),
+                            ];
+                            if form_choice(
+                                ui,
+                                "stokesforge_import_advanced_date",
+                                &mut order,
+                                &options,
+                            ) {
+                                changes.push(AdvancedChange::DateOrder(order));
+                            }
+                        }
+                        AdvancedSetting::SkipChars => {
+                            let mut count = recipe.skip_chars;
+                            if crate::number_field::number_field(
+                                ui,
+                                "stokesforge_import_advanced_skip_chars",
+                                &mut count,
+                                &stokesforge_app_state::quantities::COUNT,
+                            )
+                            .changed
+                            {
+                                changes.push(AdvancedChange::SkipChars(count));
+                            }
+                            help_text(ui, tr!("import-advanced-skip-chars", "hint"));
+                        }
+                        AdvancedSetting::Blocks => {
+                            let mut split = recipe.block_split.clone();
+                            let options = [
+                                ChoiceOption::new(
+                                    BlockSplit::None,
+                                    tr!("import-advanced-blocks-single"),
+                                ),
+                                ChoiceOption::new(
+                                    BlockSplit::BlankLines,
+                                    tr!("import-advanced-blocks-blank"),
+                                ),
+                                ChoiceOption::new(
+                                    BlockSplit::BeforeLine(String::new()),
+                                    tr!("import-advanced-blocks-line-start"),
+                                ),
+                            ];
+                            ui.vertical(|ui| {
+                                if choice_by(
+                                    ui,
+                                    "stokesforge_import_advanced_blocks",
+                                    &mut split,
+                                    &options,
+                                    same_variant,
+                                ) {
+                                    changes.push(AdvancedChange::Blocks(split.clone()));
+                                }
+                                if let BlockSplit::BeforeLine(text) = &recipe.block_split {
+                                    if let Some(new) = draft_text(ui, "blocks", text, 140.0) {
+                                        changes.push(AdvancedChange::Blocks(
+                                            BlockSplit::BeforeLine(new),
+                                        ));
+                                    }
+                                }
+                            });
+                        }
+                        AdvancedSetting::MissingValues => {
+                            let current = recipe.missing_tokens.join(", ");
+                            if let Some(text) = draft_text(ui, "missing", &current, 130.0) {
+                                changes.push(AdvancedChange::MissingValues(text));
+                            }
+                            help_text(ui, tr!("import-advanced-missing", "hint"));
+                        }
+                        AdvancedSetting::CommentPrefix => {
+                            if let Some(text) =
+                                draft_text(ui, "comment", &recipe.comment_prefix, 80.0)
+                            {
+                                changes.push(AdvancedChange::CommentPrefix(text));
+                            }
+                            help_text(ui, tr!("import-advanced-comment-prefix", "hint"));
+                        }
+                        AdvancedSetting::SkipLines => {
+                            let mut count = recipe.skip_data_rows;
+                            if crate::number_field::number_field(
+                                ui,
+                                "stokesforge_import_advanced_skip_lines",
+                                &mut count,
+                                &stokesforge_app_state::quantities::COUNT,
+                            )
+                            .changed
+                            {
+                                changes.push(AdvancedChange::SkipLines(count));
+                            }
+                            help_text(ui, tr!("import-advanced-skip-lines", "hint"));
+                        }
+                    });
+                }
+            },
+        );
+    });
+    for change in changes {
+        state.import_set_advanced(change);
+    }
 }

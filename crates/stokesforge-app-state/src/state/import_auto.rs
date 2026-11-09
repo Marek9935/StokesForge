@@ -994,10 +994,20 @@ impl AppState {
     /// « Don't show again »: closes the guide and keeps the choice in the
     /// preferences. « Show Guide » still brings it back.
     pub fn import_guide_dont_show_again(&mut self) {
+        self.import_guide_finish(true);
+    }
+
+    /// Closes the guide with the state of its « Don't show again » box:
+    /// ticked, the guide stays away from the next windows; unticked (after a
+    /// « Show Guide »), it comes back with them.
+    pub fn import_guide_finish(&mut self, dont_show_again: bool) {
         self.import_guide_close();
+        if dont_show_again == self.import_guide_hidden() {
+            return;
+        }
         if let Err(error) = self
             .object_manager_preferences
-            .save_import_guide_hidden(true)
+            .save_import_guide_hidden(dont_show_again)
         {
             self.fail(tr!(
                 "error-preferences-not-saved",

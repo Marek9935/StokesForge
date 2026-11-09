@@ -10,8 +10,8 @@ use eframe::egui;
 use stokesforge_app_state::state::{
     condition_sentence, AppState, AutoCondition, Fingerprint, TemplateRow,
 };
-use stokesforge_import::{Condition, SaveIssue};
 use stokesforge_app_state::tr;
+use stokesforge_import::{Condition, SaveIssue};
 
 use crate::app::dialogs::{
     modal_confirm, modal_dialog_with, modal_live_settings, ConfirmOutcome, DialogFooter,
@@ -322,7 +322,9 @@ fn forget_window(ctx: &egui::Context, state: &mut AppState) {
         &tr!("import-template-forget-yes"),
         &tr!("import-template-forget-yes", "hint"),
         |ui| {
-            ui.add(egui::Label::new(tr!("import-template-forget-confirm", name = name.clone())).wrap());
+            ui.add(
+                egui::Label::new(tr!("import-template-forget-confirm", name = name.clone())).wrap(),
+            );
         },
     ) {
         ConfirmOutcome::Open => {}

@@ -22,9 +22,11 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Add Text | Ajouter un texte |
 | Add Workbook | Ajouter un classeur |
 | Advanced | Avancé |
+| Advanced settings in use | Réglages avancés utilisés |
 | Align | Aligner |
 | All checked | Tout est vérifié |
 | Analysis | Analyse |
+| Answers remembered | Réponses mémorisées |
 | Axes | Axes |
 | Axes… | Axes… |
 | Below | En dessous |

@@ -1,4 +1,4 @@
-//! « the cut sheet ». The whole import is one
+//! The file as a grid. The whole import is one
 //! screen: the file already cut into a grid, marked by the detector, corrected
 //! by marking the grid itself, with the worksheet that will be created shown
 //! live under it.
@@ -28,8 +28,8 @@ use stokesforge_import::{
 };
 
 use super::{
-    column_letters, encoding_label, same_variant, import_result_table, prop_color, prop_field_label, prop_target_label,
-    refused_card, role_color, PILL_WIDTH,
+    column_letters, encoding_label, import_result_table, prop_color, prop_field_label,
+    prop_target_label, refused_card, role_color, same_variant, PILL_WIDTH,
 };
 use crate::app::cursors;
 use crate::theme::{import_color, ImportColor};
@@ -140,10 +140,12 @@ struct GridUi {
     focus_scroll_to: Option<(usize, f32)>,
     /// A click on a line is awaited (the review asked to pick one).
     pick_active: bool,
-    /// The first-time guide: the step shown, if open.
-    guide: Option<u8>,
-    guide_dont: bool,
-    guide_init: bool,
+    /// The step of the first-use guide that is shown (the guide itself is open
+    /// or not in the state).
+    guide_step: u8,
+    /// The « Don't show again » box of the open guide; `None` until the guide
+    /// opens (it then starts at the stored preference).
+    guide_dont: Option<bool>,
     /// Evidence framed after a click on a « To check » tag, with the time.
     pinned: Option<(Vec<stokesforge_app_state::state::Evidence>, f64)>,
     /// The reason of an automatic choice, open after a click on its button.
@@ -185,9 +187,8 @@ impl Default for GridUi {
             focus_line: None,
             focus_scroll_to: None,
             pick_active: false,
-            guide: None,
-            guide_dont: true,
-            guide_init: false,
+            guide_step: 0,
+            guide_dont: None,
             pinned: None,
             auto_why: None,
         }
@@ -343,6 +344,27 @@ struct Geom {
     hthumb: Rect,
     content_h: f32,
     content_w: f32,
+}
+
+/// The display rows that intersect the view: the only ones laid out and
+/// painted, whatever the length of the file (a kinetic has 630 lines and 241
+/// columns, and the frame budget does not allow more).
+fn visible_rows(pan_y: f32, view_h: f32, n_rows: usize) -> std::ops::Range<usize> {
+    let first = ((pan_y / ROW_H).floor() as usize).min(n_rows);
+    let last = (((pan_y + view_h) / ROW_H).ceil() as usize).min(n_rows);
+    first..last
+}
+
+/// The columns that intersect the view, from the left edge of every column
+/// (`colx`, one more entry than columns), the horizontal scroll `sx` and the
+/// width of the view.
+fn visible_columns(colx: &[f32], sx: f32, view_w: f32, ncols: usize) -> (usize, usize) {
+    let first = colx
+        .partition_point(|cx| *cx <= sx)
+        .saturating_sub(1)
+        .min(ncols.saturating_sub(1));
+    let last = colx.partition_point(|cx| *cx < sx + view_w).min(ncols);
+    (first, last)
 }
 
 fn row_y(g: &Geom, scroll: egui::Vec2, r: usize) -> f32 {
@@ -1185,19 +1207,9 @@ fn paint_grid(
     );
 
     // Visible rows and columns.
-    let r_first = ((gs.pan.y / ROW_H).floor() as usize).min(rows.len());
-    let r_last = (((gs.pan.y + g.view_h) / ROW_H).ceil() as usize).min(rows.len());
-    let c_first = v
-        .metrics
-        .colx
-        .partition_point(|cx| *cx <= sx)
-        .saturating_sub(1)
-        .min(ncols.saturating_sub(1));
-    let c_last = v
-        .metrics
-        .colx
-        .partition_point(|cx| *cx < sx + g.view_w)
-        .min(ncols);
+    let visible = visible_rows(gs.pan.y, g.view_h, rows.len());
+    let (r_first, r_last) = (visible.start, visible.end);
+    let (c_first, c_last) = visible_columns(&v.metrics.colx, sx, g.view_w, ncols);
 
     let grid_p = painter.with_clip_rect(g.grid);
     let gutter_rect = Rect::from_min_max(
@@ -1294,7 +1306,8 @@ fn paint_grid(
                 // Row tint by role.
                 for z in &zones {
                     if z.tints_row() {
-                        let c = zone_color(*z, dark).gamma_multiply(0.10 + 0.04 * (zones.len() > 1) as u8 as f32);
+                        let c = zone_color(*z, dark)
+                            .gamma_multiply(0.10 + 0.04 * (zones.len() > 1) as u8 as f32);
                         grid_p.rect_filled(row_rect, 0.0, c);
                         gutter_p.rect_filled(num_rect, 0.0, c);
                     }
@@ -1719,7 +1732,8 @@ fn paint_grid(
             if avail >= 28.0 && vis_h >= 28.0 {
                 let chars = (avail / 5.4).floor().max(1.0) as usize;
                 let text = fit_text(&z.label().to_uppercase(), chars);
-                let galley = lp.layout_no_wrap(text, FontId::proportional(9.5), zone_color(z, dark));
+                let galley =
+                    lp.layout_no_wrap(text, FontId::proportional(9.5), zone_color(z, dark));
                 let pos = pos2(rect.center().x + galley.size().y / 2.0, label_top);
                 lp.add(
                     egui::epaint::TextShape::new(pos, galley, zone_color(z, dark))
@@ -2121,7 +2135,11 @@ fn selection_buttons(
                     "Y".to_string(),
                     Some(import_color(dark, ImportColor::LongName)),
                 ),
-                (ColumnRoleChoice::Ignore, tr!("import-grid-btn-ignore"), None),
+                (
+                    ColumnRoleChoice::Ignore,
+                    tr!("import-grid-btn-ignore"),
+                    None,
+                ),
             ] {
                 let pressed = cols.iter().all(|c| sc.recipe.column_role(*c) == role);
                 if toggle_button(ui, &label, color, pressed, true).clicked() {
@@ -2410,4 +2428,140 @@ fn context_menu(resp: &egui::Response, v: &View<'_>, gs: &mut GridUi, out: &mut 
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+    use egui::pos2;
+
+    use super::super::test_bench::{bench, escape, paint, settle, SURE};
+    use super::{load_gs, store_gs, visible_columns, visible_rows, Sel, ROW_H};
+    use crate::app::test_support::context;
+
+    /// The rows laid out are those that intersect the view, never the whole
+    /// file.
+    #[test]
+    fn only_the_visible_rows_are_laid_out() {
+        // 630 lines, a view of 20 rows.
+        let view = 20.0 * ROW_H;
+        assert_eq!(visible_rows(0.0, view, 630), 0..20);
+        assert_eq!(visible_rows(100.0 * ROW_H, view, 630), 100..120);
+        // At the end the range stops with the file.
+        assert_eq!(visible_rows(620.0 * ROW_H, view, 630), 620..630);
+        // 241 columns of 50 pt: a view of 400 pt sees about nine of them.
+        let colx: Vec<f32> = (0..=241).map(|c| c as f32 * 50.0).collect();
+        let (first, last) = visible_columns(&colx, 0.0, 400.0, 241);
+        assert_eq!((first, last), (0, 8));
+        let (first, last) = visible_columns(&colx, 5000.0, 400.0, 241);
+        assert!(last - first <= 10, "{first}..{last}");
+        assert!(first >= 99, "the columns before the view are skipped");
+    }
+
+    /// A kinetic of 630 lines and 241 columns, unfolded, paints only what is
+    /// in view: the texts of the whole file would be about 150 000.
+    #[test]
+    fn the_grid_paints_only_the_visible_rows_and_columns() {
+        let mut bench = bench(&super::super::test_bench::kinetic_630_by_241());
+        let ctx = context();
+        let mut actions = Vec::new();
+        for _ in 0..3 {
+            paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        }
+        paint(&ctx, &mut bench.state, &mut actions, vec![escape()]);
+        let mut gs = load_gs(&ctx);
+        gs.unfolded = true;
+        store_gs(&ctx, gs);
+        let painted = settle(&ctx, &mut bench.state, &mut actions);
+        assert!(
+            painted.len() > 100,
+            "the grid is painted: {}",
+            painted.len()
+        );
+        assert!(
+            painted.len() < 2500,
+            "{} texts: rows or columns out of view are laid out",
+            painted.len()
+        );
+    }
+
+    /// Selected lines open the role bar beside them. It closes by itself when
+    /// the pointer stays away from it, and when the grid is scrolled; a mouse
+    /// user does not have to find Escape.
+    #[test]
+    fn the_role_bar_closes_when_the_pointer_leaves_and_when_the_grid_scrolls() {
+        let open_bar = |ctx: &egui::Context,
+                        state: &mut stokesforge_app_state::state::AppState,
+                        actions: &mut Vec<stokesforge_app_state::state::Action>|
+         -> egui::Rect {
+            // The guide is open first: one Escape closes it.
+            for _ in 0..3 {
+                paint(ctx, state, actions, Vec::new());
+            }
+            paint(ctx, state, actions, vec![escape()]);
+            settle(ctx, state, actions);
+            let mut gs = load_gs(ctx);
+            gs.sel = Sel::Lines([5usize].into());
+            // The whole file, so that there is something to scroll.
+            gs.unfolded = true;
+            store_gs(ctx, gs);
+            paint(ctx, state, actions, Vec::new());
+            paint(ctx, state, actions, Vec::new());
+            let gs = load_gs(ctx);
+            assert_eq!(gs.sel, Sel::Lines([5usize].into()), "the bar is open");
+            assert_ne!(gs.bar_rect, egui::Rect::NOTHING);
+            gs.bar_rect
+        };
+
+        // The pointer leaves: after the grace period the bar is gone.
+        let mut left = bench(SURE);
+        let ctx = context();
+        let mut actions = Vec::new();
+        let bar = open_bar(&ctx, &mut left.state, &mut actions);
+        paint(
+            &ctx,
+            &mut left.state,
+            &mut actions,
+            vec![egui::Event::PointerMoved(bar.center())],
+        );
+        assert_eq!(
+            load_gs(&ctx).sel,
+            Sel::Lines([5usize].into()),
+            "kept while over it"
+        );
+        for _ in 0..8 {
+            paint(
+                &ctx,
+                &mut left.state,
+                &mut actions,
+                vec![egui::Event::PointerMoved(pos2(4.0, 4.0))],
+            );
+        }
+        assert_eq!(load_gs(&ctx).sel, Sel::None, "the pointer left: closed");
+
+        // The bench holds the configuration lock: release it for the next.
+        drop(left);
+
+        // The grid scrolls: closed at once, the pointer still over the grid.
+        let mut scrolled = bench(&super::super::test_bench::kinetic_630_by_241());
+        let ctx = context();
+        let mut actions = Vec::new();
+        let bar = open_bar(&ctx, &mut scrolled.state, &mut actions);
+        let over_grid = pos2(bar.left() - 3.0, bar.center().y);
+        paint(
+            &ctx,
+            &mut scrolled.state,
+            &mut actions,
+            vec![egui::Event::PointerMoved(over_grid)],
+        );
+        assert_eq!(load_gs(&ctx).sel, Sel::Lines([5usize].into()));
+        // The wheel of the grid moves its pan (`gs.pan`); move it as it does.
+        let mut gs = load_gs(&ctx);
+        gs.pan.y += 80.0;
+        store_gs(&ctx, gs);
+        for _ in 0..2 {
+            paint(&ctx, &mut scrolled.state, &mut actions, Vec::new());
+        }
+        assert_eq!(load_gs(&ctx).sel, Sel::None, "the grid scrolled: closed");
+    }
 }

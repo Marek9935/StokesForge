@@ -1,4 +1,4 @@
-//! what the left panel asks of the grid and of
+//! What the left panel asks of the grid and of
 //! the state. The review of the doubts (one big question at a time, with the
 //! evidence framed in the grid), the correction menu of a value, the focus the
 //! panel puts on the grid (the line a sentence comes from) and the clicks the
@@ -11,7 +11,8 @@
 use eframe::egui;
 use egui::{pos2, vec2, Align2, Color32, FontId, Rect, Sense, Stroke, StrokeKind};
 use stokesforge_app_state::state::{
-    fold_range, kv_of, row_of_line, AppState, GridCmd, Row, CheckKind, CheckView, ChipId, Evidence, PropChoice, ReviewInfo,
+    fold_range, kv_of, row_of_line, AppState, CheckKind, CheckView, ChipId, Evidence, GridCmd,
+    PropChoice, ReviewInfo, Row,
 };
 use stokesforge_app_state::tr;
 
@@ -47,8 +48,10 @@ pub(in crate::app::import_wizard) enum CheckCmd {
     DoneClose,
     UseTemplate(String),
     UseAuto,
-    /// « Mark as Checked » on one point of the panel.
+    /// « Mark as Checked » on one finding of the panel.
     MarkChecked(CheckKind),
+    /// « Mark as Checked » on one point of the « To check » list (its id).
+    MarkPoint(String),
 }
 
 /// What the panel hovers frames the evidence in the grid, if nothing else
@@ -121,6 +124,7 @@ pub(in crate::app::import_wizard) fn apply(state: &mut AppState, cmd: CheckCmd) 
         CheckCmd::UseTemplate(name) => state.template_use(&name),
         CheckCmd::UseAuto => state.template_use_auto(),
         CheckCmd::MarkChecked(kind) => state.check_mark_checked(kind),
+        CheckCmd::MarkPoint(id) => state.to_check_mark(&id),
         CheckCmd::Picked(line) => {
             state.check_picked(line);
         }

@@ -1,12 +1,12 @@
-//! the first-time guide of the Import Wizard.
-//! A light card over the grid (not a modal over the whole window), three
-//! short steps, each with a pointer to the real thing it talks about. Opens on
-//! the first import screen of a run unless the user asked not to see it again;
-//! the « ? » button of the grid tabs reopens it.
+//! The first-use guide of the import screen: a light card over the grid (not a
+//! modal over the whole window), three short steps, each with a pointer to the
+//! real thing it talks about. It opens with the window every time until
+//! « Don't show again » is ticked; the « Show Guide » button of the grid tabs
+//! brings it back.
 
 use eframe::egui;
 use egui::{pos2, Pos2, Rect};
-use stokesforge_app_state::state::KeyEntry;
+use stokesforge_app_state::state::{AppState, KeyEntry};
 use stokesforge_app_state::tr;
 
 use super::{row_of_line, row_y, Geom, GridUi, View, ROW_H};
@@ -24,28 +24,11 @@ pub(super) struct Targets {
     pub value: Option<Pos2>,
 }
 
-/// The file that remembers « don't show again » (in the temporary folder, like
-/// the mockup's other state; `mockup.sh --forget` removes it).
-fn seen_flag() -> std::path::PathBuf {
-    // The tests point it at their own folder.
-    if let Some(path) = std::env::var_os("STOKESFORGE_MOCKUP_GUIDE_FLAG") {
-        return std::path::PathBuf::from(path);
-    }
-    std::env::temp_dir().join("stokesforge-mockup-488j-guide-seen")
-}
-
-/// The « ? » button: starts again at the first step.
-pub(super) fn reopen(gs: &mut GridUi) {
-    gs.guide = Some(0);
-    gs.guide_dont = true;
-    gs.guide_init = true;
-}
-
-fn close(gs: &mut GridUi) {
-    if gs.guide_dont {
-        let _ = std::fs::write(seen_flag(), b"seen");
-    }
-    gs.guide = None;
+/// « Show Guide »: starts again at the first step, with the box as the
+/// preference has it.
+pub(super) fn restart(gs: &mut GridUi) {
+    gs.guide_step = 0;
+    gs.guide_dont = None;
 }
 
 /// The line number and a value cell to point at: those of the units line when
@@ -72,19 +55,19 @@ pub(super) fn line_targets(
 }
 
 /// Paints the card of the current step and its pointer, and handles its keys.
-pub(super) fn show(ctx: &egui::Context, gs: &mut GridUi, targets: &Targets) {
-    if !gs.guide_init {
-        gs.guide_init = true;
-        if !seen_flag().exists() {
-            gs.guide = Some(0);
-            gs.guide_dont = true;
-        }
-    }
-    let Some(step) = gs.guide else {
+/// Whether the guide is open, and what « Don't show again » keeps, is in the
+/// state.
+pub(super) fn show(ctx: &egui::Context, state: &mut AppState, gs: &mut GridUi, targets: &Targets) {
+    if !state.import_guide_open() {
+        restart(gs);
         return;
-    };
+    }
+    let step = gs.guide_step;
+    let mut dont = gs.guide_dont.unwrap_or_else(|| state.import_guide_hidden());
+    gs.guide_dont = Some(dont);
     if ctx.input_mut(|i| i.consume_shortcut(&KEY_ESCAPE)) {
-        close(gs);
+        state.import_guide_finish(dont);
+        restart(gs);
         return;
     }
     let text = match step {
@@ -94,8 +77,7 @@ pub(super) fn show(ctx: &egui::Context, gs: &mut GridUi, targets: &Targets) {
     };
     let last = step + 1 >= STEPS;
     let (mut next, mut done) = (false, false);
-    let mut dont = gs.guide_dont;
-    let area = egui::Area::new(egui::Id::new("stokesforge_import_j_guide"))
+    let area = egui::Area::new(egui::Id::new("stokesforge_import_guide"))
         .order(egui::Order::Foreground)
         .fixed_pos(pos2(
             (targets.grid.right() - CARD_W - 48.0).max(targets.grid.left() + 20.0),
@@ -138,7 +120,7 @@ pub(super) fn show(ctx: &egui::Context, gs: &mut GridUi, targets: &Targets) {
         });
     // Over the wizard window, and clickable (a tooltip layer is not).
     ctx.move_to_top(area.response.layer_id);
-    gs.guide_dont = dont;
+    gs.guide_dont = Some(dont);
     let card = area.response.rect;
     let target = match step {
         0 => targets.line_number,
@@ -148,7 +130,7 @@ pub(super) fn show(ctx: &egui::Context, gs: &mut GridUi, targets: &Targets) {
     if let Some(target) = target {
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
-            egui::Id::new("stokesforge_import_j_guide_pointer"),
+            egui::Id::new("stokesforge_import_guide_pointer"),
         ));
         ctx.move_to_top(painter.layer_id());
         let from = if target.x < card.left() {
@@ -162,10 +144,11 @@ pub(super) fn show(ctx: &egui::Context, gs: &mut GridUi, targets: &Targets) {
         painter.circle_stroke(target, 10.0, stroke);
     }
     if done {
-        close(gs);
+        state.import_guide_finish(dont);
+        restart(gs);
         ctx.request_repaint();
     } else if next {
-        gs.guide = Some(step + 1);
+        gs.guide_step = step + 1;
         ctx.request_repaint();
     }
 }

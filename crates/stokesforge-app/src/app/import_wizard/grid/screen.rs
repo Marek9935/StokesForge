@@ -1,4 +1,4 @@
-//! the one screen of the Import Wizard: the
+//! The one screen of the import: the
 //! file tabs, the recognition line, the left panel (40 % of the width, at
 //! least 380 pt), the grid with its File | Result tabs, the « You get » line,
 //! and the two footer buttons (Destination, Template).
@@ -10,9 +10,9 @@ use stokesforge_app_state::state::{Action, AppState, ImportDestination};
 use stokesforge_app_state::tr;
 use stokesforge_import::ImportRecipe;
 
+use super::check::{self, CheckCmd};
 use super::guide;
 use super::panel::{self, Left};
-use super::check::{self, CheckCmd};
 use super::{
     action_bar, build_bands, build_rows, file_grid, fold_range, import_result_table, load_gs,
     make_geom, metrics, refused_card, store_gs, GridOut, GridUi, Sel, View, LETTER_H, SB,
@@ -141,15 +141,18 @@ fn file_row(ui: &mut egui::Ui, state: &mut AppState, requests: &mut ImportWizard
             vec2(strip_w, TAB_STRIP_HEIGHT),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                tab_strip(
-                    ui,
-                    TabStripSide::Top,
-                    &shown_tabs,
-                    current,
-                    |i| picked = Some(i),
-                    None,
-                    || {},
-                );
+                // Two strips live on this screen: tell their scroll areas apart.
+                ui.push_id("stokesforge_import_file_tabs", |ui| {
+                    tab_strip(
+                        ui,
+                        TabStripSide::Top,
+                        &shown_tabs,
+                        current,
+                        |i| picked = Some(i),
+                        None,
+                        || {},
+                    );
+                });
             },
         );
         if overflow {
@@ -295,7 +298,13 @@ fn file_list(
 
 // -- File | Result tabs, fold, help ------------------------------------------------------
 
-fn grid_tab_row(ui: &mut egui::Ui, rect: Rect, gs: &mut GridUi, fold_possible: bool) {
+fn grid_tab_row(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    rect: Rect,
+    gs: &mut GridUi,
+    fold_possible: bool,
+) {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
@@ -310,21 +319,28 @@ fn grid_tab_row(ui: &mut egui::Ui, rect: Rect, gs: &mut GridUi, fold_possible: b
         vec2(160.0, TAB_STRIP_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            tab_strip(
-                ui,
-                TabStripSide::Top,
-                &tabs,
-                gs.result_view,
-                |v| result_view = v,
-                None,
-                || {},
-            );
+            ui.push_id("stokesforge_import_view_tabs", |ui| {
+                tab_strip(
+                    ui,
+                    TabStripSide::Top,
+                    &tabs,
+                    gs.result_view,
+                    |v| result_view = v,
+                    None,
+                    || {},
+                );
+            });
         },
     );
     gs.result_view = result_view;
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if icon_button(ui, Icon::Help, IconRole::Neutral, tr!("import-help-how")).clicked() {
-            guide::reopen(gs);
+        if ui
+            .button(tr!("import-guide-show"))
+            .on_hover_text(tr!("import-guide-show", "hint"))
+            .clicked()
+        {
+            state.import_guide_show();
+            guide::restart(gs);
         }
         if fold_possible && !gs.result_view {
             let label = if gs.unfolded {
@@ -448,7 +464,7 @@ fn import_screen_inner(
         Some(Ok(map)) => fold_range(map).is_some(),
         _ => false,
     };
-    grid_tab_row(ui, tabs_rect, &mut gs, fold_possible);
+    grid_tab_row(ui, state, tabs_rect, &mut gs, fold_possible);
 
     let mut guide_targets = guide::Targets {
         grid: body,
@@ -533,7 +549,7 @@ fn import_screen_inner(
         check::receipt_line(&mut child, view);
     }
     ui.allocate_rect(avail, Sense::hover());
-    guide::show(&ctx, &mut gs, &guide_targets);
+    guide::show(&ctx, state, &mut gs, &guide_targets);
 
     requests.grid.append(&mut out.cmds);
     requests.checks.append(&mut out.check);
@@ -679,10 +695,7 @@ fn template_menu(ui: &mut egui::Ui, state: &mut AppState, requests: &mut ImportW
             ui.close();
         }
         for row in &rows {
-            let text = format!(
-                "{}",
-                row.name
-            );
+            let text = row.name.to_string();
             let r = menu_choice(ui, row.in_use, text).on_hover_ui(|ui| {
                 ui.set_max_width(320.0);
                 for rule in &row.rules {
@@ -690,7 +703,9 @@ fn template_menu(ui: &mut egui::Ui, state: &mut AppState, requests: &mut ImportW
                 }
             });
             if r.clicked() {
-                requests.checks.push(CheckCmd::UseTemplate(row.name.clone()));
+                requests
+                    .checks
+                    .push(CheckCmd::UseTemplate(row.name.clone()));
                 ui.close();
             }
         }

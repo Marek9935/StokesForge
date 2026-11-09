@@ -11,6 +11,8 @@ use eframe::egui;
 
 mod grid;
 mod templates;
+#[cfg(test)]
+mod test_bench;
 
 use stokesforge_app_state::errors;
 use stokesforge_app_state::state::{Action, AppState, GridCmd, LineRoleCmd};
@@ -36,7 +38,6 @@ fn role_color(role: LineRoleCmd, dark: bool) -> Option<egui::Color32> {
         LineRoleCmd::Clear => return None,
     })
 }
-
 
 /// Label of the role of a column in the result table.
 fn column_role_label(role: stokesforge_import::ColumnRoleChoice) -> String {
@@ -251,7 +252,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     // Escape clears the selection of the grid first.
     grid::grid_escape(ctx);
     // Doubts left do not block the import: the footer says so.
-    let doubts = state.import_check().map_or(0, |view| view.n_check);
+    let doubts = state.to_check_count();
     let reviewing = state.check_review_kind().is_some();
     let warning = if doubts > 0 && !reviewing {
         tr!("import-footer-unchecked", count = doubts)
@@ -318,5 +319,415 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         }
     } else if requests.cancel {
         state.cancel_import();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+    use stokesforge_app_state::state::{Action, ImportDestination};
+    use stokesforge_app_state::tr;
+
+    use super::test_bench::{
+        bench, click_at, click_text, enter, escape, paint, settle, DOUBTS, SURE,
+    };
+
+    /// Closes the first-use guide with Escape (it is open at every first
+    /// paint), then paints until the layout settles.
+    fn without_guide(
+        ctx: &egui::Context,
+        state: &mut stokesforge_app_state::state::AppState,
+        actions: &mut Vec<Action>,
+    ) -> Vec<crate::app::test_support::Text> {
+        for _ in 0..3 {
+            paint(ctx, state, actions, Vec::new());
+        }
+        paint(ctx, state, actions, vec![escape()]);
+        settle(ctx, state, actions)
+    }
+
+    /// One screen: the format sentence, the groups of what was found, the
+    /// footer with the two menus, Cancel and Import (S-F6).
+    #[test]
+    fn the_one_screen_paints_its_panel_and_its_footer() {
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let painted = settle(&ctx, &mut bench.state, &mut actions);
+        for wanted in [
+            tr!("import-format-short-delimiter"),
+            tr!("import-format-short-decimal"),
+            tr!("import-format-short-thousands"),
+            tr!("import-format-short-encoding"),
+            tr!("import-found-group-data"),
+            tr!("import-found-group-columns"),
+            tr!("import-found-group-sheet"),
+            tr!("import-grid-import"),
+            tr!("dialog-cancel"),
+            tr!("import-footer-to", value = tr!("import-destination-new")),
+        ] {
+            // The footer menu buttons leave room for their caret icon.
+            assert!(
+                painted.iter().any(|t| t.text.trim_end() == wanted),
+                "not painted: {wanted:?}"
+            );
+        }
+        // The instrument is recognised and nothing is left to check: the offer.
+        let offer = tr!("import-template-offer-title", name = "JASCO V-770");
+        assert!(painted.iter().any(|t| t.text == offer), "{offer}");
+    }
+
+    /// Finish imports the recipe the state chose for each file, as it is, and
+    /// Cancel imports nothing; Escape first closes the guide, which is over
+    /// the window, and only then the window.
+    #[test]
+    fn finish_imports_the_recipe_as_it_is_and_cancel_imports_nothing() {
+        let mut complete = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut complete.state, &mut actions);
+        let (each, skipped) = complete.state.import_each_recipe();
+        assert_eq!(each.len(), 1);
+        paint(&ctx, &mut complete.state, &mut actions, vec![enter()]);
+        assert_eq!(
+            actions,
+            vec![Action::StartImportEach {
+                destination: ImportDestination::NewBookForAll,
+                each,
+                skipped,
+            }]
+        );
+        assert!(complete.state.import_state().is_none(), "Finish closes");
+        drop(complete);
+
+        let mut empty = bench("");
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        paint(&ctx, &mut empty.state, &mut actions, vec![enter()]);
+        assert!(actions.is_empty(), "without a file, nothing to import");
+        assert!(empty.state.import_state().is_some(), "nor closed");
+        drop(empty);
+
+        let mut cancelled = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        for _ in 0..3 {
+            paint(&ctx, &mut cancelled.state, &mut actions, Vec::new());
+        }
+        assert!(cancelled.state.import_guide_open(), "the guide is open");
+        paint(&ctx, &mut cancelled.state, &mut actions, vec![escape()]);
+        assert!(!cancelled.state.import_guide_open(), "Escape closed it");
+        assert!(
+            cancelled.state.import_state().is_some(),
+            "and not the window"
+        );
+        paint(&ctx, &mut cancelled.state, &mut actions, vec![escape()]);
+        assert!(actions.is_empty(), "Cancel imports nothing");
+        assert!(cancelled.state.import_state().is_none(), "Cancel closes");
+    }
+
+    /// The guide opens with the window until « Don't show again » is ticked,
+    /// and « Show Guide » brings it back.
+    #[test]
+    fn the_guide_shows_until_dont_show_again_and_show_guide_brings_it_back() {
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let step = |n: &str| tr!("import-guide-step", n = n, total = "3");
+        let painted = settle(&ctx, &mut bench.state, &mut actions);
+        assert!(painted.iter().any(|t| t.text == step("1")), "shown first");
+        // Done without ticking: it comes back with the next window.
+        for button in [
+            tr!("import-guide-next"),
+            tr!("import-guide-next"),
+            tr!("import-guide-done"),
+        ] {
+            click_text(&ctx, &mut bench.state, &mut actions, &button);
+        }
+        assert!(!bench.state.import_guide_open());
+        bench.state.cancel_import();
+        bench.state.open_import(None::<stokesforge_core::NodeId>);
+        assert!(bench.state.import_guide_open(), "every time until ticked");
+
+        // Ticked: not shown again.
+        bench.state.import_guide_dont_show_again();
+        bench.state.cancel_import();
+        bench.state.open_import(None::<stokesforge_core::NodeId>);
+        bench.state.set_import_paths(bench.files.clone());
+        let painted = settle(&ctx, &mut bench.state, &mut actions);
+        assert!(!bench.state.import_guide_open());
+        assert!(!painted.iter().any(|t| t.text == step("1")));
+        // « Show Guide » brings it back, small, over the grid.
+        click_text(
+            &ctx,
+            &mut bench.state,
+            &mut actions,
+            &tr!("import-guide-show"),
+        );
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(bench.state.import_guide_open());
+        assert!(painted.iter().any(|t| t.text == step("1")));
+        // Its box starts ticked, as the preference has it.
+        click_text(
+            &ctx,
+            &mut bench.state,
+            &mut actions,
+            &tr!("import-guide-dont"),
+        );
+        for button in [
+            tr!("import-guide-next"),
+            tr!("import-guide-next"),
+            tr!("import-guide-done"),
+        ] {
+            click_text(&ctx, &mut bench.state, &mut actions, &button);
+        }
+        assert!(
+            !bench.state.import_guide_hidden(),
+            "unticked and closed: it comes back with the next window"
+        );
+    }
+
+    /// The Advanced fold is closed by default; a setting changed there reads
+    /// as a sentence in the left panel.
+    #[test]
+    fn the_advanced_fold_is_closed_by_default_and_a_change_shows_as_a_sentence() {
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let painted = without_guide(&ctx, &mut bench.state, &mut actions);
+        let label = tr!("import-advanced-skip-chars");
+        assert!(painted
+            .iter()
+            .any(|t| t.text == tr!("import-advanced-title")));
+        assert!(
+            !painted.iter().any(|t| t.text == label),
+            "closed: its rows are not painted"
+        );
+        click_text(
+            &ctx,
+            &mut bench.state,
+            &mut actions,
+            &tr!("import-advanced-title"),
+        );
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(painted.iter().any(|t| t.text == label), "open: its rows");
+
+        let sentence = tr!("import-advanced-sentence-skip-chars", count = 3usize);
+        assert!(!painted.iter().any(|t| t.text.contains(&sentence)));
+        bench
+            .state
+            .import_set_advanced(stokesforge_app_state::state::AdvancedChange::SkipChars(3));
+        paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(
+            painted.iter().any(|t| t.text.contains(&sentence)),
+            "the changed setting is a sentence of the left panel"
+        );
+    }
+
+    /// Forgetting a template asks first, in a modal confirmation: Enter
+    /// cancels it (and does not import), the verb forgets.
+    #[test]
+    fn deleting_a_template_goes_through_a_modal_confirmation() {
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut bench.state, &mut actions);
+        bench.state.template_save_open();
+        bench.state.template_save_commit();
+        let name = bench.state.template_rows()[0].name.clone();
+        bench.state.template_manage_open();
+        for _ in 0..4 {
+            paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        }
+        click_text(
+            &ctx,
+            &mut bench.state,
+            &mut actions,
+            &tr!("import-template-forget-button"),
+        );
+        // The confirmation takes its focus over a few frames, then Enter
+        // reads its default button.
+        let mut painted = Vec::new();
+        for _ in 0..4 {
+            painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        }
+        assert_eq!(bench.state.template_forget_pending(), Some(name.as_str()));
+        assert!(painted
+            .iter()
+            .any(|t| t.text == tr!("import-template-forget-title")));
+        paint(&ctx, &mut bench.state, &mut actions, vec![enter()]);
+        assert!(
+            bench.state.template_forget_pending().is_none(),
+            "Enter = Cancel"
+        );
+        assert_eq!(bench.state.template_rows().len(), 1, "nothing forgotten");
+        assert!(
+            bench.state.import_state().is_some(),
+            "the import stays open"
+        );
+        assert!(actions.is_empty(), "the import validated nothing");
+
+        bench.state.template_forget_ask(&name);
+        for _ in 0..3 {
+            paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        }
+        // The verb has the title's words: the button is painted after it.
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let verb = painted
+            .iter()
+            .rev()
+            .find(|t| t.text == tr!("import-template-forget-yes"))
+            .expect("the verb is painted")
+            .center;
+        click_at(&ctx, &mut bench.state, &mut actions, verb);
+        assert!(bench.state.template_rows().is_empty(), "the verb forgets");
+        assert!(actions.is_empty());
+    }
+
+    /// Clicking the « auto » button of the grid only explains the automatic
+    /// choice; it is dropped through the explicit « Drop » button of the card
+    /// and never by the click that opens it.
+    #[test]
+    fn clicking_the_auto_button_never_deletes_the_choice() {
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let painted = without_guide(&ctx, &mut bench.state, &mut actions);
+        let pills = bench.state.import_auto_info().unwrap().pills.len();
+        assert!(pills > 0, "the file gives automatic choices");
+        let auto = tr!("import-auto-pill");
+        let at = painted
+            .iter()
+            .find(|t| t.text == auto)
+            .expect("an auto button is painted")
+            .center;
+        click_at(&ctx, &mut bench.state, &mut actions, at);
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(painted
+            .iter()
+            .any(|t| t.text == tr!("import-auto-pick-why-title")));
+        assert_eq!(
+            bench.state.import_auto_info().unwrap().pills.len(),
+            pills,
+            "the click kept the choice"
+        );
+        click_text(
+            &ctx,
+            &mut bench.state,
+            &mut actions,
+            &tr!("import-auto-pick-drop"),
+        );
+        paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert_eq!(
+            bench.state.import_auto_info().unwrap().pills.len(),
+            pills - 1,
+            "the explicit action drops it"
+        );
+    }
+
+    /// A point to check shows its sentence with « Mark as Checked » beside
+    /// it; marking settles that point only, and Import stays possible.
+    #[test]
+    fn a_point_to_check_is_marked_beside_its_sentence() {
+        let mut bench = bench(DOUBTS);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let painted = without_guide(&ctx, &mut bench.state, &mut actions);
+        let points = bench.state.to_check();
+        assert!(points.len() >= 2, "{points:?}");
+        let title = tr!("import-check-warn-title", count = points.len());
+        assert!(painted.iter().any(|t| t.text == title), "{title}");
+        assert!(painted
+            .iter()
+            .any(|t| t.text == tr!("import-check-warn-check-now")));
+        let mark = tr!("import-check-mark-checked");
+        let at = painted
+            .iter()
+            .find(|t| t.text == mark)
+            .expect("Mark as Checked is painted")
+            .center;
+        click_at(&ctx, &mut bench.state, &mut actions, at);
+        assert_eq!(
+            bench.state.to_check().len(),
+            points.len() - 1,
+            "one point settled, the others stay"
+        );
+        paint(&ctx, &mut bench.state, &mut actions, vec![enter()]);
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::StartImportEach { .. })),
+            "the points left do not block the import"
+        );
+    }
+
+    /// Two templates that fit the file as well make a point to check that
+    /// offers the other one.
+    #[test]
+    fn a_tie_between_templates_offers_the_other_one() {
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut bench.state, &mut actions);
+        for name in ["Alpha", "Beta"] {
+            bench.state.template_save_open();
+            bench.state.template_save_draft_mut().unwrap().name = name.to_string();
+            bench.state.template_save_commit();
+        }
+        bench.state.template_use_auto();
+        paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let points = bench.state.to_check();
+        let tie = points
+            .iter()
+            .find_map(|p| match &p.source {
+                stokesforge_app_state::state::ToCheckSource::Tie { others } => Some(others.clone()),
+                _ => None,
+            })
+            .expect("a tie is a point to check");
+        let other = tie[0].clone();
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let label = tr!("import-tie-use", name = other.clone());
+        let at = painted
+            .iter()
+            .find(|t| t.text == label)
+            .expect("the other template is offered")
+            .center;
+        click_at(&ctx, &mut bench.state, &mut actions, at);
+        assert_eq!(bench.state.template_in_use(), Some(other));
+    }
+
+    /// Manage Templates lists the answers remembered per kind of file, each
+    /// with a Forget action that brings the doubt back.
+    #[test]
+    fn manage_templates_lists_the_remembered_answers_and_forgets_one() {
+        let mut bench = bench(DOUBTS);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut bench.state, &mut actions);
+        let before = bench.state.to_check_count();
+        assert!(before > 0);
+        let first = bench.state.to_check()[0].id.clone();
+        bench.state.to_check_mark(&first);
+        assert_eq!(bench.state.to_check_count(), before - 1);
+        let answers = bench.state.remembered_answers();
+        assert_eq!(answers.len(), 1, "one answer is remembered");
+        bench.state.template_manage_open();
+        paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(painted
+            .iter()
+            .any(|t| t.text == tr!("import-answers-title")));
+        assert!(painted
+            .iter()
+            .any(|t| t.text.contains(&answers[0].doubt_text)));
+        click_text(
+            &ctx,
+            &mut bench.state,
+            &mut actions,
+            &tr!("import-answers-forget"),
+        );
+        assert!(bench.state.remembered_answers().is_empty());
+        assert_eq!(bench.state.to_check_count(), before, "the doubt is back");
     }
 }
