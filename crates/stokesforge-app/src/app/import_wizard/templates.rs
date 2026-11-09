@@ -24,6 +24,13 @@ use crate::app::menu_sections::menu_choice;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::theme;
 
+/// Whether a template window is open over the import screen.
+pub(super) fn window_open(state: &AppState) -> bool {
+    state.template_save_draft().is_some()
+        || state.template_manage().is_some()
+        || state.template_forget_pending().is_some()
+}
+
 /// The windows that are open, painted after the wizard so they sit over it.
 pub(super) fn windows(ctx: &egui::Context, state: &mut AppState) {
     // The confirmation first: it opens over the manager and must read Enter and
@@ -56,59 +63,67 @@ fn save_window(ctx: &egui::Context, state: &mut AppState) {
         DialogFooter::gated(&label, &hint, issue.is_none(), &reason),
         |_| {},
         |ui| {
-            form(ui, "stokesforge_import_template_save", |rows| {
-                rows.row(tr!("import-template-save-name"), |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut draft.name).desired_width(260.0));
+            // The body scrolls, the footer stays: the last rule must stay reachable.
+            theme::page_scroll_area()
+                .id_salt("stokesforge_import_template_save_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    form(ui, "stokesforge_import_template_save", |rows| {
+                        rows.row(tr!("import-template-save-name"), |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut draft.name).desired_width(260.0),
+                            );
+                        });
+                        if replaces {
+                            rows.field(|ui| {
+                                ui.label(
+                                    egui::RichText::new(tr!("import-template-save-replaces"))
+                                        .color(theme::warning_color(ui.visuals().dark_mode)),
+                                );
+                            });
+                        }
+                        if unchecked > 0 {
+                            rows.field(|ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(tr!(
+                                            "import-template-save-unchecked",
+                                            count = unchecked
+                                        ))
+                                        .color(theme::warning_color(ui.visuals().dark_mode)),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                        }
+                        for warning in &draft.warnings {
+                            rows.field(|ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(warning.clone())
+                                            .color(theme::warning_color(ui.visuals().dark_mode)),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                        }
+                        rows.section(tr!("import-template-save-used"));
+                        for automatic in &mut draft.automatic {
+                            rows.checkbox(&mut automatic.on, automatic.sentence.clone(), None);
+                        }
+                        rows.field(|ui| {
+                            ui.label(theme::secondary_text(tr!("import-template-save-note")));
+                        });
+                        rows.section(tr!("import-condition-yours"));
+                        conditions_editor(rows, &mut draft.custom, fp.as_deref(), &[]);
+                        rows.section(tr!("import-template-save-sets"));
+                        for rule in &draft.rules {
+                            rows.field(|ui| {
+                                ui.add(egui::Label::new(format!("• {rule}")).wrap());
+                            });
+                        }
+                    });
                 });
-                if replaces {
-                    rows.field(|ui| {
-                        ui.label(
-                            egui::RichText::new(tr!("import-template-save-replaces"))
-                                .color(theme::warning_color(ui.visuals().dark_mode)),
-                        );
-                    });
-                }
-                if unchecked > 0 {
-                    rows.field(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(tr!(
-                                    "import-template-save-unchecked",
-                                    count = unchecked
-                                ))
-                                .color(theme::warning_color(ui.visuals().dark_mode)),
-                            )
-                            .wrap(),
-                        );
-                    });
-                }
-                for warning in &draft.warnings {
-                    rows.field(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(warning.clone())
-                                    .color(theme::warning_color(ui.visuals().dark_mode)),
-                            )
-                            .wrap(),
-                        );
-                    });
-                }
-                rows.section(tr!("import-template-save-used"));
-                for automatic in &mut draft.automatic {
-                    rows.checkbox(&mut automatic.on, automatic.sentence.clone(), None);
-                }
-                rows.field(|ui| {
-                    ui.label(theme::secondary_text(tr!("import-template-save-note")));
-                });
-                rows.section(tr!("import-condition-yours"));
-                conditions_editor(rows, &mut draft.custom, fp.as_deref(), &[]);
-                rows.section(tr!("import-template-save-sets"));
-                for rule in &draft.rules {
-                    rows.field(|ui| {
-                        ui.add(egui::Label::new(format!("• {rule}")).wrap());
-                    });
-                }
-            });
         },
     );
     if let Some(slot) = state.template_save_draft_mut() {
@@ -375,9 +390,18 @@ fn forget_window(ctx: &egui::Context, state: &mut AppState) {
         &tr!("import-template-forget-yes"),
         &tr!("import-template-forget-yes", "hint"),
         |ui| {
-            ui.add(
-                egui::Label::new(tr!("import-template-forget-confirm", name = name.clone())).wrap(),
-            );
+            theme::page_scroll_area()
+                .id_salt("stokesforge_import_template_forget_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(tr!(
+                            "import-template-forget-confirm",
+                            name = name.clone()
+                        ))
+                        .wrap(),
+                    );
+                });
         },
     ) {
         ConfirmOutcome::Open => {}

@@ -239,6 +239,27 @@ struct ImportWizardRequests {
 /// left, the message area, Cancel, Import. The windows of the templates are
 /// painted **inside** the content (see [`templates::windows`]) to read Enter and
 /// Escape before it.
+/// Runs `paint` with the pointer hidden from the input (`hidden`), then gives
+/// it back. The grid and the panels read the raw pointer position, which no
+/// layer order stops: the nested modal windows are painted after them, so they
+/// cannot cover what was already read in the frame.
+fn without_pointer(ctx: &egui::Context, hidden: bool, paint: impl FnOnce(&egui::Context)) {
+    if !hidden {
+        paint(ctx);
+        return;
+    }
+    let saved = ctx.input_mut(|input| {
+        let pointer = std::mem::take(&mut input.pointer);
+        let scroll = std::mem::take(&mut input.smooth_scroll_delta);
+        (pointer, scroll)
+    });
+    paint(ctx);
+    ctx.input_mut(|input| {
+        input.pointer = saved.0;
+        input.smooth_scroll_delta = saved.1;
+    });
+}
+
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     if state.import_state().is_none() {
         return;
@@ -286,7 +307,12 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             let mut requests = requests.borrow_mut();
             let mut guard = state_cell.borrow_mut();
             let state: &mut AppState = &mut guard;
-            grid::import_screen(ui, state, &mut requests);
+            // A template window is modal over the screen: while one is open the
+            // screen below ignores the pointer (no hover, no scroll, no click).
+            let covered = templates::window_open(state);
+            without_pointer(&ui.ctx().clone(), covered, |_| {
+                grid::import_screen(ui, state, &mut requests);
+            });
             templates::windows(ui.ctx(), state);
         },
     );
@@ -957,5 +983,104 @@ mod tests {
         );
         assert!(bench.state.remembered_answers().is_empty());
         assert_eq!(bench.state.to_check_count(), before, "the doubt is back");
+    }
+
+    /// While a template window is open the import screen below ignores the
+    /// pointer: a wheel over the grid does not scroll it, and the same wheel
+    /// does when nothing is open (the control).
+    #[test]
+    fn the_screen_under_a_template_window_ignores_the_pointer() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let wheel = vec![
+            egui::Event::PointerMoved(egui::pos2(654.0, 291.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(-300.0, 0.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        let moved = |open_manage: bool| {
+            let mut bench = bench(&super::test_bench::kinetic_630_by_241());
+            let ctx = crate::app::test_support::context();
+            let mut actions = Vec::new();
+            without_guide(&ctx, &mut bench.state, &mut actions);
+            if open_manage {
+                bench.state.template_manage_open();
+            }
+            let shot = |painted: Vec<crate::app::test_support::Text>| -> Vec<(String, i32, i32)> {
+                painted
+                    .into_iter()
+                    .map(|t| (t.text, t.center.x as i32, t.center.y as i32))
+                    .collect()
+            };
+            settle(&ctx, &mut bench.state, &mut actions);
+            let before = shot(paint(&ctx, &mut bench.state, &mut actions, Vec::new()));
+            for _ in 0..3 {
+                paint(&ctx, &mut bench.state, &mut actions, wheel.clone());
+            }
+            let after = shot(paint(&ctx, &mut bench.state, &mut actions, Vec::new()));
+            before != after
+        };
+        assert!(moved(false), "control: the wheel scrolls the open screen");
+        assert!(
+            !moved(true),
+            "a wheel under Manage Templates scrolls nothing"
+        );
+    }
+
+    /// The body of Save as Template scrolls: its last line, below the window's
+    /// edge at the default size, is reached by the wheel, the footer staying put.
+    #[test]
+    fn save_as_template_scrolls_to_its_last_line() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut bench.state, &mut actions);
+        bench.state.template_save_open();
+        bench
+            .state
+            .template_save_draft_mut()
+            .expect("the draft is open")
+            .rules
+            .extend((0..40).map(|n| format!("long rule {n}")));
+        settle(&ctx, &mut bench.state, &mut actions);
+        let last = "\u{2022} long rule 39";
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        // Two « Cancel »: the import's and the window's (painted last).
+        let cancel = painted
+            .iter()
+            .rfind(|t| t.text == "Cancel")
+            .expect("the footer of Save as Template")
+            .center
+            .y;
+        let at = |p: &[crate::app::test_support::Text]| {
+            p.iter().find(|t| t.text == last).map(|t| t.center.y)
+        };
+        assert!(at(&painted).is_none_or(|y| y > cancel), "hidden at first");
+        // The window is centered: the wheel goes over its body.
+        let wheel = vec![
+            egui::Event::PointerMoved(egui::pos2(700.0, 300.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(0.0, -5000.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        for _ in 0..4 {
+            paint(&ctx, &mut bench.state, &mut actions, wheel.clone());
+        }
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let y = at(&painted).expect("the last line is painted once scrolled");
+        assert!(
+            y < cancel,
+            "the last line ({y}) is above the footer ({cancel})"
+        );
     }
 }
