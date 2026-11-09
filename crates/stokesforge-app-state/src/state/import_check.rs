@@ -67,7 +67,7 @@ pub enum Source {
     You,
 }
 
-/// The things the wizard has an opinion about.
+/// The things the import screen has an opinion about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CheckKind {
     Separator,
@@ -130,7 +130,6 @@ impl CheckKind {
         }
     }
 }
-
 
 /// A place in the file: a 1-based line and, optionally, a cell of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -198,7 +197,7 @@ pub struct Question {
     pub answers: Vec<Answer>,
 }
 
-/// One thing the wizard understood about the file.
+/// One thing the import screen understood about the file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CheckFinding {
     pub kind: CheckKind,
@@ -331,7 +330,6 @@ impl CheckView {
             .collect()
     }
 }
-
 
 /// The review in progress: the doubts, in order.
 #[derive(Debug, Clone, Default)]
@@ -679,6 +677,58 @@ fn compute_fingerprint(map: &FileMap, sniff: &Sniff, facts: FileFacts) -> Finger
         display,
         template_name,
         facts,
+    }
+}
+
+// -- Does a dropped file need a look? ----------------------------------------
+
+/// Does a dropped file, read with the recipe `chosen` for it, still have a
+/// point to check? A file a template reads is decided (unless two templates
+/// tie); otherwise the detector's own doubts and the doubts of the check view
+/// count, each one after the answers already remembered for the kind of file.
+pub(super) fn drop_needs_a_look(
+    path: &Path,
+    bytes: &[u8],
+    chosen: &stokesforge_import::ChosenRecipe,
+    store: &stokesforge_import::RecipeStore,
+) -> bool {
+    use stokesforge_import::RecipeOrigin;
+    if !chosen.doubts.is_empty() {
+        return true;
+    }
+    let kind = chosen.kind.as_deref().unwrap_or_default();
+    match &chosen.origin {
+        RecipeOrigin::Named(_) => false,
+        RecipeOrigin::Matched { name, tied } => {
+            !tied.is_empty()
+                && !store.is_remembered(kind, &super::import_tocheck::tie_id(name, tied))
+        }
+        RecipeOrigin::Detected => {
+            let Some(sniffed) = chosen.sniffed.as_ref() else {
+                return true;
+            };
+            let Ok(map) = file_map(bytes, &chosen.recipe) else {
+                return true;
+            };
+            let facts = FileFacts::new(path, bytes, Some(sniffed));
+            let fingerprint = Arc::new(compute_fingerprint(&map, sniffed, facts));
+            let decided: HashMap<CheckKind, Source> = CheckKind::ALL
+                .into_iter()
+                .filter(|k| store.is_remembered(kind, k.doubt_id()))
+                .map(|k| (k, Source::You))
+                .collect();
+            let view = build_view(
+                &map,
+                sniffed,
+                &chosen.recipe,
+                Some(&decided),
+                fingerprint,
+                None,
+                None,
+                String::new(),
+            );
+            !view.doubts().is_empty()
+        }
     }
 }
 
@@ -1078,7 +1128,11 @@ pub fn build_view(
             if sample.is_empty() {
                 tr!("import-check-decimal-plain", c0 = marker(0))
             } else {
-                tr!("import-check-decimal", c0 = marker(0), sample = sample.clone())
+                tr!(
+                    "import-check-decimal",
+                    c0 = marker(0),
+                    sample = sample.clone()
+                )
             },
             vec![(label, ChipId::Decimal)],
             String::new(),
@@ -1942,7 +1996,10 @@ pub fn build_view(
                 if kept {
                     tr!("import-check-footer-kept", count = rest.len().to_string())
                 } else {
-                    tr!("import-check-footer-dropped", count = rest.len().to_string())
+                    tr!(
+                        "import-check-footer-dropped",
+                        count = rest.len().to_string()
+                    )
                 },
                 vec![],
                 String::new(),
@@ -2061,7 +2118,6 @@ pub fn analyse(bytes: &[u8], name: &str) -> Result<CheckView, SniffRefusal> {
     ))
 }
 
-
 // -- The state -------------------------------------------------------------
 
 impl AppState {
@@ -2148,8 +2204,10 @@ impl AppState {
             encoding,
             receipt,
         ));
-        *state.checks.cache.borrow_mut() =
-            Some(((path, recipe.clone(), state.checks.generation), view.clone()));
+        *state.checks.cache.borrow_mut() = Some((
+            (path, recipe.clone(), state.checks.generation),
+            view.clone(),
+        ));
         Some(view)
     }
 
@@ -2362,7 +2420,6 @@ impl AppState {
         }
         self.check_decide(CheckKind::YName);
     }
-
 }
 
 // -- Tests -------------------------------------------------------------------

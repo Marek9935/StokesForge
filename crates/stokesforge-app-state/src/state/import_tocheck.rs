@@ -41,13 +41,28 @@ pub struct ToCheckPoint {
     pub lines: Vec<usize>,
 }
 
+/// The id of the doubt "these templates fit the file as well": the names of
+/// the template used and of the others, sorted, so that it does not depend on
+/// which one won.
+pub(super) fn tie_id(chosen: &str, others: &[String]) -> String {
+    let mut names: Vec<&str> = std::iter::once(chosen)
+        .chain(others.iter().map(String::as_str))
+        .collect();
+    names.sort_unstable();
+    format!("template-tie:{}", names.join("|"))
+}
+
 /// The sentence of a doubt of the detector.
 fn detector_sentence(doubt: &Doubt) -> String {
     match doubt {
         Doubt::TextRowsInData { count, lines } => {
             let count: usize = *count;
             let first: usize = lines.first().copied().unwrap_or(0);
-            tr!("import-doubt-text-rows-in-data", count = count, first = first)
+            tr!(
+                "import-doubt-text-rows-in-data",
+                count = count,
+                first = first
+            )
         }
         Doubt::SeveralBlocks {
             count,
@@ -56,7 +71,11 @@ fn detector_sentence(doubt: &Doubt) -> String {
         } => {
             let (count, rows): (usize, usize) = (*count, *rows_total);
             if *split {
-                tr!("import-doubt-several-blocks-split", count = count, rows = rows)
+                tr!(
+                    "import-doubt-several-blocks-split",
+                    count = count,
+                    rows = rows
+                )
             } else {
                 tr!("import-doubt-several-blocks", count = count, rows = rows)
             }
@@ -153,11 +172,7 @@ impl AppState {
         }
         if let (Some(chosen), Some(others)) = (template, state.checks.tied_of_file.get(&path)) {
             if !others.is_empty() {
-                let mut names: Vec<&str> = std::iter::once(chosen.as_str())
-                    .chain(others.iter().map(String::as_str))
-                    .collect();
-                names.sort_unstable();
-                let id = format!("template-tie:{}", names.join("|"));
+                let id = tie_id(chosen, others);
                 if !state.store.is_remembered(&kind, &id) {
                     points.push(ToCheckPoint {
                         sentence: tr!(

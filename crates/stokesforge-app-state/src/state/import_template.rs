@@ -10,7 +10,9 @@
 //! once; a failure is a status-bar message.
 
 use stokesforge_import::sniff::SepKind;
-use stokesforge_import::{Condition, DecimalStyle, ImportRecipe, NameSource, PropField, PropTarget};
+use stokesforge_import::{
+    Condition, DecimalStyle, ImportRecipe, NameSource, PropField, PropTarget,
+};
 
 use super::import_check::{sep_name, short_data_type, Fingerprint};
 use super::AppState;
@@ -67,10 +69,7 @@ pub fn condition_sentence(condition: &Condition) -> String {
         Condition::FileStart { text } => tr!("import-condition-start", text = text.clone()),
         Condition::Origin { name } => tr!("import-condition-auto-origin", name = name.clone()),
         Condition::DataType { value } => {
-            tr!(
-                "import-condition-auto-type",
-                name = short_data_type(value)
-            )
+            tr!("import-condition-auto-type", name = short_data_type(value))
         }
         Condition::Marker { text } => tr!("import-condition-auto-marker", marker = text.clone()),
         Condition::Numbers { sep, comma: true } => {
@@ -300,7 +299,10 @@ pub fn doubt_text(id: &str) -> String {
         "jcamp-points-capped" => tr!("import-doubt-name-jcamp-points-capped"),
         "jcamp-nmr-left-out" => tr!("import-doubt-name-jcamp-nmr-left-out"),
         other => match other.strip_prefix("template-tie:") {
-            Some(names) => tr!("import-doubt-name-template-tie", names = names.replace('|', ", ")),
+            Some(names) => tr!(
+                "import-doubt-name-template-tie",
+                names = names.replace('|', ", ")
+            ),
             None => other.to_string(),
         },
     }
@@ -453,7 +455,11 @@ impl AppState {
         let Some((path, kind)) = self.check_kind_id() else {
             return;
         };
-        let ids = self.to_check().into_iter().map(|p| p.id).collect::<Vec<_>>();
+        let ids = self
+            .to_check()
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>();
         let Some(state) = self.import_state.as_mut() else {
             return;
         };
@@ -638,7 +644,12 @@ impl AppState {
         let Some(state) = self.import_state.as_mut() else {
             return;
         };
-        let Some(template) = state.store.recipes().iter().find(|r| r.name == name).cloned()
+        let Some(template) = state
+            .store
+            .recipes()
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
         else {
             return;
         };
@@ -651,7 +662,6 @@ impl AppState {
         }
         state.recipe = recipe;
         state.seen_recipe = state.recipe.clone();
-        state.save_as_name = name.to_string();
         state.checks.auto_paths.remove(&path);
         state.checks.tied_of_file.remove(&path);
         state.checks.template_of_file.insert(path, name.to_string());

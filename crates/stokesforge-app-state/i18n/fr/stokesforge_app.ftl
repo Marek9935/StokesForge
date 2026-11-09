@@ -395,10 +395,6 @@ import-window-title = Assistant d'import
 import-button-finish = Terminer
     .hint = Importe avec les réglages actuels (Entrée)
 
-import-step-files-title = Fichiers et modèle
-import-step-format-title = Format
-import-step-header-title = Lignes
-import-step-columns-title = Colonnes
 
 # Valeurs partagées par plusieurs listes.
 common-auto = Auto
@@ -440,7 +436,6 @@ import-columns-values = Valeurs
 # Étape 5 : métadonnées.
 
 # Étape 6 : destination et modèle.
-import-destination = Destination
 import-destination-mode = Dans le classeur actif
 import-mode-new-sheet = Nouvelle feuille
 import-mode-replace = Remplacer la feuille active
@@ -1847,7 +1842,6 @@ error-refresh-partial = { $count ->
 error-import-nothing-to-reopen = Il n'y a aucun import à rouvrir
 status-import-reopened-undone = Dernier import annulé. Régler ses paramètres, puis le relancer
 status-import-reopened-kept = Régler les paramètres du dernier import, puis le relancer. L'import précédent reste en place
-status-template-chosen = Modèle « { $name } » choisi d'après le fichier
 status-template-exported = Modèle exporté dans { $path }
 error-template-export = Impossible d'exporter le modèle : { $cause }
 status-template-imported = Modèle « { $name } » importé
@@ -1855,7 +1849,6 @@ error-template-import-not-saved = Modèle importé mais non enregistré : { $ca
 error-template-name-required = Donner un nom au modèle pour l'enregistrer
 error-template-save = Impossible d'enregistrer le modèle : { $cause }
 status-template-saved = Modèle « { $name } » enregistré
-error-template-delete = Impossible de supprimer le modèle : { $cause }
 status-template-deleted = Modèle « { $name } » supprimé
 error-import-choose-file-first = Choisir un fichier avant de détecter l'en-tête
 error-export-unknown-format = Format d'export inconnu pour { $path }. Choisir .svg, .pdf ou .png
@@ -2408,7 +2401,7 @@ import-chip-nothing = Rien
 import-chip-line = ligne { $line }
 import-check-data-first = Première ligne de données
 import-check-data-last = Dernière ligne de données
-# --- mockup J (#488) ---
+# Import screen: templates, conditions, file strip (#488)
 import-condition-auto-origin = viennent de { $name } (ORIGIN, SPECTROMETER/DATA SYSTEM)
 import-condition-auto-type = sont de type { $name } (DATA TYPE)
 import-condition-auto-marker = ont leurs données après la ligne { $marker }
@@ -2525,7 +2518,7 @@ import-check-warn-title =
        *[other] { $count } points à vérifier
     }
 
-# Mockup J (#488): added conditions, Mark as Checked, the reason of an automatic choice, many files.
+# Import screen: added conditions, Mark as Checked, the reason of an automatic choice, many files (#488)
 import-condition-auto-kinetic = ont une ligne de temps avant les données : plusieurs spectres (cinétique)
 import-condition-columns-eq = ont exactement { $n } colonnes
 import-condition-columns-min = ont au moins { $n } colonnes

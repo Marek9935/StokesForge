@@ -10,7 +10,9 @@ use eframe::egui;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-use super::dialogs::{modal_dialog_with, DialogFooter, DialogNature, DialogOutcome, InteractiveSize};
+use super::dialogs::{
+    modal_dialog_with, DialogFooter, DialogNature, DialogOutcome, InteractiveSize,
+};
 
 /// The import window, painted from [`StokesForgeApp::ui`](eframe::App::ui) as
 /// long as [`AppState::import_state`] is `Some`; the close cross and Escape
@@ -25,8 +27,10 @@ pub(super) fn import_window(_ctx: &egui::Context, state: &mut AppState, actions:
         .paths
         .iter()
         .map(|path| {
-            path.file_name()
-                .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+            path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
         })
         .collect();
     let has_files = !names.is_empty();

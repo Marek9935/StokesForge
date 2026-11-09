@@ -98,14 +98,14 @@ pub use import_auto::{
     PropChoice, PropRow,
 };
 pub use import_check::{
-    analyse, Answer, ChipId, CheckAction, CheckFinding, CheckKind, CheckView, Confidence,
-    DetectedFormat, Evidence, Fingerprint, FoundGroup, FoundRole, FoundRow, ImportChecks,
-    KeyEntry, Piece, Question, Review, ReviewInfo, Source,
+    analyse, Answer, CheckAction, CheckFinding, CheckKind, CheckView, ChipId, Confidence,
+    DetectedFormat, Evidence, Fingerprint, FoundGroup, FoundRole, FoundRow, ImportChecks, KeyEntry,
+    Piece, Question, Review, ReviewInfo, Source,
 };
 pub use import_grid::{
-    apply_lines, assign_role, boundary_line, build_rows, fold_range, kv_of, lines_view, row_of_line,
-    spans_of, zones_in, zones_of, GridCmd, Kv, LineRoleCmd, LinesView, Row, Spans, Zone, FOLD_KEEP,
-    FOLD_MIN, ROLE_CMDS, ZONES,
+    apply_lines, assign_role, boundary_line, build_rows, fold_range, kv_of, lines_view,
+    row_of_line, spans_of, zones_in, zones_of, GridCmd, Kv, LineRoleCmd, LinesView, Row, Spans,
+    Zone, FOLD_KEEP, FOLD_MIN, ROLE_CMDS, ZONES,
 };
 pub use import_template::{
     automatic_conditions, condition_sentence, doubt_text, template_rules, AutoCondition,
@@ -2861,17 +2861,10 @@ pub struct ImportState {
     pub paths: Vec<std::path::PathBuf>,
     /// Saved templates, loaded once when the window opens.
     pub store: stokesforge_import::RecipeStore,
-    /// Name of the recipe being edited.
-    pub save_as_name: String,
     /// File shown in the preview (index in `paths`).
     pub preview_index: usize,
-    /// Template whose deletion awaits a confirmation.
-    pub confirm_delete: Option<String>,
     /// Recently imported files, loaded at opening.
     pub recent: stokesforge_import::RecentFiles,
-    /// Recipe as it was when the template was loaded: serves to say
-    /// that it was modified without being saved.
-    baseline: stokesforge_import::ImportRecipe,
     /// Preview held during typing (S-T1, #224): the recipe as it
     /// was before the typing and the instant of the last change; as long as it
     /// is there, previews are computed on this recipe, not on `recipe`.
@@ -6755,7 +6748,6 @@ impl AppState {
         let store = stokesforge_import::RecipeStore::load();
         let mut recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
         recipe.unify_header();
-        let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
             active_book,
             destination: active_book.map_or(
@@ -6764,11 +6756,8 @@ impl AppState {
             ),
             paths: Vec::new(),
             store,
-            save_as_name,
             preview_index: 0,
-            confirm_delete: None,
             recent: stokesforge_import::RecentFiles::load(),
-            baseline: recipe.clone(),
             held_preview: None,
             seen_recipe: recipe.clone(),
             recipe,
@@ -6810,7 +6799,11 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
-        self.start_import(plan.destination, ImportSource::Drop { target_book }, plan.data);
+        self.start_import(
+            plan.destination,
+            ImportSource::Drop { target_book },
+            plan.data,
+        );
     }
 
     /// Starts the reading and analysis of the files on a background thread: single
@@ -6881,12 +6874,12 @@ impl AppState {
                             let found = bytes.as_deref().and_then(|bytes| {
                                 stokesforge_import::recipe_for_file(&store, path, bytes, None).ok()
                             });
-                            match found {
-                                Some(found)
-                                    if found.doubts.is_empty()
-                                        && bytes
-                                            .as_deref()
-                                            .is_some_and(|b| reads_well(b, &found.recipe)) =>
+                            match (found, bytes.as_deref()) {
+                                (Some(found), Some(bytes))
+                                    if reads_well(bytes, &found.recipe)
+                                        && !import_check::drop_needs_a_look(
+                                            path, bytes, &found, &store,
+                                        ) =>
                                 {
                                     chosen.push((path.clone(), found.recipe));
                                 }
@@ -6905,8 +6898,7 @@ impl AppState {
                                 // last import must not change its
                                 // destination nor overwrite an existing sheet.
                                 recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
-                                recipe.files_layout =
-                                    stokesforge_import::FilesLayout::SheetPerFile;
+                                recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
                                 if !reply.models.contains(&recipe.name) {
                                     reply.models.push(recipe.name.clone());
                                 }
@@ -7248,9 +7240,7 @@ impl AppState {
                     choice.recipe = recipe.clone();
                 }
                 if index == 0 {
-                    import.baseline = recipe.clone();
                     import.seen_recipe = recipe.clone();
-                    import.save_as_name = recipe.name.clone();
                     import.recipe = recipe;
                 }
             }
@@ -7378,14 +7368,14 @@ impl AppState {
         };
         let name = recipe.name.clone();
         state.store.upsert(recipe.clone());
-        let saved = state.store.save();
-        // Like `save_import_recipe`: without a successful write, keep the old
-        // reference so that the imported template stays "modified" (unsaved).
-        if saved.is_ok() {
-            state.baseline = recipe.clone();
+        // The criteria an older template carried are its conditions now.
+        let conditions =
+            stokesforge_import::templates::conditions_from_auto_match(&recipe.auto_match);
+        if !conditions.is_empty() && state.store.conditions(&name).is_empty() {
+            state.store.set_conditions(&name, conditions);
         }
+        let saved = state.store.save();
         state.recipe = recipe;
-        state.save_as_name = name.clone();
         match saved {
             Ok(()) => self.notice(tr!("status-template-imported", name = name)),
             Err(err) => self.fail(tr!(

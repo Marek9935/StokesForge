@@ -814,6 +814,11 @@ fn dead_keys<'c>(catalog: &'c str, sources: &[SourceFile]) -> Vec<&'c str> {
         .collect()
 }
 
+/// #488 L5: the keys of the one-screen import that its shell will paint. The
+/// state crate already phrases the sentences, the shell comes with L5; until
+/// then these keys are not dead. Delete the file and this list when L5 lands.
+const L5_PENDING: &str = include_str!("l5_pending_keys.txt");
+
 /// A key of the `en` catalog that the code uses nowhere is a dead key
 /// (a text believed visible, or the remains of a conversion): it makes this
 /// test fail (#48). A key is used when its name, between quotes,
@@ -823,7 +828,10 @@ fn dead_keys<'c>(catalog: &'c str, sources: &[SourceFile]) -> Vec<&'c str> {
 fn no_catalog_key_is_dead() {
     let keys = catalog_keys(EN);
     assert!(keys.len() > 500, "the catalog is read: {} keys", keys.len());
-    let dead = dead_keys(EN, &sources::sources());
+    let dead: Vec<&str> = dead_keys(EN, &sources::sources())
+        .into_iter()
+        .filter(|key| !L5_PENDING.lines().any(|pending| pending == *key))
+        .collect();
     assert!(
         dead.is_empty(),
         "{} key(s) of `en` unused in `src/`: {dead:?}",

@@ -597,6 +597,9 @@ pub struct ChosenRecipe {
     pub doubts: Vec<Doubt>,
     /// Kind of file, to remember answers under.
     pub kind: Option<String>,
+    /// What the detector read of the file (not for a named template), so that
+    /// the caller does not read it a second time.
+    pub sniffed: Option<Sniff>,
 }
 
 /// The one choice of recipe, for the CLI, `pyst.import_file` and the file
@@ -620,6 +623,7 @@ pub fn recipe_for_file(
             origin: RecipeOrigin::Named(name.into()),
             doubts: Vec::new(),
             kind: None,
+            sniffed: None,
         });
     }
     let file_name = path
@@ -640,6 +644,7 @@ pub fn recipe_for_file(
             },
             doubts: Vec::new(),
             kind: facts.kind,
+            sniffed: sniffed.ok(),
         });
     }
     let sniffed = sniffed?;
@@ -654,10 +659,11 @@ pub fn recipe_for_file(
         .cloned()
         .collect();
     Ok(ChosenRecipe {
-        recipe: sniffed.recipe,
+        recipe: sniffed.recipe.clone(),
         origin: RecipeOrigin::Detected,
         doubts,
         kind,
+        sniffed: Some(sniffed),
     })
 }
 

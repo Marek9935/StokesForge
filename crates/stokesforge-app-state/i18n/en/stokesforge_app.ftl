@@ -394,10 +394,6 @@ import-window-title = Import Wizard
 import-button-finish = Finish
     .hint = Imports with the current settings (Enter)
 
-import-step-files-title = Files and Template
-import-step-format-title = Format
-import-step-header-title = Lines
-import-step-columns-title = Columns
 
 # Values shared by several lists.
 common-auto = Auto
@@ -439,7 +435,6 @@ import-columns-values = Values
 # Step 5: metadata.
 
 # Step 6: destination and template.
-import-destination = Destination
 import-destination-mode = In active workbook
 import-mode-new-sheet = New sheet
 import-mode-replace = Replace active sheet
@@ -462,7 +457,7 @@ import-role-note-one-line = { $role } uses one line: line { $line }
 import-role-note-span = { $role } uses the span of lines { $from } to { $to }
 import-role-note-end-after-start = The data cannot end before it starts.
 
-## Mockup F (#488): automatic import configuration
+## Import screen: automatic configuration (#488)
 import-auto-pill = auto
 import-auto-recipe-name = Auto · { $family }
 import-auto-family-jasco = JASCO
@@ -1848,7 +1843,6 @@ error-refresh-partial = { $count ->
 error-import-nothing-to-reopen = There is no import to reopen
 status-import-reopened-undone = Last import undone. Adjust its settings, then run it again
 status-import-reopened-kept = Adjust the last import settings, then run it again. The previous import stays in place
-status-template-chosen = Template “{ $name }” chosen from the file
 status-template-exported = Template exported to { $path }
 error-template-export = Could not export the template: { $cause }
 status-template-imported = Template “{ $name }” imported
@@ -1856,7 +1850,6 @@ error-template-import-not-saved = Template imported but not saved: { $cause }
 error-template-name-required = Give the template a name to save it
 error-template-save = Could not save the template: { $cause }
 status-template-saved = Template “{ $name }” saved
-error-template-delete = Could not delete the template: { $cause }
 status-template-deleted = Template “{ $name }” deleted
 error-import-choose-file-first = Choose a file before detecting the header
 error-export-unknown-format = Unknown export format for { $path }. Choose .svg, .pdf or .png
@@ -2258,7 +2251,7 @@ refused-quit-in-main = Quit is in the main window
 opened-dialog-in-main = { $name } is open in the main window
 opened-question-in-main = A question is waiting in the main window
 
-# Mockup E (#488): the file cut into a grid that is marked directly.
+# Import screen: the file cut into a grid that is marked directly (#488)
 import-grid-view-file = File
 import-grid-view-result = Result
 import-grid-fold = Fold
@@ -2291,7 +2284,7 @@ import-grid-other-char = Other character
 import-grid-no-file = No file yet. Use + to add one.
 import-grid-ignore-todo = Not yet: the engine cannot skip a single line (only a comment prefix or a count of lines to skip)
 
-# Mockup H (#488): trust the sure, check the doubts, remember the instrument.
+# Import screen: what is sure, what to check, the instrument remembered (#488)
 import-check-encoding = Text read as { $c0 }
 import-check-separator = Columns are split by { $c0 }
 import-check-separator-irregular = The rows do not all have the same number of columns.
@@ -2409,7 +2402,7 @@ import-chip-nothing = Nothing
 import-chip-line = line { $line }
 import-check-data-first = First data line
 import-check-data-last = Last data line
-# --- mockup J (#488) ---
+# Import screen: templates, conditions, file strip (#488)
 import-condition-auto-origin = come from { $name } (ORIGIN, SPECTROMETER/DATA SYSTEM)
 import-condition-auto-type = are a { $name } (DATA TYPE)
 import-condition-auto-marker = have their data after the line { $marker }
@@ -2526,7 +2519,7 @@ import-check-warn-title =
        *[other] { $count } points to check
     }
 
-# Mockup J (#488): added conditions, Mark as Checked, the reason of an automatic choice, many files.
+# Import screen: added conditions, Mark as Checked, the reason of an automatic choice, many files (#488)
 import-condition-auto-kinetic = have a line of times before the data: several spectra (kinetic)
 import-condition-columns-eq = have exactly { $n } columns
 import-condition-columns-min = have at least { $n } columns

@@ -14,9 +14,7 @@ use stokesforge_import::sniff::{
     marker_main_lines, sniff, AutoChoice, AutoWhat, Check, EndKind, Family, KindKey, SepKind,
     Sniff, SniffRefusal, Why,
 };
-use stokesforge_import::{
-    FileFacts, HeaderProp, ImportRecipe, NameSource, PropField, PropTarget,
-};
+use stokesforge_import::{FileFacts, HeaderProp, ImportRecipe, NameSource, PropField, PropTarget};
 
 use std::sync::Arc;
 
@@ -558,12 +556,8 @@ impl AppState {
                     .insert(found.kind.clone(), state.recipe.clone());
             }
         }
-        if let Some(choice) = state.auto.choices.get(&path) {
-            state.baseline = choice.recipe.clone();
-        }
         if let Some(recipe) = recipe {
             state.seen_recipe = recipe.clone();
-            state.save_as_name = recipe.name.clone();
             state.recipe = recipe;
         }
         state.auto.current = Some(path);
@@ -639,9 +633,7 @@ impl AppState {
         let path = self.import_preview_path();
         if let Some(state) = self.import_state.as_mut() {
             state.recipe = ImportRecipe::new(tr!("import-template-untitled"));
-            state.baseline = state.recipe.clone();
             state.seen_recipe = state.recipe.clone();
-            state.save_as_name = state.recipe.name.clone();
             state.auto.pills_hidden = true;
             if let Some(path) = path {
                 state.checks.template_of_file.remove(&path);
@@ -1003,7 +995,10 @@ impl AppState {
     /// preferences. « Show Guide » still brings it back.
     pub fn import_guide_dont_show_again(&mut self) {
         self.import_guide_close();
-        if let Err(error) = self.object_manager_preferences.save_import_guide_hidden(true) {
+        if let Err(error) = self
+            .object_manager_preferences
+            .save_import_guide_hidden(true)
+        {
             self.fail(tr!(
                 "error-preferences-not-saved",
                 cause = crate::errors::io::error_message(&error)

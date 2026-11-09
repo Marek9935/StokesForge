@@ -348,11 +348,7 @@ pub struct LinesView {
 
 /// The roles of the recipe as file lines. `names_unwired` is the names line
 /// that is not the line just before the data (the recipe cannot hold it).
-pub fn lines_view(
-    recipe: &ImportRecipe,
-    first: usize,
-    names_unwired: Option<usize>,
-) -> LinesView {
+pub fn lines_view(recipe: &ImportRecipe, first: usize, names_unwired: Option<usize>) -> LinesView {
     let main = recipe.header_layout.main_header_lines;
     let sub = recipe.header_layout.subheader_lines;
     let names_row = usize::from(recipe.has_column_header_row);
