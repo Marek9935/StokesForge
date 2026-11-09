@@ -212,6 +212,65 @@ class TestQcmAndTrials(Base):
         self.assertEqual(self.held(), [])
 
 
+class TestWaitYouNeedsACard(Base):
+    """#483: `set --wait you` is a complement; the action itself is a card on the page."""
+
+    qcm = TestQcmAndTrials.qcm
+    trial = TestQcmAndTrials.trial
+
+    def setUp(self):
+        super().setUp()
+        self.claim(1)
+
+    def wait_you(self, *extra):
+        return self.run_cli("set", "1", "--wait", "you", "--waiting", "run it", *extra)
+
+    def test_refused_with_no_card_and_names_the_ways_out(self):
+        r = self.wait_you()
+        self.assertEqual(r.returncode, 1)
+        for word in ("test add", "qcm pose", "--force"):
+            self.assertIn(word, r.stderr)
+        self.assertEqual(self.rec(1)["wait_kind"], "")
+
+    def test_accepted_with_a_todo_entry_to_try(self):
+        self.trial(1, 1, status="todo", **{"try": "scripts/try.sh 1"})
+        self.assertEqual(self.wait_you().returncode, 0)
+
+    def test_refused_when_the_only_entry_is_ok_or_has_no_try(self):
+        self.trial(1, 1, status="ok", **{"try": "scripts/try.sh 1"})
+        self.trial(1, 2, status="todo")
+        self.assertEqual(self.wait_you().returncode, 1)
+
+    def test_accepted_with_an_open_form(self):
+        self.qcm(1, False)
+        self.assertEqual(self.wait_you().returncode, 0)
+
+    def test_refused_when_the_form_is_finished(self):
+        self.qcm(1, True)
+        self.assertEqual(self.wait_you().returncode, 1)
+
+    def test_force_overrides_and_asks_for_a_justification(self):
+        r = self.wait_you("--force")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("justify", r.stderr)
+        self.assertEqual(self.rec(1)["wait_kind"], "you")
+
+    def test_other_wait_kinds_need_no_card(self):
+        self.assertEqual(self.run_cli("set", "1", "--wait", "dep", "--waiting", "x").returncode, 0)
+
+    def test_entry_kind_measure_accepted_other_refused(self):
+        f = os.path.join(self.state, "e.json")
+        os.makedirs(self.state, exist_ok=True)
+        for kind, rc in (("measure", 0), ("trial", 1)):
+            with open(f, "w") as fh:
+                json.dump({"title": "t", "try": "echo hi", "kind": kind}, fh)
+            r = self.run_cli("test", "add", "1", f)
+            self.assertEqual(r.returncode, rc, r.stderr)
+        self.assertIn("kind", r.stderr)
+        self.assertEqual(self.run_cli("test", "list", "--issue", "1").returncode, 0)
+
+
+
 class TestClaim(Base):
     def test_resume_takes_the_previous_colour_when_free(self):
         self.put(1, last_colour=C[2])
@@ -301,7 +360,7 @@ class TestPauseDone(Base):
 
     def test_set_records_the_state(self):
         self.claim(1)
-        r = self.run_cli("set", "1", "--state", "essai", "--what", "trial", "--wait", "you", "--waiting", "your OK")
+        r = self.run_cli("set", "1", "--state", "essai", "--what", "trial", "--wait", "you", "--waiting", "your OK", "--force")
         self.assertEqual(r.returncode, 0, r.stderr)
         e = self.status()["colours"][0]
         self.assertEqual((e["state"], e["wait_kind"], e["waiting"]), ("essai", "you", "your OK"))
@@ -796,7 +855,7 @@ class TestTestCommands(Base):
 
     def test_set_erases_the_agent_note_unless_restated(self):
         self.claim(7)
-        self.run_cli("set", "7", "--state", "code", "--what", "w", "--wait", "you", "--waiting", "note")
+        self.run_cli("set", "7", "--state", "code", "--what", "w", "--wait", "you", "--waiting", "note", "--force")
         self.run_cli("set", "7", "--what", "other")
         r = self.rec(7)
         self.assertEqual((r["state"], r["what"], r["waiting"], r["wait_kind"]), ("code", "other", "", ""))
@@ -894,7 +953,7 @@ class ServerBase(Base):
     def setUp(self):
         super().setUp()
         self.claim(1, "--name", "One")
-        self.run_cli("set", "1", "--state", "code", "--what", "doing", "--wait", "you", "--waiting", "your OK")
+        self.run_cli("set", "1", "--state", "code", "--what", "doing", "--wait", "you", "--waiting", "your OK", "--force")
         self.claim(2, "--name", "Two")
         os.makedirs(os.path.join(self.state, "tests"))
         self.entry = os.path.join(self.state, "tests", "1-1.json")
@@ -2311,12 +2370,17 @@ class TestImages(ServerBase):
         a = self.stored(png(b"a"))
         self.assertEqual(self.post(body={"images": [a]})[0], 200)
         before, files = self.entry_text(), self.files()
-        names = [self.stored(png(bytes([i]))) for i in range(suivi.MAX_IMAGES)]           # MAX_IMAGES + a = one too many
+        names = [self.stored(png(bytes([i, 200]))) for i in range(suivi.MAX_IMAGES)]           # MAX_IMAGES + a = one too many
         for bad in ("abc", {"x": 1}, [1], ["0123456789abcdef01234567.png"], ["../x"], [a] + names, None):
             self.assertEqual(self.post(body={"images": bad})[0], 400, bad)
         self.assertEqual(self.entry_text(), before)
         self.assertEqual(self.files(), sorted(files + names))
-        self.assertEqual(self.post(body={"images": names})[0], 200)                            # exactly MAX_IMAGES is fine
+        self.assertEqual(self.post(body={"images": names})[0], 200)                            # exactly the sanity bound is fine
+
+    def test_more_than_five_images_are_accepted(self):
+        names = [self.stored(png(bytes([i]))) for i in range(8)]
+        self.assertEqual(self.post(body={"images": names})[0], 200)
+        self.assertEqual(json.loads(self.entry_text())["images"], names)
 
     def test_an_image_changes_neither_the_colour_nor_the_pending_count(self):
         held, pending = self.held(C[0]), json.loads(self.req("GET", "/api/state")[2])["pending"]
@@ -2742,8 +2806,14 @@ class TestFormTemplate(unittest.TestCase):
         f = lambda t, size=100, name="a": {"name": name, "type": t, "size": size}
         out = self.q_js("qFilter(%s, 4)" % json.dumps([f("image/png", name="a.png"), f("image/svg+xml", name="x.svg"),
                                                        f("image/gif", 10 * 1024 * 1024 + 1, "big.gif"), f("image/webp", name="w.webp")]))
-        self.assertEqual([x["name"] for x in out["accept"]], ["a.png"])                      # 4 + 1 = 5, the next is one too many
-        self.assertEqual(len(out["lines"]), 3)
+        self.assertEqual([x["name"] for x in out["accept"]], ["a.png", "w.webp"])            # no count cap
+        self.assertEqual(len(out["lines"]), 2)                                               # 2 refusals, the advice is not a refusal line
+        self.assertFalse(any("Plus de" in l for l in out["lines"]))
+        self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 9).lines"), [])
+        adv = "⚠ Plus de 5 captures dans cette réponse"
+        self.assertEqual([self.q_js("qAdvice(%d)" % n) for n in (0, 5, 6, 7)], ["", "", adv, adv])   # shown above 5, gone back at 5
+        form = self.form_html()
+        self.assertRegex(form, r'Captures \(facultatif\)</div><div class="qwarn" id="qadv"[^>]*hidden></div><div class="qstrip"')
         self.assertIn("relance-le", self.q_js("qUploadLine(404)"))
         self.assertIn("10 Mo", self.q_js("qUploadLine(413)"))
         ok = "0123456789abcdef01234567.png"
@@ -3861,8 +3931,14 @@ class TestPage(unittest.TestCase):
         self.assertTrue(all(l.split(" : ")[0] in ("x.svg", "n.txt", "big.webp", "empty.gif") for l in out["lines"]))
         self.assertEqual(self.img_js("imgFilter([%s], 0).accept.length" % json.dumps(f("image/png", 10 * 1024 * 1024))), 1)   # exactly 10 Mo
         full = self.img_js("imgFilter(%s, 4)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
-        self.assertEqual((len(full["accept"]), len(full["lines"])), (1, 1))                  # 5 per card, uploads in flight counted
-        self.assertIn("5 captures", full["lines"][0])
+        self.assertEqual((len(full["accept"]), full["lines"]), (2, []))                      # no cap; the advice is not a refusal line
+        adv = "⚠ Plus de 5 captures dans ce retour"
+        self.assertEqual([self.img_js("imgAdvice(%d)" % n) for n in (0, 5, 6, 7)], ["", "", adv, adv])   # shown above 5, gone back at 5
+        page = self.page()
+        self.assertLess(page.index("b.appendChild(ad);"), page.index("b.appendChild(adv);b.appendChild(st);"))   # the slot sits above the strip
+        self.assertIn("imgAdvice(d.names.length+d.busy)", page)                              # recomputed on every strip redraw (add and remove)
+        few = self.img_js("imgFilter(%s, 3)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
+        self.assertEqual((len(few["accept"]), few["lines"]), (2, []))                        # 5 images: no warning
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_what_a_box_button_sends_keeps_the_images_and_refuses_only_an_empty_retour(self):
@@ -3911,6 +3987,45 @@ class TestPage(unittest.TestCase):
                  {"kind": "file", "type": "application/pdf"}, {"kind": "file", "type": "image/svg+xml"}]
         got = self.img_js("imgFromItems(%s.map(i=>Object.assign(i,{getAsFile:()=>({type:i.type})})))" % json.dumps(items))
         self.assertEqual(got, [{"type": "image/png"}])
+
+    def drag_run(self, html_path, start, end, setup, events, wrap=("", "")):
+        """Run the drag handlers cut out of a page against a fake document; return what each event did."""
+        with open(html_path, encoding="utf-8") as f:
+            html = f.read()
+        kind = re.search(r"/\*(?:IMAGES|QIMG)-START\*/.*?(function dragKind.*?\n}\n)", html, re.S).group(1)
+        seg = html[html.index(start):html.index(end, html.index(start))]
+        code = ("const L={};const document={addEventListener:(n,f)=>{L[n]=f;}};let notes=[],got=[];\n" + setup + "\n" + kind + wrap[0] + seg + wrap[1] + "\n"
+                "const out=%s.map(([n,types,files])=>{const e={dataTransfer:{types,files},p:false,preventDefault(){this.p=true;}};"
+                "if(L[n])L[n](e);return e.p;});"
+                "process.stdout.write(JSON.stringify({out,notes,got,lines:typeof qLines==='undefined'?null:qLines}));") % json.dumps(events)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_an_empty_drag_is_accepted_and_says_nothing_came_through_while_files_and_text_behave(self):
+        ev = [["dragover", [], []], ["dragenter", [], []], ["dragover", ["Files"], []], ["dragover", ["text/plain"], []],
+              ["drop", [], []], ["drop", ["Files"], [{"n": 1}]], ["drop", ["text/plain"], []]]
+        r = self.drag_run(os.path.join(HERE, "suivi-page.html"), "const dragOf", "function testBox",
+                          "const imgNote=t=>notes.push(t);const dropToBox=f=>{got.push(f.length);return true;};", ev)
+        self.assertEqual(r["out"], [True, True, True, False, True, True, False])          # a text drag is never cancelled
+        self.assertEqual(r["got"], [1])                                                    # the Files drop still attaches
+        self.assertEqual(len(r["notes"]), 1)                                               # only the empty drop speaks
+        self.assertIn("rien transmis", r["notes"][0])
+        self.assertIn("Ctrl+V", r["notes"][0])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_form_accepts_an_empty_drag_only_in_a_card(self):
+        ev = [["dragover", [], []], ["drop", [], []], ["dragover", ["text/plain"], []], ["drop", ["Files"], [{"n": 1}]]]
+        path = TEMPLATE
+        setup = "let view='card',cur=0;const ORDER=[{c:'R1'}];const qLines={};const qStrip=()=>{};const qAttach=(d,f)=>got.push(f.length);"
+        r = self.drag_run(path, "const dragOf", "if(/[?&]view=sum", setup, ev, ("if(true){", ""))
+        self.assertEqual(r["out"], [True, True, False, True])
+        self.assertEqual(r["got"], [1])
+        self.assertIn("rien transmis", r["lines"]["R1"][0])                                # the empty drop says so on the card
+        r = self.drag_run(path, "const dragOf", "if(/[?&]view=sum", setup.replace("'card'", "'sum'"), ev, ("if(true){", ""))
+        self.assertEqual(r["out"], [False, False, False, True])                            # outside a card: as before
+        self.assertEqual(r["lines"], {})
 
     def test_the_trial_page_wires_the_screenshots_safely(self):
         html = self.page()

@@ -333,9 +333,22 @@ rollback, `.stf`). It is not a node.
   column, an error bar or a label is skipped, with no x' required; a sheet
   without a Y column is refused. Changing the role of a column makes the
   transposed sheet stale.
-- Refusals: a Y column of the source without x' (`CoreError::TransposeNoXPrime`)
-  or containing text (`TransposeNotNumeric`); both name the column by its
-  **letter** and its name. A shorter column gives `NaN`.
+- Refusals: a Y column of the source without x' **while another Y column has
+  one** (`CoreError::TransposeNoXPrime`) or containing text
+  (`TransposeNotNumeric`); both name the column by its **letter** and its name.
+  A shorter column gives `NaN`.
+- **Index mode (#493).** When **no** Y column has a finite x' (an x' on the X
+  column does not count), the x' column of the transposed sheet holds the rank
+  1, 2, 3... of the Y columns (base 1, X/Label columns get no number) and its
+  long name is "Column number" (back to "x' of <sheet>" with real x'; a long name
+  the user changed is kept). The numbers live only in the transposed sheet: the
+  link keeps `NaN` x' bits (`TransposeLink::is_index_mode`), the source is never
+  written, no `.stf` change (invariant 12). Real x' added on every Y column
+  later: the usual stale/follow/Recalculate. Real x' removed from every Y column
+  of a source the link read with x' (`TransposeLink::lost_x_prime`): the
+  followed sheet **does not** switch by itself, it keeps its numbers and reads
+  Out of date; only an explicit Recalculate switches to 1, 2, 3... (and warns,
+  see `docs/windows.md`).
 - Life of the link: source deleted or transposed sheet deleted, the link
   disappears (`Project::prune_transposes`) and the sheet that remains is
   ordinary, without loss; source renamed, the transposed sheet follows ("Newᵀ"),

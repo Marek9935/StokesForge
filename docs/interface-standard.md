@@ -348,6 +348,14 @@ History: #219; wiring: #220, #224, #240 (S-N11, S-T3).
   columns of which 2 are faulty counts 2); the types follow the fixed order of
   `OperationKind::ALL`, their names come from the glossary (keys
   `low-r2-count-*`, plurals fr+en). No series names and no scrolling list.
+- **Twin: "No x' Values"** (#493, `AlertKind::NoXPrime`): same shape (warning,
+  not failure, `gesture_failed` ignores it, Enter, Esc and the cross close it).
+  Raised after every row analysis that uses the column numbers as x' and after
+  the Recalculate that switches a sheet to them. Cancel Analysis is the one
+  secondary button, offered only while the analysis window is open: it aborts
+  the `AnalyzeRows` group like that window's Cancel. It takes the single alert
+  slot over a low R² box (the badge below keeps saying the R²) but never over a
+  failure.
 - **Status bar badge** (#290): "⚠ 13 low R²", on the right of the
   bar, in R² red (`theme::r_squared_color`), with a tooltip. It is a
   **state** recomputed at each snapshot (`AppState::low_r2_groups`,

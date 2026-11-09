@@ -85,8 +85,8 @@ impl HostError {
             CoreError::CalculatedColumnReadOnly { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
-            // #253: a row transposes only if all the columns of
-            // its sheet are numeric and carry an x'.
+            // #253: a row transposes only if all the Y columns of its sheet
+            // are numeric and carry an x' (or none does, #493: column numbers).
             CoreError::TransposeNoXPrime { .. } | CoreError::TransposeNotNumeric { .. } => {
                 HostError::InvalidValue(error.to_string())
             }

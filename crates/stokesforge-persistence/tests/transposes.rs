@@ -90,3 +90,35 @@ fn the_automatic_box_survives_a_round_trip_in_both_states() {
     assert!(!back.tree().transpose_link(sheet).unwrap().auto_recalc);
     assert_eq!(back.tree().transposes(), project.tree().transposes());
 }
+
+/// (#493) A link in index mode keeps its `NaN` x' bits through the file: not
+/// stale after loading, and the x' column still holds 1, 2, 3.
+#[test]
+fn an_index_mode_link_survives_a_round_trip() {
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let source = project.tree().children(book).unwrap()[0];
+    for i in 0..3 {
+        let column = Column::from_f64(&[1.0 + f64::from(i), 5.0]);
+        project
+            .add_column(source, None, Some(&format!("C{i}")), column)
+            .unwrap();
+    }
+    let sheet = project.transpose_rows(source, &[0]).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.stf");
+    save(&project, &path).unwrap();
+    let back = load(&path).unwrap();
+    assert_eq!(state(&back, sheet), (false, false));
+    let link = back.tree().transpose_link(sheet).unwrap();
+    assert!(link.is_index_mode());
+    let x = back
+        .tree()
+        .node(link.x_column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap();
+    assert_eq!(x.to_vec(), vec![1.0, 2.0, 3.0]);
+}

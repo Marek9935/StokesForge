@@ -136,6 +136,7 @@ emptied (`blocking_confirmations`). All of Small class (480 x 170).
 | Unsaved project | `SaveChanges` | `stokesforge_unsaved` | New Project, Open…, Quit, closing the window (`AppState::unsaved_pending`) |
 | Save / open failure | `Alert` | `stokesforge_alert` | a save or an open that fails (`AlertKind::SaveFailed`, `OpenFailed`) |
 | Low R² (warning), lost session | `ReadOnly` (Small) | `stokesforge_alert` | end of a calculation whose R² is low, if the preference allows it (`AlertKind::LowRSquared`); dead session (`AlertKind::SessionLost`) |
+| No x' Values (warning, #493) | `ReadOnly` (Small) with a secondary "Cancel Analysis" | `stokesforge_alert` | every row analysis that runs on the column numbers 1, 2, 3... because no Y column has an x', over the analysis window (`AlertKind::NoXPrime`); and the Recalculate of a transposed sheet whose source lost all its x' (Close alone, no analysis window) |
 | Overwrite a file | `Confirm` | `stokesforge_overwrite` | export whose added extension targets an existing file (`pending_overwrite`) |
 | Overwrite a file read with discrepancies | `Confirm` | `stokesforge_discarded_save` | Save that would overwrite the source file of a load that discarded calculations or traces not yet saved (`pending_discarded_save`, #309); not for Save As elsewhere |
 | Delete a backup copy | `Confirm` | `stokesforge_recovery_delete` | Delete on a row of the recovery window (`pending_recovery_delete`, #317); the recovery window stays underneath |

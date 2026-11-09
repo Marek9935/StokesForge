@@ -441,24 +441,36 @@ fn is_ancestor(tree: &Tree, ancestor: NodeId, node: NodeId) -> bool {
     tree.ancestors(node).is_ok_and(|a| a.contains(&ancestor))
 }
 
-/// Sheets whose Y columns can all be transposed (numeric, with an x'), formula
-/// columns included (#439: they were left out while the targeted and full twins
-/// differed after an undo over such a link).
+/// Sheets whose Y columns can all be transposed (an x' on every one, or on none:
+/// index mode, #493), formula columns included (#439: they were left out while
+/// the targeted and full twins differed after an undo over such a link).
 fn transposable(tree: &Tree) -> Vec<NodeId> {
-    sheets(tree)
+    let candidates: Vec<(NodeId, bool)> = sheets(tree)
         .into_iter()
-        .filter(|&s| {
+        .filter_map(|s| {
             let ys: Vec<_> = columns_of(tree, Some(s))
                 .into_iter()
                 .filter_map(|c| tree.node(c).and_then(|n| n.as_column()))
                 .filter(|c| c.meta().role == ColumnRole::Y)
                 .collect();
-            tree.transpose_link(s).is_none()
-                && !ys.is_empty()
-                && ys
-                    .iter()
-                    .all(|c| c.meta().x_prime.is_some_and(f64::is_finite))
+            let has = |c: &&stokesforge_core::Column| c.meta().x_prime.is_some_and(f64::is_finite);
+            let free = tree.transpose_link(s).is_none() && !ys.is_empty();
+            if free && ys.iter().all(has) {
+                Some((s, true))
+            } else if free && !ys.iter().any(has) {
+                Some((s, false))
+            } else {
+                None
+            }
         })
+        .collect();
+    // Index-mode sheets come last, so that the draws that picked the sheets with
+    // an x' before #493 still pick them.
+    let (with_x, without_x): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|(_, x)| *x);
+    with_x
+        .into_iter()
+        .chain(without_x)
+        .map(|(s, _)| s)
         .collect()
 }
 
@@ -1012,7 +1024,7 @@ fn b23_formulas_stay_exact_across_structural_gestures() {
     let cases = std::env::var("B23_CASES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(64);
+        .unwrap_or(96);
     let total = std::cell::RefCell::new(Coverage::default());
     let started = std::time::Instant::now();
     runner(cases)

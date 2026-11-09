@@ -88,6 +88,7 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .qthumb img{display:block;max-width:160px;max-height:120px;border:2px solid var(--line);border-radius:8px;background:var(--bg)}
 .qthumb .gone{border:2px dashed var(--line);border-radius:8px;padding:8px;color:var(--muted);font-size:.85rem}
 .qthumb button{padding:4px 10px;border-radius:8px;border:2px solid var(--line);background:var(--panel);cursor:pointer;font-size:.85rem;font-weight:700}
+.qwarn{color:var(--warn);font-size:.9rem;font-weight:700;margin-bottom:6px}
 .qbad{color:var(--bad);font-size:.9rem;font-weight:700}
 /* maquettes */
 .mrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -349,7 +350,7 @@ $('h1').textContent=TITRE; document.title=document.title||TITRE;
 /*QIMG-START*/
 /* Screenshots on a card (local mode only, #456). Pure functions; limits mirror the server's. An answer is always
    {i|skip, note, images}: every rebuild goes through mkAns so that no change of option loses its images. */
-const QI_MAX_BYTES=10*1024*1024, QI_MAX=5, QI_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
+const QI_MAX_BYTES=10*1024*1024, QI_WARN=5, QI_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
 const QI_NAME=/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
 const QI_GONE='Capture supprimée (limite de 512 Mo)';
 const qNames=a=>a&&Array.isArray(a.images)?a.images.filter(n=>typeof n==='string'&&QI_NAME.test(n)):[];
@@ -362,11 +363,12 @@ function qFilter(files,have){
     if(!QI_TYPES.includes(f.type)){lines.push(nm+' : ce n’est pas une image PNG, JPEG, GIF ou WebP.');continue;}
     if(f.size>QI_MAX_BYTES){lines.push(nm+' : plus de 10 Mo, trop lourd.');continue;}
     if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
-    if(n>=QI_MAX){lines.push(nm+' : '+QI_MAX+' captures au plus par carte.');continue;}
     accept.push(f);n++;
   }
   return {accept:accept,lines:lines};
 }
+/* The advice shown above the strip while the card holds more than QI_WARN screenshots ('' otherwise). */
+function qAdvice(n){return n>QI_WARN?'⚠ Plus de '+QI_WARN+' captures dans cette réponse':'';}
 function qUploadLine(status){
   if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
   if(status===413)return 'Capture refusée : plus de 10 Mo.';
@@ -377,6 +379,11 @@ function qFromItems(items){
   const out=[];
   for(const it of Array.from(items||[])){if(it&&it.kind==='file'&&QI_TYPES.includes(it.type)){const f=it.getAsFile();if(f)out.push(f);}}
   return out;
+}
+/* Kind of an OS drag from its types: 'files', 'empty' (the browser passed nothing at all, seen with a real drag from Files, #483) or 'other' (text drags stay untouched). */
+function dragKind(types){
+  const t=Array.from(types||[]);
+  return t.includes('Files')?'files':t.length===0?'empty':'other';
 }
 /*QIMG-END*/
 function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
@@ -437,7 +444,7 @@ function card(){
   h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
   h+='</div></div>';
   h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
-  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V)</span></div></div>';
+  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qwarn" id="qadv" role="status" hidden></div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V), ou glisse-la ici</span></div></div>';
   else h+='<div class="mdim">Les captures ne sont possibles que sur la page locale du suivi.</div>';
   h+='<div class="sync" aria-live="polite">'+esc(sync)+'</div></div>';
   return h;
@@ -509,6 +516,7 @@ function qThumb(d,n){
 function qStrip(d){
   const st=$('qstrip'); if(!st||view!=='card'||ORDER[cur]!==d)return;
   st.replaceChildren();
+  const adv=$('qadv'); if(adv){const t=qAdvice(qNames(ans[d.c]).length+(qBusy[d.c]||0)); adv.textContent=t; adv.hidden=!t;}
   qNames(ans[d.c]).forEach(n=>st.appendChild(qThumb(d,n)));
   const b=qBusy[d.c]||0;
   if(b>0){const e=document.createElement('span'); e.className='mdim'; e.textContent='Envoi de '+b+' capture'+(b>1?'s':'')+'…'; st.appendChild(e);}
@@ -530,7 +538,7 @@ function qAttach(d,files){
           if(typeof j.name==='string'&&QI_NAME.test(j.name)){
             const a=ans[d.c]||mkAns(null,{i:-1});      // a screenshot on an unanswered card acts like a comment: « Autre »
             const cur0=qNames(a);
-            if(!cur0.includes(j.name)&&cur0.length<QI_MAX)cur0.push(j.name);
+            if(!cur0.includes(j.name))cur0.push(j.name);
             a.images=cur0; ans[d.c]=a; ok=true;}}
       }catch(e){qLines[d.c].push(qUploadLine(0));}
       qBusy[d.c]--;
@@ -553,11 +561,18 @@ if(LOCAL){
     if(cd.getData&&cd.getData('text/plain'))return;            // a paste that carries text stays text
     e.preventDefault(); qAttach(ORDER[cur],files);
   });
-  const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
-  document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
+  /* An OS drag may arrive with no type at all (#483): accept it in a card and say nothing came through. Text drags stay untouched. */
+  const dragOf=e=>{const k=e.dataTransfer?dragKind(e.dataTransfer.types):'other'; return k==='empty'&&view!=='card'?'other':k;};   // outside a card an empty drag is not ours
+  document.addEventListener('dragenter',e=>{if(dragOf(e)!=='other')e.preventDefault();});
+  document.addEventListener('dragover',e=>{if(dragOf(e)!=='other')e.preventDefault();});
   document.addEventListener('drop',e=>{
-    if(!hasFiles(e))return; e.preventDefault();
-    if(view==='card')qAttach(ORDER[cur],Array.from(e.dataTransfer.files||[]));
+    const k=dragOf(e);
+    if(k==='other')return;
+    e.preventDefault();
+    if(view!=='card')return;
+    const all=Array.from(e.dataTransfer.files||[]), d=ORDER[cur];
+    if(all.length)qAttach(d,all);
+    else if(k==='empty'){qLines[d.c]=['Le navigateur n’a rien transmis : glisse à nouveau, ou colle avec Ctrl+V.']; qStrip(d);}
   });
 }
 if(/[?&]view=sum\b/.test(location.search))view='sum';

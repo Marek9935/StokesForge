@@ -2982,6 +2982,157 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #493: the "No x' Values" warning paints over the open analysis window with
+    /// "Cancel Analysis" and Close; Cancel Analysis dismisses it and cancels the
+    /// analysis; with no analysis window (Recalculate) Close is alone. Witness:
+    /// the old `AlertKind` match painted no such dialog.
+    #[test]
+    fn the_no_x_prime_warning_offers_to_cancel_the_analysis() {
+        use stokesforge_analysis::model::Model;
+        use stokesforge_app_state::analysis::Preset;
+
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        for name in ["S0", "S1"] {
+            project
+                .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+                .unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        app.state.dispatch(Action::OpenRowAnalysis {
+            preset: Preset::Fit(Model::Linear),
+            rows: vec![(sheet, 0)],
+        });
+        assert!(app.state.row_analysis_cancellable());
+
+        let frame = |app: &mut StokesForgeApp, events: Vec<egui::Event>| {
+            let mut actions = Vec::new();
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| app.blocking_confirmations(ui.ctx(), &mut actions),
+            );
+            output.textures_delta.clear();
+            (output, actions)
+        };
+        let center = |output: &egui::FullOutput, text: &str| -> Option<egui::Pos2> {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == text => {
+                        Some(shape.pos + shape.galley.rect.center().to_vec2())
+                    }
+                    _ => None,
+                })
+        };
+        frame(&mut app, Vec::new());
+        let (output, _) = frame(&mut app, Vec::new());
+        let cancel = tr!("alert-no-x-prime-cancel");
+        assert!(center(&output, &tr!("alert-no-x-prime-title")).is_some());
+        assert!(center(&output, &tr!("dialog-close")).is_some());
+        let position = center(&output, &cancel).expect("Cancel Analysis painted");
+        let click = |pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(position)]);
+        let mut pushed = Vec::new();
+        for pressed in [true, false] {
+            pushed.extend(frame(&mut app, vec![click(pressed)]).1);
+        }
+        assert_eq!(pushed, vec![Action::DismissAlert, Action::CloseAnalysis]);
+
+        // Recalculate case: no analysis window, Close alone.
+        app.state.dispatch(Action::DismissAlert);
+        app.state.dispatch(Action::CloseAnalysis);
+        assert!(!app.state.row_analysis_cancellable());
+        session.shutdown().unwrap();
+    }
+
+    /// #493: the warning is raised in the same frame as the analysis window (a
+    /// modal of the same order). It stays in front of it, otherwise it hides
+    /// behind it and, being blocking, freezes every button. Witness: without
+    /// `move_to_top` the analysis window layer stays above the warning.
+    #[test]
+    fn the_no_x_prime_warning_stays_in_front_of_the_analysis_window() {
+        use stokesforge_analysis::model::Model;
+        use stokesforge_app_state::analysis::Preset;
+
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        project
+            .add_column(sheet, None, Some("S0"), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        app.state.dispatch(Action::OpenRowAnalysis {
+            preset: Preset::Fit(Model::Linear),
+            rows: vec![(sheet, 0)],
+        });
+        let analysis =
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("analysis_window"));
+        let frame = |app: &mut StokesForgeApp, raise_analysis: bool| {
+            let screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 700.0),
+            ));
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect,
+                    ..egui::RawInput::default()
+                },
+                |ui| {
+                    egui::Area::new(analysis.id)
+                        .order(egui::Order::Foreground)
+                        .show(ui.ctx(), |ui| {
+                            ui.label("analysis");
+                        });
+                    if raise_analysis {
+                        ui.ctx().move_to_top(analysis);
+                    }
+                    app.blocking_confirmations(ui.ctx(), &mut Vec::new());
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut app, false);
+        // The user clicked the analysis window since: it is on top of the warning.
+        frame(&mut app, true);
+        frame(&mut app, false);
+        let top = context.memory(|memory| memory.layer_ids().last());
+        assert_eq!(
+            top,
+            Some(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("stokesforge_alert")
+            )),
+            "the warning is the top layer"
+        );
+        session.shutdown().unwrap();
+    }
+
     /// The first column of the detached workbook's first sheet, and its text at row 1.
     fn detached_first_cell(app: &mut StokesForgeApp, book: NodeId) -> (NodeId, String) {
         let sheet = app.state.selected_sheet_in(book).unwrap();

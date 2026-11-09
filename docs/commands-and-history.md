@@ -400,7 +400,8 @@ sheet (sheet, x' column, "Row N" columns, link) and
 `RecalculateTranspose { sheet }` rewrites its linked columns from the source.
 Both are **structural**
 (tree snapshot: nodes appear, the link is carried by the tree) and atomic — a
-refusal (column without x', text column) restores the tree and pushes nothing.
+refusal (text column, partial x'; no x' at all is the index mode, #493, not a
+refusal) restores the tree and pushes nothing.
 `SetTransposeAuto { sheet, auto }` (#463) checks or unchecks the box
 "Recalculate automatically": structural, one entry, refused when checking
 while the source calculates from the sheet (nothing pushed). Likewise
