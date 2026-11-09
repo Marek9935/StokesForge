@@ -718,14 +718,16 @@ ordinary layer and its overlay layers. Two gestures add a cell, one deletes it;
 all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
 `PlotEditKind::AddCell` and `RemoveCell`.
 
-- **Graph > New Layer Beside > Right / Below** (`Action::AddCell`, empty
+- **Layout > New Layer Beside > Left / Right / Above / Below** (`Action::AddCell`, empty
   `columns`), on the **active layer**'s cell. Greyed out when the grid would pass
   `compose::MAX_GRID_CELLS` (256, the size the renderer lays out as declared).
-- **Columns dropped on the right or bottom band** of the figure
-  (`graph_window::edge_drop_side`, band `EDGE_BAND_WIDTH`, painted during the
-  drag with `theme::drop_edge_band_*`): the new cell goes beside the cell
-  **nearest the pointer** (`GraphView::nearest_cell`); bottom-right corner =
-  Right. The series are planned like a drop on the graph
+- **Columns dropped on one of the four bands** of the figure
+  (`GraphView::drop_place` in `stokesforge_render_egui::edge_band`, band
+  `EDGE_BAND_WIDTH`, painted during the drag by `GraphView::paint_drop_places`):
+  the new cell goes beside the cell **nearest the pointer**
+  (`GraphView::nearest_cell`), on the side of the band; a corner goes to the
+  nearest edge (`edge_drop_side`, the diagonal splits it; the top band is at the
+  figure's very top, over the title, #503). The series are planned like a drop on the graph
   (`AppState::add_columns_to_spec`, plot type of the reference layer); the Y2-Y4
   role layers go on the **new** cell. Without a Y column: `error-add-no-y`, no cell.
   Detached windows go through the same `graph_drop_target`.
@@ -884,8 +886,8 @@ every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` be
 (one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
 hole; or `MoveTarget::Beside` a cell, a new column or row made by `open_line`, the same code as
 `insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
-uses too. Only the `row` / `column` of the moved layers change, never the layer numbers. The edge bands
-(`stokesforge_render_egui::edge_band`) are shared with the drop of workbook columns in `graph_window.rs`.
+uses too. Only the `row` / `column` of the moved layers change, never the layer numbers. The four edge bands
+(`stokesforge_render_egui::edge_band`, #503) are shared with the drop of workbook columns in `graph_window.rs`.
 `FigureFollow` also remembers the image's origin (`free_origin`):
 `observe` returns a step when the origin moves while the size stays, and the
 shell moves the floating window by the shift at the kept scale

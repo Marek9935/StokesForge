@@ -177,7 +177,7 @@ right-click's `Layout ▸`). Sections, create before organize: **Page Layout Mod
 view state: no action, no undo step, no shortcut to enter; a toolbar button beside
 Properties, icon `Icon::PageLayout`, does the same) ─ **Layer Placement ▸**
 (Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
-(Right / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
+(Left / Right / Above / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
 **Align ▸** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center) · Same
 Width · Same Height · Distribute Horizontally · Distribute Vertically ─ Bring to
 Front · Send to Back ─ **Delete Layer** (the active layer; disabled with the

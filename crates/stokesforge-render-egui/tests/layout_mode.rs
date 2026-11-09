@@ -999,6 +999,54 @@ fn dropping_in_the_bottom_edge_band_asks_for_a_new_row_beside_the_nearest_cell()
     );
 }
 
+/// The left and top bands give a new column on the left and a new row above,
+/// beside the nearest cell (#503). Witness: the `Left` and `Above` entries
+/// removed from `edge_drop_side`.
+#[test]
+fn dropping_in_the_left_and_top_edge_bands_asks_for_a_cell_on_that_side() {
+    let fixture = Fixture::grid(2, 1, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let (b, a) = (middle(&view, 1), middle(&view, 0));
+    let left_of_a = Pos2::new(10.0, 80.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        b,
+        left_of_a,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            1,
+            MoveTarget::Beside {
+                panel: 0,
+                side: CellSide::Left
+            }
+        )
+    );
+    let above_b = Pos2::new(a.x + 150.0, 8.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        above_b,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::Beside {
+                panel: 1,
+                side: CellSide::Above
+            }
+        )
+    );
+}
+
 /// An arrow key moves the selected graph one cell, a hole included; at the
 /// edge of the grid it does nothing; Shift still counts one cell (#491).
 /// Witness: the guard of `nudge` restored.

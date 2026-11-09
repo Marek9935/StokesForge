@@ -12,7 +12,6 @@ use std::collections::HashMap;
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
-use stokesforge_render_egui::edge_band::{edge_drop_side, paint_edge_bands, EDGE_BAND_WIDTH};
 use stokesforge_render_egui::{
     AxisSide, FigureLayout, GraphView, PlotComponent, TextTarget, DEFAULT_FIGURE_SIZE,
 };
@@ -86,33 +85,28 @@ pub(super) fn graph_drop_target(
     let hovering = pointer_in_tab
         && (egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx())
             || egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(ui.ctx()));
-    // Columns dropped on the right or bottom edge of the figure make a new
-    // cell beside the one nearest the pointer (#357).
-    let figure = graph_views
-        .get(&graph_id)
-        .and_then(GraphView::display_rect)
-        .unwrap_or(tab_rect);
+    // Columns dropped on one of the four edge bands of the figure make a new
+    // cell beside the one nearest the pointer (#357, #503); dropped on the line
+    // between two graphs, a new cell between them (#504).
     let pointer = ui.input(|input| input.pointer.latest_pos());
     let columns_over =
         pointer_in_tab && egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx());
-    let edge = pointer
-        .filter(|_| columns_over)
-        .and_then(|pos| edge_drop_side(pos, figure, EDGE_BAND_WIDTH));
+    let place = pointer.filter(|_| columns_over).and_then(|pos| {
+        graph_views
+            .get(&graph_id)
+            .and_then(|view| view.drop_place(pos, None))
+    });
     if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
         // Targeted layer: the active layer of the graph (#161).
         // `has_payload_of_type` before `take_payload`: the latter empties the
         // payload even when its type does not match (rows used to get lost).
         if egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
-                let beside = edge.zip(pointer).and_then(|(side, pos)| {
-                    let cell = graph_views.get(&graph_id)?.nearest_cell(pos)?;
-                    Some((side, cell))
-                });
-                if let Some((side, panel)) = beside {
+                if let Some(place) = place {
                     actions.push(Action::AddCell {
                         graph: graph_id,
-                        panel,
-                        side,
+                        panel: place.panel,
+                        side: place.side,
                         columns: payload.columns.clone(),
                     });
                 } else {
@@ -132,7 +126,9 @@ pub(super) fn graph_drop_target(
         super::file_drop::set_drop_target(ui.ctx(), ui.layer_id());
     }
     if columns_over {
-        paint_edge_bands(ui.painter(), figure, edge);
+        if let Some(view) = graph_views.get(&graph_id) {
+            view.paint_drop_places(ui.painter(), place);
+        }
     }
 }
 
@@ -2355,6 +2351,35 @@ pub(super) mod tests {
                 columns: payload.columns.clone(),
             }],
             "a release on the bottom band adds a cell below"
+        );
+
+        // #503: the left and top bands make a cell on that side (the figure is
+        // centred in the window: its top is at about y = 151).
+        let left_edge = egui::pos2(contents.min.x + 8.0, 300.0);
+        paint(vec![egui::Event::PointerMoved(left_edge)], true);
+        let (_, actions) = paint(vec![release(left_edge)], false);
+        assert_eq!(
+            actions,
+            vec![Action::AddCell {
+                graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Left,
+                columns: payload.columns.clone(),
+            }],
+            "a release on the left band adds a cell to the left"
+        );
+        let top_edge = egui::pos2(380.0, 160.0);
+        paint(vec![egui::Event::PointerMoved(top_edge)], true);
+        let (_, actions) = paint(vec![release(top_edge)], false);
+        assert_eq!(
+            actions,
+            vec![Action::AddCell {
+                graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Above,
+                columns: payload.columns.clone(),
+            }],
+            "a release on the top band adds a cell above"
         );
 
         // Rows (#166): the drop produces the rows action. Regression:
