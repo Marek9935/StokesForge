@@ -36,9 +36,10 @@ pub fn edge_drop_side(pointer: Pos2, figure: Rect, band: f32) -> Option<CellSide
     }
     let band = fitted_band(figure, band);
     [
+        // The order is the tie-break: `min_by` keeps the first of equal distances.
         (CellSide::Right, figure.max.x - pointer.x),
-        (CellSide::Left, pointer.x - figure.min.x),
         (CellSide::Below, figure.max.y - pointer.y),
+        (CellSide::Left, pointer.x - figure.min.x),
         (CellSide::Above, pointer.y - figure.min.y),
     ]
     .into_iter()
@@ -255,6 +256,12 @@ mod tests {
         assert_eq!(side(490.0, 80.0), Some(CellSide::Right), "top-right, right");
         assert_eq!(side(490.0, 340.0), Some(CellSide::Right), "diagonal");
         assert_eq!(side(120.0, 340.0), Some(CellSide::Below), "bottom-left");
+        assert_eq!(
+            side(110.0, 340.0),
+            Some(CellSide::Below),
+            "bottom-left diagonal"
+        );
+        assert_eq!(side(110.0, 60.0), Some(CellSide::Left), "top-left diagonal");
         assert_eq!(side(110.0, 70.0), Some(CellSide::Left), "top-left, left");
         assert_eq!(side(130.0, 60.0), Some(CellSide::Above), "top-left, top");
         assert_eq!(side(300.0, 20.0), None, "outside");
