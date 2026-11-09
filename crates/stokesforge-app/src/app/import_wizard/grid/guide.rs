@@ -62,6 +62,10 @@ pub(super) fn show(ctx: &egui::Context, state: &mut AppState, gs: &mut GridUi, t
         restart(gs);
         return;
     }
+    // A template window is a modal over the screen: the guide waits behind it.
+    if state.template_save_draft().is_some() || state.template_manage().is_some() {
+        return;
+    }
     let step = gs.guide_step;
     let mut dont = gs.guide_dont.unwrap_or_else(|| state.import_guide_hidden());
     gs.guide_dont = Some(dont);

@@ -350,6 +350,9 @@ mod tests {
     /// footer with the two menus, Cancel and Import (S-F6).
     #[test]
     fn the_one_screen_paints_its_panel_and_its_footer() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -382,6 +385,9 @@ mod tests {
     /// the window, and only then the window.
     #[test]
     fn finish_imports_the_recipe_as_it_is_and_cancel_imports_nothing() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut complete = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -430,6 +436,9 @@ mod tests {
     /// and « Show Guide » brings it back.
     #[test]
     fn the_guide_shows_until_dont_show_again_and_show_guide_brings_it_back() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -487,10 +496,42 @@ mod tests {
         );
     }
 
+    /// The guide is a small card over the grid; a template window (Save as
+    /// Template, Manage Templates) is a modal and the guide does not paint
+    /// over it.
+    #[test]
+    fn the_guide_waits_behind_a_template_window() {
+        use stokesforge_app_state::i18n::{self, Language};
+        let _language = i18n::test_language(Language::English);
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let step = tr!("import-guide-step", n = "1", total = "3");
+        let painted = settle(&ctx, &mut bench.state, &mut actions);
+        assert!(painted.iter().any(|t| t.text == step), "shown first");
+        bench.state.template_save_open();
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(bench.state.template_save_draft().is_some());
+        assert!(
+            !painted.iter().any(|t| t.text == step),
+            "the guide is not painted over the Save window"
+        );
+        bench.state.template_save_cancel();
+        bench.state.template_manage_open();
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(!painted.iter().any(|t| t.text == step));
+        bench.state.template_manage_close();
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(painted.iter().any(|t| t.text == step), "and comes back");
+    }
+
     /// The Advanced fold is closed by default; a setting changed there reads
     /// as a sentence in the left panel.
     #[test]
     fn the_advanced_fold_is_closed_by_default_and_a_change_shows_as_a_sentence() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -529,6 +570,9 @@ mod tests {
     /// cancels it (and does not import), the verb forgets.
     #[test]
     fn deleting_a_template_goes_through_a_modal_confirmation() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -590,6 +634,9 @@ mod tests {
     /// and never by the click that opens it.
     #[test]
     fn clicking_the_auto_button_never_deletes_the_choice() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -630,6 +677,9 @@ mod tests {
     /// it; marking settles that point only, and Import stays possible.
     #[test]
     fn a_point_to_check_is_marked_beside_its_sentence() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(DOUBTS);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -720,12 +770,6 @@ mod tests {
                 continue;
             }
             seen += 1;
-            eprintln!(
-                "DBG {:?} right {} frame {}",
-                text.galley.job.text,
-                text.pos.x + text.galley.rect.right(),
-                frame_right
-            );
             let right = text.pos.x + text.galley.rect.right();
             assert!(
                 right <= frame_right + 0.5 && right <= painted.clip_rect.right() + 0.5,
@@ -735,12 +779,37 @@ mod tests {
             );
         }
         assert!(seen >= 2, "both texts are painted, saw {seen}");
+        // The buttons at the end of the top rows (« Add Files… » of the file
+        // row, « Show Guide » of the grid tabs) are not pushed out of the
+        // window by longer texts: the file row keeps the room its end needs.
+        let buttons = [tr!("import-files-add-files"), tr!("import-guide-show")];
+        let mut seen = 0;
+        for painted in &shapes {
+            let egui::Shape::Text(text) = &painted.shape else {
+                continue;
+            };
+            if !buttons.iter().any(|w| text.galley.job.text.trim_end() == w) {
+                continue;
+            }
+            seen += 1;
+            let right = text.pos.x + text.galley.rect.right();
+            assert!(
+                right <= painted.clip_rect.right() + 0.5,
+                "{:?} ends at {right}, past its clip edge {}",
+                text.galley.job.text,
+                painted.clip_rect.right(),
+            );
+        }
+        assert!(seen >= 2, "both buttons are painted, saw {seen}");
     }
 
     /// Two templates that fit the file as well make a point to check that
     /// offers the other one.
     #[test]
     fn a_tie_between_templates_offers_the_other_one() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(SURE);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -776,6 +845,9 @@ mod tests {
     /// with a Forget action that brings the doubt back.
     #[test]
     fn manage_templates_lists_the_remembered_answers_and_forgets_one() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         let mut bench = bench(DOUBTS);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();

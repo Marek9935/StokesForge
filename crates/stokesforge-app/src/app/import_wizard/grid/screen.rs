@@ -6,7 +6,7 @@
 use eframe::egui;
 use egui::{pos2, vec2, Align2, Color32, FontId, Rect, Sense};
 use stokesforge_app_state::errors;
-use stokesforge_app_state::state::{Action, AppState, ImportDestination};
+use stokesforge_app_state::state::{Action, AppState, ImportDestination, ShownFileStatus};
 use stokesforge_app_state::tr;
 use stokesforge_import::ImportRecipe;
 
@@ -59,12 +59,29 @@ fn file_row(ui: &mut egui::Ui, state: &mut AppState, requests: &mut ImportWizard
         .collect();
     let current = import.preview_index.min(tabs.len().saturating_sub(1));
     let many = tabs.len() > 1;
-    let refused = marks.get(current).and_then(|m| m.refusal).is_some();
-    let doubts = state.import_check().map_or(0, |v| v.n_check);
+    let status = state.shown_file_status();
     let mut picked = None;
     let mut removed = false;
     ui.horizontal(|ui| {
-        let reserve = 270.0;
+        // The room the end of the row needs: the status of the file, the
+        // button to remove it and « Add Files… », measured in the language
+        // in use (a longer text must not push the button out of the window).
+        let measure = |text: &str| {
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            ui.painter()
+                .layout_no_wrap(text.to_string(), font, ui.visuals().text_color())
+                .size()
+                .x
+        };
+        let status_text = match status {
+            ShownFileStatus::Refused => tr!("import-status-refused"),
+            ShownFileStatus::Check(count) => tr!("import-status-check", count = count),
+            ShownFileStatus::Ready => tr!("import-status-ready"),
+        };
+        let reserve = measure(&tr!("import-files-add-files"))
+            + measure(&status_text)
+            + if many { 2.0 * 24.0 } else { 24.0 }
+            + 60.0;
         let width = (ui.available_width() - reserve).max(160.0);
         // A few files: all the tabs. Too many to fit: the first ones, the one
         // shown, and « + N more » that lists every file with its status.
@@ -172,13 +189,13 @@ fn file_row(ui: &mut egui::Ui, state: &mut AppState, requests: &mut ImportWizard
                 });
         }
         // The state of the file shown, by its icon.
-        if refused {
+        if status == ShownFileStatus::Refused {
             ui.add(icon_image(Icon::Close, IconRole::Danger));
             ui.label(
                 egui::RichText::new(tr!("import-status-refused"))
                     .color(ui.visuals().error_fg_color),
             );
-        } else if doubts > 0 {
+        } else if let ShownFileStatus::Check(doubts) = status {
             ui.add(icon_image(Icon::Stale, IconRole::Neutral));
             ui.label(
                 egui::RichText::new(tr!("import-status-check", count = doubts))

@@ -111,7 +111,7 @@ pub use import_template::{
     automatic_conditions, condition_sentence, doubt_text, template_rules, AutoCondition,
     ConditionRow, ManageState, Offer, RememberedAnswer, SaveDraft, TemplateRow,
 };
-pub use import_tocheck::{ToCheckPoint, ToCheckSource};
+pub use import_tocheck::{ShownFileStatus, ToCheckPoint, ToCheckSource};
 pub mod open_dialog;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
@@ -6744,7 +6744,11 @@ impl AppState {
     /// detector read. Replaces without confirmation an import window already
     /// open.
     pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
-        let active_book = book.into();
+        // A book that no longer exists (its last import was undone by « Reopen
+        // Last Import », or it was deleted) is no destination.
+        let active_book = book
+            .into()
+            .filter(|book| self.snapshot.tree.node(*book).is_some());
         let store = stokesforge_import::RecipeStore::load();
         let mut recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
         recipe.unify_header();

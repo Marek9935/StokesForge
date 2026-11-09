@@ -30,6 +30,17 @@ pub enum ToCheckSource {
     Tie { others: Vec<String> },
 }
 
+/// What the import window says about the file shown, in its status line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShownFileStatus {
+    /// The file cannot be read.
+    Refused,
+    /// This many points to check (findings, detector doubts, a tie).
+    Check(usize),
+    /// Nothing to check.
+    Ready,
+}
+
 /// One point of the "To check" list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToCheckPoint {
@@ -195,6 +206,25 @@ impl AppState {
     /// How many points the file shown has to check.
     pub fn to_check_count(&self) -> usize {
         self.to_check().len()
+    }
+
+    /// The status of the file shown: the same points as the footer counts,
+    /// never only the check view's findings (a tie or a detector doubt is a
+    /// point to check too).
+    pub fn shown_file_status(&self) -> ShownFileStatus {
+        let marks = self.import_file_marks();
+        let shown = self
+            .import_state()
+            .map_or(0, |s| s.preview_index)
+            .min(marks.len().saturating_sub(1));
+        let refused = marks.get(shown).is_some_and(|mark| mark.refusal.is_some());
+        if refused {
+            return ShownFileStatus::Refused;
+        }
+        match self.to_check_count() {
+            0 => ShownFileStatus::Ready,
+            n => ShownFileStatus::Check(n),
+        }
     }
 
     /// "Mark as Checked": the point is answered, the recipe stays as it is,

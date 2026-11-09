@@ -15904,6 +15904,30 @@ fn point_ids(state: &AppState) -> Vec<String> {
     state.to_check().into_iter().map(|p| p.id).collect()
 }
 
+/// « Reopen Last Import » undoes the workbook it made, which the window of the
+/// application may still call active: the next import must go to a new workbook,
+/// not fail on a book that is gone.
+#[test]
+fn an_import_opened_on_a_removed_book_goes_to_a_new_workbook() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.open_import(book);
+    assert_eq!(
+        state.import_state().unwrap().destination,
+        ImportDestination::ActiveBook(book)
+    );
+    state.cancel_import();
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    assert!(state.tree().node(book).is_none(), "the workbook is gone");
+    state.open_import(book);
+    assert_eq!(
+        state.import_state().unwrap().destination,
+        ImportDestination::NewBookForAll
+    );
+}
+
 #[test]
 fn adding_files_detects_each_one() {
     let _recipes = isolate_recipe_store();
@@ -16085,12 +16109,23 @@ fn two_templates_that_tie_raise_a_point_to_check_offering_the_other() {
     };
     assert_eq!(others.len(), 1);
     assert_ne!(others[0], used);
+    // The status line of the file counts the tie too, not only the findings.
+    let before = state.to_check_count();
+    assert!(before >= 1);
+    assert_eq!(
+        state.shown_file_status(),
+        stokesforge_app_state::state::ShownFileStatus::Check(before)
+    );
     // Using the other template settles it.
     state.template_use(&others[0].clone());
     assert!(state.to_check().iter().all(|p| !matches!(
         p.source,
         stokesforge_app_state::state::ToCheckSource::Tie { .. }
     )));
+    assert_eq!(
+        state.shown_file_status(),
+        stokesforge_app_state::state::ShownFileStatus::Check(before - 1)
+    );
 }
 
 #[test]
