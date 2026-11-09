@@ -1783,7 +1783,13 @@ pub fn series_list_entry(
     text: &stokesforge_plot::LegendText,
 ) -> (String, bool) {
     let label = stokesforge_core::series_label(series, tree, text);
-    if series.row.is_none() && label.as_text() == Some("") {
+    let shown = crate::figure_texts::series_label_text(&label);
+    let named = matches!(
+        label,
+        stokesforge_core::SeriesLabel::Text(_) | stokesforge_core::SeriesLabel::Template { .. }
+    );
+    // An empty text, or a template that does not compile or shows nothing.
+    if series.row.is_none() && named && shown.trim().is_empty() {
         let sheet = tree
             .parent(series.y)
             .ok()
@@ -1795,7 +1801,7 @@ pub fn series_list_entry(
         let column = format!("{sheet} {letters}").trim().to_string();
         return (crate::tr!("graph-series-empty-text", column = column), true);
     }
-    (crate::figure_texts::series_label_text(&label), false)
+    (shown, false)
 }
 
 /// [`series_list_entry`] without the flag: the text of a list row.

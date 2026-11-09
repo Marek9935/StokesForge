@@ -442,7 +442,7 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `x_auto_range`, `y_auto_range` | `True` makes the framing automatic (contradictory with bounds given in the same call) |
 | `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booleans; `x_inverted=True` on increasing bounds swaps them (the direction is read from their order, `AxisSpec::orient`, #344); the surface itself does not change |
 | `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
-| `legend_text_from`, `legend_template` | the header row the legend entries read (`long_name`, `comments`, `x_prime`, `units`, `short_name`, `long_name_units`, `long_name_comments`, `custom`); the Typst template of `custom` (`%(LL)`, `%(LU)`, `%(LC)`, `%(LS)`, `%(X)` insert the column text as is) (#499) |
+| `legend_text_from`, `legend_template` | the header row the legend entries read (`long_name`, `comments`, `x_prime`, `units`, `short_name`, `long_name_units`, `long_name_comments`, `custom`); the Typst template of `custom`, which reads the string variables `long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp` (#499) |
 | `plot_width`, `plot_height` | the plot area of the column (width) and of the row (height) of `panel`, a finite number in `unit`, from 1.27 to 70.56 cm (36 to 2000 pt); refused outside, never brought back (#399) |
 | `plot_left`, `plot_top` | distance from the image edge to the first plot area, `None` = Auto, otherwise from 0 to 70.56 cm; a value below what the axes need is kept and drawn raised to it, as in the application (#399) |
 | `fixed_size` | boolean, "Figure size = Fixed" (#399); works in both placements |

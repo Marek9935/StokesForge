@@ -130,7 +130,10 @@ impl Prepared<'_> {
     pub fn legend_text(&self, texts: &FigureTexts) -> String {
         let name = match &self.label {
             SeriesLabel::Missing => return texts.broken_reference.clone(),
-            SeriesLabel::Text(name) | SeriesLabel::Template { markup: name, .. } => name.clone(),
+            // A template is Typst source with its preamble: a broken series
+            // cannot be annotated with it, so it says only that it is broken.
+            SeriesLabel::Template { .. } if self.broken => return texts.broken_reference.clone(),
+            SeriesLabel::Text(name) | SeriesLabel::Template { markup: name } => name.clone(),
             SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
         };
         if self.broken {

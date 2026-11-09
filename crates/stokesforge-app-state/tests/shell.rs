@@ -8603,6 +8603,75 @@ fn an_empty_legend_text_is_empty_in_the_legend_and_named_in_the_lists() {
     assert_eq!(column_letter_name(tree, b), "B");
 }
 
+/// #499 G3: the lists show the plain text Typst produces for a custom
+/// template (no markup, `\u{394}` stays), and the grey fallback when it does not
+/// compile. Witness: showing the template source would print `*#ln*`; no
+/// fallback would leave the row blank.
+#[test]
+fn a_custom_template_shows_its_plain_text_in_the_lists() {
+    use stokesforge_app_state::state::series_list_entry;
+    use stokesforge_plot::{LegendText, LegendTextFrom, SeriesSpec};
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let mut project = Project::new("Lists").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("book");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .expect("A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[2.0]))
+        .expect("B");
+    for (column, long, unit) in [(a, "\u{394}A *x*", "mM"), (b, "Plain", "")] {
+        project
+            .set_column_meta(
+                column,
+                ColumnMeta {
+                    long_name: long.into(),
+                    unit: unit.into(),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+    }
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, state) = start(project, &dir.path().join("projet.stf"));
+    let tree = state.tree();
+    let custom = |template: &str| LegendText {
+        from: LegendTextFrom::Custom,
+        template: template.to_string(),
+        ..LegendText::default()
+    };
+    let template = "*#ln* #if u != \"\" [(#u)]";
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(a), &custom(template)),
+        ("\u{394}A *x* (mM)".to_string(), false)
+    );
+    // No units: the smart `#if` leaves no empty parentheses.
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(b), &custom(template)),
+        ("Plain".to_string(), false)
+    );
+    // Does not compile: the grey fallback.
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(b), &custom("#nope")),
+        ("(empty) Sheet1 B".to_string(), true)
+    );
+    // A typed name wins.
+    let typed = SeriesSpec {
+        name: "mine".into(),
+        ..SeriesSpec::new(b)
+    };
+    assert_eq!(
+        series_list_entry(tree, &typed, &custom(template)),
+        ("mine".to_string(), false)
+    );
+}
+
 /// A node that is not a graph opens nothing.
 #[test]
 fn open_plot_settings_ignores_a_node_that_is_not_a_graph() {

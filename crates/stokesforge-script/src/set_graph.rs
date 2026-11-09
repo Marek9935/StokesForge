@@ -593,8 +593,9 @@ fn set_graph_native(
 /// `'bottom_left'`, `'bottom_right'`), `legend_text_from` (`'long_name'`,
 /// `'comments'`, `'x_prime'`, `'units'`, `'short_name'`, `'long_name_units'`,
 /// `'long_name_comments'`, `'custom'`) and `legend_template` (Typst markup of
-/// `'custom'`: `%(LL)` long name, `%(LU)` units, `%(LC)` comments, `%(LS)`
-/// short name, `%(X)` x', inserted as plain text). The X axis (bottom) and the Y axis
+/// `'custom'`, which reads the string variables `long-name`/`ln`,
+/// `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp`: for example
+/// `'*#ln* #if u != "" [(#u)]'`). The X axis (bottom) and the Y axis
 /// (`axis='left'` or `'right'`): `x_title`/`y_title`, `x_unit`/`y_unit`,
 /// `x_scale`/`y_scale` (`'linear'`, `'log'`), `x_from` and `x_to` (given
 /// together and different; `from > to` draws the axis reversed) and

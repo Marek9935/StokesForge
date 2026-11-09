@@ -127,8 +127,8 @@ impl LegendTextFrom {
 pub struct LegendText {
     /// The header row the entries read.
     pub from: LegendTextFrom,
-    /// Template of [`LegendTextFrom::Custom`]: Typst markup in which the
-    /// placeholders of [`PLACEHOLDERS`] insert the column text, escaped.
+    /// Template of [`LegendTextFrom::Custom`]: Typst markup that reads the
+    /// variables of [`VARIABLES`] (`#long-name`, `#ln`, `#units`…).
     pub template: String,
     /// For a row series (#166): the column whose cell on that row gives the
     /// entry. `None` = « Row N ».
@@ -145,40 +145,37 @@ impl Default for LegendText {
     }
 }
 
-/// A piece of column text a template placeholder can insert.
+/// A piece of column text a template variable holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LegendField {
     /// Long name.
     LongName,
+    /// Short name.
+    ShortName,
     /// Units.
     Units,
     /// Comments.
     Comments,
-    /// Short name.
-    ShortName,
     /// The x' value.
     XPrime,
 }
 
-/// The placeholders of a custom template, with their meaning. **The one
-/// place** that defines the syntax (`%(LL)`…): `@` is a Typst reference, so
-/// it cannot introduce a placeholder.
-pub const PLACEHOLDERS: [(&str, LegendField); 5] = [
-    ("%(LL)", LegendField::LongName),
-    ("%(LU)", LegendField::Units),
-    ("%(LC)", LegendField::Comments),
-    ("%(LS)", LegendField::ShortName),
-    ("%(X)", LegendField::XPrime),
+/// The variables of a custom template: long name, short name, field. **The
+/// one place** that defines them; the names are the same in every interface
+/// language, so a template saved in a file works whatever the language.
+pub const VARIABLES: [(&str, &str, LegendField); 5] = [
+    ("long-name", "ln", LegendField::LongName),
+    ("short-name", "sn", LegendField::ShortName),
+    ("units", "u", LegendField::Units),
+    ("comments", "c", LegendField::Comments),
+    ("x-prime", "xp", LegendField::XPrime),
 ];
 
-/// Any text in a form that Typst displays **as is**: a Typst string,
-/// `#"…"`, of which only `\` and `"` (and line ends) are escaped (issue #33).
-pub fn typst_literal(text: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    let mut escaped = String::with_capacity(text.len() + 3);
-    escaped.push_str("#\"");
+/// Any text as a Typst **string literal** (`"…"`): only `\` and `"` (and line
+/// ends) are escaped, so the text is drawn as is whatever characters it holds.
+pub fn typst_string(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len() + 2);
+    escaped.push('"');
     for character in text.chars() {
         match character {
             '\\' => escaped.push_str("\\\\"),
@@ -193,52 +190,64 @@ pub fn typst_literal(text: &str) -> String {
     escaped
 }
 
-/// Expands a custom template: every known placeholder is replaced by the
-/// column text **escaped** ([`typst_literal`]), so it is drawn literally;
-/// the rest of the template is Typst markup and an unknown placeholder stays
-/// as typed.
-pub fn expand_template(template: &str, value: impl FnMut(LegendField) -> String) -> String {
-    expand(template, value, true)
-}
-
-/// Expands a custom template for a **list** (Object Manager, series list):
-/// the placeholders insert the column text as is, the rest of the template
-/// stays as typed, like a typed series name does in a list.
-pub fn expand_template_plain(template: &str, value: impl FnMut(LegendField) -> String) -> String {
-    expand(template, value, false)
-}
-
-fn expand(template: &str, mut value: impl FnMut(LegendField) -> String, escape: bool) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    'scan: while !rest.is_empty() {
-        for (token, field) in PLACEHOLDERS {
-            if let Some(after) = rest.strip_prefix(token) {
-                let text = value(field);
-                if !escape {
-                    out.push_str(&text);
-                    rest = after;
-                    continue 'scan;
-                }
-                out.push_str(&typst_literal(&text));
-                // A string followed by `.`, `(` or `[` would read as a field
-                // access or a call: an empty comment separates them. (An
-                // empty content block `#[]` does not: it takes the `.`, `(`
-                // or `[` as its own trailer.)
-                if !text.is_empty() && after.starts_with(['.', '(', '[']) {
-                    out.push_str("/**/");
-                }
-                rest = after;
-                continue 'scan;
-            }
-        }
-        let mut chars = rest.chars();
-        if let Some(c) = chars.next() {
-            out.push(c);
-        }
-        rest = chars.as_str();
+/// Any text in a form that Typst displays **as is** in markup: a Typst
+/// string, `#"…"`. Empty text gives nothing (issue #33).
+pub fn typst_literal(text: &str) -> String {
+    if text.is_empty() {
+        String::new()
+    } else {
+        format!("#{}", typst_string(text))
     }
-    out
+}
+
+/// The Typst source of a custom template for one legend entry: a preamble
+/// that defines every variable of [`VARIABLES`] (long and short name) as a
+/// string of the entry's column, then the template as typed. `value` gives
+/// the text of each field.
+pub fn template_source(template: &str, mut value: impl FnMut(LegendField) -> String) -> String {
+    let mut source = String::new();
+    for (long, short, field) in VARIABLES {
+        let quoted = typst_string(&value(field));
+        source.push_str(&format!("#let {long} = {quoted}\n#let {short} = {long}\n"));
+    }
+    source.push_str(template);
+    source
+}
+
+impl LegendTextFrom {
+    /// The custom template that gives the same text as this choice: what
+    /// « Custom… » starts from. `None` for [`Self::Custom`] itself.
+    pub fn template(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::LongName | Self::Unknown(_) => {
+                "#if long-name != \"\" [#long-name] else [#short-name]"
+            }
+            Self::Comments => "#comments",
+            Self::XPrime => "#x-prime",
+            Self::Units => "#units",
+            Self::ShortName => "#short-name",
+            Self::LongNameUnits => "#long-name #if units != \"\" [(#units)]",
+            Self::LongNameComments => "#long-name#if comments != \"\" [, #comments]",
+            Self::Custom => return None,
+        })
+    }
+}
+
+impl LegendText {
+    /// Chooses [`LegendTextFrom::Custom`] and, when the template is empty or
+    /// still one of the templates of the choices, starts it from the one of
+    /// the previous choice. What the user typed is never overwritten.
+    pub fn choose_custom(&mut self) {
+        let previous = self.from.template();
+        let untouched = self.template.is_empty()
+            || LegendTextFrom::CHOICES
+                .iter()
+                .any(|from| from.template() == Some(self.template.as_str()));
+        if let (true, Some(previous)) = (untouched, previous) {
+            self.template = previous.to_string();
+        }
+        self.from = LegendTextFrom::Custom;
+    }
 }
 
 #[cfg(test)]
@@ -247,7 +256,7 @@ mod tests {
 
     fn value(field: LegendField) -> String {
         match field {
-            LegendField::LongName => "A *b* #c".to_string(),
+            LegendField::LongName => "A \"*b*\" #c $d \\".to_string(),
             LegendField::Units => "mM".to_string(),
             LegendField::Comments => String::new(),
             LegendField::ShortName => "B".to_string(),
@@ -255,38 +264,50 @@ mod tests {
         }
     }
 
+    /// Witness: no escape of `"` or `\` would end the string early.
     #[test]
-    fn a_placeholder_inserts_the_escaped_text_and_the_rest_is_markup() {
-        assert_eq!(
-            expand_template("_%(LL)_ [%(LU)]", value),
-            "_#\"A *b* #c\"_ [#\"mM\"]"
-        );
-    }
-
-    #[test]
-    fn the_plain_expansion_keeps_the_column_text_unescaped_for_lists() {
-        assert_eq!(
-            expand_template_plain("_%(LL)_ [%(LU)]%(LS).x", value),
-            "_A *b* #c_ [mM]B.x"
-        );
-    }
-
-    #[test]
-    fn an_unknown_placeholder_and_an_empty_value_are_left_alone() {
-        assert_eq!(expand_template("%(QQ) %(LC)|%(X)", value), "%(QQ) |#\"57\"");
-    }
-
-    #[test]
-    fn a_string_followed_by_a_dot_or_a_bracket_is_not_read_as_code() {
-        assert_eq!(expand_template("%(LS).x", value), "#\"B\"/**/.x");
-        assert_eq!(expand_template("%(LS)(1)", value), "#\"B\"/**/(1)");
-        assert_eq!(expand_template("%(LS) .", value), "#\"B\" .");
-    }
-
-    #[test]
-    fn a_quote_or_backslash_in_the_value_is_escaped() {
-        assert_eq!(typst_literal("a\"b\\c"), "#\"a\\\"b\\\\c\"");
+    fn the_variables_are_string_literals_that_hold_any_character() {
+        let source = template_source("#ln", value);
+        assert!(source.contains("#let long-name = \"A \\\"*b*\\\" #c $d \\\\\"\n"));
+        assert!(source.contains("#let ln = long-name\n"));
+        assert!(source.contains("#let u = units\n"));
+        assert!(source.ends_with("#ln"));
         assert_eq!(typst_literal(""), "");
+        assert_eq!(typst_literal("a\"b\\c"), "#\"a\\\"b\\\\c\"");
+    }
+
+    /// Witness: prefilling over a typed template, or not prefilling an empty
+    /// one, fails here.
+    #[test]
+    fn custom_starts_from_the_previous_choice_and_keeps_what_was_typed() {
+        for from in LegendTextFrom::CHOICES {
+            let Some(template) = from.template() else {
+                continue;
+            };
+            let mut text = LegendText {
+                from: from.clone(),
+                ..LegendText::default()
+            };
+            text.choose_custom();
+            assert_eq!(text.from, LegendTextFrom::Custom);
+            assert_eq!(text.template, template, "{from:?}");
+        }
+        // Typed template: kept.
+        let mut text = LegendText {
+            from: LegendTextFrom::Comments,
+            template: "*#ln*".to_string(),
+            ..LegendText::default()
+        };
+        text.choose_custom();
+        assert_eq!(text.template, "*#ln*");
+        // A previous prefill is replaced by the new choice's one.
+        let mut text = LegendText {
+            from: LegendTextFrom::Units,
+            template: LegendTextFrom::Comments.template().unwrap().to_string(),
+            ..LegendText::default()
+        };
+        text.choose_custom();
+        assert_eq!(text.template, "#units");
     }
 
     #[test]

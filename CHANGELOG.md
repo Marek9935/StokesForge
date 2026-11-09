@@ -29,8 +29,9 @@ without a message, see `docs/persistence.md`).
 - Legend text source (#499): Graph Properties > Legend has a « Text from »
   setting that chooses which worksheet header row gives every legend entry
   (Long Name, Comments, x', Units, Short Name, Long Name (Units), Long Name,
-  Comments, or Custom… with a Typst template using `%(LL)`, `%(LU)`, `%(LC)`,
-  `%(LS)`, `%(X)`). A series name you typed still wins; an empty chosen row
+  Comments, or Custom… with a Typst template that reads the variables
+  `#long-name`/`#ln`, `#short-name`/`#sn`, `#units`/`#u`, `#comments`/`#c`,
+  `#x-prime`/`#xp`). A series name you typed still wins; an empty chosen row
   gives an empty entry. A row series can show the cell of a chosen column.
   New graphs take their default from Preferences > Display > New. Additive
   `.stf` fields (an older version that saves the file again loses them);

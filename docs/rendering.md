@@ -122,15 +122,20 @@ Legend text (#499): the text of each entry is `core::series_label(series, tree,
 (#25). `LegendText` (`stokesforge-plot/src/legend.rs`) says which header row
 gives it; a typed name still wins; an empty chosen row is an empty entry (only
 the default Long Name source falls back to the short name). A custom template is
-Typst markup in which the placeholders (`PLACEHOLDERS`, the one table of the
-syntax: `%(LL)`, `%(LU)`, `%(LC)`, `%(LS)`, `%(X)`) insert the column text
-escaped by `typst_literal` (#33); the label is `SeriesLabel::Template` and is
-drawn with the rich style (`Prepared::legend_is_typed`), every other label
-literally. Its `plain` field is the same template with the column text
-inserted as is, for the lists (Object Manager, series list), which never show
-`#"…"`. A string stuck to `.`, `(` or `[` gets an empty comment `/**/` between
-them (an empty `#[]` would take the bracket as its own call: it does not
-compile). Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
+pure Typst that reads string variables (`VARIABLES`, the one table:
+`long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`,
+`x-prime`/`xp`, same names in every language). `template_source` puts a
+preamble of `#let` lines (values as Typst string literals, `typst_string`:
+only `\` and `"` escaped, so they draw literally, #33) before the template; the
+label is `SeriesLabel::Template { markup }` and is drawn with the rich style
+(`Prepared::legend_is_typed`), every other label literally. A broken series
+with a template says only that it is broken. The lists (Object Manager,
+series list) show `formula::plain_text(markup)`, the text of the laid-out page
+(core cannot call Typst), memoized; an empty text or a template that does not
+compile gives the grey fallback of the lists. The Template field is checked
+(`diagnose`) with the preamble. « Custom… » starts from
+`LegendTextFrom::template()` of the previous choice (`LegendText::choose_custom`,
+never over a typed template). A row series ignores the template. compile). Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
 
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the

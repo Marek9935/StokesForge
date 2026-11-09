@@ -60,8 +60,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use stokesforge_plot::{
-    expand_template, expand_template_plain, LegendField, LegendText, LegendTextFrom, PanelSpec,
-    PlotSpec, SeriesSpec,
+    template_source, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec, SeriesSpec,
 };
 
 use crate::column::Column;
@@ -236,11 +235,12 @@ pub fn resolve_column(tree: &Tree, id: NodeId) -> Option<&Column> {
 pub enum SeriesLabel {
     /// A name: the spec's, the long name of the Y column, or its node name.
     Text(String),
-    /// The result of a custom legend template (#499): Typst markup, with the
-    /// column text already escaped. Drawn with the rich style, like a typed
-    /// name. `plain` is the same text for a list (Object Manager, series
-    /// list): the column text inserted as is, the rest as typed.
-    Template { markup: String, plain: String },
+    /// A custom legend template (#499): the Typst source of the entry, the
+    /// variables of the column defined first, then the template as typed.
+    /// Drawn with the rich style, like a typed name. A list (Object Manager,
+    /// series list) shows the plain text the interface layer gets by
+    /// evaluating it (`stokesforge-render`, which core does not depend on).
+    Template { markup: String },
     /// An unnamed "row" series (#166): the 0-based row (the interface shows
     /// `row + 1`, as the grid does).
     Row(usize),
@@ -333,8 +333,7 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
             false,
         )),
         LegendTextFrom::Custom => SeriesLabel::Template {
-            markup: expand_template(&text.template, field),
-            plain: expand_template_plain(&text.template, field),
+            markup: template_source(&text.template, field),
         },
     }
 }
@@ -1276,21 +1275,28 @@ mod tests {
         assert_eq!(label_of(&project, &series, &chosen), shown);
     }
 
-    /// Witness: skipping the escape would let `*` and `#` act as markup.
+    /// Witness: a column text with `* # $ " \\` reaches the preamble as a
+    /// string literal, and the template is kept as typed after it.
     #[test]
-    fn a_custom_template_draws_the_column_text_literally() {
+    fn a_custom_template_reads_the_column_text_through_variables() {
         let (project, _, y) = headers();
         let series = SeriesSpec::new(y);
         let custom = LegendText {
             from: LegendTextFrom::Custom,
-            template: "*%(LL)* (%(LU)) %(ZZ)".to_string(),
+            template: "*#ln* #if u != \"\" [(#u)]".to_string(),
             row_column: None,
         };
-        let SeriesLabel::Template { markup, plain } = label_of(&project, &series, &custom) else {
+        let SeriesLabel::Template { markup } = label_of(&project, &series, &custom) else {
             panic!("a template label");
         };
-        assert_eq!(markup, "*#\"Abs *max* #1\"* (#\"u.a.\") %(ZZ)");
-        assert_eq!(plain, "*Abs *max* #1* (u.a.) %(ZZ)");
+        assert!(
+            markup.contains("#let long-name = \"Abs *max* #1\"\n"),
+            "{markup}"
+        );
+        assert!(markup.contains("#let units = \"u.a.\"\n"));
+        assert!(markup.contains("#let short-name = \"Y\"\n"));
+        assert!(markup.contains("#let x-prime = \"57\"\n"));
+        assert!(markup.ends_with("*#ln* #if u != \"\" [(#u)]"));
     }
 
     #[test]

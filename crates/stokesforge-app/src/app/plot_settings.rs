@@ -1254,6 +1254,24 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
 /// icon's room. Returns `true` if the draft must be committed — see the
 /// head doc of [`plot_settings_window`].
 fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
+    formula_field_with(
+        form,
+        label,
+        hint,
+        value,
+        &stokesforge_render_egui::formula::diagnose,
+    )
+}
+
+/// [`formula_field`] whose text is checked by `diagnose` (a template that reads
+/// variables needs them defined first).
+fn formula_field_with(
+    form: &mut Form<'_>,
+    label: &str,
+    hint: &str,
+    value: &mut String,
+    diagnose: &dyn Fn(&str) -> Option<String>,
+) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
@@ -1261,7 +1279,7 @@ fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut Strin
         // on the field; the graph, for its part, falls back to the raw text. No red
         // while typing, where the markup is necessarily unfinished.
         if !response.has_focus() {
-            if let Some(error) = stokesforge_render_egui::formula::diagnose(value) {
+            if let Some(error) = diagnose(value) {
                 field_state::show_issue(ui, &response, &FieldIssue::refused(error));
             }
         }
@@ -1999,18 +2017,30 @@ fn legend_text_editor(
             legend_text_from_label(&text.from),
         ));
     }
+    let previous = text.from.clone();
     let mut commit = form.row(tr!("plot-legend-text-from"), |ui| {
         choice(ui, "plot_legend_text_from", &mut text.from, &options)
     });
-    if commit && text.from == LegendTextFrom::Custom && text.template.is_empty() {
-        text.template = stokesforge_plot::PLACEHOLDERS[0].0.to_string();
+    if commit && text.from == LegendTextFrom::Custom && previous != LegendTextFrom::Custom {
+        // « Custom… » starts from the Typst equivalent of the previous choice
+        // (never over what was typed).
+        text.from = previous;
+        text.choose_custom();
     }
     if text.from == LegendTextFrom::Custom {
-        commit |= formula_field(
+        // The template reads variables: it is checked with them defined.
+        let diagnose = |template: &str| {
+            stokesforge_render_egui::formula::diagnose(&stokesforge_plot::template_source(
+                template,
+                |_| String::new(),
+            ))
+        };
+        commit |= formula_field_with(
             form,
             &tr!("plot-legend-template"),
             &tr!("plot-legend-template", "hint"),
             &mut text.template,
+            &diagnose,
         );
     }
     if !row_columns.is_empty() {

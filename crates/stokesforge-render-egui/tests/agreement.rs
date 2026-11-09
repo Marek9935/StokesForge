@@ -1336,7 +1336,7 @@ fn a_custom_template_agrees_and_leaves_the_column_text_literal() {
     use stokesforge_plot::{LegendText, LegendTextFrom};
     let literal = legend_text_fixture(LegendText {
         from: LegendTextFrom::Custom,
-        template: "%(LC)".to_string(),
+        template: "#comments".to_string(),
         ..LegendText::default()
     });
     agree(
@@ -1347,7 +1347,7 @@ fn a_custom_template_agrees_and_leaves_the_column_text_literal() {
     );
     let mut starred = legend_text_fixture(LegendText {
         from: LegendTextFrom::Custom,
-        template: "%(LC)".to_string(),
+        template: "#comments".to_string(),
         ..LegendText::default()
     });
     let y = starred.spec.panels[0].series[0].y;
