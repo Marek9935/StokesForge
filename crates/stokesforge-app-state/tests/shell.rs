@@ -15004,6 +15004,35 @@ fn a_new_graph_is_480_by_360_and_a_cell_beside_it_has_the_same_frame() {
     assert_eq!(layout_of(&graph_spec(&state, graph)).size, (960, 720));
 }
 
+/// #503: `AddCell` with side Left is one undo step; the reference shifts right,
+/// the new column takes the reference's width, and Undo restores positions and
+/// widths.
+#[test]
+fn add_cell_left_is_one_undo_step_that_restores_positions_and_widths() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Left,
+        columns: Vec::new(),
+    });
+    let after = graph_spec(&state, graph);
+    let positions: Vec<_> = after.panels.iter().map(|p| (p.row, p.column)).collect();
+    assert_eq!(
+        positions,
+        [(0, 1), (0, 0)],
+        "reference shifted, new on its left"
+    );
+    assert_eq!(after.frame_widths, [before.frame_widths[0]; 2]);
+    state.dispatch(Action::Undo);
+    let undone = graph_spec(&state, graph);
+    assert_eq!(undone, before, "one Undo is enough");
+    assert_eq!(undone.frame_widths, before.frame_widths);
+}
+
 /// #394 (G7): a graph from an old file (nothing stored, the bands and the title
 /// inside the 480 x 360) is fixed by its first edit, whatever the edit: removing
 /// the title keeps the plot area exactly where and as large as it was, and the
@@ -15604,8 +15633,8 @@ fn add_cell_in_free_places_the_layer_beside_never_over_the_other() {
         let second = after.panels[1].free_frame.expect("a stored frame");
         assert_eq!((second.width, second.height), (first.width, first.height));
         match side {
-            CellSide::Right => assert_eq!(second.top, first.top, "same top"),
-            CellSide::Below => assert_eq!(second.left, first.left, "same left"),
+            CellSide::Right | CellSide::Left => assert_eq!(second.top, first.top, "same top"),
+            CellSide::Below | CellSide::Above => assert_eq!(second.left, first.left, "same left"),
         }
         let (outers, _) = free_outers(&after);
         assert_eq!(outers.len(), 2);
@@ -15613,6 +15642,8 @@ fn add_cell_in_free_places_the_layer_beside_never_over_the_other() {
         match side {
             CellSide::Right => assert_eq!(outers[0].2, outers[1].0, "touching, right"),
             CellSide::Below => assert_eq!(outers[0].3, outers[1].1, "touching, below"),
+            CellSide::Left => assert_eq!(outers[1].2, outers[0].0, "touching, left"),
+            CellSide::Above => assert_eq!(outers[1].3, outers[0].1, "touching, above"),
         }
 
         state.dispatch(Action::Undo);

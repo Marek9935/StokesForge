@@ -955,6 +955,47 @@ fn a_layer_goes_beside_a_free_cell_without_overlapping() {
     );
 }
 
+/// #503: Left and Above mirror Right and Below: the new frame sits left of /
+/// above the base cell, and steps past an obstacle on that side. Witness: the
+/// step goes to the obstacle's far edge instead of `o.0 - width`.
+#[test]
+fn a_layer_goes_left_of_or_above_a_free_cell_stepping_past_obstacles() {
+    let spec = two_cells();
+    let probe = mute((1, 1)).into_drawing_area();
+    let place = |panel, side| {
+        pipeline::place_beside(&spec, &probe, panel, side)
+            .expect("layout")
+            .expect("a free graph")
+    };
+    // Left of cell 0 (frame left 100, outer left 12): the free place is just
+    // left of its outer rectangle, same top and size.
+    let left = place(0, pipeline::BesideSide::Left);
+    assert_eq!(
+        (left.top, left.width, left.height),
+        (50.0, 300.0, 200.0),
+        "same top and size"
+    );
+    assert!(
+        left.left < 100.0 - 300.0,
+        "entirely left of cell 0: {left:?}"
+    );
+    // Left of cell 1 (200 x 150): cell 0 (outer 12..412) is in the way, so the
+    // new outer rectangle ends at 12: frame left 12 - 288 + 88.
+    let skipped = place(1, pipeline::BesideSide::Left);
+    assert_eq!(
+        (skipped.left, skipped.top, skipped.width),
+        (-188.0, 80.0, 200.0),
+        "stepped past the obstacle"
+    );
+    // Above cell 0: same left, over its outer rectangle.
+    let above = place(0, pipeline::BesideSide::Above);
+    assert_eq!(
+        (above.left, above.width, above.height),
+        (100.0, 300.0, 200.0)
+    );
+    assert!(above.top + above.height < 50.0, "{above:?}");
+}
+
 /// A panel title takes a band inside its cell's outer rectangle, above the
 /// frame: the frame does not move, the cell grows upward (and the image with
 /// it when it is the topmost). Witness: the band left out of the top of the

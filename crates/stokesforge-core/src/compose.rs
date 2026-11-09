@@ -353,6 +353,10 @@ pub enum CellSide {
     Right,
     /// In the same column, one row below.
     Below,
+    /// In the same row, in the reference's column; the reference shifts right.
+    Left,
+    /// In the same column, in the reference's row; the reference shifts down.
+    Above,
 }
 
 /// Adds an empty cell beside the cell of layer `panel` (#357) and returns the
@@ -406,20 +410,26 @@ fn open_line(
     let (new_row, new_column) = match side {
         CellSide::Right => (row, column.checked_add(1)?),
         CellSide::Below => (row.checked_add(1)?, column),
+        CellSide::Left | CellSide::Above => (row, column),
     };
     let shifts = |candidate: &PanelSpec| match side {
         CellSide::Right => candidate.column > column,
         CellSide::Below => candidate.row > row,
+        CellSide::Left => candidate.column >= column,
+        CellSide::Above => candidate.row >= row,
+    };
+    let shifted = |candidate: &PanelSpec| -> Option<(usize, usize)> {
+        Some(match side {
+            CellSide::Right | CellSide::Left => (candidate.row, candidate.column.checked_add(1)?),
+            CellSide::Below | CellSide::Above => (candidate.row.checked_add(1)?, candidate.column),
+        })
     };
     // Checks everything before touching the spec.
     let mut rows = new_row.checked_add(1)?;
     let mut columns = new_column.checked_add(1)?;
     for candidate in spec.panels.iter() {
         let (r, c) = if shifts(candidate) {
-            match side {
-                CellSide::Right => (candidate.row, candidate.column.checked_add(1)?),
-                CellSide::Below => (candidate.row.checked_add(1)?, candidate.column),
-            }
+            shifted(candidate)?
         } else {
             (candidate.row, candidate.column)
         };
@@ -431,17 +441,17 @@ fn open_line(
     }
     for candidate in spec.panels.iter_mut().filter(|candidate| shifts(candidate)) {
         match side {
-            CellSide::Right => candidate.column += 1,
-            CellSide::Below => candidate.row += 1,
+            CellSide::Right | CellSide::Left => candidate.column += 1,
+            CellSide::Below | CellSide::Above => candidate.row += 1,
         }
     }
     match side {
-        CellSide::Right => {
+        CellSide::Right | CellSide::Left => {
             if let Some(widths) = widths {
                 widths.insert(new_column, widths[column]);
             }
         }
-        CellSide::Below => {
+        CellSide::Below | CellSide::Above => {
             if let Some(heights) = heights {
                 heights.insert(new_row, heights[row]);
             }
@@ -458,8 +468,9 @@ fn open_line(
 fn insert_free_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<usize> {
     let base = spec.panels.get(spec.cell_bases().get(panel).copied()?)?;
     let (row, column) = (base.row, base.column);
+    // Free placement shifts nothing: Left/Above only need an unused identity too.
     let (new_row, new_column) = match side {
-        CellSide::Right => (
+        CellSide::Right | CellSide::Left => (
             row,
             spec.panels
                 .iter()
@@ -468,7 +479,7 @@ fn insert_free_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option
                 .max()?
                 .checked_add(1)?,
         ),
-        CellSide::Below => (
+        CellSide::Below | CellSide::Above => (
             spec.panels
                 .iter()
                 .filter(|p| p.column == column)
@@ -1983,6 +1994,75 @@ mod tests {
         assert!(move_cell(&mut spec, 0, cell_of(1, 0)));
         assert_eq!(grid(&spec), [(1, 0, false), (0, 0, false)]);
         assert_eq!(spec.frame_heights, [250.0, 100.0], "sizes stay");
+    }
+
+    #[test]
+    fn insert_left_shifts_the_reference_and_inserts_its_width_before_it() {
+        // [A B], reference B: A stays, the new cell is at (0, 1), B goes to (0, 2).
+        let mut spec = sized(&[(0, 0), (0, 1)], &[300.0, 200.0], &[250.0]);
+        assert_eq!(insert_cell(&mut spec, 1, CellSide::Left), Some(2));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 2, false), (0, 1, false)]);
+        assert_eq!(spec.frame_widths, [300.0, 200.0, 200.0]);
+        assert_eq!(spec.frame_heights, [250.0]);
+    }
+
+    #[test]
+    fn insert_above_shifts_the_base_and_its_overlay_down() {
+        let base = PanelSpec::at(0, 0);
+        let mut spec = PlotSpec {
+            panels: Panels::new(vec![
+                base.clone(),
+                PanelSpec::overlay_on(&base, OverlaySpec::TOP_X),
+            ]),
+            frame_widths: vec![300.0],
+            frame_heights: vec![250.0],
+            ..PlotSpec::default()
+        };
+        assert_eq!(insert_cell(&mut spec, 0, CellSide::Above), Some(2));
+        assert_eq!(
+            grid(&spec),
+            [(1, 0, false), (1, 0, true), (0, 0, false)],
+            "new cell on top, base and overlay both one row down"
+        );
+        assert_eq!(spec.frame_heights, [250.0, 250.0]);
+    }
+
+    #[test]
+    fn moving_beside_right_from_another_row_closes_the_emptied_row() {
+        // [A B; C _], C right of A -> [A C B] on one row, one height.
+        let mut spec = sized(&[(0, 0), (0, 1), (1, 0)], &[100.0, 200.0], &[50.0, 60.0]);
+        let target = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Right,
+        };
+        assert!(move_cell(&mut spec, 2, target));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 2, false), (0, 1, false)]);
+        assert_eq!(
+            spec.frame_heights,
+            [50.0],
+            "C's row is gone with its height"
+        );
+        assert_eq!(spec.frame_widths, [100.0, 100.0, 200.0]);
+    }
+
+    #[test]
+    fn moving_beside_left_opens_a_column_and_collapses_the_emptied_one_or_refuses() {
+        // [A B; C D], A left of B -> [_ A B; C _ D].
+        let mut spec = spec_of(&[(0, 0), (0, 1), (1, 0), (1, 1)]);
+        let target = MoveTarget::Beside {
+            panel: 1,
+            side: CellSide::Left,
+        };
+        assert!(move_cell(&mut spec, 0, target));
+        assert_eq!(
+            grid(&spec),
+            [(0, 1, false), (0, 2, false), (1, 0, false), (1, 2, false)]
+        );
+        // [A B], A left of B: lands where it was, the emptied column closes.
+        let mut spec = spec_of(&[(0, 0), (0, 1)]);
+        let before = spec.clone();
+        assert!(!move_cell(&mut spec, 0, target));
+        assert_eq!(spec, before);
     }
 
     #[test]
