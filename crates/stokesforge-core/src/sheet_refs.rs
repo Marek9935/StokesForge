@@ -1339,6 +1339,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(6)],
+                    raw: None,
                 },
             ),
             node(
@@ -1347,6 +1348,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(7)],
+                    raw: None,
                 },
             ),
             node(
@@ -1355,6 +1357,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(8)],
+                    raw: None,
                 },
             ),
             node(6, "A", Some(3), NodeKind::Column(Column::from_f64(&[1.0]))),

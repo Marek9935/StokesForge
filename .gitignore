@@ -77,3 +77,6 @@ htmlcov/
 /.agents/skills/rules-manager
 /.agents/skills/skill-manager
 /manual/book/
+
+# Private test files of the user (#488): kept local, never committed
+/test/private_file/

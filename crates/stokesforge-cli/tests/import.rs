@@ -63,11 +63,13 @@ fn imports_a_jasco_file_with_the_model_chosen_from_its_content() {
         &fixture("jasco_uvvis_semicolon.csv"),
     ]);
     result.unwrap();
-    assert!(output.contains("Jasco (semicolon)"), "{output}");
+    // The fixture holds old-format templates: kept, but not picked by
+    // themselves (F1 of #488). The detector reads the file.
+    assert!(!output.contains("Jasco (semicolon)"), "{output}");
     let project = load(&out_path);
     let sheet = project
-        .resolve_path("[Import]jasco_uvvis_semicolon")
-        .expect("worksheet named after the file");
+        .resolve_path("[Import]Fixture_Jasco_UVVis")
+        .expect("worksheet named after the TITLE key");
     let columns: Vec<_> = project.tree().node(sheet).unwrap().children().to_vec();
     assert_eq!(columns.len(), 2);
     let first = project
@@ -79,6 +81,23 @@ fn imports_a_jasco_file_with_the_model_chosen_from_its_content() {
     assert_eq!(first.meta().role, stokesforge_core::ColumnRole::X);
     assert_eq!(first.len(), 6);
     assert!(first.meta().import_source.is_some(), "source remembered");
+}
+
+/// A named old template still works.
+#[test]
+fn a_named_old_template_is_still_used() {
+    let dir = isolated();
+    let out_path = dir.path().join("named.stf");
+    let (result, output) = run(&[
+        "import",
+        "--recipe",
+        "Jasco (semicolon)",
+        "--out",
+        out_path.to_str().unwrap(),
+        &fixture("jasco_uvvis_semicolon.csv"),
+    ]);
+    result.unwrap();
+    assert!(output.contains("Jasco (semicolon)"), "{output}");
 }
 
 #[test]
@@ -128,4 +147,58 @@ fn errors_are_reported_not_panicked() {
     assert!(output.contains("skipped"), "{output}");
     let (_, listing) = run(&["recipes"]);
     assert!(listing.contains("Jasco (tab)"));
+}
+
+const IR_JCAMP: &str = "##TITLE=ir\n##JCAMP-DX=4.24\n##DATA TYPE=INFRARED SPECTRUM\n##XUNITS=1/CM\n##YUNITS=ABSORBANCE\n##FIRSTX=400\n##LASTX=403\n##NPOINTS=4\n##XFACTOR=1\n##YFACTOR=1\n##XYDATA=(X++(Y..Y))\n400 1 2 3 4\n##END=\n";
+
+/// #488: without `--recipe` the detector reads the file (the permissive
+/// recipe would not decode a JCAMP-DX table).
+#[test]
+fn a_jcamp_file_without_a_recipe_is_read_by_the_detector() {
+    let dir = isolated();
+    let input = dir.path().join("ir.jdx");
+    std::fs::write(&input, IR_JCAMP).unwrap();
+    let out_path = dir.path().join("jcamp.stf");
+    let (result, output) = run(&[
+        "import",
+        "--out",
+        out_path.to_str().unwrap(),
+        input.to_str().unwrap(),
+    ]);
+    result.unwrap_or_else(|err| panic!("{err}\n{output}"));
+    let project = load(&out_path);
+    let sheet = project.resolve_path("[Import]ir").expect("sheet named ir");
+    let columns: Vec<_> = project.tree().node(sheet).unwrap().children().to_vec();
+    assert_eq!(columns.len(), 2, "{output}");
+    let y = project
+        .tree()
+        .node(columns[1])
+        .unwrap()
+        .as_column()
+        .unwrap();
+    assert_eq!(y.len(), 4);
+}
+
+/// #488: NMR data is refused with a clear message, naming the file.
+#[test]
+fn an_nmr_file_fails_with_a_clear_message() {
+    let dir = isolated();
+    let input = dir.path().join("n.jdx");
+    std::fs::write(
+        &input,
+        "##TITLE=s\n##JCAMP-DX=5\n##DATA TYPE=NMR SPECTRUM\n##FIRSTX=0\n##LASTX=3\n##NPOINTS=4\n##XYDATA=(X++(Y..Y))\n0 1 2 3 4\n##END=\n",
+    )
+    .unwrap();
+    let out_path = dir.path().join("n.stf");
+    let error = run(&[
+        "import",
+        "--out",
+        out_path.to_str().unwrap(),
+        input.to_str().unwrap(),
+    ])
+    .0
+    .unwrap_err();
+    assert!(error.contains("NMR data is not supported"), "{error}");
+    assert!(error.contains("n.jdx"), "{error}");
+    assert!(!out_path.exists());
 }

@@ -80,7 +80,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/graph_text_edit.rs` | in-place editors (free text, title, legend name) and pending formatting requested by the format bar |
 | `app/file_drop.rs` | file drop: `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (one slot per viewport), `open_project_in_new_window` |
 | `app/inplace_edit.rs` | **the** contract of in-place editing (#224): opening selected, Enter/Tab/click elsewhere confirm, Escape cancels; pure decision `resolve` |
-| `app/import_wizard.rs` | import wizard: `import_window`, its six steps; choice of template/files and format settings in sections, the preview colored by role, the labels of the choices |
+| `app/import_wizard.rs` | the one-screen import (#488): `import_window`; `import_wizard/grid.rs` (the file as a grid marked directly), `grid/panel.rs` (left panel: To check, What was found, Advanced), `grid/screen.rs` (file tabs, footer menus), `grid/guide.rs` (first-use guide), `import_wizard/templates.rs` (Save as Template, Manage Templates, Forget); every decision lives in `stokesforge-app-state` (`state/import_*.rs`) |
 | `app/plot_settings.rs` | graph properties: `plot_settings_window`, its tabs, one editor per page, the formula syntax help (`formula_field`, `formula_help`); `column_metadata_window` |
 | `app/hover_help.rs` | shared building block of the hover help of a field (#197): `hover_help`, the greyed icon to the right of the field whose bubble shows the reminder |
 | `field_state.rs` (crate root, like `color_picker.rs`) | shared building block of the state of a field (#219): `FieldIssue` (refused red / brought back orange), `show_issue`, 2 s memory (`flag`, `active`), cycle of a validated text field (`edit_text`, `decide`, `Verdict`) |

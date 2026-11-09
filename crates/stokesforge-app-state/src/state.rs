@@ -84,6 +84,34 @@ use crate::user_colors::UserColors;
 mod analysis;
 mod autosave;
 mod column_use;
+mod import_advanced;
+mod import_auto;
+mod import_check;
+mod import_grid;
+mod import_template;
+mod import_tocheck;
+pub use import_advanced::{
+    apply_advanced, AdvancedChange, AdvancedRow, AdvancedSetting, ADVANCED_SETTINGS,
+};
+pub use import_auto::{
+    prop_choices_on, why_text, AutoCheck, AutoInfo, AutoPill, FileChoice, FileMark, ImportAuto,
+    PropChoice, PropRow,
+};
+pub use import_check::{
+    analyse, Answer, CheckAction, CheckFinding, CheckKind, CheckView, ChipId, Confidence,
+    DetectedFormat, Evidence, Fingerprint, FoundGroup, FoundRole, FoundRow, ImportChecks, KeyEntry,
+    Piece, Question, Review, ReviewInfo, Source,
+};
+pub use import_grid::{
+    apply_lines, assign_role, boundary_line, build_rows, fold_range, kv_of, lines_view,
+    row_of_line, spans_of, zones_in, zones_of, GridCmd, Kv, LineRoleCmd, LinesView, Row, Spans,
+    Zone, FOLD_KEEP, FOLD_MIN, ROLE_CMDS, ZONES,
+};
+pub use import_template::{
+    automatic_conditions, condition_sentence, doubt_text, template_count_warnings, template_rules,
+    AutoCondition, ConditionRow, ManageState, Offer, RememberedAnswer, SaveDraft, TemplateRow,
+};
+pub use import_tocheck::{ShownFileStatus, ToCheckPoint, ToCheckSource};
 pub mod open_dialog;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
@@ -561,8 +589,17 @@ pub enum Action {
         /// Files to import.
         paths: Vec<std::path::PathBuf>,
     },
-    /// Reopens the last import in the wizard, to correct it: if it is still
-    /// the last history entry, it is undone first.
+    /// Like [`Action::StartImport`], with the recipe of each file (the import
+    /// screen keeps one per kind of file and per template).
+    StartImportEach {
+        destination: ImportDestination,
+        each: Vec<(PathBuf, stokesforge_import::ImportRecipe)>,
+        /// Refused files that were left out: the status bar says how many.
+        skipped: usize,
+    },
+    /// Reopens the last import in the import window, to correct it: every
+    /// file of the batch comes back with its own recipe. If it is still the
+    /// last history entry, it is undone first.
     ReopenLastImport,
     /// Refreshes the imported columns of `sheet` from their source files
     /// (reread with the stored recipe), **in place**: the columns keep
@@ -2760,32 +2797,34 @@ fn reads_well(bytes: &[u8], recipe: &stokesforge_import::ImportRecipe) -> bool {
     })
 }
 
-/// Last successful import: what is needed to reopen it in the wizard
-/// to correct it ("Reopen Last Import…").
+/// Last successful import: what is needed to reopen it in the import window
+/// to correct it ("Reopen Last Import…"). Every file keeps its own recipe.
 #[derive(Debug, Clone)]
 struct LastImport {
     destination: ImportDestination,
-    recipe: stokesforge_import::ImportRecipe,
-    paths: Vec<PathBuf>,
+    /// The files imported, each with the recipe it was read with.
+    each: Vec<(PathBuf, stokesforge_import::ImportRecipe)>,
 }
 
-/// Where a background import comes from: the wizard/menu (a recipe chosen
-/// by the user) or a file drop (one template per file).
+/// Where a background import comes from: a recipe for all the files
+/// (`Action::StartImport`), a recipe for each file (the import window), or a
+/// file drop (the recipe of each file is chosen by the template store and the
+/// detector, `stokesforge_import::recipe_for_file`).
 enum ImportSource {
-    Menu(stokesforge_import::ImportRecipe),
+    Menu(Box<stokesforge_import::ImportRecipe>),
+    Each(Vec<(PathBuf, stokesforge_import::ImportRecipe)>),
     Drop {
-        /// Template of the files that the automatic choice does not recognize.
-        fallback: stokesforge_import::ImportRecipe,
         /// Workbook under the cursor at the time of the drop.
         target_book: Option<NodeId>,
     },
 }
 
-/// What the import thread returns: the items read, the files that cannot
-/// be read (drop only) and the templates used.
+/// What the import thread returns: the items read, the files that need the
+/// import window (drop only: a doubt left, a refusal, a table that does not
+/// read) and the templates used.
 struct ImportReply {
     items: Vec<ImportItem>,
-    unreadable: Vec<PathBuf>,
+    for_window: Vec<PathBuf>,
     models: Vec<String>,
 }
 
@@ -2805,6 +2844,8 @@ struct ImportJob {
     /// Reply received but not applied: the graph properties are
     /// open and their history macro would absorb the import.
     ready: Option<ImportReply>,
+    /// Refused files that were left out of the import.
+    skipped: usize,
 }
 
 /// Transient state of the import window (see `stokesforge_app::app` for its
@@ -2825,22 +2866,10 @@ pub struct ImportState {
     pub paths: Vec<std::path::PathBuf>,
     /// Saved templates, loaded once when the window opens.
     pub store: stokesforge_import::RecipeStore,
-    /// Name under which to save the current recipe as a template (text
-    /// field of the window, distinct from `recipe.name`: we do not want to
-    /// overwrite the name of the loaded template until "Save Template"
-    /// has been clicked).
-    pub save_as_name: String,
-    /// Current step of the wizard.
-    pub step: ImportStep,
     /// File shown in the preview (index in `paths`).
     pub preview_index: usize,
-    /// Template whose deletion awaits a confirmation.
-    pub confirm_delete: Option<String>,
     /// Recently imported files, loaded at opening.
     pub recent: stokesforge_import::RecentFiles,
-    /// Recipe as it was when the template was loaded: serves to say
-    /// that it was modified without being saved.
-    baseline: stokesforge_import::ImportRecipe,
     /// Preview held during typing (S-T1, #224): the recipe as it
     /// was before the typing and the instant of the last change; as long as it
     /// is there, previews are computed on this recipe, not on `recipe`.
@@ -2850,6 +2879,23 @@ pub struct ImportState {
     /// Bytes of the chosen files, read once per path (the file
     /// is no longer reread each frame).
     bytes: std::cell::RefCell<ImportBytesCache>,
+    /// What the detector and the templates said about each file, and the
+    /// recipe edited per kind of file.
+    pub auto: ImportAuto,
+    /// The map of the file shown and the parse of each file, rebuilt only when
+    /// the file or the recipe changes.
+    pub(crate) cache: std::cell::RefCell<import_auto::ImportCache>,
+    /// What the screen is sure of, what it doubts, the templates in use.
+    pub checks: ImportChecks,
+    /// A column names line that is not just above the data (the recipe cannot
+    /// hold it, the grid remembers it).
+    pub names_unwired: Option<usize>,
+    /// The first-use guide is open.
+    pub guide_open: bool,
+    /// Which opening of the import window this is (a new number at each
+    /// `open_import`): the interface keys the state of its folds with it, so
+    /// that "Advanced" starts closed at each opening.
+    pub opening: u64,
 }
 
 /// Typing pause before a preview is recomputed (S-T1, #224), in seconds.
@@ -2891,23 +2937,10 @@ impl ImportState {
     }
 }
 
-/// Setting offered by the right-click on a line of the preview.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportLineAction {
-    /// "Start Data Here".
-    DataStartsHere,
-    /// "Use as Units Line".
-    UnitsLine,
-    /// "End Data Here" (the line is the first of the footer).
-    DataEndsHere,
-    /// "Disable Auto Data End".
-    NoAutoCut,
-}
-
 /// Bytes read per path (or the read failure message).
 type ImportBytesCache = std::collections::HashMap<PathBuf, Result<Arc<Vec<u8>>, ImportReadError>>;
 
-/// Why the import wizard cannot show a file: data, without a
+/// Why the import window cannot show a file: data, without a
 /// sentence — `errors::import::read_message` puts it into a sentence at display.
 #[derive(Debug, Clone)]
 pub enum ImportReadError {
@@ -2920,76 +2953,6 @@ pub enum ImportReadError {
     },
     /// The content of the file is not a readable table.
     Parse(stokesforge_import::ImportError),
-}
-
-/// The six steps of the import wizard, in the manner of Origin's ASCII wizard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ImportStep {
-    /// File(s) and template.
-    Files,
-    /// Delimiter and decimal.
-    Format,
-    /// Header and end of the data.
-    Header,
-    /// Column-by-column designation.
-    Columns,
-    /// Metadata to keep.
-    Metadata,
-    /// Destination and saving of the template.
-    Destination,
-}
-
-impl ImportStep {
-    /// All the steps, in order.
-    pub const ALL: [ImportStep; 6] = [
-        ImportStep::Files,
-        ImportStep::Format,
-        ImportStep::Header,
-        ImportStep::Columns,
-        ImportStep::Metadata,
-        ImportStep::Destination,
-    ];
-
-    /// Displayed title.
-    pub fn title(self) -> String {
-        match self {
-            ImportStep::Files => tr!("import-step-files-title"),
-            ImportStep::Format => tr!("import-step-format-title"),
-            ImportStep::Header => tr!("import-step-header-title"),
-            ImportStep::Columns => tr!("import-step-columns-title"),
-            ImportStep::Metadata => tr!("common-metadata"),
-            ImportStep::Destination => tr!("import-destination"),
-        }
-    }
-
-    fn index(self) -> usize {
-        Self::ALL.iter().position(|step| *step == self).unwrap_or(0)
-    }
-
-    /// Next step (the last one stays itself).
-    pub fn next(self) -> Self {
-        Self::ALL[(self.index() + 1).min(Self::ALL.len() - 1)]
-    }
-
-    /// Previous step (the first one stays itself).
-    pub fn previous(self) -> Self {
-        Self::ALL[self.index().saturating_sub(1)]
-    }
-}
-
-/// A column of the import result, for the "Columns" step.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ImportColumnPreview {
-    /// Name (column names line) or empty.
-    pub name: String,
-    /// Long name (subheader) or empty.
-    pub long_name: String,
-    /// Unit (subheader) or empty.
-    pub unit: String,
-    /// Mixed-type column (text kept).
-    pub mixed: bool,
-    /// First values, formatted.
-    pub samples: Vec<String>,
 }
 
 /// Kind of window of the [`ProjectTreeNode`] shown by the Project
@@ -6013,7 +5976,20 @@ impl AppState {
                 destination,
                 recipe,
                 paths,
-            } => self.start_import(destination, ImportSource::Menu(recipe), paths),
+            } => self.start_import(destination, ImportSource::Menu(Box::new(recipe)), paths),
+            Action::StartImportEach {
+                destination,
+                each,
+                skipped,
+            } => {
+                let paths = each.iter().map(|(path, _)| path.clone()).collect();
+                self.start_import(destination, ImportSource::Each(each), paths);
+                if skipped > 0 {
+                    if let Some(job) = &mut self.import_job {
+                        job.skipped = skipped;
+                    }
+                }
+            }
             Action::ReopenLastImport => self.reopen_last_import(),
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
@@ -6795,24 +6771,20 @@ impl AppState {
     }
 
     /// Opens the import window for `book`. Loads the [`stokesforge_import::
-    /// RecipeStore`] from disk once for the whole time
-    /// the window is open (never reloaded every frame) and
-    /// starts on its first saved template if there is one, otherwise on
-    /// a permissive default recipe ([`stokesforge_import::ImportRecipe::
-    /// new`]). Replaces without confirmation an import window already open
-    /// (same pattern as [`AppState::begin_edit`] for a cell
-    /// entry).
+    /// RecipeStore`] from disk once for the whole time the window is open
+    /// (never reloaded every frame). Every file the window receives picks its
+    /// own recipe: a saved template whose conditions it meets, else what the
+    /// detector read. Replaces without confirmation an import window already
+    /// open.
     pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
-        let active_book = book.into();
-        // Start on the first saved template, otherwise on the permissive
-        // recipe.
+        // A book that no longer exists (its last import was undone by « Reopen
+        // Last Import », or it was deleted) is no destination.
+        let active_book = book
+            .into()
+            .filter(|book| self.snapshot.tree.node(*book).is_some());
         let store = stokesforge_import::RecipeStore::load();
-        let recipe = store.recipes().first().cloned().unwrap_or_else(|| {
-            stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
-        });
-        let mut recipe = recipe;
+        let mut recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
         recipe.unify_header();
-        let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
             active_book,
             destination: active_book.map_or(
@@ -6821,26 +6793,35 @@ impl AppState {
             ),
             paths: Vec::new(),
             store,
-            save_as_name,
-            step: ImportStep::Files,
             preview_index: 0,
-            confirm_delete: None,
             recent: stokesforge_import::RecentFiles::load(),
-            baseline: recipe.clone(),
             held_preview: None,
             seen_recipe: recipe.clone(),
             recipe,
             bytes: Default::default(),
+            auto: ImportAuto::default(),
+            cache: Default::default(),
+            checks: ImportChecks::default(),
+            names_unwired: None,
+            guide_open: !self.object_manager_preferences.import_guide_hidden(),
+            opening: {
+                static OPENINGS: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
+                OPENINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
         });
     }
 
     /// Handles a file drop ([`Action::DropFiles`]). The `.stf` files are put
     /// in a queue for opening ([`AppState::take_projects_to_open`]). The
-    /// other files go through [`AppState::start_import`]: read on the
-    /// background thread with the recognized template, otherwise the last one used, failing
-    /// that the permissive recipe; those that read correctly go off in a
-    /// single cancellable import, the others open the import window
-    /// pre-filled to be set by hand.
+    /// other files go through [`AppState::start_import`], which reads each
+    /// with `stokesforge_import::recipe_for_file` (a saved template whose
+    /// conditions it meets, else the detector) on the background thread.
+    ///
+    /// If **any** file needs a look (a doubt left after the answers already
+    /// remembered, a refusal, a table that does not read), nothing is imported
+    /// and the import window opens on **all** the dropped files, each with the
+    /// recipe chosen for it. Otherwise everything is imported without a window.
     fn drop_files(&mut self, paths: Vec<PathBuf>, target_book: Option<NodeId>) {
         // An OS drop is not blocked by egui's modal layer, notably
         // from the detached explorer. The root owns the graph's macro:
@@ -6851,7 +6832,7 @@ impl AppState {
         }
         let plan = file_drop_plan(&paths, target_book);
         self.projects_to_open.extend(plan.projects);
-        // The wizard is open: the drop adds the files to it instead of
+        // The window is open: the drop adds the files to it instead of
         // importing them on top.
         if self.import_state.is_some() {
             self.add_import_paths(plan.data);
@@ -6860,25 +6841,16 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
-        let fallback = self
-            .last_import
-            .as_ref()
-            .map(|last| last.recipe.clone())
-            .unwrap_or_else(|| {
-                stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
-            });
         self.start_import(
             plan.destination,
-            ImportSource::Drop {
-                fallback,
-                target_book,
-            },
+            ImportSource::Drop { target_book },
             plan.data,
         );
     }
 
     /// Starts the reading and analysis of the files on a background thread: single
-    /// entry point of the menu import ([`Action::StartImport`]) and of the drop.
+    /// entry point of the menu import ([`Action::StartImport`]), of the import
+    /// window ([`Action::StartImportEach`]) and of the drop.
     fn start_import(
         &mut self,
         destination: ImportDestination,
@@ -6899,59 +6871,84 @@ impl AppState {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let dropped = match &source {
-            ImportSource::Menu(_) => None,
-            ImportSource::Drop { target_book, .. } => Some(*target_book),
+            ImportSource::Menu(_) | ImportSource::Each(_) => None,
+            ImportSource::Drop { target_book } => Some(*target_book),
         };
         let spawned = thread::Builder::new()
             .name("stokesforge-app-import".to_owned())
             .spawn(move || {
                 let mut reply = ImportReply {
                     items: Vec::new(),
-                    unreadable: Vec::new(),
+                    for_window: Vec::new(),
                     models: Vec::new(),
                 };
-                // One template per file for a drop: the automatic choice
-                // (extension, name, content signature), otherwise the last
-                // template actually used, otherwise the permissive recipe.
-                let store = match &source {
-                    ImportSource::Drop { .. } => Some(stokesforge_import::RecipeStore::load()),
-                    ImportSource::Menu(_) => None,
-                };
-                for path in paths {
-                    if worker_stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
+                let stopped = || worker_stop.load(std::sync::atomic::Ordering::Relaxed);
+                match &source {
+                    ImportSource::Menu(recipe) => {
+                        for path in &paths {
+                            if stopped() {
+                                break;
+                            }
+                            reply.items.extend(import_items(path, recipe));
+                            worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
-                    match (&source, &store) {
-                        (ImportSource::Drop { fallback, .. }, Some(store)) => {
-                            let bytes = std::fs::read(&path).ok();
-                            let mut recipe = bytes
-                                .as_deref()
-                                .and_then(|bytes| {
-                                    stokesforge_import::choose_recipe(store.recipes(), &path, bytes)
-                                        .cloned()
-                                })
-                                .unwrap_or_else(|| fallback.clone());
-                            // The drop gesture adds one sheet per file:
-                            // the replace or merge options of the
-                            // last wizard must not change its
-                            // destination nor overwrite an existing sheet.
-                            recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
-                            recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
-                            if bytes.as_deref().is_some_and(|b| reads_well(b, &recipe)) {
+                    ImportSource::Each(each) => {
+                        for (path, recipe) in each {
+                            if stopped() {
+                                break;
+                            }
+                            reply.items.extend(import_items(path, recipe));
+                            worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
+                    ImportSource::Drop { .. } => {
+                        // First every file is looked at: one recipe per file,
+                        // from the template store or the detector.
+                        let store = stokesforge_import::RecipeStore::load();
+                        let mut chosen = Vec::new();
+                        let mut needs_window = false;
+                        for path in &paths {
+                            if stopped() {
+                                return;
+                            }
+                            let bytes = std::fs::read(path).ok();
+                            let found = bytes.as_deref().and_then(|bytes| {
+                                stokesforge_import::recipe_for_file(&store, path, bytes, None).ok()
+                            });
+                            match (found, bytes.as_deref()) {
+                                (Some(found), Some(bytes))
+                                    if reads_well(bytes, &found.recipe)
+                                        && !import_check::drop_needs_a_look(
+                                            path, bytes, &found, &store,
+                                        ) =>
+                                {
+                                    chosen.push((path.clone(), found.recipe));
+                                }
+                                _ => needs_window = true,
+                            }
+                        }
+                        if needs_window {
+                            reply.for_window = paths.clone();
+                        } else {
+                            for (path, mut recipe) in chosen {
+                                if stopped() {
+                                    break;
+                                }
+                                // The drop gesture adds one sheet per file:
+                                // the replace or merge options of the
+                                // last import must not change its
+                                // destination nor overwrite an existing sheet.
+                                recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
+                                recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
                                 if !reply.models.contains(&recipe.name) {
                                     reply.models.push(recipe.name.clone());
                                 }
                                 reply.items.extend(import_items(&path, &recipe));
-                            } else {
-                                reply.unreadable.push(path);
+                                worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             }
                         }
-                        (ImportSource::Menu(recipe), _) => {
-                            reply.items.extend(import_items(&path, recipe));
-                        }
-                        (ImportSource::Drop { .. }, None) => {}
                     }
-                    worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 let _ = reply_tx.send(reply);
             });
@@ -6966,6 +6963,7 @@ impl AppState {
                     started: std::time::Instant::now(),
                     reply,
                     ready: None,
+                    skipped: 0,
                 });
                 self.progress(tr!("status-import-progress", done = 0, total = total));
             }
@@ -7053,6 +7051,9 @@ impl AppState {
         if applied {
             let count = reply.items.len();
             self.apply_import(job.destination, reply.items);
+            if job.skipped > 0 {
+                self.warn(tr!("status-import-skipped", count = job.skipped));
+            }
             if job.dropped.is_some() && !self.gesture_failed() {
                 self.notice(tr!(
                     "status-import-dropped",
@@ -7062,15 +7063,11 @@ impl AppState {
             }
         }
         if let Some(target_book) = job.dropped {
-            if !reply.unreadable.is_empty() {
-                if self.import_state.is_some() {
-                    self.add_import_paths(reply.unreadable);
-                } else {
+            if !reply.for_window.is_empty() {
+                if self.import_state.is_none() {
                     self.open_import(target_book);
-                    if let Some(import) = &mut self.import_state {
-                        import.paths = reply.unreadable;
-                    }
                 }
+                self.add_import_paths(reply.for_window);
             }
         }
         applied
@@ -7266,16 +7263,34 @@ impl AppState {
             _ => None,
         };
         self.open_import(book);
+        // Every file comes back and is read again (detector, templates), then
+        // gets back the recipe it was imported with.
+        self.add_import_paths(last.each.iter().map(|(path, _)| path.clone()).collect());
         if let Some(import) = &mut self.import_state {
-            import.recipe = last.recipe.clone();
-            import.baseline = last.recipe;
-            import.save_as_name = import.recipe.name.clone();
+            for (index, (path, recipe)) in last.each.iter().enumerate() {
+                // Reopened in the import window: current reading of the
+                // sub-header roles.
+                let mut recipe = recipe.clone();
+                recipe.adopt_joined_lines();
+                if let Some(Ok(found)) = import.auto.sniffs.get(path) {
+                    import
+                        .auto
+                        .kind_recipes
+                        .insert(found.kind.clone(), recipe.clone());
+                }
+                if let Some(choice) = import.auto.choices.get_mut(path) {
+                    choice.recipe = recipe.clone();
+                }
+                if index == 0 {
+                    import.seen_recipe = recipe.clone();
+                    import.recipe = recipe;
+                }
+            }
             if let ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll =
                 last.destination
             {
                 import.destination = last.destination;
             }
-            import.paths = last.paths;
         }
         self.notice(if undone {
             tr!("status-import-reopened-undone")
@@ -7315,31 +7330,6 @@ impl AppState {
         self.import_state = None;
     }
 
-    /// Starts over from a new permissive recipe (the "Reset" button).
-    /// No effect if the import window is not open.
-    pub fn new_import_recipe(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
-            state.baseline = state.recipe.clone();
-            state.save_as_name = state.recipe.name.clone();
-        }
-    }
-
-    /// Loads the template `name` of the `RecipeStore` into the recipe being
-    /// edited (selection in the drop-down list). No effect if `name`
-    /// is not a saved template, or if the window is not open.
-    pub fn select_import_recipe(&mut self, name: &str) {
-        if let Some(state) = &mut self.import_state {
-            if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
-                let mut recipe = recipe.clone();
-                recipe.unify_header();
-                state.recipe = recipe.clone();
-                state.baseline = recipe.clone();
-                state.save_as_name = recipe.name.clone();
-            }
-        }
-    }
-
     /// Replaces the chosen files ("Choose Files to Import", native picker
     /// opened by the window layer — `rfd` is a UI dependency,
     /// it has no place here). No effect if the window is not
@@ -7349,20 +7339,17 @@ impl AppState {
             state.paths = paths;
             state.preview_index = 0;
             state.bytes.borrow_mut().clear();
+            state.auto = ImportAuto::default();
+            state.checks = ImportChecks::default();
         }
+        self.auto_sync_shown();
     }
 
-    /// Adds `paths` to the wizard's files (drop while it is
-    /// open, "Add Files…"), without duplicates.
-    ///
-    /// At the **first** addition, if the current template has not been modified, the
-    /// automatic choice of the template (extension, name, content signature)
-    /// can replace it: the message says which one was chosen.
+    /// Adds `paths` to the files of the import window (drop while it is
+    /// open, "Add Files…"), without duplicates. The detector reads each new
+    /// file once, and a saved template whose conditions it meets is applied
+    /// to it.
     pub fn add_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
-        let was_empty = self
-            .import_state
-            .as_ref()
-            .is_some_and(|state| state.paths.is_empty());
         if let Some(state) = &mut self.import_state {
             for path in paths {
                 if !state.paths.contains(&path) {
@@ -7370,32 +7357,7 @@ impl AppState {
                 }
             }
         }
-        if was_empty && !self.import_recipe_modified() {
-            self.choose_import_recipe_automatically();
-        }
-    }
-
-    /// Chooses, from the file shown, the template that matches it
-    /// (`stokesforge_import::choose_recipe`) and loads it as the current recipe.
-    /// No effect if no template matches.
-    fn choose_import_recipe_automatically(&mut self) {
-        let Some(path) = self.import_preview_path() else {
-            return;
-        };
-        let Ok(bytes) = self.import_bytes(&path) else {
-            return;
-        };
-        let Some(state) = &self.import_state else {
-            return;
-        };
-        let Some(chosen) =
-            stokesforge_import::choose_recipe(state.store.recipes(), &path, &bytes).cloned()
-        else {
-            return;
-        };
-        let name = chosen.name.clone();
-        self.select_import_recipe(&name);
-        self.notice(tr!("status-template-chosen", name = name));
+        self.auto_sync_shown();
     }
 
     /// Writes the current template to `path` (JSON) to share it.
@@ -7441,19 +7403,17 @@ impl AppState {
             }
         };
         recipe.unify_header();
+        // A template file is not read by the store loader: adopt here.
+        recipe.adopt_joined_lines();
         let Some(state) = &mut self.import_state else {
             return;
         };
         let name = recipe.name.clone();
         state.store.upsert(recipe.clone());
+        // The criteria an older template carried are kept as conditions, not automatic.
+        state.store.adopt_old_criteria(&name);
         let saved = state.store.save();
-        // Like `save_import_recipe`: without a successful write, keep the old
-        // reference so that the imported template stays "modified" (unsaved).
-        if saved.is_ok() {
-            state.baseline = recipe.clone();
-        }
         state.recipe = recipe;
-        state.save_as_name = name.clone();
         match saved {
             Ok(()) => self.notice(tr!("status-template-imported", name = name)),
             Err(err) => self.fail(tr!(
@@ -7470,8 +7430,15 @@ impl AppState {
                 let path = state.paths.remove(index);
                 state.bytes.borrow_mut().remove(&path);
                 state.preview_index = state.preview_index.min(state.paths.len().saturating_sub(1));
+                state.auto.sniffs.remove(&path);
+                state.auto.choices.remove(&path);
+                state.checks.forget_file(&path);
+                if state.auto.current.as_ref() == Some(&path) {
+                    state.auto.current = None;
+                }
             }
         }
+        self.auto_sync_shown();
     }
 
     /// Chooses the file shown in the preview.
@@ -7481,20 +7448,7 @@ impl AppState {
                 state.preview_index = index;
             }
         }
-    }
-
-    /// Moves to the next / previous step of the wizard.
-    pub fn import_step_forward(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.step = state.step.next();
-        }
-    }
-
-    /// See [`AppState::import_step_forward`].
-    pub fn import_step_back(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.step = state.step.previous();
-        }
+        self.auto_sync_shown();
     }
 
     /// Bytes of file `path`, read only once then kept: the preview
@@ -7531,212 +7485,20 @@ impl AppState {
     /// Encoding detected for the file shown in the preview.
     pub fn import_encoding(&self) -> Option<&'static str> {
         let path = self.import_preview_path()?;
-        let bytes = self.import_bytes(&path).ok()?;
-        stokesforge_import::detect_encoding(&bytes)
-    }
-
-    /// What the import would give for each chosen file, with the current
-    /// recipe: `Ok` with the number of rows, or the error that awaits it —
-    /// shown **before** the click on Import.
-    pub fn import_file_statuses(&self) -> Vec<(PathBuf, Result<usize, ImportReadError>)> {
-        let Some(state) = self.import_state.as_ref() else {
-            return Vec::new();
-        };
-        state
-            .paths
-            .iter()
-            .map(|path| {
-                let status = self.import_bytes(path).and_then(|bytes| {
-                    stokesforge_import::parse(&bytes, &state.recipe)
-                        .map(|table| table.row_count())
-                        .map_err(ImportReadError::Parse)
-                });
-                (path.clone(), status)
-            })
-            .collect()
-    }
-
-    /// The current template differs from the one that was loaded or saved.
-    pub fn import_recipe_modified(&self) -> bool {
-        self.import_state
-            .as_ref()
-            .is_some_and(|state| state.recipe != state.baseline)
-    }
-
-    /// Requests the deletion of template `name` (it takes place only on
-    /// confirmation, [`AppState::confirm_delete_import_recipe`]).
-    pub fn request_delete_import_recipe(&mut self, name: &str) {
-        if let Some(state) = &mut self.import_state {
-            state.confirm_delete = Some(name.to_string());
-        }
-    }
-
-    /// Cancels the deletion request.
-    pub fn cancel_delete_import_recipe(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.confirm_delete = None;
-        }
-    }
-
-    /// Deletes the template whose deletion was requested.
-    pub fn confirm_delete_import_recipe(&mut self) {
-        let name = self
+        // Cached: the detection reads the whole file.
+        if let Some(found) = self
             .import_state
-            .as_mut()
-            .and_then(|state| state.confirm_delete.take());
-        if let Some(name) = name {
-            self.delete_import_recipe(&name);
+            .as_ref()
+            .and_then(|state| state.cache.borrow().encoding.get(&path).copied())
+        {
+            return found;
         }
-    }
-
-    /// Columns of the import result of the file shown, with their first
-    /// values — "Columns" step.
-    pub fn import_column_previews(
-        &self,
-    ) -> Option<Result<Vec<ImportColumnPreview>, ImportReadError>> {
-        let table = self.import_preview()?;
-        Some(table.map(|table| {
-            table
-                .columns
-                .iter()
-                .map(|column| ImportColumnPreview {
-                    name: column.name.clone().unwrap_or_default(),
-                    long_name: column.long_name.clone().unwrap_or_default(),
-                    unit: column.unit.clone().unwrap_or_default(),
-                    mixed: column.texts.iter().any(Option::is_some),
-                    samples: column
-                        .values
-                        .iter()
-                        .zip(&column.texts)
-                        .take(3)
-                        .map(|(value, text)| match text {
-                            Some(text) => text.clone(),
-                            None if value.is_nan() => String::new(),
-                            None => format!("{value}"),
-                        })
-                        .collect(),
-                })
-                .collect()
-        }))
-    }
-
-    /// All the metadata the file shown could provide (header
-    /// and footer, without exclusion) — "Metadata" step, to tick
-    /// what is kept.
-    pub fn import_available_metadata(&self) -> Vec<stokesforge_import::MetadataLine> {
-        let Some(state) = self.import_state.as_ref() else {
-            return Vec::new();
-        };
-        let Some(path) = self.import_preview_path() else {
-            return Vec::new();
-        };
-        let Ok(bytes) = self.import_bytes(&path) else {
-            return Vec::new();
-        };
-        let mut recipe = state.recipe.clone();
-        recipe.keep_header_metadata = true;
-        recipe.keep_footer_metadata = true;
-        recipe.excluded_metadata.clear();
-        stokesforge_import::parse(&bytes, &recipe)
-            .map(|table| table.metadata().to_vec())
-            .unwrap_or_default()
-    }
-
-    /// Setting from a right-click on line `number` (1-based, number in the
-    /// file) of the preview. Leading blank lines do not count in the header
-    /// (as at import): the offset comes from the first line shown.
-    pub fn import_line_action(&mut self, action: ImportLineAction, number: usize) {
-        let Some(Ok(preview)) = self.import_line_preview() else {
-            return;
-        };
-        let Some(first) = preview.lines.first().map(|line| line.number) else {
-            return;
-        };
-        let Some(state) = &mut self.import_state else {
-            return;
-        };
-        let recipe = &mut state.recipe;
-        let header_total =
-            recipe.header_layout.main_header_lines + recipe.header_layout.subheader_lines;
-        let data_start = first + header_total + usize::from(recipe.has_column_header_row);
-        let offset = number.saturating_sub(first);
-        match action {
-            ImportLineAction::DataStartsHere => {
-                recipe.header = stokesforge_import::HeaderSkip::None;
-                let sub = recipe.header_layout.subheader_lines.min(offset);
-                recipe.header_layout.subheader_lines = sub;
-                recipe.header_layout.main_header_lines = offset - sub;
-                recipe.header_layout.auto_detect = false;
-            }
-            ImportLineAction::UnitsLine => {
-                // The line and those after it, up to the data, form the
-                // subheader; the line gives the units.
-                recipe.header = stokesforge_import::HeaderSkip::None;
-                let total = header_total.max(offset + 1);
-                recipe.header_layout.main_header_lines = offset;
-                recipe.header_layout.subheader_lines = total - offset;
-                recipe.header_layout.auto_detect = false;
-                recipe.subheader_roles.same_line_name_unit = false;
-                recipe.subheader_roles.unit =
-                    Some(stokesforge_import::SubheaderLineRange::single(1));
-            }
-            ImportLineAction::DataEndsHere => {
-                if number >= data_start {
-                    recipe.data_end =
-                        stokesforge_import::DataEnd::LinesAfterHeader(number - data_start);
-                }
-            }
-            ImportLineAction::NoAutoCut => recipe.data_end = stokesforge_import::DataEnd::None,
+        let bytes = self.import_bytes(&path).ok()?;
+        let found = stokesforge_import::detect_encoding(&bytes);
+        if let Some(state) = self.import_state.as_ref() {
+            state.cache.borrow_mut().encoding.insert(path, found);
         }
-    }
-
-    /// Saves the recipe being edited as a template named `save_as_name` (text
-    /// field of the window) in the `RecipeStore`, and persists the store to
-    /// disk. A write failure (config folder unreachable) becomes a
-    /// [`StatusMessage`], never a panic. No effect if the window is not open
-    /// or the name is empty.
-    pub fn save_import_recipe(&mut self) {
-        let Some(state) = &mut self.import_state else {
-            return;
-        };
-        let name = state.save_as_name.trim().to_string();
-        if name.is_empty() {
-            self.fail(tr!("error-template-name-required"));
-            return;
-        }
-        state.recipe.name = name;
-        state.store.upsert(state.recipe.clone());
-        let save_result = state.store.save();
-        let saved_name = state.recipe.name.clone();
-        if let Err(err) = save_result {
-            self.fail(tr!(
-                "error-template-save",
-                cause = errors::io::error_message(&err)
-            ));
-            return;
-        }
-        // The "modified" witness compares with the last successful save, not
-        // only with the template loaded at opening. On failure, keep the old
-        // reference so as not to announce a save.
-        state.baseline = state.recipe.clone();
-        self.notice(tr!("status-template-saved", name = saved_name));
-    }
-
-    /// Deletes the template `name` from the `RecipeStore` and persists the
-    /// store to disk. Same failure policy as [`AppState::save_import_recipe`].
-    pub fn delete_import_recipe(&mut self, name: &str) {
-        let Some(state) = &mut self.import_state else {
-            return;
-        };
-        state.store.remove(name);
-        if let Err(err) = state.store.save() {
-            self.fail(tr!(
-                "error-template-delete",
-                cause = errors::io::error_message(&err)
-            ));
-            return;
-        }
-        self.notice(tr!("status-template-deleted", name = name));
+        found
     }
 
     /// Preview of the **first** chosen file, reparsed with the current
@@ -7752,26 +7514,6 @@ impl AppState {
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
             stokesforge_import::parse(&bytes, state.preview_recipe())
-                .map_err(ImportReadError::Parse)
-        });
-        Some(result)
-    }
-
-    /// Preview of the split into lines (header/subheader/data/footer) of the
-    /// **first** chosen file, with the current settings. See
-    /// [`stokesforge_import::preview::preview`] for the cost budget.
-    /// Recomputed at each call, like [`AppState::import_preview`]: this
-    /// budget is exactly what makes recomputing at every frame acceptable,
-    /// even on a big file (the cell-by-cell work stays bounded by
-    /// `recipe.preview_lines`, never by the file size). `None` under the same
-    /// conditions as `import_preview`.
-    pub fn import_line_preview(
-        &self,
-    ) -> Option<Result<stokesforge_import::FilePreview, ImportReadError>> {
-        let state = self.import_state.as_ref()?;
-        let path = self.import_preview_path()?;
-        let result = self.import_bytes(&path).and_then(|bytes| {
-            stokesforge_import::preview(&bytes, state.preview_recipe())
                 .map_err(ImportReadError::Parse)
         });
         Some(result)
@@ -11099,13 +10841,31 @@ impl AppState {
                 }
             } else {
                 let mut shared_book = None;
+                // One file into « New Workbook » is one new workbook for that
+                // file: it is named and filled like « One Workbook per File ».
+                let destination =
+                    if destination == ImportDestination::NewBookForAll && plans.len() == 1 {
+                        ImportDestination::NewBookPerFile
+                    } else {
+                        destination
+                    };
+                // A new workbook per file holds one sheet per file: the
+                // workbook takes the name of the file, the sheet is "Raw Data"
+                // until a value of an imported column changes (#488).
+                let raw_data_sheet = matches!(destination, ImportDestination::NewBookPerFile)
+                    && first_recipe.files_layout == stokesforge_import::FilesLayout::SheetPerFile;
                 for plan in &plans {
                     let Some(book) =
                         self.book_for_plan(destination, plan, &mut shared_book, &mut failures)
                     else {
                         continue;
                     };
-                    let Some(sheet) = self.add_named_sheet(book, &plan.name, &mut failures) else {
+                    let sheet_name = if raw_data_sheet {
+                        tr!("import-sheet-raw-data")
+                    } else {
+                        plan.name.clone()
+                    };
+                    let Some(sheet) = self.add_named_sheet(book, &sheet_name, &mut failures) else {
                         continue;
                     };
                     for &planned in &plan.columns {
@@ -11119,6 +10879,14 @@ impl AppState {
                                 column,
                             });
                         }
+                    }
+                    if raw_data_sheet {
+                        self.execute(Command::SetSheetRawMark {
+                            sheet,
+                            mark: Some(stokesforge_core::RawSheetMark {
+                                modified_base: tr!("import-sheet-modified-base"),
+                            }),
+                        });
                     }
                     for &item in &plan.items {
                         if !done_paths.contains(&items[item].path) {
@@ -11135,16 +10903,17 @@ impl AppState {
         if imported > 0 {
             // Material for "Reopen Last Import…" and the recent files.
             self.recent_to_record.extend(done_paths.iter().cloned());
-            if let Some(ImportItem {
-                recipe: first_recipe,
-                ..
-            }) = first_ok
-            {
-                self.last_import = Some(LastImport {
-                    destination,
-                    recipe: first_recipe.clone(),
-                    paths: done_paths,
-                });
+            let each: Vec<(PathBuf, stokesforge_import::ImportRecipe)> = done_paths
+                .iter()
+                .filter_map(|path| {
+                    items
+                        .iter()
+                        .find(|item| item.path == *path && item.table.is_ok())
+                        .map(|item| (path.clone(), item.recipe.clone()))
+                })
+                .collect();
+            if !each.is_empty() {
+                self.last_import = Some(LastImport { destination, each });
             }
         }
         // `self.execute` refreshes the snapshot at each command, but always
@@ -11230,9 +10999,34 @@ impl AppState {
             failures.push(tr!("error-import-create-sheet", name = name));
             return None;
         };
+        // A title already used in this workbook: the new sheet takes a free
+        // name ("Title (2)") instead of a red « Name already used » for an
+        // import that worked.
+        let taken: Vec<String> = self
+            .snapshot
+            .tree
+            .node(book)
+            .map(|node| {
+                node.children()
+                    .iter()
+                    .filter(|id| **id != sheet)
+                    .filter_map(|id| self.snapshot.tree.node(*id))
+                    .map(|child| child.name().to_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_taken = |candidate: &str| taken.contains(&candidate.to_lowercase());
+        let free = if is_taken(name) {
+            (2u64..)
+                .map(|n| format!("{name} ({n})"))
+                .find(|candidate| !is_taken(candidate))
+                .unwrap_or_else(|| name.to_string())
+        } else {
+            name.to_string()
+        };
         self.execute(Command::Rename {
             id: sheet,
-            name: name.to_string(),
+            name: free,
         });
         Some(sheet)
     }

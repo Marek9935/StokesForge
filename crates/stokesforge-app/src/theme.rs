@@ -164,6 +164,15 @@ pub fn table_header(text: impl Into<String>) -> egui::RichText {
 /// `TextStyle::Small` (9 pt, 72 % of the body) was too small to read (#392 trial).
 pub const SECONDARY_TEXT_SIZE: f32 = 11.0;
 
+/// Size of the value shown in a format chip (delimiter, decimal, thousands,
+/// encoding): a little above the body text (half the step it had at 17 pt).
+pub const FORMAT_CHIP_TEXT_SIZE: f32 = 14.5;
+
+/// The value of a format chip: bold, a little larger than the body.
+pub fn format_chip_text(text: impl Into<String>) -> egui::RichText {
+    bold(text).size(FORMAT_CHIP_TEXT_SIZE)
+}
+
 /// Level 3: the secondary text (detail, help), muted and slightly smaller than
 /// body ([`SECONDARY_TEXT_SIZE`]). The usage rules are those of muted text
 /// (`docs/interface-standard.md`).
@@ -185,7 +194,7 @@ pub fn dimmed_text(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).weak()
 }
 
-/// **The** section title of a form (graph properties, import wizard…):
+/// **The** section title of a form (graph properties, import window…):
 /// a space, then the label at the [`section_heading`] level. The
 /// title is enough to separate the groups: never a `ui.separator()` right before
 /// (`no_separator_before_a_section_title`), never a lone rule between
@@ -280,6 +289,59 @@ pub fn import_header_line_color() -> Color32 {
 /// Import preview: comment or x' sub-header.
 pub fn import_comment_line_color() -> Color32 {
     Color32::from_rgb(200, 80, 200)
+}
+
+/// Import wizard palette (#488 mockup): one colour per role, readable on the
+/// light and dark themes. The single place to change them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportColor {
+    LongName,
+    Units,
+    Comments,
+    XPrime,
+    ColumnNames,
+    Header,
+    Footer,
+    /// Text of a line that carries several roles.
+    MultiRole,
+    /// The « auto » pill of an automatic choice (mockup F, #488).
+    Auto,
+}
+
+/// Colour of an [`ImportColor`] for the given theme.
+pub fn import_color(dark: bool, which: ImportColor) -> Color32 {
+    let (light, night) = match which {
+        ImportColor::LongName => ((30, 100, 215), (105, 165, 255)),
+        ImportColor::Units => ((15, 130, 55), (95, 205, 120)),
+        ImportColor::Comments => ((135, 55, 205), (190, 140, 255)),
+        ImportColor::XPrime => ((205, 100, 0), (255, 165, 60)),
+        ImportColor::ColumnNames => ((45, 50, 150), (150, 160, 255)),
+        ImportColor::Header => ((105, 110, 118), (150, 155, 165)),
+        ImportColor::Footer => ((20, 125, 135), (80, 205, 215)),
+        ImportColor::MultiRole => ((195, 20, 75), (255, 95, 135)),
+        ImportColor::Auto => ((150, 115, 0), (235, 200, 60)),
+    };
+    let (r, g, b) = if dark { night } else { light };
+    Color32::from_rgb(r, g, b)
+}
+
+/// Import window (#488): what was found with certainty (the « All checked »
+/// card, the check of a sure row). Green, like the Units role, readable on
+/// both themes.
+pub fn import_sure_color(dark: bool) -> Color32 {
+    import_color(dark, ImportColor::Units)
+}
+
+/// Import window (#488): the light fill of the « points to check » block, under
+/// the [`warning_color`] border.
+pub fn import_warning_fill(dark: bool) -> Color32 {
+    warning_color(dark).gamma_multiply(if dark { 0.16 } else { 0.10 })
+}
+
+/// Import window (#488): the focus of the left panel on the grid (the line
+/// or the cell a sentence comes from): a see-through tint of the accent.
+pub fn import_focus_fill() -> Color32 {
+    accent().gamma_multiply(0.20)
 }
 
 /// Tint of a computed column that is no longer up to date (header letter and

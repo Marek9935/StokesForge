@@ -690,9 +690,9 @@ pub(crate) fn import_file(
         None => {
             let bytes = std::fs::read(path)
                 .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?;
-            stokesforge_import::choose_recipe(store.recipes(), path, &bytes)
-                .cloned()
-                .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Untitled"))
+            stokesforge_import::recipe_for_file(&store, path, &bytes, None)
+                .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?
+                .recipe
         }
     };
     let items = stokesforge_importer::import_items(path, &recipe);

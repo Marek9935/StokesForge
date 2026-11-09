@@ -764,7 +764,7 @@ How it is held:
   Guard `no_literal_add_space_outside_the_theme` (`tests/guards.rs`), without
   exemption; a computed gap passes.
 - Migrated: graph properties (all pages, series editor shared
-  with the series window), analysis form, import wizard
+  with the series window), analysis form, import window
   (files, format, header, metadata, destination; the rules between
   blocks became headings). The series window (group, scope,
   color gradient — `curve_settings.rs`) is migrated, as are the tools of

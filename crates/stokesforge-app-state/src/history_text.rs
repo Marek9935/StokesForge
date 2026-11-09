@@ -103,6 +103,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::SetWindowMeta { name: Some(name) } => {
             tr!("history-set-window-meta-named", name = name.as_str())
         }
+        HistoryLabel::SetSheetRawMark { name: None } => tr!("history-set-sheet-raw-mark"),
+        HistoryLabel::SetSheetRawMark { name: Some(name) } => {
+            tr!("history-set-sheet-raw-mark-named", name = name.as_str())
+        }
         HistoryLabel::SetNoteText { name: None } => tr!("history-set-note-text"),
         HistoryLabel::SetNoteText { name: Some(name) } => {
             tr!("history-set-note-text-named", name = name.as_str())

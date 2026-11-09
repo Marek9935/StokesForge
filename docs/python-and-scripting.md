@@ -178,7 +178,7 @@ describes its effects.
 | `save()` | saves at the project's current path; `InvalidValueError` if it has none (use `save_as`) |
 | `save_as(path)` | saves at this path (text or `pathlib.Path`), which becomes the current path |
 | `export_graph(graph, path, *, png_scale=4.0)` | exports a graph to `.svg`, `.pdf` or `.png` (unknown extension: `InvalidValueError`), same rendering as the application's export |
-| `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets |
+| `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets (the sheet is named after the file, not "Raw Data": only the application's **One Workbook per File** marks its sheet, #488) |
 | `set_graph(graph, *, panel=(0, 0), axis="left", unit="cm", **options)` | sets an existing graph through the Graph Properties keys ("`set_graph`" table below), sizes included (#399, in `unit`); **a single history entry**; unknown key, unit or refused value: `InvalidValueError`, nothing is written |
 | `graph_size(graph, *, unit="cm")` | reads the size of a graph (#399): dict `width`, `height`, `plot_widths`, `plot_heights`, `plot_left`, `plot_top`, `fixed_size`, `layer_placement`, `layers`, lengths in `unit` (`cm`, `mm`, `pt`, `in`); never writes |
 | `insert_rows(worksheet, at, count=1)` | inserts empty rows at row `at` (0 = at the top) in all columns of the sheet; `at` beyond the last row: `InvalidValueError` |
@@ -643,7 +643,13 @@ created. Without a template name, it applies the automatic choice, otherwise the
 permissive recipe. It respects the template settings (ignored columns, types,
 metadata, blocks and split into sheets) and always creates a new
 workbook; the modes that modify an active sheet concern the wizard.
-A single `pyst.undo()` or Ctrl+Z removes the whole import. An unknown template or an
+A single `pyst.undo()` or Ctrl+Z removes the whole import. The sheet it creates
+is named after the file and carries no "Raw Data" mark (#488: only the
+application's **One Workbook per File** marks its sheet). A script that writes
+the value of an imported column of a still-marked "Raw Data" sheet renames it
+"Sheet1" inside its group, like the interface, so a path such as
+`[x]Raw Data!A` stops resolving after the write and `[x]Sheet1!A` takes over; a
+script resolves the name again after a write. An unknown template or an
 unreadable file raises `InvalidValueError` before any mutation; an error
 during creation aborts the macro. Parsing and commands run with
 the GIL released, like the other calls to the model.

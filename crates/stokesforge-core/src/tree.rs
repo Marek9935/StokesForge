@@ -583,6 +583,25 @@ impl Tree {
         }
     }
 
+    /// The worksheets that still carry the mark of an untouched import
+    /// (#488), in walk order. Visits folders, workbooks and sheets only,
+    /// never a column, and allocates nothing but the result.
+    pub fn raw_sheets(&self) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        self.visit_windows(|book| {
+            for &sheet in self.node(book).map_or(&[][..], |node| node.children()) {
+                let marked = self.node(sheet).is_some_and(|node| {
+                    matches!(node.kind(), NodeKind::Worksheet { raw: Some(_), .. })
+                });
+                if marked {
+                    out.push(sheet);
+                }
+            }
+            false
+        });
+        out
+    }
+
     /// Direct child of `parent` with this name, or `None`.
     pub fn child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
         Ok(self
@@ -1122,6 +1141,7 @@ mod tests {
     fn worksheet_kind() -> NodeKind {
         NodeKind::Worksheet {
             columns: Vec::new(),
+            raw: None,
         }
     }
 

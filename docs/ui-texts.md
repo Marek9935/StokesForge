@@ -136,7 +136,9 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 <!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
-| Import Wizard | Assistant d'import | Six-step window that sets up the import | Importateur | O |
+| Import (window) | Importer | Title of the one-screen window that sets up the import (#488: file tabs, left panel, file grid; no steps). Was « Import Wizard » / « Assistant d'import ». In sentences: « the Import window » / « la fenêtre d'import » | Import Wizard, Assistant d'import, Importateur | O |
+| Not automatic / Use Automatically | Pas automatique / Utiliser automatiquement | An import template kept from an older version with its conditions, never applied by itself; the button in Manage Templates makes the conditions active (F1 of #488) | Disabled, Enable | O |
+| Sheet name (import) | Nom de la feuille | Advanced setting of the import: the sheet takes **Title from the file** (« Titre du fichier ») when the file has one, or always the **File name** (« Nom du fichier ») (F2 of #488) | Worksheet name | O |
 | Delimiter | Séparateur | Character that separates the values of a line | Délimiteur | O |
 | Decimal separator | Séparateur décimal | Character between the integer and decimal parts | Virgule (pour le nom) | O |
 | Thousands separator | Séparateur de milliers | Character that groups digits | Milliers | O |
@@ -155,6 +157,15 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Source file | Fichier source | File a column comes from | Origine | O |
 | Header key | Clé d'en-tête | Name of a header metadata item | — | — |
 | Destination | Destination | Where the import writes its columns | Cible | O |
+| To check | À vérifier | Tag and block of the import screen: what the detector is not sure of, listed as sentences (« Check Now » walks through them). Never « Warnings » | Avertissements, Alertes | O |
+| Mark as Checked | Marquer comme vérifié | Button beside a point to check: the user looked and accepts it; the answer is remembered for that kind of file, the recipe is not touched | Valider, Ignorer, OK | O |
+| Check Now | Vérifier maintenant | Button of the To check block: reviews the points one at a time | Revoir, Lancer | O |
+| Template (import) | Modèle | Saved settings with the **conditions** a file must meet to be read with them (« Used for files that »). Never « recipe » or « preset » on screen | Recette, Préréglage | O |
+| Save as Template / Manage Templates | Enregistrer comme modèle / Gérer les modèles | Footer Template menu and the offer « Save these settings for JASCO files? » | Sauvegarder le modèle | O |
+| Condition | Condition | What triggers a template: instrument, data type, number of columns, a header line, file name, extension | Critère, Déclencheur | O |
+| Answers remembered | Réponses mémorisées | List in Manage Templates of the points already answered per kind of file, each with **Forget** | Historique | O |
+| Advanced (import) | Avancé | Fold, closed by default, at the bottom of the left panel: date order, leading characters removed, blocks, missing values, comment prefix, skipped data lines | Options, Expert | O |
+| Show Guide / Don't show again | Afficher le guide / Ne plus afficher | The three-step first-use guide over the grid; shown every time until « Don't show again » is ticked | Tutoriel, Aide | O |
 
 ### 2.5 Graph
 

@@ -13,6 +13,18 @@ use crate::error::CoreResult;
 use crate::id::NodeId;
 use crate::name::check_name;
 
+/// Mark of a worksheet that is still an untouched import (#488): its name is
+/// the generic one the import gave it ("Raw Data"). The first change to the
+/// value of an imported column removes the mark and renames the sheet
+/// `<modified_base>N` in the same undoable step; renaming the sheet by hand
+/// removes the mark too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawSheetMark {
+    /// Base of the name the sheet takes at the first change, in the
+    /// interface language at import time ("Sheet", « Feuille »).
+    pub modified_base: String,
+}
+
 /// Metadata common to windows (workbook, graph, matrix, note).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WindowMeta {
@@ -44,6 +56,9 @@ pub enum NodeKind {
     Worksheet {
         /// Columns of the sheet, from left to right.
         columns: Vec<NodeId>,
+        /// Present while the sheet is an untouched import (#488): it still
+        /// carries the name the import gave it.
+        raw: Option<RawSheetMark>,
     },
     /// Data column (the name lives in the node, not in the `Column`).
     Column(Column),
@@ -128,7 +143,7 @@ impl NodeKind {
         match self {
             NodeKind::Folder { children } => children,
             NodeKind::Workbook { sheets, .. } => sheets,
-            NodeKind::Worksheet { columns } => columns,
+            NodeKind::Worksheet { columns, .. } => columns,
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
@@ -232,7 +247,7 @@ impl NodeKind {
         match self {
             NodeKind::Folder { children } => Some(children),
             NodeKind::Workbook { sheets, .. } => Some(sheets),
-            NodeKind::Worksheet { columns } => Some(columns),
+            NodeKind::Worksheet { columns, .. } => Some(columns),
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
@@ -431,6 +446,7 @@ mod tests {
     fn worksheet() -> NodeKind {
         NodeKind::Worksheet {
             columns: Vec::new(),
+            raw: None,
         }
     }
 
@@ -509,7 +525,8 @@ mod tests {
         );
         assert_eq!(
             NodeKind::Worksheet {
-                columns: ids.clone()
+                columns: ids.clone(),
+                raw: None,
             }
             .children(),
             &ids[..]

@@ -14,7 +14,7 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 **Baseline**. The background signal under the peaks. A baseline correction computes a baseline and subtracts it from the data, or divides the data by it. See [Baseline correction](../guide/analysis.md#baseline-correction).
 
-**Block**. In an imported file, one series of data separated from the others, for example one spectrum among several in the same file. See [Blocks and encoding](../guide/import.md#blocks-and-encoding).
+**Block**. In an imported file, one series of data separated from the others, for example one spectrum among several in the same file. See [Blocks and encoding](../guide/import.md#advanced).
 
 ## C
 
@@ -34,11 +34,11 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 ## D
 
-**Data end**. The place where the data of an imported file stop. The lines after it form the footer. See [Data end](../guide/import.md#data-end).
+**Data end**. The place where the data of an imported file stop. The lines after it form the footer. See [Data end](../guide/import.md#give-a-line-a-role).
 
 **Deconvolution**. An analysis that recovers the signal before the instrument response. See [Direct deconvolution](../guide/analysis.md#direct-deconvolution).
 
-**Delimiter**. The character that separates the values on a line of an imported file. See [Delimiter](../guide/import.md#delimiter).
+**Delimiter**. The character that separates the values on a line of an imported file. See [Delimiter](../guide/import.md#the-screen).
 
 **Detached window**. A workbook, graph or panel that you moved out of the main window, into a window of its own, for example onto a second screen. See [Windows in the workspace](../guide/interface.md#windows-in-the-workspace).
 
@@ -64,11 +64,11 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 **Header** (column). The rows above the data of a column: letter and role, **Long Name**, **Units**, **Comments** and **F(x)=**. See [The column header](../guide/projects-and-workbooks.md#the-column-header).
 
-**Header** (import). The lines at the start of an imported file that are not data. See [Step 3: header and data end](../guide/import.md#step-3-header-and-data-end).
+**Header** (import). The lines at the start of an imported file that are not data. See [Give a line a role](../guide/import.md#give-a-line-a-role).
 
 ## I
 
-**Import Wizard**. The window with six steps that sets up the import of text files. See [The wizard at a glance](../guide/import.md#the-wizard-at-a-glance).
+**Import**. The one-screen window that sets up the import of text files: it shows what was recognised and the file as a grid. See [The screen](../guide/import.md#the-screen).
 
 **Instrument response (IRF)**. The response of the instrument to a very short signal. Reconvolution and direct deconvolution use it. See [Reconvolution](../guide/analysis.md#reconvolution).
 
@@ -82,7 +82,7 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 ## M
 
-**Metadata**. Pairs of a key and a value read from the header or footer of an imported file, such as the date or the instrument. They are kept with each imported column. See [Step 5: metadata](../guide/import.md#step-5-metadata).
+**Metadata**. Pairs of a key and a value read from the header or footer of an imported file, such as the date or the instrument. They are kept with each imported column. See [What was found](../guide/import.md#what-was-found).
 
 ## N
 
@@ -140,13 +140,15 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 **Status bar**. The bottom line of the window. It shows the last message and the progress of long work. See [Status bar](../guide/interface.md#status-bar).
 
-**Subheader**. The lines at the end of the header of an imported file that give the name, the units or the comments of each column. See [Subheader lines](../guide/import.md#subheader-lines).
+**Subheader**. The lines at the end of the header of an imported file that give the name, the units or the comments of each column. See [Subheader lines](../guide/import.md#give-a-line-a-role).
 
 ## T
 
-**Template** (import). The settings of the Import Wizard, saved under a name and reused for the files of one instrument. A template can choose itself for a file. See [Templates](../guide/import.md#templates).
+**Template** (import). The settings of an import, saved under a name with the conditions a file must meet to be read with them. A template can choose itself for a file. See [Templates](../guide/import.md#templates).
 
 **Theme**. A set of global colors of a graph, **Light** or **Dark**. See [The tabs](../guide/graphs.md#the-tabs).
+
+**To check** (import). What the Import window is not sure of, listed as sentences. **Mark as Checked** accepts a point, **Check Now** goes through them. See [Points to check](../guide/import.md#points-to-check).
 
 **Transposed sheet**. A sheet created from the rows of another sheet, named like it with a `ᵀ` suffix, so that you can analyse the rows. See [Linked sheets](../guide/projects-and-workbooks.md#linked-sheets).
 
@@ -165,3 +167,4 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 ## X
 
 **x' row**. A header row that holds one number for each column, such as the time of a measurement. It lets you plot and analyse rows. Show it with **Workbook ▸ Show x' Row**. See [Header rows](../guide/projects-and-workbooks.md#header-rows).
+
