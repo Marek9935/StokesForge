@@ -3971,6 +3971,45 @@ class TestPage(unittest.TestCase):
         got = self.img_js("imgFromItems(%s.map(i=>Object.assign(i,{getAsFile:()=>({type:i.type})})))" % json.dumps(items))
         self.assertEqual(got, [{"type": "image/png"}])
 
+    def drag_run(self, html_path, start, end, setup, events, wrap=("", "")):
+        """Run the drag handlers cut out of a page against a fake document; return what each event did."""
+        with open(html_path, encoding="utf-8") as f:
+            html = f.read()
+        kind = re.search(r"/\*(?:IMAGES|QIMG)-START\*/.*?(function dragKind.*?\n}\n)", html, re.S).group(1)
+        seg = html[html.index(start):html.index(end, html.index(start))]
+        code = ("const L={};const document={addEventListener:(n,f)=>{L[n]=f;}};let notes=[],got=[];\n" + setup + "\n" + kind + wrap[0] + seg + wrap[1] + "\n"
+                "const out=%s.map(([n,types,files])=>{const e={dataTransfer:{types,files},p:false,preventDefault(){this.p=true;}};"
+                "if(L[n])L[n](e);return e.p;});"
+                "process.stdout.write(JSON.stringify({out,notes,got,lines:typeof qLines==='undefined'?null:qLines}));") % json.dumps(events)
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_an_empty_drag_is_accepted_and_says_nothing_came_through_while_files_and_text_behave(self):
+        ev = [["dragover", [], []], ["dragenter", [], []], ["dragover", ["Files"], []], ["dragover", ["text/plain"], []],
+              ["drop", [], []], ["drop", ["Files"], [{"n": 1}]], ["drop", ["text/plain"], []]]
+        r = self.drag_run(os.path.join(HERE, "suivi-page.html"), "const dragOf", "function testBox",
+                          "const imgNote=t=>notes.push(t);const dropToBox=f=>{got.push(f.length);return true;};", ev)
+        self.assertEqual(r["out"], [True, True, True, False, True, True, False])          # a text drag is never cancelled
+        self.assertEqual(r["got"], [1])                                                    # the Files drop still attaches
+        self.assertEqual(len(r["notes"]), 1)                                               # only the empty drop speaks
+        self.assertIn("rien transmis", r["notes"][0])
+        self.assertIn("Ctrl+V", r["notes"][0])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_form_accepts_an_empty_drag_only_in_a_card(self):
+        ev = [["dragover", [], []], ["drop", [], []], ["dragover", ["text/plain"], []], ["drop", ["Files"], [{"n": 1}]]]
+        path = TEMPLATE
+        setup = "let view='card',cur=0;const ORDER=[{c:'R1'}];const qLines={};const qStrip=()=>{};const qAttach=(d,f)=>got.push(f.length);"
+        r = self.drag_run(path, "const dragOf", "if(/[?&]view=sum", setup, ev, ("if(true){", ""))
+        self.assertEqual(r["out"], [True, True, False, True])
+        self.assertEqual(r["got"], [1])
+        self.assertIn("rien transmis", r["lines"]["R1"][0])                                # the empty drop says so on the card
+        r = self.drag_run(path, "const dragOf", "if(/[?&]view=sum", setup.replace("'card'", "'sum'"), ev, ("if(true){", ""))
+        self.assertEqual(r["out"], [False, False, False, True])                            # outside a card: as before
+        self.assertEqual(r["lines"], {})
+
     def test_the_trial_page_wires_the_screenshots_safely(self):
         html = self.page()
         self.assertNotIn("innerHTML", html)                                                       # no name ever goes into markup

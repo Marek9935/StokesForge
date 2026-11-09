@@ -378,6 +378,11 @@ function qFromItems(items){
   for(const it of Array.from(items||[])){if(it&&it.kind==='file'&&QI_TYPES.includes(it.type)){const f=it.getAsFile();if(f)out.push(f);}}
   return out;
 }
+/* Kind of an OS drag from its types: 'files', 'empty' (the browser passed nothing at all, seen with a real drag from Files, #483) or 'other' (text drags stay untouched). */
+function dragKind(types){
+  const t=Array.from(types||[]);
+  return t.includes('Files')?'files':t.length===0?'empty':'other';
+}
 /*QIMG-END*/
 function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
 // Uploads and saves go one after the other: a save that lands while an upload is unlisted would delete the file,
@@ -437,7 +442,7 @@ function card(){
   h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
   h+='</div></div>';
   h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
-  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V)</span></div></div>';
+  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V), ou glisse-la ici</span></div></div>';
   else h+='<div class="mdim">Les captures ne sont possibles que sur la page locale du suivi.</div>';
   h+='<div class="sync" aria-live="polite">'+esc(sync)+'</div></div>';
   return h;
@@ -553,11 +558,18 @@ if(LOCAL){
     if(cd.getData&&cd.getData('text/plain'))return;            // a paste that carries text stays text
     e.preventDefault(); qAttach(ORDER[cur],files);
   });
-  const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
-  document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
+  /* An OS drag may arrive with no type at all (#483): accept it in a card and say nothing came through. Text drags stay untouched. */
+  const dragOf=e=>{const k=e.dataTransfer?dragKind(e.dataTransfer.types):'other'; return k==='empty'&&view!=='card'?'other':k;};   // outside a card an empty drag is not ours
+  document.addEventListener('dragenter',e=>{if(dragOf(e)!=='other')e.preventDefault();});
+  document.addEventListener('dragover',e=>{if(dragOf(e)!=='other')e.preventDefault();});
   document.addEventListener('drop',e=>{
-    if(!hasFiles(e))return; e.preventDefault();
-    if(view==='card')qAttach(ORDER[cur],Array.from(e.dataTransfer.files||[]));
+    const k=dragOf(e);
+    if(k==='other')return;
+    e.preventDefault();
+    if(view!=='card')return;
+    const all=Array.from(e.dataTransfer.files||[]), d=ORDER[cur];
+    if(all.length)qAttach(d,all);
+    else if(k==='empty'){qLines[d.c]=['Le navigateur n’a rien transmis : glisse à nouveau, ou colle avec Ctrl+V.']; qStrip(d);}
   });
 }
 if(/[?&]view=sum\b/.test(location.search))view='sum';

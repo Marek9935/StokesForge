@@ -443,6 +443,11 @@ function boxAfterSend(ok,st,id){
   delete st.drafts[id];delete st.imgDrafts[id];
   return st;
 }
+/* Kind of an OS drag from its types: 'files', 'empty' (the browser passed nothing at all, seen with a real drag from Files, #483) or 'other' (text drags stay untouched). */
+function dragKind(types){
+  const t=Array.from(types||[]);
+  return t.includes('Files')?'files':t.length===0?'empty':'other';
+}
 /*IMAGES-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
@@ -609,7 +614,7 @@ function imgNote(text){
 /* Paste and drop go to the open box; with none open, a line says to open one. */
 function dropToBox(files){
   if(!files.length)return false;
-  if(!openBack||!imgDrafts[openBack.id]){imgNote('Ouvre d’abord la boîte d’une carte (Retour ou commentaire), puis colle la capture.');return true;}
+  if(!openBack||!imgDrafts[openBack.id]){imgNote('Ouvre d’abord la boîte d’une carte (Retour ou commentaire), puis colle ou glisse la capture.');return true;}
   attach(openBack.id,files);return true;
 }
 document.addEventListener('paste',e=>{
@@ -619,14 +624,19 @@ document.addEventListener('paste',e=>{
   if(cd.getData&&cd.getData('text/plain'))return;       // a paste that carries text stays text
   if(dropToBox(files))e.preventDefault();
 });
-/* Not named by the hints: a real drag from Files did nothing at the #456 trial (#483). */
-const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
-document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
+/* An OS drag may reach the page with no type at all (seen with a real drag from Files, #483): accept it too,
+   and say on release that nothing came through. Text drags (no Files, some type) are left alone. */
+const dragOf=e=>e.dataTransfer?dragKind(e.dataTransfer.types):'other';
+const noDrag=()=>imgNote('Le navigateur n’a rien transmis : glisse à nouveau, ou colle avec Ctrl+V.');
+document.addEventListener('dragenter',e=>{if(dragOf(e)!=='other')e.preventDefault();});
+document.addEventListener('dragover',e=>{if(dragOf(e)!=='other')e.preventDefault();});
 document.addEventListener('drop',e=>{
-  if(!hasFiles(e))return;
+  const k=dragOf(e);
+  if(k==='other')return;
   e.preventDefault();
   const all=Array.from(e.dataTransfer.files||[]);
   if(all.length)dropToBox(all);
+  else if(k==='empty')noDrag();
 });
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
@@ -671,7 +681,7 @@ function testBox(x){
     fi.onchange=()=>{attach(x.id,Array.from(fi.files));fi.value='';};
     pick.onclick=()=>fi.click();
     ad.appendChild(pick);ad.appendChild(fi);
-    ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V)'));
+    ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V), ou glisse-la ici'));
     b.appendChild(ad);b.appendChild(st);
     const r=el('div','acts');
     const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;
