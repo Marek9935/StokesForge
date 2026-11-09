@@ -161,6 +161,11 @@ for rel in "--dry-run --release 2" "--dry-run 2 --release" "--release --dry-run 
 done
 if "$here/try.sh" --dry-run 99 2> "$tmp/err"; then fail "try.sh 99 should fail"; fi
 grep -q 'try.sh main' "$tmp/err" || fail "try.sh 99 message"
+# A suffixed sibling worktree (feature999b, branch feature/999b-x) resolves like a plain number (#489).
+git worktree add -q "$tmp/_stokesforge/feature999b" -b "feature/999b-x" --no-track main
+out="$("$here/try.sh" --dry-run 999b)" || fail "try.sh 999b failed"
+echo "$out" | grep -q "CARGO_TARGET_DIR=$tmp/_stokesforge/feature999b/target" || fail "try 999b target: $out"
+git worktree remove "$tmp/_stokesforge/feature999b"; git branch -q -D feature/999b-x
 
 # Main lock: a second take fails, release frees.
 "$here/main-lock.sh" take "A #1" > /dev/null
