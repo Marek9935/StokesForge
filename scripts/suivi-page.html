@@ -177,6 +177,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
       <h2 id="h-back">Retours envoyés <span class="count" id="n-back">–</span></h2>
       <div id="back" class="rows"></div>
     </section>
+    <details id="settled-wrap"><summary>Retours traités (<span id="n-settled">0</span>)</summary><div id="settled" class="rows"></div></details>
     <details id="done-wrap"><summary>Testé et OK (<span id="n-done">0</span>)</summary><div id="done" class="rows"></div></details>
   </div>
 
@@ -331,6 +332,7 @@ async function sendBuild(patch){
   etag=null;load();
 }
 /*CARDLINE-START*/
+const isSettled=x=>!!(x&&x.settled&&typeof x.settled==='object');   // a retour the agent or the user filed as handled (#496)
 const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
 /* One line per card, computed: whose turn it is. c = a colour entry or a paused entry; tests and
    qcms = S.tests and S.qcms. Members: the issue, its package's sub-issues, the colour's issues. */
@@ -340,7 +342,7 @@ function cardLine(c,tests,qcms){
   const mine=(tests||[]).filter(t=>members.has(Number(t.n!=null?t.n:t.issue)));
   const todo=mine.filter(t=>(t.status||'todo')==='todo').length;
   const tried=mine.filter(t=>t.try);      // merged entries (no `try`) do not count
-  const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok');
+  const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok'||(t.status==='retour'&&isSettled(t)));
   const held=c.held_by||[];
   const note=typeof c.waiting==='string'?c.waiting.trim():'';
   const noteYou=note!==''&&c.wait_kind==='you';
@@ -394,6 +396,24 @@ function withdrawUi(q,asking){
 /* The merge button names where the merge goes: an issue with an integration line merges into it (#480). */
 function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
 /*CARDLINE-END*/
+/*SPLIT-START*/
+/* Where each trial entry is listed (#496): a settled retour leaves « Retours envoyés » for « Retours traités ». */
+function splitTests(tests){
+  const stamp=x=>String(x.reviewed||x.date||'');
+  const by=f=>tests.filter(f).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
+  const st=x=>x.status||'todo';
+  return {todo:by(x=>st(x)==='todo'),back:by(x=>st(x)==='retour'&&!isSettled(x)),
+          settled:by(x=>st(x)==='retour'&&isSettled(x)),done:by(x=>st(x)==='ok')};
+}
+const canSettle=x=>x.status==='retour'&&!isSettled(x);
+function settledText(x,dateText){
+  const s=x.settled||{};const m=[];
+  m.push((s.by==='user'?'classé par toi':'traité')+(dateText?' le '+dateText:''));
+  if(s.commit)m.push('commit '+String(s.commit).slice(0,8));
+  if(s.note)m.push(String(s.note));
+  return m.join(' · ');
+}
+/*SPLIT-END*/
 /*IMAGES-START*/
 /* Screenshots on a trial entry (#456). Pure functions, no DOM: the limits mirror the server's
    (MAX_IMAGE 10 Mo), which stays the judge. No count cap: past IMG_WARN_COUNT an advice line above the thumbnails, all kept. */
@@ -642,7 +662,7 @@ document.addEventListener('drop',e=>{
   else if(k==='empty')noDrag();
 });
 function testBox(x){
-  const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
+  const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'&&!isSettled(x)?' isback':''));
   b.appendChild(head(x,x.title||''));
   if(x.intro)b.appendChild(el('div','intro',x.intro));
   if(Array.isArray(x.where)&&x.where.length){
@@ -657,6 +677,7 @@ function testBox(x){
   const m=[];if(x.date)m.push(String(x.date).slice(0,10));
   if(x.status==='ok'||x.status==='retour'){const v=dayText(x.reviewed||'','', x.status==='ok'?'validé le ':'retour envoyé le ');if(v)m.push(v);}if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
   if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
+  if(isSettled(x)){const d=dayText(x.settled.at||'','','');b.appendChild(el('div','meta',settledText(x,d?d.trim():'')));}
   const editing=openBack&&openBack.id===x.id;
   const sent=imgListed(x);
   if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
@@ -669,7 +690,12 @@ function testBox(x){
   bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   const cm=el('button','',(x.comment||sent.length)?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
   cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
-  a.appendChild(ok);a.appendChild(bk);a.appendChild(cm);b.appendChild(a);
+  a.appendChild(ok);a.appendChild(bk);
+  if(canSettle(x)){
+    const cl=el('button','','Classer');cl.type='button';cl.id='cl-'+x.id;cl.title='Ce retour est traité : le ranger sous « Retours traités »';
+    cl.onclick=()=>settleTest(x);a.appendChild(cl);
+  }
+  a.appendChild(cm);b.appendChild(a);
   if(editing){
     const retour=openBack.mode==='retour';
     const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
@@ -699,16 +725,15 @@ function testBox(x){
 }
 function renderTests(){
   if(!S)return;
-  const stamp=x=>String(x.reviewed||x.date||'');
-  const by=s=>S.tests.filter(x=>(x.status||'todo')===s).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
-  const todoAll=by('todo'),backAll=by('retour'),doneAll=by('ok');
+  const sp=splitTests(S.tests);
+  const todoAll=sp.todo,backAll=sp.back,settledAll=sp.settled,doneAll=sp.done;
   $('n-todo').textContent=todoAll.length;$('n-back').textContent=backAll.length;$('n-done').textContent=doneAll.length;
   $('n-qcm').textContent=S.qcms.length;
   const F=filt,mine=x=>!F||String(x.n??x.issue)===String(F.issue);
   const qcms=F&&F.what==='essai'?[]:S.qcms.filter(mine);
   const showT=!(F&&F.what==='qcm');
-  const todo=showT?todoAll.filter(mine):[],back=showT?backAll.filter(mine):[],done=showT?doneAll.filter(mine):[];
-  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;$('n-qcm').textContent=qcms.length;
+  const todo=showT?todoAll.filter(mine):[],back=showT?backAll.filter(mine):[],settled=showT?settledAll.filter(mine):[],done=showT?doneAll.filter(mine):[];
+  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;$('n-settled').textContent=settled.length;$('n-qcm').textContent=qcms.length;
   const fe=$('filter');fe.replaceChildren();fe.hidden=!F;
   if(F){
     fe.appendChild(el('span','chip','Filtré : '+(colourSq(F.issue)||'')+'#'+F.issue+' · '+(F.what==='essai'?'essais':'questionnaires')));
@@ -720,6 +745,7 @@ function renderTests(){
   fill('qcm',qcms,qcmBox,F?'Aucun questionnaire pour ce chantier.':'Aucun questionnaire ne t’attend.');
   fill('todo',todo,testBox,F?'Rien à tester pour ce chantier.':'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
   fill('back',back,testBox,F?'Aucun retour pour ce chantier.':'Aucun retour en attente.');
+  fill('settled',settled,testBox,'');
   fill('done',done,testBox,'');
   const bn=$('banner');
   if(todoAll.length>=5){bn.hidden=false;bn.textContent=todoAll.length+' choses attendent ton essai. Tester maintenant aide les prochaines décisions.';}else bn.hidden=true;
@@ -780,7 +806,7 @@ async function load(){
 }
 async function send(x,patch,onOk){
   let ok=true;
-  Object.assign(x,patch);renderTests();
+  Object.assign(x,patch);if('status' in patch)delete x.settled;renderTests();
   try{
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
@@ -788,6 +814,13 @@ async function send(x,patch,onOk){
   }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';ok=false;}
   etag=null;load();
   return ok;
+}
+async function settleTest(x){
+  try{
+    const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify({settle:true})});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Pas classé : le retour a peut-être changé, réessaie dans un instant.';}
+  etag=null;load();
 }
 async function withdrawForm(q){
   askWithdraw=null;

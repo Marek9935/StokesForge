@@ -17,7 +17,10 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
                            folder moved, meta carries withdrawn_at/_ts/_by; its number is never reused
     tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
-                           page's POST and by `test add|merged`)
+                           page's POST and by `test add|merged`; `settled` {at, by, commit?, note?} by
+                           `test settle` or the page's « Classer », #496: a handled retour keeps status "retour";
+                           any later answer with a status from the page clears it; it counts as OK for
+                           the merge condition; deliver.sh refuses an unsettled retour)
     tests/<n>-<k>.images/  screenshots of an entry (#456); the entry's `images` field lists names only
     qcm/<id>/images/<code>/  screenshots of a form card; the answer's `images` lists names only
     removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
@@ -99,7 +102,7 @@ until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
-test add|merged|remove|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
+test add|merged|remove|settle|unsettled|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
 """
 import argparse
 import datetime
@@ -811,6 +814,12 @@ def cmd_check(a):
         if len(ids) > 1:
             problems.append("issue #%s has %d open forms: %s (withdraw the extra one with qcm withdraw)"
                             % (n, len(ids), ", ".join(ids)))
+    for t in sorted(load_tests(), key=lambda t: natural(t["id"])):
+        n = t["id"].split("-")[0]
+        r = recs.get(int(n)) if n.isdigit() else None
+        if t.get("status") == "retour" and not t.get("settled") and (r is None or r.get("done_at")):
+            problems.append("entry %s is an unsettled retour of issue #%s (%s): suivi.py test settle %s --note ..."
+                            % (t["id"], n, "done" if r else "no record", t["id"]))
     owner = os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
     write_json(os.path.join(suivi_dir(), "control.json"),
                {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": owner, "problems": problems})
@@ -946,16 +955,21 @@ def merge_path(root):
     return os.path.join(suivi_dir(), "merge", "%d.json" % root)
 
 
+def settled_by(t):
+    s = t.get("settled")
+    return str(s.get("by", "")) if isinstance(s, dict) else ("" if not s else "?")
+
+
 def merge_ready(items):
-    """The merge condition: at least one `try` entry and every one of them OK."""
+    """The merge condition: at least one `try` entry and every one of them OK, or a retour settled (#496)."""
     tests = [it for it in items.values() if it["kind"] == "test"]
-    return bool(tests) and all(it["status"] == "ok" for it in tests)
+    return bool(tests) and all(it["status"] == "ok" or (it["status"] == "retour" and it["settled"]) for it in tests)
 
 
 def merge_key(items):
     """What a merge request is bound to: any change of a trial entry (a Retour, an un-tick and a new
     tick) voids it, since each rewrite moves the file's mtime."""
-    raw = json.dumps(sorted((it["id"], it["status"], it["comment"], it["mns"]) for it in items.values()
+    raw = json.dumps(sorted((it["id"], it["status"], it["comment"], it["mns"], it["settled"]) for it in items.values()
                             if it["kind"] == "test"))
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
@@ -979,6 +993,7 @@ def scan_group(members, root=None):
             if not safe_id(tid) or not isinstance(t, dict) or "try" not in t:
                 continue
             status, comment = t.get("status", "todo"), str(t.get("comment") or "").strip()
+            by_user = status == "retour" and settled_by(t) == "user"
             if status == "todo":
                 todos.append(tid)
             try:
@@ -991,9 +1006,11 @@ def scan_group(members, root=None):
                 mns = 0
             imgs = listed_images(t)
             items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime, "mns": mns,
-                          "images": imgs,
-                          "fp": "%s|%s" % (status, comment) + ("|" + ",".join(imgs) if imgs else ""),   # no images: BASE_FP stays valid
-                          "line": "\n".join(["%s %s%s" % (tid, status, ": " + comment if comment else "")]
+                          "images": imgs, "settled": bool(t.get("settled")),
+                          # no images: BASE_FP stays valid. A settle by the user is an answer (#496); an agent's is silent.
+                          "fp": "%s|%s" % (status, comment) + ("|" + ",".join(imgs) if imgs else "") + ("|settled-by-user" if by_user else ""),
+                          "line": "\n".join(["%s %s%s%s" % (tid, status, ": " + comment if comment else "",
+                                                           " (settled by the user on the page)" if by_user else "")]
                                             + image_lines(test_images_dir(tid), imgs))}
         for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
             qid = os.path.basename(os.path.dirname(p))
@@ -1675,10 +1692,62 @@ def cmd_test_remove(a):
     return 0
 
 
+def settle_owner_check(n):
+    """#496: settling needs no claim, but a live session other than the caller must not be overruled."""
+    recs = load_all()
+    me = current_owner()
+    for r in (recs.get(n), recs.get((recs.get(n) or {}).get("parent"))):
+        if r and owner_alive(r) and (me is None or str((r.get("owner") or {}).get("session", "")) != me["session"]):
+            raise Fail("#%d is owned by another live session: only it may settle its entries" % r["issue"])
+
+
+def cmd_test_settle(a):
+    m = re.fullmatch(r"(\d+)-\d+", a.id)
+    if not m:
+        raise Fail("%r is not an entry id (<issue>-<k>)" % a.id)
+    settle_owner_check(int(m.group(1)))
+    full = None
+    if a.commit:
+        rc, out = git_rc("rev-parse", "--verify", "--quiet", a.commit + "^{commit}")
+        if rc != 0:
+            raise Fail("no such commit in this repository: %s" % a.commit)
+        full = out.strip()
+    with Lock():
+        t = read_json(test_path(a.id))
+        if not isinstance(t, dict):
+            raise Fail("no entry %s" % a.id)
+        if t.get("status", "todo") != "retour":
+            raise Fail("%s is %s: only a retour can be settled" % (a.id, t.get("status", "todo")))
+        if t.get("settled"):
+            raise Fail("%s is already settled" % a.id)
+        s = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": "agent"}
+        if full:
+            s["commit"] = full
+        if a.note is not None:
+            s["note"] = a.note
+        t["settled"] = s
+        write_json(test_path(a.id), t)
+    print("settled %s%s" % (a.id, " (%s)" % full[:8] if full else ""))
+    return 0
+
+
+def unsettled_retours(n):
+    return [t["id"] for t in sorted(load_tests(n), key=lambda t: natural(t["id"]))
+            if t.get("status") == "retour" and not t.get("settled")]
+
+
+def cmd_test_unsettled(a):
+    """Read-only (#496): the retours of issue n nobody settled. Exit 1 and one id per line if any."""
+    ids = unsettled_retours(a.issue)
+    for tid in ids:
+        print(tid)
+    return 1 if ids else 0
+
+
 def cmd_test_list(a):
     for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
-        print("%s\t%s\t%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
-                                "\t(try)" if t.get("try") else ""))
+        print("%s\t%s\t%s%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
+                                  "\t(try)" if t.get("try") else "", "\t(settled)" if t.get("settled") else ""))
         for line in image_lines(test_images_dir(t["id"]), listed_images(t)):
             print(line)
     return 0
@@ -3086,12 +3155,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.read_body()
         if body is None:
             return
-        if not isinstance(body, dict) or not ({"status", "comment", "images"} & set(body)):
-            return self.fail(400, "expected an object with status, comment and/or images")
+        if not isinstance(body, dict) or not ({"status", "comment", "images", "settle"} & set(body)):
+            return self.fail(400, "expected an object with status, comment, images and/or settle")
+        if "settle" in body and (body["settle"] is not True or set(body) != {"settle"}):
+            return self.fail(400, "settle is {\"settle\": true} alone")
         if "status" in body and body["status"] not in TEST_STATUSES:
             return self.fail(400, "status must be one of %s" % ", ".join(TEST_STATUSES))
         if "comment" in body and not isinstance(body["comment"], str):
             return self.fail(400, "comment must be a string")
+        if "settle" in body:      # #496: the user files a retour as handled; no `reviewed`, the retour date stays
+            try:
+                with Lock():
+                    t = read_json(test_path(tid))
+                    if not isinstance(t, dict):
+                        return self.fail(404, "no such trial entry")
+                    if t.get("status", "todo") != "retour":
+                        return self.fail(409, "only a retour can be settled")
+                    if t.get("settled"):
+                        return self.fail(409, "already settled")
+                    t["settled"] = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": "user"}
+                    write_json(test_path(tid), t)
+            except Fail as e:
+                return self.fail(503, str(e))
+            return self.send(200, json.dumps({"ok": True}), "application/json")
         t = read_json(test_path(tid))
         if not isinstance(t, dict):
             return self.fail(404, "no such trial entry")
@@ -3106,6 +3192,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for k in ("status", "comment"):
             if k in body:
                 t[k] = body[k]
+        if "status" in body:
+            t.pop("settled", None)      # a new answer reopens: a retour sent again is a new retour (#496)
         t["reviewed"] = datetime.datetime.now().isoformat(timespec="seconds")
         write_json(test_path(tid), t)
         if "images" in body:
@@ -3223,6 +3311,8 @@ def parser():
     for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
                         ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
                         ("remove", cmd_test_remove, "withdraw the session's own unmerged entries (archived)"),
+                        ("settle", cmd_test_settle, "mark a handled retour as settled (status stays retour, #496)"),
+                        ("unsettled", cmd_test_unsettled, "read-only: the unsettled retours of an issue (exit 1 if any)"),
                         ("list", cmd_test_list, "list the entries")):
         q = t.add_parser(name, help=h, allow_abbrev=False)
         q.set_defaults(fn=fn)
@@ -3238,6 +3328,12 @@ def parser():
             q.add_argument("issue", type=int)
             q.add_argument("ids", nargs="+")
             q.add_argument("--answered", action="store_true", help="also remove entries ticked or commented")
+        elif name == "unsettled":
+            q.add_argument("issue", type=int)
+        elif name == "settle":
+            q.add_argument("id")
+            q.add_argument("--commit", help="the commit that handled it (any commit of this repository)")
+            q.add_argument("--note", help="free text, stored as is")
         else:
             q.add_argument("--issue", type=int)
     q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)
