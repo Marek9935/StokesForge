@@ -426,6 +426,14 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
 
     # Refusals: main unchanged, lock free.
     dsb; base="$(main_head)"
+    # #496: an unsettled retour of the issue refuses the delivery before anything moves; settled, it goes through.
+    set_status() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]=sys.argv[2]; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/7-1.json" "$1"; }
+    set_status retour
+    refused "unsettled retour"
+    grep -q '7-1' "$sb/out" && grep -q 'test settle' "$sb/out" || fail "unsettled retour: message names the entry and the command: $(cat "$sb/out")"
+    sbsuivi test settle 7-1 --note "fixed" > /dev/null || fail "settle in the sandbox"
+    deliver || fail "settled retour: refused: $(cat "$sb/out")"
+    dsb; base="$(main_head)"
     echo 'Merge #77: x' > "$sb/bad"; DMSG="$sb/bad" refused "bad message"
     DMSG="$sb/none" refused "missing file"
     DN=77 refused "wrong issue"

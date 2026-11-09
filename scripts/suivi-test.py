@@ -946,6 +946,42 @@ class TestTestCommands(Base):
         self.assertEqual(self.settle("7-1", sid="S1").returncode, 0)
         self.assertEqual((suivi_state_counts(self.state), self.held()), before)
 
+    def test_merge_ready_counts_a_settled_retour_but_not_an_unsettled_one(self):
+        def items(*es):
+            shutil.rmtree(os.path.join(self.state, "tests"), ignore_errors=True)
+            for k, f in enumerate(es, 1):
+                self.put_test("7-%d" % k, **dict({"try": "x"}, **f))
+            with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+                return suivi.scan_group([7])[0]
+        st = {"at": "t", "by": "agent"}
+        self.assertTrue(suivi.merge_ready(items({"status": "ok"}, {"status": "retour", "settled": st})))
+        self.assertFalse(suivi.merge_ready(items({"status": "ok"}, {"status": "retour"})))
+        self.assertFalse(suivi.merge_ready(items({"status": "retour", "settled": st}, {"status": "todo"})))
+        a = items({"status": "retour"})
+        b = {k: dict(v, settled=True) for k, v in a.items()}          # same file times: only `settled` differs
+        self.assertNotEqual(suivi.merge_key(a), suivi.merge_key(b))
+
+    def test_check_lists_an_unsettled_retour_of_a_done_issue_or_without_record(self):
+        self.put(5, colour=None, done_at="2026-11-01")
+        self.put(6, colour=C[0], owner=self.live_owner())
+        self.put_test("5-1", status="retour")
+        self.put_test("5-2", status="retour", settled={"at": "t", "by": "agent"})
+        self.put_test("8-1", status="retour")                    # no record
+        self.put_test("6-1", status="retour")                    # a live issue: its own business
+        out = self.run_cli("check").stdout
+        self.assertIn("5-1", out)
+        self.assertIn("8-1", out)
+        self.assertNotIn("5-2", out)
+        self.assertNotIn("6-1", out)
+
+    def test_unsettled_lists_and_exits_1_only_while_one_remains(self):
+        self.put_test("7-1", status="retour")
+        self.put_test("7-2", status="ok")
+        r = self.run_cli("test", "unsettled", "7")
+        self.assertEqual((r.returncode, r.stdout.split()), (1, ["7-1"]))
+        self.settle("7-1")
+        self.assertEqual(self.run_cli("test", "unsettled", "7").returncode, 0)
+
 
 class TestAgentIdle(Base):
     def setUp(self):
@@ -1254,6 +1290,18 @@ class TestWaitEvents(WaitBase):
         self.assertEqual(rc, 0)
         self.assertTrue(out.startswith("timeout"), out)
         self.assertNotIn("1-1", out)
+
+    def test_a_settle_by_the_user_wakes_the_wait_like_an_answer(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "x")
+        self.entry("1-2")
+        self.run_wait(1)                                              # hears the retour
+        p = self.spawn(1, "--timeout", "5")
+        self.armed()
+        self.entry("1-1", "retour", "x", settled={"at": "t", "by": "user"})
+        rc, out, _ = self.finish(p)
+        self.assertEqual(rc, 0)
+        self.assertIn("1-1 retour: x (settled by the user on the page)", out)
 
     def test_rearmed_reports_nothing_again(self):
         self.owned(1)
@@ -2066,8 +2114,45 @@ class TestServer(ServerBase):
         st = json.loads(self.req("GET", "/api/state")[2])
         e = [t for t in st["tests"] if t["id"] == "1-1"][0]
         self.assertEqual((e["status"], e["settled"]["note"], st["pending"]), ("retour", "n", 0))
-        self.assertEqual(self.post(body={"status": "ok"})[0], 200)               # the page still writes the entry
-        self.assertIn("settled", json.loads(self.entry_text()))
+
+    def settled_entry(self, status="retour"):
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": status, "comment": "bad", "try": "scripts/try.sh 1",
+                       "settled": {"at": "2026-11-09T10:00:00", "by": "agent"}}, f)
+
+    def test_a_note_keeps_settled_a_new_retour_or_an_ok_clears_it(self):
+        self.settled_entry()
+        self.assertEqual(self.post(body={"comment": "just a note"})[0], 200)
+        e = json.loads(self.entry_text())
+        self.assertEqual((e["comment"], e["settled"]["by"]), ("just a note", "agent"))
+        self.assertEqual(self.post(body={"status": "retour", "comment": "again"})[0], 200)
+        self.assertNotIn("settled", json.loads(self.entry_text()))
+        self.settled_entry()
+        self.assertEqual(self.post(body={"status": "ok"})[0], 200)
+        e = json.loads(self.entry_text())
+        self.assertEqual((e["status"], "settled" in e), ("ok", False))
+
+    def test_the_page_settles_a_retour_as_the_user_and_only_a_retour_once(self):
+        S = {"settle": True}
+        for st in ("todo", "ok"):
+            with open(self.entry, "w") as f:
+                json.dump({"n": 1, "title": "T", "status": st, "try": "x"}, f)
+            before = self.entry_text()
+            self.assertEqual(self.post(body=S)[0], 409)
+            self.assertEqual(self.entry_text(), before)
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "retour", "comment": "c", "reviewed": "R", "try": "x"}, f)
+        self.assertEqual(self.post(body={"settle": "yes"})[0], 400)
+        self.assertEqual(self.post(body={"settle": True, "status": "ok"})[0], 400)
+        self.assertEqual(self.post(body=S, headers={"Content-Type": "application/json"})[0], 403)
+        self.assertEqual(self.post(body=S)[0], 200)
+        e = json.loads(self.entry_text())
+        self.assertEqual((e["status"], e["settled"]["by"], e["reviewed"], e["comment"]), ("retour", "user", "R", "c"))
+        self.assertNotIn("commit", e["settled"])
+        before = self.entry_text()
+        self.assertEqual(self.post(body=S)[0], 409)
+        self.assertEqual(self.entry_text(), before)
+        self.assertEqual(self.post("/api/tests/1-9", body=S)[0], 404)
 
     def test_csp_lets_the_inline_tab_icon_load(self):
         status, headers, _ = self.req("GET", "/")
@@ -4273,6 +4358,53 @@ class TestPage(unittest.TestCase):
         self.assertFalse(L(dict(base, merge_requested=True), [ok, todo])["mergeRequested"])
         self.assertFalse(L(dict(base, merge_requested=False), [ok])["mergeRequested"])
         # lang: fr end
+
+    def split_node(self, expr):
+        page = self.page()
+        card = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", page, re.S).group(1)
+        split = re.search(r"/\*SPLIT-START\*/(.*)/\*SPLIT-END\*/", page, re.S).group(1)
+        r = subprocess.run(["node", "-e", card + split + "\nprocess.stdout.write(JSON.stringify(%s));" % expr],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_settled_retour_moves_to_its_own_section(self):
+        st = {"at": "2026-11-09T10:00:00", "by": "agent"}
+        tests = [{"id": "1-1", "status": "todo"}, {"id": "1-2", "status": "retour"},
+                 {"id": "1-3", "status": "retour", "settled": st}, {"id": "1-4", "status": "ok"}]
+        got = self.split_node("(()=>{const s=splitTests(%s);return Object.fromEntries(Object.entries(s).map(([k,v])=>[k,v.map(x=>x.id)]));})()" % json.dumps(tests))
+        self.assertEqual(got, {"todo": ["1-1"], "back": ["1-2"], "settled": ["1-3"], "done": ["1-4"]})
+        html = self.page()
+        self.assertIn('id="n-settled"', html)
+        self.assertLess(html.index('id="back"'), html.index('id="settled-wrap"'))
+        self.assertLess(html.index('id="settled-wrap"'), html.index('id="done-wrap"'))
+        self.assertIn("$('n-settled').textContent=settled.length", html)
+        # lang: fr begin
+        self.assertIn("Retours traités", html)
+        text = self.split_node("[settledText({settled:{by:'user',at:'x'}},'9 nov.'),"
+                               "settledText({settled:{by:'agent',commit:'0123456789abcdef',note:'#12'}},'9 nov.')]")
+        self.assertEqual(text, ["classé par toi le 9 nov.", "traité le 9 nov. · commit 01234567 · #12"])
+        # lang: fr end
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_classer_button_is_for_an_unsettled_retour_only(self):
+        st = {"at": "t", "by": "user"}
+        got = self.split_node("[{status:'todo'},{status:'ok'},{status:'retour'},{status:'retour',settled:%s}].map(canSettle)" % json.dumps(st))
+        self.assertEqual(got, [False, False, True, False])
+        self.assertIn("if(canSettle(x)){", self.page())
+        self.assertIn("'Classer'", self.page())              # lang: fr
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_merge_button_counts_a_settled_retour_as_done(self):
+        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        ok = {"n": 7, "status": "ok", "try": "x"}
+        done = {"n": 7, "status": "retour", "try": "x", "settled": {"at": "t", "by": "agent"}}
+        open_ = {"n": 7, "status": "retour", "try": "x"}
+        self.assertTrue(self.merge_ui(c, [ok, done])["button"])
+        self.assertFalse(self.merge_ui(c, [ok, open_])["button"])
+        self.assertTrue(self.card_line(c, [ok, done])["mergeReady"])
+        self.assertFalse(self.card_line(c, [ok, open_])["mergeReady"])
 
     def merge_ui(self, c, tests):
         src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
