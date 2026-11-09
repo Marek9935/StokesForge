@@ -589,7 +589,19 @@ mod tests {
         bench
             .state
             .import_set_advanced(stokesforge_app_state::state::AdvancedChange::SkipChars(3));
-        paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        // The sentences sit below the fold: scroll down to them.
+        let wheel = vec![
+            egui::Event::PointerMoved(egui::pos2(200.0, 400.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(0.0, -2000.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        for _ in 0..3 {
+            paint(&ctx, &mut bench.state, &mut actions, wheel.clone());
+        }
         let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
         assert!(
             painted.iter().any(|t| t.text.contains(&sentence)),
@@ -597,11 +609,11 @@ mod tests {
         );
     }
 
-    /// A setting changed in the Advanced fold adds a sentence above the fold:
-    /// the left panel keeps the fold where it was on screen (the scroll does
-    /// not jump), so the control just clicked stays under the pointer.
+    /// A setting changed in the Advanced fold adds (or removes) a sentence
+    /// below the fold: the control just clicked keeps its screen position on
+    /// the same frame and on the frames after, in both directions.
     #[test]
-    fn changing_an_advanced_setting_keeps_the_left_panel_where_it_was() {
+    fn changing_an_advanced_setting_keeps_the_clicked_control_where_it_was() {
         let _language = stokesforge_app_state::i18n::test_language(
             stokesforge_app_state::i18n::Language::English,
         );
@@ -611,8 +623,13 @@ mod tests {
         without_guide(&ctx, &mut bench.state, &mut actions);
         let title = tr!("import-advanced-title");
         click_text(&ctx, &mut bench.state, &mut actions, &title);
-        let y = |p: &[crate::app::test_support::Text]| {
-            p.iter().find(|t| t.text == title).map(|t| t.center.y)
+        let file = tr!("import-advanced-sheet-name-file");
+        let from_title = tr!("import-advanced-sheet-name-title");
+        let y = |p: &[crate::app::test_support::Text], label: &str| {
+            p.iter()
+                .find(|t| t.text == label)
+                .map(|t| t.center.y)
+                .unwrap_or_else(|| panic!("{label} is in view"))
         };
         // The panel is scrolled down by the wheel, over the left panel.
         let wheel = vec![
@@ -627,25 +644,35 @@ mod tests {
         for _ in 0..3 {
             paint(&ctx, &mut bench.state, &mut actions, wheel.clone());
         }
-        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
-        let before = y(&painted).expect("the fold title is in view");
-        let top = painted.iter().find(|t| t.text == "Recognised:").unwrap();
-        assert!(top.center.y > 0.0);
-        bench.state.import_set_advanced(
-            stokesforge_app_state::state::AdvancedChange::SheetNameFromFile(true),
-        );
-        for _ in 0..3 {
+        // Let the smooth scrolling come to rest.
+        for _ in 0..30 {
             paint(&ctx, &mut bench.state, &mut actions, Vec::new());
         }
         let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
-        assert!(painted
-            .iter()
-            .any(|t| t.text == tr!("import-advanced-set-title")));
-        let after = y(&painted).expect("the fold title is still in view");
-        assert!(
-            (after - before).abs() < 1.0,
-            "the fold moved from {before} to {after}"
-        );
+        let top = painted.iter().find(|t| t.text == "Recognised:").unwrap();
+        assert!(top.center.y > 0.0);
+        for (to_file, label) in [(true, &file), (false, &from_title)] {
+            let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+            let (before_title, before) = (y(&painted, &title), y(&painted, label));
+            bench.state.import_set_advanced(
+                stokesforge_app_state::state::AdvancedChange::SheetNameFromFile(to_file),
+            );
+            for frame in 1..=4 {
+                let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+                assert_eq!(
+                    !bench.state.import_advanced_sentences().is_empty(),
+                    to_file,
+                    "frame {frame}: the sentence block follows the setting"
+                );
+                for (name, was) in [(&title, before_title), (label, before)] {
+                    let now = y(&painted, name);
+                    assert!(
+                        (now - was).abs() < 1.0,
+                        "to_file={to_file} frame {frame}: {name} moved from {was} to {now}"
+                    );
+                }
+            }
+        }
     }
 
     /// Save as Template says how many points are still to check and that they

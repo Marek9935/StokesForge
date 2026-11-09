@@ -174,7 +174,7 @@ left to check.
   and its whole text on hover), and the **Advanced** fold, closed by default
   (date order, leading characters removed, blocks, missing values, comment
   prefix, skipped data lines: `state/import_advanced.rs`; a setting not at its
-  default also reads as a sentence above the fold). Nothing of the panel is
+  default also reads as a sentence below the fold). Nothing of the panel is
   ever cut at its edge: a long text wraps, and "Mark as Checked" moves under
   its sentence when the sentence would get too narrow.
 - **To check** (`state/import_tocheck.rs`): the findings that are doubts, the

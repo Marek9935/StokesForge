@@ -180,6 +180,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | SVG Text | Texte SVG |
 | Text | Texte |
 | Text format | Format du texte |
+| the file has no title | le fichier n'a pas de titre |
 | Theme | Thème |
 | Theme… | Thème… |
 | Title from the file | Titre du fichier |

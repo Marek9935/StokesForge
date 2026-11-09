@@ -1709,7 +1709,16 @@ pub fn build_view(
                         line = ev.first().map_or(0, |e| e.line).to_string()
                     ),
                 ),
-                _ => (tr!("import-found-value-filename"), String::new()),
+                // Always a second line, so the Advanced setting changes no
+                // height above the control just clicked.
+                _ if recipe.sheet_name_from_file => (
+                    tr!("import-found-value-filename"),
+                    tr!("import-found-source-filename-setting"),
+                ),
+                _ => (
+                    tr!("import-found-value-filename"),
+                    tr!("import-found-source-filename-no-title"),
+                ),
             };
             found(
                 &mut rows,

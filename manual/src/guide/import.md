@@ -122,7 +122,7 @@ The rare settings are in the **Advanced** fold at the bottom of the left panel, 
 
 <img src="../images/import-advanced.png" alt="The Import window on a plain two-column file, with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines." width="1000">
 
-A setting that is not at its default value also appears as a sentence under **Advanced settings in use**, above the fold, so nothing set there stays hidden.
+A setting that is not at its default value also appears as a sentence under **Advanced settings in use**, below the fold, so nothing set there stays hidden.
 
 ## Where the data goes
 
