@@ -4876,10 +4876,31 @@ fn importing_into_new_books_groups_files_as_requested() {
             1
         };
         assert_eq!(added, expected);
-        let sheet_a = sheet_named(state.tree(), "measure_a");
-        let sheet_b = sheet_named(state.tree(), "measure_b");
+        // A new workbook per file takes the name of the file; its sheet is
+        // "Raw Data" (#488). Every file in one shared workbook keeps one sheet
+        // per file, named after the file.
+        let (sheet_a, sheet_b) = if destination == ImportDestination::NewBookPerFile {
+            let first_sheet = |name: &str| {
+                let book = book_named(state.tree(), name);
+                state.worksheets_of(book)[0].0
+            };
+            (first_sheet("measure_a"), first_sheet("measure_b"))
+        } else {
+            (
+                sheet_named(state.tree(), "measure_a"),
+                sheet_named(state.tree(), "measure_b"),
+            )
+        };
         let book_a = state.tree().node(sheet_a).unwrap().parent().unwrap();
         let book_b = state.tree().node(sheet_b).unwrap().parent().unwrap();
+        let sheet_name = |sheet| state.tree().node(sheet).unwrap().name().to_string();
+        if destination == ImportDestination::NewBookPerFile {
+            assert_eq!(sheet_name(sheet_a), "Raw Data");
+            assert_eq!(sheet_name(sheet_b), "Raw Data");
+        } else {
+            assert_eq!(sheet_name(sheet_a), "measure_a");
+            assert_eq!(sheet_name(sheet_b), "measure_b");
+        }
         assert_eq!(
             book_a == book_b,
             destination == ImportDestination::NewBookForAll
@@ -4902,6 +4923,101 @@ fn importing_into_new_books_groups_files_as_requested() {
             before
         );
     }
+}
+
+/// #488: a new workbook per file holds a sheet "Raw Data" until a value of an
+/// imported column changes; the change renames it "Sheet1" in the same history
+/// step, and "Refresh from Source" keeps the current name.
+#[test]
+fn the_raw_data_sheet_of_a_new_book_renames_at_the_first_change() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Untitled"),
+        paths: vec![file],
+    });
+    let book = book_named(state.tree(), "measure_a");
+    let sheet = state.worksheets_of(book)[0].0;
+    let name = |state: &AppState| state.tree().node(sheet).unwrap().name().to_string();
+    assert_eq!(name(&state), "Raw Data");
+    let column = state.visible_columns(sheet)[0].0;
+
+    // A header edit is not a change.
+    state.dispatch(Action::SetColumnLongName {
+        column,
+        text: "Time".into(),
+    });
+    assert_eq!(state.column_meta(column).long_name, "Time");
+    assert_eq!(name(&state), "Raw Data");
+
+    state.select_cell(sheet, column, 1);
+    state.dispatch(Action::Paste {
+        sheet,
+        text: "7\n".to_string(),
+    });
+    assert_eq!(cell(&state, column, 1), Cell::Float(7.0));
+    assert_eq!(name(&state), "Sheet1");
+    state.dispatch(Action::Undo);
+    assert_eq!(cell(&state, column, 1), Cell::Float(2.0));
+    assert_eq!(name(&state), "Raw Data");
+    state.dispatch(Action::Redo);
+    assert_eq!(name(&state), "Sheet1");
+}
+
+/// Only "one sheet per file" gets the "Raw Data" sheet: files side by side in
+/// one sheet keep the name of the file, and no mark is set.
+#[test]
+fn files_side_by_side_do_not_get_a_raw_data_sheet() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (a, b) = (
+        dir.path().join("measure_a.csv"),
+        dir.path().join("measure_b.csv"),
+    );
+    std::fs::write(&a, "1,10\n2,20\n").unwrap();
+    std::fs::write(&b, "3,30\n4,40\n").unwrap();
+    let mut recipe = ImportRecipe::new("Untitled");
+    recipe.files_layout = stokesforge_import::FilesLayout::SideBySide;
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe,
+        paths: vec![a, b],
+    });
+    assert!(
+        state.tree().walk_all().into_iter().all(|id| state
+            .tree()
+            .node(id)
+            .is_none_or(|node| node.name() != "Raw Data")),
+        "no sheet is called Raw Data"
+    );
+    assert!(state.tree().raw_sheets().is_empty());
+}
+
+#[test]
+fn refreshing_from_the_source_keeps_the_raw_data_name() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Untitled"),
+        paths: vec![file.clone()],
+    });
+    let book = book_named(state.tree(), "measure_a");
+    let sheet = state.worksheets_of(book)[0].0;
+    std::fs::write(&file, "1,10\n2,20\n3,30\n").unwrap();
+    state.dispatch(Action::RefreshFromSource { sheet });
+    let column = state.visible_columns(sheet)[0].0;
+    assert_eq!(
+        cell(&state, column, 2),
+        Cell::Float(3.0),
+        "the file was re-read"
+    );
+    assert_eq!(state.tree().node(sheet).unwrap().name(), "Raw Data");
 }
 
 /// The detached view keeps its selections and its copies, then provides this

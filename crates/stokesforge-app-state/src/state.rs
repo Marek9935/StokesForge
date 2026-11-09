@@ -10813,13 +10813,23 @@ impl AppState {
                 }
             } else {
                 let mut shared_book = None;
+                // A new workbook per file holds one sheet per file: the
+                // workbook takes the name of the file, the sheet is "Raw Data"
+                // until a value of an imported column changes (#488).
+                let raw_data_sheet = matches!(destination, ImportDestination::NewBookPerFile)
+                    && first_recipe.files_layout == stokesforge_import::FilesLayout::SheetPerFile;
                 for plan in &plans {
                     let Some(book) =
                         self.book_for_plan(destination, plan, &mut shared_book, &mut failures)
                     else {
                         continue;
                     };
-                    let Some(sheet) = self.add_named_sheet(book, &plan.name, &mut failures) else {
+                    let sheet_name = if raw_data_sheet {
+                        tr!("import-sheet-raw-data")
+                    } else {
+                        plan.name.clone()
+                    };
+                    let Some(sheet) = self.add_named_sheet(book, &sheet_name, &mut failures) else {
                         continue;
                     };
                     for &planned in &plan.columns {
@@ -10833,6 +10843,14 @@ impl AppState {
                                 column,
                             });
                         }
+                    }
+                    if raw_data_sheet {
+                        self.execute(Command::SetSheetRawMark {
+                            sheet,
+                            mark: Some(stokesforge_core::RawSheetMark {
+                                modified_base: tr!("import-sheet-modified-base"),
+                            }),
+                        });
                     }
                     for &item in &plan.items {
                         if !done_paths.contains(&items[item].path) {
