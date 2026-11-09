@@ -218,7 +218,11 @@ impl ScaledShapes {
                     // mesh is snapped to the pixels (#86).
                     return by_id.contains_key(&id).then_some(id);
                 }
-                let sharp = match previous.get(&id) {
+                // `kept` first: several meshes can point to one texture
+                // (same text, same cache entry, #500). Rasterizing again for
+                // the second would replace, and so free, the texture the
+                // first mesh already points to.
+                let sharp = match kept.get(&id).or_else(|| previous.get(&id)) {
                     Some(texture) if texture.pixels_per_point() == pixels_per_point => {
                         Arc::clone(texture)
                     }
@@ -457,6 +461,28 @@ mod tests {
             first, second,
             "same scale: the enlarged texture is carried over"
         );
+    }
+
+    /// Issue #500: several legend entries with the same text share one cached
+    /// texture, so several meshes point to it. Enlarged, every mesh must keep
+    /// a live texture: the later mesh must reuse the version the earlier one
+    /// got, not drop it for a new one (an empty legend entry on screen).
+    #[test]
+    fn identical_formulas_share_one_enlarged_texture() {
+        let context = context();
+        let formulas = FormulaCache::new();
+        let (_, first) = formula(&context, &formulas);
+        let source = [first.clone(), first.clone(), first];
+        let transform = TSTransform::new(egui::Vec2::ZERO, 2.0);
+        let mut cache = ScaledShapes::default();
+        let shapes = cache.get(&context, key_for(200.0), &source, transform, &formulas);
+        for shape in shapes {
+            let id = mesh_of(shape).texture_id;
+            assert!(
+                context.tex_manager().read().meta(id).is_some(),
+                "a mesh points to a freed texture {id:?}"
+            );
+        }
     }
 
     /// Issue #86: on screen, a formula's mesh lands on a whole physical pixel
