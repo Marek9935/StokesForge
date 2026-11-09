@@ -538,6 +538,17 @@ class TestMigrateLegacy(Base):
         self.assertEqual((e["free"], e["held_by"]), (False, ["legacy"]))
 
 
+def suivi_state_counts(state):
+    """pending, trial_pending and is_answered of the entries of a state folder, read in a child process."""
+    code = ("import json,sys;sys.path.insert(0,%r);import suivi;"
+            "print(json.dumps([suivi.build_state()['pending'],suivi.trial_pending(7),"
+            "[suivi.is_answered(t) for t in suivi.load_tests(7)]]))" % os.path.dirname(SUIVI))
+    return subprocess.run([sys.executable, "-I", "-c", code], env=dict(os.environ, SF_SUIVI_DIR=state, SF_SUIVI_CI="off"),
+                          capture_output=True, text=True, check=True).stdout
+
+
+
+
 class TestTestCommands(Base):
     def entries(self, tmp, data):
         p = os.path.join(tmp, "e.json")
@@ -865,6 +876,77 @@ class TestTestCommands(Base):
         self.assertEqual((r["what"], r["waiting"], r["wait_kind"]), ("z", "n2", "dep"))
 
 
+    def settle(self, *args, sid=None):
+        return self.run_cli("test", "settle", *args, env=self.as_session(sid) if sid else None)
+
+    def test_settle_a_retour_keeps_its_status(self):
+        self.put_test("7-1", status="retour", comment="fix it", **{"try": "scripts/try.sh 7"})
+        r = self.settle("7-1", "--note", "  raw « text »  ")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t = jload(self.tfile("7-1"))
+        self.assertEqual((t["status"], t["comment"]), ("retour", "fix it"))
+        self.assertEqual((t["settled"]["by"], t["settled"]["note"]), ("agent", "  raw « text »  "))
+        self.assertRegex(t["settled"]["at"], r"^\d{4}-\d\d-\d\dT")
+        self.assertNotIn("commit", t["settled"])
+        self.assertIn("(settled)", self.run_cli("test", "list", "--issue", "7").stdout)
+
+    def test_settle_refuses_todo_ok_missing_and_twice(self):
+        self.put_test("7-1", status="todo")
+        self.put_test("7-2", status="ok")
+        self.put_test("7-3", status="retour")
+        for tid in ("7-1", "7-2"):
+            before = slurp(self.tfile(tid))
+            r = self.settle(tid)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("only a retour", r.stderr)
+            self.assertEqual(slurp(self.tfile(tid)), before)
+        self.assertNotEqual(self.settle("7-9").returncode, 0)
+        self.assertNotEqual(self.settle("bad").returncode, 0)
+        self.assertEqual(self.settle("7-3").returncode, 0)
+        before = slurp(self.tfile("7-3"))
+        r = self.settle("7-3", "--note", "again")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("already settled", r.stderr)
+        self.assertEqual(slurp(self.tfile("7-3")), before)
+
+    def test_settle_commit_must_exist_but_need_not_cite_the_issue(self):
+        self.put_test("7-1", status="retour", commit="m" * 40)
+        self.put_test("7-2", status="retour")
+        before = slurp(self.tfile("7-1"))
+        r = self.settle("7-1", "--commit", "deadbeef0000")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no such commit", r.stderr)
+        self.assertEqual(slurp(self.tfile("7-1")), before)
+        full = self.gout("rev-parse", "HEAD")             # the "init" commit: cites no issue
+        self.assertEqual(self.settle("7-1", "--commit", full[:8]).returncode, 0)
+        t = jload(self.tfile("7-1"))
+        self.assertEqual((t["settled"]["commit"], t["commit"]), (full, "m" * 40))
+
+    def test_settle_ownership(self):
+        self.put_test("7-1", status="retour")
+        self.put_test("8-1", status="retour")
+        self.put_test("9-1", status="retour")
+        self.put(8, colour=C[0], owner=self.live_owner("OTHER"))
+        r = self.settle("8-1", sid="S1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("another live session", r.stderr)
+        self.assertNotIn("settled", jload(self.tfile("8-1")))
+        self.assertNotEqual(self.settle("8-1").returncode, 0)                      # no session at all
+        self.assertEqual(self.settle("7-1", sid="S1").returncode, 0)               # no record
+        self.put(9, colour=None, last_colour=C[0])                                 # record, no owner
+        self.assertEqual(self.settle("9-1", sid="S1").returncode, 0)
+        self.put_test("8-2", status="retour")
+        self.assertEqual(self.settle("8-2", sid="OTHER").returncode, 0)            # the live owner itself
+
+    def test_settle_does_not_change_the_counts_or_the_colour(self):
+        self.claim(7, "--name", "Seven")
+        self.put_test("7-1", status="retour", **{"try": "scripts/try.sh 7"})
+        self.put_test("7-2", status="todo", **{"try": "scripts/try.sh 7"})
+        before = (suivi_state_counts(self.state), self.held())
+        self.assertEqual(self.settle("7-1", sid="S1").returncode, 0)
+        self.assertEqual((suivi_state_counts(self.state), self.held()), before)
+
+
 class TestAgentIdle(Base):
     def setUp(self):
         super().setUp()
@@ -1158,6 +1240,20 @@ class TestWaitEvents(WaitBase):
         self.assertIn("1-1 retour: x", out)
         self.assertLess(time.time() - t0, 5)
         self.assertIn("Still open: 1 trial entry to tick. Re-arm: python3 scripts/suivi.py wait 1", out)
+
+    def test_settling_a_retour_wakes_nothing(self):
+        self.owned(1)
+        self.entry("1-1", "retour", "x")
+        self.entry("1-2")
+        self.run_wait(1)                                              # hears the retour
+        p = self.spawn(1, "--timeout", "2")
+        self.armed()
+        r = self.run_cli("test", "settle", "1-1", "--note", "done", env=self.as_session("S1"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rc, out, _ = self.finish(p)
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("timeout"), out)
+        self.assertNotIn("1-1", out)
 
     def test_rearmed_reports_nothing_again(self):
         self.owned(1)
@@ -1960,6 +2056,19 @@ class TestAgentIdleServed(ServerBase):
 
 
 class TestServer(ServerBase):
+    def test_state_carries_settled_and_pending_is_unchanged(self):
+        self.assertEqual(json.loads(self.req("GET", "/api/state")[2])["pending"], 1)
+        self.assertEqual(self.post(body={"status": "retour", "comment": "no"})[0], 200)
+        self.assertEqual(json.loads(self.req("GET", "/api/state")[2])["pending"], 0)
+        r = subprocess.run([sys.executable, "-I", SUIVI, "test", "settle", "1-1", "--note", "n"], cwd=self.repo,
+                           env=dict(self.env, **self.as_session("S1")), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        st = json.loads(self.req("GET", "/api/state")[2])
+        e = [t for t in st["tests"] if t["id"] == "1-1"][0]
+        self.assertEqual((e["status"], e["settled"]["note"], st["pending"]), ("retour", "n", 0))
+        self.assertEqual(self.post(body={"status": "ok"})[0], 200)               # the page still writes the entry
+        self.assertIn("settled", json.loads(self.entry_text()))
+
     def test_csp_lets_the_inline_tab_icon_load(self):
         status, headers, _ = self.req("GET", "/")
         csp = {k.lower(): v for k, v in headers.items()}["content-security-policy"]
@@ -3711,6 +3820,25 @@ class TestTagReport(LabelBase):
         self.assertEqual([(p["issue"], p["fields"]) for p in puts],
                          [(1, {"remove_labels": "attente-final,attente-rc", "state_event": "close"})])
         self.assertEqual(self.load_fake()["issues"]["1"]["state"], "closed")
+
+    def test_settling_a_tag_card_does_not_close_the_issue(self):
+        self.seed("v1.0.0")
+        self.paused(1)
+        self.issue(1, ["attente-final"])
+        self.declare(1, "final", jobs=["release-linux"], human="Ouvre le manuel en ligne.")
+        self.gh_run([gh_job("release-linux")])
+        self.tag("v1.1.0")
+        suivi.tag_pass(NOW)
+        path = os.path.join(self.state, "tests", "1-1.json")
+        card = jload(path)
+        card["status"] = "retour"
+        suivi.write_json(path, card)
+        r = self.run_cli("test", "settle", "1-1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(jload(path)["status"], "retour")
+        suivi.tag_pass(NOW + 2)
+        suivi.tag_pass(NOW + 3)
+        self.assertEqual(self.puts(), [])
 
     def test_a_failed_job_comments_keeps_the_label_and_makes_no_card(self):
         self.seed("v1.0.0")

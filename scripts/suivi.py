@@ -17,7 +17,8 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
                            folder moved, meta carries withdrawn_at/_ts/_by; its number is never reused
     tests/<n>-<k>.json     trial entry: title, intro, where, steps, expect, try, commit, date,
                            status (todo|ok|retour), comment, reviewed (written by the
-                           page's POST and by `test add|merged`)
+                           page's POST and by `test add|merged`; `settled` {at, by, commit?, note?} by
+                           `test settle`, #496: a handled retour keeps status "retour")
     tests/<n>-<k>.images/  screenshots of an entry (#456); the entry's `images` field lists names only
     qcm/<id>/images/<code>/  screenshots of a form card; the answer's `images` lists names only
     removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
@@ -99,7 +100,7 @@ until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
 members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
-test add|merged|remove|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
+test add|merged|remove|settle|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
 """
 import argparse
 import datetime
@@ -1675,10 +1676,49 @@ def cmd_test_remove(a):
     return 0
 
 
+def settle_owner_check(n):
+    """#496: settling needs no claim, but a live session other than the caller must not be overruled."""
+    recs = load_all()
+    me = current_owner()
+    for r in (recs.get(n), recs.get((recs.get(n) or {}).get("parent"))):
+        if r and owner_alive(r) and (me is None or str((r.get("owner") or {}).get("session", "")) != me["session"]):
+            raise Fail("#%d is owned by another live session: only it may settle its entries" % r["issue"])
+
+
+def cmd_test_settle(a):
+    m = re.fullmatch(r"(\d+)-\d+", a.id)
+    if not m:
+        raise Fail("%r is not an entry id (<issue>-<k>)" % a.id)
+    settle_owner_check(int(m.group(1)))
+    full = None
+    if a.commit:
+        rc, out = git_rc("rev-parse", "--verify", "--quiet", a.commit + "^{commit}")
+        if rc != 0:
+            raise Fail("no such commit in this repository: %s" % a.commit)
+        full = out.strip()
+    with Lock():
+        t = read_json(test_path(a.id))
+        if not isinstance(t, dict):
+            raise Fail("no entry %s" % a.id)
+        if t.get("status", "todo") != "retour":
+            raise Fail("%s is %s: only a retour can be settled" % (a.id, t.get("status", "todo")))
+        if t.get("settled"):
+            raise Fail("%s is already settled" % a.id)
+        s = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": "agent"}
+        if full:
+            s["commit"] = full
+        if a.note is not None:
+            s["note"] = a.note
+        t["settled"] = s
+        write_json(test_path(a.id), t)
+    print("settled %s%s" % (a.id, " (%s)" % full[:8] if full else ""))
+    return 0
+
+
 def cmd_test_list(a):
     for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
-        print("%s\t%s\t%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
-                                "\t(try)" if t.get("try") else ""))
+        print("%s\t%s\t%s%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
+                                  "\t(try)" if t.get("try") else "", "\t(settled)" if t.get("settled") else ""))
         for line in image_lines(test_images_dir(t["id"]), listed_images(t)):
             print(line)
     return 0
@@ -3223,6 +3263,7 @@ def parser():
     for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
                         ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
                         ("remove", cmd_test_remove, "withdraw the session's own unmerged entries (archived)"),
+                        ("settle", cmd_test_settle, "mark a handled retour as settled (status stays retour, #496)"),
                         ("list", cmd_test_list, "list the entries")):
         q = t.add_parser(name, help=h, allow_abbrev=False)
         q.set_defaults(fn=fn)
@@ -3238,6 +3279,10 @@ def parser():
             q.add_argument("issue", type=int)
             q.add_argument("ids", nargs="+")
             q.add_argument("--answered", action="store_true", help="also remove entries ticked or commented")
+        elif name == "settle":
+            q.add_argument("id")
+            q.add_argument("--commit", help="the commit that handled it (any commit of this repository)")
+            q.add_argument("--note", help="free text, stored as is")
         else:
             q.add_argument("--issue", type=int)
     q = add("qcm", None, "decision forms (qcm/<id>/)").add_subparsers(dest="qcmd", required=True)
