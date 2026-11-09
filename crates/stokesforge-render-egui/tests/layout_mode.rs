@@ -4,6 +4,7 @@
 //! No graphics server: `egui::Context::run_ui` produces shapes without painting
 //! anything.
 
+use egui::Color32;
 use egui::{Pos2, Rect};
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use stokesforge_core::compose::{CellSide, MoveTarget};
@@ -543,6 +544,7 @@ fn grid_edited(signals: &[GraphEvent]) -> (&[f64], &[f64]) {
             widths,
             heights,
             figure: false,
+            slack: None,
         }] => (widths, heights),
         other => panic!("one GridFramesEdited expected, got {other:?}"),
     }
@@ -660,6 +662,104 @@ fn a_boundary_drag_trades_the_two_columns_and_keeps_the_figure_size() {
     assert_eq!(spec_of(&fixture).frame_widths, vec![200.0, 200.0], "model");
 }
 
+/// The outer edge of a row, pulled inward, changes that row alone (#505): one
+/// event, only the first height down by 40, the slack on top 40, the image the
+/// same size, the preview held. Pulling it back outward eats the slack. An L
+/// corner still scales everything. Witness: the drag routed to the figure kind
+/// (every row would scale).
+#[test]
+fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let band = before.title_band as f32;
+    let from = Pos2::new(before.column_breaks[1] as f32 / 2.0, band + 1.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(0.0, 40.0),
+        egui::Modifiers::NONE,
+    );
+    let [GraphEvent::GridFramesEdited {
+        widths,
+        heights,
+        figure: false,
+        slack: Some(slack),
+    }] = signals.as_slice()
+    else {
+        panic!("one edge event expected, got {signals:?}");
+    };
+    assert_eq!(widths, &vec![200.0, 200.0]);
+    assert_eq!(heights, &vec![110.0, 150.0]);
+    assert_eq!(
+        (slack.top, slack.left, slack.right, slack.bottom),
+        (40.0, 0.0, 0.0, 0.0)
+    );
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, before.size, "the image keeps its size");
+    assert_eq!(after.grid_slack, [0, 40, 0, 0]);
+    assert_eq!(spec_of(&fixture).frame_heights, vec![150.0, 150.0], "model");
+
+    // The edge now sits at the outline, 40 lower; pulling it up eats the slack.
+    let committed = {
+        let mut spec = spec_of(&fixture);
+        spec.frame_heights = vec![110.0, 150.0];
+        spec.grid_slack = Some(*slack);
+        spec
+    };
+    fixture.replace(committed);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let outline_top = layout.grid_outline().expect("outline").1 as f32;
+    let from = Pos2::new(layout.column_breaks[1] as f32 / 2.0, outline_top + 1.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from - egui::vec2(0.0, 60.0),
+        egui::Modifiers::NONE,
+    );
+    let [GraphEvent::GridFramesEdited {
+        heights,
+        slack: Some(slack),
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one edge event expected, got {signals:?}");
+    };
+    assert_eq!(heights, &vec![170.0, 150.0], "the frame grows by 60");
+    assert_eq!(slack.top, 0.0, "the slack is eaten, the figure grows by 20");
+    let grown = layout_of(&context, &mut view, &fixture);
+    assert_eq!(grown.size.1, layout.size.1 + 20);
+
+    // The L corner is untouched: it scales every row (slack frozen).
+    let (context, mut view) = in_mode(&fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner + egui::vec2(0.0, 30.0),
+        egui::Modifiers::NONE,
+    );
+    let [GraphEvent::GridFramesEdited {
+        heights,
+        figure: true,
+        slack: None,
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    assert!(heights.iter().all(|h| *h > 110.0), "{heights:?}");
+    assert!(heights[0] < heights[1], "proportions kept: {heights:?}");
+}
+
 /// With four graphs the middle corner moves the column and the row in one
 /// event; a corner on one boundary and the figure edge moves that one; the
 /// figure's own corners and outer edges have no handle. A legacy graph starts
@@ -705,8 +805,8 @@ fn corners_move_every_boundary_they_lie_on() {
     let cursor = hover_at(&context, &mut view, &fixture, meeting(&layout, 1, 1), 5.2).cursor;
     assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
 
-    // The figure's own corners and outer edges grab nothing.
-    let (context, mut view) = in_mode(&fixture);
+    // The figure's own corners and outer edges grab an outer edge (#505),
+    // never an internal boundary and never the whole figure.
     let edge_middle = meeting(&layout, 0, 0) + egui::vec2(0.0, 75.0);
     let spots = [
         meeting(&layout, 0, 0),
@@ -716,7 +816,7 @@ fn corners_move_every_boundary_they_lie_on() {
         edge_middle,
     ];
     for (n, at) in spots.into_iter().enumerate() {
-        let (i, j) = (n, 0);
+        let (context, mut view) = in_mode(&fixture);
         let signals = drag(
             &context,
             &mut view,
@@ -725,7 +825,17 @@ fn corners_move_every_boundary_they_lie_on() {
             at + egui::vec2(10.0, 10.0),
             egui::Modifiers::NONE,
         );
-        assert!(signals.is_empty(), "({i}, {j}): {signals:?}");
+        assert!(
+            matches!(
+                signals.as_slice(),
+                [GraphEvent::GridFramesEdited {
+                    figure: false,
+                    slack: Some(_),
+                    ..
+                }]
+            ),
+            "({n}): {signals:?}"
+        );
     }
 
     // A legacy graph: the first gesture starts from the frames it is drawn with.
@@ -1089,11 +1199,12 @@ fn l_corners(shapes: &[egui::epaint::ClippedShape]) -> usize {
     count
 }
 
-/// The pills sit on internal boundaries only and the squares on the corners
-/// that lie on one: a selected graph of a 2 x 2 shows 2 pills and 3 squares,
-/// a one-cell figure none. Witness: outer edges or figure corners included.
+/// The pills sit on the four sides of an editable graph (internal boundaries
+/// and, since #505, outer edges) and the squares on the corners that lie on an
+/// internal one: a selected graph of a 2 x 2 shows 4 pills and 3 squares, a
+/// one-cell figure 4 pills. Witness: the squares of figure corners included.
 #[test]
-fn regular_handles_are_drawn_on_internal_boundaries_only() {
+fn regular_handles_are_drawn_on_every_edge_and_squares_on_internal_corners_only() {
     fn marks(shapes: &[egui::epaint::ClippedShape]) -> (usize, usize) {
         fn walk(shape: &egui::Shape, counts: &mut (usize, usize)) {
             match shape {
@@ -1130,15 +1241,53 @@ fn regular_handles_are_drawn_on_internal_boundaries_only() {
     );
     assert_eq!(
         marks(&out.shapes),
-        (3, 2),
+        (3, 4),
         "squares, pills of the top-left graph"
     );
     assert_eq!(l_corners(&out.shapes), 4, "the L page corners");
     let single = Fixture::grid(1, 1, false, false, false);
     let (context, mut view) = in_mode(&single);
     let out = hover_at(&context, &mut view, &single, Pos2::new(-100.0, -100.0), 1.0);
-    assert_eq!(marks(&out.shapes), (0, 0));
+    assert_eq!(marks(&out.shapes), (0, 4));
     assert_eq!(l_corners(&out.shapes), 4, "even on a one-cell figure");
+}
+
+/// With empty space around the grid the mode draws the page dashed (#505), and
+/// a solid page when there is none. Witness: the dash drawn without slack.
+#[test]
+fn the_page_outline_is_dashed_only_when_a_grid_has_slack() {
+    fn page_dashes(shapes: &[egui::epaint::ClippedShape]) -> usize {
+        fn walk(shape: &egui::Shape, count: &mut usize) {
+            match shape {
+                egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, count)),
+                egui::Shape::LineSegment { stroke, .. }
+                    if stroke.color == Color32::from_rgba_unmultiplied(110, 110, 125, 170) =>
+                {
+                    *count += 1;
+                }
+                _ => {}
+            }
+        }
+        let mut count = 0;
+        for clipped in shapes {
+            walk(&clipped.shape, &mut count);
+        }
+        count
+    }
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let away = Pos2::new(-100.0, -100.0);
+    let plain = hover_at(&context, &mut view, &fixture, away, 1.0);
+    assert_eq!(page_dashes(&plain.shapes), 0, "no slack, a solid page");
+    let mut spec = spec_of(&fixture);
+    spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        bottom: 40.0,
+        ..Default::default()
+    });
+    fixture.replace(spec);
+    let (context, mut view) = in_mode(&fixture);
+    let slacked = hover_at(&context, &mut view, &fixture, away, 1.0);
+    assert!(page_dashes(&slacked.shapes) > 4, "a dashed page");
 }
 
 /// An L corner of a Regular figure scales every column and row by one factor
@@ -1164,6 +1313,7 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         widths,
         heights,
         figure: true,
+        slack: None,
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
@@ -1205,6 +1355,7 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         widths,
         heights,
         figure: true,
+        slack: None,
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");

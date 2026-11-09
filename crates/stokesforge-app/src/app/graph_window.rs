@@ -1157,12 +1157,14 @@ fn annotation_interactions(
                 widths,
                 heights,
                 figure,
+                slack,
             } => {
                 actions.push(Action::SetGridFrames {
                     graph,
                     widths,
                     heights,
                     figure,
+                    slack,
                 });
             }
             stokesforge_render_egui::GraphEvent::GridCellMoved { panel, target } => {

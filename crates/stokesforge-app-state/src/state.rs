@@ -859,6 +859,9 @@ pub enum Action {
         /// The whole figure was scaled (history kind `ResizeFigure`), else a
         /// boundary or a corner was pulled (`ResizeCell`).
         figure: bool,
+        /// The empty space around the grid after an outer edge was pulled
+        /// (#505); `None` leaves it as it is.
+        slack: Option<stokesforge_plot::GridSlack>,
     },
     /// Moves a graph (the cell of layer `panel`, overlays included) on a
     /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
@@ -5881,7 +5884,8 @@ impl AppState {
                 widths,
                 heights,
                 figure,
-            } => self.set_grid_frames(graph, &widths, &heights, figure),
+                slack,
+            } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
             Action::MoveGridCell {
                 graph,
                 panel,
@@ -11754,7 +11758,14 @@ impl AppState {
     /// [`Action::SetGridFrames`]: both vectors written into one spec and
     /// committed as one step. A legacy graph is first given the frames it is
     /// drawn with, so the vectors always have the grid's lengths.
-    fn set_grid_frames(&mut self, graph: NodeId, widths: &[f64], heights: &[f64], figure: bool) {
+    fn set_grid_frames(
+        &mut self,
+        graph: NodeId,
+        widths: &[f64],
+        heights: &[f64],
+        figure: bool,
+        slack: Option<stokesforge_plot::GridSlack>,
+    ) {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
@@ -11776,6 +11787,10 @@ impl AppState {
         }
         spec.frame_widths = widths.iter().map(bounds).collect();
         spec.frame_heights = heights.iter().map(bounds).collect();
+        if let Some(slack) = slack {
+            // Stored sanitized: a hostile number never reaches the model.
+            spec.grid_slack = Some(slack.sanitized()).filter(|slack| !slack.is_zero());
+        }
         if self.plot_spec(graph).is_some_and(|before| before == spec) {
             return;
         }

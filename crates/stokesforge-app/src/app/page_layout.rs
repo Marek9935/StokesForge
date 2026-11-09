@@ -942,6 +942,7 @@ fn box_controls(
                 widths,
                 heights,
                 figure: false,
+                slack: None,
             });
         }
     }

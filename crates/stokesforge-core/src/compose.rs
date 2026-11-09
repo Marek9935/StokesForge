@@ -590,6 +590,9 @@ pub fn set_free_placement(spec: &mut PlotSpec, frames: &[Option<FreeFrame>]) -> 
         return false;
     }
     spec.layer_placement = LayerPlacement::Free;
+    // #505: the empty space around the grid is the caller's page now (it sets
+    // `free_page` before); the field belongs to the regular grid only.
+    spec.grid_slack = None;
     for (panel, frame) in spec.panels.iter_mut().zip(frames) {
         panel.free_frame = if panel.overlay.is_some() {
             None
@@ -687,6 +690,7 @@ pub fn set_grid_placement(spec: &mut PlotSpec) -> bool {
     spec.layer_placement = LayerPlacement::Grid;
     // #426: the page belongs to Free placement only.
     spec.free_page = None;
+    spec.grid_slack = None;
     true
 }
 

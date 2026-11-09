@@ -1350,3 +1350,66 @@ fn with_a_page_a_right_axis_grows_the_image_only_when_the_bands_leave_it() {
     assert!(b.size.0 > 830, "the axis leaves the page: {:?}", b.size);
     assert_eq!(b.frame_rect(0, 1), a.frame_rect(0, 1));
 }
+
+/// #505: the slack is empty space outside the outer cells. A row shrunk by 50
+/// with 50 of slack below has the size of the figure before, the same frame
+/// position, and the grid outline stops 50 above the image bottom. Witness:
+/// `ExplicitGrid::build` ignoring the slack (the image shrinks by 50).
+#[test]
+fn a_grid_slack_keeps_the_image_size_and_leaves_the_space_outside_the_grid() {
+    let whole = framed(grid("", 1, 1), &[300.0], &[200.0]);
+    let mut shrunk = framed(grid("", 1, 1), &[300.0], &[150.0]);
+    shrunk.grid_slack = Some(stokesforge_plot::GridSlack {
+        bottom: 50.0,
+        ..Default::default()
+    });
+    let (a, b) = (layout_of(&whole), layout_of(&shrunk));
+    assert_eq!(a.size, b.size, "the page keeps its size");
+    assert_eq!(b.grid_slack, [0, 0, 0, 50]);
+    assert_eq!(a.grid_slack, [0; 4]);
+    let outline = b.grid_outline().expect("outline");
+    assert_eq!(outline.3, b.size.1 - 50, "50 above the image bottom");
+    assert_eq!(outline.0, 0);
+    assert_eq!(outline.2, b.size.0);
+    assert_eq!(b.frame_rect(0, 0), Some((76, 12, 300, 150)));
+    assert_eq!(a.frame_rect(0, 0).map(|r| (r.0, r.1)), Some((76, 12)));
+    // Drawn: the frame sits where the layout says, whichever the slack.
+    let (layout, plot) = drawn(&shrunk);
+    assert_eq!(frames(&plot), vec![((76, 12), (300, 150))]);
+    assert_eq!(layout.size, a.size);
+}
+
+/// #505: a slack on the left and top moves the frames by that much and grows
+/// the image; a hostile one is bounded (invariant 10).
+#[test]
+fn a_slack_on_the_left_and_top_moves_the_frames_and_a_hostile_one_is_bounded() {
+    let mut spec = framed(grid("", 1, 1), &[300.0], &[200.0]);
+    let plain = layout_of(&spec);
+    spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        left: 20.0,
+        top: 10.0,
+        ..Default::default()
+    });
+    let slacked = layout_of(&spec);
+    assert_eq!(slacked.size, (plain.size.0 + 20, plain.size.1 + 10));
+    assert_eq!(slacked.frame_rect(0, 0), Some((96, 22, 300, 200)));
+    assert_eq!(
+        slacked.grid_outline(),
+        Some((20, 10, slacked.size.0, slacked.size.1))
+    );
+    for hostile in [f64::NAN, -5.0, 1e12, f64::INFINITY] {
+        spec.grid_slack = Some(stokesforge_plot::GridSlack {
+            left: hostile,
+            top: hostile,
+            right: hostile,
+            bottom: hostile,
+        });
+        let layout = layout_of(&spec);
+        let bound = (stokesforge_plot::MAX_FRAME_SIZE + 500.0) as u32;
+        assert!(
+            layout.size.0 <= bound && layout.size.1 <= bound,
+            "{hostile}: {:?}",
+            layout.size
+        );
+    }
+}

@@ -11,7 +11,11 @@
 //!   `stokesforge_render::free_gesture` (stored page coordinates).
 //! * **Regular Grid**: the grid is not converted and no single graph is
 //!   resized; the internal boundaries between columns and rows, and the graph
-//!   corners lying on one of them, are the handles (they keep priority). A drag
+//!   corners lying on one of them, are the handles (they keep priority). The
+//!   **outer edge** of the first and last row and column, over a graph, is a
+//!   handle too (#505): pulling it changes that row or column alone, and the
+//!   empty space it leaves (or eats) is the page's slack; the figure does not
+//!   follow, the L corners still scale the whole figure. A drag
 //!   that starts **inside a graph**, off a handle, **moves that graph** (#491):
 //!   the cell under the pointer is outlined (a graph there swaps places, a hole
 //!   takes the graph), the right and bottom edge bands of the figure make a new
@@ -31,14 +35,14 @@ use egui::{
     Stroke, StrokeKind, Visuals,
 };
 use stokesforge_core::compose::MoveTarget;
-use stokesforge_plot::{FreeFrame, FreePage, LayerPlacement, LengthUnit, PlotSpec};
+use stokesforge_plot::{FreeFrame, FreePage, GridSlack, LayerPlacement, LengthUnit, PlotSpec};
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
-    layout_handle_at, locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_frames,
-    resized_page, scaled_frames, scaled_to_page, stored_to_figure, BoundaryGroup, GraphBox,
-    GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX,
-    MAGNET_THRESHOLD_POINTS,
+    layout_handle_at, locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_edge,
+    resized_frames, resized_page, scaled_frames, scaled_to_page, stored_to_figure, BoundaryGroup,
+    EdgeSide, GraphBox, GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap,
+    EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::edge_band::{edge_drop_side, paint_edge_bands, EDGE_BAND_WIDTH};
@@ -137,6 +141,8 @@ enum DragKind {
         /// Position of the grabbed vertical and horizontal lines at the press,
         /// in figure pixels (title band excluded for the row), for the grid.
         line: (f64, f64),
+        /// The empty space around the grid at the press (#505).
+        slack: GridSlack,
     },
     /// An L corner of a regular grid: the whole figure scales.
     Figure {
@@ -345,6 +351,12 @@ fn handle_cursor(handle: &LayoutHandle) -> CursorIcon {
 /// The cursor of a grid handle: one axis for one line, diagonal for a corner on
 /// two.
 fn grid_cursor(handle: &GridHandle) -> CursorIcon {
+    if let Some(edge) = handle.edge {
+        return match edge.side {
+            EdgeSide::Left | EdgeSide::Right => CursorIcon::ResizeHorizontal,
+            EdgeSide::Top | EdgeSide::Bottom => CursorIcon::ResizeVertical,
+        };
+    }
     match (handle.column.is_some(), handle.row.is_some()) {
         (true, true) => CursorIcon::ResizeNwSe,
         (true, false) => CursorIcon::ResizeHorizontal,
@@ -380,15 +392,19 @@ fn grid_view(spec: &PlotSpec, layout: &FigureLayout) -> Option<(GridView, Vec<Gr
         && layout.frame_widths.len() == columns
         && layout.frame_heights.len() == rows;
     let band = f64::from(layout.title_band);
+    // #505: the box of a cell stops where the slack starts.
+    let (out_left, out_top, out_right, out_bottom) = layout.grid_outline()?;
     let boxes = cells
         .iter()
         .filter_map(|cell| {
             let (x, y, w, h) = layout.cell_rect(cell.row, cell.column)?;
+            let (x0, y0) = (x.max(out_left), y.max(out_top));
+            let (x1, y1) = ((x + w).min(out_right), (y + h).min(out_bottom));
             let outer = FreePage {
-                left: f64::from(x),
-                top: f64::from(y) - band,
-                width: f64::from(w),
-                height: f64::from(h),
+                left: f64::from(x0),
+                top: f64::from(y0) - band,
+                width: f64::from(x1.saturating_sub(x0)),
+                height: f64::from(y1.saturating_sub(y0)),
             };
             let frame = match layout.frame_rect(cell.row, cell.column) {
                 Some((fx, fy, fw, fh)) => FreeFrame {
@@ -936,7 +952,10 @@ impl GraphView {
         grid.cells
             .iter()
             .filter(|cell| {
-                handle
+                handle.edge.is_some_and(|edge| match edge.side {
+                    EdgeSide::Left | EdgeSide::Right => cell.column == edge.index,
+                    EdgeSide::Top | EdgeSide::Bottom => cell.row == edge.index,
+                }) || handle
                     .column
                     .is_some_and(|n| cell.column == n || cell.column == n + 1)
                     || handle
@@ -1110,6 +1129,7 @@ impl GraphView {
                 widths,
                 heights,
                 line,
+                slack,
             } => {
                 let grid = self.layout.grid.filter(|_| !shift);
                 let snapped = |start: f64, moved: f64| match grid {
@@ -1117,9 +1137,19 @@ impl GraphView {
                     None => moved,
                 };
                 let delta = (snapped(line.0, delta.0), snapped(line.1, delta.1));
-                let (new_widths, new_heights) = resized_frames(handle, widths, heights, delta);
+                let (new_widths, new_heights, new_slack) = match handle.edge {
+                    Some(edge) => {
+                        let (w, h, slack) = resized_edge(edge, widths, heights, *slack, delta);
+                        (w, h, Some(slack))
+                    }
+                    None => {
+                        let (w, h) = resized_frames(handle, widths, heights, delta);
+                        (w, h, None)
+                    }
+                };
                 self.set_frame_preview(Some(FramePreview {
                     grid: Some((new_widths, new_heights)),
+                    slack: new_slack,
                     ..FramePreview::default()
                 }));
             }
@@ -1192,7 +1222,7 @@ impl GraphView {
                 let Some((_, layout)) = self.figure_memo.as_ref() else {
                     return false;
                 };
-                let line = (
+                let mut line = (
                     handle
                         .column
                         .and_then(|n| layout.column_breaks.get(n + 1))
@@ -1202,11 +1232,28 @@ impl GraphView {
                         .and_then(|n| layout.row_breaks.get(n + 1))
                         .map_or(0.0, |b| f64::from(*b)),
                 );
+                let [left, top, right, bottom] = layout.grid_slack.map(f64::from);
+                let last = |breaks: &[u32]| breaks.last().map_or(0.0, |b| f64::from(*b));
+                if let Some(edge) = handle.edge {
+                    // The outline of the grid, not the image edge.
+                    line = match edge.side {
+                        EdgeSide::Left => (left, 0.0),
+                        EdgeSide::Right => (last(&layout.column_breaks) - right, 0.0),
+                        EdgeSide::Top => (0.0, top),
+                        EdgeSide::Bottom => (0.0, last(&layout.row_breaks) - bottom),
+                    };
+                }
                 DragKind::Grid {
                     handle,
                     widths: layout.frame_widths.clone(),
                     heights: layout.frame_heights.clone(),
                     line,
+                    slack: GridSlack {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    },
                 }
             }
             (None, Some(page)) => {
@@ -1308,15 +1355,23 @@ impl GraphView {
             return;
         };
         let preview = self.frame_preview.clone();
-        let grid_event = |widths: &[f64], heights: &[f64], figure: bool| match &preview {
+        let grid_event = |widths: &[f64],
+                          heights: &[f64],
+                          slack: Option<GridSlack>,
+                          figure: bool| match &preview {
             Some(FramePreview {
                 grid: Some((new_widths, new_heights)),
+                slack: new_slack,
                 ..
-            }) if sizes_differ(widths, new_widths) || sizes_differ(heights, new_heights) => {
+            }) if sizes_differ(widths, new_widths)
+                || sizes_differ(heights, new_heights)
+                || new_slack.is_some_and(|new| Some(new) != slack) =>
+            {
                 Some(GraphEvent::GridFramesEdited {
                     widths: new_widths.clone(),
                     heights: new_heights.clone(),
                     figure,
+                    slack: *new_slack,
                 })
             }
             _ => None,
@@ -1330,16 +1385,19 @@ impl GraphView {
             }
             (
                 DragKind::Grid {
-                    widths, heights, ..
+                    widths,
+                    heights,
+                    slack,
+                    ..
                 },
                 _,
-            ) => grid_event(widths, heights, false),
+            ) => grid_event(widths, heights, Some(*slack), false),
             (
                 DragKind::Figure {
                     widths, heights, ..
                 },
                 _,
-            ) => grid_event(widths, heights, true),
+            ) => grid_event(widths, heights, None, true),
             (DragKind::Free { boxes, page, .. }, Some(preview))
                 if preview.page.is_some_and(|shown| page_differs(shown, *page))
                     || preview.frees.iter().any(|(base, frame)| {
@@ -1381,12 +1439,26 @@ impl GraphView {
             ) {
                 let page_rect = Rect::from_two_pos(a, b);
                 self.paint_grid(painter, page, page_rect, scale);
-                painter.rect_stroke(
-                    page_rect,
-                    0.0,
-                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(110, 110, 125, 170)),
-                    StrokeKind::Outside,
-                );
+                let page_stroke =
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(110, 110, 125, 170));
+                // #505: with empty space around a regular grid, the page is
+                // dashed (screen only) and the grid keeps the solid outline.
+                match self.grid_outline_rect(view) {
+                    Some(outline) => {
+                        let points = vec![
+                            page_rect.left_top(),
+                            page_rect.right_top(),
+                            page_rect.right_bottom(),
+                            page_rect.left_bottom(),
+                            page_rect.left_top(),
+                        ];
+                        painter.extend(Shape::dashed_line(&points, page_stroke, 5.0, 4.0));
+                        painter.rect_stroke(outline, 0.0, page_stroke, StrokeKind::Outside);
+                    }
+                    None => {
+                        painter.rect_stroke(page_rect, 0.0, page_stroke, StrokeKind::Outside);
+                    }
+                }
                 let dragged_corner = match self.layout.drag.as_ref().map(|drag| &drag.kind) {
                     Some(DragKind::Free {
                         handle: LayoutHandle::Page { right, bottom },
@@ -1496,6 +1568,22 @@ impl GraphView {
             }
             at += step;
         }
+    }
+
+    /// The screen rectangle of the grid without its slack, when a regular grid
+    /// has some (#505); `None` otherwise.
+    fn grid_outline_rect(&self, view: &LayoutView) -> Option<Rect> {
+        view.grid.as_ref()?;
+        let (_, layout) = self.figure_memo.as_ref()?;
+        if layout.grid_slack == [0; 4] {
+            return None;
+        }
+        let (left, top, right, bottom) = layout.grid_outline()?;
+        let at = |x: u32, y: u32| {
+            let (sx, sy) = figure_to_stored(layout, f64::from(x), f64::from(y));
+            self.stored_to_screen(sx, sy)
+        };
+        Some(Rect::from_two_pos(at(left, top)?, at(right, bottom)?))
     }
 
     /// One graph box: outline, dashed plot area, size label, and the handles
@@ -1629,25 +1717,15 @@ impl GraphView {
                 vec![top, right, bottom, left],
             );
         };
-        let Some(cell) = grid.cells.iter().find(|c| c.base == graph.base) else {
+        if !grid.cells.iter().any(|c| c.base == graph.base) {
             return (Vec::new(), Vec::new());
-        };
+        }
         if !grid.editable {
             return (Vec::new(), Vec::new());
         }
-        let mut pills = Vec::new();
-        if cell.row > 0 {
-            pills.push(top);
-        }
-        if cell.column + 1 < grid.columns {
-            pills.push(right);
-        }
-        if cell.row + 1 < grid.rows {
-            pills.push(bottom);
-        }
-        if cell.column > 0 {
-            pills.push(left);
-        }
+        // Every side of an editable cell carries a handle: the internal
+        // boundaries and, since #505, the outer edges.
+        let pills = vec![top, right, bottom, left];
         let squares = corners
             .iter()
             .filter(|(_, x, y)| {
@@ -1717,6 +1795,7 @@ mod tests {
     #[test]
     fn grid_cursors_follow_the_lines_a_handle_holds() {
         let at = |column, row| GridHandle {
+            edge: None,
             column,
             row,
             corner: true,

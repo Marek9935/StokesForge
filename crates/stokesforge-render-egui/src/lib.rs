@@ -194,6 +194,9 @@ pub enum GraphEvent {
         /// The whole figure was scaled with an L corner (else a boundary or
         /// a graph corner was pulled).
         figure: bool,
+        /// The empty space around the grid after an outer edge was pulled
+        /// (#505); `None` for every other gesture (the slack stays as it is).
+        slack: Option<stokesforge_plot::GridSlack>,
     },
     /// A graph of a regular grid was dragged to another place, or moved by an
     /// arrow key, in the Page Layout Mode (#491): the base layer of the graph
@@ -307,6 +310,9 @@ struct FramePreview {
     /// Frame widths and heights the Page Layout Mode is pulling a regular grid
     /// to (#426), whole vectors.
     grid: Option<(Vec<f64>, Vec<f64>)>,
+    /// The empty space around the grid the Page Layout Mode is pulling an
+    /// outer edge to (#505); with `grid`.
+    slack: Option<stokesforge_plot::GridSlack>,
     /// The frames the Page Layout Mode is moving or scaling (#426): base
     /// layer and frame, several at once for a page corner drag or a nudge of
     /// a selection.
@@ -326,6 +332,9 @@ impl FramePreview {
             };
             spec.frame_widths = widths.iter().map(bounds).collect();
             spec.frame_heights = heights.iter().map(bounds).collect();
+            if let Some(slack) = self.slack {
+                spec.grid_slack = Some(slack).filter(|s| !s.is_zero());
+            }
             return;
         }
         if !self.frees.is_empty() || self.page.is_some() {
