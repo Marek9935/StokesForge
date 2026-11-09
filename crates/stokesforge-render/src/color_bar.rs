@@ -176,6 +176,27 @@ pub fn value_colors(panel: &ResolvedPanel<'_>) -> Vec<Option<String>> {
     colors
 }
 
+/// How many curves of the groups on the visible bar of `panel` are left
+/// without a value (no x', text in the cell, a value `<= 0` on a log scale):
+/// the tab reports them (#499, C8). Hidden and broken curves do not count.
+pub fn missing_value_count(panel: &ResolvedPanel<'_>) -> usize {
+    let Some(bar) = panel.spec.color_bar.as_ref().filter(|bar| bar.visible) else {
+        return 0;
+    };
+    let colors = value_colors(panel);
+    panel
+        .series
+        .iter()
+        .enumerate()
+        .filter(|(index, series)| {
+            bar.segments
+                .iter()
+                .any(|segment| on_bar(series, segment.group))
+                && colors[*index].is_none()
+        })
+        .count()
+}
+
 /// True if `series` counts for the segment of `group`.
 fn on_bar(series: &ResolvedSeries<'_>, group: u32) -> bool {
     series.spec.visible && !series.broken() && series.spec.group == Some(group)

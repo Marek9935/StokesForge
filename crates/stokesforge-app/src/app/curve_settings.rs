@@ -428,10 +428,20 @@ fn series_page(
             [series.x_error, series.y_error],
         )
     };
+    // The curves of a group on a visible bar take their color from it (#499).
+    let color_reason = group
+        .filter(|group| {
+            panel
+                .color_bar
+                .as_ref()
+                .is_some_and(|bar| bar.visible && bar.segment_of(*group).is_some())
+        })
+        .map(|_| tr!("curve-color-by-bar"));
     commit |= series_editor(
         ui,
         &mut panel.series[*index],
         env,
+        color_reason,
         whole_group,
         auto_bar_width,
         panel.overlay.is_some(),
@@ -638,6 +648,23 @@ fn group_editor(
             }
         }
     });
+    // On the color bar of the layer (#499): the curves are coloured by value.
+    let mut on_bar = panel
+        .color_bar
+        .as_ref()
+        .is_some_and(|bar| bar.segment_of(group).is_some());
+    if f.checkbox(
+        &mut on_bar,
+        tr!("curve-on-color-bar"),
+        Some(tr!("curve-on-color-bar", "hint")),
+    ) {
+        if on_bar {
+            super::color_bar_settings::put_group_on_bar(panel, group);
+        } else {
+            super::color_bar_settings::take_group_off_bar(panel, group);
+        }
+        commit = true;
+    }
     f.field(|ui| {
         if ui
             .button(tr!("curve-group-ungroup"))
@@ -1211,6 +1238,35 @@ mod tests {
             selected, 0,
             "the selection falls back on an existing series"
         );
+    }
+
+    /// #499: « On the color bar » on the group page puts the group on the
+    /// bar of the layer (creating it, retaining a gradient for the group) and
+    /// takes it off again. Witness: a checkbox that does nothing, or a segment
+    /// left behind, fails the first and last assertions.
+    #[test]
+    fn the_group_page_puts_the_group_on_the_color_bar_and_takes_it_off() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut selected = 1;
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = center_of(&output, &tr!("curve-on-color-bar"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        let bar = panel.color_bar.as_ref().expect("a bar was created");
+        assert!(bar.visible);
+        assert_eq!(bar.segments.len(), 1);
+        assert_eq!(bar.segments[0].group, 1);
+        assert!(
+            panel.group_gradient(1).is_some(),
+            "the group retains a gradient in the same edit"
+        );
+
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = center_of(&output, &tr!("curve-on-color-bar"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert!(panel.color_bar.as_ref().unwrap().segments.is_empty());
     }
 
     /// #197: joining a group places the series after its members, and

@@ -2584,6 +2584,8 @@ pub enum PlotSettingsTab {
     Series,
     /// The legend.
     Legend,
+    /// The colour bar of a layer (#499).
+    ColorBar,
     /// The global colors: background, text, axes, predefined themes.
     Theme,
 }
@@ -2591,11 +2593,12 @@ pub enum PlotSettingsTab {
 impl PlotSettingsTab {
     /// The tabs of the graph window, in display order (the series
     /// have their own window, #179).
-    pub const ALL: [PlotSettingsTab; 5] = [
+    pub const ALL: [PlotSettingsTab; 6] = [
         PlotSettingsTab::Graph,
         PlotSettingsTab::PlotArea,
         PlotSettingsTab::Axes,
         PlotSettingsTab::Legend,
+        PlotSettingsTab::ColorBar,
         PlotSettingsTab::Theme,
     ];
 
@@ -2607,6 +2610,7 @@ impl PlotSettingsTab {
             PlotSettingsTab::Axes => tr!("plot-tab-axes"),
             PlotSettingsTab::Series => tr!("plot-tab-series"),
             PlotSettingsTab::Legend => tr!("plot-tab-legend"),
+            PlotSettingsTab::ColorBar => tr!("plot-tab-color-bar"),
             PlotSettingsTab::Theme => tr!("plot-tab-theme"),
         }
     }
@@ -2703,6 +2707,8 @@ pub enum PlotTarget {
     Annotation(AnnotationRef),
     /// The legend (frame or entry, issue #53).
     Legend,
+    /// The colour bar (#499).
+    ColorBar,
     /// A graphic object: rectangle, ellipse, line or arrow (issue #76).
     Object(ShapeRef),
 }
@@ -2718,6 +2724,7 @@ impl PlotTarget {
             PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", side = axis.key()),
             PlotTarget::Annotation(_) => tr!("plot-target-text"),
             PlotTarget::Legend => tr!("plot-target-legend"),
+            PlotTarget::ColorBar => tr!("plot-target-color-bar"),
             PlotTarget::Object(_) => tr!("plot-target-object"),
         }
     }
@@ -2731,6 +2738,7 @@ impl PlotTarget {
                 (PlotSettingsTab::PlotArea, None)
             }
             PlotTarget::Legend => (PlotSettingsTab::Legend, None),
+            PlotTarget::ColorBar => (PlotSettingsTab::ColorBar, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
             }
@@ -5620,8 +5628,13 @@ impl AppState {
     }
 
     /// True if `draft` differs from the spec of `graph` in the model by the
-    /// « Text from » settings of its legends alone (#499).
-    fn only_legend_text_differs(&self, graph: NodeId, draft: &PlotSpec) -> bool {
+    /// part `same` copies back from the model alone (#499).
+    fn only_differs_by(
+        &self,
+        graph: NodeId,
+        draft: &PlotSpec,
+        same: impl Fn(&mut PanelSpec, &PanelSpec),
+    ) -> bool {
         let Some(current) = self.plot_spec(graph) else {
             return false;
         };
@@ -5630,7 +5643,7 @@ impl AppState {
         }
         let mut aligned = draft.clone();
         for (panel, original) in aligned.panels.iter_mut().zip(current.panels.iter()) {
-            panel.legend.text = original.legend.text.clone();
+            same(panel, original);
         }
         aligned == current
     }
@@ -5642,13 +5655,25 @@ impl AppState {
         if self.plot_spec(edit.graph).as_ref() == Some(&edit.spec) {
             return;
         }
-        if self.only_legend_text_differs(edit.graph, &edit.spec) {
+        let kind = if self.only_differs_by(edit.graph, &edit.spec, |panel, original| {
+            panel.legend.text = original.legend.text.clone();
+        }) {
             // A change of the « Text from » setting alone has its own
             // history label (#499).
+            Some(PlotEditKind::LegendText)
+        } else if self.only_differs_by(edit.graph, &edit.spec, |panel, original| {
+            panel.color_bar = original.color_bar.clone();
+        }) {
+            // Same for the colour bar alone (#499).
+            Some(PlotEditKind::ColorBar)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
             self.execute(Command::EditPlotSpec {
                 graph: edit.graph,
                 spec: edit.spec.clone(),
-                kind: PlotEditKind::LegendText,
+                kind,
             });
         } else {
             self.dispatch(Action::SetPlotSpec {
@@ -6454,10 +6479,11 @@ impl AppState {
                     T::Panel(i) => (PlotSettingsTab::PlotArea, None, i, None),
                     T::Group(i) => (PlotSettingsTab::Series, None, i, None),
                     T::Axes(i) => (PlotSettingsTab::Axes, None, i, None),
-                    // The Color Bar tab comes with lot 3; until then the bar
-                    // opens the Legend tab of its layer.
-                    T::Text(TextTarget::Legend { panel } | TextTarget::ColorBar { panel }) => {
+                    T::Text(TextTarget::Legend { panel }) => {
                         (PlotSettingsTab::Legend, None, panel, None)
+                    }
+                    T::Text(TextTarget::ColorBar { panel }) => {
+                        (PlotSettingsTab::ColorBar, None, panel, None)
                     }
                     // The address is a field of the layer; the tab is named
                     // where the axis is drawn (#396).

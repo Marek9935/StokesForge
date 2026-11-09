@@ -356,6 +356,17 @@ fn plot_settings_contents(
                         };
                         commit |= legend_editor(ui, &mut panel.legend, &row_columns);
                     }
+                    PlotSettingsTab::ColorBar => {
+                        let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
+                            return;
+                        };
+                        commit |= super::color_bar_settings::color_bar_editor(
+                            ui,
+                            panel,
+                            tree,
+                            &row_columns,
+                        );
+                    }
                 });
         }
     }
@@ -1253,7 +1264,12 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
 /// : the "?" icon alone). The field takes the full width (S-L2), minus the
 /// icon's room. Returns `true` if the draft must be committed — see the
 /// head doc of [`plot_settings_window`].
-fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
+pub(super) fn formula_field(
+    form: &mut Form<'_>,
+    label: &str,
+    hint: &str,
+    value: &mut String,
+) -> bool {
     formula_field_with(
         form,
         label,
@@ -1674,6 +1690,7 @@ pub(super) fn series_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
     env: &mut PickerEnv,
+    color_reason: Option<String>,
     locked: bool,
     auto_bar_width: f64,
     overlay: bool,
@@ -1828,13 +1845,19 @@ pub(super) fn series_editor(
 
         form.section(tr!("plot-series-line-section"));
         if !locked {
-            commit |= form.color(
-                &tr!("plot-series-line-color"),
-                &mut series.line.color,
-                ColorUsage::Curves,
-                None,
-                env,
-            );
+            let out = form.enabled(color_reason.is_none(), |form| {
+                form.color(
+                    &tr!("plot-series-line-color"),
+                    &mut series.line.color,
+                    ColorUsage::Curves,
+                    None,
+                    env,
+                )
+            });
+            if let Some(reason) = &color_reason {
+                out.response.on_disabled_hover_text(reason);
+            }
+            commit |= out.inner;
         }
         commit |= form.row(tr!("plot-series-line-style"), |ui| {
             choice(
@@ -1889,13 +1912,19 @@ pub(super) fn series_editor(
             .changed
         });
         if !locked {
-            commit |= form.color(
-                &tr!("plot-series-symbol-color"),
-                &mut series.symbol.color,
-                ColorUsage::Curves,
-                Some(&tr!("plot-color-same-as-line")),
-                env,
-            );
+            let out = form.enabled(color_reason.is_none(), |form| {
+                form.color(
+                    &tr!("plot-series-symbol-color"),
+                    &mut series.symbol.color,
+                    ColorUsage::Curves,
+                    Some(&tr!("plot-color-same-as-line")),
+                    env,
+                )
+            });
+            if let Some(reason) = &color_reason {
+                out.response.on_disabled_hover_text(reason);
+            }
+            commit |= out.inner;
         }
         commit
     })
@@ -1967,7 +1996,7 @@ fn legend_editor(
 /// The columns a row series (#166) of the selected layer can read for its
 /// legend entry (#499): those of the sheet of its anchor column. Empty if the
 /// layer has no row series.
-fn legend_row_columns(state: &AppState, graph: NodeId) -> Vec<(NodeId, String)> {
+pub(super) fn legend_row_columns(state: &AppState, graph: NodeId) -> Vec<(NodeId, String)> {
     let Some(edit) = state.plot_edit().filter(|edit| edit.graph == graph) else {
         return Vec::new();
     };
@@ -4662,6 +4691,153 @@ mod tests {
         assert_eq!(harness.model().panels[0].legend.visible, before);
         click_label(&context, &mut harness.state, &tr!("plot-legend-show"));
         assert_eq!(harness.model().panels[0].legend.visible, !before);
+    }
+
+    /// A graph whose first layer has `groups` series groups of two series
+    /// each (the columns have no x', no comment).
+    fn grouped(groups: u32) -> Harness {
+        harness(|spec| {
+            let panel = first_panel(spec);
+            let template = panel.series[0].clone();
+            panel.series.clear();
+            for group in 1..=groups {
+                for _ in 0..2 {
+                    let mut series = template.clone();
+                    series.group = Some(group);
+                    panel.series.push(series);
+                }
+            }
+        })
+    }
+
+    /// #499: the Color Bar tab shows the bar; ticking « Show color bar »
+    /// commits at once, and a group added from the list lands on the bar with
+    /// a retained gradient. Witness: a tab that edits nothing fails both.
+    #[test]
+    fn the_color_bar_tab_shows_the_bar_and_adds_a_group() {
+        let mut harness = grouped(2);
+        harness.open(PlotSettingsTab::ColorBar, None);
+        let context = test_support::context();
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert!(harness.model().panels[0].color_bar.is_none());
+        click_label(&context, &mut harness.state, &tr!("plot-color-bar-show"));
+        let bar = harness.model().panels[0].color_bar.clone().expect("bar");
+        assert!(bar.visible && bar.segments.is_empty());
+
+        let painted = click_label(
+            &context,
+            &mut harness.state,
+            &tr!("plot-color-bar-add-group"),
+        );
+        let first = text_exact(&painted, "Group 1").center;
+        click(&context, first, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        paint_window(&context, &mut harness.state, Vec::new());
+        let model = harness.model();
+        let bar = model.panels[0].color_bar.as_ref().expect("bar");
+        assert_eq!(bar.segments.len(), 1);
+        assert_eq!(bar.segments[0].group, 1);
+        assert!(model.panels[0].group_gradient(1).is_some());
+    }
+
+    /// #499: the curves left without a value are reported, in the plural the
+    /// language asks for. Witness: counting nothing hides the line.
+    #[test]
+    fn the_color_bar_tab_counts_the_curves_without_a_value() {
+        let context = test_support::context();
+        let line = tr!("plot-color-bar-no-value", count = 2);
+        for (on_bar, reported) in [(true, true), (false, false)] {
+            let mut harness = grouped(1);
+            let mut spec = harness.model();
+            first_panel(&mut spec).color_bar = Some(stokesforge_plot::ColorBarSpec {
+                segments: if on_bar {
+                    vec![stokesforge_plot::ColorBarSegment::new(1)]
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            });
+            harness.state.dispatch(Action::SetPlotSpec {
+                graph: harness.graph,
+                spec,
+            });
+            harness.open(PlotSettingsTab::ColorBar, None);
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert_eq!(is_painted(&painted, &line), reported, "{line}");
+        }
+        assert_ne!(
+            tr!("plot-color-bar-no-value", count = 1),
+            line,
+            "the singular reads differently"
+        );
+    }
+
+    /// #499: below the frame the bar is horizontal and the Orientation choice
+    /// is greyed; in a corner it is free. Witness: a choice that stays enabled
+    /// below lets the click through.
+    #[test]
+    fn the_color_bar_orientation_is_greyed_when_the_place_forces_it() {
+        use stokesforge_plot::{ColorBarOrientation, ColorBarPosition, ColorBarSpec};
+        let forced = |position, anchor| {
+            super::super::color_bar_settings::forced_orientation(&ColorBarSpec {
+                position,
+                anchor,
+                ..ColorBarSpec::default()
+            })
+        };
+        assert_eq!(
+            forced(ColorBarPosition::Below, None),
+            Some(ColorBarOrientation::Horizontal)
+        );
+        assert_eq!(
+            forced(ColorBarPosition::Right, None),
+            Some(ColorBarOrientation::Vertical)
+        );
+        assert_eq!(forced(ColorBarPosition::TopLeft, None), None);
+        assert_eq!(
+            forced(
+                ColorBarPosition::Below,
+                Some(stokesforge_plot::TextAnchor::new(0.5, 0.5))
+            ),
+            None,
+            "a dragged bar has its own place"
+        );
+
+        let context = test_support::context();
+        for (position, free) in [
+            (ColorBarPosition::Below, false),
+            (ColorBarPosition::TopLeft, true),
+        ] {
+            let mut harness = grouped(1);
+            let mut spec = harness.model();
+            first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+                segments: vec![stokesforge_plot::ColorBarSegment::new(1)],
+                position: position.clone(),
+                ..ColorBarSpec::default()
+            });
+            harness.state.dispatch(Action::SetPlotSpec {
+                graph: harness.graph,
+                spec,
+            });
+            harness.open(PlotSettingsTab::ColorBar, None);
+            click_label(
+                &context,
+                &mut harness.state,
+                &tr!("plot-color-bar-orientation-vertical"),
+            );
+            let orientation = harness.model().panels[0]
+                .color_bar
+                .as_ref()
+                .unwrap()
+                .orientation
+                .clone();
+            assert_eq!(
+                orientation == ColorBarOrientation::Vertical,
+                free,
+                "{position:?}"
+            );
+        }
     }
 
     /// The result of each frame of [`formula_field`] on `value`, and its

@@ -823,6 +823,7 @@ plot-tab-plot-area = Zone de tracé
 plot-tab-axes = Axes
 plot-tab-series = Séries
 plot-tab-legend = Légende
+plot-tab-color-bar = Barre de couleurs
 plot-tab-theme = Thème
 
 # Les trois axes d'un calque
@@ -852,6 +853,7 @@ plot-target-axis-title = { $side ->
 plot-target-text = Texte
 plot-target-object = Objet
 plot-target-legend = Légende
+plot-target-color-bar = Barre de couleurs
 
 # Valeurs automatiques des champs de couleur
 
@@ -1097,6 +1099,58 @@ plot-legend-row-text = Série de ligne
 plot-legend-row-number = Numéro de ligne
 plot-legend-row-column-value = Valeur de la colonne…
 plot-legend-row-column = Colonne
+
+# Onglet Barre de couleurs (#499)
+
+plot-color-bar-show =
+    Afficher la barre de couleurs
+    .hint = Colore les courbes des groupes de la barre selon leur valeur, et remplace leurs entrées dans la légende. Masquée, la barre rend aux courbes leurs couleurs et leurs entrées de légende.
+plot-color-bar-groups-section = Groupes sur la barre
+plot-color-bar-group-break = Étiquette de rupture
+    .hint = Texte Typst écrit à la fin de ce segment, au-dessus de sa rupture. Laisser vide pour aucune.
+plot-color-bar-move-up = Monter
+plot-color-bar-move-down = Descendre
+plot-color-bar-remove = Retirer
+    .hint = Retire ce groupe de la barre. Ses courbes retrouvent leurs couleurs.
+plot-color-bar-add-group = Ajouter un groupe…
+    .disabled = Tous les groupes de cette couche sont déjà sur la barre
+plot-color-bar-no-groups = Aucun groupe sur la barre. Ajoutez un groupe, ou cochez « Sur la barre de couleurs » sur sa page dans la fenêtre Séries.
+plot-color-bar-no-series-groups = Cette couche n’a aucun groupe de séries. Groupez d’abord ses courbes, dans la fenêtre Séries.
+plot-color-bar-chain =
+    Enchaîner les segments
+    .hint = Chaque segment commence où le précédent finit : des groupes de 0 à 57 et de 0 à 25 sont tracés de 0 à 57 et de 57 à 82. Les couleurs ne changent pas.
+plot-color-bar-value-section = Valeur
+plot-color-bar-value-from = Valeur depuis
+    .hint = La ligne d’en-tête de la feuille qui donne la valeur de chaque courbe. Une valeur avec une unité ou du texte (« 57 min ») n’a pas de valeur.
+plot-color-bar-row-none = Aucune valeur
+plot-color-bar-scale = Échelle
+plot-color-bar-scale-linear = Linéaire
+plot-color-bar-scale-log = Log
+    .hint = Une valeur nulle ou négative n’a pas de couleur sur une échelle log.
+plot-color-bar-no-value =
+    { $count ->
+        [one] { $count } courbe n’a pas de valeur
+       *[other] { $count } courbes n’ont pas de valeur
+    }
+plot-color-bar-layout-section = Emplacement
+plot-color-bar-position = Position
+plot-color-bar-position-below = Sous le cadre
+plot-color-bar-position-right = À droite du cadre
+plot-color-bar-orientation = Orientation
+    .disabled = Sous le cadre, la barre est horizontale ; à droite du cadre, verticale
+plot-color-bar-orientation-horizontal = Horizontale
+plot-color-bar-orientation-vertical = Verticale
+plot-color-bar-ticks = Graduations
+plot-color-bar-ticks-breaks = Extrémités et ruptures
+plot-color-bar-ticks-auto = Automatiques
+plot-color-bar-title = Titre
+    .hint = Texte Typst écrit sous la barre. Laisser vide pour aucun.
+plot-color-bar-unknown = Par défaut (réglage d’une version plus récente)
+disabled-color-bar-off = Activez d’abord « Afficher la barre de couleurs »
+curve-on-color-bar =
+    Sur la barre de couleurs
+    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
+curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici.
 
 # Onglet Thème
 

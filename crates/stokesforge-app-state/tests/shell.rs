@@ -8494,6 +8494,69 @@ fn changing_the_legend_text_source_is_one_undo_step() {
     assert_eq!(state.undo_label(), label_before, "a single history entry");
 }
 
+/// #499 step C: editing the colour bar in Graph Properties is one history
+/// entry, and one Undo brings back the graph without a bar. Witness: a bar
+/// edit that is not part of the committed draft (or one entry per field)
+/// fails the assertions.
+#[test]
+fn editing_the_color_bar_is_one_undo_step() {
+    use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    assert!(before.panels[0].color_bar.is_none());
+    let label_before = state.undo_label();
+
+    state.dispatch(PlotTarget::ColorBar.open_settings(graph));
+    assert_eq!(
+        state.plot_settings().expect("window").tab,
+        PlotSettingsTab::ColorBar
+    );
+    {
+        let edit = state.plot_edit_mut().expect("draft");
+        let panel = edit.spec.panels.get_mut(0).expect("panel");
+        panel.color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment::new(1)],
+            position: ColorBarPosition::Right,
+            ..ColorBarSpec::default()
+        });
+    }
+    state.commit_plot_edit();
+    {
+        let edit = state.plot_edit_mut().expect("draft");
+        let bar = edit
+            .spec
+            .panels
+            .get_mut(0)
+            .expect("panel")
+            .color_bar
+            .as_mut();
+        bar.expect("bar").title = "t (min)".to_string();
+    }
+    state.commit_plot_edit();
+    state.close_plot_settings();
+
+    let after = state.plot_spec(graph).expect("spec");
+    let bar = after.panels[0].color_bar.as_ref().expect("a bar");
+    assert_eq!(bar.title, "t (min)");
+    assert_eq!(bar.position, ColorBarPosition::Right);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
+/// #499 step C: the tab is the sixth of the window, and the bar opens it.
+#[test]
+fn the_color_bar_has_its_own_tab() {
+    assert_eq!(PlotSettingsTab::ALL.len(), 6);
+    assert!(PlotSettingsTab::ALL.contains(&PlotSettingsTab::ColorBar));
+    assert_eq!(
+        PlotTarget::ColorBar.settings_page(),
+        (PlotSettingsTab::ColorBar, None)
+    );
+}
+
 /// #499: a new graph takes the « Text from » default of the Preferences, a
 /// graph that exists keeps its own. Witness: ignoring the preference leaves
 /// the long name.

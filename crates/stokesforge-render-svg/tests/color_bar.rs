@@ -93,7 +93,14 @@ fn equal_values_paint_the_start_colour_for_everyone() {
     let spec = spec_with(&mut project, Some(bar()), [57.0, 57.0]);
     let document = export(&spec, &project);
     assert!(document.contains("#10FF20"));
-    assert!(!document.contains("#FF1020"), "no end colour when equal");
+    // The bar's own stripes may reach the end colour: compare with a spread
+    // of values, where a curve is painted in it as well.
+    let mut other = Project::new("Spread").expect("project");
+    let spread = export(&spec_with(&mut other, Some(bar()), [0.0, 57.0]), &other);
+    assert!(
+        document.matches("#FF1020").count() < spread.matches("#FF1020").count(),
+        "no curve in the end colour when equal"
+    );
 }
 
 /// A hidden bar acts as no bar: the stored colours come back.
@@ -106,4 +113,38 @@ fn a_hidden_bar_gives_the_stored_colours_back() {
     let document = export(&spec, &project);
     assert!(document.contains("#112233"));
     assert!(!document.contains("#10FF20"));
+}
+
+/// The tab reports the curves of the bar that have no value (C8): both have
+/// an x', neither has a comment; a hidden bar reports nothing.
+/// Witness: counting every member (not only those without a color) fails the
+/// first assertion.
+#[test]
+fn the_curves_without_a_value_are_counted() {
+    let mut project = Project::new("Bar").expect("project");
+    let spec = spec_with(&mut project, Some(bar()), [0.0, 57.0]);
+    let count = |spec: &PlotSpec| {
+        let plot = resolve_spec(project.tree(), spec);
+        stokesforge_render::color_bar::missing_value_count(&plot.panels[0])
+    };
+    assert_eq!(count(&spec), 0);
+    let mut comments = spec.clone();
+    comments
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar")
+        .value = stokesforge_plot::ColorBarValue::Comments;
+    assert_eq!(count(&comments), 2);
+    comments
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar")
+        .visible = false;
+    assert_eq!(count(&comments), 0);
 }

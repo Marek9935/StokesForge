@@ -824,6 +824,7 @@ plot-tab-plot-area = Plot Area
 plot-tab-axes = Axes
 plot-tab-series = Series
 plot-tab-legend = Legend
+plot-tab-color-bar = Color Bar
 plot-tab-theme = Theme
 
 # The three axes of a layer
@@ -853,6 +854,7 @@ plot-target-axis-title = { $side ->
 plot-target-text = Text
 plot-target-object = Object
 plot-target-legend = Legend
+plot-target-color-bar = Color Bar
 
 # Automatic values of the color fields
 
@@ -1098,6 +1100,58 @@ plot-legend-row-text = Row series
 plot-legend-row-number = Row number
 plot-legend-row-column-value = Value of column…
 plot-legend-row-column = Column
+
+# Color Bar tab (#499)
+
+plot-color-bar-show =
+    Show color bar
+    .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
+plot-color-bar-groups-section = Groups on the bar
+plot-color-bar-group-break = Break label
+    .hint = Typst text written at the end of this segment, above its break. Leave empty for none.
+plot-color-bar-move-up = Move Up
+plot-color-bar-move-down = Move Down
+plot-color-bar-remove = Remove
+    .hint = Takes this group off the bar. Its curves get their own colors back.
+plot-color-bar-add-group = Add a group…
+    .disabled = Every group of this layer is already on the bar
+plot-color-bar-no-groups = No group on the bar yet. Add a group, or tick « On the color bar » on its page in the Series window.
+plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
+plot-color-bar-chain =
+    Chain the segments
+    .hint = Each segment starts where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change.
+plot-color-bar-value-section = Value
+plot-color-bar-value-from = Value from
+    .hint = The worksheet header row that gives the value of every curve. A value with a unit or text (« 57 min ») has no value.
+plot-color-bar-row-none = No value
+plot-color-bar-scale = Scale
+plot-color-bar-scale-linear = Linear
+plot-color-bar-scale-log = Log
+    .hint = A value of zero or less has no color on a log scale.
+plot-color-bar-no-value =
+    { $count ->
+        [one] { $count } curve has no value
+       *[other] { $count } curves have no value
+    }
+plot-color-bar-layout-section = Placement
+plot-color-bar-position = Position
+plot-color-bar-position-below = Below the frame
+plot-color-bar-position-right = Right of the frame
+plot-color-bar-orientation = Orientation
+    .disabled = Below the frame, the bar is horizontal; right of the frame, vertical
+plot-color-bar-orientation-horizontal = Horizontal
+plot-color-bar-orientation-vertical = Vertical
+plot-color-bar-ticks = Ticks
+plot-color-bar-ticks-breaks = Ends and breaks
+plot-color-bar-ticks-auto = Automatic
+plot-color-bar-title = Title
+    .hint = Typst text written under the bar. Leave empty for none.
+plot-color-bar-unknown = Default (setting of a newer version)
+disabled-color-bar-off = Turn on « Show color bar » first
+curve-on-color-bar =
+    On the color bar
+    .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
+curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
 
 # Theme tab
 
