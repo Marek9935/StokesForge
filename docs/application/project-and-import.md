@@ -154,6 +154,19 @@ left to check.
   name"); when two meet as many conditions, one is used and a point to check
   offers the other. A correction made on one file is kept per **kind** of file
   (instrument fingerprint), so it does not leak to a file of another kind.
+- **The sheet name depends on the destination** (#488). With **One Workbook per
+  File** and **One sheet per file**, the workbook takes the title of the file
+  (else its name; `Title_1`, `Title_2` for the blocks of one file) and its sheet is
+  named `import-sheet-raw-data` ("Raw Data" / « Données brutes ») and marked
+  (`SetSheetRawMark`, base `import-sheet-modified-base`), in the interface
+  language at import time. The first change to a value of an imported column
+  renames it "Sheet1" in the same undoable step (see
+  `docs/commands-and-history.md`). Every other destination and layout keeps
+  the title or file name as the sheet name. The texts of the screen that speak
+  of the sheet name (`import-why-sheet-name`, the Advanced **Sheet name**
+  setting) say that the new workbook takes the name, or the sheet in an
+  existing workbook. `stokesforge-cli import` and `pyst.import_file` do not
+  mark or rename sheets.
 - **The left panel** (`grid/panel.rs`, decisions in `state/import_check.rs`):
   the format sentence (delimiter, decimal, encoding), the **To check** block, **What was found** (rows grouped Data /
   Columns / Sheet, each with the source line, a long value cut with an ellipsis

@@ -37,6 +37,7 @@ Authoritative list: `stokesforge-commands/src/command.rs` (`Command`,
 | `AddNote { parent, name, text }` | structure |
 | `RemoveNode { id }` | structure |
 | `SetWindowMeta { id, meta }` | data |
+| `SetSheetRawMark { sheet, mark }` | data (#488: the mark of an untouched import on a sheet, `DataDelta::RawMark`; label `SetSheetRawMark`) |
 | `SetNoteText { id, text }` | data |
 | `SetColumnMeta { column, meta }` | data |
 | `SetPlotSpec { graph, spec }` | data |
@@ -55,6 +56,31 @@ head doc of `command.rs`); `RemoveNode` stays generic, like `Project::remove`.
 The four content-editing commands
 (`SetWindowMeta`/`SetNoteText`/`SetColumnMeta`/`SetPlotSpec`) replace their
 target **as a whole**, like `SetCells` — no per-subfield editing.
+
+### The sheet of an untouched import renames itself (#488)
+
+A new workbook per file holds one sheet, "Raw Data" (« Données brutes »), that
+carries a mark (`NodeKind::Worksheet.raw: Option<RawSheetMark>`, the base of
+the name to take later: "Sheet" / « Feuille », in the language of the import).
+The first change to the **value** of an imported column renames it to the first
+free `<base>N` from 1 (`Project::first_free_sheet_name`, not `next_child_name`).
+The rule lives in the session actor (`actor.rs`, `RawWatch`), not in a command:
+before each `Execute` it lists, for each marked sheet (`Tree::raw_sheets`, a walk
+of workbooks and sheets only, never a column), the imported columns with their
+`version()`, x' and formula, as owned data (no `Arc<Tree>` kept, D3). After the
+command, if one of them changed or is gone, `absorb_into_last(Rename)` folds the
+rename into the entry of the command, **before** `bind_kept_formulas` (a kept
+formula waiting for `[Book]Sheet1` binds in the same gesture) and before the
+recalculation pass, which never counts: a column's version covers type and
+values, so headers, role, display format, order, hidden state and a calculated
+column beside are not changes. Inside an open user macro the rename is a plain
+`execute` in the macro (invariant 8), so `abort_macro` and an interrupted Stop
+give "Raw Data" back; inside an `Import` or `RefreshFromSource` macro nothing is
+watched. `Project::rename` clears the mark, so a sheet renamed by hand is never
+renamed again, and the undo of that rename (a tree snapshot, `Rename` is
+structural) puts the mark back with the name. A duplicated or pasted sheet loses
+the mark; a pasted whole workbook keeps it. `SetSheetRawMark` is sent by
+`apply_import` after the `AddColumn`s, inside the `Import` macro.
 
 ### Two cell writes, strict and tolerant
 

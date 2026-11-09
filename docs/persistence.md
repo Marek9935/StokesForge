@@ -395,6 +395,18 @@ literal values (computed by hand, `==`): a renamed function, a changed
 associativity or a changed text of the witness fails it. Regenerating the
 witness with other formulas means editing that table by hand.
 
+## Sheet of an untouched import: additive field (#488)
+
+The `Worksheet` record gained `raw_modified_base` (`Option<String>`,
+`#[serde(default)]`): the base of the name the sheet takes at the first change
+to an imported column ("Sheet", « Feuille »), present only while the sheet is
+the untouched "Raw Data" of a new workbook per file. It is **not written** on a
+sheet without the mark, so every file that has none is byte-identical to before
+(the `v1` witness did not change) and a file without the field reads no mark.
+**`FORMAT_VERSION` did not move.** A 1.0 reader keeps the sheet and ignores the
+field; if it saves the file again, the field is dropped without a message and
+the sheet keeps its name for good. Tests: `tests/raw_sheet_mark.rs`.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added

@@ -138,6 +138,8 @@ With **Active Workbook**, **In active workbook** adds four modes: **New sheet** 
 
 When you import more than one file, **Multiple files** offers **One sheet per file** (default), **One sheet, side by side (X Y X Y…)** and **One sheet, X of first file shared**. Use the second or third to plot several spectra from one sheet.
 
+With **One Workbook per File** and **One sheet per file**, each workbook takes the title of the file (else its name) and holds one sheet called **Raw Data**. The sheet keeps that name as long as no value of an imported column changes. As soon as you type or paste a value, clear a cell, add, delete or sort rows, change the type of a column, change an x′ value, put a formula on an imported column or delete one, the sheet renames itself **Sheet1** (or **Sheet2** if that name is taken), in the same step: **Undo** gives back **Raw Data** and the old value. Editing a header (**Long Name**, **Units**, **Comments**), a role or a display format, moving columns or adding a calculated column beside the data does not count. A sheet you renamed yourself is never renamed again, and **Refresh from Source** keeps the current name. The other destinations name the sheet after the title or the file.
+
 The whole import is a single entry in the history: one **Undo** removes it.
 
 ## Templates
