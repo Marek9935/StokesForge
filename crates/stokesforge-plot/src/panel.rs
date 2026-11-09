@@ -239,6 +239,10 @@ pub struct PanelSpec {
     /// keep their colors. A series that joins a group with a
     /// color gradient gets its color ([`PanelSpec::set_series_group`]).
     pub group_gradients: std::collections::BTreeMap<u32, Vec<String>>,
+    /// The colour bar of this layer (#499, step C): colours the curves of
+    /// its groups by value and replaces their legend entries. At most one
+    /// per layer; `None` = no bar, the curves keep their stored colors.
+    pub color_bar: Option<crate::ColorBarSpec>,
     /// Frame of the cell in free placement (#398), stored on the ordinary
     /// (base) layer of a cell only; an overlaid layer uses its base's.
     /// Ignored in grid placement. Read through
@@ -759,6 +763,9 @@ impl PanelSpec {
         }
         self.group_names.remove(&group);
         self.group_gradients.remove(&group);
+        if let Some(bar) = &mut self.color_bar {
+            bar.remove_group(group);
+        }
         changed
     }
 
@@ -778,6 +785,9 @@ impl PanelSpec {
         self.series.retain(|s| s.group != Some(group));
         self.group_names.remove(&group);
         self.group_gradients.remove(&group);
+        if let Some(bar) = &mut self.color_bar {
+            bar.remove_group(group);
+        }
         self.series.len() != before
     }
 
@@ -906,6 +916,7 @@ impl Default for PanelSpec {
             shapes: Vec::new(),
             group_names: std::collections::BTreeMap::new(),
             group_gradients: std::collections::BTreeMap::new(),
+            color_bar: None,
             free_frame: None,
             layer_background: String::new(),
         }
@@ -1458,5 +1469,52 @@ mod free_page_tests {
             ..crate::PlotSpec::default()
         };
         assert_eq!(spec.sanitized_free_page(), None);
+    }
+}
+
+#[cfg(test)]
+mod color_bar_tests {
+    use super::*;
+    use crate::{ColorBarSegment, ColorBarSpec, SeriesSpec};
+    use stokesforge_id::NodeId;
+
+    fn panel_with_bar() -> PanelSpec {
+        let mut panel = PanelSpec::at(0, 0);
+        for group in [1, 1, 2, 2] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(1));
+            series.group = Some(group);
+            panel.series.push(series);
+        }
+        panel.color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment::new(1), ColorBarSegment::new(2)],
+            ..ColorBarSpec::default()
+        });
+        panel
+    }
+
+    fn groups_of_the_bar(panel: &PanelSpec) -> Vec<u32> {
+        panel
+            .color_bar
+            .as_ref()
+            .map(|bar| bar.segments.iter().map(|s| s.group).collect())
+            .unwrap_or_default()
+    }
+
+    /// A segment follows its group: ungrouping or deleting the group drops
+    /// it, the other segment stays. Witness: the second case on a group that
+    /// has no segment changes nothing.
+    #[test]
+    fn dissolving_or_removing_a_group_drops_its_segment() {
+        let mut panel = panel_with_bar();
+        assert!(panel.dissolve_group(1));
+        assert_eq!(groups_of_the_bar(&panel), [2]);
+
+        let mut panel = panel_with_bar();
+        assert!(panel.remove_group(2));
+        assert_eq!(groups_of_the_bar(&panel), [1]);
+
+        let mut panel = panel_with_bar();
+        assert!(!panel.dissolve_group(7));
+        assert_eq!(groups_of_the_bar(&panel), [1, 2]);
     }
 }

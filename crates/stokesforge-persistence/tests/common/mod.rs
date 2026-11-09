@@ -317,6 +317,29 @@ pub fn non_trivial_spec(
         group_names: [(3, "Séries d'été".to_string())].into(),
         // Color gradient kept by group 3 (#213).
         group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),
+        // #499: a colour bar, two segments in a chain, a break label, a
+        // choice that only a newer version knows.
+        color_bar: Some(stokesforge_plot::ColorBarSpec {
+            segments: vec![
+                stokesforge_plot::ColorBarSegment {
+                    group: 3,
+                    from: Some(0.0),
+                    to: Some(57.0),
+                    label: "57 min".to_string(),
+                },
+                stokesforge_plot::ColorBarSegment::new(4),
+            ],
+            chain: true,
+            value: stokesforge_plot::ColorBarValue::Comments,
+            row_column: None,
+            scale: stokesforge_plot::ColorBarScale::Log,
+            orientation: stokesforge_plot::ColorBarOrientation::Horizontal,
+            position: stokesforge_plot::ColorBarPosition::Below,
+            anchor: None,
+            ticks: stokesforge_plot::ColorBarTicks::Auto,
+            title: "Time".to_string(),
+            visible: true,
+        }),
         // #398: a free frame, negative left.
         free_frame: Some(stokesforge_plot::FreeFrame {
             left: -120.5,

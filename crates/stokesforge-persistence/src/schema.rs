@@ -896,6 +896,9 @@ pub(crate) struct PanelSpecRecord {
     /// older file, hence no group has a color gradient.
     #[serde(default)]
     pub(crate) group_gradients: Vec<GroupGradientRecord>,
+    /// Colour bar of the layer (#499); absent from an older file = no bar.
+    #[serde(default)]
+    pub(crate) color_bar: Option<ColorBarRecord>,
     /// Frame of the cell in free placement (#398); absent = none.
     #[serde(default)]
     pub(crate) free_frame: Option<FreeFrameRecord>,
@@ -903,6 +906,50 @@ pub(crate) struct PanelSpecRecord {
     /// Auto.
     #[serde(default)]
     pub(crate) layer_background: String,
+}
+
+/// [`stokesforge_plot::ColorBarSpec`], flat (#499). Every choice is a stored
+/// key; an empty or unknown key reads as the default and is kept on save.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ColorBarRecord {
+    #[serde(default)]
+    pub(crate) segments: Vec<ColorBarSegmentRecord>,
+    #[serde(default)]
+    pub(crate) chain: bool,
+    #[serde(default)]
+    pub(crate) value: String,
+    #[serde(default)]
+    pub(crate) row_column: Option<u64>,
+    #[serde(default)]
+    pub(crate) scale: String,
+    #[serde(default)]
+    pub(crate) orientation: String,
+    #[serde(default)]
+    pub(crate) position: String,
+    #[serde(default)]
+    pub(crate) anchor: Option<TextAnchorRecord>,
+    #[serde(default)]
+    pub(crate) ticks: String,
+    #[serde(default)]
+    pub(crate) title: String,
+    #[serde(default = "default_true")]
+    pub(crate) visible: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// One segment of a colour bar (#499).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ColorBarSegmentRecord {
+    pub(crate) group: u32,
+    #[serde(default)]
+    pub(crate) from: Option<f64>,
+    #[serde(default)]
+    pub(crate) to: Option<f64>,
+    #[serde(default)]
+    pub(crate) label: String,
 }
 
 /// The stops of the color gradient of a series group (#213), flat.
@@ -1010,6 +1057,7 @@ impl Default for PanelSpecRecord {
             shapes: Vec::new(),
             group_names: Vec::new(),
             group_gradients: Vec::new(),
+            color_bar: None,
             free_frame: None,
             layer_background: String::new(),
         }

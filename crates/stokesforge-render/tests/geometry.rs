@@ -966,3 +966,61 @@ fn an_oriented_axis_is_drawn_like_the_original_axis() {
     framings.dedup();
     assert!(framings.len() >= 4, "the witness covers several framings");
 }
+
+/// #499 step C: the members of a group on a colour bar leave the ordinary
+/// legend, and the rows that remain still designate their own series (the
+/// rank list and the drawn entries use one predicate). A member with no value
+/// stays listed. Witness: the same figure without the bar lists all four.
+#[test]
+fn a_colour_bar_replaces_its_groups_entries_and_keeps_the_ranks_of_the_others() {
+    use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+    let with_x_prime = |x_prime: Option<f64>| {
+        Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float(vec![1.0, 2.0, 3.0]),
+            ColumnMeta {
+                x_prime,
+                ..ColumnMeta::default()
+            },
+        )
+        .expect("column")
+    };
+    let columns = [
+        ("X", with_x_prime(None)),
+        ("A", with_x_prime(Some(0.0))),
+        ("B", with_x_prime(Some(57.0))),
+        // In the group, but with no x': no value, so no replacement.
+        ("C", with_x_prime(None)),
+        // Not in the group.
+        ("D", with_x_prime(Some(5.0))),
+    ];
+    let draw = |bar: bool| {
+        geometry_from_columns(&columns, move |ids| {
+            let mut panel = PanelSpec::at(0, 0);
+            for (index, group) in [Some(1), Some(1), Some(1), None].into_iter().enumerate() {
+                let mut series = SeriesSpec::new_xy(ids[0], ids[index + 1]);
+                series.group = group;
+                panel.series.push(series);
+            }
+            if bar {
+                panel.color_bar = Some(ColorBarSpec {
+                    segments: vec![ColorBarSegment::new(1)],
+                    ..ColorBarSpec::default()
+                });
+            }
+            PlotSpec::empty("Test").with_panels(panel)
+        })
+    };
+    let without = draw(false);
+    assert_eq!(without.panel(0).unwrap().legend_rows.len(), 4);
+
+    let with = draw(true);
+    let panel = with.panel(0).unwrap();
+    let ranks: Vec<usize> = panel.legend_rows.iter().map(|row| row.series).collect();
+    assert_eq!(
+        ranks,
+        [2, 3],
+        "C (no value) and D remain, with their own rank"
+    );
+    assert_eq!(panel.legend_entries, 2);
+}

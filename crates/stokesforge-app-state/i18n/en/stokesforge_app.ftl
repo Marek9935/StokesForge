@@ -1471,6 +1471,7 @@ history-plot-match-layer-size = Match Layer Size
 history-plot-distribute-layers = Distribute Layers
 history-plot-layer-placement = Change Layer Placement
 history-plot-legend-text = Change Legend Text
+history-plot-color-bar = Change Color Bar
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel

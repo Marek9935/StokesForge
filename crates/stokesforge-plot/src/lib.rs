@@ -84,6 +84,7 @@
 
 pub mod annotation;
 pub mod axis;
+pub mod color_bar;
 pub mod gradient;
 pub mod legend;
 pub mod length_unit;
@@ -101,7 +102,11 @@ pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
 pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection};
-pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
+pub use color_bar::{
+    value_color, ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment,
+    ColorBarSpec, ColorBarTicks, ColorBarValue,
+};
+pub use gradient::{gradient_at, gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{
     template_source, typst_literal, typst_string, LegendField, LegendPosition, LegendSpec,
     LegendText, LegendTextFrom, VARIABLES,

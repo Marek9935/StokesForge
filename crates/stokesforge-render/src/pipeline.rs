@@ -2652,6 +2652,7 @@ fn draw_panel<DB: DrawingBackend>(
     // nor framed, nor in the legend.
     // `source` keeps the rank of each series in `PanelSpec::series`: the
     // legend designates its rows by this rank (issue #53).
+    let value_colors = crate::color_bar::value_colors(panel);
     let (source, mut prepared): (Vec<usize>, Vec<Prepared<'_>>) = panel
         .series
         .iter()
@@ -2663,7 +2664,9 @@ fn draw_panel<DB: DrawingBackend>(
             } else {
                 y_scale
             };
-            (rank, series::prepare(series, x_scale, scale))
+            let mut prepared = series::prepare(series, x_scale, scale);
+            prepared.value_color.clone_from(&value_colors[rank]);
+            (rank, prepared)
         })
         .unzip();
     // A superimposed layer has no secondary ordinate: everything is drawn on
@@ -3651,11 +3654,17 @@ fn draw_panel<DB: DrawingBackend>(
             } else {
                 y_scale
             };
+            let colors = crate::color_bar::value_colors(layer);
             layer
                 .series
                 .iter()
-                .filter(|series| series.spec.visible)
-                .map(move |series| series::prepare(series, x, y))
+                .zip(colors)
+                .filter(|(series, _)| series.spec.visible)
+                .map(move |(series, color)| {
+                    let mut prepared = series::prepare(series, x, y);
+                    prepared.value_color = color;
+                    prepared
+                })
         })
         .collect();
     let entries: Vec<&Prepared<'_>> = prepared
@@ -3907,15 +3916,15 @@ fn paint_whiskers<DB: DrawingBackend>(
     if whiskers.is_empty() {
         return Ok(());
     }
-    let spec = series.spec;
+    let line = series.line();
     let segments: Vec<_> = whiskers
         .iter()
         .map(|(from, to)| (map(*from), map(*to)))
         .collect();
     if series.stale {
-        paint::whiskers(screen, &segments, &paint::grayed(&spec.line))?;
+        paint::whiskers(screen, &segments, &paint::grayed(&line))?;
     } else {
-        paint::whiskers(screen, &segments, &spec.line)?;
+        paint::whiskers(screen, &segments, &line)?;
     }
     for (a, b) in segments {
         match bounds {
@@ -3948,6 +3957,8 @@ fn paint_series<DB: DrawingBackend>(
 ) -> Result<(usize, crate::series_selection::DrawnSeries), DrawingAreaErrorKind<DB::ErrorType>> {
     let mut geometry = crate::series_selection::DrawnSeries::default();
     let spec = series.spec;
+    let line = series.line();
+    let symbol = series.symbol();
     match &series.geometry {
         Geometry::Nothing => Ok((0, geometry)),
         Geometry::Bars { bars, whiskers } => {
@@ -3960,9 +3971,9 @@ fn paint_series<DB: DrawingBackend>(
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
                 .collect();
             if series.stale {
-                paint::bars(screen, &rects, &paint::grayed(&spec.line), ink)?;
+                paint::bars(screen, &rects, &paint::grayed(&line), ink)?;
             } else {
-                paint::bars(screen, &rects, &spec.line, ink)?;
+                paint::bars(screen, &rects, &line, ink)?;
             }
             // `a` is the corner on the value side, `b` the corner on the
             // baseline side: the free end of the bar (the place of its
@@ -4032,12 +4043,12 @@ fn paint_series<DB: DrawingBackend>(
                 match bounds {
                     Some(bounds) => {
                         for run in clip::clip_polyline_f64(bounds, &precise) {
-                            paint::polyline_f64(screen, &run, &spec.line, series.stale)?;
+                            paint::polyline_f64(screen, &run, &line, series.stale)?;
                             geometry.paths.push(quantized_path(&run));
                         }
                     }
                     None => {
-                        paint::polyline_f64(screen, &precise, &spec.line, series.stale)?;
+                        paint::polyline_f64(screen, &precise, &line, series.stale)?;
                         geometry.paths.push(quantized_path(&precise));
                     }
                 }
@@ -4047,7 +4058,7 @@ fn paint_series<DB: DrawingBackend>(
                 && spec.symbol.shape != stokesforge_plot::SymbolShape::None
             {
                 let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
-                paint::symbols(screen, &mapped, &spec.symbol, series.stale)?;
+                paint::symbols(screen, &mapped, &symbol, series.stale)?;
                 geometry.points = mapped
                     .into_iter()
                     .filter(|&(x, y)| {

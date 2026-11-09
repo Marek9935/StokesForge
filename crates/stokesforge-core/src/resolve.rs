@@ -60,7 +60,8 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use stokesforge_plot::{
-    template_source, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec, SeriesSpec,
+    template_source, ColorBarSpec, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec,
+    SeriesSpec,
 };
 
 use crate::column::Column;
@@ -159,6 +160,10 @@ pub struct ResolvedSeries<'s> {
     /// (#198). The rendering knows no more: it greys the series out and places its
     /// marker; where the staleness comes from remains the model's business.
     pub stale: bool,
+    /// The value that places the series on its layer's colour bar (#499),
+    /// read from the bar's value source by [`series_value`]. `None` without
+    /// a bar, or when the series has no readable number there.
+    pub value: Option<f64>,
 }
 
 impl<'s> ResolvedSeries<'s> {
@@ -338,6 +343,33 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
     }
 }
 
+/// The value that places `series` on a colour bar (#499, C2), read from the
+/// bar's value source `bar.value`: the x' row by default, or the comments,
+/// long name, short name or units row, whose text must be a single number
+/// (`number_format::parse_input`; « 57 min » is no value). A row series reads
+/// the cell of `bar.row_column` on its row. `None` if there is no readable
+/// finite number: the curve keeps its colour and is reported.
+pub fn series_value(series: &SeriesSpec, tree: &Tree, bar: &ColorBarSpec) -> Option<f64> {
+    if let Some(row) = series.row {
+        let id = bar.row_column?;
+        let column = tree.node(id)?.as_column()?;
+        return match column.cell(row) {
+            crate::column::MixedCell::Number(value) => value.is_finite().then_some(value),
+            crate::column::MixedCell::Text(text) => crate::number_format::parse_input(&text),
+            crate::column::MixedCell::Empty => None,
+        };
+    }
+    let node = tree.node(series.y).filter(|node| node.kind().is_column())?;
+    let meta = node.as_column().map(Column::meta)?;
+    match bar.value.field() {
+        LegendField::XPrime => meta.x_prime.filter(|value| value.is_finite()),
+        LegendField::Comments => crate::number_format::parse_input(&meta.comment),
+        LegendField::Units => crate::number_format::parse_input(&meta.unit),
+        LegendField::LongName => crate::number_format::parse_input(&meta.long_name),
+        LegendField::ShortName => crate::number_format::parse_input(node.name()),
+    }
+}
+
 /// Text of the cell `row` of the column `id` (#499), `None` if the column no
 /// longer exists (the label then falls back to « Row N »).
 fn row_cell_text(tree: &Tree, id: NodeId, row: usize) -> Option<String> {
@@ -444,6 +476,7 @@ fn resolve_series_data<'s>(
             missing,
             truncated: false,
             stale: false,
+            value: None,
         };
     }
 
@@ -486,6 +519,7 @@ fn resolve_series_data<'s>(
         missing,
         truncated,
         stale: false,
+        value: None,
     }
 }
 
@@ -511,6 +545,7 @@ fn resolve_row_series<'s>(
         missing: vec![MissingRole::Y],
         truncated: false,
         stale: false,
+        value: None,
     };
     let Some(sheet) =
         resolve_column(tree, series.y).and_then(|_| tree.parent(series.y).ok().flatten())
@@ -544,6 +579,7 @@ fn resolve_row_series<'s>(
         missing: Vec::new(),
         truncated: false,
         stale: false,
+        value: None,
     }
 }
 
@@ -574,7 +610,14 @@ pub fn resolve_panel<'s>(tree: &Tree, panel: &'s PanelSpec) -> ResolvedPanel<'s>
         series: panel
             .series
             .iter()
-            .map(|series| resolve_series_in(tree, series, &panel.legend.text))
+            .map(|series| {
+                let mut resolved = resolve_series_in(tree, series, &panel.legend.text);
+                resolved.value = panel
+                    .color_bar
+                    .as_ref()
+                    .and_then(|bar| series_value(series, tree, bar));
+                resolved
+            })
             .collect(),
     }
 }
@@ -1227,6 +1270,80 @@ mod tests {
             ..chosen
         };
         assert_eq!(label_of(&project, &series, &gone), SeriesLabel::Row(1));
+    }
+
+    fn bar_from(value: stokesforge_plot::ColorBarValue) -> ColorBarSpec {
+        ColorBarSpec {
+            value,
+            ..ColorBarSpec::default()
+        }
+    }
+
+    /// #499 step C: the value of a curve is read from the bar's source;
+    /// a text must be a single number. Witness: reading x' whatever the
+    /// source gives 57 for the comment case.
+    #[test]
+    fn a_curve_reads_its_value_from_the_chosen_header_row() {
+        use stokesforge_plot::ColorBarValue;
+        let (mut project, _, y) = headers();
+        let series = SeriesSpec::new(y);
+        let value =
+            |project: &Project, source| series_value(&series, project.tree(), &bar_from(source));
+        assert_eq!(value(&project, ColorBarValue::XPrime), Some(57.0));
+        // « scan 3 » is no number.
+        assert_eq!(value(&project, ColorBarValue::Comments), None);
+        let meta = |comment: &str| ColumnMeta {
+            comment: comment.to_string(),
+            x_prime: Some(57.0),
+            ..ColumnMeta::default()
+        };
+        project.set_column_meta(y, meta("12,5")).expect("meta");
+        assert_eq!(value(&project, ColorBarValue::Comments), Some(12.5));
+        project.set_column_meta(y, meta("57 min")).expect("meta");
+        assert_eq!(value(&project, ColorBarValue::Comments), None);
+        // An unknown source reads x'.
+        assert_eq!(
+            value(&project, ColorBarValue::Unknown("later".into())),
+            Some(57.0)
+        );
+    }
+
+    /// A row series reads the cell of the chosen column on its row; without
+    /// a column, or past the data, it has no value.
+    #[test]
+    fn a_row_series_reads_the_cell_of_the_bars_column() {
+        let (project, x, y) = headers();
+        let series = SeriesSpec {
+            row: Some(1),
+            ..SeriesSpec::new(y)
+        };
+        let none = ColorBarSpec::default();
+        assert_eq!(series_value(&series, project.tree(), &none), None);
+        let chosen = ColorBarSpec {
+            row_column: Some(x),
+            ..ColorBarSpec::default()
+        };
+        // Column X holds 0, 1, 2: row 1 is 1.
+        assert_eq!(series_value(&series, project.tree(), &chosen), Some(1.0));
+        let beyond = SeriesSpec {
+            row: Some(40),
+            ..series
+        };
+        assert_eq!(series_value(&beyond, project.tree(), &chosen), None);
+    }
+
+    /// The value reaches `ResolvedSeries::value` only through a bar.
+    #[test]
+    fn the_resolved_series_carries_the_value_only_with_a_bar() {
+        let (project, _, y) = headers();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new(y));
+        assert_eq!(resolve_panel(project.tree(), &panel).series[0].value, None);
+        panel.color_bar = Some(ColorBarSpec::default());
+        assert_eq!(
+            resolve_panel(project.tree(), &panel).series[0].value,
+            Some(57.0)
+        );
     }
 
     /// F5 (#499): a number inserted in a legend text is shown as the grid

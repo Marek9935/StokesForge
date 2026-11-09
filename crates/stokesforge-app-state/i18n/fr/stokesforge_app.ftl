@@ -1470,6 +1470,7 @@ history-plot-match-layer-size = Uniformiser la taille des calques
 history-plot-distribute-layers = Répartir les calques
 history-plot-layer-placement = Changer le placement des calques
 history-plot-legend-text = Changer le texte de la légende
+history-plot-color-bar = Changer la barre de couleurs
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau

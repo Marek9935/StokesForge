@@ -105,6 +105,11 @@ pub struct Prepared<'s> {
     /// A column of the series comes from a stale computation and the graph
     /// warns about it (#198): grayed line and « ! » marker.
     pub stale: bool,
+    /// The colour the series' value takes on its layer's colour bar (#499,
+    /// step C), computed at each draw and **never written to the spec**.
+    /// When set, the series is painted with it instead of its stored colour
+    /// and its legend entry is replaced by the bar.
+    pub value_color: Option<String>,
 }
 
 impl Prepared<'_> {
@@ -117,8 +122,37 @@ impl Prepared<'_> {
     ///
     /// A broken reference qualifies — it is even the only place where it can
     /// show, since it has nothing to draw.
+    ///
+    /// A series coloured by a colour bar (#499) is replaced by the bar: it
+    /// leaves the legend. The predicate is shared by the drawn entries and by
+    /// the rank of each row, so a click on a remaining entry still finds its
+    /// own series.
     pub fn in_legend(&self) -> bool {
-        self.spec.show_in_legend && (self.draws() || self.broken)
+        self.spec.show_in_legend && self.value_color.is_none() && (self.draws() || self.broken)
+    }
+
+    /// The line to paint: the stored one, or a copy in the value colour
+    /// (#499). Never modifies the spec.
+    pub fn line(&self) -> std::borrow::Cow<'_, stokesforge_plot::LineSpec> {
+        match &self.value_color {
+            None => std::borrow::Cow::Borrowed(&self.spec.line),
+            Some(color) => std::borrow::Cow::Owned(stokesforge_plot::LineSpec {
+                color: color.clone(),
+                ..self.spec.line.clone()
+            }),
+        }
+    }
+
+    /// The marker to paint: the stored one, or a copy whose fill is the
+    /// value colour (#499). Never modifies the spec.
+    pub fn symbol(&self) -> std::borrow::Cow<'_, stokesforge_plot::SymbolSpec> {
+        match &self.value_color {
+            None => std::borrow::Cow::Borrowed(&self.spec.symbol),
+            Some(color) => std::borrow::Cow::Owned(stokesforge_plot::SymbolSpec {
+                color: color.clone(),
+                ..self.spec.symbol.clone()
+            }),
+        }
     }
 
     /// The text of the legend entry, in the language of `texts`.
@@ -173,6 +207,7 @@ pub fn prepare<'s>(
         unknown_type: matches!(spec.plot_type, PlotType::Unknown(_)),
         decimated: 0,
         stale: resolved.stale,
+        value_color: None,
     };
     if prepared.broken || prepared.unknown_type {
         return prepared;

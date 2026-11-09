@@ -306,9 +306,11 @@ pub enum PlotEditKind {
     LayerPlacement,
     /// The « Text from » setting of a legend changed (#499).
     LegendText,
+    /// The colour bar of a layer edited (#499).
+    ColorBar,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 27] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -335,6 +337,7 @@ impl PlotEditKind {
         Self::DistributeLayers,
         Self::LayerPlacement,
         Self::LegendText,
+        Self::ColorBar,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -366,6 +369,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::DistributeLayers => "Distribute Layers",
             Self::LayerPlacement => "Change Layer Placement",
             Self::LegendText => "Change Legend Text",
+            Self::ColorBar => "Change Color Bar",
         })
     }
 }
