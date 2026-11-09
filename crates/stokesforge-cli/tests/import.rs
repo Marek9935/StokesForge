@@ -63,7 +63,9 @@ fn imports_a_jasco_file_with_the_model_chosen_from_its_content() {
         &fixture("jasco_uvvis_semicolon.csv"),
     ]);
     result.unwrap();
-    assert!(output.contains("Jasco (semicolon)"), "{output}");
+    // The fixture holds old-format templates: kept, but not picked by
+    // themselves (F1 of #488). The detector reads the file.
+    assert!(!output.contains("Jasco (semicolon)"), "{output}");
     let project = load(&out_path);
     let sheet = project
         .resolve_path("[Import]Fixture_Jasco_UVVis")
@@ -79,6 +81,23 @@ fn imports_a_jasco_file_with_the_model_chosen_from_its_content() {
     assert_eq!(first.meta().role, stokesforge_core::ColumnRole::X);
     assert_eq!(first.len(), 6);
     assert!(first.meta().import_source.is_some(), "source remembered");
+}
+
+/// A named old template still works.
+#[test]
+fn a_named_old_template_is_still_used() {
+    let dir = isolated();
+    let out_path = dir.path().join("named.stf");
+    let (result, output) = run(&[
+        "import",
+        "--recipe",
+        "Jasco (semicolon)",
+        "--out",
+        out_path.to_str().unwrap(),
+        &fixture("jasco_uvvis_semicolon.csv"),
+    ]);
+    result.unwrap();
+    assert!(output.contains("Jasco (semicolon)"), "{output}");
 }
 
 #[test]
