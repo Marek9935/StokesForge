@@ -416,7 +416,7 @@ function imgFilter(files,have){
   return {accept:accept,lines:lines};
 }
 /* The advice shown above the strip while the box holds more than IMG_WARN_COUNT screenshots ('' otherwise). */
-function imgAdvice(n){return n>IMG_WARN_COUNT?'Conseil : au-delà de '+IMG_WARN_COUNT+' captures, ne garde que les plus utiles.':'';}
+function imgAdvice(n){return n>IMG_WARN_COUNT?'⚠ Plus de '+IMG_WARN_COUNT+' captures dans ce retour':'';}
 function imgUploadLine(status){
   if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
   if(status===413)return 'Capture refusée : plus de 10 Mo.';

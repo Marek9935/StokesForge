@@ -368,7 +368,7 @@ function qFilter(files,have){
   return {accept:accept,lines:lines};
 }
 /* The advice shown above the strip while the card holds more than QI_WARN screenshots ('' otherwise). */
-function qAdvice(n){return n>QI_WARN?'Conseil : au-delà de '+QI_WARN+' captures, ne garde que les plus utiles.':'';}
+function qAdvice(n){return n>QI_WARN?'⚠ Plus de '+QI_WARN+' captures dans cette réponse':'';}
 function qUploadLine(status){
   if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
   if(status===413)return 'Capture refusée : plus de 10 Mo.';

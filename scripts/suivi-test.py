@@ -2808,9 +2808,9 @@ class TestFormTemplate(unittest.TestCase):
                                                        f("image/gif", 10 * 1024 * 1024 + 1, "big.gif"), f("image/webp", name="w.webp")]))
         self.assertEqual([x["name"] for x in out["accept"]], ["a.png", "w.webp"])            # no count cap
         self.assertEqual(len(out["lines"]), 2)                                               # 2 refusals, the advice is not a refusal line
-        self.assertFalse(any("Conseil" in l for l in out["lines"]))
+        self.assertFalse(any("Plus de" in l for l in out["lines"]))
         self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 9).lines"), [])
-        adv = "Conseil : au-delà de 5 captures, ne garde que les plus utiles."
+        adv = "⚠ Plus de 5 captures dans cette réponse"
         self.assertEqual([self.q_js("qAdvice(%d)" % n) for n in (0, 5, 6, 7)], ["", "", adv, adv])   # shown above 5, gone back at 5
         form = self.form_html()
         self.assertRegex(form, r'Captures \(facultatif\)</div><div class="qwarn" id="qadv"[^>]*hidden></div><div class="qstrip"')
@@ -3932,7 +3932,7 @@ class TestPage(unittest.TestCase):
         self.assertEqual(self.img_js("imgFilter([%s], 0).accept.length" % json.dumps(f("image/png", 10 * 1024 * 1024))), 1)   # exactly 10 Mo
         full = self.img_js("imgFilter(%s, 4)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
         self.assertEqual((len(full["accept"]), full["lines"]), (2, []))                      # no cap; the advice is not a refusal line
-        adv = "Conseil : au-delà de 5 captures, ne garde que les plus utiles."
+        adv = "⚠ Plus de 5 captures dans ce retour"
         self.assertEqual([self.img_js("imgAdvice(%d)" % n) for n in (0, 5, 6, 7)], ["", "", adv, adv])   # shown above 5, gone back at 5
         page = self.page()
         self.assertLess(page.index("b.appendChild(ad);"), page.index("b.appendChild(adv);b.appendChild(st);"))   # the slot sits above the strip
