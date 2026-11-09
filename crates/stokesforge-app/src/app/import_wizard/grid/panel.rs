@@ -540,6 +540,9 @@ fn warnings_block(
         });
 }
 
+/// Least width of a sentence of the « To check » block, beside its button.
+const MIN_SENTENCE_W: f32 = 160.0;
+
 /// One point to check: its sentence, « Mark as Checked » beside it, and, for
 /// a tie, one button per other template.
 fn to_check_point(
@@ -564,51 +567,77 @@ fn to_check_point(
             })
             .collect(),
     };
-    ui.horizontal_top(|ui| {
-        let button_w = 120.0;
-        ui.allocate_ui_with_layout(
-            vec2((ui.available_width() - button_w).max(80.0), 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                let sense = if evidence.is_empty() {
-                    Sense::hover()
-                } else {
-                    Sense::click()
-                };
-                let r = ui.add(egui::Label::new(point.sentence.clone()).wrap().sense(sense));
-                if !evidence.is_empty() {
-                    let r = cursors::clickable(r).on_hover_text(tr!("import-check-tag-check-go"));
-                    if r.hovered() {
-                        check::focus_hint(gs, &evidence, theme::accent());
-                    }
-                    if r.clicked() {
-                        // Shows where to look; settles nothing.
-                        let now = ui.input(|i| i.time);
-                        gs.pinned = Some((evidence.clone(), now));
+    // « Mark as Checked » sits beside the sentence while the sentence keeps a
+    // readable width, and moves below it otherwise (a long translation, a
+    // narrow panel), never cut at the edge.
+    let button_text = tr!("import-check-mark-checked");
+    let button_w = ui
+        .painter()
+        .layout_no_wrap(
+            button_text.clone(),
+            egui::TextStyle::Button.resolve(ui.style()),
+            ui.visuals().text_color(),
+        )
+        .size()
+        .x
+        + ui.spacing().button_padding.x * 2.0
+        + ui.spacing().item_spacing.x;
+    let beside = ui.available_width() - button_w >= MIN_SENTENCE_W;
+    let sentence = |ui: &mut egui::Ui, gs: &mut GridUi, out: &mut GridOut| {
+        let sense = if evidence.is_empty() {
+            Sense::hover()
+        } else {
+            Sense::click()
+        };
+        let r = ui.add(egui::Label::new(point.sentence.clone()).wrap().sense(sense));
+        if !evidence.is_empty() {
+            let r = cursors::clickable(r).on_hover_text(tr!("import-check-tag-check-go"));
+            if r.hovered() {
+                check::focus_hint(gs, &evidence, theme::accent());
+            }
+            if r.clicked() {
+                // Shows where to look; settles nothing.
+                let now = ui.input(|i| i.time);
+                gs.pinned = Some((evidence.clone(), now));
+            }
+        }
+        if let ToCheckSource::Tie { others } = &point.source {
+            ui.horizontal_wrapped(|ui| {
+                for name in others {
+                    let button = ui
+                        .button(tr!("import-tie-use", name = name.clone()))
+                        .on_hover_text(tr!("import-tie-use", "hint"));
+                    if button.clicked() {
+                        out.check.push(CheckCmd::UseTemplate(name.clone()));
                     }
                 }
-                if let ToCheckSource::Tie { others } = &point.source {
-                    ui.horizontal_wrapped(|ui| {
-                        for name in others {
-                            let button = ui
-                                .button(tr!("import-tie-use", name = name.clone()))
-                                .on_hover_text(tr!("import-tie-use", "hint"));
-                            if button.clicked() {
-                                out.check.push(CheckCmd::UseTemplate(name.clone()));
-                            }
-                        }
-                    });
-                }
-            },
-        );
+            });
+        }
+    };
+    let mark = |ui: &mut egui::Ui, out: &mut GridOut| {
         if ui
-            .button(tr!("import-check-mark-checked"))
+            .button(button_text.clone())
             .on_hover_text(tr!("import-check-mark-checked", "hint"))
             .clicked()
         {
             out.check.push(CheckCmd::MarkPoint(point.id.clone()));
         }
-    });
+    };
+    if beside {
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                vec2((ui.available_width() - button_w).max(MIN_SENTENCE_W), 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| sentence(ui, gs, out),
+            );
+            mark(ui, out);
+        });
+    } else {
+        ui.vertical(|ui| {
+            sentence(ui, gs, out);
+            mark(ui, out);
+        });
+    }
     ui.add_space(theme::SPACE_ITEM);
 }
 
@@ -707,8 +736,27 @@ fn role_color(dark: bool, role: FoundRole) -> Option<egui::Color32> {
     }
 }
 
-/// Width of the right column of a row: the « To check » tag and its ✓.
-const TAG_COLUMN_W: f32 = 118.0;
+/// Least width of the right column of a row: the « To check » tag and its ✓.
+const TAG_COLUMN_MIN_W: f32 = 118.0;
+
+/// Width of the right column of a row: the « To check » tag and its ✓, wide
+/// enough for the text of the current language (a long translation widens the
+/// column instead of being cut at the edge of the panel).
+fn tag_column_w(ui: &egui::Ui) -> f32 {
+    let text_w = ui
+        .painter()
+        .layout_no_wrap(
+            tr!("import-check-tag-check"),
+            egui::FontId::proportional(theme::SECONDARY_TEXT_SIZE),
+            ui.visuals().text_color(),
+        )
+        .size()
+        .x;
+    let pad = ui.spacing().button_padding.x * 2.0;
+    // The tag button, the gap, the ✓ button.
+    let wanted = text_w + pad + ui.spacing().item_spacing.x + ICON_COLUMN_W + pad;
+    wanted.max(TAG_COLUMN_MIN_W)
+}
 /// Width of the icon column of a row.
 const ICON_COLUMN_W: f32 = 18.0;
 /// Spare width at the end of a row, against rounding and the scroll bar.
@@ -755,11 +803,11 @@ fn found_row(
     let doubt = row.confidence == Confidence::Check;
     let background = ListRowBackground::reserve(ui);
     let total_w = ui.available_width();
+    let tag_w = tag_column_w(ui);
     let gap = ui.spacing().item_spacing.x;
     // The tag column is reserved first, so a long value can only eat into
     // the value column; the slack keeps the ✓ clear of the scroll bar.
-    let value_w =
-        (total_w - ICON_COLUMN_W - label_w - TAG_COLUMN_W - 3.0 * gap - ROW_SLACK).max(40.0);
+    let value_w = (total_w - ICON_COLUMN_W - label_w - tag_w - 3.0 * gap - ROW_SLACK).max(40.0);
     let inner = ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.visuals_mut().indent_has_left_vline = false;
@@ -827,10 +875,10 @@ fn found_row(
                 );
                 // Tag column: « To check » and « Mark as Checked ».
                 ui.allocate_ui_with_layout(
-                    vec2(TAG_COLUMN_W, LIST_ROW_HEIGHT),
+                    vec2(tag_w, LIST_ROW_HEIGHT),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.set_width(TAG_COLUMN_W);
+                        ui.set_width(tag_w);
                         if !doubt {
                             return;
                         }

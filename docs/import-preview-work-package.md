@@ -1,5 +1,15 @@
 # Work package "import preview" — handover note
 
+**Status (#488).** The window this note talks about, the six-step wizard, was
+replaced by the one-screen import (`docs/application/project-and-import.md`
+§ "The import screen"). What stays true here: the engine (`layout`, `preview`,
+`data_end`, `HeaderLayout`, `SubheaderRoles`) and the decisions below. The
+sections that describe the wizard's steps ("Step-by-step wizard", the buttons
+"Re-evaluate Now" and "Detect Header", the "Metadata" step) are history: the
+detector now proposes the header layout by itself (`sniff`), a click on a line
+number of the grid gives a line its role, and the selection of the metadata
+keys is the « Do not keep this info » / « Keep this info » choice of the grid.
+
 **This document is not a reference page.** Unlike the rest of `docs/`, which
 describes the code as it is, this one describes a *work package*: what it
 aimed at, what it found along the way, and what it leaves open. Its lifetime
@@ -208,9 +218,8 @@ one (an empty line included); a text in another column does not cut.
 Other options: no cut, first empty line, marker, N lines after
 the header, N lines before the end. The rule lives in `data_end.rs`, called by the
 shared `layout` split, so that `parse` **and** `preview` cut at the
-same place. `footer_skip_lines` applies first. The options and the right-click
-on the cut line are available in the wizard; see
-`docs/application/project-and-import.md` § "Import wizard". The footer can be kept
+same place. `footer_skip_lines` applies first. The options are in the recipe, and the cut is the pair of handles of the grid; see
+`docs/application/project-and-import.md` § "The import screen". The footer can be kept
 in the metadata with `keep_footer_metadata`.
 
 ## File metadata per column (issue #5)
@@ -223,17 +232,16 @@ the preview's own) is not metadata, #488). `stokesforge-app` copies them into `C
 of each imported column — in the "Import" macro, with no
 edit command: read-only. Display: "Metadata" row of the header ("📋 N
 keys"), click → modal viewing window (`column_metadata_window`).
-The row can be hidden (Window menu); selection by key is in the
-"Metadata" step of the wizard; no automatic filling of units
-(decided).
+The row can be hidden (Window menu); a key is kept or left out from the grid of
+the import screen (`GridCmd::Exclude`); units are filled from the file only
+where the detector reads them (`KEY;value` lines, `props`).
 
 ## Step-by-step wizard (issue #6)
 
-`import_window` is now a six-step wizard (see
-`docs/application/project-and-import.md` § "Import wizard"). On the `stokesforge-import` side:
+*History: this was the six-step wizard, replaced by the one-screen import (#488, see
+`docs/application/project-and-import.md` § "The import screen").* On the `stokesforge-import` side:
 `ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignore removes the column
-at import), `unify_header`, `detect_encoding`. The header setting no longer
-exposes the "Automatic detection" checkbox: only the button "Detect Header" acts (`HeaderLayout::auto_detect` stays in the recipe, with no effect).
+at import), `unify_header`, `detect_encoding`. `HeaderLayout::auto_detect` stays in the recipe, with no effect: the detector (`sniff`) proposes the layout when a file arrives.
 
 Numbers: a non-finite result (`inf`, `Infinity`, `1e400`) reads as `NaN` and the token stays visible as text (`Mixed` column), like `nan`; the automatic end of data and the subheader detection nevertheless count it as a number (`NumberFormat::is_numeric`).
 

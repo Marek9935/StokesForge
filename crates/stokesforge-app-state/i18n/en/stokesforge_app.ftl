@@ -387,7 +387,7 @@ status-graph-copied-partly = Graph copied as { $formats }; { $missing } could no
 status-language-not-saved = Could not save the language choice: { $detail }
 
 ## Assistant d'import (#44)
-## Texts of the Import Wizard: six steps, templates, metadata and preview.
+## Texts of the Import Wizard: the one-screen import, templates, points to check.
 ## Template names and file contents are data and are never translated.
 
 import-window-title = Import Wizard

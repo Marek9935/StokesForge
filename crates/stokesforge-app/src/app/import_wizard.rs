@@ -662,6 +662,81 @@ mod tests {
         );
     }
 
+    /// In the pseudo-locale (texts 30 % longer) nothing of the left panel is
+    /// cut at its edge: « Mark as Checked » of the « To check » block and the
+    /// « To check » tags of the rows stay inside the panel, whose edge is the
+    /// one of the frame of the « To check » block.
+    #[test]
+    fn long_texts_of_the_left_panel_are_never_cut() {
+        use stokesforge_app_state::i18n::{self, Language};
+        let _language = i18n::test_language(Language::PseudoEnglish);
+        let mut bench = bench(DOUBTS);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        // The default window of the application, 1100 x 700.
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::app::test_support::frame_of(&ctx, egui::vec2(1100.0, 700.0), events, |ui| {
+                super::import_window(ui.ctx(), &mut bench.state, &mut actions)
+            })
+        };
+        frame(Vec::new());
+        // The size the window takes on that screen: the left panel keeps its
+        // least width, 380 points.
+        crate::app::dialogs::set_dialog_size(
+            &ctx,
+            egui::Id::new("stokesforge_import_wizard"),
+            egui::vec2(1040.0, 640.0),
+        );
+        for _ in 0..3 {
+            frame(Vec::new());
+        }
+        frame(vec![escape()]);
+        for _ in 0..3 {
+            frame(Vec::new());
+        }
+        let shapes = frame(Vec::new()).shapes;
+        let frame_right = shapes
+            .iter()
+            .filter_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect)
+                    if rect.stroke.width == 1.5 && rect.fill != egui::Color32::TRANSPARENT =>
+                {
+                    Some(rect.rect.right())
+                }
+                _ => None,
+            })
+            .fold(f32::NAN, f32::max);
+        assert!(frame_right.is_finite(), "the frame of the block is painted");
+        let wanted = [
+            tr!("import-check-mark-checked"),
+            tr!("import-check-tag-check"),
+        ];
+        let mut seen = 0;
+        for painted in &shapes {
+            let egui::Shape::Text(text) = &painted.shape else {
+                continue;
+            };
+            if !wanted.contains(&text.galley.job.text) {
+                continue;
+            }
+            seen += 1;
+            eprintln!(
+                "DBG {:?} right {} frame {}",
+                text.galley.job.text,
+                text.pos.x + text.galley.rect.right(),
+                frame_right
+            );
+            let right = text.pos.x + text.galley.rect.right();
+            assert!(
+                right <= frame_right + 0.5 && right <= painted.clip_rect.right() + 0.5,
+                "{:?} ends at {right}, past the panel edge {frame_right} or its clip edge {}",
+                text.galley.job.text,
+                painted.clip_rect.right(),
+            );
+        }
+        assert!(seen >= 2, "both texts are painted, saw {seen}");
+    }
+
     /// Two templates that fit the file as well make a point to check that
     /// offers the other one.
     #[test]
