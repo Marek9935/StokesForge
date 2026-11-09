@@ -15185,6 +15185,111 @@ fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
     assert_eq!(state.snapshot().revision, revision, "wrong length: nothing");
 }
 
+/// #491: moving a graph on a regular grid is ONE undo step labelled Move Layer
+/// (swap, or a new row beside another cell); a move that changes nothing, or
+/// that targets a free figure, sends no command; a legacy graph is given its
+/// frames first. Witness: the command sent with another kind, or sent even
+/// when the spec is unchanged.
+#[test]
+fn moving_a_graph_on_the_grid_is_one_move_layer_step_and_a_no_op_leaves_no_entry() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::{CellSide, MoveTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let before = graph_spec(&state, graph);
+    let position = |spec: &stokesforge_plot::PlotSpec| {
+        spec.panels
+            .iter()
+            .map(|p| (p.row, p.column))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(position(&before), [(0, 0), (0, 1)]);
+
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 0,
+        target: MoveTarget::Cell { row: 0, column: 1 },
+    });
+    assert_eq!(position(&graph_spec(&state, graph)), [(0, 1), (0, 0)]);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+
+    // Nothing to do: no entry.
+    let revision = state.snapshot().revision;
+    for target in [
+        MoveTarget::Cell { row: 0, column: 0 },
+        MoveTarget::Cell { row: 9, column: 9 },
+    ] {
+        state.dispatch(Action::MoveGridCell {
+            graph,
+            panel: 0,
+            target,
+        });
+    }
+    assert_eq!(state.snapshot().revision, revision, "no entry");
+
+    // [A B] -> [A; B] and back with one Undo.
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 1,
+        target: MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        },
+    });
+    let stacked = graph_spec(&state, graph);
+    assert_eq!(position(&stacked), [(0, 0), (1, 0)]);
+    assert_eq!(
+        stacked.frame_widths.len(),
+        1,
+        "B's column left with its width"
+    );
+    assert_eq!(stacked.frame_heights.len(), 2);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+
+    // A free figure is not moved by cell.
+    go_free(&mut state, graph);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 0,
+        target: MoveTarget::Cell { row: 0, column: 1 },
+    });
+    assert_eq!(state.snapshot().revision, revision, "free: nothing");
+
+    // A legacy graph (no stored frames) gets the ones it is drawn with.
+    state.dispatch(Action::Undo);
+    let mut legacy = graph_spec(&state, graph);
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy);
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 1,
+        target: MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        },
+    });
+    let moved = graph_spec(&state, graph);
+    assert_eq!(position(&moved), [(0, 0), (1, 0)]);
+    assert_eq!(
+        (moved.frame_widths.len(), moved.frame_heights.len()),
+        (1, 2)
+    );
+}
+
 /// #426: the figure size typed in the Page Layout Mode strip is ONE undo step
 /// of its own kind, the other axis follows the closed lock's ratio, and a free
 /// graph is left to `SetFreeLayout`. Witness: the ratio ignored.

@@ -263,12 +263,12 @@ pub fn drop_target_stroke() -> egui::Stroke {
 /// there creates a new cell beside the nearest one. The stroke outlines the
 /// band; the fill marks the band under the pointer.
 pub fn drop_edge_band_stroke() -> egui::Stroke {
-    egui::Stroke::new(1.0, Color32::from_rgb(70, 150, 230))
+    stokesforge_render_egui::edge_band::edge_band_stroke()
 }
 
 /// Fill of the edge band under the pointer, see [`drop_edge_band_stroke`].
 pub fn drop_edge_band_fill() -> Color32 {
-    Color32::from_rgba_unmultiplied(70, 150, 230, 60)
+    stokesforge_render_egui::edge_band::edge_band_fill()
 }
 
 /// Import preview: recognized header line (name, sub-header, unit),

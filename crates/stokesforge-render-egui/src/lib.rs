@@ -77,6 +77,7 @@
 
 pub mod backend;
 pub mod cache;
+pub mod edge_band;
 pub mod feathering;
 mod layout_mode;
 pub mod scaled;
@@ -193,6 +194,17 @@ pub enum GraphEvent {
         /// The whole figure was scaled with an L corner (else a boundary or
         /// a graph corner was pulled).
         figure: bool,
+    },
+    /// A graph of a regular grid was dragged to another place, or moved by an
+    /// arrow key, in the Page Layout Mode (#491): the base layer of the graph
+    /// and where it goes, to commit as **one** change of the model. Nothing is
+    /// signalled during the drag, and nothing for a release on the same cell
+    /// or outside the figure.
+    GridCellMoved {
+        /// The base layer of the moved graph.
+        panel: usize,
+        /// The cell it takes, or the new column / row beside another cell.
+        target: stokesforge_core::compose::MoveTarget,
     },
     /// A gesture of the Page Layout Mode ended on a free figure (#426): a graph
     /// box moved or resized, the page corner pulled, or a burst of arrow-key

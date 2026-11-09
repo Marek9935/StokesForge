@@ -879,7 +879,14 @@ cursors, so outside the mode the plot area of a Free layer behaves like a Regula
 graph's: a plain drag does nothing. The mode signals `GraphEvent::LayoutEdited`,
 which `graph_window.rs` turns into `Action::SetFreeLayout` (one `EditPlotSpec`,
 `PlotEditKind::MoveLayer` when only positions change, `ResizeLayer` when a size does,
-`ResizeFigure` when the page does). `FigureFollow` also remembers the image's origin (`free_origin`):
+`ResizeFigure` when the page does). On a **Regular Grid** (#491) a drag that starts inside a graph, off
+every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` becomes `Action::MoveGridCell`
+(one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
+hole; or `MoveTarget::Beside` a cell, a new column or row made by `open_line`, the same code as
+`insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
+uses too. Only the `row` / `column` of the moved layers change, never the layer numbers. The edge bands
+(`stokesforge_render_egui::edge_band`) are shared with the drop of workbook columns in `graph_window.rs`.
+`FigureFollow` also remembers the image's origin (`free_origin`):
 `observe` returns a step when the origin moves while the size stays, and the
 shell moves the floating window by the shift at the kept scale
 (`FigureFollow::origin_follow`, `shifted_corner`); Undo and Redo go through the
