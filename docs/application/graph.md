@@ -725,9 +725,11 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
   (`GraphView::drop_place` in `stokesforge_render_egui::edge_band`, band
   `EDGE_BAND_WIDTH`, painted during the drag by `GraphView::paint_drop_places`):
   the new cell goes beside the cell **nearest the pointer**
-  (`GraphView::nearest_cell`), on the side of the band; a corner goes to the
-  nearest edge (`edge_drop_side`, the diagonal splits it; the top band is at the
-  figure's very top, over the title, #503). Dropped on an **internal line**
+  (`GraphView::nearest_cell`), on the side of the band; in a corner the left
+  or right band wins (`edge_drop_side`; the side bands are full height, the top
+  and bottom ones stop at them; the top band is at the figure's very top, over
+  the title, #503); when moving a graph, a band's reference is the nearest cell
+  other than the moving graph (`GraphView::nearest_cell_except`). Dropped on an **internal line**
   between two graphs (`stokesforge_render::grid_line_at`, the reach of the resize
   handles), the new cell goes between them: `drop_place` takes the cell of the
   pointer's row (column) on the near side of the line, the other side if that

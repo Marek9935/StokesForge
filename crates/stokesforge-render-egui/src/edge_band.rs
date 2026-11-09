@@ -25,27 +25,27 @@ fn fitted_band(figure: Rect, band: f32) -> f32 {
     band.min(figure.width() / 2.0).min(figure.height() / 2.0)
 }
 
-/// Which edge band of `figure` the pointer is in (#503, corner rule G1): the
-/// band of the **nearest** edge, so a corner is split by its diagonal; on the
-/// diagonal itself the right, then the bottom, then the left edge wins. `None`
-/// outside every band and outside the figure. Pure, so it is tested without a
-/// window.
+/// Which edge band of `figure` the pointer is in (#503, corner rule): the left
+/// and right bands are full-height and **win** in a corner, the top and bottom
+/// bands only cover what lies between them. The right band wins over the left
+/// one when both would hold the pointer. `None` outside every band and outside
+/// the figure. Pure, so it is tested without a window.
 pub fn edge_drop_side(pointer: Pos2, figure: Rect, band: f32) -> Option<CellSide> {
     if !figure.contains(pointer) {
         return None;
     }
     let band = fitted_band(figure, band);
-    [
-        // The order is the tie-break: `min_by` keeps the first of equal distances.
-        (CellSide::Right, figure.max.x - pointer.x),
-        (CellSide::Below, figure.max.y - pointer.y),
-        (CellSide::Left, pointer.x - figure.min.x),
-        (CellSide::Above, pointer.y - figure.min.y),
-    ]
-    .into_iter()
-    .filter(|(_, distance)| *distance < band)
-    .min_by(|a, b| a.1.total_cmp(&b.1))
-    .map(|(side, _)| side)
+    if figure.max.x - pointer.x < band {
+        Some(CellSide::Right)
+    } else if pointer.x - figure.min.x < band {
+        Some(CellSide::Left)
+    } else if figure.max.y - pointer.y < band {
+        Some(CellSide::Below)
+    } else if pointer.y - figure.min.y < band {
+        Some(CellSide::Above)
+    } else {
+        None
+    }
 }
 
 /// Where a drop at a pointer position puts its new cell: beside `panel`, on
@@ -66,14 +66,14 @@ impl GraphView {
     /// pointer, see [`edge_drop_side`]), else an internal line of a regular grid
     /// (#504: between the two cells of the pointer's row or column on either
     /// side of it). `moving` is the graph being moved, if any: it is never its
-    /// own reference, so a line next to it uses the cell on its other side with
-    /// the opposite side, and the band nearest to it gives `None`. A line with
-    /// no graph on either side gives `None`, as does everything else.
+    /// own reference: a band uses the nearest **other** cell (a hole is never a
+    /// cell), and a line next to it uses the cell on its other side with the
+    /// opposite side. `None` when there is no such cell, as for everything else.
     pub fn drop_place(&self, pos: Pos2, moving: Option<usize>) -> Option<DropPlace> {
         let display = self.display_rect?;
         if let Some(band) = edge_drop_side(pos, display, EDGE_BAND_WIDTH) {
-            let panel = self.nearest_cell(pos)?;
-            return (Some(panel) != moving).then_some(DropPlace {
+            let panel = self.nearest_cell_except(pos, moving)?;
+            return Some(DropPlace {
                 panel,
                 side: band,
                 band: Some(band),
@@ -184,38 +184,20 @@ impl GraphView {
     }
 }
 
-/// The four corners of the band of `side`: a trapezoid, so that the corners of
-/// the figure are split along their diagonal exactly as [`edge_drop_side`]
-/// splits them.
+/// The four corners of the band of `side`, as [`edge_drop_side`] splits them:
+/// the left and right bands are full-height rectangles, the top and bottom ones
+/// stop at them.
 fn band_corners(figure: Rect, band: f32, side: CellSide) -> [Pos2; 4] {
     let (min, max) = (figure.min, figure.max);
+    let (left, right) = (min.x + band, max.x - band);
     let p = egui::pos2;
-    match side {
-        CellSide::Left => [
-            p(min.x, min.y),
-            p(min.x + band, min.y + band),
-            p(min.x + band, max.y - band),
-            p(min.x, max.y),
-        ],
-        CellSide::Right => [
-            p(max.x, min.y),
-            p(max.x, max.y),
-            p(max.x - band, max.y - band),
-            p(max.x - band, min.y + band),
-        ],
-        CellSide::Above => [
-            p(min.x, min.y),
-            p(max.x, min.y),
-            p(max.x - band, min.y + band),
-            p(min.x + band, min.y + band),
-        ],
-        CellSide::Below => [
-            p(min.x, max.y),
-            p(min.x + band, max.y - band),
-            p(max.x - band, max.y - band),
-            p(max.x, max.y),
-        ],
-    }
+    let (x0, y0, x1, y1) = match side {
+        CellSide::Left => (min.x, min.y, left, max.y),
+        CellSide::Right => (right, min.y, max.x, max.y),
+        CellSide::Above => (left, min.y, right, min.y + band),
+        CellSide::Below => (left, max.y - band, right, max.y),
+    };
+    [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)]
 }
 
 /// Outline of an edge band. Not red: red is reserved for errors.
@@ -237,12 +219,13 @@ pub fn edge_band_pale_fill() -> Color32 {
 mod tests {
     use super::*;
 
-    /// #503 (G1): each of the four bands gives its side, and a corner goes to
-    /// the nearest edge (split by its diagonal, the right and bottom edges
-    /// winning the exact diagonal); the interior and the outside give nothing.
-    /// Witness: the `Left` entry removed from `edge_drop_side`.
+    /// #503 (corner rule): each of the four bands gives its side, and in a
+    /// corner the left or right band wins over the top or bottom one (all four
+    /// corners); the interior and the outside give nothing.
+    /// Witness: the side bands tested after the top and bottom ones (nearest
+    /// edge) fails the corner assertions.
     #[test]
-    fn the_four_edge_bands_and_their_corners_follow_the_nearest_edge() {
+    fn the_four_edge_bands_and_the_side_bands_win_the_corners() {
         let figure = Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(500.0, 350.0));
         let band = 36.0;
         let side = |x: f32, y: f32| edge_drop_side(egui::pos2(x, y), figure, band);
@@ -251,19 +234,27 @@ mod tests {
         assert_eq!(side(300.0, 340.0), Some(CellSide::Below));
         assert_eq!(side(110.0, 200.0), Some(CellSide::Left));
         assert_eq!(side(300.0, 60.0), Some(CellSide::Above));
-        // Corners: the nearest edge wins.
-        assert_eq!(side(480.0, 60.0), Some(CellSide::Above), "top-right, top");
-        assert_eq!(side(490.0, 80.0), Some(CellSide::Right), "top-right, right");
-        assert_eq!(side(490.0, 340.0), Some(CellSide::Right), "diagonal");
-        assert_eq!(side(120.0, 340.0), Some(CellSide::Below), "bottom-left");
+        // Corners: the left or right band wins, whatever the nearest edge.
+        for (x, y, expected) in [
+            (480.0, 60.0, CellSide::Right),
+            (490.0, 80.0, CellSide::Right),
+            (490.0, 340.0, CellSide::Right),
+            (490.0, 345.0, CellSide::Right),
+            (120.0, 340.0, CellSide::Left),
+            (110.0, 340.0, CellSide::Left),
+            (110.0, 60.0, CellSide::Left),
+            (130.0, 55.0, CellSide::Left),
+        ] {
+            assert_eq!(side(x, y), Some(expected), "corner at ({x}, {y})");
+        }
+        // Just inside the side bands, the top and bottom bands apply.
+        assert_eq!(side(300.0, 60.0), Some(CellSide::Above));
+        assert_eq!(side(300.0, 340.0), Some(CellSide::Below));
         assert_eq!(
-            side(110.0, 340.0),
-            Some(CellSide::Below),
-            "bottom-left diagonal"
+            side(140.0, 60.0),
+            Some(CellSide::Above),
+            "past the left band"
         );
-        assert_eq!(side(110.0, 60.0), Some(CellSide::Left), "top-left diagonal");
-        assert_eq!(side(110.0, 70.0), Some(CellSide::Left), "top-left, left");
-        assert_eq!(side(130.0, 60.0), Some(CellSide::Above), "top-left, top");
         assert_eq!(side(300.0, 20.0), None, "outside");
         assert_eq!(side(520.0, 200.0), None, "outside");
         assert_eq!(
