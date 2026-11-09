@@ -1047,6 +1047,101 @@ fn dropping_in_the_left_and_top_edge_bands_asks_for_a_cell_on_that_side() {
     );
 }
 
+/// `[A B; C _]` (a hole bottom right).
+fn grid_with_a_hole() -> Fixture {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let mut spec = spec_of(&fixture);
+    let mut panels: Vec<_> = spec.panels.iter().cloned().collect();
+    panels.pop();
+    spec.panels = Panels::new(panels);
+    fixture.replace(spec);
+    fixture
+}
+
+/// Released on the line between two graphs, a graph asks for a new column (or
+/// row) there (#504): C dropped on the A|B line is beside A, on its right; a
+/// line next to the moving graph's own cell uses the cell on its other side.
+/// Witness: the line test removed from `drop_place` (the release becomes a
+/// swap with the cell under the pointer).
+#[test]
+fn dropping_on_the_line_between_two_graphs_asks_for_a_cell_between_them() {
+    let fixture = grid_with_a_hole();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let c = middle(&view, 2);
+    let top_row_mid = f32::midpoint(
+        (layout.row_breaks[0] + layout.title_band) as f32,
+        (layout.row_breaks[1] + layout.title_band) as f32,
+    );
+    let on_line = Pos2::new(layout.column_breaks[1] as f32 + 2.0, top_row_mid);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        c,
+        on_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            2,
+            MoveTarget::Beside {
+                panel: 0,
+                side: CellSide::Right
+            }
+        )
+    );
+    // A, the moving graph, dropped on its own right line: B is the reference.
+    let a = middle(&view, 0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        on_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::Beside {
+                panel: 1,
+                side: CellSide::Left
+            }
+        )
+    );
+    // The horizontal line under B, in the right column: a new row between B
+    // and the hole, beside B (below it).
+    let right_col_mid = f32::midpoint(
+        layout.column_breaks[1] as f32,
+        layout.column_breaks[2] as f32,
+    );
+    let on_row_line = Pos2::new(
+        right_col_mid,
+        (layout.row_breaks[1] + layout.title_band) as f32 - 2.0,
+    );
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        c,
+        on_row_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            2,
+            MoveTarget::Beside {
+                panel: 1,
+                side: CellSide::Below
+            }
+        )
+    );
+}
+
 /// An arrow key moves the selected graph one cell, a hole included; at the
 /// edge of the grid it does nothing; Shift still counts one cell (#491).
 /// Witness: the guard of `nudge` restored.

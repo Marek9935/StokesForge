@@ -727,7 +727,11 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
   the new cell goes beside the cell **nearest the pointer**
   (`GraphView::nearest_cell`), on the side of the band; a corner goes to the
   nearest edge (`edge_drop_side`, the diagonal splits it; the top band is at the
-  figure's very top, over the title, #503). The series are planned like a drop on the graph
+  figure's very top, over the title, #503). Dropped on an **internal line**
+  between two graphs (`stokesforge_render::grid_line_at`, the reach of the resize
+  handles), the new cell goes between them: `drop_place` takes the cell of the
+  pointer's row (column) on the near side of the line, the other side if that
+  one is a hole (#504, one mechanism for both gestures). The series are planned like a drop on the graph
   (`AppState::add_columns_to_spec`, plot type of the reference layer); the Y2-Y4
   role layers go on the **new** cell. Without a Y column: `error-add-no-y`, no cell.
   Detached windows go through the same `graph_drop_target`.
@@ -886,7 +890,7 @@ every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` be
 (one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
 hole; or `MoveTarget::Beside` a cell, a new column or row made by `open_line`, the same code as
 `insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
-uses too. Only the `row` / `column` of the moved layers change, never the layer numbers. The four edge bands
+uses too. A release on an internal line between two graphs is a `MoveTarget::Beside` too (`GraphView::drop_place`, #504), so it is the same single `MoveLayer` step. Only the `row` / `column` of the moved layers change, never the layer numbers. The four edge bands
 (`stokesforge_render_egui::edge_band`, #503) are shared with the drop of workbook columns in `graph_window.rs`.
 `FigureFollow` also remembers the image's origin (`free_origin`):
 `observe` returns a step when the origin moves while the size stays, and the

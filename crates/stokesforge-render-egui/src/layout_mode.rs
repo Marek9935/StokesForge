@@ -914,10 +914,10 @@ impl GraphView {
     }
 
     /// Where releasing a dragged graph at the screen position `pos` would put
-    /// it (#491, #503): into a new column or row in one of the four edge bands
-    /// ([`GraphView::drop_place`], which wins over the cell under the pointer),
-    /// else on the cell under the pointer (a hole is a place); `None` on its
-    /// own cell, outside the grid, or beside itself.
+    /// it (#491, #503, #504): into a new column or row in one of the four edge
+    /// bands or on an internal line ([`GraphView::drop_place`], which wins over
+    /// the cell under the pointer), else on the cell under the pointer (a hole
+    /// is a place); `None` on its own cell, outside the grid, or beside itself.
     /// The second value is the edge band to fill in the preview.
     fn move_target(
         &self,

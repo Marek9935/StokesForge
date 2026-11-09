@@ -9,6 +9,7 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, StrokeKind};
 use stokesforge_core::compose::CellSide;
+use stokesforge_render::{grid_line_at, LayoutReach, LineAxis};
 
 use crate::GraphView;
 
@@ -54,16 +55,19 @@ pub struct DropPlace {
     pub panel: usize,
     /// Which side of it the new cell goes.
     pub side: CellSide,
-    /// The edge band the pointer is in.
+    /// The edge band the pointer is in; `None` for a drop on an internal line.
     pub band: Option<CellSide>,
 }
 
 impl GraphView {
     /// The drop zone under the egui pixel `pos`, in the **last** drawn figure:
     /// one of the four edge bands (the new cell goes beside the cell nearest the
-    /// pointer, see [`edge_drop_side`]). `moving` is the graph being moved, if
-    /// any: it is never its own reference, so the band nearest to it gives
-    /// `None`.
+    /// pointer, see [`edge_drop_side`]), else an internal line of a regular grid
+    /// (#504: between the two cells of the pointer's row or column on either
+    /// side of it). `moving` is the graph being moved, if any: it is never its
+    /// own reference, so a line next to it uses the cell on its other side with
+    /// the opposite side, and the band nearest to it gives `None`. A line with
+    /// no graph on either side gives `None`, as does everything else.
     pub fn drop_place(&self, pos: Pos2, moving: Option<usize>) -> Option<DropPlace> {
         let display = self.display_rect?;
         if let Some(band) = edge_drop_side(pos, display, EDGE_BAND_WIDTH) {
@@ -74,13 +78,46 @@ impl GraphView {
                 band: Some(band),
             });
         }
-        None
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let last = self.last.as_ref()?;
+        let at = self.figure_position(pos)?;
+        let reach = LayoutReach::standard(f64::from(self.display_scale()?));
+        let line = grid_line_at(layout, f64::from(at.x), f64::from(at.y), reach)?;
+        let occupant = |row: usize, column: usize| {
+            last.panels
+                .iter()
+                .find(|p| p.overlay.is_none() && (p.row, p.column) == (row, column))
+                .map(|p| p.index)
+                .filter(|index| Some(*index) != moving)
+        };
+        let (before, after, near, far) = match line.axis {
+            LineAxis::Column => (
+                occupant(line.along, line.n),
+                occupant(line.along, line.n + 1),
+                CellSide::Right,
+                CellSide::Left,
+            ),
+            LineAxis::Row => (
+                occupant(line.n, line.along),
+                occupant(line.n + 1, line.along),
+                CellSide::Below,
+                CellSide::Above,
+            ),
+        };
+        let place = |panel, side| DropPlace {
+            panel,
+            side,
+            band: None,
+        };
+        before
+            .map(|panel| place(panel, near))
+            .or_else(|| after.map(|panel| place(panel, far)))
     }
 
     /// The preview of a drop while the pointer drags (#503): the four bands
     /// pale, the one under the pointer filled, and a thick bar at the exact
     /// place the new cell would go (on the side of the reference cell that
-    /// faces it).
+    /// faces it, which for a drop between two graphs is the line itself).
     pub fn paint_drop_places(&self, painter: &Painter, place: Option<DropPlace>) {
         let Some(figure) = self.display_rect else {
             return;

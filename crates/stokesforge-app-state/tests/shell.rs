@@ -15319,6 +15319,52 @@ fn moving_a_graph_on_the_grid_is_one_move_layer_step_and_a_no_op_leaves_no_entry
     );
 }
 
+/// #504: a graph dropped on the line between two graphs ([A B; C _], C released
+/// on the A|B line: `Beside { A, Right }`) is ONE undo step labelled Move Layer;
+/// the row it empties disappears and one Undo gives the figure back. Witness:
+/// the command sent in two steps (an insertion, then a move).
+#[test]
+fn a_graph_dropped_between_two_graphs_is_one_move_layer_step() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::{CellSide, MoveTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    for (panel, side) in [(0, CellSide::Right), (0, CellSide::Below)] {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel,
+            side,
+            columns: Vec::new(),
+        });
+    }
+    let before = graph_spec(&state, graph);
+    let position = |spec: &stokesforge_plot::PlotSpec| {
+        spec.panels
+            .iter()
+            .map(|p| (p.row, p.column))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(position(&before), [(0, 0), (0, 1), (1, 0)]);
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 2,
+        target: MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Right,
+        },
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(position(&after), [(0, 0), (0, 2), (0, 1)]);
+    assert_eq!(after.frame_heights.len(), 1, "the emptied row is gone");
+    assert_eq!(after.frame_widths.len(), 3);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+}
+
 /// #426: the figure size typed in the Page Layout Mode strip is ONE undo step
 /// of its own kind, the other axis follows the closed lock's ratio, and a free
 /// graph is left to `SetFreeLayout`. Witness: the ratio ignored.

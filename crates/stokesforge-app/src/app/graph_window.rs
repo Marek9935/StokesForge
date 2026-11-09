@@ -2399,6 +2399,106 @@ pub(super) mod tests {
         );
     }
 
+    /// #504 (G6): columns dropped on the line between two graphs make a new
+    /// cell between them: beside the cell on the left of the line, on its right.
+    /// Elsewhere inside a graph they are a series as before. Witness: the line
+    /// test removed from `GraphView::drop_place`.
+    #[test]
+    fn dropping_columns_on_the_line_between_two_graphs_adds_a_cell_between_them() {
+        let (session, graph) = plotted_graph();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let contents =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(560.0, 540.0));
+        let payload = ColumnDragPayload {
+            sheet: NodeId::from_raw(7),
+            columns: vec![NodeId::from_raw(8), NodeId::from_raw(9)],
+        };
+        let mut graph_views = HashMap::new();
+        let paint =
+            |views: &mut HashMap<NodeId, GraphView>, events: Vec<egui::Event>, drag: bool| {
+                let mut actions = Vec::new();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 1200.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    if drag {
+                        egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
+                    }
+                    show_floating_window(
+                        ui.ctx(),
+                        egui::Id::new("between_bench_window"),
+                        contents,
+                        ui.ctx().content_rect(),
+                        false,
+                        |ui| {
+                            graph_drop_target(ui, &state, &mut actions, views, graph);
+                        },
+                        |_, _| {},
+                    );
+                });
+                output.textures_delta.clear();
+                actions
+            };
+        let release = |pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let warm = egui::pos2(380.0, 330.0);
+        for _ in 0..3 {
+            paint(
+                &mut graph_views,
+                vec![egui::Event::PointerMoved(warm)],
+                false,
+            );
+        }
+        let cell = graph_views[&graph].cell_rect_screen(0).expect("first cell");
+        let on_line = egui::pos2(cell.max.x + 1.0, cell.center().y);
+        paint(
+            &mut graph_views,
+            vec![egui::Event::PointerMoved(on_line)],
+            true,
+        );
+        let actions = paint(&mut graph_views, vec![release(on_line)], false);
+        assert_eq!(
+            actions,
+            vec![Action::AddCell {
+                graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Right,
+                columns: payload.columns.clone(),
+            }],
+            "a release on the line adds a cell between the two graphs"
+        );
+        let inside = egui::pos2(cell.center().x, cell.center().y);
+        paint(
+            &mut graph_views,
+            vec![egui::Event::PointerMoved(inside)],
+            true,
+        );
+        let actions = paint(&mut graph_views, vec![release(inside)], false);
+        assert_eq!(
+            actions,
+            vec![drop_payload_action(&payload, graph, 0)],
+            "inside a graph, away from the line: a series"
+        );
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn right_click_on_a_shape_selects_before_the_submenu_and_keeps_its_target() {
         let mut project = Project::new("Menu target").unwrap();
