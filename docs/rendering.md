@@ -117,6 +117,17 @@ system font → Noto Sans Math (fallback). Tests: `formula.rs`
 (`an_areas_font_is_set_in_the_source_with_its_math`), `geometry.rs`
 (`the_font_size_of_a_text_box_changes_its_size`), `stokesforge-render-svg/tests/typst.rs`.
 
+Legend text (#499): the text of each entry is `core::series_label(series, tree,
+&panel.legend.text)`, the single function the legend and the series lists read
+(#25). `LegendText` (`stokesforge-plot/src/legend.rs`) says which header row
+gives it; a typed name still wins; an empty chosen row is an empty entry (only
+the default Long Name source falls back to the short name). A custom template is
+Typst markup in which the placeholders (`PLACEHOLDERS`, the one table of the
+syntax: `%(LL)`, `%(LU)`, `%(LC)`, `%(LS)`, `%(X)`) insert the column text
+escaped by `typst_literal` (#33); the label is `SeriesLabel::Template` and is
+drawn with the rich style (`Prepared::legend_is_typed`), every other label
+literally. Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
+
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the
 whole legend, which can also be moved by dragging it from an entry.

@@ -753,3 +753,18 @@ the sheet stays, ordinary. A column identifier that no longer exists is accepted
 clipboard carries a link only when both its ends are inside the copied roots
 (#391, `docs/data-model.md`); otherwise the copy is ordinary. Additive field: it
 does not change the version number of the format.
+
+## Legend text source: additive fields (#499)
+
+`LegendSpecRecord` gained `text_from` (the key of a `LegendTextFrom`, `String`),
+`text_template` (`String`) and `text_row_column` (`Option<u64>`), all
+`#[serde(default)]`. **`FORMAT_VERSION` did not move**: a file without the
+fields reads as today's text (long name, then short name), and the default
+source is written as an empty `text_from`, so a graph that never touched the
+setting is byte-identical to before. A key written by a newer version becomes
+`LegendTextFrom::Unknown(key)`: read as the long name, written back as it was
+(invariant 10). An older reader that saves the file again drops the three
+fields without a message. Witness `tests/witnesses/v1/project.stf`
+regenerated with a custom template and a row column on one legend and a
+list choice on the other; unit tests in `schema.rs`
+(`a_legend_without_text_settings_reads_as_the_default`).

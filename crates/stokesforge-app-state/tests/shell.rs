@@ -8449,6 +8449,95 @@ fn open_plot_settings_opens_the_requested_tab_and_keeps_the_chosen_axis() {
     assert_eq!(settings.axis, PlotAxis::Left, "the chosen axis is kept");
 }
 
+/// #499: changing the legend « Text from » in Graph Properties is one history
+/// entry (the window's group), and one Undo brings back the previous text.
+/// Witness: a change that is not undoable, or one entry per commit, fails the
+/// last two assertions.
+#[test]
+fn changing_the_legend_text_source_is_one_undo_step() {
+    use stokesforge_plot::LegendTextFrom;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    assert_eq!(before.panels[0].legend.text.from, LegendTextFrom::LongName);
+    let label_before = state.undo_label();
+
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Legend,
+        axis: None,
+    });
+    state
+        .plot_edit_mut()
+        .expect("draft")
+        .spec
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .legend
+        .text
+        .from = LegendTextFrom::Comments;
+    state.commit_plot_edit();
+    state.close_plot_settings();
+
+    let after = state.plot_spec(graph).expect("spec");
+    assert_eq!(after.panels[0].legend.text.from, LegendTextFrom::Comments);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::Macro(
+            stokesforge_commands::MacroKind::GraphProperties
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
+/// #499: a new graph takes the « Text from » default of the Preferences, a
+/// graph that exists keeps its own. Witness: ignoring the preference leaves
+/// the long name.
+#[test]
+fn new_graphs_take_the_legend_text_preference() {
+    use stokesforge_plot::LegendTextFrom;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, sheet, columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    let root = state.tree().root();
+    let last_graph = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    state.dispatch(Action::AddGraph);
+    let old = last_graph(&state);
+    state.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Units));
+    state.dispatch(Action::AddGraph);
+    let from = |state: &AppState, graph| {
+        state.plot_spec(graph).unwrap().panels[0]
+            .legend
+            .text
+            .from
+            .clone()
+    };
+    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns,
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    assert_eq!(from(&state, old), LegendTextFrom::LongName);
+    // Remembered; a custom template is not a default.
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::Units);
+    next.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Custom));
+    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
+}
+
 /// A node that is not a graph opens nothing.
 #[test]
 fn open_plot_settings_ignores_a_node_that_is_not_a_graph() {

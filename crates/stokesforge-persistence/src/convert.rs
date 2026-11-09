@@ -10,8 +10,8 @@ use stokesforge_core::{
 };
 use stokesforge_plot::{
     AnnotationSpec, AxisScale, AxisSpec, FreeFrame, FreePage, LayerPlacement, LegendPosition,
-    LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec,
-    ShapeKind, ShapeSpec, SymbolShape, SymbolSpec, TickDirection,
+    LegendSpec, LegendText, LegendTextFrom, LineSpec, LineStyle, PanelSpec, PlotSpec, PlotType,
+    SeriesAxis, SeriesSpec, ShapeKind, ShapeSpec, SymbolShape, SymbolSpec, TickDirection,
 };
 
 use stokesforge_import::recipe::ImportRecipe;
@@ -464,6 +464,15 @@ impl From<&LegendSpec> for LegendSpecRecord {
             anchor: value.anchor.map(anchor_to_record),
             font: font_to_record(&value.font),
             color: value.color.clone(),
+            // The default source is written as nothing: a file with no
+            // setting stays byte-identical to an older one.
+            text_from: if value.text.from == LegendTextFrom::LongName {
+                String::new()
+            } else {
+                value.text.from.key().to_string()
+            },
+            text_template: value.text.template.clone(),
+            text_row_column: value.text.row_column.map(NodeId::raw),
         }
     }
 }
@@ -476,6 +485,11 @@ impl From<LegendSpecRecord> for LegendSpec {
             anchor: value.anchor.map(record_to_anchor),
             font: record_to_font(value.font),
             color: value.color,
+            text: LegendText {
+                from: LegendTextFrom::from_key(&value.text_from),
+                template: value.text_template,
+                row_column: value.text_row_column.map(NodeId::from_raw),
+            },
         }
     }
 }

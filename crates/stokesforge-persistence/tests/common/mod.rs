@@ -257,6 +257,12 @@ pub fn non_trivial_spec(
                 ..Default::default()
             },
             color: "#118899".to_string(),
+            // #499: a custom template and a column for the row series.
+            text: stokesforge_plot::LegendText {
+                from: stokesforge_plot::LegendTextFrom::Custom,
+                template: "%(LL) (%(LU))".to_string(),
+                row_column: Some(y1),
+            },
         },
         title_color: "#aa8811".to_string(),
         // Issue #35: free texts, all fields non-default.
@@ -331,6 +337,11 @@ pub fn non_trivial_spec(
             font: stokesforge_plot::TextFont::default(),
             // Issue #90: color of the legend and of the title of the panel.
             color: "#228833".to_string(),
+            // #499: a list choice.
+            text: stokesforge_plot::LegendText {
+                from: stokesforge_plot::LegendTextFrom::LongNameComments,
+                ..Default::default()
+            },
         },
         title_font: stokesforge_plot::TextFont {
             family: "Noto Sans".to_string(),

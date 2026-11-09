@@ -167,7 +167,7 @@ fn series_row(
     dnd: &ListDnd,
     commit: &mut bool,
 ) -> f32 {
-    let label = series_list_label(tree, &panel.series[index]);
+    let label = series_list_label(tree, &panel.series[index], &panel.legend.text);
     let row = ui
         .push_id(index, |ui| {
             with_list_row_height(ui, |ui| {

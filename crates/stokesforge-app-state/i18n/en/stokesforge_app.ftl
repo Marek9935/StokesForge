@@ -1080,6 +1080,23 @@ plot-legend-top-left = Top left
 plot-legend-top-right = Top right
 plot-legend-bottom-left = Bottom left
 plot-legend-bottom-right = Bottom right
+plot-legend-text-from = Text from
+    .hint = The worksheet header row that gives the text of every legend entry. A series name you typed still wins.
+legend-text-from-long-name = Long Name
+legend-text-from-comments = Comments
+legend-text-from-x-prime = x'
+legend-text-from-units = Units
+legend-text-from-short-name = Short Name
+legend-text-from-long-name-units = Long Name (Units)
+legend-text-from-long-name-comments = Long Name, Comments
+legend-text-from-custom = Custom…
+legend-text-from-unknown = Long Name (setting of a newer version)
+plot-legend-template = Template
+    .hint = Typst text. %(LL) inserts the Long Name, %(LU) the Units, %(LC) the Comments, %(LS) the Short Name, %(X) the x'. The inserted text is shown as is.
+plot-legend-row-text = Row series
+plot-legend-row-number = Row number
+plot-legend-row-column-value = Value of column…
+plot-legend-row-column = Column
 
 # Theme tab
 
@@ -1452,6 +1469,7 @@ history-plot-align-layers = Align Layers
 history-plot-match-layer-size = Match Layer Size
 history-plot-distribute-layers = Distribute Layers
 history-plot-layer-placement = Change Layer Placement
+history-plot-legend-text = Change Legend Text
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
@@ -2106,6 +2124,8 @@ preferences-new-graphs = New graphs
 preferences-new-graphs-note = Starting point of the graphs you create. Each graph then keeps its own setting, in its Graph Properties; graphs that already exist are not changed.
 preferences-new-graph-decimal-comma = Decimal comma on tick labels
     .hint = New graphs write 1,5 instead of 1.5 on every axis, on screen and in exports. Graphs that already exist and graphs made by scripts keep their own setting.
+preferences-new-graph-legend-text = Legend text from
+    .hint = The header row new graphs read for their legend entries. Each graph then keeps its own setting, in Graph Properties > Legend. Graphs that already exist and graphs made by scripts are not changed.
 preferences-analysis-values = Values
 preferences-analysis-values-note = What an analysis window offers the first time you use that analysis. Each analysis then remembers its own last choice.
 preferences-export-graph = Export Graph

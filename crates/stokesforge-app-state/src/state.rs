@@ -1177,6 +1177,9 @@ pub enum Action {
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
+    /// The « Text from » given to the legend of new graphs (#499); the graphs
+    /// that exist keep their own.
+    SetNewGraphLegendText(stokesforge_plot::LegendTextFrom),
     /// The default of "Keep in Results" for the analyses (M5, #148); the choice
     /// of an operation already run is remembered apart.
     SetAnalysisKeepResults(bool),
@@ -1770,8 +1773,15 @@ fn row_series_name(row: usize) -> String {
 /// Displayed name of a series in the list of the properties window: the
 /// same rule as the graph legend, [`stokesforge_core::series_label`] (single
 /// source, issue #25).
-pub fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
-    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree))
+///
+/// `text` is the « Text from » setting of the legend of the panel that holds
+/// the series (#499).
+pub fn series_list_label(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> String {
+    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree, text))
 }
 
 /// Payload of the drag of **whole rows** of a sheet to an open
@@ -5550,6 +5560,22 @@ impl AppState {
         self.gesture(Self::commit_plot_edit_in_gesture);
     }
 
+    /// True if `draft` differs from the spec of `graph` in the model by the
+    /// « Text from » settings of its legends alone (#499).
+    fn only_legend_text_differs(&self, graph: NodeId, draft: &PlotSpec) -> bool {
+        let Some(current) = self.plot_spec(graph) else {
+            return false;
+        };
+        if current.panels.len() != draft.panels.len() {
+            return false;
+        }
+        let mut aligned = draft.clone();
+        for (panel, original) in aligned.panels.iter_mut().zip(current.panels.iter()) {
+            panel.legend.text = original.legend.text.clone();
+        }
+        aligned == current
+    }
+
     fn commit_plot_edit_in_gesture(&mut self) {
         let Some(edit) = self.plot_edit.clone() else {
             return;
@@ -5557,10 +5583,20 @@ impl AppState {
         if self.plot_spec(edit.graph).as_ref() == Some(&edit.spec) {
             return;
         }
-        self.dispatch(Action::SetPlotSpec {
-            graph: edit.graph,
-            spec: edit.spec.clone(),
-        });
+        if self.only_legend_text_differs(edit.graph, &edit.spec) {
+            // A change of the « Text from » setting alone has its own
+            // history label (#499).
+            self.execute(Command::EditPlotSpec {
+                graph: edit.graph,
+                spec: edit.spec.clone(),
+                kind: PlotEditKind::LegendText,
+            });
+        } else {
+            self.dispatch(Action::SetPlotSpec {
+                graph: edit.graph,
+                spec: edit.spec.clone(),
+            });
+        }
         if let Some(current) = self.plot_edit.as_mut() {
             current.base = edit.spec;
         }
@@ -5848,10 +5884,10 @@ impl AppState {
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.creation_folder(),
                 name: None,
-                spec: PlotSpec {
+                spec: self.with_new_graph_legend(PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
                     ..PlotSpec::empty("")
-                },
+                }),
             }),
             Action::SetFrameSize {
                 graph,
@@ -6583,6 +6619,17 @@ impl AppState {
                 if let Err(error) = self
                     .object_manager_preferences
                     .save_show_column_formula_help(show)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetNewGraphLegendText(from) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_new_graph_legend_text(from)
                 {
                     self.fail(tr!(
                         "error-preferences-not-saved",
@@ -8603,6 +8650,23 @@ impl AppState {
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// « Text from » of the legend of new graphs (#499).
+    pub fn new_graph_legend_text(&self) -> stokesforge_plot::LegendTextFrom {
+        self.object_manager_preferences
+            .new_graph_legend_text()
+            .clone()
+    }
+
+    /// A new graph spec carrying the legend default of the Preferences
+    /// (#499): the setting rides in the creation command itself.
+    fn with_new_graph_legend(&self, mut spec: PlotSpec) -> PlotSpec {
+        let from = self.new_graph_legend_text();
+        for panel in spec.panels.iter_mut() {
+            panel.legend.text.from = from.clone();
+        }
+        spec
     }
 
     /// The default folder of a kind of file dialog, as written in the preferences
@@ -11457,11 +11521,11 @@ impl AppState {
         // The new-graph default of the Preferences rides in the spec of the
         // creation itself: one command, one history step.
         // A fresh layer shows no mirror, so there is nothing to switch off.
-        let spec = PlotSpec {
+        let spec = self.with_new_graph_legend(PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
-        };
+        });
         self.execute(Command::AddGraph {
             parent,
             name: None,
@@ -12007,11 +12071,11 @@ impl AppState {
         };
         let mut panel = PanelSpec::default();
         panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
-        let spec = PlotSpec {
+        let spec = self.with_new_graph_legend(PlotSpec {
             panels: Panels::new(vec![panel]),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
-        };
+        });
         self.execute(Command::AddGraph {
             parent,
             name: None,

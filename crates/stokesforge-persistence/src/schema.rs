@@ -1308,6 +1308,17 @@ pub(crate) struct LegendSpecRecord {
     /// file, hence automatic.
     #[serde(default)]
     pub(crate) color: String,
+    /// « Text from » (#499): key of the header row the entries read; absent
+    /// or empty = the long name, like an older file. An unknown key (newer
+    /// version) is kept as is.
+    #[serde(default)]
+    pub(crate) text_from: String,
+    /// Custom template of « Text from » (#499); absent = empty.
+    #[serde(default)]
+    pub(crate) text_template: String,
+    /// Column read by the row series of the legend (#499); absent = « Row N ».
+    #[serde(default)]
+    pub(crate) text_row_column: Option<u64>,
 }
 
 impl Default for LegendSpecRecord {
@@ -1321,6 +1332,9 @@ impl Default for LegendSpecRecord {
             anchor: None,
             font: TextFontRecord::default(),
             color: String::new(),
+            text_from: String::new(),
+            text_template: String::new(),
+            text_row_column: None,
         }
     }
 }
@@ -1364,6 +1378,38 @@ mod tests {
         let known = rmp_serde::to_vec_named(&Future::In).expect("encoding");
         let reloaded: TickDirectionRecord = rmp_serde::from_slice(&known).expect("decoding");
         assert_eq!(reloaded, TickDirectionRecord::In);
+    }
+
+    /// A legend written before « Text from » (#499) reads as today's text
+    /// (long name, then short name). Witness: removing `#[serde(default)]`
+    /// from the three fields makes the decoding fail.
+    #[test]
+    fn a_legend_without_text_settings_reads_as_the_default() {
+        #[derive(Serialize)]
+        struct Before {
+            visible: bool,
+            position: LegendPositionRecord,
+        }
+        let bytes = rmp_serde::to_vec_named(&Before {
+            visible: true,
+            position: LegendPositionRecord::TopLeft,
+        })
+        .expect("encoding");
+        let record: LegendSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        let legend = stokesforge_plot::LegendSpec::from(record);
+        assert_eq!(legend.text, stokesforge_plot::LegendText::default());
+    }
+
+    /// A choice from a newer version survives a save (kept as typed).
+    #[test]
+    fn an_unknown_text_source_is_kept_through_a_round_trip() {
+        let record = LegendSpecRecord {
+            text_from: "from_the_future".to_string(),
+            ..LegendSpecRecord::default()
+        };
+        let legend = stokesforge_plot::LegendSpec::from(record);
+        let back = LegendSpecRecord::from(&legend);
+        assert_eq!(back.text_from, "from_the_future");
     }
 
     /// An unknown placement (newer file) reads as the grid, a known one as

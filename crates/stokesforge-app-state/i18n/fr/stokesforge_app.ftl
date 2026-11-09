@@ -1079,6 +1079,23 @@ plot-legend-top-left = Haut gauche
 plot-legend-top-right = Haut droite
 plot-legend-bottom-left = Bas gauche
 plot-legend-bottom-right = Bas droite
+plot-legend-text-from = Texte issu de
+    .hint = La ligne d'en-tête de la feuille qui donne le texte de chaque entrée de la légende. Un nom de série que vous avez saisi reste prioritaire.
+legend-text-from-long-name = Nom long
+legend-text-from-comments = Commentaires
+legend-text-from-x-prime = x'
+legend-text-from-units = Unités
+legend-text-from-short-name = Nom court
+legend-text-from-long-name-units = Nom long (Unités)
+legend-text-from-long-name-comments = Nom long, Commentaires
+legend-text-from-custom = Personnalisé…
+legend-text-from-unknown = Nom long (réglage d'une version plus récente)
+plot-legend-template = Modèle
+    .hint = Texte Typst. %(LL) insère le Nom long, %(LU) les Unités, %(LC) les Commentaires, %(LS) le Nom court, %(X) le x'. Le texte inséré s'affiche tel quel.
+plot-legend-row-text = Série de ligne
+plot-legend-row-number = Numéro de ligne
+plot-legend-row-column-value = Valeur de la colonne…
+plot-legend-row-column = Colonne
 
 # Onglet Thème
 
@@ -1451,6 +1468,7 @@ history-plot-align-layers = Aligner les calques
 history-plot-match-layer-size = Uniformiser la taille des calques
 history-plot-distribute-layers = Répartir les calques
 history-plot-layer-placement = Changer le placement des calques
+history-plot-legend-text = Changer le texte de la légende
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -2103,6 +2121,8 @@ preferences-new-graphs = Nouveaux graphiques
 preferences-new-graphs-note = Point de départ des graphiques que vous créez. Chaque graphique garde ensuite son propre réglage, dans ses Propriétés du graphique ; les graphiques existants ne changent pas.
 preferences-new-graph-decimal-comma = Virgule décimale sur les graduations
     .hint = Les nouveaux graphiques écrivent 1,5 au lieu de 1.5 sur tous les axes, à l'écran et dans les exports. Les graphiques existants et ceux créés par des scripts gardent leur réglage.
+preferences-new-graph-legend-text = Texte de légende issu de
+    .hint = La ligne d'en-tête que les nouveaux graphiques lisent pour les entrées de leur légende. Chaque graphique garde ensuite son réglage, dans Propriétés du graphique > Légende. Les graphiques existants et ceux créés par des scripts ne changent pas.
 preferences-analysis-values = Valeurs
 preferences-analysis-values-note = Ce que propose la fenêtre d'une analyse la première fois que vous l'utilisez. Chaque analyse retient ensuite son dernier choix.
 preferences-export-graph = Exporter le graphique

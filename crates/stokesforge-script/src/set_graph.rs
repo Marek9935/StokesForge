@@ -59,6 +59,9 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     // The targeted panel's legend.
     "legend_visible",
     "legend_position",
+    // Which header row gives the legend entries (#499), and its template.
+    "legend_text_from",
+    "legend_template",
     // The size (#399): plot area of the panel's column / row, Left / Top of the
     // first plot area (None = Auto), Figure size = Fixed. In `unit`.
     "plot_width",
@@ -153,6 +156,8 @@ struct Changes {
     y: AxisChange,
     legend_visible: Option<bool>,
     legend_position: Option<LegendPosition>,
+    legend_text_from: Option<stokesforge_plot::LegendTextFrom>,
+    legend_template: Option<String>,
     /// Sizes in points (already converted and checked). Left / Top: the inner
     /// `None` is Auto.
     plot_width: Option<f64>,
@@ -319,6 +324,17 @@ impl Changes {
                         }
                     })
                 }
+                "legend_text_from" => {
+                    let text = string()?;
+                    let from = stokesforge_plot::LegendTextFrom::from_key(&text);
+                    if matches!(from, stokesforge_plot::LegendTextFrom::Unknown(_)) {
+                        return Err(invalid(
+                            "unknown legend text source: use long_name, comments, x_prime, units, short_name, long_name_units, long_name_comments or custom",
+                        ));
+                    }
+                    changes.legend_text_from = Some(from);
+                }
+                "legend_template" => changes.legend_template = Some(string()?),
                 _ => {
                     return Err(invalid(format!(
                         "unknown graph option: {key} (accepted: {})",
@@ -441,6 +457,12 @@ impl Changes {
         }
         if let Some(position) = self.legend_position {
             panel.legend.position = position;
+        }
+        if let Some(from) = &self.legend_text_from {
+            panel.legend.text.from = from.clone();
+        }
+        if let Some(template) = &self.legend_template {
+            panel.legend.text.template.clone_from(template);
         }
         // The size, through the setters of the interface (#399). They only
         // refuse a graph that stores no plot area and could not be given any
@@ -568,7 +590,11 @@ fn set_graph_native(
 /// automatic), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
 /// `decimal_comma` (booleans). The panel `panel=(row, column)`: `panel_title`,
 /// `legend_visible`, `legend_position` (`'top_left'`, `'top_right'`,
-/// `'bottom_left'`, `'bottom_right'`). The X axis (bottom) and the Y axis
+/// `'bottom_left'`, `'bottom_right'`), `legend_text_from` (`'long_name'`,
+/// `'comments'`, `'x_prime'`, `'units'`, `'short_name'`, `'long_name_units'`,
+/// `'long_name_comments'`, `'custom'`) and `legend_template` (Typst markup of
+/// `'custom'`: `%(LL)` long name, `%(LU)` units, `%(LC)` comments, `%(LS)`
+/// short name, `%(X)` x', inserted as plain text). The X axis (bottom) and the Y axis
 /// (`axis='left'` or `'right'`): `x_title`/`y_title`, `x_unit`/`y_unit`,
 /// `x_scale`/`y_scale` (`'linear'`, `'log'`), `x_from` and `x_to` (given
 /// together and different; `from > to` draws the axis reversed) and

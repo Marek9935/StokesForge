@@ -122,7 +122,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 | **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
-| **Legend** | **Show legend**, **Position** |
+| **Legend** | **Show legend**, **Position**, **Text from** |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
@@ -306,6 +306,12 @@ To repeat a scale on the opposite side of the plot, choose **Graph ▸ Top Mirro
 The **Legend** tab has **Show legend** and **Position**: **Top left**, **Top right**, **Bottom left** or **Bottom right**.
 
 Each entry shows the name of its series. To rename a series, double-click its entry in the legend and type the new name. An empty name goes back to the column name.
+
+**Text from** chooses which header row of the worksheet gives the text of every entry: **Long Name** (the default; an empty long name shows the short name), **Comments**, **x'**, **Units**, **Short Name**, **Long Name (Units)**, **Long Name, Comments**, or **Custom…**. The choice applies to all the series of the layer. A name you typed for a series still wins. If the chosen row is empty for a column, its entry is empty (its line or symbol stays). With **Custom…** a **Template** field appears. It is Typst text in which `%(LL)` inserts the Long Name, `%(LU)` the Units, `%(LC)` the Comments, `%(LS)` the Short Name and `%(X)` the x'; the inserted text is shown exactly as it is written in the column, whatever characters it holds. Other text is read as Typst, for example `_%(LL)_` for italics. A placeholder that does not exist is shown as typed.
+
+For a series made from a row of a worksheet, **Row series** chooses between **Row number** and **Value of column…**, which shows the cell of the column you pick on that row.
+
+New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**.
 
 Drag the legend to move it anywhere on the figure. Right-click it and choose **Reset Position** to put it back. A series with **Show in legend** cleared does not appear.
 

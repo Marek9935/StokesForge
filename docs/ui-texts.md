@@ -106,6 +106,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Long Name | Nom long | Description of a column, shown in the header | Libellé, Description | O |
 | Units | Unités | Unit of the values of a column, shown in the header | Unité (singulier) | O (Q13) |
 | Comments | Commentaires | Free text of a column | Remarques, Notes | O |
+| Short Name | Nom court | Name of a column, the letter or the name in the header (#499) | Étiquette | O |
+| Text from | Texte issu de | Legend setting: the header row that gives the text of each legend entry (#499) | Source du texte | O |
 | Metadata | Métadonnées | Key-value pairs read from the imported file | Infos, En-tête du fichier | O |
 | Role | Rôle | Function of a column in a plot | Désignation, Type | O (Q8) |
 | X / Y / Z | X / Y / Z | Roles: abscissa, ordinate, third axis | — | O |

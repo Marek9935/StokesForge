@@ -26,6 +26,16 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Legend text source (#499): Graph Properties > Legend has a « Text from »
+  setting that chooses which worksheet header row gives every legend entry
+  (Long Name, Comments, x', Units, Short Name, Long Name (Units), Long Name,
+  Comments, or Custom… with a Typst template using `%(LL)`, `%(LU)`, `%(LC)`,
+  `%(LS)`, `%(X)`). A series name you typed still wins; an empty chosen row
+  gives an empty entry. A row series can show the cell of a chosen column.
+  New graphs take their default from Preferences > Display > New. Additive
+  `.stf` fields (an older version that saves the file again loses them);
+  `pyst` API 0.6: `set_graph(legend_text_from=…, legend_template=…)`.
+
 - Origin projects (#490): an `.opj` file dropped on the window, picked in the
   Import Wizard or reached by File > Import opens the "Import from Origin"
   window instead of the wizard. It lists the workbooks and sheets of the

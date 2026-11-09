@@ -304,9 +304,11 @@ pub enum PlotEditKind {
     DistributeLayers,
     /// A graph switched between the regular grid and free placement (#398).
     LayerPlacement,
+    /// The « Text from » setting of a legend changed (#499).
+    LegendText,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -332,6 +334,7 @@ impl PlotEditKind {
         Self::MatchLayerSize,
         Self::DistributeLayers,
         Self::LayerPlacement,
+        Self::LegendText,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -362,6 +365,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::MatchLayerSize => "Match Layer Size",
             Self::DistributeLayers => "Distribute Layers",
             Self::LayerPlacement => "Change Layer Placement",
+            Self::LegendText => "Change Legend Text",
         })
     }
 }

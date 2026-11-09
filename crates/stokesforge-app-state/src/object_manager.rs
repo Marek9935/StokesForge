@@ -733,7 +733,7 @@ pub fn object_tree_of_spec(
                             let target = SeriesRef::new(index, rank);
                             SeriesRow {
                                 target,
-                                label: crate::state::series_list_label(tree, s),
+                                label: crate::state::series_list_label(tree, s, &panel.legend.text),
                                 spec: s.clone(),
                                 selected: selected == Some(VisibilityTarget::Series(target)),
                                 stale: spec.stale_warning

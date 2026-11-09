@@ -102,7 +102,10 @@ pub mod theme;
 pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
 pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection};
 pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
-pub use legend::{LegendPosition, LegendSpec};
+pub use legend::{
+    expand_template, typst_literal, LegendField, LegendPosition, LegendSpec, LegendText,
+    LegendTextFrom, PLACEHOLDERS,
+};
 pub use length_unit::LengthUnit;
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
 pub use panel::{FreeFrame, FreePage, OverlaySpec, PanelSpec, SeriesSlot};

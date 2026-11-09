@@ -130,7 +130,7 @@ impl Prepared<'_> {
     pub fn legend_text(&self, texts: &FigureTexts) -> String {
         let name = match &self.label {
             SeriesLabel::Missing => return texts.broken_reference.clone(),
-            SeriesLabel::Text(name) => name.clone(),
+            SeriesLabel::Text(name) | SeriesLabel::Template(name) => name.clone(),
             SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
         };
         if self.broken {
@@ -140,13 +140,14 @@ impl Prepared<'_> {
         }
     }
 
-    /// True if the legend text was **typed** (`SeriesSpec::name`): intended
-    /// Typst markup. False if taken from the column, hence shown as is
+    /// True if the legend text was **typed** (`SeriesSpec::name`), or comes
+    /// from a custom template (#499): intended Typst markup. False if taken from the column, hence shown as is
     /// (issue #33, `formula::literal_style`). Also false for a broken
     /// reference: the annotated text mixes the name with a sentence of the
     /// interface, which would be markup too, so it is all drawn literally.
     pub fn legend_is_typed(&self) -> bool {
-        !self.spec.name.is_empty() && !self.broken
+        !self.broken
+            && (!self.spec.name.is_empty() || matches!(self.label, SeriesLabel::Template(_)))
     }
 }
 

@@ -214,7 +214,11 @@ pub(super) fn open_legend_entry_editor(
     let Some(anchor) = view.legend_entry_screen_box(panel, series) else {
         return;
     };
-    let original = stokesforge_app_state::state::series_list_label(tree, spec_series);
+    let original = stokesforge_app_state::state::series_list_label(
+        tree,
+        spec_series,
+        &spec.panels[panel].legend.text,
+    );
     start_text_editor(
         ctx,
         view,
@@ -248,7 +252,7 @@ pub(super) fn open_series_name_editor(
         ctx,
         view,
         TextEditTarget::LegendEntry(series),
-        series_list_label(tree, value),
+        series_list_label(tree, value, &spec.panels[series.panel].legend.text),
         anchor,
     );
 }

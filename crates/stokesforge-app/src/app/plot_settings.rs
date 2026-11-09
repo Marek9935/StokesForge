@@ -22,6 +22,7 @@ use crate::icons::{icon_button, Icon, IconRole, ICON_SIZE};
 use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
+use stokesforge_app_state::figure_texts::legend_text_from_label;
 use stokesforge_app_state::frame_sizes::{
     free_fields, set_fixed_in_draft, set_free_field_in_draft, set_offset_in_draft,
     set_placement_in_draft, set_size_in_draft, set_total_in_draft, SizeLock, TotalFit,
@@ -243,6 +244,7 @@ fn plot_settings_contents(
     let size_lock_before = size_lock;
     let published = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
     let mut gradient_actions: Vec<Action> = Vec::new();
+    let row_columns = legend_row_columns(state, settings.graph);
     // Saved colors, read before borrowing the draft; the
     // picker requests (save, remove) are translated into actions
     // afterwards.
@@ -352,7 +354,7 @@ fn plot_settings_contents(
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= legend_editor(ui, &mut panel.legend);
+                        commit |= legend_editor(ui, &mut panel.legend, &row_columns);
                     }
                 });
         }
@@ -1915,7 +1917,14 @@ fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>)
 /// Edits a [`stokesforge_plot::LegendSpec`]: visibility, anchor corner. Returns
 /// `true` if the draft must be committed — see the head doc of
 /// [`plot_settings_window`].
-fn legend_editor(ui: &mut egui::Ui, legend: &mut stokesforge_plot::LegendSpec) -> bool {
+///
+/// `row_columns` lists the columns a row series of the panel can read
+/// (#499); empty when the panel has no row series.
+fn legend_editor(
+    ui: &mut egui::Ui,
+    legend: &mut stokesforge_plot::LegendSpec,
+    row_columns: &[(NodeId, String)],
+) -> bool {
     form(ui, "plot_legend_page", |form| {
         let mut commit = form.checkbox(&mut legend.visible, tr!("plot-legend-show"), None);
         commit |= form.row(tr!("plot-legend-position"), |ui| {
@@ -1932,8 +1941,120 @@ fn legend_editor(ui: &mut egui::Ui, legend: &mut stokesforge_plot::LegendSpec) -
                 .map(|candidate| ChoiceOption::new(candidate, legend_position_label(candidate))),
             )
         });
+        commit |= legend_text_editor(form, &mut legend.text, row_columns);
         commit
     })
+}
+
+/// The columns a row series (#166) of the selected layer can read for its
+/// legend entry (#499): those of the sheet of its anchor column. Empty if the
+/// layer has no row series.
+fn legend_row_columns(state: &AppState, graph: NodeId) -> Vec<(NodeId, String)> {
+    let Some(edit) = state.plot_edit().filter(|edit| edit.graph == graph) else {
+        return Vec::new();
+    };
+    let tree = state.tree();
+    let Some(anchor) = edit
+        .spec
+        .panels
+        .get(edit.selected_panel)
+        .and_then(|panel| panel.series.iter().find(|series| series.row.is_some()))
+        .map(|series| series.y)
+    else {
+        return Vec::new();
+    };
+    let Some(sheet) = tree.parent(anchor).ok().flatten() else {
+        return Vec::new();
+    };
+    tree.node(sheet)
+        .map(|node| node.children().to_vec())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|id| Some((id, tree.node(id)?.name().to_string())))
+        .collect()
+}
+
+/// The « Text from » setting of a legend (#499): the header row, the custom
+/// template and, for a row series, the column read on that row.
+fn legend_text_editor(
+    form: &mut Form<'_>,
+    text: &mut stokesforge_plot::LegendText,
+    row_columns: &[(NodeId, String)],
+) -> bool {
+    use stokesforge_plot::LegendTextFrom;
+    let mut options: Vec<ChoiceOption<LegendTextFrom>> = LegendTextFrom::CHOICES
+        .iter()
+        .map(|from| ChoiceOption::new(from.clone(), legend_text_from_label(from)))
+        .collect();
+    // A choice written by a newer version stays visible, and selected.
+    if let LegendTextFrom::Unknown(_) = text.from {
+        options.push(ChoiceOption::new(
+            text.from.clone(),
+            legend_text_from_label(&text.from),
+        ));
+    }
+    let mut commit = form.row(tr!("plot-legend-text-from"), |ui| {
+        choice(ui, "plot_legend_text_from", &mut text.from, &options)
+    });
+    if commit && text.from == LegendTextFrom::Custom && text.template.is_empty() {
+        text.template = stokesforge_plot::PLACEHOLDERS[0].0.to_string();
+    }
+    if text.from == LegendTextFrom::Custom {
+        commit |= formula_field(
+            form,
+            &tr!("plot-legend-template"),
+            &tr!("plot-legend-template", "hint"),
+            &mut text.template,
+        );
+    }
+    if !row_columns.is_empty() {
+        #[derive(Clone, Copy, PartialEq)]
+        enum RowText {
+            Number,
+            Column,
+        }
+        let mut mode = if text.row_column.is_some() {
+            RowText::Column
+        } else {
+            RowText::Number
+        };
+        let changed = form.row(tr!("plot-legend-row-text"), |ui| {
+            choice(
+                ui,
+                "plot_legend_row_text",
+                &mut mode,
+                &[
+                    ChoiceOption::new(RowText::Number, tr!("plot-legend-row-number")),
+                    ChoiceOption::new(RowText::Column, tr!("plot-legend-row-column-value")),
+                ],
+            )
+        });
+        if changed {
+            text.row_column = match mode {
+                RowText::Number => None,
+                RowText::Column => text.row_column.or(row_columns.first().map(|(id, _)| *id)),
+            };
+            commit = true;
+        }
+        if let Some(chosen) = text.row_column.as_mut() {
+            let selected = row_columns
+                .iter()
+                .find(|(id, _)| id == chosen)
+                .map_or_else(String::new, |(_, name)| name.clone());
+            commit |= form.row(tr!("plot-legend-row-column"), |ui| {
+                let mut picked = false;
+                egui::ComboBox::from_id_salt("plot_legend_row_column")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        for (id, name) in row_columns {
+                            picked |= ui.selectable_value(chosen, *id, name).clicked();
+                        }
+                    });
+                picked
+            });
+        }
+    }
+    commit
 }
 
 /// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of
@@ -2229,7 +2350,11 @@ mod tests {
             // from its columns, numeric values, empty input fields (titles
             // not filled in).
             let tree = harness.state.tree().clone();
-            let series = series_list_label(&tree, &original.panels[0].series[0]);
+            let series = series_list_label(
+                &tree,
+                &original.panels[0].series[0],
+                &original.panels[0].legend.text,
+            );
             let is_data =
                 |text: &str| text.is_empty() || text == series || text.parse::<f64>().is_ok();
             for item in &painted {
@@ -3667,7 +3792,13 @@ mod tests {
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         let spec = harness.draft();
         let tree = harness.state.tree();
-        let label = |index: usize| series_list_label(tree, &spec.panels[0].series[index]);
+        let label = |index: usize| {
+            series_list_label(
+                tree,
+                &spec.panels[0].series[index],
+                &spec.panels[0].legend.text,
+            )
+        };
         let rows = |index: usize| -> Vec<&Text> {
             painted.iter().filter(|t| t.text == label(index)).collect()
         };

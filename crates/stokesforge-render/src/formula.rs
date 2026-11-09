@@ -454,23 +454,7 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
 /// would read a field): the only addition is the broken-reference suffix, preceded
 /// by a space.
 pub fn escape(text: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    let mut escaped = String::with_capacity(text.len() + 3);
-    escaped.push_str("#\"");
-    for character in text.chars() {
-        match character {
-            '\\' => escaped.push_str("\\\\"),
-            '"' => escaped.push_str("\\\""),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            other => escaped.push(other),
-        }
-    }
-    escaped.push('"');
-    escaped
+    stokesforge_plot::typst_literal(text)
 }
 
 /// Typst's standard library, built once for the whole process.

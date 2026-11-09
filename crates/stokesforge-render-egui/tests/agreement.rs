@@ -1285,3 +1285,98 @@ fn a_free_page_is_the_same_figure_on_screen_and_in_the_export() {
         "the document has the size of the page"
     );
 }
+
+// -- #499: the legend « Text from » setting --
+
+/// The minimal graph with its first series unnamed and a comment on its Y
+/// column, and the legend reading `text`.
+fn legend_text_fixture(text: stokesforge_plot::LegendText) -> Sample {
+    let mut fixture = minimal();
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    let y = panel.series[0].y;
+    panel.series[0].name.clear();
+    panel.legend.text = text;
+    let mut meta = fixture
+        .project
+        .tree()
+        .node(y)
+        .and_then(|node| node.as_column())
+        .map(|column| column.meta().clone())
+        .expect("column");
+    meta.comment = "scan comment 42".to_string();
+    meta.long_name = "the long name".to_string();
+    fixture.project.set_column_meta(y, meta).expect("meta");
+    fixture
+}
+
+/// The screen and the export draw the same text, and it is the chosen one.
+/// Witness: one path ignoring the setting makes the two disagree, or the
+/// default text come back.
+#[test]
+fn the_screen_and_the_svg_export_draw_the_chosen_legend_text() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let fixture = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Comments,
+        ..LegendText::default()
+    });
+    let (primitives, _) = agree(fixture.project.tree(), &fixture.spec, SIZE, "comments");
+    let has = |needle: &str| {
+        primitives
+            .iter()
+            .any(|p| matches!(p, Primitive::Text(text) if text == needle))
+    };
+    assert!(has("scan comment 42"), "the comment is not in the legend");
+    assert!(!has("the long name"), "the long name is still drawn");
+}
+
+/// A custom template is drawn the same on both backends, and the column text
+/// it inserts is not read as Typst (`*` stays a star).
+#[test]
+fn a_custom_template_agrees_and_leaves_the_column_text_literal() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let literal = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Custom,
+        template: "%(LC)".to_string(),
+        ..LegendText::default()
+    });
+    agree(
+        literal.project.tree(),
+        &literal.spec,
+        SIZE,
+        "custom template",
+    );
+    let mut starred = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Custom,
+        template: "%(LC)".to_string(),
+        ..LegendText::default()
+    });
+    let y = starred.spec.panels[0].series[0].y;
+    let mut meta = starred
+        .project
+        .tree()
+        .node(y)
+        .and_then(|node| node.as_column())
+        .map(|column| column.meta().clone())
+        .expect("column");
+    meta.comment = "*not bold* #panic()".to_string();
+    starred.project.set_column_meta(y, meta).expect("meta");
+    // Compiles without a Typst error and agrees: the markup in the column
+    // text did not run.
+    agree(
+        starred.project.tree(),
+        &starred.spec,
+        SIZE,
+        "markup in the column text",
+    );
+}
+
+/// An empty chosen row gives an empty entry; the figure still agrees.
+#[test]
+fn an_empty_legend_entry_agrees_between_the_backends() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let fixture = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Units,
+        ..LegendText::default()
+    });
+    agree(fixture.project.tree(), &fixture.spec, SIZE, "empty entry");
+}
