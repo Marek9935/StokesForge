@@ -234,6 +234,24 @@ Source keeps the stored value; a recipe opened in the import wizard is switched
 to true. Witness `tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens
 and saves the file again loses the field (CHANGELOG).
 
+## Import recipe: the detector fields (#488)
+
+`ImportRecipeRecord` stores six more fields, all `#[serde(default)]`:
+`main_until_marker` (`Option<String>`), `header_props` (`Vec<HeaderPropRecord>`,
+with `PropFieldRecord` and `PropTargetRecord`), `skip_text_rows`, `format`
+(`FileFormatRecord`: `Table` or `Jcamp`), `name_unit_slash`,
+`strip_unit_brackets`. A record without them reads the reading from before
+(plain table, no header property, no marker), so **`FORMAT_VERSION` stays 1**
+and every existing `.stf` loads. Witness `tests/witnesses/v1/project.stf`
+regenerated with non-default values. A 1.0 that opens and saves the file again
+loses the six fields (CHANGELOG).
+
+**Limitation (user decision, 2026-11-09).** Refresh from Source re-reads the
+source file with the **stored recipe as it is**, without running the detector.
+It is not promised to reproduce an import from one version to the next: a
+newer reader may interpret the same recipe differently (a recipe stored by an
+older version has no detector fields, a newer detector may know more).
+
 ## Frame sizes: additive fields (#394)
 
 `PlotSpecRecord` gained `frame_widths` and `frame_heights` (`Vec<f64>`, points;

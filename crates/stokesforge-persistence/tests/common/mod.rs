@@ -427,12 +427,24 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
         import_mode: ImportMode::AddRows,
         files_layout: FilesLayout::SharedX,
         block_split: BlockSplit::BeforeLine("XYDATA".into()),
-        // #488 L2: the new recipe fields are stored from here on.
-        main_until_marker: None,
-        header_props: Vec::new(),
-        skip_text_rows: false,
-        format: FileFormat::Table,
-        name_unit_slash: false,
-        strip_unit_brackets: false,
+        main_until_marker: Some("XYDATA".into()),
+        header_props: vec![
+            HeaderProp {
+                key: "XUNITS".into(),
+                field: PropField::Units,
+                target: PropTarget::X,
+                short_unit: true,
+            },
+            HeaderProp {
+                key: "TITLE".into(),
+                field: PropField::LongName,
+                target: PropTarget::All,
+                short_unit: false,
+            },
+        ],
+        skip_text_rows: true,
+        format: FileFormat::Jcamp,
+        name_unit_slash: true,
+        strip_unit_brackets: true,
     }
 }

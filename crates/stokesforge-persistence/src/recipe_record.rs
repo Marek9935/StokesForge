@@ -79,6 +79,50 @@ pub(crate) struct ImportRecipeRecord {
     pub(crate) files_layout: FilesLayoutRecord,
     #[serde(default)]
     pub(crate) block_split: BlockSplitRecord,
+    // The fields below appeared with #488 (detector): absent means the
+    // reading from before (plain table, no header property).
+    #[serde(default)]
+    pub(crate) main_until_marker: Option<String>,
+    #[serde(default)]
+    pub(crate) header_props: Vec<HeaderPropRecord>,
+    #[serde(default)]
+    pub(crate) skip_text_rows: bool,
+    #[serde(default)]
+    pub(crate) format: FileFormatRecord,
+    #[serde(default)]
+    pub(crate) name_unit_slash: bool,
+    #[serde(default)]
+    pub(crate) strip_unit_brackets: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum FileFormatRecord {
+    #[default]
+    Table,
+    Jcamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum PropFieldRecord {
+    LongName,
+    Units,
+    Comment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum PropTargetRecord {
+    X,
+    Y,
+    All,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct HeaderPropRecord {
+    pub(crate) key: String,
+    pub(crate) field: PropFieldRecord,
+    pub(crate) target: PropTargetRecord,
+    #[serde(default)]
+    pub(crate) short_unit: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -303,6 +347,38 @@ unit_enum!(
     }
 );
 unit_enum!(DecimalStyleRecord, DecimalStyle { Dot, Comma, Auto });
+unit_enum!(FileFormatRecord, FileFormat { Table, Jcamp });
+unit_enum!(
+    PropFieldRecord,
+    PropField {
+        LongName,
+        Units,
+        Comment
+    }
+);
+unit_enum!(PropTargetRecord, PropTarget { X, Y, All });
+
+impl From<&r::HeaderProp> for HeaderPropRecord {
+    fn from(value: &r::HeaderProp) -> Self {
+        HeaderPropRecord {
+            key: value.key.clone(),
+            field: (&value.field).into(),
+            target: (&value.target).into(),
+            short_unit: value.short_unit,
+        }
+    }
+}
+
+impl From<HeaderPropRecord> for r::HeaderProp {
+    fn from(value: HeaderPropRecord) -> Self {
+        r::HeaderProp {
+            key: value.key,
+            field: value.field.into(),
+            target: value.target.into(),
+            short_unit: value.short_unit,
+        }
+    }
+}
 
 impl From<&r::BlockSplit> for BlockSplitRecord {
     fn from(value: &r::BlockSplit) -> Self {
@@ -534,6 +610,12 @@ impl From<&r::ImportRecipe> for ImportRecipeRecord {
             import_mode: (&value.import_mode).into(),
             files_layout: (&value.files_layout).into(),
             block_split: (&value.block_split).into(),
+            main_until_marker: value.main_until_marker.clone(),
+            header_props: value.header_props.iter().map(Into::into).collect(),
+            skip_text_rows: value.skip_text_rows,
+            format: (&value.format).into(),
+            name_unit_slash: value.name_unit_slash,
+            strip_unit_brackets: value.strip_unit_brackets,
         }
     }
 }
@@ -568,13 +650,74 @@ impl From<ImportRecipeRecord> for r::ImportRecipe {
             import_mode: value.import_mode.into(),
             files_layout: value.files_layout.into(),
             block_split: value.block_split.into(),
-            // #488 L2: the new recipe fields are stored from here on.
-            main_until_marker: None,
-            header_props: Vec::new(),
-            skip_text_rows: false,
-            format: r::FileFormat::Table,
-            name_unit_slash: false,
-            strip_unit_brackets: false,
+            main_until_marker: value.main_until_marker,
+            header_props: value.header_props.into_iter().map(Into::into).collect(),
+            skip_text_rows: value.skip_text_rows,
+            format: value.format.into(),
+            name_unit_slash: value.name_unit_slash,
+            strip_unit_brackets: value.strip_unit_brackets,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn detector_recipe() -> r::ImportRecipe {
+        r::ImportRecipe {
+            main_until_marker: Some("XYDATA".into()),
+            header_props: vec![r::HeaderProp {
+                key: "XUNITS".into(),
+                field: r::PropField::Units,
+                target: r::PropTarget::Y,
+                short_unit: true,
+            }],
+            skip_text_rows: true,
+            format: r::FileFormat::Jcamp,
+            name_unit_slash: true,
+            strip_unit_brackets: true,
+            ..r::ImportRecipe::new("detector")
+        }
+    }
+
+    /// The six fields of the detector (#488) survive the record.
+    #[test]
+    fn the_detector_fields_round_trip_through_the_record() {
+        let recipe = detector_recipe();
+        let back: r::ImportRecipe = ImportRecipeRecord::from(&recipe).into();
+        assert_eq!(back, recipe);
+    }
+
+    /// A record written before #488 has none of the six keys: it reads with the
+    /// reading from before (plain table), and `FORMAT_VERSION` stays 1.
+    #[test]
+    fn a_record_without_the_detector_fields_reads_the_old_way() {
+        let record = ImportRecipeRecord::from(&detector_recipe());
+        let bytes = rmp_serde::to_vec_named(&record).unwrap();
+        let mut value: rmpv::Value = rmp_serde::from_slice(&bytes).unwrap();
+        let rmpv::Value::Map(entries) = &mut value else {
+            panic!("a record is a map");
+        };
+        let new_keys = [
+            "main_until_marker",
+            "header_props",
+            "skip_text_rows",
+            "format",
+            "name_unit_slash",
+            "strip_unit_brackets",
+        ];
+        let before = entries.len();
+        entries.retain(|(k, _)| !new_keys.iter().any(|n| k.as_str() == Some(n)));
+        assert_eq!(before - entries.len(), new_keys.len());
+        let mut old_bytes = Vec::new();
+        rmpv::encode::write_value(&mut old_bytes, &value).unwrap();
+        let old: ImportRecipeRecord = rmp_serde::from_slice(&old_bytes).unwrap();
+        let back: r::ImportRecipe = old.into();
+        assert_eq!(back.main_until_marker, None);
+        assert!(back.header_props.is_empty());
+        assert!(!back.skip_text_rows);
+        assert_eq!(back.format, r::FileFormat::Table);
+        assert!(!back.name_unit_slash && !back.strip_unit_brackets);
     }
 }
