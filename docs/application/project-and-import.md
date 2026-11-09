@@ -127,7 +127,7 @@ following the cursor, detached workbook; before #386, which moved the outline on
 the detached OS windows and the other cases of the protocol below remain to be
 validated manually.
 
-### The import screen (#488)
+### Import wizard
 
 "Import…" opens **one screen that creates** (`import_window`, module
 `src/app/import_wizard.rs`, the only entry point called by `app.rs`; window

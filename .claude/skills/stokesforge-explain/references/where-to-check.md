@@ -13,7 +13,7 @@ Read from `stokesforge-explain` before answering. Pages route; the code decides.
 | undo, macros, what Ctrl+Z brings back | `docs/commands-and-history.md` § A command is a value | `stokesforge-commands/src/command.rs` |
 | saving, file format, compatibility | `docs/persistence.md` § Version rule: every V1 file can be read back up to V3 | `stokesforge-persistence` |
 | plotting, axes, legend, SVG/PDF/PNG export, formulas | `docs/rendering.md` | `stokesforge-render` |
-| CSV/TXT/ASC import, preview | `docs/application/project-and-import.md` § The import screen | `stokesforge-import`, `stokesforge-importer` |
+| CSV/TXT/ASC import, preview | `docs/application/project-and-import.md` § Import wizard | `stokesforge-import`, `stokesforge-importer` |
 | menus, right-clicks, what is greyed or absent | `docs/menus.md` § Tree by surface | `stokesforge-app/src/app/menus.rs` |
 | analysis (baseline, fit, peaks) | `docs/application/analysis.md` | `stokesforge-analysis`, `stokesforge-app-state/src/analysis.rs` |
 | Python scripts, `pyst` | `docs/python-and-scripting.md` § The `pyst` surface | `stokesforge-script`, `stokesforge-python` |

@@ -7,7 +7,7 @@ description: Work on importing instrument files (stokesforge-import, stokesforge
 
 ## Read first
 
-The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application/project-and-import.md` § The import screen. `docs/import-preview-work-package.md` is a hand-over note (its wizard-step sections are history): confront its "to do" with the code before reusing it.
+The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application/project-and-import.md` § Import wizard. `docs/import-preview-work-package.md` is a hand-over note (its wizard-step sections are history): confront its "to do" with the code before reusing it.
 
 ## Rules
 

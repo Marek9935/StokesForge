@@ -2,7 +2,7 @@
 
 **Status (#488).** The window this note talks about, the six-step wizard, was
 replaced by the one-screen import (`docs/application/project-and-import.md`
-§ "The import screen"). What stays true here: the engine (`layout`, `preview`,
+§ "Import wizard"). What stays true here: the engine (`layout`, `preview`,
 `data_end`, `HeaderLayout`, `SubheaderRoles`) and the decisions below. The
 sections that describe the wizard's steps ("Step-by-step wizard", the buttons
 "Re-evaluate Now" and "Detect Header", the "Metadata" step) are history: the
@@ -219,7 +219,7 @@ Other options: no cut, first empty line, marker, N lines after
 the header, N lines before the end. The rule lives in `data_end.rs`, called by the
 shared `layout` split, so that `parse` **and** `preview` cut at the
 same place. `footer_skip_lines` applies first. The options are in the recipe, and the cut is the pair of handles of the grid; see
-`docs/application/project-and-import.md` § "The import screen". The footer can be kept
+`docs/application/project-and-import.md` § "Import wizard". The footer can be kept
 in the metadata with `keep_footer_metadata`.
 
 ## File metadata per column (issue #5)
@@ -239,7 +239,7 @@ where the detector reads them (`KEY;value` lines, `props`).
 ## Step-by-step wizard (issue #6)
 
 *History: this was the six-step wizard, replaced by the one-screen import (#488, see
-`docs/application/project-and-import.md` § "The import screen").* On the `stokesforge-import` side:
+`docs/application/project-and-import.md` § "Import wizard").* On the `stokesforge-import` side:
 `ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignore removes the column
 at import), `unify_header`, `detect_encoding`. `HeaderLayout::auto_detect` stays in the recipe, with no effect: the detector (`sniff`) proposes the layout when a file arrives.
 
