@@ -453,6 +453,18 @@ impl Fixture {
         fixture
     }
 
+    /// A 2 x 2 grid whose bottom right cell is a hole: `[A B; C _]`, bases
+    /// 0 1 on the top row and 2 under 0.
+    fn grid_with_hole() -> Self {
+        let fixture = Self::grid(2, 2, false, false, false);
+        let mut spec = spec_of(&fixture);
+        let mut panels: Vec<_> = spec.panels.iter().cloned().collect();
+        panels.pop();
+        spec.panels = Panels::new(panels);
+        fixture.replace(spec);
+        fixture
+    }
+
     /// Two panels far apart on a 17 x 17 grid: more cells than a layout stores
     /// frames for, so the figure falls back to a compact grid.
     fn compact() -> Self {
@@ -705,7 +717,7 @@ fn corners_move_every_boundary_they_lie_on() {
     let cursor = hover_at(&context, &mut view, &fixture, meeting(&layout, 1, 1), 5.2).cursor;
     assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
 
-    // The figure's own corners and outer edges grab nothing.
+    // The figure's own corners and outer edges grab no handle.
     let (context, mut view) = in_mode(&fixture);
     let edge_middle = meeting(&layout, 0, 0) + egui::vec2(0.0, 75.0);
     let spots = [
@@ -725,7 +737,13 @@ fn corners_move_every_boundary_they_lie_on() {
             at + egui::vec2(10.0, 10.0),
             egui::Modifiers::NONE,
         );
-        assert!(signals.is_empty(), "({i}, {j}): {signals:?}");
+        // No handle is grabbed: at most the graph is moved into an edge band.
+        assert!(
+            signals
+                .iter()
+                .all(|signal| matches!(signal, GraphEvent::GridCellMoved { .. })),
+            "({i}, {j}): {signals:?}"
+        );
     }
 
     // A legacy graph: the first gesture starts from the frames it is drawn with.
@@ -994,6 +1012,35 @@ fn dropping_in_the_bottom_edge_band_asks_for_a_new_row_beside_the_nearest_cell()
             MoveTarget::Beside {
                 panel: 1,
                 side: CellSide::Right
+            }
+        )
+    );
+}
+
+/// In an edge band the reference is the nearest cell other than the moving
+/// graph (#503): `[A B; C _]`, C dragged to the left band at the height of its
+/// own row, goes beside A, not nowhere. Witness: `moving` not excluded in
+/// `drop_place` (the nearest cell is C itself and the drop gives nothing).
+#[test]
+fn the_moving_graph_is_never_the_nearest_cell_of_an_edge_band() {
+    let fixture = Fixture::grid_with_hole();
+    let (context, mut view) = in_mode(&fixture);
+    let c = middle(&view, 2);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        c,
+        Pos2::new(10.0, c.y),
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            2,
+            MoveTarget::Beside {
+                panel: 0,
+                side: CellSide::Left
             }
         )
     );
