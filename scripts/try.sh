@@ -54,9 +54,9 @@ elif [[ "$target" =~ ^[A-Za-z][A-Za-z0-9._-]*$ ]]; then
 else
     wt=""
     cur=""
-    while read -r line; do
-        case "$line" in
-        "worktree "*) cur="${line#worktree }" ;;
+    while read -r entry; do
+        case "$entry" in
+        "worktree "*) cur="${entry#worktree }" ;;
         "branch refs/heads/feature/$target-"*) wt="$cur" ;;
         esac
     done < <(git -C "$main" worktree list --porcelain)
@@ -66,8 +66,11 @@ else
     fi
 fi
 
-[[ "$target" =~ ^[0-9]+$ ]] && line="$(sf_line_of "$target")"
-if [ "$line" != main ] && [[ "$target" =~ ^[0-9]+$ ]] && ! git -C "$main" rev-parse --verify -q "refs/heads/$line" > /dev/null; then
+# A plain number or a suffixed sibling (488b): the line of its issue number.
+issue=""
+[[ "$target" =~ ^[0-9]+[A-Za-z]*$ ]] && issue="${target%%[!0-9]*}"
+[ -z "$issue" ] || line="$(sf_line_of "$issue")"
+if [ "$line" != main ] && [ -n "$issue" ] && ! git -C "$main" rev-parse --verify -q "refs/heads/$line" > /dev/null; then
     echo "#$target is on the line $line, but the branch $line does not exist here (scripts/line.sh create $line)" >&2
     exit 1
 fi
