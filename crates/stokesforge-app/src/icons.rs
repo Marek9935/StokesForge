@@ -106,6 +106,8 @@ pub enum Icon {
     Redo,
     /// The handle of a row that is reordered by dragging.
     Grip,
+    /// A check mark: what is sure (Import Wizard, #488).
+    Check,
 }
 
 macro_rules! svg {
@@ -361,6 +363,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         IconRole::Neutral,
         svg!("dots-six-vertical.neutral.svg"),
     ),
+    (Icon::Check, IconRole::Neutral, svg!("check.neutral.svg")),
 ];
 
 /// Unreachable as long as every icon has a variant (test `the_variants_table_…`).

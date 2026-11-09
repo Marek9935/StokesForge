@@ -76,6 +76,15 @@ pub(crate) const KEY_LAYOUT_SNAP: egui::KeyboardShortcut =
 pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
 
+/// 1, 2, 3 — the first, second and third answer of a question of the Import
+/// Wizard review (Enter takes the first).
+pub(crate) const KEY_ANSWER_1: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num1);
+pub(crate) const KEY_ANSWER_2: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num2);
+pub(crate) const KEY_ANSWER_3: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num3);
+
 /// Ctrl+Z — undo.
 pub(super) const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);

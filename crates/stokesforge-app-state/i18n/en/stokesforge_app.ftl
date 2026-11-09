@@ -2392,11 +2392,6 @@ import-check-pick-times = Click the line of the times — Esc: cancel
 import-check-pick-last = Click the last data line — Esc: cancel
 import-check-log-xprime = Line { $line } is the times (x′)
 import-check-log-last = The data end at line { $line }
-import-template-name-files =
-    { $count ->
-        [one] 1 file
-       *[other] { $count } files
-    }
 import-chip-keys = Take the value from
 import-chip-nothing = Nothing
 import-chip-line = line { $line }
@@ -2499,7 +2494,7 @@ import-template-save-button = Save
 import-template-save-name = Name
 import-template-save-note = The number of header lines does not matter.
 import-template-save-reason-name = Type a name
-import-template-save-reason-trigger = Keep at least one trigger
+import-template-save-reason-trigger = Keep at least one condition
 import-template-save-replaces = Replaces the template of the same name
 import-template-save-sets = What it sets
 import-template-save-title = Save as Template
@@ -2541,6 +2536,11 @@ import-condition-name-is = File name contains
 import-condition-ext-is = Extension
 import-condition-remove = Remove this condition
 import-condition-yours = Your conditions
+import-answers-title = Answers remembered
+import-answers-note = When you answered a point to check, StokesForge kept the answer for that kind of file and does not ask again.
+import-answers-empty = No answer remembered yet.
+import-answers-forget = Forget
+    .hint = Ask this question again the next time a file of this kind comes
 import-check-mark-checked = Mark as Checked
     .hint = Settle this one without the review
 import-check-tag-check-go = Show where it comes from in the file

@@ -2391,11 +2391,6 @@ import-check-pick-times = Clique la ligne des temps — Échap : annuler
 import-check-pick-last = Clique la dernière ligne de données — Échap : annuler
 import-check-log-xprime = La ligne { $line } est le temps (x′)
 import-check-log-last = Les données finissent à la ligne { $line }
-import-template-name-files =
-    { $count ->
-        [one] 1 fichier
-       *[other] { $count } fichiers
-    }
 import-chip-keys = Prendre la valeur dans
 import-chip-nothing = Rien
 import-chip-line = ligne { $line }
@@ -2540,6 +2535,11 @@ import-condition-name-is = Nom de fichier contient
 import-condition-ext-is = Extension
 import-condition-remove = Retirer cette condition
 import-condition-yours = Vos conditions
+import-answers-title = Réponses mémorisées
+import-answers-note = Quand vous avez répondu à un point à vérifier, StokesForge garde la réponse pour ce type de fichier et ne la redemande plus.
+import-answers-empty = Aucune réponse mémorisée pour l’instant.
+import-answers-forget = Oublier
+    .hint = Reposer cette question au prochain fichier de ce type
 import-check-mark-checked = Marquer comme vérifié
     .hint = Régler celui-ci sans la vérification
 import-check-tag-check-go = Montrer d’où ça vient dans le fichier
