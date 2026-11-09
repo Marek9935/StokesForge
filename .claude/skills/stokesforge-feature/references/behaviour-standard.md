@@ -5,6 +5,7 @@ Read when placing a field, message, dialog, confirmation, greying, keyboard or m
 ## Where the rule lives
 
 - Rule index: `docs/interface-standard.md` § Rule index.
+- A draft field is drawn under `field_state::for_target(<target>)`; a target pick (tab, row) is applied after the page it governs is drawn (`pick_pending` / `pick_allowed`), so a typed number lands on its own target (#498).
 - Numeric fields, bounds, steps, wheel: `docs/interface-standard.md` § Numeric fields.
 - Refused or clamped input: `docs/interface-standard.md` § Input refused or brought back.
 - Decimal comma: `docs/interface-standard.md` § Decimal comma.

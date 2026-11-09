@@ -214,6 +214,9 @@ fn plot_settings_contents(
 ) {
     let mut chosen_tab = settings.tab;
     let mut chosen_axis = settings.axis;
+    // A tab click is applied after the page it leaves is drawn (#498): the
+    // draft in progress is validated on its own page first.
+    let mut picked_tab = None;
     // Same strip as the sheet tabs (`tab_strip`, issue #19): it
     // scrolls instead of shrinking when the window is narrow.
     if settings.tab != PlotSettingsTab::Series {
@@ -223,12 +226,18 @@ fn plot_settings_contents(
             .collect();
         // The strip draws its own rule under the tabs (#169): no
         // separator in addition, only the space it used to leave.
+        let ui_ctx = &ui.ctx().clone();
         tab_strip(
             ui,
             TabStripSide::Top,
             &tabs,
             settings.tab,
-            |tab| chosen_tab = tab,
+            |tab| {
+                if tab != settings.tab {
+                    crate::field_state::pick_pending(ui_ctx);
+                    picked_tab = Some(tab);
+                }
+            },
             None,
             || {},
         );
@@ -359,6 +368,12 @@ fn plot_settings_contents(
     }
     if commit {
         state.commit_plot_edit();
+    }
+    if let Some(tab) = picked_tab {
+        if crate::field_state::pick_allowed(ui.ctx()) {
+            chosen_tab = tab;
+            ui.ctx().request_repaint();
+        }
     }
     for action in gradient_actions {
         state.dispatch(action);
@@ -1054,74 +1069,88 @@ pub(super) fn axes_settings_page(
     // The row takes the whole height left: `ui.horizontal` would hand the
     // scroll area about one row.
     let size = ui.available_size();
-    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
-        let mut picked = None;
-        tab_strip_left_with_reasons(
-            ui,
-            &tabs,
-            *chosen_axis,
-            &|axis| side_of(axis).and_then(|side| side.reason()),
-            |axis| picked = Some(axis),
-        );
-        if let Some(axis) = picked {
-            *chosen_axis = axis;
-        }
-        let Some(side) = side_of(chosen_axis).filter(|side| side.available()) else {
-            return false;
-        };
-        let Some(field) = side.field else {
-            return false;
-        };
-        ui.vertical(|ui| {
-            let computed = bounds.and_then(|bounds| match field {
-                AxisSide::Bottom => bounds.bottom,
-                AxisSide::Left => bounds.left,
-                _ => bounds.right,
-            });
-            let Some(panel) = spec.panels.get_mut(panel_index) else {
+    let ui_ctx = &ui.ctx().clone();
+    // A side click is applied after the page it leaves is drawn (#498).
+    let mut picked = None;
+    let commit = ui
+        .allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
+            tab_strip_left_with_reasons(
+                ui,
+                &tabs,
+                *chosen_axis,
+                &|axis| side_of(axis).and_then(|side| side.reason()),
+                |axis| {
+                    if axis != *chosen_axis {
+                        crate::field_state::pick_pending(ui_ctx);
+                        picked = Some(axis);
+                    }
+                },
+            );
+            let Some(side) = side_of(chosen_axis).filter(|side| side.available()) else {
                 return false;
             };
-            let decimal_comma = &mut spec.decimal_comma;
-            crate::theme::page_scroll_area()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    form(ui, "plot_axis_page", |form| {
-                        let mut commit = if side.mirror {
-                            mirror_axis_editor(form, panel.axis_mut(field), env)
-                        } else if side.own_scale {
-                            // An overlaid layer's top / right: the axis
-                            // fields plus the "Own scale" of the layer.
-                            let own = panel.overlay.as_mut().map(|overlay| {
-                                if field == AxisSide::Bottom {
-                                    &mut overlay.x_top
+            let Some(field) = side.field else {
+                return false;
+            };
+            ui.vertical(|ui| {
+                let computed = bounds.and_then(|bounds| match field {
+                    AxisSide::Bottom => bounds.bottom,
+                    AxisSide::Left => bounds.left,
+                    _ => bounds.right,
+                });
+                let Some(panel) = spec.panels.get_mut(panel_index) else {
+                    return false;
+                };
+                let decimal_comma = &mut spec.decimal_comma;
+                crate::theme::page_scroll_area()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        crate::field_state::for_target(ui, (panel_index, field), |ui| {
+                            form(ui, "plot_axis_page", |form| {
+                                let mut commit = if side.mirror {
+                                    mirror_axis_editor(form, panel.axis_mut(field), env)
+                                } else if side.own_scale {
+                                    // An overlaid layer's top / right: the axis
+                                    // fields plus the "Own scale" of the layer.
+                                    let own = panel.overlay.as_mut().map(|overlay| {
+                                        if field == AxisSide::Bottom {
+                                            &mut overlay.x_top
+                                        } else {
+                                            &mut overlay.y_right
+                                        }
+                                    });
+                                    let axis = if field == AxisSide::Bottom {
+                                        &mut panel.bottom
+                                    } else {
+                                        &mut panel.left
+                                    };
+                                    axis_editor(form, axis, computed, own, env)
                                 } else {
-                                    &mut overlay.y_right
-                                }
-                            });
-                            let axis = if field == AxisSide::Bottom {
-                                &mut panel.bottom
-                            } else {
-                                &mut panel.left
-                            };
-                            axis_editor(form, axis, computed, own, env)
-                        } else {
-                            axis_editor(form, panel.axis_mut(field), computed, None, env)
-                        };
-                        // Setting of the whole graph (#223), put under the
-                        // axes display.
-                        commit |= form.checkbox(
-                            decimal_comma,
-                            tr!("plot-axes-decimal-comma"),
-                            Some(tr!("plot-axes-decimal-comma", "hint")),
-                        );
-                        commit
+                                    axis_editor(form, panel.axis_mut(field), computed, None, env)
+                                };
+                                // Setting of the whole graph (#223), put under the
+                                // axes display.
+                                commit |= form.checkbox(
+                                    decimal_comma,
+                                    tr!("plot-axes-decimal-comma"),
+                                    Some(tr!("plot-axes-decimal-comma", "hint")),
+                                );
+                                commit
+                            })
+                        })
                     })
-                })
-                .inner
+                    .inner
+            })
+            .inner
         })
-        .inner
-    })
-    .inner
+        .inner;
+    if let Some(axis) = picked {
+        if crate::field_state::pick_allowed(ui_ctx) {
+            *chosen_axis = axis;
+            ui_ctx.request_repaint();
+        }
+    }
+    commit
 }
 
 /// "Theme" tab: background, text color and axes color, set
@@ -4039,6 +4068,113 @@ mod tests {
         assert_eq!(width(&harness.model()), 4.0);
         harness.state.dispatch(Action::Undo);
         assert_eq!(harness.model(), original, "a single Undo");
+    }
+
+    // -- A draft belongs to the target it was typed for (#498) --------------
+
+    /// A graph whose Bottom and Left axes are fixed, with distinct bounds.
+    fn two_fixed_axes() -> Harness {
+        harness(|spec| {
+            let panel = first_panel(spec);
+            panel.bottom.auto_range = false;
+            panel.bottom.range_min = Some(-3.5);
+            panel.bottom.range_max = Some(12.5);
+            panel.left.auto_range = false;
+            panel.left.range_min = Some(7.25);
+            panel.left.range_max = Some(20.5);
+        })
+    }
+
+    /// Bottom From typed without Enter, then a click on the Left tab: the
+    /// number is applied to Bottom (one undo step), Left is untouched and is
+    /// the page that opens. Witness: `*chosen_axis = axis` before the page.
+    #[test]
+    fn a_number_typed_on_one_axis_is_applied_there_when_another_axis_is_clicked() {
+        let mut harness = two_fixed_axes();
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = test_support::context();
+        let original = harness.model();
+        focus_field(&context, &mut harness.state, "-3.5");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("550".into())],
+        );
+        click_label(&context, &mut harness.state, &PlotAxis::Left.label());
+        let panel = |spec: &PlotSpec| spec.panels[0].clone();
+        let after = panel(&harness.model());
+        assert_eq!(
+            after.bottom.range_min,
+            Some(550.0),
+            "Bottom took the number"
+        );
+        assert_eq!(after.left, panel(&original).left, "Left is untouched");
+        assert_eq!(harness.state.plot_settings().unwrap().axis, PlotAxis::Left);
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(
+            harness.model().panels[0].bottom,
+            panel(&original).bottom,
+            "one undo step gives Bottom back"
+        );
+    }
+
+    /// An unreadable draft and a click on another axis: the switch is
+    /// cancelled, the field stays open with its text and the red rule.
+    /// Witness: drop the cancel (`pick_allowed`).
+    #[test]
+    fn an_unreadable_draft_blocks_the_switch_to_another_axis() {
+        let mut harness = two_fixed_axes();
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = test_support::context();
+        let original = harness.model();
+        focus_field(&context, &mut harness.state, "-3.5");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("abc".into())],
+        );
+        click_label(&context, &mut harness.state, &PlotAxis::Left.label());
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            harness.state.plot_settings().unwrap().axis,
+            PlotAxis::Bottom,
+            "still on Bottom"
+        );
+        assert_eq!(harness.model(), original, "nothing changed");
+        assert!(
+            is_painted(&painted, "abc"),
+            "the draft is still shown: {painted:?}"
+        );
+        assert!(
+            context.memory(|memory| memory.focused()).is_some(),
+            "the field has the focus back"
+        );
+    }
+
+    /// The same for the main tabs: Bottom From typed, a click on Legend.
+    /// Witness: `chosen_tab` applied before the page.
+    #[test]
+    fn a_number_typed_on_the_axes_page_is_applied_when_another_main_tab_is_clicked() {
+        let mut harness = two_fixed_axes();
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = test_support::context();
+        focus_field(&context, &mut harness.state, "-3.5");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("550".into())],
+        );
+        click_label(
+            &context,
+            &mut harness.state,
+            &PlotSettingsTab::Legend.label(),
+        );
+        assert_eq!(harness.model().panels[0].bottom.range_min, Some(550.0));
+        assert_eq!(
+            harness.state.plot_settings().unwrap().tab,
+            PlotSettingsTab::Legend
+        );
     }
 
     // -- Bins and bar width (#359) -----------------------------------------
