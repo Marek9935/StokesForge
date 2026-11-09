@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use stokesforge_import::{choose_recipe, parse, ImportRecipe, RecipeStore};
+use stokesforge_import::{parse, FileFacts, ImportRecipe, RecipeStore};
 
 fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -22,7 +22,7 @@ static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The recipes of `test/import/test_recipes.json`, loaded like a user's
 /// saved templates.
-fn test_recipes() -> Vec<ImportRecipe> {
+fn test_store() -> RecipeStore {
     let _lock = CONFIG_ENV_LOCK
         .lock()
         .unwrap_or_else(|err| err.into_inner());
@@ -30,7 +30,11 @@ fn test_recipes() -> Vec<ImportRecipe> {
     let _restoration = RestoredConfig::redirect(dir.path());
     let (_, bytes) = fixture("test_recipes.json");
     std::fs::write(dir.path().join("import_recipes.json"), bytes).unwrap();
-    RecipeStore::load().recipes().to_vec()
+    RecipeStore::load()
+}
+
+fn test_recipes() -> Vec<ImportRecipe> {
+    test_store().recipes().to_vec()
 }
 
 fn recipe(name: &str) -> ImportRecipe {
@@ -42,8 +46,9 @@ fn recipe(name: &str) -> ImportRecipe {
 
 fn auto_name(file: &str) -> Option<String> {
     let (path, bytes) = fixture(file);
-    let recipes = test_recipes();
-    choose_recipe(&recipes, &path, &bytes).map(|r| r.name.clone())
+    let store = test_store();
+    let facts = FileFacts::new(&path, &bytes, None);
+    store.matching(&facts).map(|found| found.recipe.name.clone())
 }
 
 #[test]

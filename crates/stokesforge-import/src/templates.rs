@@ -44,6 +44,17 @@ pub enum Condition {
     Extension { exts: Vec<String> },
     /// The start of the file contains a text (case ignored).
     FileStart { text: String },
+    /// The file comes from this instrument or software, as the detector names
+    /// it (`JASCO V-770`, `JCAMP-DX`; case ignored).
+    Origin { name: String },
+    /// The `DATA TYPE` of the header (`ULTRAVIOLET SPECTRUM`; case ignored).
+    DataType { value: String },
+    /// The line that ends the header (`XYDATA`; case ignored).
+    Marker { text: String },
+    /// How the numbers are written: `sep` is `;`, `,`, `tab` or `space`.
+    Numbers { sep: String, comma: bool },
+    /// A kinetic: several curves sharing the x column, with an x' line.
+    Kinetic,
 }
 
 impl Condition {
@@ -55,6 +66,11 @@ impl Condition {
             Condition::HeaderKey { key, .. } => key.trim().is_empty(),
             Condition::FileName { text } | Condition::FileStart { text } => text.trim().is_empty(),
             Condition::Extension { exts } => exts.iter().all(|e| e.trim().is_empty()),
+            Condition::Origin { name } => name.trim().is_empty(),
+            Condition::DataType { value } => value.trim().is_empty(),
+            Condition::Marker { text } => text.trim().is_empty(),
+            Condition::Numbers { sep, .. } => sep.trim().is_empty(),
+            Condition::Kinetic => false,
         }
     }
 
@@ -90,6 +106,13 @@ impl Condition {
                 !e.is_empty() && facts.extension.eq_ignore_ascii_case(e)
             }),
             Condition::FileStart { text } => facts.head.contains(&text.trim().to_lowercase()),
+            Condition::Origin { name } => facts.origin.eq_ignore_ascii_case(name.trim()),
+            Condition::DataType { value } => facts.data_type.eq_ignore_ascii_case(value.trim()),
+            Condition::Marker { text } => facts.marker.eq_ignore_ascii_case(text.trim()),
+            Condition::Numbers { sep, comma } => {
+                facts.sep.eq_ignore_ascii_case(sep.trim()) && facts.comma == *comma
+            }
+            Condition::Kinetic => facts.kinetic,
         }
     }
 }
@@ -130,6 +153,72 @@ pub struct FileFacts {
     /// The kind of file, for the answers remembered ([`kind_id`]); `None`
     /// when the detector refused the file.
     pub kind: Option<String>,
+    /// The instrument or software (`JASCO V-770`, `JCAMP-DX`); empty when the
+    /// detector does not recognise one.
+    pub origin: String,
+    /// Raw `DATA TYPE` of the header, upper case; empty when absent.
+    pub data_type: String,
+    /// The marker line that ends the header, as the detector found it.
+    pub marker: String,
+    /// The delimiter: `;`, `,`, `tab` or `space`; empty when not sniffed.
+    pub sep: String,
+    /// Decimal comma.
+    pub comma: bool,
+    /// Several curves with an x' line.
+    pub kinetic: bool,
+}
+
+/// `V-770` in `JASCO Corp., V-770, Rev. 1.00`.
+fn model_token(text: &str) -> Option<String> {
+    text.split(|c: char| c.is_whitespace() || c == ',')
+        .map(|t| t.trim_matches(|c: char| c == ',' || c == '.' || c == ';'))
+        .find(|t| {
+            t.contains('-')
+                && t.chars().any(|c| c.is_ascii_digit())
+                && t.chars().any(char::is_alphabetic)
+                && t.chars().all(|c| c.is_alphanumeric() || c == '-')
+        })
+        .map(str::to_string)
+}
+
+/// The delimiter as the conditions write it.
+fn sep_symbol(kind: crate::sniff::SepKind) -> &'static str {
+    use crate::sniff::SepKind;
+    match kind {
+        SepKind::Semicolon => ";",
+        SepKind::Comma => ",",
+        SepKind::Tab => "tab",
+        SepKind::Whitespace | SepKind::None => "space",
+    }
+}
+
+/// `JASCO V-770`, `JCAMP-DX` or nothing. The model comes from the header key
+/// `SPECTROMETER/DATA SYSTEM`, else from the `MODEL NAME` line of the footer.
+fn origin_of(sniffed: &Sniff, keys: &[(String, String)], text: &str) -> String {
+    use crate::sniff::Family;
+    let vendor = match sniffed.family {
+        Some(Family::Jasco) => "JASCO",
+        Some(Family::Jcamp) => return "JCAMP-DX".to_string(),
+        _ => return String::new(),
+    };
+    let key = |wanted: &str| {
+        keys.iter()
+            .find(|(k, _)| k.trim().eq_ignore_ascii_case(wanted))
+            .map(|(_, v)| v.as_str())
+    };
+    let model = key("SPECTROMETER/DATA SYSTEM")
+        .and_then(model_token)
+        .or_else(|| {
+            text.lines().take(HEAD_LINES).find_map(|line| {
+                let (k, v) = split_kv(line)?;
+                (k.trim().eq_ignore_ascii_case("MODEL NAME") && !v.trim().is_empty())
+                    .then(|| v.trim().to_string())
+            })
+        });
+    match model {
+        Some(model) => format!("{vendor} {model}"),
+        None => vendor.to_string(),
+    }
 }
 
 impl FileFacts {
@@ -148,7 +237,36 @@ impl FileFacts {
             }
             keys.push((key.to_string(), value.to_string()));
         }
+        let (origin, data_type, marker, sep, comma, kinetic) = match sniffed {
+            Some(found) => {
+                let whole;
+                let footer_text = if matches!(found.family, Some(crate::sniff::Family::Jasco)) {
+                    whole = crate::decode::decode_text(bytes).unwrap_or_default();
+                    &whole[..]
+                } else {
+                    ""
+                };
+                (
+                    origin_of(found, &keys, footer_text),
+                    keys.iter()
+                        .find(|(k, _)| k.trim().eq_ignore_ascii_case("DATA TYPE"))
+                        .map(|(_, v)| v.trim().to_uppercase())
+                        .unwrap_or_default(),
+                    found.recipe.main_until_marker.clone().unwrap_or_default(),
+                    sep_symbol(found.kind.sep).to_string(),
+                    found.kind.comma,
+                    found.recipe.subheader_roles.x_prime.is_some() && found.columns > 2,
+                )
+            }
+            None => Default::default(),
+        };
         Self {
+            origin,
+            data_type,
+            marker,
+            sep,
+            comma,
+            kinetic,
             file_name: path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -192,14 +310,25 @@ pub fn kind_id(sniffed: &Sniff) -> String {
 }
 
 impl Doubt {
-    /// Stable name of the doubt, for the answers remembered. A JCAMP doubt is
-    /// remembered whatever its block.
+    /// Stable name of the doubt, for the answers remembered: the kind of doubt
+    /// and what it is about, never a block index or a line number, so that two
+    /// files of one kind give the same id.
     pub fn id(&self) -> &'static str {
+        use crate::jcamp::JcampIssue;
         match self {
             Doubt::TextRowsInData { .. } => "text-rows-in-data",
-            Doubt::SeveralBlocks { .. } => "several-blocks",
+            Doubt::SeveralBlocks { split: true, .. } => "several-blocks-split",
+            Doubt::SeveralBlocks { split: false, .. } => "several-blocks",
             Doubt::DecimalOrSeparator { .. } => "decimal-or-separator",
-            Doubt::Jcamp { .. } => "jcamp",
+            Doubt::Jcamp { issue, .. } => match issue {
+                JcampIssue::NPointsMismatch { .. } => "jcamp-npoints",
+                JcampIssue::NtuplesNotRead => "jcamp-ntuples-not-read",
+                JcampIssue::UnreadableTable => "jcamp-unreadable-table",
+                JcampIssue::BadLines { .. } => "jcamp-bad-lines",
+                JcampIssue::DupCapped => "jcamp-dup-capped",
+                JcampIssue::PointsCapped => "jcamp-points-capped",
+                JcampIssue::NmrLeftOut { .. } => "jcamp-nmr-left-out",
+            },
         }
     }
 }
@@ -573,6 +702,86 @@ mod tests {
         assert!(!cols(facts.n_cols.unwrap() + 1).holds(&facts));
         // An empty condition never holds.
         assert!(!name("").holds(&facts));
+    }
+
+    #[test]
+    fn the_automatic_conditions_of_a_detection_pass_and_fail() {
+        let (path, bytes) = fixture("jasco_uvvis_semicolon.csv");
+        let sniffed = sniff(&bytes, "jasco_uvvis_semicolon.csv").unwrap();
+        let facts = FileFacts::new(&path, &bytes, Some(&sniffed));
+        assert!(facts.origin.starts_with("JASCO"), "{}", facts.origin);
+        let origin = |name: &str| Condition::Origin { name: name.into() };
+        assert!(origin(&facts.origin.to_lowercase()).holds(&facts));
+        assert!(!origin("JASCO V-999").holds(&facts));
+        assert!(!origin("").holds(&facts));
+        assert!(!facts.data_type.is_empty());
+        let data_type = |value: &str| Condition::DataType {
+            value: value.into(),
+        };
+        assert!(data_type(&facts.data_type.to_lowercase()).holds(&facts));
+        assert!(!data_type("FLUORESCENCE SPECTRUM").holds(&facts));
+        let numbers = |sep: &str, comma| Condition::Numbers {
+            sep: sep.into(),
+            comma,
+        };
+        assert_eq!(facts.sep, ";");
+        assert!(numbers(";", facts.comma).holds(&facts));
+        assert!(!numbers(";", !facts.comma).holds(&facts));
+        assert!(!numbers("tab", facts.comma).holds(&facts));
+        assert_eq!(Condition::Kinetic.holds(&facts), facts.kinetic);
+        // A file the detector refused meets none of them.
+        let blind = FileFacts::new(&path, &bytes, None);
+        assert!(!origin(&facts.origin).holds(&blind));
+        assert!(!numbers(";", facts.comma).holds(&blind));
+        assert!(!Condition::Kinetic.holds(&blind));
+        // A marker and a kinetic come from a file that has them.
+        let kinetic = FileFacts {
+            kinetic: true,
+            marker: "XYDATA".into(),
+            ..FileFacts::default()
+        };
+        assert!(Condition::Kinetic.holds(&kinetic));
+        assert!(Condition::Marker {
+            text: "xydata".into()
+        }
+        .holds(&kinetic));
+        assert!(!Condition::Marker { text: "".into() }.holds(&kinetic));
+        assert!(!Condition::Marker {
+            text: "other".into()
+        }
+        .holds(&kinetic));
+    }
+
+    #[test]
+    fn a_doubt_id_names_the_kind_of_doubt_not_its_block() {
+        use crate::jcamp::JcampIssue;
+        let jcamp = |block, issue| Doubt::Jcamp { block, issue };
+        // Two blocks with the same issue share the id.
+        assert_eq!(
+            jcamp(0, JcampIssue::NtuplesNotRead).id(),
+            jcamp(7, JcampIssue::NtuplesNotRead).id()
+        );
+        // Different issues, different ids.
+        assert_ne!(
+            jcamp(0, JcampIssue::NtuplesNotRead).id(),
+            jcamp(0, JcampIssue::UnreadableTable).id()
+        );
+        assert_ne!(
+            jcamp(0, JcampIssue::BadLines { count: 1 }).id(),
+            jcamp(
+                0,
+                JcampIssue::NPointsMismatch {
+                    declared: 1,
+                    decoded: 2
+                }
+            )
+            .id()
+        );
+        // Line numbers and counts do not enter the id.
+        assert_eq!(
+            Doubt::DecimalOrSeparator { line: 2 }.id(),
+            Doubt::DecimalOrSeparator { line: 90 }.id()
+        );
     }
 
     #[test]

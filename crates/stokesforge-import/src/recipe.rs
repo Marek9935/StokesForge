@@ -85,7 +85,7 @@ pub struct ImportRecipe {
     #[serde(default)]
     pub encoding: Encoding,
     /// Criteria for automatically choosing this template from a file; see
-    /// [`crate::choose_recipe`]. Empty: never chosen automatically.
+    /// [`crate::RecipeStore::matching`]. Empty: never chosen automatically.
     #[serde(default)]
     pub auto_match: AutoMatch,
     /// Forced kind of each column, by position ("Columns" step). Shorter than
