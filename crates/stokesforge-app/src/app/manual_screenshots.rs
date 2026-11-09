@@ -38,7 +38,7 @@ use stokesforge_app_state::analysis::Preset;
 use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::object_manager::VisibilityTarget;
 use stokesforge_app_state::preferences::Preferences;
-use stokesforge_app_state::state::{Action, AppState, ImportStep, PlotAxis, PlotSettingsTab};
+use stokesforge_app_state::state::{Action, AppState, PlotAxis, PlotSettingsTab};
 use stokesforge_core::compose::CellSide;
 use stokesforge_core::{NodeId, NodeKind};
 use stokesforge_plot::SeriesRef;
@@ -270,17 +270,17 @@ const SHOTS: &[Shot] = &[
     },
     Shot {
         name: "import-wizard-format",
-        setup: |h| open_wizard_clean(h, ImportStep::Format),
+        setup: |h| open_wizard_clean(h),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
         name: "import-wizard-header",
-        setup: |h| open_wizard_clean(h, ImportStep::Header),
+        setup: |h| open_wizard_clean(h),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
         name: "import-wizard-columns",
-        setup: |h| open_wizard_clean(h, ImportStep::Columns),
+        setup: |h| open_wizard_clean(h),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
@@ -613,17 +613,17 @@ const SHOTS: &[Shot] = &[
     },
     Shot {
         name: "import-wizard-files",
-        setup: |h| open_wizard_clean(h, ImportStep::Files),
+        setup: |h| open_wizard_clean(h),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
         name: "import-wizard-metadata",
-        setup: |h| open_wizard_clean(h, ImportStep::Metadata),
+        setup: |h| open_wizard_clean(h),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
         name: "import-wizard-destination",
-        setup: |h| open_wizard_clean(h, ImportStep::Destination),
+        setup: |h| open_wizard_clean(h),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
@@ -805,12 +805,13 @@ fn show_only(h: &mut Harness<'static, Bench>, tab: Tab, size: egui::Vec2) {
 
 /// A small instrument file in the scratch folder, and the import wizard open
 /// on it at `step` (the file chooser is bypassed: the paths are given).
-fn open_wizard_clean(h: &mut Harness<'static, Bench>, step: ImportStep) {
+// #488 L5: the six shots below become the shots of the one-screen import.
+fn open_wizard_clean(h: &mut Harness<'static, Bench>) {
     empty_workspace(h);
-    open_wizard(h, step);
+    open_wizard(h);
 }
 
-fn open_wizard(h: &mut Harness<'static, Bench>, step: ImportStep) {
+fn open_wizard(h: &mut Harness<'static, Bench>) {
     let file = h.state().scratch.path().join("spectrum.csv");
     let mut text =
         String::from("Instrument: Demo spectrometer\nSample: S-12\nWavelength;Absorbance\nnm;AU\n");
@@ -836,9 +837,6 @@ fn open_wizard(h: &mut Harness<'static, Bench>, step: ImportStep) {
         roles.unit = Some(stokesforge_import::SubheaderLineRange::single(2));
     }
     settle(h);
-    if let Some(import) = h.state_mut().app.state.import_state_mut() {
-        import.step = step;
-    }
 }
 
 /// The analysis window open on the series of `Graph1`.

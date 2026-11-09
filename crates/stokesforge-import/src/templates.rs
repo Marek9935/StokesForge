@@ -291,9 +291,12 @@ impl FileFacts {
 pub fn kind_id(sniffed: &Sniff) -> String {
     let k = &sniffed.kind;
     format!(
-        "{:?}|{:?}|{:?}|{}|{}|{:x}|{:?}|{:?}|{}",
+        "{:?}|{}|{:?}|{}|{}|{:x}|{:?}|{:?}|{}",
         k.family,
-        sniffed.instrument.as_ref().map(|i| i.instrument),
+        sniffed
+            .instrument
+            .as_ref()
+            .map_or("-", |i| i.instrument.id()),
         k.sep,
         k.comma,
         k.columns.min(3),
@@ -307,6 +310,47 @@ pub fn kind_id(sniffed: &Sniff) -> String {
             .unwrap_or_default()
             .to_uppercase(),
     )
+}
+
+/// What a kind-of-file key says, for the interface to describe it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KindSummary {
+    pub family: Option<crate::sniff::Family>,
+    pub instrument: Option<crate::instrument::Instrument>,
+    /// The delimiter: `;`, `,`, `tab` or `space`.
+    pub sep: &'static str,
+    pub comma: bool,
+}
+
+/// Reads back a key made by [`kind_id`]; `None` if it is not one.
+pub fn kind_summary(kind: &str) -> Option<KindSummary> {
+    use crate::sniff::{Family, SepKind};
+    let mut parts = kind.splitn(9, '|');
+    let family = match parts.next()? {
+        "None" => None,
+        "Some(Jasco)" => Some(Family::Jasco),
+        "Some(Jcamp)" => Some(Family::Jcamp),
+        "Some(PlainTable)" => Some(Family::PlainTable),
+        _ => return None,
+    };
+    let instrument = match parts.next()? {
+        "-" => None,
+        id => Some(crate::instrument::Instrument::from_id(id)?),
+    };
+    let sep = match parts.next()? {
+        "Semicolon" => sep_symbol(SepKind::Semicolon),
+        "Comma" => sep_symbol(SepKind::Comma),
+        "Tab" => sep_symbol(SepKind::Tab),
+        "Whitespace" | "None" => sep_symbol(SepKind::Whitespace),
+        _ => return None,
+    };
+    let comma = parts.next()?.parse().ok()?;
+    Some(KindSummary {
+        family,
+        instrument,
+        sep,
+        comma,
+    })
 }
 
 impl Doubt {
@@ -750,6 +794,18 @@ mod tests {
             text: "other".into()
         }
         .holds(&kinetic));
+    }
+
+    #[test]
+    fn a_kind_key_reads_back_for_the_interface() {
+        let (path, bytes) = fixture("jasco_uvvis_semicolon.csv");
+        let sniffed = sniff(&bytes, "jasco_uvvis_semicolon.csv").unwrap();
+        let facts = FileFacts::new(&path, &bytes, Some(&sniffed));
+        let summary = kind_summary(facts.kind.as_deref().unwrap()).unwrap();
+        assert_eq!(summary.sep, ";");
+        assert!(summary.comma);
+        assert_eq!(summary.family, Some(crate::sniff::Family::Jasco));
+        assert!(kind_summary("not a kind").is_none());
     }
 
     #[test]

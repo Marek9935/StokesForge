@@ -189,6 +189,7 @@ pub(super) enum DialogNature {
     /// Choice with no "yes" answer: same footer, secondary = the other answers.
     Choice(PlainSize),
     /// Wizard: `[Cancel] [message] [Back · Next] [Finish]`.
+    #[allow(dead_code)] // #488 L5: the one-screen import does not use the wizard shape
     Wizard(InteractiveSize),
     /// Settings **applied live**, with nothing to confirm or cancel:
     /// `[message] [Close]` (S-F2). Interactive (fields to fill in: focus
@@ -486,6 +487,7 @@ pub(super) fn modal_dialog_with(
 /// (`step_buttons`, added **from right to left**: Next then Back) grouped on
 /// the right against the final button (`footer`, Finish). Same window as
 /// [`modal_dialog_with`]; the import wizard is its use.
+#[allow(dead_code)] // #488 L5: the one-screen import does not use the wizard shape
 pub(super) fn modal_wizard(
     ctx: &egui::Context,
     id: egui::Id,

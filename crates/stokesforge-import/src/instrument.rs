@@ -45,6 +45,46 @@ pub enum Instrument {
     PlateReader,
 }
 
+impl Instrument {
+    /// Every instrument, in declaration order.
+    pub const ALL: [Instrument; 11] = [
+        Instrument::Jasco,
+        Instrument::Jcamp,
+        Instrument::JcampOcean,
+        Instrument::OceanOptics,
+        Instrument::Avantes,
+        Instrument::Netzsch,
+        Instrument::PerkinElmerPyris,
+        Instrument::TaInstruments,
+        Instrument::Specs,
+        Instrument::Craic,
+        Instrument::PlateReader,
+    ];
+
+    /// Stable machine name (the key of a kind of file, the key of its name
+    /// in the interface catalogs).
+    pub fn id(self) -> &'static str {
+        match self {
+            Instrument::Jasco => "jasco",
+            Instrument::Jcamp => "jcamp",
+            Instrument::JcampOcean => "jcamp-ocean",
+            Instrument::OceanOptics => "ocean-optics",
+            Instrument::Avantes => "avantes",
+            Instrument::Netzsch => "netzsch",
+            Instrument::PerkinElmerPyris => "perkinelmer-pyris",
+            Instrument::TaInstruments => "ta-instruments",
+            Instrument::Specs => "specs",
+            Instrument::Craic => "craic",
+            Instrument::PlateReader => "plate-reader",
+        }
+    }
+
+    /// The instrument of a machine name.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|i| i.id() == id)
+    }
+}
+
 /// A recognised instrument and the line that proves it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstrumentMatch {

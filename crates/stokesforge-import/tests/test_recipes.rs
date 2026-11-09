@@ -48,7 +48,9 @@ fn auto_name(file: &str) -> Option<String> {
     let (path, bytes) = fixture(file);
     let store = test_store();
     let facts = FileFacts::new(&path, &bytes, None);
-    store.matching(&facts).map(|found| found.recipe.name.clone())
+    store
+        .matching(&facts)
+        .map(|found| found.recipe.name.clone())
 }
 
 #[test]

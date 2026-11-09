@@ -524,7 +524,7 @@ pub mod file {
 /// Parse errors of an instrument file (`stokesforge-import`,
 /// `stokesforge-importer`).
 pub mod import {
-    use stokesforge_import::ImportError;
+    use stokesforge_import::{ChooseError, ImportError, SaveIssue};
     use stokesforge_importer::{ImportFailure, ImportFailureCause};
 
     use crate::state::ImportReadError;
@@ -541,7 +541,31 @@ pub mod import {
         }
     }
 
-    /// The sentence of an [`ImportReadError`] of the import wizard.
+    /// The sentence of a [`ChooseError`]: why no recipe could be chosen for a file.
+    pub fn choose_message(error: &ChooseError) -> String {
+        match error {
+            ChooseError::UnknownTemplate { name } => {
+                tr!("error-choose-unknown-template", name = name.as_str())
+            }
+            ChooseError::Unreadable { message } => {
+                tr!("error-choose-unreadable", detail = super::fallback(message))
+            }
+            ChooseError::Binary => tr!("error-import-binary"),
+            ChooseError::Empty => tr!("error-import-empty"),
+            ChooseError::NoNumbers => tr!("error-choose-no-numbers"),
+            ChooseError::Nmr => tr!("error-choose-nmr"),
+        }
+    }
+
+    /// The sentence of a [`SaveIssue`]: why a template cannot be saved.
+    pub fn save_issue_message(issue: SaveIssue) -> String {
+        match issue {
+            SaveIssue::NoName => tr!("error-template-name-required"),
+            SaveIssue::NoCondition => tr!("error-template-save-no-condition"),
+        }
+    }
+
+    /// The sentence of an [`ImportReadError`] of the import window.
     pub fn read_message(error: &ImportReadError) -> String {
         match error {
             ImportReadError::NoImport => tr!("error-import-not-open"),
@@ -596,6 +620,32 @@ pub mod import {
         fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
+            }
+        }
+
+        #[test]
+        fn a_refused_choice_and_a_refused_save_have_their_sentence() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let every_choose = [
+                ChooseError::UnknownTemplate { name: "T".into() },
+                ChooseError::Unreadable {
+                    message: "denied".into(),
+                },
+                ChooseError::Binary,
+                ChooseError::Empty,
+                ChooseError::NoNumbers,
+                ChooseError::Nmr,
+            ];
+            for error in &every_choose {
+                crate::errors::tests_support::check(error, &choose_message(error));
+            }
+            assert_eq!(
+                choose_message(&ChooseError::Nmr),
+                "This file holds NMR data, which StokesForge does not read"
+            );
+            for issue in [SaveIssue::NoName, SaveIssue::NoCondition] {
+                let text = save_issue_message(issue);
+                assert!(!text.is_empty() && !text.contains("NoCondition"), "{text}");
             }
         }
 

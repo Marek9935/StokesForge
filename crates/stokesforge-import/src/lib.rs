@@ -52,6 +52,6 @@ pub use recent::{RecentFiles, MAX_RECENT_FILES};
 pub use recipe::*;
 pub use store::*;
 pub use templates::{
-    recipe_for_file, ChooseError, ChosenRecipe, Condition, FileFacts, RecipeOrigin, SaveIssue,
-    TemplateMatch,
+    kind_id, kind_summary, recipe_for_file, ChooseError, ChosenRecipe, Condition, FileFacts,
+    KindSummary, RecipeOrigin, SaveIssue, TemplateMatch,
 };
