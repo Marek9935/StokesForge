@@ -70,6 +70,12 @@ pub enum TextTarget {
         /// Index of the layer in [`PlotSpec::panels`].
         panel: usize,
     },
+    /// The colour bar of a panel (the whole bar with its ticks and labels,
+    /// #499).
+    ColorBar {
+        /// Index of the layer in [`PlotSpec::panels`].
+        panel: usize,
+    },
 }
 
 impl TextTarget {
@@ -77,9 +83,10 @@ impl TextTarget {
     pub fn panel_index_of(&self) -> Option<usize> {
         match *self {
             Self::Title => None,
-            Self::PanelTitle { panel } | Self::AxisTitle { panel, .. } | Self::Legend { panel } => {
-                Some(panel)
-            }
+            Self::PanelTitle { panel }
+            | Self::AxisTitle { panel, .. }
+            | Self::Legend { panel }
+            | Self::ColorBar { panel } => Some(panel),
         }
     }
 
@@ -100,6 +107,13 @@ impl TextTarget {
                     .title_visible
             }
             Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.visible,
+            Self::ColorBar { .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .color_bar
+                    .as_ref()?
+                    .visible
+            }
         })
     }
 
@@ -123,6 +137,11 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_visible = visible,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_visible = visible,
             Self::Legend { .. } => panel.legend.visible = visible,
+            Self::ColorBar { .. } => {
+                if let Some(bar) = panel.color_bar.as_mut() {
+                    bar.visible = visible;
+                }
+            }
         }
         true
     }
@@ -139,6 +158,13 @@ impl TextTarget {
                     .title_anchor
             }
             Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.anchor,
+            Self::ColorBar { .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .color_bar
+                    .as_ref()?
+                    .anchor
+            }
         }
     }
 
@@ -180,6 +206,17 @@ impl TextTarget {
                 panel.legend.anchor = anchor;
                 true
             }
+            Self::ColorBar { .. } => {
+                let Some(bar) = self
+                    .panel_index(spec)
+                    .and_then(|index| spec.panels.get_mut(index))
+                    .and_then(|panel| panel.color_bar.as_mut())
+                else {
+                    return false;
+                };
+                bar.anchor = anchor;
+                true
+            }
         }
     }
 
@@ -201,6 +238,11 @@ impl TextTarget {
                 .legend
                 .font
                 .clone(),
+            // The bar has no font of its own: it reads the label size.
+            Self::ColorBar { .. } => {
+                spec.panels.get(self.panel_index(spec)?)?;
+                crate::TextFont::default()
+            }
         })
     }
 
@@ -222,6 +264,7 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_font = font,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_font = font,
             Self::Legend { .. } => panel.legend.font = font,
+            Self::ColorBar { .. } => return false,
         }
         true
     }
@@ -248,6 +291,10 @@ impl TextTarget {
                 .legend
                 .color
                 .clone(),
+            Self::ColorBar { .. } => {
+                spec.panels.get(self.panel_index(spec)?)?;
+                String::new()
+            }
         })
     }
 
@@ -269,6 +316,7 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_color = color,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_color = color,
             Self::Legend { .. } => panel.legend.color = color,
+            Self::ColorBar { .. } => return false,
         }
         true
     }
@@ -289,7 +337,7 @@ impl TextTarget {
                     .axis(side)
                     .display_label(),
             ),
-            Self::Legend { .. } => None,
+            Self::Legend { .. } | Self::ColorBar { .. } => None,
         }
     }
 
@@ -335,7 +383,7 @@ impl TextTarget {
                 }
                 true
             }
-            Self::Legend { .. } => false,
+            Self::Legend { .. } | Self::ColorBar { .. } => false,
         }
     }
 }

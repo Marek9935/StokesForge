@@ -508,6 +508,36 @@ mod tests {
         );
     }
 
+    /// #499 step C: a colour bar below the frame, outside the plot area, is
+    /// picked on its box; next to it nothing is. Witness: dropping the generic
+    /// text search gives the background there.
+    #[test]
+    fn a_colour_bar_outside_the_frame_is_picked_on_its_box() {
+        use crate::pipeline::DrawnText;
+        let mut plot = figure();
+        let bar = TextTarget::ColorBar { panel: 0 };
+        // The frame ends at y = 280; the bar sits under it.
+        plot.panels[0].texts = vec![DrawnText {
+            target: bar,
+            center: (260.0, 335.0),
+            size: (360, 60),
+            rotation: 0.0,
+            anchored: false,
+        }];
+        assert_eq!(
+            component_at(&plot, 260.0, 335.0),
+            Some(PlotComponent::Text(bar))
+        );
+        assert_ne!(
+            component_at(&plot, 260.0, 400.0),
+            Some(PlotComponent::Text(bar))
+        );
+        assert_ne!(
+            component_at(&plot, 50.0, 335.0),
+            Some(PlotComponent::Text(bar))
+        );
+    }
+
     /// Issue #53: a title, a rotated axis title or a legend are picked
     /// on their (rotated) rectangle, before the plot area that they cover,
     /// and a legend row before the whole frame.

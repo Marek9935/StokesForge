@@ -991,6 +991,61 @@ fn a_click_selects_a_title_or_the_legend() {
     assert_eq!(view.selected_text(), Some(legend));
 }
 
+/// #499 step C: the colour bar is picked by a click anywhere on its box, and
+/// a drag that starts on it moves it (one `TextMoved` on its target), like the
+/// legend. Witness: without the bar target in the picking, no box, no event.
+#[test]
+fn a_colour_bar_is_selected_by_a_click_and_moved_by_a_drag() {
+    use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec};
+    use stokesforge_render_egui::{GraphEvent, TextTarget};
+    let fixture = Fixture::with_panel("Bar", |panel| {
+        panel.series[0].group = Some(1);
+        panel.color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment {
+                from: Some(0.0),
+                to: Some(57.0),
+                ..ColorBarSegment::new(1)
+            }],
+            position: ColorBarPosition::BottomLeft,
+            ..ColorBarSpec::default()
+        });
+    });
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+
+    let bar = TextTarget::ColorBar { panel: 0 };
+    let (center, size, _) = view.text_screen_box(bar).expect("the bar is drawn");
+    // On the strip, left of the center.
+    let on_strip = center + egui::vec2(-size.x / 4.0, 0.0);
+    assert_eq!(view.text_target_at(on_strip), Some(bar));
+    for (pressed, time) in [(true, 1.0), (false, 1.5)] {
+        let mut events = vec![button_event(on_strip, pressed)];
+        if pressed {
+            events.insert(0, egui::Event::PointerMoved(on_strip));
+        }
+        frame_with(&context, &mut view, &fixture, rect, events, time);
+    }
+    assert_eq!(view.selected_text(), Some(bar));
+
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        rect,
+        on_strip,
+        on_strip + egui::vec2(80.0, -60.0),
+        10.0,
+    );
+    assert!(
+        signals
+            .iter()
+            .any(|s| matches!(s, GraphEvent::TextMoved { target, .. } if *target == bar)),
+        "{signals:?}"
+    );
+}
+
 // -- Issue #76: graphic objects (rectangle, ellipse, line, arrow) --
 
 /// A fixture whose panel carries a **filled** rectangle in the middle of the

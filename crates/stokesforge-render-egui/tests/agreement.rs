@@ -1380,3 +1380,87 @@ fn an_empty_legend_entry_agrees_between_the_backends() {
     });
     agree(fixture.project.tree(), &fixture.spec, SIZE, "empty entry");
 }
+
+// -- #499 step C: the colour bar --
+
+/// The minimal graph with two groups on a chained colour bar under the frame
+/// (typed ranges 0-57 and 0-16, drawn 0-57 and 57-73), stored frames.
+fn colour_bar_fixture() -> (Sample, (u32, u32)) {
+    use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+    let mut fixture = minimal();
+    fixture.spec.title.clear();
+    fixture.spec.frame_widths = vec![600.0];
+    fixture.spec.frame_heights = vec![300.0];
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    let mut second = panel.series[0].clone();
+    panel.series[0].group = Some(1);
+    second.group = Some(2);
+    panel.series.push(second);
+    panel.color_bar = Some(ColorBarSpec {
+        segments: vec![
+            ColorBarSegment {
+                from: Some(0.0),
+                to: Some(57.0),
+                label: "switch".to_string(),
+                ..ColorBarSegment::new(1)
+            },
+            ColorBarSegment {
+                from: Some(0.0),
+                to: Some(16.0),
+                ..ColorBarSegment::new(2)
+            },
+        ],
+        chain: true,
+        title: "t (min)".to_string(),
+        ..ColorBarSpec::default()
+    });
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let size = stokesforge_render_svg::figure_size(&fixture.spec, &measurer, &choice);
+    (fixture, size)
+}
+
+/// The screen and the export draw the same bar: the same 1-pixel stripes, the
+/// same dashed ticks, tick labels, break label and title, in a figure that
+/// grew by the band. Witness: a stripe of another width in one backend (or a
+/// tick written by one path only) makes `agree` fail; the bar drawn in the
+/// figure of the same spec without it (`without`) shows the band is the bar's.
+#[test]
+fn the_screen_and_the_export_draw_the_same_colour_bar() {
+    let (fixture, size) = colour_bar_fixture();
+    let (primitives, drawn) = agree(fixture.project.tree(), &fixture.spec, size, "colour bar");
+    let stripes: Vec<_> = primitives
+        .iter()
+        .filter(|p| matches!(p, Primitive::Rect((x0, _), (x1, _)) if x1 - x0 == 1))
+        .collect();
+    assert!(
+        stripes.len() >= 400,
+        "one stripe per pixel of the bar, found {}",
+        stripes.len()
+    );
+    let has = |needle: &str| {
+        primitives
+            .iter()
+            .any(|p| matches!(p, Primitive::Text(text) if text == needle))
+    };
+    for text in ["0", "57", "73", "t (min)", "switch"] {
+        assert!(has(text), "{text:?} is not drawn");
+    }
+    assert!(drawn
+        .panel(0)
+        .expect("panel")
+        .texts
+        .iter()
+        .any(|text| text.target == stokesforge_plot::TextTarget::ColorBar { panel: 0 }));
+
+    let mut without = fixture.spec.clone();
+    without.panels.get_mut(0).expect("panel").color_bar = None;
+    let (bare, _) = agree(fixture.project.tree(), &without, size, "without the bar");
+    assert!(
+        bare.iter()
+            .filter(|p| matches!(p, Primitive::Rect((x0, _), (x1, _)) if x1 - x0 == 1))
+            .count()
+            < 50,
+        "the stripes come from the bar"
+    );
+}

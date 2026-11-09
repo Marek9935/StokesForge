@@ -1269,3 +1269,18 @@ carries it, `Prepared::line()` / `symbol()` hand the painting a `Cow` copy so th
 spec is never changed, and `Prepared::in_legend()` drops a series that has one
 (drawn entries and `entry_ranks` share that predicate). The bar itself is drawn
 in a later lot.
+
+Colour bar, lot 2 (#499 step C): `color_bar::draw` runs after `legend::draw`. The gradient is 1-pixel
+`Rectangle` stripes (no gradient element in Plotters); the ticks are `scale::format_tick` through the
+epaint measurement, never Typst; the title and the break labels are `formula::rich_style`; a break is a
+drawn triangle (`Polygon`), not a glyph. Below / Right of the frame the bar owns a **band**
+(`color_bar::band(spec)`, a function of the spec alone, fixed thicknesses) that `CellPlan` adds to the
+gutters on that side: the image grows (and a Fixed figure reports `fixed_overflow`), the frame never
+changes, and `draw_panel` gives the chart `margin_bottom/right(MARGIN + band)` **for every layer of the
+cell** (superimposed layers must keep the same plot area). Those two places force the orientation
+(Below horizontal, Right vertical); corners and a dragged bar (`anchor`, wins over the position) are
+inside the frame and ask no band. In the legacy layout (no stored frame, no padding) nothing is reserved
+and an outside place draws at the bottom right corner. `DrawnText { ColorBar }` serves picking and drag
+exactly like the legend (`TextTarget::ColorBar` has no font and no colour of its own, is not listed in
+the Object Manager). Test: `figure_layout.rs` (band), `agreement.rs` (stripes, ticks, labels on both
+backends), `cache_session.rs` (click and drag).

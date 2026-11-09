@@ -163,7 +163,9 @@ impl StokesForgeApp {
                     TextTarget::Title => stokesforge_render_egui::TITLE_SIZE,
                     TextTarget::PanelTitle { .. } => stokesforge_render_egui::PANEL_TITLE_SIZE,
                     TextTarget::AxisTitle { .. } => stokesforge_render_egui::AXIS_DESC_SIZE,
-                    TextTarget::Legend { .. } => stokesforge_render_egui::LABEL_SIZE,
+                    TextTarget::Legend { .. } | TextTarget::ColorBar { .. } => {
+                        stokesforge_render_egui::LABEL_SIZE
+                    }
                 };
                 let text = editor
                     .as_ref()

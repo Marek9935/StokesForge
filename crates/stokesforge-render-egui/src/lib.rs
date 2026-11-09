@@ -1448,7 +1448,10 @@ impl GraphView {
     /// The width handles of a selected title or axis title; no width for the
     /// legend (#244).
     fn text_width_handles(&self, target: TextTarget) -> Option<[Pos2; 2]> {
-        if matches!(target, TextTarget::Legend { .. }) {
+        if matches!(
+            target,
+            TextTarget::Legend { .. } | TextTarget::ColorBar { .. }
+        ) {
             return None;
         }
         let (center, size, rotation) = self.text_screen_box(target)?;
@@ -2052,7 +2055,7 @@ impl GraphView {
                     self.events.push(match target {
                         // The legend has no text of its own: it is the series
                         // names, one per line.
-                        TextTarget::Legend { .. } => return,
+                        TextTarget::Legend { .. } | TextTarget::ColorBar { .. } => return,
                         _ => GraphEvent::EditText(target),
                     });
                 }

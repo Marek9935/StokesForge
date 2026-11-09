@@ -818,9 +818,9 @@ impl CellPlan {
         let area = |visible: bool, wanted: u32| if visible { wanted } else { 0 };
         Gutters {
             left: MARGIN + area(self.left, Y_LABEL_AREA),
-            right: MARGIN + area(self.right, self.right_wanted()),
+            right: MARGIN + area(self.right, self.right_wanted()) + self.bar_right,
             top: MARGIN + area(self.top, self.top_wanted()),
-            bottom: MARGIN + area(self.bottom, X_LABEL_AREA),
+            bottom: MARGIN + area(self.bottom, X_LABEL_AREA) + self.bar_bottom,
             band,
         }
     }
@@ -2405,7 +2405,7 @@ impl Projection {
 /// Draws `text` (Typst) centered on `pixel`, rotated by `rotation` degrees
 /// (counterclockwise), and returns the size of the **straight** text,
 /// measured by the same path as everything else.
-fn draw_centered_text<DB: DrawingBackend>(
+pub(crate) fn draw_centered_text<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     text: &str,
     style: &TextStyle<'static>,
@@ -2518,10 +2518,17 @@ struct CellPlan {
     right_labels: bool,
     /// A series is attached to the right axis: it is a real axis.
     right_data: bool,
+    /// Bands a colour bar of the cell asks under / right of the frame, past
+    /// the axis areas (#499); the largest of its layers.
+    bar_bottom: u32,
+    bar_right: u32,
 }
 
 impl CellPlan {
     fn add(&mut self, spec: &PanelSpec) {
+        let (bar_bottom, bar_right) = crate::color_bar::band(spec.color_bar.as_ref());
+        self.bar_bottom = self.bar_bottom.max(bar_bottom);
+        self.bar_right = self.bar_right.max(bar_right);
         match spec.overlay {
             Some(overlay) => {
                 self.top_overlay |= overlay.x_top && spec.bottom.visible;
@@ -2820,6 +2827,13 @@ fn draw_panel<DB: DrawingBackend>(
         .top_x_label_area_size(top_label_area)
         .y_label_area_size(y_label_area)
         .right_y_label_area_size(right_label_area);
+    // Stored frames: the band of the colour bar of the cell (#499) comes after
+    // the axis areas, inside the margin.
+    if padding.is_some() {
+        builder
+            .margin_bottom(MARGIN + plan.bar_bottom)
+            .margin_right(MARGIN + plan.bar_right);
+    }
     // The length of the axes in pixels (#397), before any range matters: the
     // plot area only depends on the margins and the fixed label bands. The
     // tick count of each axis is chosen once, here, and given to everything
@@ -3718,6 +3732,48 @@ fn draw_panel<DB: DrawingBackend>(
                 height,
             })
             .collect();
+    }
+
+    // The colour bar (#499), after the legend.
+    if let Some(bar) = spec.color_bar.as_ref().filter(|bar| bar.visible) {
+        let segments = crate::color_bar::bar_segments(panel);
+        let bar_ink = opaque(ink);
+        let placed = crate::color_bar::draw(
+            canvas,
+            bar,
+            &segments,
+            &crate::color_bar::BarFrame {
+                frame: (origin, size),
+                outside: (
+                    origin.0 + size.0 as i32 + right_label_area as i32,
+                    origin.1 + size.1 as i32 + x_label_area as i32,
+                ),
+                reserved: padding.is_some(),
+                center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
+            },
+            &crate::color_bar::BarStyles {
+                rich: font_style(
+                    &stokesforge_plot::TextFont::default(),
+                    LABEL_SIZE,
+                    bar_ink,
+                    canvas.dim_in_pixel().0,
+                ),
+                tick: text_style(LABEL_SIZE, bar_ink),
+                ink,
+            },
+        )?;
+        if let Some(((left, top), (width, height))) = placed {
+            texts.push(DrawnText {
+                target: TextTarget::ColorBar { panel: index },
+                center: (
+                    left as f64 + width as f64 / 2.0,
+                    top as f64 + height as f64 / 2.0,
+                ),
+                size: (width, height),
+                rotation: 0.0,
+                anchored: usable_anchor(bar.anchor).is_some(),
+            });
+        }
     }
 
     // The moved titles, placed on their anchor (issue #53): on top of the

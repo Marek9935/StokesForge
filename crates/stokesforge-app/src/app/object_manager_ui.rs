@@ -200,7 +200,11 @@ pub(super) fn object_node_menu(
     let visibility = target.visibility_shown(spec, shown);
     let editable_text = match target {
         T::Annotation(_) => Some(true),
-        T::Text(text) => Some(!matches!(text, stokesforge_plot::TextTarget::Legend { .. })),
+        T::Text(text) => Some(!matches!(
+            text,
+            stokesforge_plot::TextTarget::Legend { .. }
+                | stokesforge_plot::TextTarget::ColorBar { .. }
+        )),
         _ => None,
     };
     let text_moved = match target {

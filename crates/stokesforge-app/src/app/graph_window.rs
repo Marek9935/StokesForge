@@ -1346,7 +1346,7 @@ fn plot_target(
         Some(PlotComponent::Text(target)) => match target {
             TextTarget::Title | TextTarget::PanelTitle { .. } => PlotTarget::Title,
             TextTarget::AxisTitle { panel, side } => PlotTarget::AxisTitle(place(panel, side)),
-            TextTarget::Legend { .. } => PlotTarget::Legend,
+            TextTarget::Legend { .. } | TextTarget::ColorBar { .. } => PlotTarget::Legend,
         },
         Some(PlotComponent::LegendEntry { .. }) => PlotTarget::Legend,
     }
@@ -1842,6 +1842,11 @@ pub(super) mod tests {
                 panel: 0,
                 series: 0
             })),
+            PlotTarget::Legend
+        );
+        // The colour bar opens the Legend page until it has its own (lot 3).
+        assert_eq!(
+            named(Some(PlotComponent::Text(T::ColorBar { panel: 0 }))),
             PlotTarget::Legend
         );
     }

@@ -109,7 +109,7 @@ keyed_enum! {
 keyed_enum! {
     /// Direction of the drawn bar.
     ColorBarOrientation {
-        default Vertical,
+        default Horizontal,
         Vertical => "vertical",
         Horizontal => "horizontal",
     }
@@ -118,7 +118,7 @@ keyed_enum! {
 keyed_enum! {
     /// Where the bar sits: a corner of the plot area, or outside the frame.
     ColorBarPosition {
-        default Right,
+        default Below,
         TopLeft => "top_left",
         TopRight => "top_right",
         BottomLeft => "bottom_left",
@@ -405,8 +405,16 @@ mod tests {
         }
         let future = ColorBarOrientation::from_key("diagonal");
         assert_eq!(future.key(), "diagonal");
-        assert_eq!(future.effective(), ColorBarOrientation::Vertical);
+        assert_eq!(future.effective(), ColorBarOrientation::Horizontal);
         assert_eq!(ColorBarScale::from_key(""), ColorBarScale::Linear);
+    }
+
+    #[test]
+    fn a_new_bar_is_horizontal_below_the_frame() {
+        let bar = ColorBarSpec::default();
+        assert_eq!(bar.orientation, ColorBarOrientation::Horizontal);
+        assert_eq!(bar.position, ColorBarPosition::Below);
+        assert!(bar.position.is_outside());
     }
 
     #[test]

@@ -1350,3 +1350,179 @@ fn with_a_page_a_right_axis_grows_the_image_only_when_the_bands_leave_it() {
     assert!(b.size.0 > 830, "the axis leaves the page: {:?}", b.size);
     assert_eq!(b.frame_rect(0, 1), a.frame_rect(0, 1));
 }
+
+// ---------------------------------------------------------------------------
+// Colour bar outside the frame (#499, step C)
+// ---------------------------------------------------------------------------
+
+use stokesforge_core::column::{ColumnMeta, ColumnType, ValueBlock};
+use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec, TextTarget};
+
+/// A bar of group 1, with a title and a break label so that every row of its
+/// band is present.
+fn bar(position: ColorBarPosition) -> ColorBarSpec {
+    ColorBarSpec {
+        segments: vec![
+            ColorBarSegment {
+                label: "switch".into(),
+                ..ColorBarSegment::new(1)
+            },
+            ColorBarSegment::new(2),
+        ],
+        position,
+        title: "t (min)".into(),
+        ..ColorBarSpec::default()
+    }
+}
+
+/// A project whose two groups of curves carry an x' (the value of the bar).
+fn bar_project() -> (Project, Vec<NodeId>) {
+    let mut project = Project::new("Bar").expect("project");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("workbook");
+    let sheet = project.add_worksheet(book, None).expect("sheet");
+    let mut ids = Vec::new();
+    for (name, x_prime) in [
+        ("X", None),
+        ("A", Some(0.0)),
+        ("B", Some(57.0)),
+        ("C", Some(1.0)),
+    ] {
+        let column = Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float(vec![1.0, 2.0, 3.0]),
+            ColumnMeta {
+                x_prime,
+                ..ColumnMeta::default()
+            },
+        )
+        .expect("column");
+        ids.push(
+            project
+                .add_column(sheet, None, Some(name), column)
+                .expect("column"),
+        );
+    }
+    (project, ids)
+}
+
+fn with_bar(mut spec: PlotSpec, ids: &[NodeId], bar: Option<ColorBarSpec>) -> PlotSpec {
+    let panel = spec.panels.get_mut(0).expect("panel");
+    for (y, group) in [(1, 1), (2, 1), (3, 2)] {
+        let mut series = SeriesSpec::new_xy(ids[0], ids[y]);
+        series.group = Some(group);
+        panel.series.push(series);
+    }
+    panel.color_bar = bar;
+    spec
+}
+
+/// The bar band of a graph in a grid with stored frames: the image grows by
+/// the band under the frame, the frame keeps its size and its place, and the
+/// bar is drawn inside the band, under the axis area.
+/// Witness: `band` returning `(0, 0)` fails the three assertions.
+#[test]
+fn a_colour_bar_below_the_frame_grows_the_image_and_never_moves_the_frame() {
+    let (project, ids) = bar_project();
+    let bare = with_bar(framed(grid("", 1, 1), &[300.0], &[200.0]), &ids, None);
+    let spec = with_bar(
+        framed(grid("", 1, 1), &[300.0], &[200.0]),
+        &ids,
+        Some(bar(ColorBarPosition::Below)),
+    );
+    let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
+    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref());
+    assert!(band.0 > 0 && band.1 == 0, "{band:?}");
+    assert_eq!(layout.size.0, bare_layout.size.0);
+    assert_eq!(layout.size.1, bare_layout.size.1 + band.0);
+    assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+
+    let plot = draw_in(&project, &spec, layout.size);
+    let bare_plot = draw_in(&project, &bare, bare_layout.size);
+    assert_eq!(frames(&plot), frames(&bare_plot));
+    let panel = &plot.panels[0];
+    let text = panel
+        .texts
+        .iter()
+        .find(|text| text.target == (TextTarget::ColorBar { panel: 0 }))
+        .expect("the bar is drawn and listed for picking");
+    let (frame_bottom, figure_height) = (
+        (panel.pixel_origin.1 + panel.pixel_size.1 as i32) as f64,
+        layout.size.1 as f64,
+    );
+    let (top, bottom) = (
+        text.center.1 - text.size.1 as f64 / 2.0,
+        text.center.1 + text.size.1 as f64 / 2.0,
+    );
+    // Below the frame and its 52-pixel axis area, inside the image.
+    assert!(top >= frame_bottom + 52.0, "{top} vs {frame_bottom}");
+    assert!(bottom <= figure_height, "{bottom} vs {figure_height}");
+}
+
+/// A bar on the right widens the image instead.
+#[test]
+fn a_colour_bar_on_the_right_widens_the_image_and_never_moves_the_frame() {
+    let (_, ids) = bar_project();
+    let bare = with_bar(framed(grid("", 1, 1), &[300.0], &[200.0]), &ids, None);
+    let spec = with_bar(
+        framed(grid("", 1, 1), &[300.0], &[200.0]),
+        &ids,
+        Some(bar(ColorBarPosition::Right)),
+    );
+    let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
+    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref());
+    assert!(band.1 > 0 && band.0 == 0, "{band:?}");
+    assert_eq!(layout.size.0, bare_layout.size.0 + band.1);
+    assert_eq!(layout.size.1, bare_layout.size.1);
+    assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+}
+
+/// Same band in free placement; a fixed figure reports that it grew.
+#[test]
+fn a_colour_bar_band_also_grows_a_free_figure_and_a_fixed_one_reports_it() {
+    let (_, ids) = bar_project();
+    let cell = &[(0, 0, 100.0, 50.0, 300.0, 200.0)];
+    let bare = with_bar(free("", cell), &ids, None);
+    let spec = with_bar(free("", cell), &ids, Some(bar(ColorBarPosition::Below)));
+    let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
+    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref()).0;
+    assert!(band > 0);
+    assert_eq!(layout.size.1, bare_layout.size.1 + band);
+    assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+
+    let (mut bare, mut spec) = (bare, spec);
+    bare.fixed_figure = true;
+    spec.fixed_figure = true;
+    let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
+    assert!(!bare_layout.fixed_overflow);
+    assert!(layout.fixed_overflow, "the bar is not in the axis reserve");
+    assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+}
+
+/// A bar in a corner, a dragged one or a hidden one changes nothing around the
+/// frame; a bar whose group has no segment is still the same size.
+#[test]
+fn a_colour_bar_inside_the_frame_or_hidden_asks_for_no_band() {
+    use stokesforge_plot::TextAnchor;
+    let (_, ids) = bar_project();
+    let base = framed(grid("", 1, 1), &[300.0], &[200.0]);
+    let bare = layout_of(&with_bar(base.clone(), &ids, None));
+    let variants = [
+        ColorBarSpec {
+            position: ColorBarPosition::TopRight,
+            ..bar(ColorBarPosition::Below)
+        },
+        ColorBarSpec {
+            anchor: Some(TextAnchor::new(1.0, 1.0)),
+            ..bar(ColorBarPosition::Below)
+        },
+        ColorBarSpec {
+            visible: false,
+            ..bar(ColorBarPosition::Below)
+        },
+    ];
+    for variant in variants {
+        let layout = layout_of(&with_bar(base.clone(), &ids, Some(variant)));
+        assert_eq!(layout.size, bare.size);
+    }
+}

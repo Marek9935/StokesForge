@@ -6454,7 +6454,9 @@ impl AppState {
                     T::Panel(i) => (PlotSettingsTab::PlotArea, None, i, None),
                     T::Group(i) => (PlotSettingsTab::Series, None, i, None),
                     T::Axes(i) => (PlotSettingsTab::Axes, None, i, None),
-                    T::Text(TextTarget::Legend { panel }) => {
+                    // The Color Bar tab comes with lot 3; until then the bar
+                    // opens the Legend tab of its layer.
+                    T::Text(TextTarget::Legend { panel } | TextTarget::ColorBar { panel }) => {
                         (PlotSettingsTab::Legend, None, panel, None)
                     }
                     // The address is a field of the layer; the tab is named

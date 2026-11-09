@@ -388,6 +388,7 @@ impl VisibilityTarget {
                     side,
                 },
                 TextTarget::Legend { panel } => TextTarget::Legend { panel: to(panel)? },
+                TextTarget::ColorBar { panel } => TextTarget::ColorBar { panel: to(panel)? },
             }),
         })
     }
