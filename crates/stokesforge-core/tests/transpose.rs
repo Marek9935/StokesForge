@@ -795,3 +795,227 @@ fn a_reader_without_x_prime_is_refused_as_no_x_prime_before_the_loop() {
         "{error:?}"
     );
 }
+
+// Index mode (#493): no x' on any Y column, the x' column numbers them 1, 2, 3...
+
+fn set_x_prime(p: &mut Project, column: NodeId, x_prime: Option<f64>) {
+    let mut meta = p
+        .tree()
+        .node(column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.x_prime = x_prime;
+    p.set_column_meta(column, meta).unwrap();
+}
+
+fn long_name(p: &Project, column: NodeId) -> String {
+    p.tree()
+        .node(column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .long_name
+        .clone()
+}
+
+/// The fixture with no x' at all on its three Y columns.
+fn bare_fixture() -> Fixture {
+    let mut f = fixture();
+    for c in f.cols.clone() {
+        set_x_prime(&mut f.project, c, None);
+    }
+    f
+}
+
+#[test]
+fn without_any_x_prime_the_x_column_numbers_the_y_columns() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[1]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    assert_eq!(values(&f.project, cols[1]), vec![2.0, 5.0, 8.0]);
+    assert_eq!(name(&f.project, cols[0]), "x'");
+    assert_eq!(long_name(&f.project, cols[0]), "Column number");
+    assert!(f
+        .project
+        .tree()
+        .transpose_link(sheet)
+        .unwrap()
+        .is_index_mode());
+    assert_eq!(state(&f.project, sheet), (false, false));
+    // The source is never written.
+    for c in &f.cols {
+        let meta = f
+            .project
+            .tree()
+            .node(*c)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta();
+        assert_eq!(meta.x_prime, None);
+    }
+}
+
+#[test]
+fn the_rank_skips_the_columns_that_are_not_y() {
+    let mut f = bare_fixture();
+    let mut x = Column::from_f64(&[0.0, 1.0, 2.0]);
+    x.set_meta(ColumnMeta {
+        role: ColumnRole::X,
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(0), Some("Time"), x)
+        .unwrap();
+    let mut label = Column::from_f64(&[0.0, 0.0, 0.0]);
+    label.set_meta(ColumnMeta {
+        role: ColumnRole::Label,
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(2), Some("Tag"), label)
+        .unwrap();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn an_x_prime_on_the_x_column_only_is_index_mode() {
+    let mut f = bare_fixture();
+    let mut x = Column::from_f64(&[0.0, 1.0, 2.0]);
+    x.set_meta(ColumnMeta {
+        role: ColumnRole::X,
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(0), Some("Time"), x)
+        .unwrap();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn real_x_prime_added_on_every_column_makes_the_index_sheet_stale_then_recalculate_takes_them() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    for (i, c) in f.cols.clone().into_iter().enumerate() {
+        set_x_prime(&mut f.project, c, Some(10.0 * i as f64 + 0.5));
+    }
+    assert_eq!(state(&f.project, sheet), (true, false));
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(values(&f.project, cols[0]), vec![0.5, 10.5, 20.5]);
+    assert_eq!(long_name(&f.project, cols[0]), "x' of Sheet1");
+    assert!(!f
+        .project
+        .tree()
+        .transpose_link(sheet)
+        .unwrap()
+        .is_index_mode());
+}
+
+#[test]
+fn a_followed_index_sheet_takes_real_x_prime_by_itself() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    for (i, c) in f.cols.clone().into_iter().enumerate() {
+        set_x_prime(&mut f.project, c, Some(10.0 * i as f64 + 0.5));
+    }
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![0.5, 10.5, 20.5]);
+    assert_eq!(long_name(&f.project, cols[0]), "x' of Sheet1");
+}
+
+#[test]
+fn a_new_y_column_without_x_prime_extends_the_numbers_when_following() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    f.project
+        .add_column(f.sheet, None, Some("D"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn an_x_prime_on_one_column_only_refuses_and_keeps_the_numbers() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    set_x_prime(&mut f.project, f.cols[0], Some(3.0));
+    let error = f.project.follow_transpose(sheet).unwrap_err();
+    assert!(matches!(error, CoreError::TransposeNoXPrime { ref letter, .. } if letter == "B"));
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    assert_eq!(state(&f.project, sheet), (true, false));
+    assert!(matches!(
+        f.project.transpose_rows(f.sheet, &[1]).unwrap_err(),
+        CoreError::TransposeNoXPrime { .. }
+    ));
+}
+
+#[test]
+fn partial_x_prime_is_still_refused_when_creating() {
+    let mut f = bare_fixture();
+    set_x_prime(&mut f.project, f.cols[1], Some(3.0));
+    let error = f.project.transpose_rows(f.sheet, &[0]).unwrap_err();
+    assert!(matches!(error, CoreError::TransposeNoXPrime { ref letter, .. } if letter == "A"));
+}
+
+#[test]
+fn real_x_prime_removed_everywhere_is_not_followed_but_recalculate_switches_to_numbers() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    for c in f.cols.clone() {
+        set_x_prime(&mut f.project, c, None);
+    }
+    let link = f.project.tree().transpose_link(sheet).unwrap().clone();
+    assert!(link.lost_x_prime(f.project.tree()));
+    assert!(
+        !f.project.follow_transpose(sheet).unwrap(),
+        "checked, but refuses"
+    );
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![0.0, 10.0, 20.0]);
+    assert_eq!(state(&f.project, sheet), (true, false));
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    assert_eq!(long_name(&f.project, cols[0]), "Column number");
+    assert_eq!(state(&f.project, sheet), (false, false));
+    let link = f.project.tree().transpose_link(sheet).unwrap();
+    assert!(!link.lost_x_prime(f.project.tree()));
+}
+
+#[test]
+fn a_renamed_long_name_of_the_x_column_survives_a_mode_switch() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let x = children(&f.project, sheet)[0];
+    let mut meta = f
+        .project
+        .tree()
+        .node(x)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.long_name = "Wavelength".into();
+    f.project.set_column_meta(x, meta).unwrap();
+    for (i, c) in f.cols.clone().into_iter().enumerate() {
+        set_x_prime(&mut f.project, c, Some(i as f64));
+    }
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(long_name(&f.project, x), "Wavelength");
+}

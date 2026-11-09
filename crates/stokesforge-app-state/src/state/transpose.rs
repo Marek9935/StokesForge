@@ -76,6 +76,17 @@ impl AppState {
                 stokesforge_core::unfollowable_column(tree, link.source)
                     .map(|error| errors::model::error_message(&error))
                     .or_else(|| {
+                        // #493, A5: the x' are gone; a followed sheet keeps its
+                        // numbers until an explicit Recalculate.
+                        link.lost_x_prime(tree).then(|| {
+                            tr!(
+                                "transpose-stuck-lost-x-prime",
+                                source =
+                                    tree.node(link.source).map(|n| n.name()).unwrap_or_default()
+                            )
+                        })
+                    })
+                    .or_else(|| {
                         tree.transpose_check_refusal(sheet)
                             .map(|error| errors::model::error_message(&error))
                     })
@@ -136,6 +147,15 @@ impl AppState {
         }
         self.refresh();
         let tree = &self.snapshot.tree;
+        // #493: the sheets read without any x' warn once, after the success.
+        let index_sheets: Vec<String> = sheets
+            .iter()
+            .filter(|sheet| {
+                tree.transposed_from(**sheet)
+                    .is_some_and(|(_, link)| link.is_index_mode())
+            })
+            .filter_map(|sheet| tree.node(*sheet).map(|n| n.name().to_string()))
+            .collect();
         let series: Option<Vec<SeriesRef>> = rows
             .iter()
             .map(|(sheet, row)| {
@@ -157,6 +177,69 @@ impl AppState {
         let keep = self.keep_results_for(preset.kind());
         self.analysis = Some(AnalysisForm::new(preset, series, keep));
         self.analysis_rows_macro = true;
+        if !index_sheets.is_empty() {
+            self.raise_no_x_prime(tr!(
+                "alert-no-x-prime",
+                count = index_sheets.len(),
+                sheets = index_sheets.join(", ")
+            ));
+        }
+    }
+
+    /// Opens the "No x' Values" box (#493), twin of the low R² one. It takes
+    /// the single alert slot unless a failure waits there (a low R² box is
+    /// replaced: its badge in the status bar keeps saying it).
+    fn raise_no_x_prime(&mut self, message: String) {
+        if self
+            .alert
+            .as_ref()
+            .is_some_and(|alert| alert.kind != super::AlertKind::LowRSquared)
+        {
+            return;
+        }
+        self.alert = Some(super::Alert {
+            kind: super::AlertKind::NoXPrime,
+            message,
+        });
+    }
+
+    /// Can the "No x' Values" box cancel the analysis? Only while the window of
+    /// a row analysis is open (`analysis_rows_macro`).
+    pub fn row_analysis_cancellable(&self) -> bool {
+        self.analysis_rows_macro
+    }
+
+    /// Runs `RecalculateTranspose`; when it switches a sheet that read real x'
+    /// to the column numbers (#493, A5), says so.
+    fn run_recalculate_transpose(&mut self, sheet: NodeId) {
+        let lost = self
+            .snapshot
+            .tree
+            .transpose_link(sheet)
+            .is_some_and(|link| link.lost_x_prime(&self.snapshot.tree));
+        let names = lost.then(|| {
+            let tree = &self.snapshot.tree;
+            let source = tree
+                .transpose_link(sheet)
+                .and_then(|link| tree.node(link.source))
+                .map(|n| n.name().to_string())
+                .unwrap_or_default();
+            let transposed = tree
+                .node(sheet)
+                .map(|n| n.name().to_string())
+                .unwrap_or_default();
+            (source, transposed)
+        });
+        self.execute(Command::RecalculateTranspose { sheet });
+        if let Some((source, transposed)) = names {
+            if !self.gesture_failed() {
+                self.raise_no_x_prime(tr!(
+                    "alert-no-x-prime-recalculated",
+                    source = source,
+                    transposed = transposed
+                ));
+            }
+        }
     }
 
     /// Closes the `AnalyzeRows` group: the analysis has just been validated.
@@ -198,7 +281,7 @@ impl AppState {
             self.pending_transpose_relink = Some(sheet);
             return;
         }
-        self.execute(Command::RecalculateTranspose { sheet });
+        self.run_recalculate_transpose(sheet);
     }
 
     /// Answer to the confirmation of the update.
@@ -207,7 +290,7 @@ impl AppState {
             return;
         };
         if accept {
-            self.execute(Command::RecalculateTranspose { sheet });
+            self.run_recalculate_transpose(sheet);
         }
     }
 }

@@ -73,6 +73,15 @@ alert-session-lost-no-recovery = Aucune copie de secours n'a pu être écrite :
 
 alert-low-r2-title = R² faible
 alert-low-r2 = Des résultats suivent mal les données (R² inférieur à 0,6). Vérifiez le modèle et les valeurs de départ.
+alert-no-x-prime-title = Pas de valeurs x'
+alert-no-x-prime =
+    { $count ->
+        [one] { $sheets } n'a pas de valeurs x'. L'analyse utilise les numéros de colonne 1, 2, 3… comme x'.
+       *[other] { $sheets } n'ont pas de valeurs x'. L'analyse utilise les numéros de colonne 1, 2, 3… comme x'.
+    }
+alert-no-x-prime-recalculated = { $source } n'a plus de valeurs x'. { $transposed } utilise maintenant les numéros de colonne 1, 2, 3… comme x'.
+alert-no-x-prime-cancel = Annuler l'analyse
+    .hint = Ferme l'analyse et supprime la feuille transposée
 low-r2-summary-head = R² < 0,6 pour :
 low-r2-summary-see-results = Les valeurs sont dans le volet Résultats.
 low-r2-count-baseline =
@@ -2269,6 +2278,8 @@ transpose-auto = Recalculer automatiquement
     .hint = Met { $sheet } à jour dès que { $source } change. Une valeur saisie dedans arrête les mises à jour jusqu’à Relier de nouveau
     .disabled = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher cette case
 transpose-state-stuck = Pas à jour : { $reason }
+transpose-stuck-lost-x-prime = { $source } n'a plus de valeurs x'. Recalculer pour utiliser les numéros de colonne 1, 2, 3… comme x'
+row-plot-needs-x-prime = Donner des valeurs x' pour tracer une ligne
 
 # Lissage (#324)
 analysis-kind-smooth = Lissage
