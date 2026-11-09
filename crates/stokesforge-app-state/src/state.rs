@@ -2806,7 +2806,7 @@ struct LastImport {
 /// file drop (the recipe of each file is chosen by the template store and the
 /// detector, `stokesforge_import::recipe_for_file`).
 enum ImportSource {
-    Menu(stokesforge_import::ImportRecipe),
+    Menu(Box<stokesforge_import::ImportRecipe>),
     Each(Vec<(PathBuf, stokesforge_import::ImportRecipe)>),
     Drop {
         /// Workbook under the cursor at the time of the drop.
@@ -5943,7 +5943,7 @@ impl AppState {
                 destination,
                 recipe,
                 paths,
-            } => self.start_import(destination, ImportSource::Menu(recipe), paths),
+            } => self.start_import(destination, ImportSource::Menu(Box::new(recipe)), paths),
             Action::StartImportEach {
                 destination,
                 each,

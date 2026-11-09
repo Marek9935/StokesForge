@@ -42,6 +42,7 @@ pub(super) fn import_window(_ctx: &egui::Context, state: &mut AppState, actions:
         ctx,
         egui::Id::new("stokesforge_import_wizard"),
         &tr!("import-window-title"),
+        // FREE-SIZE(#300): provisional window of #488 L4, replaced by the one-screen import in L5
         DialogNature::Draft(InteractiveSize::Free(egui::vec2(560.0, 360.0))),
         DialogFooter::gated(&finish_label, &finish_hint, has_files, &add_file_first),
         |_footer| {},

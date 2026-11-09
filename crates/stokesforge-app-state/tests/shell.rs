@@ -16109,15 +16109,20 @@ fn start_import_each_reads_each_file_with_its_own_recipe_and_reopen_restores_the
         ],
     );
     state.import_state_mut().unwrap().destination = ImportDestination::ActiveBook(book);
+    // A correction made on file A, which the detector would not make again.
+    state.import_state_mut().unwrap().recipe.comment_prefix = "%".into();
+    state.set_import_preview_index(1);
+    state.import_state_mut().unwrap().recipe.comment_prefix = "//".into();
     let action = state.import_finish().unwrap();
     let Action::StartImportEach { each, .. } = &action else {
         panic!("one recipe per file")
     };
     let used: Vec<_> = each
         .iter()
-        .map(|(p, r)| (p.clone(), r.separator.clone(), r.decimal))
+        .map(|(p, r)| (p.clone(), r.separator.clone(), r.comment_prefix.clone()))
         .collect();
     assert_ne!(used[0].1, used[1].1, "two kinds, two recipes");
+    assert_eq!((used[0].2.as_str(), used[1].2.as_str()), ("%", "//"));
     state.dispatch(action);
     wait_import(&mut state);
     for (name, first, second) in [("a", 1.5, 10.5), ("b", 1.5, 10.5)] {
@@ -16135,7 +16140,7 @@ fn start_import_each_reads_each_file_with_its_own_recipe_and_reopen_restores_the
     assert_eq!(skipped, 0);
     let again: Vec<_> = again
         .iter()
-        .map(|(p, r)| (p.clone(), r.separator.clone(), r.decimal))
+        .map(|(p, r)| (p.clone(), r.separator.clone(), r.comment_prefix.clone()))
         .collect();
     assert_eq!(again, used);
 }

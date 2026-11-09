@@ -126,7 +126,7 @@ fn no_window_is_a_raw_egui_window() {
     );
     let import = unique_function(&sources, "import_window");
     assert!(
-        import.body.contains("modal_wizard("),
+        import.body.contains("modal_dialog_with("),
         "the import wizard ({}:{}) is a modal dialog",
         import.path,
         import.line
