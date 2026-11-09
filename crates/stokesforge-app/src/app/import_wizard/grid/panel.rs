@@ -56,7 +56,7 @@ pub(super) fn left_panel(ui: &mut egui::Ui, rect: Rect, l: Left<'_>) {
         state.check_review_kind().map(|k| k as u8),
         state.check_review_done().is_some(),
     );
-    theme::page_scroll_area()
+    let scrolled = theme::page_scroll_area()
         .id_salt(("stokesforge_import_j_left", mode))
         .auto_shrink([false, false])
         .show(&mut child, |ui| {
@@ -81,6 +81,15 @@ pub(super) fn left_panel(ui: &mut egui::Ui, rect: Rect, l: Left<'_>) {
             found_rows(ui, state, &view, gs, out);
             advanced_fold(ui, state);
         });
+    // The sentences above the Advanced fold grew or shrank: the fold keeps its
+    // place on screen, so the control just clicked stays under the pointer.
+    let shift = ui.data_mut(|d| d.remove_temp::<f32>(egui::Id::new(ADVANCED_SHIFT)));
+    if let Some(shift) = shift.filter(|s| *s != 0.0 && scrolled.state.offset.y > 0.0) {
+        let mut state = scrolled.state;
+        state.offset.y = (state.offset.y + shift).max(0.0);
+        state.store(ui.ctx(), scrolled.id);
+        ui.ctx().request_repaint();
+    }
     // A « To check » tag was clicked: its evidence stays framed for a moment.
     if let Some((ev, since)) = gs.pinned.clone() {
         let now = ui.input(|i| i.time);
@@ -93,6 +102,9 @@ pub(super) fn left_panel(ui: &mut egui::Ui, rect: Rect, l: Left<'_>) {
         }
     }
 }
+
+/// Temporary datum: how far the Advanced fold moved down this frame.
+const ADVANCED_SHIFT: &str = "stokesforge_import_advanced_shift";
 
 /// How long the evidence of a clicked « To check » stays framed.
 const PIN_SECONDS: f64 = 6.0;
@@ -984,12 +996,22 @@ fn draft_text(ui: &mut egui::Ui, salt: &str, current: &str, width: f32) -> Optio
 /// sentence just above the fold, so nothing set here stays hidden.
 fn advanced_fold(ui: &mut egui::Ui, state: &mut AppState) {
     let sentences = state.import_advanced_sentences();
+    let top = ui.cursor().top();
     if !sentences.is_empty() {
         ui.add_space(theme::SPACE_SECTION * 2.0);
         theme::section_title(ui, tr!("import-advanced-set-title"));
         for sentence in &sentences {
             ui.add(egui::Label::new(format!("• {sentence}")).wrap());
         }
+    }
+    // Height of the block above the fold, remembered from one frame to the
+    // next: when it changes, the panel reports how far the fold moved.
+    let height = ui.cursor().top() - top;
+    let remembered = ui.id().with("stokesforge_import_advanced_block_height");
+    let before: Option<f32> = ui.data(|d| d.get_temp(remembered));
+    ui.data_mut(|d| d.insert_temp(remembered, height));
+    if let Some(before) = before.filter(|b| (height - b).abs() > 0.5) {
+        ui.data_mut(|d| d.insert_temp(egui::Id::new(ADVANCED_SHIFT), height - before));
     }
     let Some(recipe) = state.import_state().map(|i| i.recipe.clone()) else {
         return;

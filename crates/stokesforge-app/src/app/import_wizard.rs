@@ -571,6 +571,57 @@ mod tests {
         );
     }
 
+    /// A setting changed in the Advanced fold adds a sentence above the fold:
+    /// the left panel keeps the fold where it was on screen (the scroll does
+    /// not jump), so the control just clicked stays under the pointer.
+    #[test]
+    fn changing_an_advanced_setting_keeps_the_left_panel_where_it_was() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let mut bench = bench(SURE);
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut bench.state, &mut actions);
+        let title = tr!("import-advanced-title");
+        click_text(&ctx, &mut bench.state, &mut actions, &title);
+        let y = |p: &[crate::app::test_support::Text]| {
+            p.iter().find(|t| t.text == title).map(|t| t.center.y)
+        };
+        // The panel is scrolled down by the wheel, over the left panel.
+        let wheel = vec![
+            egui::Event::PointerMoved(egui::pos2(200.0, 400.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(0.0, -300.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        for _ in 0..3 {
+            paint(&ctx, &mut bench.state, &mut actions, wheel.clone());
+        }
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let before = y(&painted).expect("the fold title is in view");
+        let top = painted.iter().find(|t| t.text == "Recognised:").unwrap();
+        assert!(top.center.y > 0.0);
+        bench.state.import_set_advanced(
+            stokesforge_app_state::state::AdvancedChange::SheetNameFromFile(true),
+        );
+        for _ in 0..3 {
+            paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        }
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(painted
+            .iter()
+            .any(|t| t.text == tr!("import-advanced-set-title")));
+        let after = y(&painted).expect("the fold title is still in view");
+        assert!(
+            (after - before).abs() < 1.0,
+            "the fold moved from {before} to {after}"
+        );
+    }
+
     /// Save as Template says how many points are still to check and that they
     /// are saved as they are; with nothing left to check it says nothing.
     #[test]
