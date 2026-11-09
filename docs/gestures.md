@@ -201,6 +201,7 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 | Wheel | file grid of the import (`app/import_wizard/grid.rs`) | scrolls the grid; Shift + wheel scrolls sideways; a role bar or menu open on a selection closes |
 | Click, drag | line numbers and cells of the file grid | selects lines, cells or columns; the role bar opens beside the selection |
 | Right-click | selection of the file grid | the same roles as a menu |
+| Wheel, hover | import screen under Save as Template, Manage Templates or Forget Template (`app/import_wizard.rs`) | not taken: the screen below is painted with the pointer and the wheel hidden, only the open window reacts |
 
 ## The guard
 
@@ -228,7 +229,8 @@ Surfaces read (paths relative to `src/`; `render-egui/` for
 - `app/tab_strip.rs`: the tabs;
 - `app/window_chrome.rs`: the windows;
 - `number_field.rs`, `color_picker.rs`: the fields;
-- `app/import_wizard/grid.rs`: the file grid of the import.
+- `app/import_wizard/grid.rs`: the file grid of the import;
+- `app/import_wizard.rs`: the import screen, which hides the wheel from itself under its template windows.
 
 ## Verification (2026-10-20)
 

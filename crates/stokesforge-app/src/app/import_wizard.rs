@@ -228,17 +228,6 @@ struct ImportWizardRequests {
     checks: Vec<grid::CheckCmd>,
 }
 
-/// The import window (« Import… », File menu): **one screen that creates**.
-/// The file tabs, what was understood, the left panel (the format sentence, the
-/// points to check, what was found) and the file cut into a grid you mark
-/// directly; « Import » is always there, the doubts are a warning in the footer,
-/// not a gate. A draft dialog of the common building block ([`modal_dialog_with`]),
-/// painted from [`StokesForgeApp::ui`](eframe::App::ui) as long as
-/// [`AppState::import_state`] is `Some`; the close cross and Escape mean
-/// "Cancel", Enter "Import". Footer (S-F6): Destination and Template on the
-/// left, the message area, Cancel, Import. The windows of the templates are
-/// painted **inside** the content (see [`templates::windows`]) to read Enter and
-/// Escape before it.
 /// Runs `paint` with the pointer hidden from the input (`hidden`), then gives
 /// it back. The grid and the panels read the raw pointer position, which no
 /// layer order stops: the nested modal windows are painted after them, so they
@@ -260,6 +249,17 @@ fn without_pointer(ctx: &egui::Context, hidden: bool, paint: impl FnOnce(&egui::
     });
 }
 
+/// The import window (« Import… », File menu): **one screen that creates**.
+/// The file tabs, what was understood, the left panel (the format sentence, the
+/// points to check, what was found) and the file cut into a grid you mark
+/// directly; « Import » is always there, the doubts are a warning in the footer,
+/// not a gate. A draft dialog of the common building block ([`modal_dialog_with`]),
+/// painted from [`StokesForgeApp::ui`](eframe::App::ui) as long as
+/// [`AppState::import_state`] is `Some`; the close cross and Escape mean
+/// "Cancel", Enter "Import". Footer (S-F6): Destination and Template on the
+/// left, the message area, Cancel, Import. The windows of the templates are
+/// painted **inside** the content (see [`templates::windows`]) to read Enter and
+/// Escape before it.
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     if state.import_state().is_none() {
         return;
