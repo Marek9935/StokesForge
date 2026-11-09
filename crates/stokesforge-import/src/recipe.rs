@@ -85,7 +85,7 @@ pub struct ImportRecipe {
     #[serde(default)]
     pub encoding: Encoding,
     /// Criteria for automatically choosing this template from a file; see
-    /// [`crate::choose_recipe`]. Empty: never chosen automatically.
+    /// [`crate::RecipeStore::matching`]. Empty: never chosen automatically.
     #[serde(default)]
     pub auto_match: AutoMatch,
     /// Forced kind of each column, by position ("Columns" step). Shorter than
@@ -104,6 +104,90 @@ pub struct ImportRecipe {
     /// same recipe, its own header included.
     #[serde(default)]
     pub block_split: BlockSplit,
+    /// The main header runs up to and including the first
+    /// line whose trimmed text equals this marker (case-insensitive), wherever
+    /// it is; the `subheader_lines` are counted after it. One recipe then fits
+    /// files whose header blocks have different lengths (JASCO `XYDATA`). When
+    /// the marker is not found, `header_layout.main_header_lines` is used.
+    #[serde(default)]
+    pub main_until_marker: Option<String>,
+    /// Values read from `KEY<sep>VALUE` lines of the header
+    /// and of the footer and put in the Long Name / Units / Comments of the
+    /// columns; see [`HeaderProp`].
+    #[serde(default)]
+    pub header_props: Vec<HeaderProp>,
+    /// In the data zone, a line whose first token is text (not
+    /// a number, not a missing token) is a comment, not a data row. A table
+    /// interrupted by one-line segment titles then reads as one table.
+    #[serde(default)]
+    pub skip_text_rows: bool,
+    /// How the file is read. `Table` is the line-and-column
+    /// engine; `Jcamp` reads the numeric tables of a JCAMP-DX file
+    /// ([`crate::jcamp`]), one table per spectrum.
+    #[serde(default)]
+    pub format: FileFormat,
+    /// With `subheader_roles.same_line_name_unit`, each token
+    /// of the long-name line reads `name/unit` (Netzsch: `Temp./°C`,
+    /// `DSC/(mW/mg)`), split at the **first** `/` that is followed by a unit;
+    /// the outer parentheses of the unit and the leading `#`s of the name are
+    /// dropped. A token without such a `/` falls back to the bracket reading.
+    #[serde(default)]
+    pub name_unit_slash: bool,
+    /// The unit tokens of the `unit` role are read without
+    /// their surrounding square brackets (Avantes: `[nm]` gives `nm`).
+    #[serde(default)]
+    pub strip_unit_brackets: bool,
+    /// The worksheet takes the name of the file even when the file has a title
+    /// (F2 of #488). `false`: the title of the file when it has one (the
+    /// header key chosen in `name_source`), else the file name.
+    #[serde(default)]
+    pub sheet_name_from_file: bool,
+}
+
+/// The engine that reads a file.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum FileFormat {
+    /// Lines of delimited fields, driven by the rest of the recipe.
+    #[default]
+    Table,
+    /// JCAMP-DX: the file describes its own tables (compressed forms, several
+    /// spectra, units in the header).
+    Jcamp,
+}
+
+/// Field of a column filled from a header property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum PropField {
+    LongName,
+    Units,
+    Comment,
+}
+
+/// Columns a header property applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum PropTarget {
+    /// The first column.
+    X,
+    /// Every column but the first.
+    Y,
+    All,
+}
+
+/// A `KEY<sep>VALUE` line of the header or footer (`XUNITS;NANOMETERS`,
+/// `TITLE: my sample`, `##XUNITS=1/CM`) whose value fills `field` of the
+/// `target` columns. It only fills an empty field: the
+/// sub-header roles win. For a `Name [unit]` value, Long Name takes the name,
+/// Units takes the bracket.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct HeaderProp {
+    pub key: String,
+    pub field: PropField,
+    pub target: PropTarget,
+    /// Units only: `NANOMETERS` -> `nm`, `1/CM` -> `cm⁻¹`...
+    #[serde(default)]
+    pub short_unit: bool,
 }
 
 /// Split of a file into independent data blocks.
@@ -393,9 +477,11 @@ pub struct SubheaderRoles {
     pub long_name: Option<SubheaderLineRange>,
     pub unit: Option<SubheaderLineRange>,
     pub comment: Option<SubheaderLineRange>,
-    /// Line whose every numeric token becomes the x' value
-    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) of its column: the
-    /// time of a spectrum, in a kinetic series.
+    /// Line whose tokens give the x' value
+    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) of their column: the
+    /// time of a spectrum, in a kinetic series. The value is the **first
+    /// number found in the token** (`t=12.5 s` gives 12.5; so `Sample-3`
+    /// gives -3, accepted); no number, no x'. Only the `from` line is read.
     #[serde(default)]
     pub x_prime: Option<SubheaderLineRange>,
     /// When checked, `unit` is ignored: each token of the `long_name` line is
@@ -404,9 +490,33 @@ pub struct SubheaderRoles {
     /// parentheses keeps all its text as the long name and gives an empty
     /// unit, rather than cutting arbitrarily (see `crate::parse::parse`).
     pub same_line_name_unit: bool,
+    /// #488: `long_name` and `comment` ranges of several lines are **joined**
+    /// (the tokens of a column over the range, empty ones skipped, one space
+    /// between). `false` is the reading of recipes written before: only the
+    /// first line of the range. `Units` and x' read their `from` line only,
+    /// whatever this says. Additive field (`serde(default)` = `false`, so an
+    /// old template or `.stf` keeps its reading, invariant 12); a recipe that
+    /// goes through the import wizard is switched to `true`, as is
+    /// [`ImportRecipe::new`].
+    #[serde(default)]
+    pub join_lines: bool,
+}
+
+impl SubheaderLineRange {
+    /// Last line really read when the role joins its lines: a `to` before
+    /// `from` (or empty) means the single line `from`.
+    pub fn last_joined(&self) -> usize {
+        self.to.max(self.from)
+    }
 }
 
 impl ImportRecipe {
+    /// Puts the recipe on the current reading of the sub-header roles
+    /// (`join_lines`, #488). Called when a recipe enters the import wizard.
+    pub fn adopt_joined_lines(&mut self) {
+        self.subheader_roles.join_lines = true;
+    }
+
     /// Kind chosen for column `index` (`Auto` by default).
     pub fn column_kind(&self, index: usize) -> ColumnKind {
         self.column_kinds.get(index).copied().unwrap_or_default()
@@ -446,7 +556,10 @@ impl ImportRecipe {
             has_column_header_row: false,
             name_source: NameSource::Filename,
             header_layout: HeaderLayout::default(),
-            subheader_roles: SubheaderRoles::default(),
+            subheader_roles: SubheaderRoles {
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
             skip_chars: 0,
             preview_lines: default_preview_lines(),
             data_end: DataEnd::default(),
@@ -465,6 +578,13 @@ impl ImportRecipe {
             import_mode: ImportMode::NewSheet,
             files_layout: FilesLayout::SheetPerFile,
             block_split: BlockSplit::None,
+            main_until_marker: None,
+            header_props: Vec::new(),
+            skip_text_rows: false,
+            format: FileFormat::Table,
+            name_unit_slash: false,
+            strip_unit_brackets: false,
+            sheet_name_from_file: false,
         }
     }
 }
@@ -484,7 +604,14 @@ mod tests {
         assert!(!recipe.has_column_header_row);
         assert_eq!(recipe.name_source, NameSource::Filename);
         assert_eq!(recipe.header_layout, HeaderLayout::default());
-        assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
+        assert_eq!(
+            recipe.subheader_roles,
+            SubheaderRoles {
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+            "a new recipe joins the lines of a role (#488)"
+        );
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
         assert_eq!(recipe.data_end, DataEnd::None);
@@ -544,6 +671,7 @@ mod tests {
                 comment: None,
                 x_prime: None,
                 same_line_name_unit: false,
+                join_lines: true,
             },
             skip_chars: 5,
             preview_lines: 50,
@@ -567,6 +695,18 @@ mod tests {
             import_mode: ImportMode::AddRows,
             files_layout: FilesLayout::SharedX,
             block_split: BlockSplit::BeforeLine("TITLE".into()),
+            main_until_marker: Some("XYDATA".into()),
+            header_props: vec![HeaderProp {
+                key: "XUNITS".into(),
+                field: PropField::Units,
+                target: PropTarget::X,
+                short_unit: true,
+            }],
+            skip_text_rows: true,
+            format: FileFormat::Jcamp,
+            name_unit_slash: true,
+            strip_unit_brackets: true,
+            sheet_name_from_file: true,
         };
         let json = serde_json::to_string(&recipe).unwrap();
         assert!(json.contains("MonthFirst"));
@@ -579,6 +719,21 @@ mod tests {
     /// in its JSON) must keep loading, with the new fields at their default
     /// values. `#[serde(default)]` is what keeps this promise; this test
     /// checks it rather than assuming it.
+    /// Sub-header roles stored before `join_lines` (#488) read with the old
+    /// reading (first line only); a new recipe joins.
+    #[test]
+    fn roles_without_join_lines_keep_the_old_reading() {
+        let old = r#"{"long_name":{"from":1,"to":2},"unit":null,"comment":null,"same_line_name_unit":false}"#;
+        let roles: SubheaderRoles = serde_json::from_str(old).unwrap();
+        assert!(!roles.join_lines);
+        assert_eq!(roles.long_name, Some(SubheaderLineRange { from: 1, to: 2 }));
+        assert!(ImportRecipe::new("t").subheader_roles.join_lines);
+        let mut recipe = ImportRecipe::new("t");
+        recipe.subheader_roles = roles;
+        recipe.adopt_joined_lines();
+        assert!(recipe.subheader_roles.join_lines);
+    }
+
     #[test]
     fn json_recipe_older_than_the_work_package_loads_with_the_defaults() {
         let json_before_work_package = r#"{
@@ -599,5 +754,6 @@ mod tests {
         assert_eq!(recipe.data_end, DataEnd::None);
         assert!(recipe.keep_header_metadata, "everything is kept by default");
         assert_eq!(recipe.date_order, DateOrder::DayFirst);
+        assert!(!recipe.name_unit_slash && !recipe.strip_unit_brackets);
     }
 }

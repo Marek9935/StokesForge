@@ -198,7 +198,10 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 | Click | field arrow | opens the list |
 | Click, drag | square, wheel, bar of the color picker (`color_picker.rs`) | chooses the color |
 | Right-click | swatch of a saved color | removes it |
-| Right-click | row number of the import preview (`app/import_wizard.rs`) | row menu |
+| Wheel | file grid of the import (`app/import_wizard/grid.rs`) | scrolls the grid; Shift + wheel scrolls sideways; a role bar or menu open on a selection closes |
+| Click, drag | line numbers and cells of the file grid | selects lines, cells or columns; the role bar opens beside the selection |
+| Right-click | selection of the file grid | the same roles as a menu |
+| Wheel, hover | import screen under Save as Template, Manage Templates or Forget Template (`app/import_wizard.rs`) | not taken: the screen below is painted with the pointer and the wheel hidden, only the open window reacts |
 
 ## The guard
 
@@ -226,7 +229,8 @@ Surfaces read (paths relative to `src/`; `render-egui/` for
 - `app/tab_strip.rs`: the tabs;
 - `app/window_chrome.rs`: the windows;
 - `number_field.rs`, `color_picker.rs`: the fields;
-- `app/import_wizard.rs`: the import preview.
+- `app/import_wizard/grid.rs`: the file grid of the import;
+- `app/import_wizard.rs`: the import screen, which hides the wheel from itself under its template windows.
 
 ## Verification (2026-10-20)
 
@@ -289,5 +293,5 @@ Alt+Down are swallowed (`app/list_row.rs` `read_navigation`), the background
 right-click opens the settings. Not confirmed: an actual drag-and-drop
 reorder of OM rows with the mouse (read only through the unit tests), the
 Ctrl + wheel of the grid, and the right-click menu of the import preview row
-number (the code attaches a context menu to the row number, `app/import_wizard.rs`,
+number (the code attaches a context menu to the selection, `app/import_wizard/grid.rs`,
 but its content was not read).

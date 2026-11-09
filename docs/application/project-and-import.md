@@ -1,6 +1,6 @@
-# Application: new project, file drop, import wizard
+# Application: new project, file drop, import screen
 
-Continuation of the index [`README.md`](README.md). Contents: new project and empty graph, file drag and drop and its backend, import wizard.
+Continuation of the index [`README.md`](README.md). Contents: new project and empty graph, file drag and drop and its backend, the import screen.
 
 ### New project and empty graph (#73)
 
@@ -91,19 +91,26 @@ The claimed workbook it receives one sheet per file, otherwise
 a new workbook is created. `.stf` files are never imported: `AppState` queues
 them (`take_projects_to_open`) and `app.rs` launches a second process
 (`file_drop::open_project_in_new_window`)
-`stokesforge-app <chemin>`. Each file uses the template that recognizes it,
-otherwise the last template used in this session, otherwise the permissive
-recipe. Reading, template choice and analysis happen on the background thread
-of the menu import (#266): `drop_files` keeps on the interface thread only the
-refusals and the queuing of `.stf` files, then goes through `start_import`, the
-single entry point of import (indicator and Stop as for File › Import; a drop
-during an import in progress is refused). `poll_import` applies the result — a
-single "Import" entry — and posts the message of the templates used; a file
-that gives no numeric value opens the pre-filled import window instead, when
-the thread returns. Pure decision: `state::file_drop_plan`. The drop always
-creates new sheets, even if the recipe of the last import replaced or merged a
-sheet. The File › Import › Reopen Last
-Import… link takes its files back into the wizard.
+`stokesforge-app <chemin>`. Each file is read with the recipe that
+`stokesforge_import::recipe_for_file` picks (a saved template whose conditions
+the file meets, else the detector, #488): the same entry point as the import
+screen, the CLI and `pyst.import_file`. Reading, template choice and analysis
+happen on the background thread of the menu import (#266): `drop_files` keeps
+on the interface thread only the refusals and the queuing of `.stf` files,
+then goes through `start_import`, the single entry point of import (indicator
+and Stop as for File › Import; a drop during an import in progress is
+refused). When the thread returns, `poll_import` decides: if **no** file needs
+a look, it applies the result — a single "Import" entry — and posts the
+message of the templates used; if **any** file has a point left to check (a
+doubt not answered yet for that kind of file), a refusal or a table that does
+not read, nothing is imported and the import screen opens on **all** the
+dropped files, each with the recipe chosen for it. An answer given earlier
+(Mark as Checked, a correction) is remembered per kind of file, so the same
+doubt does not open the window for the next file of that kind
+(`import_check.rs`, `RecipeStore::remember_answer`). Pure decision:
+`state::file_drop_plan`. The drop always creates new sheets, even if the recipe
+of the last import replaced or merged a sheet. The File › Import › Reopen Last
+Import… link reopens every file of the last import, each with its own recipe.
 
 The same gesture is wired in the detached windows: on a workbook, the
 destination stays that workbook; on a graph, a note, a matrix or the
@@ -122,41 +129,120 @@ validated manually.
 
 ### Import wizard
 
-The Format step groups its settings under five headings (#170): delimiter,
-numbers and dates, comment lines, blocks and encoding, ignored lines.
-These headings use the same section building block as the other forms; they
-change neither the recipe nor the order of the controls.
+"Import…" opens **one screen that creates** (`import_window`, module
+`src/app/import_wizard.rs`, the only entry point called by `app.rs`; window
+title "Import window"), a **modal dialog of the common building block**
+(`modal_dialog_with`, `Draft`, free size 1320 x 840 shrunk to the screen). It
+replaced the six-step wizard (files, format, header and end of data, columns,
+metadata, destination): nothing of those steps is left, and there is no
+fallback to them. The module `//!` docs carry the design; this page keeps the
+map.
 
-"Import…" opens a six-step wizard in the Origin style (`import_window`,
-`ImportStep`; module `src/app/import_wizard.rs`, #118, the only entry point
-called by `app.rs`), a **modal dialog of the common building block**
-(`modal_dialog_with`: same frame, same title bar, same blocking of the rest of
-the interface as the graph properties; *Finish* = default button, *Back* and
-*Next* in the footer): files and template, format, header and end of data,
-columns, metadata, destination. All its texts go through `tr!` (`import-*` keys
-of the `en` catalog, written according to `docs/ui-texts.md` § 2.4:
-*Delimiter*, *Template*, *Subheader*…); template names and file content stay
-data, never translated. The file preview stays on the right at every step; a
-right-click on a line sets the import at that place
-(`AppState::import_line_action`). *Finish* imports from step 1 with the
-template as is. The file bytes are read once (cache by path,
-`ImportState::bytes`); each file shows before the import its lines read or its
-error. The header is a single setting (`ImportRecipe::unify_header` brings
-`HeaderSkip::Lines` back to the structured split); the column roles chosen at
-step 4 live in the recipe (`column_roles`). The *Column names* section is
-disabled and inactive when *Names in first line* is checked: the names then come
-from that line. Otherwise, the *Filename* and *Header key* choices are active;
-their values are kept while disabled. A file drop while the wizard is open adds
-them to its list. *Finish* launches `Action::StartImport`: the analysis of the
-files runs on a background thread (with progress "Importing… k of n",
-`AppState::poll_import` called at each frame) and the sheets are created at the
-end, in a single "Import" entry.
+Layout, from top to bottom: the **file tabs** (one per file; a strip that stays
+usable with about 50 files: filter, previous / next, "+ n more"); at the left,
+the **left panel** (35 % of the width, 380 points at least) and, at the right,
+the **grid** with its File / Result tabs; under them the line "You get"; the
+footer with the **Destination** and **Template** menus, Cancel and Import.
+Import is never greyed out by a doubt: the footer only says how many points are
+left to check.
+
+- **The detector reads every file once** (`stokesforge_import::sniff`, state
+  in `state/import_auto.rs`) and proposes the whole configuration: encoding,
+  delimiter, decimal, where the data start and stop, the x' line, column names,
+  units and titles written as `KEY;value` lines. A saved template whose
+  conditions the file meets is applied at once and its name shown ("Auto ·
+  name"); when two meet as many conditions, one is used and a point to check
+  offers the other. A correction made on one file is kept per **kind** of file
+  (instrument fingerprint), so it does not leak to a file of another kind.
+- **The sheet name depends on the destination** (#488). With **One Workbook per
+  File** and **One sheet per file** (a single plan imported into **New
+  Workbook** counts as one workbook per file), the workbook takes the title of the file
+  (else its name; `Title_1`, `Title_2` for the blocks of one file) and its sheet is
+  named `import-sheet-raw-data` ("Raw Data" / « Données brutes ») and marked
+  (`SetSheetRawMark`, base `import-sheet-modified-base`), in the interface
+  language at import time. The first change to a value of an imported column
+  renames it "Sheet1" in the same undoable step (see
+  `docs/commands-and-history.md`). Every other destination and layout keeps
+  the title or file name as the sheet name. The texts of the screen that speak
+  of the sheet name (`import-why-sheet-name`, the Advanced **Sheet name**
+  setting) say that the new workbook takes the name, or the sheet in an
+  existing workbook. `stokesforge-cli import` and `pyst.import_file` do not
+  mark or rename sheets.
+- **The left panel** (`grid/panel.rs`, decisions in `state/import_check.rs`):
+  the format sentence (delimiter, decimal, encoding), the **To check** block, **What was found** (rows grouped Data /
+  Columns / Sheet, each with the source line, a long value cut with an ellipsis
+  and its whole text on hover), and the **Advanced** fold, closed by default
+  (date order, leading characters removed, blocks, missing values, comment
+  prefix, skipped data lines: `state/import_advanced.rs`; a setting not at its
+  default also reads as a sentence below the fold). Nothing of the panel is
+  ever cut at its edge: a long text wraps, and "Mark as Checked" moves under
+  its sentence when the sentence would get too narrow.
+- **To check** (`state/import_tocheck.rs`): the findings that are doubts, the
+  detector's own doubts (text rows inside the data, several blocks of numbers,
+  a comma that may be a decimal, a JCAMP-DX problem) and a tie between two
+  templates. A sentence shows where it comes from in the file (it settles
+  nothing). **Mark as Checked** answers one point without touching the recipe;
+  **Check Now** walks through the doubts one at a time. An answer is remembered
+  for that kind of file in the template store and listed under **Answers
+  remembered** in Manage Templates (**Forget** brings the doubt back). The
+  detector never picks a block silently: several blocks are read whole with
+  their titles listed, split into one table each, or flagged.
+- **The grid** (`grid.rs`, `state/import_grid.rs`): painted by hand, only the
+  visible rows and columns are laid out (a kinetic of 630 lines x 241 columns
+  stays smooth). Clicking a **line number** (or a value) gives the line a role
+  (Long Name, Units, x', data start / end); column letters give a column a role
+  or read it as text; the zones are colored; the data boundaries are handles.
+  Each decision is a `GridCmd` applied to the recipe by
+  `AppState::import_grid_cmd`. The **File** tab shows the raw file, the
+  **Result** tab the worksheet that will be created. An "auto" pill takes an
+  automatic choice back; it never deletes the choice by itself.
+- **The first-use guide** (`grid/guide.rs`, `import_guide_*`): three short
+  steps over the grid, shown every time until **Don't show again** is ticked
+  (stored in the preferences); **Show Guide** brings it back.
+- **Templates** (`templates.rs`, `state/import_template.rs`): after a first
+  import of a kind of file, the screen offers "Save these settings for JASCO
+  files?". **Save as Template…** proposes a name and shows **what triggers the
+  template** (conditions, each can be unchecked: the instrument, the data type,
+  the marker the data come after, the numbers; the user adds the number of
+  columns, a header line equal to / containing a value, the file name, the
+  extension). **Manage Templates…** lists the templates with their conditions,
+  the answers remembered and Forget Template (with a confirmation). The
+  Template menu of the footer lists them too (Auto first). One template store
+  (`import_recipes.json`, `RecipeStore`): the templates saved before #488 are
+  kept, their Auto-select criteria became conditions.
+- **Texts**: `import-*` keys of the `en` catalog written by `docs/ui-texts.md`
+  § 2.4; template names and file contents stay data, never translated.
+
+The file bytes are read once (cache by path, `ImportState::bytes`, the
+`FileMap` cached while neither the file nor the recipe changes); each file
+shows before the import its lines read or its error. A file the reader refuses
+(binary, empty, no numbers, NMR) is marked on its tab and skipped; it never
+stops the others. The header is a single setting (`ImportRecipe::unify_header`
+brings `HeaderSkip::Lines` back to the structured split); the column roles
+live in the recipe (`column_roles`). A file drop while the screen is open adds
+the files to its list. *Import* launches `Action::StartImportEach`: the
+analysis of the files runs on a background thread (with progress "Importing…
+k of n", `AppState::poll_import` called at each frame) and the sheets are
+created at the end, in a single "Import" entry.
 Shortcut: **Ctrl+"** (`SHORTCUT_IMPORT`: the key of the 3 without Shift on
 AZERTY, `SHORTCUT_IMPORT_QWERTY`: Ctrl+Shift+' on QWERTY). Recent files and
 remembered folder: `stokesforge_import::RecentFiles` (`import_recent.json`, next
 to the recipes). "File › Import › Reopen Last Import…" (`Action::ReopenLastImport`)
-reopens the wizard on the files and template of the last import — undoing it
-first if it is still at the top of the history, never later work.
+reopens the screen on the files of the last import, each with its recipe —
+undoing it first if it is still at the top of the history, never later work.
+
+**What the engine reads.** `stokesforge-import` is split as follows (details
+in each module's `//!`): `sniff` (the detector, pure, returns data and
+`Doubt`s, never sentences), `instrument` (fingerprints from the content, never
+the extension), `jcamp` (JCAMP-DX tables in every ASDF form, `(XY..XY)` pairs,
+LINK blocks, simple NTUPLES; **NMR is out of scope**: an NMR file is refused
+with a clear card, an NMR block of a mixed file is left out and flagged),
+`thousands` (strict guess of a grouping character), `props` (`KEY;value` lines
+that fill Long Name, Units or Comments of the columns; a sheet takes the name
+of a `TITLE` key), `templates` (conditions and `recipe_for_file`, the one entry
+point). `recipe_for_file` picks, in order, the named template, a matching
+template, then the detector; the application, the CLI (`import` skips an
+unreadable file and lists it) and `pyst.import_file` all call it.
 
 The "modified" marker of the template compares the settings with the loaded
 template or the last successful save (`AppState::import_recipe_modified`).
@@ -174,14 +260,14 @@ the Y role; these roles are kept when the import is redone after an undo.
 
 **End of data.** By default there is no cut (the data go to the end of the
 file): the automatic cut silently lost the lines that followed a missing
-measurement ("n/a") in X. It remains a choice of the wizard, and the Jasco
+measurement ("n/a") in X. It remains a choice of the recipe, and the Jasco
 templates ask for it. It arms at the first numeric X, then cuts at the first
 non-numeric X (empty line included). The text and empty lines that precede that
 first number are kept; text in Y does not cut. The `skip_chars` prefix is
 removed before this test; with the Whitespace delimiter, X is the first non-empty
-token. The "Header and Data End" step also offers "No cut",
+token. The recipe also offers "No cut",
 first empty line, marker, N lines after the header or N lines before the end.
-The right-click on the preview allows cancelling the automatic cut; the preview
+On the import screen the cut is the pair of handles of the grid; the preview
 and the import use the same split (`stokesforge_import::layout`, `data_end`).
 
 **Number format, dates and encoding (#314).** A "Whitespace" delimiter (chosen, or
@@ -205,7 +291,7 @@ blocks.
 (`ColumnMeta::import_source`: path, recipe as JSON in the template, column
 index; in the `.stf` file, the recipe has its own types, `docs/persistence.md`).
 "File › Import › Refresh from Source" (`Action::RefreshFromSource`)
-rereads the files and rewrites the values **in place**: the columns keep their
+rereads the files **with the stored recipe, without running the detector**, and rewrites the values **in place**. It is not promised to reproduce an import from one version to the next (a newer reader may read the same recipe differently; `docs/persistence.md`). The columns keep their
 identity, the graphs stay valid. The rows of the sheet follow the longest of the
 new contents; they shrink only if all the columns are refreshed.
 

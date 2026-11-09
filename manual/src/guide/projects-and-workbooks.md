@@ -126,6 +126,8 @@ The same commands are in **Workbook ▸ Sheet**.
 
 <img src="../images/workbooks-workbook-menu.png" alt="The Workbook menu of the menu bar: Sheet and Columns (submenus), Plot (greyed out), and the check boxes Show Metadata Row (checked) and Show x' Row." width="156">
 
+A sheet that comes from an import into **One Workbook per File** is called **Raw Data** until you change a value of an imported column; it then becomes **Sheet1** (see [Importing data](import.md)).
+
 A sheet name cannot be empty and must be unique inside the workbook. A workbook always keeps at least one sheet: **Delete** is greyed out on the last one.
 
 Deleting a sheet can be undone. If a graph plotted columns of that sheet, the status bar names it.

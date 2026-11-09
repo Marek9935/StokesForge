@@ -43,7 +43,7 @@ whose default value is a class:
   the default class of the nature, another class, or a **free size**
   (`InteractiveSize::Free`) that requires `// FREE-SIZE(#300): <justification>`
   in the twelve lines before it (15 characters at least). Free sizes
-  today: the analysis (1000 x 660), the import wizard (1000 x 620) and the
+  today: the analysis (1000 x 660), the import window (1000 x 620) and the
   `preferences_proto` bench (560 x 470, reference screenshots).
 - **Window without rich interaction** (choice, read-only, confirmation,
   save, alert: `PlainSize`): may take the **size of its
@@ -104,7 +104,7 @@ They are always painted by the root, whatever window the gesture came from
 | Series properties | `Settings` | Large | list of series on the left, editor on the right (`curve_settings_page`) | double-click on a curve, Object Manager, Graph menu (`Action::OpenObjectProperties` on a series or a group) | `stokesforge_curve_settings` (built), `plot_settings.rs` (window), `curve_settings.rs` (page) |
 | Properties of an object (rectangle, arrow…) | `Settings` | Medium | coordinates X1 Y1 X2 Y2, line and fill colors | double-click on the object, Object Manager (`open_shape_properties`) | derived from the object, `graph_window.rs` |
 | Analysis (new or edit) | `Draft` | free 1000 x 660 | two columns: settings (330 wide, scrolling) and clickable preview with tools and values | Analysis menu, right-click, results panel (`Action::OpenAnalysis`) | `stokesforge_analysis` (built), `analysis_dialog.rs`, `analysis_forms.rs`, `analysis_preview.rs` |
-| Import wizard | `Wizard` | free 1000 x 620 | 6 steps: Files, Format, Header, Columns, Metadata, Destination; file preview on the right at every step | File > Import, Ctrl+3 (`open_import_dialog`) | `stokesforge_import_wizard`, `import_wizard.rs` |
+| Import | `Draft` | free 1320 x 840 (a smaller screen shrinks it) | one screen that creates (#488): file tabs, the format sentence, the points to check (Check Now, Mark as Checked), what was found, the Advanced fold (closed by default) at the left; the file as a grid with its File / Result tabs at the right, a short guide (Show Guide) over the grid; footer Destination and Template menus, Cancel, Import (never greyed out by a doubt: a warning in the footer). Three windows nested over it: Save as Template (`Draft`, default size), Import Templates (`LiveSettings`, Large: templates, their conditions, remembered answers) and the confirmation of Forget Template (`Confirm`) | File > Import, Ctrl+3 (`open_import_dialog`), a file dropped on the window | `stokesforge_import_wizard`, `stokesforge_import_template_save`, `stokesforge_import_templates`, `stokesforge_import_template_forget`; `import_wizard.rs`, `import_wizard/templates.rs` |
 | Preferences | `LiveSettings` (immediate settings) | Large | 4 rubrics as tabs on top (`TabStripSide::Top`): General (language, maximum file size at opening, autosave: checkbox and period in minutes, disabled if the checkbox is unchecked, #317; analysis: default of Values Show / Keep in Results, low R2 warning), Display with vertical sub-tabs at the left (S-L9) Interface (formula syntax help icon) · Object Manager (lists, expand-by-default groups, Reset) · New (rows of new workbooks, decimal comma of new graphs), Export (SVG text, PNG resolution, Copy Graph formats), Folders (the configuration folder with Open Folder and its files, the recovery copies folder, and the default folders Open and Save, Import, Export, each typed or picked with Browse…, with a "Folder not found" note #148) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences_rubrics`, `preferences_window.rs` |
 | Keyboard shortcuts | `ReadOnly` | content 480 x 460 | scrolling list by area, generated from `shortcuts::HELP` | Help > Keyboard Shortcuts (`Action::OpenKeyboardShortcuts`) | `stokesforge_keyboard_shortcuts`, `keyboard_shortcuts_window.rs` |
 | Formula Functions | `ReadOnly` | content 900 x 560 (wide: each description on one to three lines) | the functions of an `F(x)=` formula, one family at a time (#402): families as fixed vertical tabs at the left (`TabStripSide::Left`, S-L9), at the right a scrolling table Function · Example · What it does; the intro line on top; state (open, chosen family) in `AppState` | the "?" of the `F(x)=` cell while it is edited (`Action::OpenFormulaFunctions`) | `stokesforge_formula_functions`, `formula_functions_window.rs` |
@@ -119,7 +119,6 @@ They are always painted by the root, whatever window the gesture came from
 | Project recovery | `ReadOnly` | content 560 x 230 | one row per backup copy (name or Untitled, UTC date) with Open, Ignore, Delete; introduction message; scrolling list | at startup, if copies from vanished processes remain that are newer than their `.stf` (`AppState::scan_recovery`, #317); closes by itself when the list is empty | `stokesforge_recovery`, `recovery.rs` |
 | Replacing a shared analysis | `Confirm` | Small | a message | applying an analysis whose source feeds other curves | `stokesforge_replace_analysis`, `analysis_dialog.rs` |
 | Refreshing a modified transposed sheet | `Confirm` | Small | a message | Relink (band of the linked transposed sheet) when a value of a column created by the link has been edited (#253) | `stokesforge_transpose_relink`, `transpose_ui.rs` |
-| Deleting an import template | `Confirm` | Small | a message | delete button of a template, at the Files step; painted **inside** the wizard | `stokesforge_import_template_delete`, `import_wizard.rs` |
 
 The "built" identifiers are chosen before the call (a `&str`, not a
 literal in its arguments): the catalog guard looks for them as
@@ -344,7 +343,7 @@ standard):
 | Live settings | `plot_settings_window` (`plot_settings.rs`); `shape_properties_ui` (`graph_window.rs`) for the smallest | draft, single confirmation, tabs |
 | Creation on a draft | `analysis_window` (`analysis_dialog.rs`) | button verb, disable reason, preview |
 | Choice | `stale_export_window` (`stale_export.rs`) | secondary + main, the shortest |
-| Wizard | `import_window` (`import_wizard.rs`) | the only one; Back · Next · Finish |
+| Wizard | `modal_wizard` (`dialogs.rs`) | none today: the import became a `Draft` (#488); the nature waits for the next multi-step window |
 | Live settings | `preferences_window.rs` (tabs, immediate settings) | Close only, focus on the first field |
 | Read-only | `keyboard_shortcuts_window.rs` (the simplest) | Close only |
 | Confirmation | `analysis_replace_window` (`analysis_dialog.rs`); `confirmations.rs` for the blocking ones | Cancel by default |

@@ -594,6 +594,7 @@ impl Project {
             &name,
             NodeKind::Worksheet {
                 columns: Vec::new(),
+                raw: None,
             },
         )
     }

@@ -129,14 +129,24 @@ pub struct ImportPlan {
 pub fn plan_import(items: &[ImportItem], layout: FilesLayout) -> Vec<ImportPlan> {
     // Worksheet name: the file, followed by the block rank if there are several.
     let stem = |item: usize| {
-        let base = items[item]
+        let file = items[item]
             .path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("file");
+        // A header key chosen as the name (TITLE...) names the
+        // worksheet too, when the file holds it.
+        // The recipe may ask for the file name always (F2 of #488).
+        let base = match (&items[item].recipe.name_source, &items[item].table) {
+            _ if items[item].recipe.sheet_name_from_file => file.to_string(),
+            (stokesforge_import::NameSource::HeaderKey(_), Ok(table)) => {
+                stokesforge_import::resolve_series_name(&items[item].recipe, table, file)
+            }
+            _ => file.to_string(),
+        };
         match items[item].block {
             Some(block) => format!("{base}_{}", block + 1),
-            None => base.to_string(),
+            None => base,
         }
     };
     let kept = |item: usize| -> Vec<usize> {
@@ -340,5 +350,54 @@ mod date_reader_agreement {
                 "{text:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod sheet_name {
+    use super::*;
+    use stokesforge_import::{NameSource, ParsedTable};
+
+    /// A header key chosen as the series name (TITLE) names the worksheet
+    /// too, not the file stem.
+    #[test]
+    fn a_title_key_names_the_sheet() {
+        let bytes = b"TITLE\tmy sample\nnm\tabs\n1\t2\n";
+        let mut recipe = ImportRecipe::new("t");
+        recipe.separator = stokesforge_import::Separator::Tab;
+        recipe.name_source = NameSource::HeaderKey("TITLE".into());
+        recipe.header_layout.main_header_lines = 1;
+        recipe.header_layout.subheader_lines = 1;
+        let table: ParsedTable = stokesforge_import::parse(bytes, &recipe).unwrap();
+        let item = ImportItem {
+            path: PathBuf::from("/data/file_0042.txt"),
+            recipe,
+            table: Ok(table),
+            block: None,
+        };
+        let plans = plan_import(&[item], FilesLayout::SheetPerFile);
+        assert_eq!(plans[0].name, "my sample");
+    }
+
+    /// F2 of #488: with the setting, the file name names the sheet even when
+    /// the file has a title.
+    #[test]
+    fn the_file_name_setting_names_the_sheet_after_the_file() {
+        let bytes = b"TITLE\tmy sample\nnm\tabs\n1\t2\n";
+        let mut recipe = ImportRecipe::new("t");
+        recipe.separator = stokesforge_import::Separator::Tab;
+        recipe.name_source = NameSource::HeaderKey("TITLE".into());
+        recipe.header_layout.main_header_lines = 1;
+        recipe.header_layout.subheader_lines = 1;
+        recipe.sheet_name_from_file = true;
+        let table: ParsedTable = stokesforge_import::parse(bytes, &recipe).unwrap();
+        let item = ImportItem {
+            path: PathBuf::from("/data/file_0042.txt"),
+            recipe,
+            table: Ok(table),
+            block: None,
+        };
+        let plans = plan_import(&[item], FilesLayout::SheetPerFile);
+        assert_eq!(plans[0].name, "file_0042");
     }
 }
