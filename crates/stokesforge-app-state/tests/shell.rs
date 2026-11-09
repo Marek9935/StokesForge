@@ -16367,3 +16367,103 @@ fn a_recipe_from_a_template_saved_before_join_lines_reads_the_joined_lines() {
     );
     assert!(import.recipe.subheader_roles.join_lines);
 }
+
+#[test]
+fn a_role_given_to_lines_is_written_to_the_recipe_and_given_back_by_the_same_click() {
+    use stokesforge_app_state::state::{GridCmd, LineRoleCmd};
+    use stokesforge_import::DataEnd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    // Line 9 is the first data line of the file; line 8 is XYDATA.
+    state.import_grid_cmd(GridCmd::Role(LineRoleCmd::Units, vec![5]));
+    let roles = &state.import_state().unwrap().recipe.subheader_roles;
+    assert!(roles.unit.is_some(), "XUNITS line marked as the units");
+    let spans = state.import_spans().unwrap();
+    assert!(spans.carries(LineRoleCmd::Units, 5));
+    // The same role on the same line again takes it back.
+    state.import_grid_cmd(GridCmd::Role(LineRoleCmd::Units, vec![5]));
+    assert!(state
+        .import_state()
+        .unwrap()
+        .recipe
+        .subheader_roles
+        .unit
+        .is_none());
+    // The end of the data on a data line: the data stop after it.
+    state.import_grid_cmd(GridCmd::Handle { first: 9, last: 10 });
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        DataEnd::LinesAfterHeader(2)
+    );
+    // The same column role again goes back to Auto.
+    state.import_grid_cmd(GridCmd::ColumnText(vec![1]));
+    assert_eq!(
+        state.import_state().unwrap().recipe.column_kind(1),
+        stokesforge_import::ColumnKind::Text
+    );
+    state.import_grid_cmd(GridCmd::ColumnText(vec![1]));
+    assert_eq!(
+        state.import_state().unwrap().recipe.column_kind(1),
+        stokesforge_import::ColumnKind::Auto
+    );
+}
+
+#[test]
+fn a_long_data_zone_folds_and_the_rows_keep_every_other_line() {
+    use stokesforge_app_state::state::{build_rows, fold_range, row_of_line, Row, FOLD_KEEP};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let mut text = String::from("TITLE;x\nXYDATA\n");
+    for i in 0..100 {
+        text.push_str(&format!("{};{}\n", 800 - i, i));
+    }
+    import_window_on(&mut state, dir.path(), &[("long.csv", &text)]);
+    let map = state.import_file_map().unwrap();
+    let map = map.as_ref().as_ref().unwrap();
+    let (from, to) = fold_range(map).expect("100 data lines fold");
+    let (first, last) = map.data_range.unwrap();
+    assert_eq!((from, to), (first + FOLD_KEEP, last - FOLD_KEEP));
+    let rows = build_rows(map, false, None);
+    assert_eq!(rows.len(), map.line_count() - (to - from));
+    assert!(rows.contains(&Row::Fold(from, to)));
+    assert_eq!(build_rows(map, true, None).len(), map.line_count());
+    // A line inside the fold sits on the fold row.
+    assert_eq!(rows[row_of_line(&rows, from + 3)], Row::Fold(from, to));
+}
+
+#[test]
+fn answering_the_review_edits_the_recipe_and_settles_the_doubt_for_the_kind() {
+    use stokesforge_app_state::state::CheckKind;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_DOUBTS)]);
+    state.check_review_start_at(CheckKind::XPrime);
+    let info = state.check_review_info().expect("a doubt to review");
+    assert_eq!(info.finding.kind, CheckKind::XPrime);
+    // Answer 2: the line of times is a line of data.
+    let had_x_prime = state
+        .import_state()
+        .unwrap()
+        .recipe
+        .subheader_roles
+        .x_prime
+        .is_some();
+    assert!(had_x_prime);
+    state.check_answer(1);
+    assert!(state
+        .import_state()
+        .unwrap()
+        .recipe
+        .subheader_roles
+        .x_prime
+        .is_none());
+    assert!(!point_ids(&state).contains(&"check-x-prime".to_string()));
+    assert!(RecipeStore::load()
+        .remembered_answers()
+        .iter()
+        .any(|(_, id)| *id == "check-x-prime"));
+}
