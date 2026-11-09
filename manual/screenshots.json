@@ -122,17 +122,17 @@
   {
     "image": "import-overview.png",
     "page": "guide/import.md",
-    "shows": "A JASCO UV file (test/import) in the Import Wizard: the file tab, the recognised line, the format, the offer to save the settings, What was found at the left; the file as a grid with line numbers, key;value roles, auto tags, data handles and the minimap at the right; the You get line and the footer menus."
+    "shows": "A JASCO UV file (test/import) in the Import window: the file tab, the recognised line, the format, the offer to save the settings, What was found at the left; the file as a grid with line numbers, key;value roles, auto tags, data handles and the minimap at the right; the You get line and the footer menus."
   },
   {
     "image": "import-to-check.png",
     "page": "guide/import.md",
-    "shows": "A synthetic JASCO kinetic in the Import Wizard: the orange frame with 2 points to check, a Mark as Checked button beside each sentence, Check Now, and the To check tags with their check marks in the rows of What was found."
+    "shows": "A synthetic JASCO kinetic in the Import window: the orange frame with 2 points to check, a Mark as Checked button beside each sentence, Check Now, and the To check tags with their check marks in the rows of What was found."
   },
   {
     "image": "import-correction.png",
     "page": "guide/import.md",
-    "shows": "The Import Wizard on the kinetic with the correction window of the Data row open (First data line, Last data line) under the row."
+    "shows": "The Import window on the kinetic with the correction window of the Data row open (First data line, Last data line) under the row."
   },
   {
     "image": "import-save-template.png",
@@ -147,7 +147,7 @@
   {
     "image": "import-advanced.png",
     "page": "guide/import.md",
-    "shows": "A plain two-column CSV in the Import Wizard with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines."
+    "shows": "A plain two-column CSV in the Import window with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines."
   },
   {
     "image": "interface-object-manager-series.png",

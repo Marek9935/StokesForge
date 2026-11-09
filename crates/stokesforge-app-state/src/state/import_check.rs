@@ -1674,7 +1674,7 @@ pub fn build_view(
     // Sheet name.
     {
         let (sentence, chips, ev) = match &recipe.name_source {
-            NameSource::HeaderKey(k) => {
+            NameSource::HeaderKey(k) if !recipe.sheet_name_from_file => {
                 let wanted = norm_key(k);
                 match keys.iter().find(|e| norm_key(&e.key) == wanted) {
                     Some(e) => (
@@ -1695,7 +1695,9 @@ pub fn build_view(
                     None => (tr!("import-check-sheetname-file"), vec![], vec![]),
                 }
             }
-            NameSource::Filename => (tr!("import-check-sheetname-file"), vec![], vec![]),
+            // The file name, by the recipe or because the file has no title
+            // (F2 of #488: the setting of the Advanced fold).
+            _ => (tr!("import-check-sheetname-file"), vec![], vec![]),
         };
         {
             let (value, src) = match (&recipe.name_source, chips.first()) {
@@ -1732,7 +1734,11 @@ pub fn build_view(
             ev,
             None,
         ));
-        if let (NameSource::HeaderKey(k), Some(last)) = (&recipe.name_source, out.last_mut()) {
+        if let (NameSource::HeaderKey(k), false, Some(last)) = (
+            &recipe.name_source,
+            recipe.sheet_name_from_file,
+            out.last_mut(),
+        ) {
             last.key = Some(k.clone());
         }
     }

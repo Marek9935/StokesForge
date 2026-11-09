@@ -11,7 +11,7 @@
 
 use stokesforge_import::sniff::SepKind;
 use stokesforge_import::{
-    Condition, DecimalStyle, ImportRecipe, NameSource, PropField, PropTarget,
+    Condition, DataEnd, DecimalStyle, HeaderSkip, ImportRecipe, NameSource, PropField, PropTarget,
 };
 
 use super::import_check::{sep_name, short_data_type, Fingerprint};
@@ -173,6 +173,67 @@ pub fn template_rules(r: &ImportRecipe) -> Vec<String> {
     rules
 }
 
+/// The places where a template counts lines instead of looking for a rule
+/// (a marker, a blank line): a longer or shorter file would be cut or
+/// misread. One sentence each, for the Save as Template window.
+pub fn template_count_warnings(r: &ImportRecipe) -> Vec<String> {
+    let mut out = Vec::new();
+    if let DataEnd::LinesAfterHeader(n) = r.data_end {
+        out.push(tr!("import-template-warn-data-count", count = n));
+    }
+    if let DataEnd::LinesBeforeEnd(n) = r.data_end {
+        out.push(tr!("import-template-warn-data-tail", count = n));
+    }
+    let layout = &r.header_layout;
+    let counted = if layout.main_header_lines > 0 || layout.subheader_lines > 0 {
+        layout.main_header_lines + layout.subheader_lines
+    } else if let HeaderSkip::Lines(n) = r.header {
+        n
+    } else {
+        0
+    };
+    if counted > 0
+        && r.main_until_marker.is_none()
+        && !matches!(r.header, HeaderSkip::UntilMarker(_))
+    {
+        out.push(tr!("import-template-warn-header", count = counted));
+    }
+    // Lines left out at the start and at the end: counts, not rules.
+    if r.skip_data_rows > 0 {
+        out.push(tr!(
+            "import-template-warn-skip-rows",
+            count = r.skip_data_rows
+        ));
+    }
+    if r.footer_skip_lines > 0 {
+        out.push(tr!(
+            "import-template-warn-footer",
+            count = r.footer_skip_lines
+        ));
+    }
+    // Sub-header lines are counted from the end of the main header: with a
+    // marker they follow it; without one they are lines of this file.
+    if r.main_until_marker.is_none() && !matches!(r.header, HeaderSkip::UntilMarker(_)) {
+        let roles = &r.subheader_roles;
+        let at = |from: usize| layout.main_header_lines + from;
+        for (name, range) in [
+            (tr!("column-long-name"), roles.long_name),
+            (tr!("column-units"), roles.unit),
+            (tr!("column-comments"), roles.comment),
+            (tr!("column-x-prime"), roles.x_prime),
+        ] {
+            if let Some(range) = range {
+                out.push(tr!(
+                    "import-template-warn-role-line",
+                    role = name,
+                    line = at(range.from)
+                ));
+            }
+        }
+    }
+    out
+}
+
 // -- Types ---------------------------------------------------------------------
 
 /// A condition the detector offers, with its sentence and whether it is kept.
@@ -194,6 +255,9 @@ pub struct SaveDraft {
     pub custom: Vec<Condition>,
     /// What the template sets, in plain sentences.
     pub rules: Vec<String>,
+    /// What the template fixes by a number of lines, which a file of another
+    /// length would not fit (shown in the warning style).
+    pub warnings: Vec<String>,
 }
 
 impl SaveDraft {
@@ -244,6 +308,9 @@ pub struct TemplateRow {
     /// The file shown is read with it.
     pub in_use: bool,
     pub conditions: Vec<ConditionRow>,
+    /// Kept from an older version with its conditions, but never applied by
+    /// itself until "Use Automatically" (F1 of #488).
+    pub not_automatic: bool,
 }
 
 /// An answer to a doubt, remembered for a kind of file (shown in "Manage
@@ -418,6 +485,7 @@ impl AppState {
                 .collect(),
             custom: Vec::new(),
             rules: template_rules(&state.recipe),
+            warnings: template_count_warnings(&state.recipe),
         });
     }
 
@@ -568,6 +636,19 @@ impl AppState {
             return;
         }
         if !state.store.set_conditions(name, conditions) {
+            return;
+        }
+        state.checks.generation += 1;
+        self.save_import_store();
+    }
+
+    /// "Use Automatically": the conditions an older template kept become
+    /// active, so a file that meets them is read with it.
+    pub fn template_use_automatically(&mut self, name: &str) {
+        let Some(state) = self.import_state.as_mut() else {
+            return;
+        };
+        if !state.store.set_automatic(name) {
             return;
         }
         state.checks.generation += 1;
@@ -732,6 +813,7 @@ impl AppState {
                 name: t.name.clone(),
                 rules: template_rules(t),
                 in_use: in_use.as_deref() == Some(t.name.as_str()),
+                not_automatic: state.store.is_old_not_automatic(&t.name),
                 conditions: state
                     .store
                     .conditions(&t.name)

@@ -1105,6 +1105,22 @@ fn advanced_fold(ui: &mut egui::Ui, state: &mut AppState) {
                             }
                             help_text(ui, tr!("import-advanced-skip-lines", "hint"));
                         }
+                        AdvancedSetting::SheetName => {
+                            let mut from_file = recipe.sheet_name_from_file;
+                            let options = [
+                                ChoiceOption::new(false, tr!("import-advanced-sheet-name-title")),
+                                ChoiceOption::new(true, tr!("import-advanced-sheet-name-file")),
+                            ];
+                            if form_choice(
+                                ui,
+                                "stokesforge_import_advanced_sheet_name",
+                                &mut from_file,
+                                &options,
+                            ) {
+                                changes.push(AdvancedChange::SheetNameFromFile(from_file));
+                            }
+                            help_text(ui, tr!("import-advanced-sheet-name", "hint"));
+                        }
                     });
                 }
             },

@@ -68,7 +68,7 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 ## I
 
-**Import Wizard**. The one-screen window that sets up the import of text files: it shows what was recognised and the file as a grid. See [The screen](../guide/import.md#the-screen).
+**Import**. The one-screen window that sets up the import of text files: it shows what was recognised and the file as a grid. See [The screen](../guide/import.md#the-screen).
 
 **Instrument response (IRF)**. The response of the instrument to a very short signal. Reconvolution and direct deconvolution use it. See [Reconvolution](../guide/analysis.md#reconvolution).
 
@@ -148,7 +148,7 @@ This page defines the terms you meet in StokesForge, in alphabetical order. Each
 
 **Theme**. A set of global colors of a graph, **Light** or **Dark**. See [The tabs](../guide/graphs.md#the-tabs).
 
-**To check** (import). What the Import Wizard is not sure of, listed as sentences. **Mark as Checked** accepts a point, **Check Now** goes through them. See [Points to check](../guide/import.md#points-to-check).
+**To check** (import). What the Import window is not sure of, listed as sentences. **Mark as Checked** accepts a point, **Check Now** goes through them. See [Points to check](../guide/import.md#points-to-check).
 
 **Transposed sheet**. A sheet created from the rows of another sheet, named like it with a `ᵀ` suffix, so that you can analyse the rows. See [Linked sheets](../guide/projects-and-workbooks.md#linked-sheets).
 

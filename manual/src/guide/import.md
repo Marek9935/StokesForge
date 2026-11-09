@@ -1,10 +1,10 @@
 # Importing data
 
-This page explains how to bring instrument files into a project. You open the **Import Wizard**, a single screen. StokesForge reads the file, tells you what it recognised, and shows the file as a grid. You only act where it is not sure, or where you want something different.
+This page explains how to bring instrument files into a project. You open the **Import** window, a single screen. StokesForge reads the file, tells you what it recognised, and shows the file as a grid. You only act where it is not sure, or where you want something different.
 
 You can import several files at once. You can also save your settings as a template and reuse it for every file from the same instrument.
 
-<img src="../images/import-overview.png" alt="The Import Wizard on a JASCO file: the file tab, what was recognised, the offer to save the settings, what was found at the left, and the file as a grid with its line numbers, roles and the data handles at the right." width="1000">
+<img src="../images/import-overview.png" alt="The Import window on a JASCO file: the file tab, what was recognised, the offer to save the settings, what was found at the left, and the file as a grid with its line numbers, roles and the data handles at the right." width="1000">
 
 ## What you can import
 
@@ -20,7 +20,7 @@ A few things to know:
 - A column that mixes numbers and text is **not** an error. StokesForge keeps it, with the type **Mixed**.
 - Project files (`.stf`) are never imported. If you drop one on the window, it opens as a project in a new window.
 
-## Open the Import Wizard
+## Open the Import window
 
 ### From the menu
 
@@ -81,7 +81,7 @@ You do not need a dialog to say what a line is. In the grid:
 - Drag the two **data handles** at the left of the grid to move the first and the last line of data.
 - The small **auto** tag beside an automatic choice takes the choice back. It never deletes it.
 
-<img src="../images/import-correction.png" alt="The Import Wizard on a kinetic file, with the correction window of the Data row open: First data line and Last data line." width="1000">
+<img src="../images/import-correction.png" alt="The Import window on a kinetic file, with the correction window of the Data row open: First data line and Last data line." width="1000">
 
 ### The first-use guide
 
@@ -91,7 +91,7 @@ Over the grid, a short guide explains the three gestures above: click a line num
 
 When StokesForge is not sure, it says so in an orange frame titled "n points to check". The doubt is a sentence, for example "Line 8 is x′ (the times)" or "All 5 curves are called Kinetic S13". The detector also raises its own doubts: text lines inside the data, several blocks of numbers in one file, a comma that may be a decimal, a JCAMP-DX table it cannot read fully, or two templates that fit the file equally. StokesForge never picks one of several blocks of numbers silently.
 
-<img src="../images/import-to-check.png" alt="The Import Wizard on a kinetic file: the orange frame '2 points to check' with a Mark as Checked button beside each sentence and the Check Now button, and the To check tags in the rows of What was found." width="1000">
+<img src="../images/import-to-check.png" alt="The Import window on a kinetic file: the orange frame '2 points to check' with a Mark as Checked button beside each sentence and the Check Now button, and the To check tags in the rows of What was found." width="1000">
 
 - **Click the sentence** (or the **To check** tag of a row): the file shows where it comes from. This settles nothing.
 - **Mark as Checked**: you looked, and you accept the point as it is. The recipe is not changed.
@@ -118,8 +118,9 @@ The rare settings are in the **Advanced** fold at the bottom of the left panel, 
 | **Missing values** | A comma-separated list of words read as empty cells, such as `--, n/a, *, NaN`. |
 | **Comment prefix** | Data lines that start with this text (`#`, `;`, `//`) are skipped. |
 | **Skip data lines** | Ignores this many lines at the start of the data. |
+| **Sheet name** | **Title from the file** (default): the sheet takes the title written in the file when it has one, and the name of the file otherwise. **File name**: the sheet always takes the name of the file, even when the file has a title. Saved with a template. |
 
-<img src="../images/import-advanced.png" alt="The Import Wizard on a plain two-column file, with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines." width="1000">
+<img src="../images/import-advanced.png" alt="The Import window on a plain two-column file, with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines." width="1000">
 
 A setting that is not at its default value also appears as a sentence under **Advanced settings in use**, above the fold, so nothing set there stays hidden.
 
@@ -166,9 +167,9 @@ The window proposes a **Name** (type your own) and shows **Used for files that**
 
 **Manage Templates…** (also in the offer) opens the **Import Templates** window. Pick a template to rename it, remove or add its conditions, read what it sets, or **Forget Template…** (after a confirmation; the files it recognised go back to **Auto**; you cannot undo it). Under **Answers remembered** you see the points already answered per kind of file, each with **Forget**.
 
-Templates saved with earlier versions are kept and listed here. Their old Auto-select criteria (extensions, name contains, file start contains) became conditions.
+Templates saved with earlier versions (before 1.1) are kept and listed here, but they are **no longer applied automatically**. Their old Auto-select criteria (extensions, name contains, file start contains) became conditions, and these conditions are not active: a file that fits them is read with what StokesForge detects in it, not with the old template. The reason is that those criteria were broad (for example "a `.csv` file that starts with `ORIGIN;JASCO`" fits every JASCO file) and an old template could silently misread a file of another shape, such as a kinetic whose x′ line it read as data. An old template shows **Not automatic** in this window. You can still choose it from the **Template:** menu. To let StokesForge use it by itself again, pick it and click **Use Automatically**: its conditions become active, and you can then edit them like those of any template. A template you save from the Import window is automatic.
 
-The command line (`stokesforge-cli import`) and the `pyst.import_file` scripts use the same templates and the same detector as the window. In the command line, a file that cannot be read is skipped and listed.
+The command line (`stokesforge-cli import`) and the `pyst.import_file` scripts use the same templates and the same detector as the window, and the same rule for old templates (a template you name with `--recipe` or `recipe=` is always used). In the command line, a file that cannot be read is skipped and listed.
 
 ## Import progress
 

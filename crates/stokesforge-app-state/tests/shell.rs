@@ -505,6 +505,14 @@ fn with_test_recipes() -> RecipeStoreIsolation {
         isolation.dir.path().join("import_recipes.json"),
     )
     .expect("copy of the test templates");
+    // These tests are about templates that apply by themselves: the fixture
+    // holds old-format templates, which load as "not automatic" (F1 of #488).
+    let mut store = RecipeStore::load();
+    let names: Vec<String> = store.recipes().iter().map(|r| r.name.clone()).collect();
+    for name in names {
+        store.set_automatic(&name);
+    }
+    store.save().expect("writes the isolated templates");
     isolation
 }
 
@@ -5056,7 +5064,9 @@ fn a_drop_with_a_template_saved_before_join_lines_joins_the_long_name() {
     };
     old.auto_match.extensions = vec!["csv".into()];
     let mut store = RecipeStore::default();
-    store.upsert(old);
+    // Saved with its conditions: automatic (an old-format one is not, F1 of #488).
+    let conditions = stokesforge_import::templates::conditions_from_auto_match(&old.auto_match);
+    store.upsert_with_conditions(old, conditions).unwrap();
     store.save().expect("writes the isolated template");
     let file = write_csv(dir.path(), "two_lines.csv", "Abs,Abs2\nlow,high\n1,2\n");
     state.dispatch(Action::DropFiles {
@@ -16488,6 +16498,10 @@ fn a_change_in_the_advanced_group_produces_its_sentence() {
             AdvancedChange::SkipLines(2),
             stokesforge_app_state::tr!("import-advanced-sentence-skip-lines", count = 2usize),
         ),
+        (
+            AdvancedChange::SheetNameFromFile(true),
+            stokesforge_app_state::tr!("import-advanced-sentence-sheet-name"),
+        ),
     ] {
         assert!(
             !state.import_advanced_sentences().contains(&expected),
@@ -16497,7 +16511,7 @@ fn a_change_in_the_advanced_group_produces_its_sentence() {
         let after = state.import_advanced_sentences();
         assert!(after.contains(&expected), "{expected} in {after:?}");
     }
-    assert!(state.import_advanced_sentences().len() >= before.len() + 6);
+    assert!(state.import_advanced_sentences().len() >= before.len() + 7);
     assert!(state.import_advanced().iter().all(|row| row.set));
 }
 
@@ -16557,7 +16571,8 @@ fn a_recipe_from_a_template_saved_before_join_lines_reads_the_joined_lines() {
         let mut old = ImportRecipe::new(name);
         old.subheader_roles.join_lines = false;
         old.auto_match.extensions = vec!["csv".into()];
-        store.upsert(old);
+        let conditions = stokesforge_import::templates::conditions_from_auto_match(&old.auto_match);
+        store.upsert_with_conditions(old, conditions).unwrap();
     }
     store.save().expect("writes the isolated templates");
     let (_session, mut state) = start_demo(dir.path());
@@ -16668,4 +16683,268 @@ fn answering_the_review_edits_the_recipe_and_settles_the_doubt_for_the_kind() {
         .remembered_answers()
         .iter()
         .any(|(_, id)| *id == "check-x-prime"));
+}
+
+// -- F1/F2 and rules instead of counts (#488) --------------------------------
+
+/// F1 of #488: templates of an old store are kept and listed as "not
+/// automatic"; a file their criteria fit does not use them until the user
+/// clicks "Use Automatically" (`template_use_automatically`).
+#[test]
+fn an_old_template_is_not_automatic_until_the_user_turns_it_on() {
+    let _recipes = isolate_recipe_store();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test/import/test_recipes.json"),
+        _recipes.path().join("import_recipes.json"),
+    )
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![fixture_path("jasco_uvvis_semicolon.csv")]);
+    assert_ne!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (semicolon)",
+        "an old template is not picked by itself"
+    );
+    let rows = state.template_rows();
+    let row = rows.iter().find(|r| r.name == "Jasco (semicolon)").unwrap();
+    assert!(row.not_automatic);
+    assert!(!row.conditions.is_empty(), "its conditions are kept");
+
+    state.template_use_automatically("Jasco (semicolon)");
+    assert!(!state
+        .template_rows()
+        .iter()
+        .any(|r| r.name == "Jasco (semicolon)" && r.not_automatic));
+    // Saved: a new window picks it for the same file.
+    state.cancel_import();
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![fixture_path("jasco_uvvis_semicolon.csv")]);
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (semicolon)"
+    );
+}
+
+const JASCO_LIKE_END: &str = "##### Extended Information\nnote\nmore\n";
+
+/// A JASCO-like file: `extra` more header lines before `XYDATA`, `rows` data
+/// lines, a blank line and a footer.
+fn jasco_text(extra: usize, rows: usize) -> String {
+    let mut text = String::from("TITLE;S13\nORIGIN;JASCO\nDATA TYPE;ULTRAVIOLET SPECTRUM\n");
+    for i in 0..extra {
+        text.push_str(&format!("EXTRA{i};x\n"));
+    }
+    text.push_str("XYDATA\n");
+    for i in 0..rows {
+        text.push_str(&format!("{};{},5\n", 800 - i, i));
+    }
+    text.push('\n');
+    text.push_str(JASCO_LIKE_END);
+    text
+}
+
+/// The hand-dragged end of the data is stored as the rule that stops there
+/// (a blank line, a footer line), never as the count of the file it was
+/// dragged on; one template then reads a longer file with a longer header
+/// completely, from the shared entry point and from a file drop.
+#[test]
+fn a_template_saved_on_one_jasco_like_file_reads_all_rows_of_a_longer_one() {
+    use stokesforge_app_state::state::GridCmd;
+    use stokesforge_import::templates::Condition;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let first = write_csv(dir.path(), "first.csv", &jasco_text(0, 4));
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![first]);
+    // Header 3 lines + XYDATA: data on lines 5..=8, then a blank line.
+    state.import_grid_cmd(GridCmd::Handle { first: 5, last: 8 });
+    let recipe = state.import_state().unwrap().recipe.clone();
+    assert_eq!(recipe.data_end, stokesforge_import::DataEnd::FirstBlankLine);
+    assert_eq!(recipe.main_until_marker.as_deref(), Some("XYDATA"));
+    // The end before a footer line with no blank line gives that line.
+    let tight = write_csv(
+        dir.path(),
+        "tight.csv",
+        "TITLE;S13\nORIGIN;JASCO\nXYDATA\n1;2\n2;3\n##### Extended Information\n",
+    );
+    state.cancel_import();
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![tight]);
+    state.import_grid_cmd(GridCmd::Handle { first: 4, last: 5 });
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        stokesforge_import::DataEnd::Marker("##### Extended Information".into())
+    );
+    state.cancel_import();
+
+    // One template, a second file with 6 more header lines and 40 rows.
+    let mut store = stokesforge_import::RecipeStore::load();
+    store
+        .upsert_with_conditions(
+            recipe,
+            vec![Condition::Extension {
+                exts: vec!["csv".into()],
+            }],
+        )
+        .unwrap();
+    store.save().unwrap();
+    let second_text = jasco_text(6, 40);
+    let second = write_csv(dir.path(), "second.csv", &second_text);
+    let store = stokesforge_import::RecipeStore::load();
+    let chosen =
+        stokesforge_import::recipe_for_file(&store, &second, second_text.as_bytes(), None).unwrap();
+    let table = stokesforge_import::parse(second_text.as_bytes(), &chosen.recipe).unwrap();
+    assert_eq!(table.row_count(), 40, "all rows of the longer file");
+
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::DropFiles {
+        paths: vec![second],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    let sheet = sheet_named(state.tree(), "S13");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(column_len(&state, columns[0].0), 40);
+}
+
+/// A hand-dragged end in the middle of the data (a number follows) keeps the
+/// count: no rule fits.
+#[test]
+fn a_hand_dragged_end_in_the_middle_of_the_data_keeps_the_count() {
+    use stokesforge_app_state::state::GridCmd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", "1,10\n2,20\n3,30\n4,40\n")],
+    );
+    state.import_grid_cmd(GridCmd::Handle { first: 1, last: 2 });
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        stokesforge_import::DataEnd::LinesAfterHeader(2)
+    );
+}
+
+/// A hand-moved start is anchored on the last line of the header when it is
+/// text, so a file with a longer header still starts at its data.
+#[test]
+fn a_hand_moved_start_is_anchored_on_the_header_line_before_it() {
+    use stokesforge_app_state::state::GridCmd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", "Title text\nnotes here\n1,10\n2,20\n3,30\n")],
+    );
+    assert_eq!(
+        state.import_state().unwrap().recipe.main_until_marker,
+        None,
+        "the detector found no marker: the anchor is the hand move's"
+    );
+    state.import_grid_cmd(GridCmd::Handle { first: 3, last: 5 });
+    let recipe = state.import_state().unwrap().recipe.clone();
+    assert_eq!(recipe.main_until_marker.as_deref(), Some("notes here"));
+    let longer = "Title\nextra 1\nextra 2\nextra 3\nnotes here\n1,10\n2,20\n3,30\n4,40\n5,50\n";
+    let table = stokesforge_import::parse(longer.as_bytes(), &recipe).unwrap();
+    assert_eq!(table.row_count(), 5);
+}
+
+/// Never silent: a template that fixes a number of lines says so in the
+/// Save as Template window; one made of rules says nothing.
+#[test]
+fn save_as_template_warns_about_a_fixed_number_of_lines() {
+    use stokesforge_app_state::state::GridCmd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", "1,10\n2,20\n3,30\n4,40\n")],
+    );
+    state.import_grid_cmd(GridCmd::Handle { first: 1, last: 2 });
+    state.template_save_open();
+    let warnings = state.template_save_draft().unwrap().warnings.clone();
+    assert_eq!(
+        warnings,
+        [stokesforge_app_state::tr!(
+            "import-template-warn-data-count",
+            count = 2usize
+        )]
+    );
+    assert!(warnings[0].contains('2'), "{}", warnings[0]);
+    state.template_save_cancel();
+    state.cancel_import();
+
+    // Rules (the marker, the blank line): nothing to warn about.
+    import_window_on(&mut state, dir.path(), &[("b.csv", &jasco_text(0, 4))]);
+    state.import_grid_cmd(GridCmd::Handle { first: 5, last: 8 });
+    state.template_save_open();
+    assert!(state.template_save_draft().unwrap().warnings.is_empty());
+}
+
+#[test]
+fn the_count_warnings_name_each_fixed_count() {
+    use stokesforge_app_state::state::template_count_warnings;
+    use stokesforge_import::{DataEnd, ImportRecipe};
+    let mut recipe = ImportRecipe::new("x");
+    assert!(template_count_warnings(&recipe).is_empty());
+    recipe.data_end = DataEnd::LinesBeforeEnd(3);
+    recipe.header_layout.main_header_lines = 5;
+    assert_eq!(template_count_warnings(&recipe).len(), 2);
+    recipe.main_until_marker = Some("XYDATA".into());
+    assert_eq!(template_count_warnings(&recipe).len(), 1);
+}
+
+/// Every setting that is a line number of the file warns; the same settings
+/// carried by a marker do not (the sub-header roles then count from it).
+#[test]
+fn the_count_warnings_cover_every_line_based_setting() {
+    use stokesforge_app_state::state::template_count_warnings;
+    use stokesforge_import::{ImportRecipe, SubheaderLineRange};
+    let mut recipe = ImportRecipe::new("x");
+    recipe.header_layout.main_header_lines = 3;
+    recipe.header_layout.subheader_lines = 2;
+    recipe.subheader_roles.long_name = Some(SubheaderLineRange::single(1));
+    recipe.subheader_roles.unit = Some(SubheaderLineRange::single(2));
+    recipe.subheader_roles.x_prime = Some(SubheaderLineRange::single(2));
+    recipe.skip_data_rows = 2;
+    recipe.footer_skip_lines = 4;
+    let by_line = template_count_warnings(&recipe);
+    // header count, skipped rows, footer, three roles
+    assert_eq!(by_line.len(), 6, "{by_line:?}");
+    assert!(by_line.iter().any(|w| w.contains("line 4")), "{by_line:?}");
+    recipe.main_until_marker = Some("XYDATA".into());
+    let by_rule = template_count_warnings(&recipe);
+    assert_eq!(
+        by_rule.len(),
+        2,
+        "only the skipped rows and the footer: {by_rule:?}"
+    );
+}
+
+/// Sub-header roles count from the marker, not from the top of the file: a
+/// longer header before the marker does not move the Long Name line.
+#[test]
+fn sub_header_roles_follow_the_marker_with_two_header_lengths() {
+    use stokesforge_import::{ImportRecipe, Separator, SubheaderLineRange};
+    let mut recipe = ImportRecipe::new("x");
+    recipe.separator = Separator::Comma;
+    recipe.main_until_marker = Some("XYDATA".into());
+    recipe.header_layout.subheader_lines = 1;
+    recipe.subheader_roles.long_name = Some(SubheaderLineRange::single(1));
+    for header in ["TITLE\nXYDATA\n", "TITLE\nA\nB\nC\nXYDATA\n"] {
+        let text = format!("{header}Absorbance,Time\n1,2\n3,4\n");
+        let table = stokesforge_import::parse(text.as_bytes(), &recipe).unwrap();
+        assert_eq!(table.row_count(), 2, "{header:?}");
+        assert_eq!(table.columns.len(), 2);
+    }
 }

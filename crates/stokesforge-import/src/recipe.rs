@@ -137,6 +137,11 @@ pub struct ImportRecipe {
     /// their surrounding square brackets (Avantes: `[nm]` gives `nm`).
     #[serde(default)]
     pub strip_unit_brackets: bool,
+    /// The worksheet takes the name of the file even when the file has a title
+    /// (F2 of #488). `false`: the title of the file when it has one (the
+    /// header key chosen in `name_source`), else the file name.
+    #[serde(default)]
+    pub sheet_name_from_file: bool,
 }
 
 /// The engine that reads a file.
@@ -579,6 +584,7 @@ impl ImportRecipe {
             format: FileFormat::Table,
             name_unit_slash: false,
             strip_unit_brackets: false,
+            sheet_name_from_file: false,
         }
     }
 }
@@ -700,6 +706,7 @@ mod tests {
             format: FileFormat::Jcamp,
             name_unit_slash: true,
             strip_unit_brackets: true,
+            sheet_name_from_file: true,
         };
         let json = serde_json::to_string(&recipe).unwrap();
         assert!(json.contains("MonthFirst"));

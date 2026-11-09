@@ -93,6 +93,9 @@ pub(crate) struct ImportRecipeRecord {
     pub(crate) name_unit_slash: bool,
     #[serde(default)]
     pub(crate) strip_unit_brackets: bool,
+    // F2 of #488: absent means the title of the file names the sheet.
+    #[serde(default)]
+    pub(crate) sheet_name_from_file: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -616,6 +619,7 @@ impl From<&r::ImportRecipe> for ImportRecipeRecord {
             format: (&value.format).into(),
             name_unit_slash: value.name_unit_slash,
             strip_unit_brackets: value.strip_unit_brackets,
+            sheet_name_from_file: value.sheet_name_from_file,
         }
     }
 }
@@ -656,6 +660,7 @@ impl From<ImportRecipeRecord> for r::ImportRecipe {
             format: value.format.into(),
             name_unit_slash: value.name_unit_slash,
             strip_unit_brackets: value.strip_unit_brackets,
+            sheet_name_from_file: value.sheet_name_from_file,
         }
     }
 }
@@ -677,6 +682,7 @@ mod tests {
             format: r::FileFormat::Jcamp,
             name_unit_slash: true,
             strip_unit_brackets: true,
+            sheet_name_from_file: true,
             ..r::ImportRecipe::new("detector")
         }
     }
@@ -706,6 +712,7 @@ mod tests {
             "format",
             "name_unit_slash",
             "strip_unit_brackets",
+            "sheet_name_from_file",
         ];
         let before = entries.len();
         entries.retain(|(k, _)| !new_keys.iter().any(|n| k.as_str() == Some(n)));
@@ -719,5 +726,6 @@ mod tests {
         assert!(!back.skip_text_rows);
         assert_eq!(back.format, r::FileFormat::Table);
         assert!(!back.name_unit_slash && !back.strip_unit_brackets);
+        assert!(!back.sheet_name_from_file);
     }
 }

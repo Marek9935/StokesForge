@@ -43,7 +43,7 @@ whose default value is a class:
   the default class of the nature, another class, or a **free size**
   (`InteractiveSize::Free`) that requires `// FREE-SIZE(#300): <justification>`
   in the twelve lines before it (15 characters at least). Free sizes
-  today: the analysis (1000 x 660), the import wizard (1000 x 620) and the
+  today: the analysis (1000 x 660), the import window (1000 x 620) and the
   `preferences_proto` bench (560 x 470, reference screenshots).
 - **Window without rich interaction** (choice, read-only, confirmation,
   save, alert: `PlainSize`): may take the **size of its

@@ -131,7 +131,7 @@ validated manually.
 
 "Import…" opens **one screen that creates** (`import_window`, module
 `src/app/import_wizard.rs`, the only entry point called by `app.rs`; window
-title "Import Wizard"), a **modal dialog of the common building block**
+title "Import window"), a **modal dialog of the common building block**
 (`modal_dialog_with`, `Draft`, free size 1320 x 840 shrunk to the screen). It
 replaced the six-step wizard (files, format, header and end of data, columns,
 metadata, destination): nothing of those steps is left, and there is no

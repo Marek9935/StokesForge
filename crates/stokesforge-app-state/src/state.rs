@@ -108,8 +108,8 @@ pub use import_grid::{
     Zone, FOLD_KEEP, FOLD_MIN, ROLE_CMDS, ZONES,
 };
 pub use import_template::{
-    automatic_conditions, condition_sentence, doubt_text, template_rules, AutoCondition,
-    ConditionRow, ManageState, Offer, RememberedAnswer, SaveDraft, TemplateRow,
+    automatic_conditions, condition_sentence, doubt_text, template_count_warnings, template_rules,
+    AutoCondition, ConditionRow, ManageState, Offer, RememberedAnswer, SaveDraft, TemplateRow,
 };
 pub use import_tocheck::{ShownFileStatus, ToCheckPoint, ToCheckSource};
 pub mod open_dialog;
@@ -7381,12 +7381,8 @@ impl AppState {
         };
         let name = recipe.name.clone();
         state.store.upsert(recipe.clone());
-        // The criteria an older template carried are its conditions now.
-        let conditions =
-            stokesforge_import::templates::conditions_from_auto_match(&recipe.auto_match);
-        if !conditions.is_empty() && state.store.conditions(&name).is_empty() {
-            state.store.set_conditions(&name, conditions);
-        }
+        // The criteria an older template carried are kept as conditions, not automatic.
+        state.store.adopt_old_criteria(&name);
         let saved = state.store.save();
         state.recipe = recipe;
         match saved {

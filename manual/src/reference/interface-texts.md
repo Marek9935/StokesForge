@@ -82,7 +82,6 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Import | Importer |
 | Import Template | Importer un modèle |
 | Import Templates | Modèles d’import |
-| Import Wizard | Assistant d'import |
 | Import… | Importer… |
 | Insert Object | Insérer un objet |
 | Integrate | Intégrer |
@@ -183,6 +182,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Text format | Format du texte |
 | Theme | Thème |
 | Theme… | Thème… |
+| Title from the file | Titre du fichier |
 | Tools | Outils |
 | Top | Haut |
 | Top Mirror Axis | Axe miroir du haut |

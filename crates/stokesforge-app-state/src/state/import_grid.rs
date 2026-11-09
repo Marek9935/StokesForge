@@ -550,6 +550,68 @@ pub fn assign_role(
     note
 }
 
+// -- Rules rather than counts (#488) --------------------------------------------
+
+/// Does file line `line` (0-based) of the map start with a number?
+fn starts_with_number(map: &FileMap, recipe: &ImportRecipe, line: usize) -> bool {
+    map.tokens(line, recipe)
+        .first()
+        .is_some_and(|token| map.token_number(0, token.trim(), recipe).is_some())
+}
+
+/// What a hand-chosen last data line (1-based) means for a file that is not this
+/// one: the **rule** that stops there when the file offers one, else the count.
+/// A blank line after it gives "first blank line", a non-numeric line after it
+/// gives that line as the marker, nothing after it gives "to the end of the
+/// file"; a number after it (the cut is in the middle of the data) keeps the
+/// count `n`. A rule is used only if it would not cut earlier, inside the data.
+pub(crate) fn data_end_rule(
+    map: &FileMap,
+    recipe: &ImportRecipe,
+    data_start: usize,
+    last: usize,
+    n: usize,
+) -> DataEnd {
+    let inside = (data_start.saturating_sub(1))..last.min(map.line_count());
+    let after = last; // 0-based index of the line after `last`
+    if after >= map.end {
+        return DataEnd::None;
+    }
+    let text = map.line(after).trim();
+    if text.is_empty() {
+        if inside.clone().all(|i| !map.line(i).trim().is_empty()) {
+            return DataEnd::FirstBlankLine;
+        }
+    } else if !starts_with_number(map, recipe, after)
+        && inside
+            .clone()
+            .all(|i| !map.line(i).trim().eq_ignore_ascii_case(text))
+    {
+        return DataEnd::Marker(text.to_string());
+    }
+    DataEnd::LinesAfterHeader(n)
+}
+
+/// After the header was moved by hand: the main header then ends on a line
+/// that reads the same in another file, so the recipe looks for that line
+/// (the marker) instead of counting lines. Only when that line is text, is
+/// the first of its kind in the file, and no marker is set yet.
+pub(crate) fn anchor_header_marker(recipe: &mut ImportRecipe, map: &FileMap) {
+    let main = recipe.header_layout.main_header_lines;
+    if main == 0 || recipe.main_until_marker.is_some() {
+        return;
+    }
+    let last_main = map.first + main - 1;
+    let text = map.line(last_main).trim();
+    if text.is_empty()
+        || starts_with_number(map, recipe, last_main)
+        || (map.first..last_main).any(|i| map.line(i).trim().eq_ignore_ascii_case(text))
+    {
+        return;
+    }
+    recipe.main_until_marker = Some(text.to_string());
+}
+
 // -- Commands of the grid ------------------------------------------------------
 
 /// What the grid asks of the recipe.
@@ -659,6 +721,12 @@ impl AppState {
         let set: BTreeSet<usize> = lines.iter().copied().collect();
         let is_data = |n: usize| map.roles.get(n.wrapping_sub(1)) == Some(&LineRole::Data);
         let note = assign_role(&mut view, &mut recipe.data_end, role, &set, &is_data);
+        if role == LineRoleCmd::DataEnd {
+            if let DataEnd::LinesAfterHeader(n) = recipe.data_end {
+                recipe.data_end =
+                    data_end_rule(map, recipe, view.data_start, view.data_start + n - 1, n);
+            }
+        }
         if role == LineRoleCmd::DataStart {
             // The start moves, the end stays where it was.
             if let (DataEnd::LinesAfterHeader(n), Some(mark)) =
@@ -669,6 +737,7 @@ impl AppState {
         }
         if view != before {
             Self::store_view(import, &view);
+            anchor_header_marker(&mut import.recipe, map);
         }
         note
     }
@@ -676,6 +745,12 @@ impl AppState {
     /// Moves the data boundaries to file lines `first_line..=last_line` (1-based).
     pub fn import_apply_handle(&mut self, first_line: usize, last_line: usize) {
         let Some(first) = self.grid_first_line() else {
+            return;
+        };
+        let Some(map) = self.import_file_map() else {
+            return;
+        };
+        let Ok(map) = &*map else {
             return;
         };
         let Some(import) = self.import_state.as_mut() else {
@@ -686,11 +761,12 @@ impl AppState {
         let mut view = lines_view(recipe, first, import.names_unwired);
         let before = view;
         view.data_start = first_line;
-        recipe.data_end =
-            DataEnd::LinesAfterHeader((last_line + 1).saturating_sub(first_line).max(1));
+        let count = (last_line + 1).saturating_sub(first_line).max(1);
+        recipe.data_end = data_end_rule(map, recipe, first_line, last_line, count);
         if view != before {
             Self::store_view(import, &view);
         }
+        anchor_header_marker(&mut import.recipe, map);
     }
 
     /// Writes a changed view back to the recipe and remembers a names line

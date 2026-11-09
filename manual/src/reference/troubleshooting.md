@@ -91,15 +91,15 @@ For the full list of import problems, see [Common problems](../guide/import.md#c
 
 **Cause.** The file writes `1,5` and the **Decimal separator** is read as a dot.
 
-**What to do.** Click the **Decimal separator** at the left of the Import Wizard and choose the comma. In a cell that you type yourself, a decimal comma is accepted: the status bar says `"1,5" was read as 1.5 (decimal comma)`.
+**What to do.** Click the **Decimal separator** at the left of the Import window and choose the comma. In a cell that you type yourself, a decimal comma is accepted: the status bar says `"1,5" was read as 1.5 (decimal comma)`.
 
 ### The column names are the first row of data, or the units are missing
 
-**Cause.** The Import Wizard does not know that the first line is a header.
+**Cause.** The Import window does not know that the first line is a header.
 
-**What to do.** In the Import Wizard, click the line number of the names line and give it the role **Long Name**, then the units line the role **Units**. See [Give a line a role](../guide/import.md#give-a-line-a-role).
+**What to do.** In the Import window, click the line number of the names line and give it the role **Long Name**, then the units line the role **Units**. See [Give a line a role](../guide/import.md#give-a-line-a-role).
 
-### Messages of the Import Wizard
+### Messages of the Import window
 
 | Message | What it means and what to do |
 |---|---|

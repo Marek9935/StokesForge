@@ -194,7 +194,7 @@ pub fn dimmed_text(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).weak()
 }
 
-/// **The** section title of a form (graph properties, import wizard…):
+/// **The** section title of a form (graph properties, import window…):
 /// a space, then the label at the [`section_heading`] level. The
 /// title is enough to separate the groups: never a `ui.separator()` right before
 /// (`no_separator_before_a_section_title`), never a lone rule between
@@ -325,20 +325,20 @@ pub fn import_color(dark: bool, which: ImportColor) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-/// Import Wizard (#488): what was found with certainty (the « All checked »
+/// Import window (#488): what was found with certainty (the « All checked »
 /// card, the check of a sure row). Green, like the Units role, readable on
 /// both themes.
 pub fn import_sure_color(dark: bool) -> Color32 {
     import_color(dark, ImportColor::Units)
 }
 
-/// Import Wizard (#488): the light fill of the « points to check » block, under
+/// Import window (#488): the light fill of the « points to check » block, under
 /// the [`warning_color`] border.
 pub fn import_warning_fill(dark: bool) -> Color32 {
     warning_color(dark).gamma_multiply(if dark { 0.16 } else { 0.10 })
 }
 
-/// Import Wizard (#488): the focus of the left panel on the grid (the line
+/// Import window (#488): the focus of the left panel on the grid (the line
 /// or the cell a sentence comes from): a see-through tint of the accent.
 pub fn import_focus_fill() -> Color32 {
     accent().gamma_multiply(0.20)

@@ -129,7 +129,7 @@ action-import = Importer…
 action-refresh-from-source = Actualiser depuis la source
     .hint = Relit les fichiers source des colonnes de la feuille active
 action-reopen-last-import = Rouvrir le dernier import…
-    .hint = Rouvre l'assistant d'import avec les derniers fichiers et le dernier modèle
+    .hint = Rouvre la fenêtre d'import avec les derniers fichiers et le dernier modèle
 action-open = Ouvrir…
 action-save = Enregistrer
 action-save-as = Enregistrer sous…
@@ -388,10 +388,10 @@ status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
 status-language-not-saved = Impossible d'enregistrer le choix de la langue : { $detail }
 
-## Assistant d'import (#44)
+## Fenêtre d'import (#44)
 ## Les noms de modèles et le contenu des fichiers sont des données : jamais traduits.
 
-import-window-title = Assistant d'import
+import-window-title = Importer
 import-button-finish = Terminer
     .hint = Importe avec les réglages actuels (Entrée)
 
@@ -2503,6 +2503,36 @@ import-template-save-unchecked =
     }
 import-template-save-sets = Ce qu’il règle
 import-template-save-title = Enregistrer comme modèle
+import-template-warn-data-count =
+    { $count ->
+        [one] Données : seule la première ligne est lue. Un fichier plus long sera coupé.
+       *[other] Données : seules les { $count } premières lignes sont lues. Un fichier plus long sera coupé.
+    }
+import-template-warn-data-tail =
+    { $count ->
+        [one] Données : la dernière ligne de chaque fichier est ignorée. Dans un fichier à la fin plus longue, une partie sera lue comme des données.
+       *[other] Données : les { $count } dernières lignes de chaque fichier sont ignorées. Dans un fichier à la fin plus longue, une partie sera lue comme des données.
+    }
+import-template-warn-header =
+    { $count ->
+        [one] En-tête : toujours 1 ligne. Un fichier à l’en-tête plus long sera mal lu.
+       *[other] En-tête : toujours { $count } lignes. Un fichier à l’en-tête plus long sera mal lu.
+    }
+import-template-warn-skip-rows =
+    { $count ->
+        [one] Données : la première ligne est toujours ignorée. Si les données commencent ailleurs dans un autre fichier, il sera mal lu.
+       *[other] Données : les { $count } premières lignes sont toujours ignorées. Si les données commencent ailleurs dans un autre fichier, il sera mal lu.
+    }
+import-template-warn-footer =
+    { $count ->
+        [one] Fin de fichier : la dernière ligne de chaque fichier est ignorée. Dans un fichier à la fin plus longue, une partie sera lue comme des données.
+       *[other] Fin de fichier : les { $count } dernières lignes de chaque fichier sont ignorées. Dans un fichier à la fin plus longue, une partie sera lue comme des données.
+    }
+import-template-warn-role-line = { $role } : ligne { $line } du fichier. Si l’en-tête change de longueur, cette ligne se déplace.
+import-template-not-automatic = Pas automatique
+import-template-not-automatic-note = Conservé d'une version précédente. Ce modèle n'est jamais appliqué de lui-même ; ses conditions ci-dessous ne sont pas actives. Vous pouvez toujours le choisir dans le menu Modèle.
+import-template-use-automatically = Utiliser automatiquement
+    .hint = Active les conditions ci-dessous : un fichier qui les remplit est lu avec ce modèle
 import-template-save-used = Utilisé pour les fichiers qui
 import-status-check = 
     { $count ->
@@ -2570,7 +2600,7 @@ import-condition-start = commencent par le texte { $text }
 import-guide-show = Afficher le guide
     .hint = Affiche de nouveau le court guide de cette fenêtre
 import-advanced-title = Avancé
-    .hint = Les réglages rares : ordre des dates, caractères à retirer, blocs, valeurs manquantes, lignes de commentaire, lignes ignorées
+    .hint = Les réglages rares : ordre des dates, caractères à retirer, blocs, valeurs manquantes, lignes de commentaire, lignes ignorées, nom de la feuille
 import-advanced-set-title = Réglages avancés utilisés
 import-advanced-date-order = Ordre des dates
 import-advanced-date-day-first = Jour, puis mois
@@ -2588,6 +2618,11 @@ import-advanced-comment-prefix = Préfixe de commentaire
     .hint = Les lignes de données qui commencent par ce texte sont ignorées (#, ;, //…)
 import-advanced-skip-lines = Ignorer des lignes de données
     .hint = Ignorées au début des données
+import-advanced-sheet-name = Nom de la feuille
+    .hint = Ce qui nomme la feuille : le titre du fichier s'il en a un, ou toujours le nom du fichier
+import-advanced-sheet-name-title = Titre du fichier
+import-advanced-sheet-name-file = Nom du fichier
+import-advanced-sentence-sheet-name = La feuille porte le nom du fichier, même quand le fichier a un titre.
 import-advanced-sentence-date-month-first = Les dates sont lues mois en premier : 03/04 est le 4 mars.
 import-advanced-sentence-skip-chars = { $count } caractères sont retirés au début de chaque ligne de données.
 import-advanced-sentence-blocks-line = Un nouveau bloc commence à chaque ligne qui débute par { $text }.

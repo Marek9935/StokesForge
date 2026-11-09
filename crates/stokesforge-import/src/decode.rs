@@ -148,7 +148,7 @@ pub fn decode_with(
 }
 
 /// Name of the encoding [`decode_text`] would pick for `bytes`, to show it in
-/// the import wizard; `None` for a binary file.
+/// the import window; `None` for a binary file.
 pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
     decode_text(bytes).ok()?;
     Some(if bytes.starts_with(&[0xFF, 0xFE]) {

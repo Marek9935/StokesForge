@@ -420,6 +420,11 @@ pub(crate) struct TemplateExtras {
     /// Doubt ids the user answered, per kind of file.
     #[serde(default)]
     pub(crate) remembered: BTreeMap<String, BTreeSet<String>>,
+    /// Templates kept with their conditions but never chosen by themselves
+    /// (F1 of #488): those migrated from the criteria of an older version. The
+    /// user turns one on from Manage Templates. An older file has none.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) not_automatic: BTreeSet<String>,
 }
 
 impl RecipeStore {
@@ -429,6 +434,40 @@ impl RecipeStore {
             .conditions
             .get(name)
             .map_or(&[][..], Vec::as_slice)
+    }
+
+    /// Is the template chosen by itself when a file meets its conditions? No
+    /// for one without conditions and for an old one the user has not turned
+    /// on ([`Self::set_automatic`]).
+    pub fn is_automatic(&self, name: &str) -> bool {
+        !self.conditions(name).is_empty() && !self.extras.not_automatic.contains(name)
+    }
+
+    /// Is the template one an older version left, kept but not automatic?
+    pub fn is_old_not_automatic(&self, name: &str) -> bool {
+        self.extras.not_automatic.contains(name) && !self.conditions(name).is_empty()
+    }
+
+    /// Makes the conditions of a kept old template active. `false` if there
+    /// was nothing to turn on.
+    pub fn set_automatic(&mut self, name: &str) -> bool {
+        self.extras.not_automatic.remove(name)
+    }
+
+    /// Gives a template the criteria an older version carried, as conditions
+    /// that are kept but not automatic. Does nothing if it has conditions.
+    pub fn adopt_old_criteria(&mut self, name: &str) {
+        let Some(recipe) = self.recipes.iter().find(|r| r.name == name) else {
+            return;
+        };
+        if !self.conditions(name).is_empty() {
+            return;
+        }
+        let conditions = conditions_from_auto_match(&recipe.auto_match);
+        if !conditions.is_empty() {
+            self.extras.conditions.insert(name.to_string(), conditions);
+            self.extras.not_automatic.insert(name.to_string());
+        }
     }
 
     /// Saves the template with its conditions (same name: replaced). Refused
@@ -445,6 +484,7 @@ impl RecipeStore {
         if conditions.is_empty() {
             return Err(SaveIssue::NoCondition);
         }
+        self.extras.not_automatic.remove(&recipe.name);
         self.extras
             .conditions
             .insert(recipe.name.clone(), conditions);
@@ -461,6 +501,7 @@ impl RecipeStore {
         let conditions: Vec<Condition> = conditions.into_iter().filter(|c| !c.is_empty()).collect();
         if conditions.is_empty() {
             self.extras.conditions.remove(name);
+            self.extras.not_automatic.remove(name);
         } else {
             self.extras.conditions.insert(name.to_string(), conditions);
         }
@@ -480,32 +521,33 @@ impl RecipeStore {
         if let Some(conditions) = self.extras.conditions.remove(from) {
             self.extras.conditions.insert(to.to_string(), conditions);
         }
+        if self.extras.not_automatic.remove(from) {
+            self.extras.not_automatic.insert(to.to_string());
+        }
         true
     }
 
     /// Gives the old `auto_match` criteria of every template without
-    /// conditions as conditions (called when the store is read from disk).
+    /// conditions as conditions, kept but not automatic (F1 of #488: an old
+    /// criterion such as ".csv + ORIGIN;JASCO" fits files the template
+    /// misreads). Called when the store is read from disk.
     pub(crate) fn adopt_auto_match(&mut self) {
-        for recipe in &self.recipes {
-            if self.extras.conditions.contains_key(&recipe.name) {
-                continue;
-            }
-            let conditions = conditions_from_auto_match(&recipe.auto_match);
-            if !conditions.is_empty() {
-                self.extras
-                    .conditions
-                    .insert(recipe.name.clone(), conditions);
-            }
+        let names: Vec<String> = self.recipes.iter().map(|r| r.name.clone()).collect();
+        for name in names {
+            self.adopt_old_criteria(&name);
         }
     }
 
     /// The template the file meets the most conditions of. A template with no
-    /// condition is never chosen.
+    /// condition, or kept but not automatic, is never chosen.
     pub fn matching(&self, facts: &FileFacts) -> Option<TemplateMatch<'_>> {
         let mut best: Vec<(&ImportRecipe, usize)> = Vec::new();
         for recipe in &self.recipes {
             let conditions = self.conditions(&recipe.name);
-            if conditions.is_empty() || !conditions.iter().all(|c| c.holds(facts)) {
+            if conditions.is_empty()
+                || self.extras.not_automatic.contains(&recipe.name)
+                || !conditions.iter().all(|c| c.holds(facts))
+            {
                 continue;
             }
             let met = conditions.len();
@@ -913,8 +955,10 @@ mod tests {
         assert!(store.recipes().is_empty());
     }
 
+    /// F1 of #488: the criteria of an older template are kept as conditions
+    /// but never applied by themselves until the user turns them on.
     #[test]
-    fn an_old_store_turns_its_auto_match_into_conditions() {
+    fn an_old_store_keeps_its_auto_match_as_conditions_that_are_not_automatic() {
         let mut recipe = ImportRecipe::new("Old");
         recipe.auto_match = AutoMatch {
             extensions: vec!["csv".into()],
@@ -923,15 +967,74 @@ mod tests {
         };
         // The JSON of a store written before the conditions: only `recipes`.
         let json = serde_json::json!({ "recipes": [recipe] }).to_string();
-        let store = RecipeStore::from_json(&json).unwrap();
+        let mut store = RecipeStore::from_json(&json).unwrap();
         assert_eq!(store.conditions("Old").len(), 3);
+        assert!(store.is_old_not_automatic("Old"));
+        assert!(!store.is_automatic("Old"));
         let (path, bytes) = fixture("jasco_uvvis_semicolon.csv");
         let facts = FileFacts::new(&path, &bytes, None);
+        // The file fits every criterion, yet the old template is not chosen.
+        assert!(store.conditions("Old").iter().all(|c| c.holds(&facts)));
+        assert!(store.matching(&facts).is_none());
+        // It stays so after a save and a reload.
+        let reloaded = RecipeStore::from_json(&serde_json::to_string(&store).unwrap()).unwrap();
+        assert!(reloaded.matching(&facts).is_none());
+        // Turned on, it is chosen; and only the fitting file.
+        assert!(store.set_automatic("Old"));
+        assert!(store.is_automatic("Old"));
         assert_eq!(store.matching(&facts).unwrap().recipe.name, "Old");
         let (path, bytes) = fixture("jasco_fluo_tab.txt");
         assert!(store
             .matching(&FileFacts::new(&path, &bytes, None))
             .is_none());
+        // Turned on, it stays on after a save and a reload.
+        let reloaded = RecipeStore::from_json(&serde_json::to_string(&store).unwrap()).unwrap();
+        assert!(reloaded.is_automatic("Old"));
+    }
+
+    /// F1 of #488 on the entry point of the command line and `pyst.import_file`:
+    /// an old template is not picked for a file its criteria fit, a named one
+    /// is still used, and one turned on is picked.
+    #[test]
+    fn the_shared_entry_point_ignores_an_old_template_unless_named_or_turned_on() {
+        let mut recipe = ImportRecipe::new("Old");
+        recipe.auto_match.extensions = vec!["csv".into()];
+        recipe.auto_match.content_contains = "ORIGIN;JASCO".into();
+        let json = serde_json::json!({ "recipes": [recipe] }).to_string();
+        let mut store = RecipeStore::from_json(&json).unwrap();
+        let (path, bytes) = fixture("jasco_uvvis_semicolon.csv");
+        let by_default = recipe_for_file(&store, &path, &bytes, None).unwrap();
+        assert_eq!(by_default.origin, RecipeOrigin::Detected);
+        let named = recipe_for_file(&store, &path, &bytes, Some("Old")).unwrap();
+        assert_eq!(named.origin, RecipeOrigin::Named("Old".into()));
+        store.set_automatic("Old");
+        let on = recipe_for_file(&store, &path, &bytes, None).unwrap();
+        assert!(matches!(on.origin, RecipeOrigin::Matched { .. }));
+    }
+
+    #[test]
+    fn a_template_saved_with_conditions_stays_automatic() {
+        let mut store = RecipeStore::default();
+        store
+            .upsert_with_conditions(ImportRecipe::new("New"), vec![cols(2)])
+            .unwrap();
+        assert!(store.is_automatic("New"));
+        assert!(!store.is_old_not_automatic("New"));
+        assert!(store.matching(&facts("a.csv", Some(2))).is_some());
+        let json = serde_json::to_string(&store).unwrap();
+        assert!(!json.contains("not_automatic"));
+    }
+
+    /// Saving over an old template replaces its criteria: it is automatic.
+    #[test]
+    fn saving_over_an_old_template_makes_it_automatic() {
+        let mut old = ImportRecipe::new("Old");
+        old.auto_match.extensions = vec!["csv".into()];
+        let json = serde_json::json!({ "recipes": [old.clone()] }).to_string();
+        let mut store = RecipeStore::from_json(&json).unwrap();
+        assert!(store.is_old_not_automatic("Old"));
+        store.upsert_with_conditions(old, vec![cols(2)]).unwrap();
+        assert!(store.is_automatic("Old"));
     }
 
     #[test]

@@ -106,7 +106,7 @@ pub enum Icon {
     Redo,
     /// The handle of a row that is reordered by dragging.
     Grip,
-    /// A check mark: what is sure (Import Wizard, #488).
+    /// A check mark: what is sure (Import window, #488).
     Check,
 }
 

@@ -82,6 +82,17 @@ fn save_window(ctx: &egui::Context, state: &mut AppState) {
                         );
                     });
                 }
+                for warning in &draft.warnings {
+                    rows.field(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(warning.clone())
+                                    .color(theme::warning_color(ui.visuals().dark_mode)),
+                            )
+                            .wrap(),
+                        );
+                    });
+                }
                 rows.section(tr!("import-template-save-used"));
                 for automatic in &mut draft.automatic {
                     rows.checkbox(&mut automatic.on, automatic.sentence.clone(), None);
@@ -130,6 +141,7 @@ fn manage_window(ctx: &egui::Context, state: &mut AppState) {
     let mut rename = manage.rename.clone();
     let mut commit_rename = false;
     let mut forget = false;
+    let mut use_automatically = false;
     let mut forget_answer: Option<(String, String)> = None;
     let outcome = modal_live_settings(
         ctx,
@@ -206,6 +218,29 @@ fn manage_window(ctx: &egui::Context, state: &mut AppState) {
                                             commit_rename = true;
                                         }
                                     });
+                                    if current.not_automatic {
+                                        f.section(tr!("import-template-not-automatic"));
+                                        f.field(|ui| {
+                                            ui.add(
+                                                egui::Label::new(theme::secondary_text(tr!(
+                                                    "import-template-not-automatic-note"
+                                                )))
+                                                .wrap(),
+                                            );
+                                        });
+                                        f.field(|ui| {
+                                            if ui
+                                                .button(tr!("import-template-use-automatically"))
+                                                .on_hover_text(tr!(
+                                                    "import-template-use-automatically",
+                                                    "hint"
+                                                ))
+                                                .clicked()
+                                            {
+                                                use_automatically = true;
+                                            }
+                                        });
+                                    }
                                     f.section(tr!("import-template-save-used"));
                                     let mut conditions: Vec<Condition> = current
                                         .conditions
@@ -269,6 +304,9 @@ fn manage_window(ctx: &egui::Context, state: &mut AppState) {
         }
         if let Some(conditions) = new_conditions {
             state.template_set_conditions(&current, conditions);
+        }
+        if use_automatically {
+            state.template_use_automatically(&current);
         }
         if forget {
             state.template_forget_ask(&current);

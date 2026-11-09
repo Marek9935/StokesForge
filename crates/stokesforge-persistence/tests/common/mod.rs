@@ -446,5 +446,6 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
         format: FileFormat::Jcamp,
         name_unit_slash: true,
         strip_unit_brackets: true,
+        sheet_name_from_file: true,
     }
 }

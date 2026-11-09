@@ -129,7 +129,7 @@ action-import = Import…
 action-refresh-from-source = Refresh from Source
     .hint = Re-reads the source files of the active sheet's columns
 action-reopen-last-import = Reopen Last Import…
-    .hint = Reopens the Import Wizard with the last files and template
+    .hint = Reopens the Import window with the last files and template
 action-open = Open…
 action-save = Save
 action-save-as = Save As…
@@ -386,11 +386,11 @@ status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }
 
-## Assistant d'import (#44)
-## Texts of the Import Wizard: the one-screen import, templates, points to check.
+## Import window (#44)
+## Texts of the Import window: the one-screen import, templates, points to check.
 ## Template names and file contents are data and are never translated.
 
-import-window-title = Import Wizard
+import-window-title = Import
 import-button-finish = Finish
     .hint = Imports with the current settings (Enter)
 
@@ -2505,6 +2505,36 @@ import-template-save-unchecked =
 import-template-save-sets = What it sets
 import-template-save-title = Save as Template
 import-template-save-used = Used for files that
+import-template-warn-data-count =
+    { $count ->
+        [one] Data: only the first line is read. A longer file will be cut.
+       *[other] Data: only the first { $count } lines are read. A longer file will be cut.
+    }
+import-template-warn-data-tail =
+    { $count ->
+        [one] Data: the last line of each file is left out. A file with a longer footer will read some of it as data.
+       *[other] Data: the last { $count } lines of each file are left out. A file with a longer footer will read some of it as data.
+    }
+import-template-warn-header =
+    { $count ->
+        [one] Header: always 1 line. A file with a longer header will be misread.
+       *[other] Header: always { $count } lines. A file with a longer header will be misread.
+    }
+import-template-warn-skip-rows =
+    { $count ->
+        [one] Data: the first line is always skipped. If the data start elsewhere in another file, it will be misread.
+       *[other] Data: the first { $count } lines are always skipped. If the data start elsewhere in another file, it will be misread.
+    }
+import-template-warn-footer =
+    { $count ->
+        [one] Footer: the last line of each file is left out. A file with a longer footer will read some of it as data.
+       *[other] Footer: the last { $count } lines of each file are left out. A file with a longer footer will read some of it as data.
+    }
+import-template-warn-role-line = { $role }: line { $line } of the file. If the header changes length, this line moves.
+import-template-not-automatic = Not automatic
+import-template-not-automatic-note = Kept from an earlier version. This template is never applied by itself; its conditions below are not active. You can still choose it from the Template menu.
+import-template-use-automatically = Use Automatically
+    .hint = Makes the conditions below active: a file that meets them is read with this template
 import-status-check = 
     { $count ->
         [one] 1 point to check
@@ -2571,7 +2601,7 @@ import-condition-start = start with the text { $text }
 import-guide-show = Show Guide
     .hint = Shows the short guide of this window again
 import-advanced-title = Advanced
-    .hint = The rare settings: date order, characters to remove, blocks, missing values, comment lines, skipped lines
+    .hint = The rare settings: date order, characters to remove, blocks, missing values, comment lines, skipped lines, sheet name
 import-advanced-set-title = Advanced settings in use
 import-advanced-date-order = Date order
 import-advanced-date-day-first = Day, then month
@@ -2589,6 +2619,11 @@ import-advanced-comment-prefix = Comment prefix
     .hint = Data lines starting with it are skipped (#, ;, //…)
 import-advanced-skip-lines = Skip data lines
     .hint = Ignored at the start of the data
+import-advanced-sheet-name = Sheet name
+    .hint = What names the sheet: the title of the file when it has one, or always the name of the file
+import-advanced-sheet-name-title = Title from the file
+import-advanced-sheet-name-file = File name
+import-advanced-sentence-sheet-name = The sheet is named after the file, even when the file has a title.
 import-advanced-sentence-date-month-first = Dates are read month first: 03/04 is March 4.
 import-advanced-sentence-skip-chars = { $count } characters are removed at the start of every data line.
 import-advanced-sentence-blocks-line = A new block starts at each line beginning with { $text }.

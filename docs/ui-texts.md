@@ -136,7 +136,9 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 <!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
-| Import Wizard | Assistant d'import | Title of the one-screen window that sets up the import (#488: file tabs, left panel, file grid; no steps) | Importateur | O |
+| Import (window) | Importer | Title of the one-screen window that sets up the import (#488: file tabs, left panel, file grid; no steps). Was « Import Wizard » / « Assistant d'import ». In sentences: « the Import window » / « la fenêtre d'import » | Import Wizard, Assistant d'import, Importateur | O |
+| Not automatic / Use Automatically | Pas automatique / Utiliser automatiquement | An import template kept from an older version with its conditions, never applied by itself; the button in Manage Templates makes the conditions active (F1 of #488) | Disabled, Enable | O |
+| Sheet name (import) | Nom de la feuille | Advanced setting of the import: the sheet takes **Title from the file** (« Titre du fichier ») when the file has one, or always the **File name** (« Nom du fichier ») (F2 of #488) | Worksheet name | O |
 | Delimiter | Séparateur | Character that separates the values of a line | Délimiteur | O |
 | Decimal separator | Séparateur décimal | Character between the integer and decimal parts | Virgule (pour le nom) | O |
 | Thousands separator | Séparateur de milliers | Character that groups digits | Milliers | O |

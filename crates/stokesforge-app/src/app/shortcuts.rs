@@ -182,7 +182,7 @@ pub(super) const SHORTCUT_NEW_PROJECT: egui::KeyboardShortcut =
 /// when the active tab is not a graph.
 pub(super) const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
-/// Ctrl+" — open the import wizard. On an AZERTY keyboard, `"` is the digit 3
+/// Ctrl+" — open the import window. On an AZERTY keyboard, `"` is the digit 3
 /// key **without** Shift: egui has no `"` key and falls back to the physical
 /// key, so the shortcut is consumed as Ctrl+3. On a QWERTY keyboard, `"` is
 /// Shift+apostrophe ([`SHORTCUT_IMPORT_QWERTY`]).

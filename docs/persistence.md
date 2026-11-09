@@ -230,7 +230,7 @@ Comments ranges of several sub-header lines are joined with a space. **Absent
 means false, the reading from before: the first line of the range only**, so a
 stored range `1` to `2` keeps its meaning in an older file and `FORMAT_VERSION`
 stays 1 (changing the meaning of the range would have raised it). Refresh from
-Source keeps the stored value; a recipe opened in the import wizard is switched
+Source keeps the stored value; a recipe opened in the import window is switched
 to true. Witness `tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens
 and saves the file again loses the field (CHANGELOG).
 
@@ -251,6 +251,18 @@ source file with the **stored recipe as it is**, without running the detector.
 It is not promised to reproduce an import from one version to the next: a
 newer reader may interpret the same recipe differently (a recipe stored by an
 older version has no detector fields, a newer detector may know more).
+
+## Import recipe: `sheet_name_from_file` (#488)
+
+`ImportRecipeRecord` gained `sheet_name_from_file` (`bool`, `#[serde(default)]`):
+the worksheet takes the file name even when the file has a title. Absent means
+false, the reading from before (the title names the sheet when the recipe
+reads one), so **`FORMAT_VERSION` stays 1**. Witness
+`tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens and saves the
+file again loses the field (CHANGELOG). The same field is in
+`import_recipes.json` (preferences, not the `.stf`); the same file also holds
+`not_automatic`, the names of the old templates kept but not applied by
+themselves (F1 of #488), absent in an older file and ignored by an older app.
 
 ## Frame sizes: additive fields (#394)
 

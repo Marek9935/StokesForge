@@ -609,7 +609,7 @@ impl StokesForgeApp {
         }
     }
 
-    /// Opens the import wizard on the active workbook (maximized, or in the
+    /// Opens the import window on the active workbook (maximized, or in the
     /// foreground, or the only detached workbook) — File menu and Ctrl+".
     fn open_import_dialog(&mut self) {
         let active_book = self.active_book();
@@ -3348,7 +3348,7 @@ mod tests {
         assert_eq!(app.floating_rects[&graph], rect);
     }
 
-    /// Ctrl+" opens the import wizard, on an AZERTY keyboard (the 3 key
+    /// Ctrl+" opens the import window, on an AZERTY keyboard (the 3 key
     /// without Shift) as on QWERTY (Shift+apostrophe), and not while it is
     /// already open.
     #[test]

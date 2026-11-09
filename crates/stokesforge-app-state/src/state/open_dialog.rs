@@ -30,7 +30,7 @@ pub enum DialogKind {
 /// until it is named here and in [`OpenDialog::kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenDialog {
-    /// The import wizard.
+    /// The import window.
     ImportWizard,
     /// The graph properties window (and the series properties).
     GraphProperties,

@@ -44,9 +44,20 @@ fn recipe(name: &str) -> ImportRecipe {
         .unwrap_or_else(|| panic!("test template \"{name}\" missing"))
 }
 
+/// The store with every template turned on ("Use Automatically", F1 of #488):
+/// the fixture holds old-format templates, which are not automatic as loaded.
+fn turned_on_store() -> RecipeStore {
+    let mut store = test_store();
+    let names: Vec<String> = store.recipes().iter().map(|r| r.name.clone()).collect();
+    for name in names {
+        store.set_automatic(&name);
+    }
+    store
+}
+
 fn auto_name(file: &str) -> Option<String> {
     let (path, bytes) = fixture(file);
-    let store = test_store();
+    let store = turned_on_store();
     let facts = FileFacts::new(&path, &bytes, None);
     store
         .matching(&facts)
@@ -112,6 +123,21 @@ fn automatic_choice_proposes_the_right_model_or_none() {
     assert_eq!(auto_name("analytikjena_nohead_semicolon.csv"), None);
     assert_eq!(auto_name("generic_named_header.csv"), None);
     assert_eq!(auto_name("proprietary_binary.dat"), None);
+}
+
+/// F1 of #488: templates of the old format load with their conditions but are
+/// never picked by themselves, even for the files they were made for.
+#[test]
+fn old_format_templates_are_not_picked_until_turned_on() {
+    let store = test_store();
+    let (path, bytes) = fixture("jasco_uvvis_semicolon.csv");
+    let facts = FileFacts::new(&path, &bytes, None);
+    assert!(store.is_old_not_automatic("Jasco (semicolon)"));
+    assert!(store
+        .conditions("Jasco (semicolon)")
+        .iter()
+        .all(|c| c.holds(&facts)));
+    assert!(store.matching(&facts).is_none());
 }
 
 #[test]

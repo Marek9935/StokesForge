@@ -75,6 +75,7 @@ impl RecipeStore {
     pub fn remove(&mut self, name: &str) {
         self.recipes.retain(|r| r.name != name);
         self.extras.conditions.remove(name);
+        self.extras.not_automatic.remove(name);
     }
 }
 

@@ -49,9 +49,9 @@ See [Projects](../guide/projects-and-workbooks.md#projects).
 
 ## Import the data
 
-### 2. Open the Import Wizard
+### 2. Open the Import window
 
-Choose **File ▸ Import ▸ Import…**. The **Import Wizard** opens on one screen.
+Choose **File ▸ Import ▸ Import…**. The **Import** window opens on one screen.
 
 Click **Add Files…** and pick `spectrum.csv`. The grid on the right shows the lines of the file, and the left panel says what StokesForge recognised: the **Delimiter**, the **Decimal separator**, the lines of data.
 

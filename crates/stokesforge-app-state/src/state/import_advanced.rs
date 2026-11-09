@@ -1,7 +1,8 @@
 //! The rare settings of the import screen, in the « Advanced » fold at the
 //! bottom of the left panel: date order, characters removed at the start of
 //! every data line, how a file with several blocks is split, the words read as
-//! missing values, the prefix of comment lines, the data lines skipped. The
+//! missing values, the prefix of comment lines, the data lines skipped, where the sheet name
+//! comes from. The
 //! detector sets none of them by hand; the fold is closed by default.
 //!
 //! A setting that is not at its default value also reads as a **sentence** in
@@ -22,16 +23,18 @@ pub enum AdvancedSetting {
     MissingValues,
     CommentPrefix,
     SkipLines,
+    SheetName,
 }
 
 /// Every rare setting, in the order of the fold.
-pub const ADVANCED_SETTINGS: [AdvancedSetting; 6] = [
+pub const ADVANCED_SETTINGS: [AdvancedSetting; 7] = [
     AdvancedSetting::DateOrder,
     AdvancedSetting::SkipChars,
     AdvancedSetting::Blocks,
     AdvancedSetting::MissingValues,
     AdvancedSetting::CommentPrefix,
     AdvancedSetting::SkipLines,
+    AdvancedSetting::SheetName,
 ];
 
 /// A new value for a rare setting.
@@ -44,6 +47,8 @@ pub enum AdvancedChange {
     MissingValues(String),
     CommentPrefix(String),
     SkipLines(usize),
+    /// `true`: the sheet is named after the file, even when the file has a title.
+    SheetNameFromFile(bool),
 }
 
 /// A row of the fold: the setting, its label and its value as the field shows
@@ -67,6 +72,7 @@ impl AdvancedSetting {
             AdvancedSetting::MissingValues => tr!("import-advanced-missing"),
             AdvancedSetting::CommentPrefix => tr!("import-advanced-comment-prefix"),
             AdvancedSetting::SkipLines => tr!("import-advanced-skip-lines"),
+            AdvancedSetting::SheetName => tr!("import-advanced-sheet-name"),
         }
     }
 }
@@ -128,6 +134,16 @@ fn describe(recipe: &ImportRecipe, setting: AdvancedSetting) -> (String, Option<
                 )
             }),
         ),
+        AdvancedSetting::SheetName => {
+            if recipe.sheet_name_from_file {
+                (
+                    tr!("import-advanced-sheet-name-file"),
+                    Some(tr!("import-advanced-sentence-sheet-name")),
+                )
+            } else {
+                (tr!("import-advanced-sheet-name-title"), None)
+            }
+        }
     }
 }
 
@@ -146,6 +162,7 @@ pub fn apply_advanced(recipe: &mut ImportRecipe, change: AdvancedChange) {
         }
         AdvancedChange::CommentPrefix(prefix) => recipe.comment_prefix = prefix.trim().to_string(),
         AdvancedChange::SkipLines(count) => recipe.skip_data_rows = count,
+        AdvancedChange::SheetNameFromFile(on) => recipe.sheet_name_from_file = on,
     }
 }
 

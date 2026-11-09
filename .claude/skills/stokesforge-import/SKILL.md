@@ -3,7 +3,7 @@ name: stokesforge-import
 description: Work on importing instrument files (stokesforge-import, stokesforge-importer) — recipes, delimiters, decimal comma, header and footer lines, sub-headers, live preview. Use for a badly read CSV/TXT/ASC, a new instrument (Jasco…), a column read as text, or a wrong import preview.
 ---
 
-`stokesforge-import` turns an instrument file into a **recipe** (how that instrument writes its files): the **detector** proposes it from the content, a saved template with matching **conditions** can replace it, the user corrects it on **one screen** (the Import Wizard, #488), and may save it.
+`stokesforge-import` turns an instrument file into a **recipe** (how that instrument writes its files): the **detector** proposes it from the content, a saved template with matching **conditions** can replace it, the user corrects it on **one screen** (the Import window, #488), and may save it.
 
 ## Read first
 
