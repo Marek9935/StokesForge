@@ -733,7 +733,7 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
   between two graphs (`stokesforge_render::grid_line_at`, the reach of the resize
   handles), the new cell goes between them: `drop_place` takes the cell of the
   pointer's row (column) on the near side of the line, the other side if that
-  one is a hole (#504, one mechanism for both gestures). The series are planned like a drop on the graph
+  one is a hole (#504, one mechanism for both gestures). While columns are dragged, a floating graph window not in front that keeps the pointer for `SPRING_LOAD_DELAY` (`stokesforge_app_state::spring_load`, timer per window kept in the egui memory by `spring_load_raise`, `graph_window.rs`) is raised with `Context::move_to_top`; the end-of-frame resync of `floating_tabs` follows. Detached windows are out of reach. The series are planned like a drop on the graph
   (`AppState::add_columns_to_spec`, plot type of the reference layer); the Y2-Y4
   role layers go on the **new** cell. Without a Y column: `error-add-no-y`, no cell.
   Detached windows go through the same `graph_drop_target`.

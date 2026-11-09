@@ -22,6 +22,7 @@ use crate::number_field::number_field;
 use stokesforge_app_state::cell_sides;
 use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget};
 use stokesforge_app_state::quantities;
+use stokesforge_app_state::spring_load::{spring_load_remaining, spring_load_step};
 use stokesforge_app_state::state::{
     drop_payload_action, drop_rows_action, export_file_name, Action, AppState, ColumnDragPayload,
     PlotAxis, PlotSettingsTab, PlotTarget, RowDragPayload,
@@ -122,6 +123,7 @@ pub(super) fn graph_drop_target(
         }
     }
     graph_contents(ui, state, actions, graph_views, graph_id);
+    spring_load_raise(ui, columns_over);
     if hovering {
         super::file_drop::set_drop_target(ui.ctx(), ui.layer_id());
     }
@@ -130,6 +132,30 @@ pub(super) fn graph_drop_target(
             view.paint_drop_places(ui.painter(), place);
         }
     }
+}
+
+/// Spring-loaded raise (#504): while columns are dragged, a floating graph
+/// window that is not in front and has the pointer on its visible part comes
+/// to the front after [`stokesforge_app_state::spring_load::SPRING_LOAD_DELAY`], so the drop can land on it. View
+/// state only: no action, no model change, no history step. Detached windows
+/// (their own OS window receives nothing during a drag started in the main
+/// window), the maximized window and the docked tab have no stack, so they
+/// are left out by the layer order test.
+fn spring_load_raise(ui: &egui::Ui, columns_over: bool) {
+    let ctx = ui.ctx();
+    let layer = ui.layer_id();
+    let behind = layer.order == super::window_chrome::FLOATING_WINDOW_ORDER
+        && ctx.top_layer_id().is_some_and(|top| top != layer);
+    let key = layer.id.with("spring_load");
+    let now = ui.input(|input| input.time);
+    let mut since: Option<f64> = ctx.data(|data| data.get_temp(key)).flatten();
+    if spring_load_step(&mut since, columns_over && behind, now) {
+        ctx.move_to_top(layer);
+        ctx.request_repaint();
+    } else if let Some(left) = spring_load_remaining(since, now) {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+    }
+    ctx.data_mut(|data| data.insert_temp(key, since));
 }
 
 /// Opens the properties dialog of a graphic object: the Object Manager
