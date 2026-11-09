@@ -562,6 +562,16 @@ def cmd_set(a):
     with Lock():
         recs = load_all()
         r = need(recs, a.issue)
+        if a.wait == "you":
+            # An action only the user can do is a card on the page, never a terminal note alone (#483).
+            if not (trial_pending(a.issue) or qcm_open(a.issue)):
+                if not a.force:
+                    raise Fail("#%d has no card for the user: `--wait you` is only a complement. Put the action on "
+                               "the tracking page: suivi.py test add %d entries.json (with `try`, and "
+                               "\"kind\": \"measure\" for a measurement) or suivi.py qcm pose %d data.js; "
+                               "or pass --force and justify it in the report" % (a.issue, a.issue, a.issue))
+                sys.stderr.write("suivi: --force: `--wait you` on #%d with no card on the page; the report must "
+                                 "justify it\n" % a.issue)
         # state and what are kept when not passed. waiting and wait_kind are an agent note:
         # the next `set` erases them unless it restates them (E1, #449).
         for key, val in (("state", a.state), ("what", a.what)):
@@ -1317,7 +1327,8 @@ def cmd_hook_news(a):
 # ------------------------------------------------------------ trial entries
 ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
 TEST_FIELDS = {"title": str, "intro": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
-               "date": str, "colour": str, "name": str}
+               "date": str, "colour": str, "name": str, "kind": str}
+TEST_KINDS = ("measure",)    # `kind`: an action only the user's hands can do, before any code (#483)
 TEST_STATUSES = ("todo", "ok", "retour")
 MAX_UNMERGED = 5      # E2: trial entries with `try` per issue, unless `test add --force`
 
@@ -1495,6 +1506,8 @@ def check_entry(e):
             raise Fail("field %r must be a %s" % (k, TEST_FIELDS[k].__name__))
         if isinstance(v, list) and not all(isinstance(x, str) for x in v):
             raise Fail("field %r must be a list of strings" % k)
+        if k == "kind" and v not in TEST_KINDS:
+            raise Fail("field 'kind' must be one of: %s (got %r)" % (", ".join(TEST_KINDS), v))
 
 
 def removed_dir():
@@ -3169,6 +3182,7 @@ def parser():
     p.add_argument("--what")
     p.add_argument("--wait", choices=WAIT_KINDS)
     p.add_argument("--waiting")
+    p.add_argument("--force", action="store_true", help="allow `--wait you` with no card on the page")
     p = add("pause", cmd_pause, "drop the owner (the colour is freed unless a QCM or a trial holds it)")
     p.add_argument("issue", type=int)
     p = add("done", cmd_done, "the issue is finished: colour freed")

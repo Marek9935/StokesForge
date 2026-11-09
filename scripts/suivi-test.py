@@ -212,6 +212,65 @@ class TestQcmAndTrials(Base):
         self.assertEqual(self.held(), [])
 
 
+class TestWaitYouNeedsACard(Base):
+    """#483: `set --wait you` is a complement; the action itself is a card on the page."""
+
+    qcm = TestQcmAndTrials.qcm
+    trial = TestQcmAndTrials.trial
+
+    def setUp(self):
+        super().setUp()
+        self.claim(1)
+
+    def wait_you(self, *extra):
+        return self.run_cli("set", "1", "--wait", "you", "--waiting", "run it", *extra)
+
+    def test_refused_with_no_card_and_names_the_ways_out(self):
+        r = self.wait_you()
+        self.assertEqual(r.returncode, 1)
+        for word in ("test add", "qcm pose", "--force"):
+            self.assertIn(word, r.stderr)
+        self.assertEqual(self.rec(1)["wait_kind"], "")
+
+    def test_accepted_with_a_todo_entry_to_try(self):
+        self.trial(1, 1, status="todo", **{"try": "scripts/try.sh 1"})
+        self.assertEqual(self.wait_you().returncode, 0)
+
+    def test_refused_when_the_only_entry_is_ok_or_has_no_try(self):
+        self.trial(1, 1, status="ok", **{"try": "scripts/try.sh 1"})
+        self.trial(1, 2, status="todo")
+        self.assertEqual(self.wait_you().returncode, 1)
+
+    def test_accepted_with_an_open_form(self):
+        self.qcm(1, False)
+        self.assertEqual(self.wait_you().returncode, 0)
+
+    def test_refused_when_the_form_is_finished(self):
+        self.qcm(1, True)
+        self.assertEqual(self.wait_you().returncode, 1)
+
+    def test_force_overrides_and_asks_for_a_justification(self):
+        r = self.wait_you("--force")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("justify", r.stderr)
+        self.assertEqual(self.rec(1)["wait_kind"], "you")
+
+    def test_other_wait_kinds_need_no_card(self):
+        self.assertEqual(self.run_cli("set", "1", "--wait", "dep", "--waiting", "x").returncode, 0)
+
+    def test_entry_kind_measure_accepted_other_refused(self):
+        f = os.path.join(self.state, "e.json")
+        os.makedirs(self.state, exist_ok=True)
+        for kind, rc in (("measure", 0), ("trial", 1)):
+            with open(f, "w") as fh:
+                json.dump({"title": "t", "try": "echo hi", "kind": kind}, fh)
+            r = self.run_cli("test", "add", "1", f)
+            self.assertEqual(r.returncode, rc, r.stderr)
+        self.assertIn("kind", r.stderr)
+        self.assertEqual(self.run_cli("test", "list", "--issue", "1").returncode, 0)
+
+
+
 class TestClaim(Base):
     def test_resume_takes_the_previous_colour_when_free(self):
         self.put(1, last_colour=C[2])
@@ -301,7 +360,7 @@ class TestPauseDone(Base):
 
     def test_set_records_the_state(self):
         self.claim(1)
-        r = self.run_cli("set", "1", "--state", "essai", "--what", "trial", "--wait", "you", "--waiting", "your OK")
+        r = self.run_cli("set", "1", "--state", "essai", "--what", "trial", "--wait", "you", "--waiting", "your OK", "--force")
         self.assertEqual(r.returncode, 0, r.stderr)
         e = self.status()["colours"][0]
         self.assertEqual((e["state"], e["wait_kind"], e["waiting"]), ("essai", "you", "your OK"))
@@ -796,7 +855,7 @@ class TestTestCommands(Base):
 
     def test_set_erases_the_agent_note_unless_restated(self):
         self.claim(7)
-        self.run_cli("set", "7", "--state", "code", "--what", "w", "--wait", "you", "--waiting", "note")
+        self.run_cli("set", "7", "--state", "code", "--what", "w", "--wait", "you", "--waiting", "note", "--force")
         self.run_cli("set", "7", "--what", "other")
         r = self.rec(7)
         self.assertEqual((r["state"], r["what"], r["waiting"], r["wait_kind"]), ("code", "other", "", ""))
@@ -894,7 +953,7 @@ class ServerBase(Base):
     def setUp(self):
         super().setUp()
         self.claim(1, "--name", "One")
-        self.run_cli("set", "1", "--state", "code", "--what", "doing", "--wait", "you", "--waiting", "your OK")
+        self.run_cli("set", "1", "--state", "code", "--what", "doing", "--wait", "you", "--waiting", "your OK", "--force")
         self.claim(2, "--name", "Two")
         os.makedirs(os.path.join(self.state, "tests"))
         self.entry = os.path.join(self.state, "tests", "1-1.json")
