@@ -651,3 +651,66 @@ fn the_warning_does_not_make_the_next_gesture_look_failed() {
     assert_eq!(s.state.tree().calculations().len(), 1);
     assert!(s.state.analysis_form().is_none(), "the window closed");
 }
+
+/// Row 1 of the bare sheet becomes 0, 100, 0, 100...: a linear fit of it
+/// against the column numbers has an R² close to 0.
+fn scramble_row_one(s: &mut Setup) {
+    for (c, text) in ["0", "100", "0", "100", "0", "100"].into_iter().enumerate() {
+        s.state.dispatch(Action::CommitCell {
+            column: s.cols[c],
+            row: 1,
+            text: text.to_string(),
+        });
+    }
+}
+
+/// #493: the single alert slot. The "No x' Values" box replaces a pending
+/// "Low R²" box (witness: replacing only when no alert waits keeps the Low R²
+/// box in front).
+#[test]
+fn the_no_x_prime_alert_replaces_a_pending_low_r2_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup_bare(dir.path());
+    scramble_row_one(&mut s);
+    open_rows(&mut s, &[1]);
+    s.state.dispatch(Action::DismissAlert);
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert_eq!(
+        s.state.alert().map(|a| a.kind),
+        Some(AlertKind::LowRSquared),
+        "the premise: the fit of the scrambled row is flagged"
+    );
+    open_rows(&mut s, &[2]);
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::NoXPrime));
+}
+
+/// #493: a low R² never opens over the "No x' Values" box (witness: letting
+/// `raise_low_r2` overwrite the slot). The badge of the status bar keeps
+/// saying it.
+#[test]
+fn a_low_r2_does_not_open_while_the_no_x_prime_alert_is_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup_bare(dir.path());
+    scramble_row_one(&mut s);
+    open_rows(&mut s, &[1]);
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::NoXPrime));
+    s.state.analysis_form_mut().unwrap().keep_results = true;
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::NoXPrime));
+    assert!(s.state.low_r2_total() > 0, "the badge still says it");
+}
+
+/// #493: the "No x' Values" text agrees with the number of sheets (several
+/// sheets are reached through the row curves of a graph).
+#[test]
+fn the_no_x_prime_text_has_a_plural() {
+    let _language = i18n::test_language(Language::English);
+    assert_eq!(
+        stokesforge_app_state::tr!("alert-no-x-prime", count = 1, sheets = "A"),
+        "A has no x' values. The analysis uses the column numbers 1, 2, 3… as x'."
+    );
+    assert_eq!(
+        stokesforge_app_state::tr!("alert-no-x-prime", count = 2, sheets = "A, B"),
+        "A, B have no x' values. The analysis uses the column numbers 1, 2, 3… as x'."
+    );
+}

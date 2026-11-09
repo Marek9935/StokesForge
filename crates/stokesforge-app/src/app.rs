@@ -3065,6 +3065,74 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #493: the warning is raised in the same frame as the analysis window (a
+    /// modal of the same order). It stays in front of it, otherwise it hides
+    /// behind it and, being blocking, freezes every button. Witness: without
+    /// `move_to_top` the analysis window layer stays above the warning.
+    #[test]
+    fn the_no_x_prime_warning_stays_in_front_of_the_analysis_window() {
+        use stokesforge_analysis::model::Model;
+        use stokesforge_app_state::analysis::Preset;
+
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        project
+            .add_column(sheet, None, Some("S0"), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        app.state.dispatch(Action::OpenRowAnalysis {
+            preset: Preset::Fit(Model::Linear),
+            rows: vec![(sheet, 0)],
+        });
+        let analysis =
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("analysis_window"));
+        let frame = |app: &mut StokesForgeApp, raise_analysis: bool| {
+            let screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 700.0),
+            ));
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect,
+                    ..egui::RawInput::default()
+                },
+                |ui| {
+                    egui::Area::new(analysis.id)
+                        .order(egui::Order::Foreground)
+                        .show(ui.ctx(), |ui| {
+                            ui.label("analysis");
+                        });
+                    if raise_analysis {
+                        ui.ctx().move_to_top(analysis);
+                    }
+                    app.blocking_confirmations(ui.ctx(), &mut Vec::new());
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut app, false);
+        // The user clicked the analysis window since: it is on top of the warning.
+        frame(&mut app, true);
+        frame(&mut app, false);
+        let top = context.memory(|memory| memory.layer_ids().last());
+        assert_eq!(
+            top,
+            Some(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("stokesforge_alert")
+            )),
+            "the warning is the top layer"
+        );
+        session.shutdown().unwrap();
+    }
+
     /// The first column of the detached workbook's first sheet, and its text at row 1.
     fn detached_first_cell(app: &mut StokesForgeApp, book: NodeId) -> (NodeId, String) {
         let sheet = app.state.selected_sheet_in(book).unwrap();

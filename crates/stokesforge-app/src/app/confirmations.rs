@@ -62,6 +62,13 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
         // Analysis" also aborts it (same effect as the window's Cancel).
         let mut cancel = false;
         let cancellable = state.row_analysis_cancellable();
+        // It is raised in the same frame as the analysis window, itself a
+        // modal of the same order: keep it in front, else it hides behind that
+        // window and its (blocking) answer can never be given.
+        let alert_id = egui::Id::new("stokesforge_alert");
+        for layer_id in [alert_id.with("backdrop"), alert_id] {
+            ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, layer_id));
+        }
         let outcome = modal_read_only_with(
             ctx,
             egui::Id::new("stokesforge_alert"),
