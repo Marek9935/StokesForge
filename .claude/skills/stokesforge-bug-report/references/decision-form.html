@@ -88,6 +88,7 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .qthumb img{display:block;max-width:160px;max-height:120px;border:2px solid var(--line);border-radius:8px;background:var(--bg)}
 .qthumb .gone{border:2px dashed var(--line);border-radius:8px;padding:8px;color:var(--muted);font-size:.85rem}
 .qthumb button{padding:4px 10px;border-radius:8px;border:2px solid var(--line);background:var(--panel);cursor:pointer;font-size:.85rem;font-weight:700}
+.qwarn{color:var(--warn);font-size:.9rem;font-weight:700;margin-bottom:6px}
 .qbad{color:var(--bad);font-size:.9rem;font-weight:700}
 /* maquettes */
 .mrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -364,9 +365,10 @@ function qFilter(files,have){
     if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
     accept.push(f);n++;
   }
-  if(n>QI_WARN)lines.push('Plus de '+QI_WARN+' captures sur cette carte : elles sont toutes gardées, mais garde seulement les utiles.');
   return {accept:accept,lines:lines};
 }
+/* The advice shown above the strip while the card holds more than QI_WARN screenshots ('' otherwise). */
+function qAdvice(n){return n>QI_WARN?'Conseil : au-delà de '+QI_WARN+' captures, ne garde que les plus utiles.':'';}
 function qUploadLine(status){
   if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
   if(status===413)return 'Capture refusée : plus de 10 Mo.';
@@ -442,7 +444,7 @@ function card(){
   h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
   h+='</div></div>';
   h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
-  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V), ou glisse-la ici</span></div></div>';
+  if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qwarn" id="qadv" role="status" hidden></div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V), ou glisse-la ici</span></div></div>';
   else h+='<div class="mdim">Les captures ne sont possibles que sur la page locale du suivi.</div>';
   h+='<div class="sync" aria-live="polite">'+esc(sync)+'</div></div>';
   return h;
@@ -514,6 +516,7 @@ function qThumb(d,n){
 function qStrip(d){
   const st=$('qstrip'); if(!st||view!=='card'||ORDER[cur]!==d)return;
   st.replaceChildren();
+  const adv=$('qadv'); if(adv){const t=qAdvice(qNames(ans[d.c]).length+(qBusy[d.c]||0)); adv.textContent=t; adv.hidden=!t;}
   qNames(ans[d.c]).forEach(n=>st.appendChild(qThumb(d,n)));
   const b=qBusy[d.c]||0;
   if(b>0){const e=document.createElement('span'); e.className='mdim'; e.textContent='Envoi de '+b+' capture'+(b>1?'s':'')+'…'; st.appendChild(e);}

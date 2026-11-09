@@ -111,6 +111,7 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
 .thumb button{padding:2px 8px;font-size:.85rem}
 .imgline{color:var(--muted);font-size:.9rem}
 .imgline.bad{color:var(--bad);font-weight:700}
+.imgline.warn{color:var(--warn);font-weight:700}
 .sent{display:flex;flex-wrap:wrap;gap:8px}
 .sent .thumb img{max-width:200px;max-height:150px}
 #imgnote{position:sticky;top:56px;z-index:2}
@@ -395,7 +396,7 @@ function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.lin
 /*CARDLINE-END*/
 /*IMAGES-START*/
 /* Screenshots on a trial entry (#456). Pure functions, no DOM: the limits mirror the server's
-   (MAX_IMAGE 10 Mo), which stays the judge. No count cap: past IMG_WARN_COUNT one warning line, all kept. */
+   (MAX_IMAGE 10 Mo), which stays the judge. No count cap: past IMG_WARN_COUNT an advice line above the thumbnails, all kept. */
 const IMG_MAX_BYTES=10*1024*1024, IMG_WARN_COUNT=5, IMG_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
 const IMG_NAME=/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
 const IMG_GONE='Capture supprimée (limite de 512 Mo)';
@@ -412,9 +413,10 @@ function imgFilter(files,have){
     if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
     accept.push(f);n++;
   }
-  if(n>IMG_WARN_COUNT)lines.push('Plus de '+IMG_WARN_COUNT+' captures sur cette carte : elles sont toutes gardées, mais garde seulement les utiles.');
   return {accept:accept,lines:lines};
 }
+/* The advice shown above the strip while the box holds more than IMG_WARN_COUNT screenshots ('' otherwise). */
+function imgAdvice(n){return n>IMG_WARN_COUNT?'Conseil : au-delà de '+IMG_WARN_COUNT+' captures, ne garde que les plus utiles.':'';}
 function imgUploadLine(status){
   if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
   if(status===413)return 'Capture refusée : plus de 10 Mo.';
@@ -576,6 +578,7 @@ function thumb(id,name,onremove){
 function renderStrip(id,strip){
   const st=strip||$('st-'+id),d=imgDrafts[id];if(!st||!d)return;
   st.replaceChildren();
+  const adv=st.previousElementSibling&&st.previousElementSibling.id==='adv-'+id?st.previousElementSibling:$('adv-'+id);if(adv){const t=imgAdvice(d.names.length+d.busy);adv.textContent=t;adv.hidden=!t;}
   d.names.forEach(n=>st.appendChild(thumb(id,n,()=>{d.names=d.names.filter(m=>m!==n);renderStrip(id,st);})));
   if(d.busy>0)st.appendChild(el('span','imgline','Envoi de '+d.busy+' capture'+(d.busy>1?'s':'')+'…'));
   d.lines.forEach(l=>st.appendChild(el('div','imgline bad',l)));
@@ -682,7 +685,9 @@ function testBox(x){
     pick.onclick=()=>fi.click();
     ad.appendChild(pick);ad.appendChild(fi);
     ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V), ou glisse-la ici'));
-    b.appendChild(ad);b.appendChild(st);
+    b.appendChild(ad);
+    const adv=el('div','imgline warn');adv.id='adv-'+x.id;adv.hidden=true;adv.setAttribute('role','status');
+    b.appendChild(adv);b.appendChild(st);
     const r=el('div','acts');
     const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;
     sv.onclick=()=>boxSend(x,retour?'retour':'note');

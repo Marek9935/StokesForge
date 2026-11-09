@@ -2807,11 +2807,13 @@ class TestFormTemplate(unittest.TestCase):
         out = self.q_js("qFilter(%s, 4)" % json.dumps([f("image/png", name="a.png"), f("image/svg+xml", name="x.svg"),
                                                        f("image/gif", 10 * 1024 * 1024 + 1, "big.gif"), f("image/webp", name="w.webp")]))
         self.assertEqual([x["name"] for x in out["accept"]], ["a.png", "w.webp"])            # no count cap
-        self.assertEqual(len(out["lines"]), 3)                                               # 2 refusals + the warning (6 > 5)
-        self.assertIn("Plus de 5 captures", out["lines"][-1])
-        self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 3).lines"), [])   # 4 images: no warning
-        self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 4).lines"), [])   # exactly 5: no warning
-        self.assertEqual(len(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 9).lines")), 1)   # warning once per batch
+        self.assertEqual(len(out["lines"]), 2)                                               # 2 refusals, the advice is not a refusal line
+        self.assertFalse(any("Conseil" in l for l in out["lines"]))
+        self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 9).lines"), [])
+        adv = "Conseil : au-delà de 5 captures, ne garde que les plus utiles."
+        self.assertEqual([self.q_js("qAdvice(%d)" % n) for n in (0, 5, 6, 7)], ["", "", adv, adv])   # shown above 5, gone back at 5
+        form = self.form_html()
+        self.assertRegex(form, r'Captures \(facultatif\)</div><div class="qwarn" id="qadv"[^>]*hidden></div><div class="qstrip"')
         self.assertIn("relance-le", self.q_js("qUploadLine(404)"))
         self.assertIn("10 Mo", self.q_js("qUploadLine(413)"))
         ok = "0123456789abcdef01234567.png"
@@ -3929,8 +3931,12 @@ class TestPage(unittest.TestCase):
         self.assertTrue(all(l.split(" : ")[0] in ("x.svg", "n.txt", "big.webp", "empty.gif") for l in out["lines"]))
         self.assertEqual(self.img_js("imgFilter([%s], 0).accept.length" % json.dumps(f("image/png", 10 * 1024 * 1024))), 1)   # exactly 10 Mo
         full = self.img_js("imgFilter(%s, 4)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
-        self.assertEqual((len(full["accept"]), len(full["lines"])), (2, 1))                  # no cap, in-flight uploads counted; one warning
-        self.assertIn("Plus de 5 captures", full["lines"][0])
+        self.assertEqual((len(full["accept"]), full["lines"]), (2, []))                      # no cap; the advice is not a refusal line
+        adv = "Conseil : au-delà de 5 captures, ne garde que les plus utiles."
+        self.assertEqual([self.img_js("imgAdvice(%d)" % n) for n in (0, 5, 6, 7)], ["", "", adv, adv])   # shown above 5, gone back at 5
+        page = self.page()
+        self.assertLess(page.index("b.appendChild(ad);"), page.index("b.appendChild(adv);b.appendChild(st);"))   # the slot sits above the strip
+        self.assertIn("imgAdvice(d.names.length+d.busy)", page)                              # recomputed on every strip redraw (add and remove)
         few = self.img_js("imgFilter(%s, 3)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
         self.assertEqual((len(few["accept"]), few["lines"]), (2, []))                        # 5 images: no warning
 
