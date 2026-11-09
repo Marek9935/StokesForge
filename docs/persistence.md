@@ -768,3 +768,18 @@ fields without a message. Witness `tests/witnesses/v1/project.stf`
 regenerated with a custom template and a row column on one legend and a
 list choice on the other; unit tests in `schema.rs`
 (`a_legend_without_text_settings_reads_as_the_default`).
+
+## Colour bar: additive field (#499, step C)
+
+`PanelSpecRecord` gained `color_bar` (`Option<ColorBarRecord>`),
+`#[serde(default)]`: segments (group, optional typed ends, break label),
+`chain`, the value source, scale, orientation, position, anchor, ticks, title
+and `visible`. **`FORMAT_VERSION` did not move**: a file without it has no bar
+and its curves keep their stored colors. Every choice is a stored key; a
+default is written as an empty string and an unknown key (newer version)
+becomes `Unknown(key)`, read as the default and written back as it was
+(invariant 10). The colour of a curve on a bar is never stored: it is computed
+at each draw (`stokesforge-render::color_bar`). An older reader that saves the
+file again drops the bar without a message. Witness
+`tests/witnesses/v1/project.stf` regenerated with a two-segment chained bar;
+unit test `a_color_bar_round_trips_and_keeps_unknown_choices` in `convert.rs`.

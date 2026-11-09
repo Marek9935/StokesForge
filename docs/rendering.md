@@ -1261,3 +1261,11 @@ series and object from the tree, including for hidden contents; only one
 kind is selected at a time. Revalidation discards the addresses
 absent from the spec. The properties and the format bars reuse this
 same view in a detached window.
+
+Colour bar, lot 1 (#499 step C): `stokesforge-render/src/color_bar.rs::value_colors(panel)`
+gives the colour each series takes from its value on the layer's bar
+(`ResolvedSeries::value`, read by `core::series_value`); `Prepared::value_color`
+carries it, `Prepared::line()` / `symbol()` hand the painting a `Cow` copy so the
+spec is never changed, and `Prepared::in_legend()` drops a series that has one
+(drawn entries and `entry_ranks` share that predicate). The bar itself is drawn
+in a later lot.

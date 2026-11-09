@@ -307,7 +307,8 @@ pub fn value_color<S: AsRef<str>>(
             }
         }
     };
-    gradient_at(stops, t.clamp(0.0, 1.0))
+    // `gradient_at` clamps the position to the ends.
+    gradient_at(stops, t)
 }
 
 #[cfg(test)]
@@ -324,6 +325,12 @@ mod tests {
         assert_eq!(at(100.0).as_deref(), Some("#ff0000"));
         assert_eq!(at(-5.0).as_deref(), Some("#000000"));
         assert_eq!(at(f64::NAN), None);
+        // A gradient that does not saturate shows the clamp: past the end is
+        // the end, not an extrapolation.
+        let soft = ["#102030", "#506070"];
+        let past = |v| value_color(&bar, &soft, (0.0, 10.0), v);
+        assert_eq!(past(99.0).as_deref(), Some("#506070"));
+        assert_eq!(past(-99.0).as_deref(), Some("#102030"));
     }
 
     #[test]

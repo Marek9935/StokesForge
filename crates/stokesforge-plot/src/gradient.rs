@@ -165,6 +165,9 @@ mod tests {
 
     #[test]
     fn gradient_at_clamps_and_refuses_unreadable_stops() {
+        let soft = ["#102030", "#506070"];
+        assert_eq!(gradient_at(&soft, 9.0).as_deref(), Some("#506070"));
+        assert_eq!(gradient_at(&soft, -9.0).as_deref(), Some("#102030"));
         assert_eq!(
             gradient_at(&["#000000", "#ff0000"], -3.0).as_deref(),
             Some("#000000")
