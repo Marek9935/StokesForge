@@ -823,10 +823,17 @@ mod tests {
     /// cut at its edge: « Mark as Checked » of the « To check » block and the
     /// « To check » tags of the rows stay inside the panel, whose edge is the
     /// one of the frame of the « To check » block.
+    ///
+    /// The language is a global state of the process: this body runs only in
+    /// a child process started with `STOKESFORGE_LANG=en-XA` by
+    /// [`long_texts_of_the_left_panel_are_never_cut`], so it never changes
+    /// the language under the neighbouring tests.
     #[test]
-    fn long_texts_of_the_left_panel_are_never_cut() {
+    #[ignore = "run in a subprocess by long_texts_of_the_left_panel_are_never_cut"]
+    fn long_texts_of_the_left_panel_are_never_cut_in_the_process_language() {
         use stokesforge_app_state::i18n::{self, Language};
-        let _language = i18n::test_language(Language::PseudoEnglish);
+        assert_eq!(i18n::language(), Language::PseudoEnglish);
+        println!("left panel checked in {}", i18n::language().tag());
         let mut bench = bench(DOUBTS);
         let ctx = crate::app::test_support::context();
         let mut actions = Vec::new();
@@ -908,6 +915,41 @@ mod tests {
             );
         }
         assert!(seen >= 2, "both buttons are painted, saw {seen}");
+    }
+
+    /// Reruns [`long_texts_of_the_left_panel_are_never_cut_in_the_process_language`]
+    /// in a child process in the pseudo-locale; the child must succeed and say
+    /// it ran in that language (witness: a child that ran nothing would not).
+    #[test]
+    fn long_texts_of_the_left_panel_are_never_cut() {
+        use stokesforge_app_state::i18n::{Language, LANGUAGE_VARIABLE};
+        let executable = std::env::current_exe().unwrap();
+        let module = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
+        let name =
+            format!("{module}::long_texts_of_the_left_panel_are_never_cut_in_the_process_language");
+        let output = std::process::Command::new(&executable)
+            .args([
+                name.as_str(),
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(LANGUAGE_VARIABLE, Language::PseudoEnglish.tag())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stdout}\n{stderr}");
+        assert!(
+            stdout.contains(&format!(
+                "left panel checked in {}",
+                Language::PseudoEnglish.tag()
+            )),
+            "the child did not run in the pseudo-locale:\n{stdout}"
+        );
     }
 
     /// Two templates that fit the file as well make a point to check that

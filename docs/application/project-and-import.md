@@ -155,7 +155,8 @@ left to check.
   offers the other. A correction made on one file is kept per **kind** of file
   (instrument fingerprint), so it does not leak to a file of another kind.
 - **The sheet name depends on the destination** (#488). With **One Workbook per
-  File** and **One sheet per file**, the workbook takes the title of the file
+  File** and **One sheet per file** (a single plan imported into **New
+  Workbook** counts as one workbook per file), the workbook takes the title of the file
   (else its name; `Title_1`, `Title_2` for the blocks of one file) and its sheet is
   named `import-sheet-raw-data` ("Raw Data" / « Données brutes ») and marked
   (`SetSheetRawMark`, base `import-sheet-modified-base`), in the interface

@@ -4925,6 +4925,27 @@ fn importing_into_new_books_groups_files_as_requested() {
     }
 }
 
+/// #488: one file imported into « New Workbook » is one workbook for that file:
+/// it takes the file's name and its sheet is "Raw Data", as with « One Workbook
+/// per File » (witness: the shared workbook keeps its default name and the
+/// sheet the file's name).
+#[test]
+fn one_file_into_a_new_workbook_is_named_like_a_workbook_per_file() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookForAll,
+        recipe: ImportRecipe::new("Untitled"),
+        paths: vec![file],
+    });
+    let book = book_named(state.tree(), "measure_a");
+    let sheets = state.worksheets_of(book);
+    assert_eq!(sheets.len(), 1);
+    assert_eq!(state.tree().node(sheets[0].0).unwrap().name(), "Raw Data");
+}
+
 /// #488: a new workbook per file holds a sheet "Raw Data" until a value of an
 /// imported column changes; the change renames it "Sheet1" in the same history
 /// step, and "Refresh from Source" keeps the current name.

@@ -10813,6 +10813,14 @@ impl AppState {
                 }
             } else {
                 let mut shared_book = None;
+                // One file into « New Workbook » is one new workbook for that
+                // file: it is named and filled like « One Workbook per File ».
+                let destination =
+                    if destination == ImportDestination::NewBookForAll && plans.len() == 1 {
+                        ImportDestination::NewBookPerFile
+                    } else {
+                        destination
+                    };
                 // A new workbook per file holds one sheet per file: the
                 // workbook takes the name of the file, the sheet is "Raw Data"
                 // until a value of an imported column changes (#488).
