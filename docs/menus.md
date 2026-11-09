@@ -175,7 +175,10 @@ Workbook › Sheet (including Reset Column Widths) / Columns (including Reset Wi
 right-click's `Layout ▸`). Sections, create before organize: **Page Layout Mode**
 (#426, first entry, one check mark through `menu_choice` while the mode is on; it is a
 view state: no action, no undo step, no shortcut to enter; a toolbar button beside
-Properties, icon `Icon::PageLayout`, does the same) ─ **Layer Placement ▸**
+Properties, icon `Icon::PageLayout`, does the same) ─ **Fit Page to Layers** (#505,
+`Action::FitPageToLayers`, one undo step; greyed out with the `.disabled` reason
+when the page already fits; the same button is in the Page Layout Mode strip) ─
+**Layer Placement ▸**
 (Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
 (Right / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
 **Align ▸** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center) · Same

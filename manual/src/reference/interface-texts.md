@@ -63,6 +63,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | File | Fichier |
 | File Metadata | Métadonnées du fichier |
 | Files and Template | Fichiers et modèle |
+| Fit Page to Layers | Ajuster la page aux calques |
 | Fitting | Ajustement |
 | Fitting… | Ajustement… |
 | Format | Format |

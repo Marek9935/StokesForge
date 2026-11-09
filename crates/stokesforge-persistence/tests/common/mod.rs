@@ -375,13 +375,6 @@ pub fn non_trivial_spec(
             width: 612.0,
             height: 391.5,
         }),
-        // #505: empty space around a grid, none of its numbers a default.
-        grid_slack: Some(stokesforge_plot::GridSlack {
-            left: 4.5,
-            top: 7.25,
-            right: 11.0,
-            bottom: 2.75,
-        }),
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }
