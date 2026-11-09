@@ -197,18 +197,36 @@ pub fn typst_literal(text: &str) -> String {
 /// column text **escaped** ([`typst_literal`]), so it is drawn literally;
 /// the rest of the template is Typst markup and an unknown placeholder stays
 /// as typed.
-pub fn expand_template(template: &str, mut value: impl FnMut(LegendField) -> String) -> String {
+pub fn expand_template(template: &str, value: impl FnMut(LegendField) -> String) -> String {
+    expand(template, value, true)
+}
+
+/// Expands a custom template for a **list** (Object Manager, series list):
+/// the placeholders insert the column text as is, the rest of the template
+/// stays as typed, like a typed series name does in a list.
+pub fn expand_template_plain(template: &str, value: impl FnMut(LegendField) -> String) -> String {
+    expand(template, value, false)
+}
+
+fn expand(template: &str, mut value: impl FnMut(LegendField) -> String, escape: bool) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     'scan: while !rest.is_empty() {
         for (token, field) in PLACEHOLDERS {
             if let Some(after) = rest.strip_prefix(token) {
                 let text = value(field);
+                if !escape {
+                    out.push_str(&text);
+                    rest = after;
+                    continue 'scan;
+                }
                 out.push_str(&typst_literal(&text));
                 // A string followed by `.`, `(` or `[` would read as a field
-                // access or a call: an empty content block separates them.
+                // access or a call: an empty comment separates them. (An
+                // empty content block `#[]` does not: it takes the `.`, `(`
+                // or `[` as its own trailer.)
                 if !text.is_empty() && after.starts_with(['.', '(', '[']) {
-                    out.push_str("#[]");
+                    out.push_str("/**/");
                 }
                 rest = after;
                 continue 'scan;
@@ -246,14 +264,22 @@ mod tests {
     }
 
     #[test]
+    fn the_plain_expansion_keeps_the_column_text_unescaped_for_lists() {
+        assert_eq!(
+            expand_template_plain("_%(LL)_ [%(LU)]%(LS).x", value),
+            "_A *b* #c_ [mM]B.x"
+        );
+    }
+
+    #[test]
     fn an_unknown_placeholder_and_an_empty_value_are_left_alone() {
         assert_eq!(expand_template("%(QQ) %(LC)|%(X)", value), "%(QQ) |#\"57\"");
     }
 
     #[test]
     fn a_string_followed_by_a_dot_or_a_bracket_is_not_read_as_code() {
-        assert_eq!(expand_template("%(LS).x", value), "#\"B\"#[].x");
-        assert_eq!(expand_template("%(LS)(1)", value), "#\"B\"#[](1)");
+        assert_eq!(expand_template("%(LS).x", value), "#\"B\"/**/.x");
+        assert_eq!(expand_template("%(LS)(1)", value), "#\"B\"/**/(1)");
         assert_eq!(expand_template("%(LS) .", value), "#\"B\" .");
     }
 

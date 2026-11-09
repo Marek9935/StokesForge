@@ -130,7 +130,7 @@ impl Prepared<'_> {
     pub fn legend_text(&self, texts: &FigureTexts) -> String {
         let name = match &self.label {
             SeriesLabel::Missing => return texts.broken_reference.clone(),
-            SeriesLabel::Text(name) | SeriesLabel::Template(name) => name.clone(),
+            SeriesLabel::Text(name) | SeriesLabel::Template { markup: name, .. } => name.clone(),
             SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
         };
         if self.broken {
@@ -147,7 +147,7 @@ impl Prepared<'_> {
     /// interface, which would be markup too, so it is all drawn literally.
     pub fn legend_is_typed(&self) -> bool {
         !self.broken
-            && (!self.spec.name.is_empty() || matches!(self.label, SeriesLabel::Template(_)))
+            && (!self.spec.name.is_empty() || matches!(self.label, SeriesLabel::Template { .. }))
     }
 }
 

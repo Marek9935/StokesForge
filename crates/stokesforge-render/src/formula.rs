@@ -1465,6 +1465,21 @@ mod tests {
         assert_eq!(diagnose("$ (unclosed"), diagnose("$ (unclosed"));
     }
 
+    /// #499: a custom legend template compiles even when a placeholder is
+    /// stuck to `.`, `(` or `[` (witness: `#[]` instead of `/**/` fails).
+    #[test]
+    fn a_legend_template_with_a_placeholder_before_a_bracket_compiles() {
+        use stokesforge_plot::{expand_template, LegendField};
+        let value = |field: LegendField| match field {
+            LegendField::LongName => "A *b* #c".to_string(),
+            _ => "mM".to_string(),
+        };
+        for template in ["%(LL)(%(LU))", "%(LL).x", "%(LL)[%(LU)]", "*%(LL)* %(LU)"] {
+            let markup = expand_template(template, value);
+            assert_eq!(diagnose(&markup), None, "{template} -> {markup}");
+        }
+    }
+
     /// Two different sizes of the same formula give different page sizes —
     /// sanity check that we measure the requested point size, not a frozen
     /// value.

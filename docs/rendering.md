@@ -126,7 +126,11 @@ Typst markup in which the placeholders (`PLACEHOLDERS`, the one table of the
 syntax: `%(LL)`, `%(LU)`, `%(LC)`, `%(LS)`, `%(X)`) insert the column text
 escaped by `typst_literal` (#33); the label is `SeriesLabel::Template` and is
 drawn with the rich style (`Prepared::legend_is_typed`), every other label
-literally. Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
+literally. Its `plain` field is the same template with the column text
+inserted as is, for the lists (Object Manager, series list), which never show
+`#"…"`. A string stuck to `.`, `(` or `[` gets an empty comment `/**/` between
+them (an empty `#[]` would take the bracket as its own call: it does not
+compile). Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
 
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the

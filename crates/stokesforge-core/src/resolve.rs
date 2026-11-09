@@ -60,7 +60,8 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use stokesforge_plot::{
-    expand_template, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec, SeriesSpec,
+    expand_template, expand_template_plain, LegendField, LegendText, LegendTextFrom, PanelSpec,
+    PlotSpec, SeriesSpec,
 };
 
 use crate::column::Column;
@@ -237,8 +238,9 @@ pub enum SeriesLabel {
     Text(String),
     /// The result of a custom legend template (#499): Typst markup, with the
     /// column text already escaped. Drawn with the rich style, like a typed
-    /// name.
-    Template(String),
+    /// name. `plain` is the same text for a list (Object Manager, series
+    /// list): the column text inserted as is, the rest as typed.
+    Template { markup: String, plain: String },
     /// An unnamed "row" series (#166): the 0-based row (the interface shows
     /// `row + 1`, as the grid does).
     Row(usize),
@@ -330,7 +332,10 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
             LegendField::Comments,
             false,
         )),
-        LegendTextFrom::Custom => SeriesLabel::Template(expand_template(&text.template, field)),
+        LegendTextFrom::Custom => SeriesLabel::Template {
+            markup: expand_template(&text.template, field),
+            plain: expand_template_plain(&text.template, field),
+        },
     }
 }
 
@@ -1235,10 +1240,11 @@ mod tests {
             template: "*%(LL)* (%(LU)) %(ZZ)".to_string(),
             row_column: None,
         };
-        let SeriesLabel::Template(markup) = label_of(&project, &series, &custom) else {
+        let SeriesLabel::Template { markup, plain } = label_of(&project, &series, &custom) else {
             panic!("a template label");
         };
         assert_eq!(markup, "*#\"Abs *max* #1\"* (#\"u.a.\") %(ZZ)");
+        assert_eq!(plain, "*Abs *max* #1* (u.a.) %(ZZ)");
     }
 
     #[test]

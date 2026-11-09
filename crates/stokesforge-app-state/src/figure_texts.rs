@@ -27,7 +27,7 @@ pub fn figure_texts() -> FigureTexts {
 /// window): same rule as the legend, phrased in the current language.
 pub fn series_label_text(label: &SeriesLabel) -> String {
     match label {
-        SeriesLabel::Text(text) | SeriesLabel::Template(text) => text.clone(),
+        SeriesLabel::Text(text) | SeriesLabel::Template { plain: text, .. } => text.clone(),
         SeriesLabel::Row(row) => tr!("graph-row-series", number = row.saturating_add(1)),
         SeriesLabel::Missing => tr!("graph-series-broken-reference"),
     }
