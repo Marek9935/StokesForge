@@ -860,6 +860,23 @@ pub enum Action {
         /// boundary or a corner was pulled (`ResizeCell`).
         figure: bool,
     },
+    /// Moves a graph (the cell of layer `panel`, overlays included) on a
+    /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
+    /// in the Page Layout Mode. To a cell (swap if occupied, a hole accepted) or
+    /// into a new column or row beside another cell
+    /// ([`stokesforge_core::compose::move_cell`]); a column or row left empty
+    /// disappears with its size. Layer numbers do not change. One undo step
+    /// ([`PlotEditKind::MoveLayer`]); nothing sent on free placement, for a
+    /// missing layer or cell, or when nothing changes. A graph without stored
+    /// frames is first given the ones it is drawn with.
+    MoveGridCell {
+        /// Target graph.
+        graph: NodeId,
+        /// A layer of the moved cell.
+        panel: usize,
+        /// Where it goes.
+        target: stokesforge_core::compose::MoveTarget,
+    },
     /// Sets several frames of a free graph and its page in one go: what a
     /// gesture of the Page Layout Mode commits (#426). Each `(base layer,
     /// frame)` is stored as given (brought into bounds, stacking key kept);
@@ -5865,6 +5882,11 @@ impl AppState {
                 heights,
                 figure,
             } => self.set_grid_frames(graph, &widths, &heights, figure),
+            Action::MoveGridCell {
+                graph,
+                panel,
+                target,
+            } => self.move_grid_cell(graph, panel, target),
             Action::SetFreeLayout {
                 graph,
                 frames,
@@ -11768,6 +11790,33 @@ impl AppState {
             } else {
                 PlotEditKind::ResizeCell
             },
+        });
+    }
+
+    /// [`Action::MoveGridCell`]: the move applied to one spec and committed as
+    /// one step. A legacy graph is first given the frames it is drawn with, so
+    /// the emptied column or row takes its size with it.
+    fn move_grid_cell(
+        &mut self,
+        graph: NodeId,
+        panel: usize,
+        target: stokesforge_core::compose::MoveTarget,
+    ) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        if before.layer_placement != stokesforge_plot::LayerPlacement::Grid {
+            return;
+        }
+        let mut spec = before.clone();
+        crate::frame_sizes::fix_new(&mut spec);
+        if !stokesforge_core::compose::move_cell(&mut spec, panel, target) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::MoveLayer,
         });
     }
 

@@ -6,6 +6,7 @@
 
 use egui::{Pos2, Rect};
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
+use stokesforge_core::compose::{CellSide, MoveTarget};
 use stokesforge_core::{NodeId, Project};
 use stokesforge_plot::{
     FreeFrame, LayerPlacement, LineSpec, PanelSpec, Panels, PlotSpec, SeriesSpec,
@@ -795,41 +796,280 @@ fn a_compact_fallback_grid_has_no_page_corner() {
     assert_eq!(l_corners(&out.shapes), 0, "no corner is drawn");
 }
 
-/// On a Regular grid the inside of a graph moves nothing and the arrow keys
-/// nudge nothing: no event, no preview. Witness: the guard removed from
-/// `nudge`.
+/// The number of rectangles outlined with the 2.5 point accent stroke (the
+/// target cell of a graph being moved).
+fn target_outlines(shapes: &[egui::epaint::ClippedShape]) -> usize {
+    fn walk(shape: &egui::Shape, count: &mut usize) {
+        match shape {
+            egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, count)),
+            egui::Shape::Rect(rect) if (rect.stroke.width - 2.5).abs() < 0.01 => *count += 1,
+            _ => {}
+        }
+    }
+    let mut count = 0;
+    for clipped in shapes {
+        walk(&clipped.shape, &mut count);
+    }
+    count
+}
+
+fn moved(signals: &[GraphEvent]) -> (usize, MoveTarget) {
+    match signals {
+        [GraphEvent::GridCellMoved { panel, target }] => (*panel, *target),
+        other => panic!("one GridCellMoved expected, got {other:?}"),
+    }
+}
+
+/// On a Regular grid a drag that starts inside a graph moves it (#491): nothing
+/// is sent or changed before the release, then one event names the cell under
+/// the pointer. Witness: the `MoveCell` start removed from `begin_layout_drag`.
 #[test]
-fn a_regular_grid_has_no_move_and_no_nudge() {
+fn dragging_inside_a_graph_of_a_regular_grid_sends_one_move_on_release() {
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
     let stored = spec_of(&fixture);
-    let inside = middle(&view, 0);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (from, to) = (middle(&view, 0), middle(&view, 3));
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        to,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(moved(&signals), (0, MoveTarget::Cell { row: 1, column: 1 }));
+    assert_eq!(spec_of(&fixture), stored, "the model is for the shell");
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.frame_widths, layout.frame_widths, "nothing previewed");
+}
+
+/// A drag that starts on a boundary keeps its meaning and priority (#491).
+/// Witness: the cell check moved before the handle check.
+#[test]
+fn a_drag_from_a_boundary_still_resizes_and_never_moves() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let from = meeting(&layout, 1, 0) + egui::vec2(0.0, 60.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(30.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let _ = grid_edited(&signals);
+}
+
+/// Released on its own cell, outside the figure, or without a drag: nothing
+/// is sent, and a plain click only selects (#491). Witness: `move_target`
+/// returns the source cell.
+#[test]
+fn releasing_on_the_same_cell_or_outside_sends_nothing() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let start = middle(&view, 0);
+    let same = drag(
+        &context,
+        &mut view,
+        &fixture,
+        start,
+        start + egui::vec2(12.0, 9.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(same.is_empty(), "{same:?}");
+    let outside = drag(
+        &context,
+        &mut view,
+        &fixture,
+        start,
+        Pos2::new(-60.0, -60.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(outside.is_empty(), "{outside:?}");
+    let target = middle(&view, 3);
+    click(
+        &context,
+        &mut view,
+        &fixture,
+        target,
+        egui::Modifiers::NONE,
+        5.0,
+    );
+    assert!(view.take_events().is_empty());
+}
+
+/// While the graph is dragged over another cell, that cell is outlined; over
+/// its own cell, nothing is (#491). Witness: the outline never painted.
+#[test]
+fn the_target_cell_is_outlined_while_a_graph_is_dragged() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let start = middle(&view, 0);
+    let none = egui::Modifiers::NONE;
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(start), button(start, true, none)],
+        0.1,
+        none,
+    );
+    let mid_drag = |view: &mut GraphView, to: Pos2, time: f64| {
+        let step = start + (to - start) * 0.5;
+        frame_with(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(step)],
+            time,
+            none,
+            1.0,
+        );
+        frame_with(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(to)],
+            time + 0.05,
+            none,
+            1.0,
+        )
+    };
+    let own = mid_drag(&mut view, start + egui::vec2(14.0, 10.0), 0.2);
+    let over_three = middle(&view, 3);
+    let other = mid_drag(&mut view, over_three, 0.4);
+    assert!(other.events.is_empty() && own.events.is_empty());
+    assert_eq!(
+        target_outlines(&other.shapes),
+        target_outlines(&own.shapes) + 1,
+        "one more outline over another cell"
+    );
+}
+
+/// A drop in the bottom edge band makes a new row beside the cell nearest the
+/// pointer (#491): [A B] with B dragged under A. Witness: the edge band test
+/// removed from `move_target`.
+#[test]
+fn dropping_in_the_bottom_edge_band_asks_for_a_new_row_beside_the_nearest_cell() {
+    let fixture = Fixture::grid(2, 1, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let under_a = Pos2::new(60.0, layout.size.1 as f32 - 10.0);
+    let (b, a) = (middle(&view, 1), middle(&view, 0));
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        b,
+        under_a,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            1,
+            MoveTarget::Beside {
+                panel: 0,
+                side: CellSide::Below
+            }
+        )
+    );
+    // The right band gives a new column beside the nearest cell.
+    let beside_b = Pos2::new(layout.size.0 as f32 - 10.0, 60.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        beside_b,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::Beside {
+                panel: 1,
+                side: CellSide::Right
+            }
+        )
+    );
+}
+
+/// An arrow key moves the selected graph one cell, a hole included; at the
+/// edge of the grid it does nothing; Shift still counts one cell (#491).
+/// Witness: the guard of `nudge` restored.
+#[test]
+fn an_arrow_key_moves_the_selected_graph_one_cell_on_a_regular_grid() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let mut time = 1.0;
+    let mut press = |view: &mut GraphView, steps: (i32, i32)| {
+        view.nudge(steps, time);
+        time += 1.0;
+        frame(
+            &context,
+            view,
+            &fixture,
+            vec![],
+            time,
+            egui::Modifiers::NONE,
+        )
+    };
+    assert_eq!(
+        moved(&press(&mut view, (1, 0))),
+        (0, MoveTarget::Cell { row: 0, column: 1 })
+    );
+    assert_eq!(
+        moved(&press(&mut view, (0, 1))),
+        (0, MoveTarget::Cell { row: 1, column: 0 })
+    );
+    assert_eq!(
+        moved(&press(&mut view, (0, 10))),
+        (0, MoveTarget::Cell { row: 1, column: 0 }),
+        "Shift counts one cell"
+    );
+    assert!(press(&mut view, (-1, 0)).is_empty(), "left edge");
+    assert!(press(&mut view, (0, -1)).is_empty(), "top edge");
+    // A pending event is never kept as a preview.
+    assert!(!view.layout_dragging());
+}
+
+/// A grid with no frames to edit (compact fallback) cannot move a graph, by
+/// drag or by key (#491). Witness: the `editable` test removed.
+#[test]
+fn a_compact_fallback_grid_cannot_move_a_graph() {
+    let fixture = Fixture::compact();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let centre = |row: usize, column: usize| {
+        let (x, y, w, h) = layout.cell_rect(row, column).expect("cell");
+        Pos2::new(x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0)
+    };
+    let last = layout.column_breaks.len() - 2;
+    let (inside, other) = (centre(0, 0), centre(0, last));
     let signals = drag(
         &context,
         &mut view,
         &fixture,
         inside,
-        inside + egui::vec2(25.0, 18.0),
-        SHIFT,
+        other,
+        egui::Modifiers::NONE,
     );
     assert!(signals.is_empty(), "{signals:?}");
-    view.nudge((1, 0), 1.0);
-    let mut out = None;
-    for time in [1.1, 2.0, 2.5] {
-        let frame = frame_with(
-            &context,
-            &mut view,
-            &fixture,
-            vec![],
-            time,
-            egui::Modifiers::NONE,
-            1.0,
-        );
-        assert!(frame.events.is_empty(), "{:?}", frame.events);
-        out = Some(frame);
-    }
-    assert!(out.is_some_and(|out| out.cached), "no preview was set");
-    assert_eq!(spec_of(&fixture), stored);
+    view.nudge((1, 0), 9.0);
+    let after = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![],
+        10.0,
+        egui::Modifiers::NONE,
+    );
+    assert!(after.is_empty(), "{after:?}");
 }
 
 /// The number of L page corner polylines (stroke width 2.5) painted.
