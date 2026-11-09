@@ -101,6 +101,12 @@ pub const X_LABEL_AREA: u32 = 52;
 pub const Y_LABEL_AREA: u32 = 64;
 /// Tick area of a mirror axis without labels (#176): the tick marks alone.
 pub const BARE_LABEL_AREA: u32 = 12;
+/// Depth of the tick marks and tick labels of the bottom axis inside its
+/// area; the rest is the title zone. A colour bar under a frame whose axis
+/// has no title starts here (#499).
+const X_TICKS_DEPTH: u32 = 30;
+/// Same for a right axis: width of its tick marks and labels.
+const Y_TICKS_DEPTH: u32 = 46;
 /// Font family requested from Plotters. It is translated into
 /// [`epaint::FontFamily::Proportional`] by [`crate::text::font_id`]; what
 /// Plotters does with it by itself does not matter, its fonts being
@@ -478,7 +484,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // that superimposed layers (#167) share an identical plot area. `bases`
     // keeps, per cell, the last ordinary layer drawn: the one a superimposed
     // layer covers. The ranks of the superimposed layers come with them.
-    let (plans, ranks) = cell_plans(spec, &layout);
+    let (plans, ranks, bar_offsets) = cell_plans(spec, &layout);
 
     // Free placement (#398): every cell is its stored frame plus its own
     // gutters, placed where the frame says. `cells` is indexed by the cell key
@@ -656,6 +662,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             plan,
             padding,
             ranks.get(index).copied().unwrap_or_default(),
+            bar_offsets.get(index).copied().unwrap_or_default(),
             bases.get(&cell_index),
             &overlay_panels,
             plot.spec.decimal_comma,
@@ -818,9 +825,11 @@ impl CellPlan {
         let area = |visible: bool, wanted: u32| if visible { wanted } else { 0 };
         Gutters {
             left: MARGIN + area(self.left, Y_LABEL_AREA),
-            right: MARGIN + area(self.right, self.right_wanted()) + self.bar_right,
+            right: MARGIN + area(self.right, self.right_wanted()) + self.bar_right
+                - self.tuck_right(self.right_wanted_area()),
             top: MARGIN + area(self.top, self.top_wanted()),
-            bottom: MARGIN + area(self.bottom, X_LABEL_AREA) + self.bar_bottom,
+            bottom: MARGIN + area(self.bottom, X_LABEL_AREA) + self.bar_bottom
+                - self.tuck_bottom(area(self.bottom, X_LABEL_AREA)),
             band,
         }
     }
@@ -831,23 +840,32 @@ impl CellPlan {
 fn cell_plans(
     spec: &PlotSpec,
     layout: &Layout,
-) -> (std::collections::HashMap<usize, CellPlan>, Vec<(u32, u32)>) {
+) -> (
+    std::collections::HashMap<usize, CellPlan>,
+    Vec<(u32, u32)>,
+    Vec<(u32, u32)>,
+) {
     let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
     // The rank of each superimposed layer among those of its cell that show an
     // axis on the same side (#168): 0 against the plot area. It comes from the
     // order of the layers, never from a stored level: a deleted layer
     // therefore leaves no empty band.
     let mut ranks: Vec<(u32, u32)> = Vec::with_capacity(spec.panels.len());
+    // The bands of the colour bars of the earlier layers of the cell: where
+    // the band of this layer's bar starts (bottom, right), #499.
+    let mut offsets: Vec<(u32, u32)> = Vec::with_capacity(spec.panels.len());
     for (index, panel) in spec.panels.iter().enumerate() {
         if let Some(cell) = layout.cells.get(index) {
             let plan = plans.entry(*cell).or_default();
             ranks.push((plan.top_levels, plan.right_levels));
+            offsets.push((plan.bar_bottom, plan.bar_right));
             plan.add(panel);
         } else {
             ranks.push((0, 0));
+            offsets.push((0, 0));
         }
     }
-    (plans, ranks)
+    (plans, ranks, offsets)
 }
 
 /// Measures a title: `(text, font, default size, figure width)` to the height
@@ -1487,7 +1505,7 @@ pub fn figure_layout<DB: DrawingBackend>(
 ) -> Result<FigureLayout, DrawingAreaErrorKind<DB::ErrorType>> {
     if spec.layer_placement == LayerPlacement::Free {
         let layout = free_layout_of(spec);
-        let (plans, _) = cell_plans(spec, &layout);
+        let (plans, _, _) = cell_plans(spec, &layout);
         let free = FreeLayout::build(
             spec,
             &layout,
@@ -1571,7 +1589,7 @@ pub fn figure_layout<DB: DrawingBackend>(
             free_origin: (0.0, 0.0),
         });
     };
-    let (plans, _) = cell_plans(spec, &layout);
+    let (plans, _, _) = cell_plans(spec, &layout);
     let grid = ExplicitGrid::build(
         spec,
         &layout,
@@ -2270,7 +2288,7 @@ fn drawn_legacy_frames<DB: DrawingBackend>(
     let band = graph_title_band(spec, probe, width)?;
     let column_breaks = fit_breaks(None, layout.columns, width);
     let row_breaks = fit_breaks(None, layout.rows, total_height.saturating_sub(band));
-    let (plans, _) = cell_plans(spec, &layout);
+    let (plans, _, _) = cell_plans(spec, &layout);
     let bands = panel_bands(spec, &layout, width, &mut |text, font, size, width| {
         text_band(probe, text, font, size, width)
     })?;
@@ -2522,13 +2540,22 @@ struct CellPlan {
     /// the axis areas (#499); the largest of its layers.
     bar_bottom: u32,
     bar_right: u32,
+    /// A layer of the cell writes a title for its bottom / right axis: the
+    /// title zone of the axis area is then used, else a colour bar is tucked
+    /// right after the tick labels (#499).
+    bottom_title: bool,
+    right_title: bool,
 }
 
 impl CellPlan {
     fn add(&mut self, spec: &PanelSpec) {
+        // The bands of the bars of the cell stack, in the order of the layers
+        // (a layer draws its bar after the bands of the previous ones).
         let (bar_bottom, bar_right) = crate::color_bar::band(spec.color_bar.as_ref());
-        self.bar_bottom = self.bar_bottom.max(bar_bottom);
-        self.bar_right = self.bar_right.max(bar_right);
+        self.bar_bottom += bar_bottom;
+        self.bar_right += bar_right;
+        self.bottom_title |= spec.bottom.title_visible && !spec.bottom.display_label().is_empty();
+        self.right_title |= spec.right.title_visible && !spec.right.display_label().is_empty();
         match spec.overlay {
             Some(overlay) => {
                 self.top_overlay |= overlay.x_top && spec.bottom.visible;
@@ -2564,6 +2591,35 @@ impl CellPlan {
 }
 
 impl CellPlan {
+    /// How far a bar under the frame climbs into the bottom axis area: the
+    /// part meant for the axis title when none is written. Never more than
+    /// the area given.
+    fn tuck_bottom(&self, area: u32) -> u32 {
+        if self.bar_bottom > 0 && self.bottom && !self.bottom_title {
+            X_LABEL_AREA.saturating_sub(X_TICKS_DEPTH).min(area)
+        } else {
+            0
+        }
+    }
+
+    /// Same for a bar right of the frame and the right axis area.
+    fn tuck_right(&self, area: u32) -> u32 {
+        if self.bar_right > 0 && self.right && !self.right_title && area == Y_LABEL_AREA {
+            Y_LABEL_AREA.saturating_sub(Y_TICKS_DEPTH).min(area)
+        } else {
+            0
+        }
+    }
+
+    /// The right area as `gutters` reserves it.
+    fn right_wanted_area(&self) -> u32 {
+        if self.right {
+            self.right_wanted()
+        } else {
+            0
+        }
+    }
+
     /// Bands of the right area when superimposed layers show an axis there:
     /// one per layer, plus that of the right data axis (#168).
     fn right_slots(&self) -> u32 {
@@ -2630,6 +2686,7 @@ fn draw_panel<DB: DrawingBackend>(
     plan: CellPlan,
     padding: Option<Padding>,
     rank: (u32, u32),
+    bar_offset: (u32, u32),
     base: Option<&BaseFrame<DB>>,
     legend_overlays: &[&ResolvedPanel<'_>],
     decimal_comma: bool,
@@ -2827,13 +2884,17 @@ fn draw_panel<DB: DrawingBackend>(
         .top_x_label_area_size(top_label_area)
         .y_label_area_size(y_label_area)
         .right_y_label_area_size(right_label_area);
-    // Stored frames: the band of the colour bar of the cell (#499) comes after
-    // the axis areas, inside the margin.
-    if padding.is_some() {
-        builder
-            .margin_bottom(MARGIN + plan.bar_bottom)
-            .margin_right(MARGIN + plan.bar_right);
-    }
+    // The band of the colour bars of the cell (#499) comes after the axis
+    // areas, inside the margin; a bar under an axis without a title climbs
+    // into the title zone. In a legacy layout (no stored frames) the band
+    // takes its share of the fixed canvas, so the frame gives way.
+    let tuck = (
+        plan.tuck_bottom(x_label_area),
+        plan.tuck_right(right_label_area),
+    );
+    builder
+        .margin_bottom(MARGIN + plan.bar_bottom - tuck.0)
+        .margin_right(MARGIN + plan.bar_right - tuck.1);
     // The length of the axes in pixels (#397), before any range matters: the
     // plot area only depends on the margins and the fixed label bands. The
     // tick count of each axis is chosen once, here, and given to everything
@@ -3745,10 +3806,12 @@ fn draw_panel<DB: DrawingBackend>(
             &crate::color_bar::BarFrame {
                 frame: (origin, size),
                 outside: (
-                    origin.0 + size.0 as i32 + right_label_area as i32,
-                    origin.1 + size.1 as i32 + x_label_area as i32,
+                    origin.0 + size.0 as i32 + right_label_area as i32 - tuck.1 as i32
+                        + bar_offset.1 as i32,
+                    origin.1 + size.1 as i32 + x_label_area as i32 - tuck.0 as i32
+                        + bar_offset.0 as i32,
                 ),
-                reserved: padding.is_some(),
+                reserved: true,
                 center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
             },
             &crate::color_bar::BarStyles {

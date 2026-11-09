@@ -1414,6 +1414,16 @@ fn with_bar(mut spec: PlotSpec, ids: &[NodeId], bar: Option<ColorBarSpec>) -> Pl
         panel.series.push(series);
     }
     panel.color_bar = bar;
+    // The x axis writes a title: its zone is used, the bar goes past it.
+    panel.bottom.label = "t".into();
+    panel.bottom.title_visible = true;
+    spec
+}
+
+/// Same, with the x axis left without a title.
+fn with_untitled_bar(mut spec: PlotSpec, ids: &[NodeId], bar: Option<ColorBarSpec>) -> PlotSpec {
+    spec = with_bar(spec, ids, bar);
+    spec.panels.get_mut(0).expect("panel").bottom.label = String::new();
     spec
 }
 
@@ -1525,4 +1535,97 @@ fn a_colour_bar_inside_the_frame_or_hidden_asks_for_no_band() {
         let layout = layout_of(&with_bar(base.clone(), &ids, Some(variant)));
         assert_eq!(layout.size, bare.size);
     }
+}
+
+/// Without an x axis title the bar climbs into the title zone: right after the
+/// tick labels instead of floating a title's height below the axis.
+/// Witness: a `tuck_bottom` of 0 makes the three assertions fail.
+#[test]
+fn a_colour_bar_under_an_untitled_axis_starts_right_after_the_tick_labels() {
+    let (project, ids) = bar_project();
+    let base = framed(grid("", 1, 1), &[300.0], &[200.0]);
+    let titled = with_bar(base.clone(), &ids, Some(bar(ColorBarPosition::Below)));
+    let bare = with_untitled_bar(base.clone(), &ids, None);
+    let spec = with_untitled_bar(base, &ids, Some(bar(ColorBarPosition::Below)));
+    let (titled_layout, bare_layout, layout) =
+        (layout_of(&titled), layout_of(&bare), layout_of(&spec));
+    let tuck = titled_layout.size.1 - layout.size.1;
+    assert!(tuck > 0, "the untitled figure is shorter by the title zone");
+    assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+
+    let plot = draw_in(&project, &spec, layout.size);
+    let panel = &plot.panels[0];
+    let text = panel
+        .texts
+        .iter()
+        .find(|text| text.target == (TextTarget::ColorBar { panel: 0 }))
+        .expect("the bar is drawn");
+    let frame_bottom = (panel.pixel_origin.1 + panel.pixel_size.1 as i32) as f64;
+    let top = text.center.1 - text.size.1 as f64 / 2.0;
+    let bottom = text.center.1 + text.size.1 as f64 / 2.0;
+    // Past the tick labels (about 30 px), well before the 52 px axis area.
+    assert!(top < frame_bottom + 40.0, "{top} vs {frame_bottom}");
+    assert!(bottom <= layout.size.1 as f64);
+}
+
+/// Two layers of one cell with a bar each stack their bands instead of
+/// overlapping. Witness: `max` instead of the sum in `CellPlan::add` fails the
+/// height and the overlap assertions.
+#[test]
+fn two_colour_bars_in_one_cell_stack_their_bands() {
+    let (project, ids) = bar_project();
+    let mut spec = with_bar(
+        framed(grid("", 1, 1), &[300.0], &[200.0]),
+        &ids,
+        Some(bar(ColorBarPosition::Below)),
+    );
+    let single = layout_of(&spec);
+    let mut second = spec.panels[0].clone();
+    second.overlay = Some(OverlaySpec {
+        x_top: false,
+        y_right: false,
+        layer: 0,
+    });
+    spec.panels.push(second);
+    let layout = layout_of(&spec);
+    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref()).0;
+    assert_eq!(layout.size.1, single.size.1 + band);
+    let plot = draw_in(&project, &spec, layout.size);
+    let mut boxes: Vec<(f64, f64)> = plot
+        .panels
+        .iter()
+        .flat_map(|panel| panel.texts.iter())
+        .filter(|text| matches!(text.target, TextTarget::ColorBar { .. }))
+        .map(|text| {
+            (
+                text.center.1 - text.size.1 as f64 / 2.0,
+                text.center.1 + text.size.1 as f64 / 2.0,
+            )
+        })
+        .collect();
+    assert_eq!(boxes.len(), 2);
+    boxes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(boxes[0].1 <= boxes[1].0, "{boxes:?}");
+}
+
+/// A legacy graph (no stored frames) reserves the band too: the figure keeps
+/// its size and the bar sits inside it, under the frame.
+/// Witness: dropping the margin for the legacy path puts the bar over the axis.
+#[test]
+fn a_colour_bar_below_a_legacy_graph_reserves_its_band_inside_the_figure() {
+    let (project, ids) = bar_project();
+    let spec = with_bar(grid("", 1, 1), &ids, Some(bar(ColorBarPosition::Below)));
+    let layout = layout_of(&spec);
+    assert!(!layout.is_explicit());
+    let plot = draw_in(&project, &spec, layout.size);
+    let panel = &plot.panels[0];
+    let text = panel
+        .texts
+        .iter()
+        .find(|text| text.target == (TextTarget::ColorBar { panel: 0 }))
+        .expect("the bar is drawn");
+    let frame_bottom = (panel.pixel_origin.1 + panel.pixel_size.1 as i32) as f64;
+    let top = text.center.1 - text.size.1 as f64 / 2.0;
+    assert!(top >= frame_bottom + 52.0, "{top} vs {frame_bottom}");
+    assert!(text.center.1 + text.size.1 as f64 / 2.0 <= layout.size.1 as f64);
 }
