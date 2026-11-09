@@ -668,12 +668,17 @@ fn flush_layout_edit(view: &mut GraphView, graph: NodeId, actions: &mut Vec<Acti
 /// and what happens when axes are added. Every numeric field commits on Enter,
 /// on leaving the field or at a step (never each frame). What touches the model
 /// goes after a pending burst of arrow keys ([`flush_layout_edit`]).
+///
+/// `selected` is the box that was selected **before** the canvas was painted
+/// this frame: a click on another box on the canvas takes effect on the next
+/// frame, so a number typed for the old box is validated on it (#498).
 pub(super) fn inspector(
     ui: &mut egui::Ui,
     view: &mut GraphView,
     spec: &PlotSpec,
     layout: Option<&FigureLayout>,
     graph: NodeId,
+    selected: Option<GraphBox>,
     actions: &mut Vec<Action>,
 ) {
     let ctx = ui.ctx().clone();
@@ -682,7 +687,9 @@ pub(super) fn inspector(
     let mut model: Vec<Action> = Vec::new();
     // Both rows wrap in a narrow window; the strip height follows the content.
     let top = ui.cursor().top();
-    ui.horizontal_wrapped(|ui| measures_row(ui, view, spec, layout, graph, &mut model, actions));
+    ui.horizontal_wrapped(|ui| {
+        measures_row(ui, view, spec, layout, graph, selected, &mut model, actions)
+    });
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         arrange_row(ui, &ctx, spec, graph, active, &extra, &mut model);
@@ -734,12 +741,14 @@ fn button_padding(ui: &egui::Ui) -> f32 {
 }
 
 /// First row of the strip: figure size, selected graph, plot area.
+#[allow(clippy::too_many_arguments)]
 fn measures_row(
     ui: &mut egui::Ui,
     view: &GraphView,
     spec: &PlotSpec,
     layout: Option<&FigureLayout>,
     graph: NodeId,
+    selected: Option<GraphBox>,
     model: &mut Vec<Action>,
     session: &mut Vec<Action>,
 ) {
@@ -751,8 +760,11 @@ fn measures_row(
     };
     figure_size_controls(ui, view, spec, graph, image, unit, model, session);
     ui.separator();
-    if let Some(selected) = view.selected_box() {
-        box_controls(ui, spec, layout, graph, image, &selected, unit, model);
+    if let Some(selected) = selected {
+        // The box is the target of the number fields (#498).
+        crate::field_state::for_target(ui, (graph, selected.base), |ui| {
+            box_controls(ui, spec, layout, graph, image, &selected, unit, model);
+        });
     }
 }
 
@@ -1728,6 +1740,64 @@ mod tests {
             regular_resize(&layout, &spec, &outer(0, 240.0), (10_000.0, 190.0)).unwrap();
         assert_eq!(widths.iter().sum::<f64>(), 300.0);
         assert_eq!(widths[1], MIN_FRAME_SIZE);
+    }
+
+    /// A number typed in the Left field of the selected box and a click on
+    /// another box on the canvas: the number moves the box it was typed for
+    /// (#498). Witness: `selected_box()` read after the canvas is painted.
+    #[test]
+    fn a_left_typed_for_one_box_moves_it_when_another_box_is_clicked() {
+        let mut bench = Bench::new(2, true);
+        bench.frame(Vec::new());
+        let selected = bench.view.selected_box().expect("selected");
+        let other = bench
+            .view
+            .layout_boxes()
+            .into_iter()
+            .find(|candidate| candidate.base != selected.base)
+            .expect("a second box");
+        let image = bench.view.layout_image().expect("the page");
+        let unit = bench.state.length_unit();
+        let left_text = crate::number_field::format_value(
+            shown(unit.from_points(selected.outer.left - image.left), unit),
+            unit.decimals(),
+        );
+        let (output, _) = bench.frame(Vec::new());
+        // "0" is also a ruler mark: the field is the one on the row of its label.
+        let texts = super::super::test_support::texts(&output.shapes);
+        let label = texts
+            .iter()
+            .find(|t| t.text == tr!("layout-mode-left"))
+            .expect("the label")
+            .center;
+        let field = texts
+            .iter()
+            .find(|t| t.text == left_text && (t.center.y - label.y).abs() < 4.0)
+            .expect("the field")
+            .center;
+        bench.click_text_at(field);
+        bench.frame(vec![egui::Event::Text("3".into())]);
+        let o = other.outer;
+        let at = bench
+            .view
+            .stored_to_screen(o.left + o.width / 2.0, o.top + o.height / 2.0)
+            .expect("on screen");
+        let sent = bench.click_text_at(at);
+        let moved: Vec<usize> = sent
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetFreeLayout { frames, .. } => Some(frames.iter().map(|f| f.0)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(moved, vec![selected.base], "only the box typed for moved");
+        assert_eq!(
+            bench.view.selected_box().map(|b| b.base),
+            Some(other.base),
+            "the clicked box is the selected one"
+        );
+        bench.session.shutdown().unwrap();
     }
 
     /// X and Y are greyed on a regular grid, with a reason; W and H are not
