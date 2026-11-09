@@ -1074,7 +1074,7 @@ pub(super) fn layout_menu_contents(
             .on_disabled_hover_text(tr!("action-layout-fit-page", "disabled"))
             .clicked()
         {
-            actions.push(Action::FitPageToLayers { graph });
+            actions.push(Action::FitPageToLayout { graph });
             ui.close();
         }
     });

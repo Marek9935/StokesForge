@@ -816,7 +816,7 @@ fn figure_size_controls(
         .on_disabled_hover_text(tr!("action-layout-fit-page", "disabled"))
         .clicked()
     {
-        model.push(Action::FitPageToLayers { graph });
+        model.push(Action::FitPageToLayout { graph });
     }
     if !(width_changed || height_changed) {
         return;

@@ -425,6 +425,38 @@ pub fn resized_edge(
     }
 }
 
+/// The frames and the slack after dragging an internal line **alone**, with
+/// Shift held at the press (#505, G9): the row above (column left of) each
+/// grabbed line takes the whole change, every other row (column) keeps its
+/// size, and the empty space on the far edge (bottom, right) absorbs the
+/// difference exactly as for [`resized_edge`] of that far edge: the slack
+/// shrinks or grows first, the page grows only when the slack is used up.
+/// A corner holding a column and a row line applies the rule to both axes.
+pub fn resized_line_alone(
+    handle: &GridHandle,
+    widths: &[f64],
+    heights: &[f64],
+    slack: GridSlack,
+    delta: (f64, f64),
+) -> (Vec<f64>, Vec<f64>, GridSlack) {
+    let mut out = (widths.to_vec(), heights.to_vec(), slack);
+    if let Some(index) = handle.column {
+        let edge = OuterEdge {
+            side: EdgeSide::Right,
+            index,
+        };
+        out = resized_edge(edge, &out.0, &out.1, out.2, (delta.0, 0.0));
+    }
+    if let Some(index) = handle.row {
+        let edge = OuterEdge {
+            side: EdgeSide::Bottom,
+            index,
+        };
+        out = resized_edge(edge, &out.0, &out.1, out.2, (0.0, delta.1));
+    }
+    out
+}
+
 /// The sizes of one axis after the figure's edge `far` (right or bottom, else
 /// left or top) is pulled by `delta` points. `bands` is the part of the
 /// figure's extent that is not plot area (axis bands, margins, titles): it
@@ -739,6 +771,48 @@ mod tests {
         );
         assert_eq!(h, vec![100.0, 210.0]);
         assert_eq!(slack.top, 40.0);
+    }
+
+    /// #505 G9: Shift on an internal line changes only the row before it; the
+    /// bottom slack absorbs the difference; outward past the slack the figure
+    /// grows. Witness: `splitter` instead (the next row would trade).
+    #[test]
+    fn a_line_dragged_alone_changes_one_row_and_the_slack_absorbs() {
+        let row = GridHandle {
+            edge: None,
+            column: None,
+            row: Some(0),
+            corner: false,
+        };
+        let heights = [100.0, 100.0, 100.0];
+        let (w, h, slack) =
+            resized_line_alone(&row, &[200.0], &heights, GridSlack::default(), (0.0, -30.0));
+        assert_eq!((w, h), (vec![200.0], vec![70.0, 100.0, 100.0]));
+        assert_eq!(slack.bottom, 30.0);
+        // Back out beyond the slack: the row grows, the slack is eaten, the
+        // figure grows by the rest.
+        let start = GridSlack {
+            bottom: 10.0,
+            ..GridSlack::default()
+        };
+        let (_, h, slack) = resized_line_alone(&row, &[200.0], &heights, start, (0.0, 25.0));
+        assert_eq!(h, vec![125.0, 100.0, 100.0]);
+        assert_eq!(slack.bottom, 0.0);
+        // A column line takes the same rule on the right.
+        let column = GridHandle {
+            column: Some(0),
+            row: None,
+            ..row
+        };
+        let (w, h, slack) = resized_line_alone(
+            &column,
+            &[100.0, 100.0],
+            &[50.0],
+            GridSlack::default(),
+            (-20.0, 0.0),
+        );
+        assert_eq!((w, h), (vec![80.0, 100.0], vec![50.0]));
+        assert_eq!(slack.right, 20.0);
     }
 
     /// #505: pulled outward, the slack goes first, then the frame keeps growing

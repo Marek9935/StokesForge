@@ -40,9 +40,9 @@ use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
     layout_handle_at, locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_edge,
-    resized_frames, resized_page, scaled_frames, scaled_to_page, stored_to_figure, BoundaryGroup,
-    EdgeSide, GraphBox, GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap,
-    EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
+    resized_frames, resized_line_alone, resized_page, scaled_frames, scaled_to_page,
+    stored_to_figure, BoundaryGroup, EdgeSide, GraphBox, GridCorner, GridHandle, Guide,
+    LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::edge_band::{edge_drop_side, paint_edge_bands, EDGE_BAND_WIDTH};
@@ -143,6 +143,9 @@ enum DragKind {
         line: (f64, f64),
         /// The empty space around the grid at the press (#505).
         slack: GridSlack,
+        /// Shift was held at the press on an internal line: the line changes
+        /// only the row (column) before it, the slack absorbs the rest (G9).
+        alone: bool,
     },
     /// An L corner of a regular grid: the whole figure scales.
     Figure {
@@ -1130,6 +1133,7 @@ impl GraphView {
                 heights,
                 line,
                 slack,
+                alone,
             } => {
                 let grid = self.layout.grid.filter(|_| !shift);
                 let snapped = |start: f64, moved: f64| match grid {
@@ -1140,6 +1144,11 @@ impl GraphView {
                 let (new_widths, new_heights, new_slack) = match handle.edge {
                     Some(edge) => {
                         let (w, h, slack) = resized_edge(edge, widths, heights, *slack, delta);
+                        (w, h, Some(slack))
+                    }
+                    None if *alone => {
+                        let (w, h, slack) =
+                            resized_line_alone(handle, widths, heights, *slack, delta);
                         (w, h, Some(slack))
                     }
                     None => {
@@ -1254,6 +1263,7 @@ impl GraphView {
                         right,
                         bottom,
                     },
+                    alone: handle.edge.is_none() && context.input(|input| input.modifiers.shift),
                 }
             }
             (None, Some(page)) => {

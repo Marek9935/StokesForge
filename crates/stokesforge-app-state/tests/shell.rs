@@ -16122,8 +16122,8 @@ fn set_layer_placement_is_one_step_with_the_draft_result() {
     assert_eq!(graph_spec(&state, graph), grid, "one Undo is enough");
 }
 
-/// #505: Fit Page to Layers on a Regular Grid clears the empty space around
-/// the grid, frames unchanged, in ONE step labelled Fit Page to Layers; Undo
+/// #505: Fit Page to Layout on a Regular Grid clears the empty space around
+/// the grid, frames unchanged, in ONE step labelled Fit Page to Layout; Undo
 /// gives the space back; nothing to fit sends nothing. An outer-edge drag
 /// commits the slack with the frames as one Resize Plot Area step. Witness:
 /// the action doing nothing (the slack stays, no step).
@@ -16135,7 +16135,7 @@ fn fit_page_to_layers_clears_the_grid_slack_in_one_step_and_nothing_to_fit_is_no
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let before = graph_spec(&state, graph);
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     assert_eq!(state.snapshot().revision, revision, "nothing to fit");
 
     // An outer edge pulled in: frames and slack in one Resize Plot Area step.
@@ -16178,7 +16178,7 @@ fn fit_page_to_layers_clears_the_grid_slack_in_one_step_and_nothing_to_fit_is_no
     assert_eq!(graph_spec(&state, graph).grid_slack, Some(slack));
     state.dispatch(Action::Undo);
 
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     let fitted = graph_spec(&state, graph);
     assert_eq!(fitted.grid_slack, None);
     assert_eq!(
@@ -16191,13 +16191,13 @@ fn fit_page_to_layers_clears_the_grid_slack_in_one_step_and_nothing_to_fit_is_no
         Some(HistoryLabel::EditPlotSpec(K::FitPage))
     );
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     assert_eq!(state.snapshot().revision, revision, "already fitted");
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), slacked, "one Undo is enough");
 }
 
-/// #505: Fit Page to Layers in Free makes the page the bounding box of the
+/// #505: Fit Page to Layout in Free makes the page the bounding box of the
 /// graphs: bigger for a graph beyond the page, smaller around shrunk graphs;
 /// the graphs do not move; already fitted sends nothing. Witness: the page
 /// left as it was.
@@ -16231,7 +16231,7 @@ fn fit_page_to_layers_in_free_grows_and_shrinks_the_page_around_the_graphs() {
     };
     // Fitted at creation: nothing to do.
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     assert_eq!(state.snapshot().revision, revision, "already fitted");
 
     // A graph pushed beyond the page: the page grows to hold it.
@@ -16251,7 +16251,7 @@ fn fit_page_to_layers_in_free_grows_and_shrinks_the_page_around_the_graphs() {
         beyond.left + beyond.width > drawn.left + drawn.width,
         "the graph left the page: {beyond:?} vs {drawn:?}"
     );
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     let grown = graph_spec(&state, graph);
     assert_eq!(grown.panels[0].sanitized_free_frame(), far, "graphs stay");
     let fitted = grown.free_page.expect("a page");
@@ -16274,12 +16274,12 @@ fn fit_page_to_layers_in_free_grows_and_shrinks_the_page_around_the_graphs() {
         page: Some(page),
     });
     let wide = page_of(&state);
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     let tight = page_of(&state);
     assert!(tight.width < wide.width, "{tight:?} vs {wide:?}");
     assert_eq!(tight.width, bbox(&state).width.round());
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitPageToLayers { graph });
+    state.dispatch(Action::FitPageToLayout { graph });
     assert_eq!(state.snapshot().revision, revision, "fitted again: no step");
     state.dispatch(Action::Undo);
     assert_eq!(page_of(&state), wide, "Undo gives the page back");

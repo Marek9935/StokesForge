@@ -365,7 +365,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::MatchLayerSize => "Match Layer Size",
             Self::DistributeLayers => "Distribute Layers",
             Self::LayerPlacement => "Change Layer Placement",
-            Self::FitPage => "Fit Page to Layers",
+            Self::FitPage => "Fit Page to Layout",
         })
     }
 }

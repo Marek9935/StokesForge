@@ -234,9 +234,9 @@ action-layout-distribute-horizontally = Répartir horizontalement
 action-layout-distribute-vertically = Répartir verticalement
     .hint = Répartit les calques de haut en bas avec des écarts égaux ; les deux extrêmes restent en place
     .disabled = Il faut au moins trois calques
-action-layout-fit-page = Ajuster la page aux calques
+action-layout-fit-page = Ajuster la page à la disposition
     .hint = Redimensionne la page à l’espace qu’utilisent les calques, marges comprises. Les calques ne bougent pas
-    .disabled = La page est déjà ajustée aux calques
+    .disabled = La page est déjà ajustée à la disposition
 action-delete-layer = Supprimer le calque
     .hint = Supprime le calque actif
 action-properties = Propriétés…
@@ -1454,7 +1454,7 @@ history-plot-align-layers = Aligner les calques
 history-plot-match-layer-size = Uniformiser la taille des calques
 history-plot-distribute-layers = Répartir les calques
 history-plot-layer-placement = Changer le placement des calques
-history-plot-fit-page = Ajuster la page aux calques
+history-plot-fit-page = Ajuster la page à la disposition
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau

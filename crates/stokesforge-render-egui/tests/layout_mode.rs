@@ -760,6 +760,56 @@ fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     assert!(heights[0] < heights[1], "proportions kept: {heights:?}");
 }
 
+/// #505 G9: Shift held at the press on an internal row line changes only the
+/// row above: one event, the first height down by 30, the second untouched, the
+/// slack at the bottom 30, the figure the same size. Without Shift the two
+/// rows trade. Witness: the Shift flag ignored (the second row would grow).
+#[test]
+fn shift_on_an_internal_line_changes_one_row_and_makes_bottom_slack() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let from = Pos2::new(
+        before.column_breaks[1] as f32 / 2.0,
+        (before.row_breaks[1] + before.title_band) as f32,
+    );
+    let shift = egui::Modifiers::SHIFT;
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from - egui::vec2(0.0, 30.0),
+        shift,
+    );
+    let [GraphEvent::GridFramesEdited {
+        heights,
+        figure: false,
+        slack: Some(slack),
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one event with slack expected, got {signals:?}");
+    };
+    assert_eq!(heights, &vec![120.0, 150.0]);
+    assert_eq!(slack.bottom, 30.0);
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, before.size, "the page keeps its size");
+
+    // Without Shift the same drag trades the two rows.
+    let (context, mut view) = in_mode(&fixture);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from - egui::vec2(0.0, 30.0),
+        egui::Modifiers::NONE,
+    );
+    let (_, heights) = grid_edited(&signals);
+    assert_eq!(heights, [120.0, 180.0]);
+}
+
 /// With four graphs the middle corner moves the column and the row in one
 /// event; a corner on one boundary and the figure edge moves that one; the
 /// figure's own corners and outer edges have no handle. A legacy graph starts

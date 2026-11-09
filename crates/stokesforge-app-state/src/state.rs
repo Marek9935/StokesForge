@@ -868,7 +868,7 @@ pub enum Action {
     /// bounding box of the graphs (margins included). One undo step
     /// ([`PlotEditKind::FitPage`]); nothing sent, no undo step, when there is
     /// nothing to fit. The size lock follows the new figure.
-    FitPageToLayers {
+    FitPageToLayout {
         /// Target graph.
         graph: NodeId,
     },
@@ -5895,7 +5895,7 @@ impl AppState {
                 figure,
                 slack,
             } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
-            Action::FitPageToLayers { graph } => self.fit_page_to_layers(graph),
+            Action::FitPageToLayout { graph } => self.fit_page_to_layout(graph),
             Action::MoveGridCell {
                 graph,
                 panel,
@@ -11818,9 +11818,9 @@ impl AppState {
         });
     }
 
-    /// [`Action::FitPageToLayers`]: the fitted spec committed as one step, or
+    /// [`Action::FitPageToLayout`]: the fitted spec committed as one step, or
     /// nothing when the page already fits.
-    fn fit_page_to_layers(&mut self, graph: NodeId) {
+    fn fit_page_to_layout(&mut self, graph: NodeId) {
         let Some(before) = self.plot_spec(graph) else {
             return;
         };
