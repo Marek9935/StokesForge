@@ -23,8 +23,8 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     removed-tests/<n>-<k>.json   an entry withdrawn by `test remove` (archive, with removed_at;
                            outside tests/ so nothing reads it, and its number is never reused;
                            its screenshots move to removed-tests/<n>-<k>.images/)
-    Screenshots: PNG, JPEG, GIF or WebP, named by the server (content hash), 10 MB and 5 per
-    entry or card. Above MAX_IMAGES_TOTAL (512 MB, all folders together) the oldest files are
+    Screenshots: PNG, JPEG, GIF or WebP, named by the server (content hash), 10 MB each, no
+    count limit per entry or card (the pages warn past 5; the server stops at 100 as a sanity bound). Above MAX_IMAGES_TOTAL (512 MB, all folders together) the oldest files are
     deleted after an upload; the JSON is never rewritten, a name left without its file is shown
     as "removed by the size limit".
     control.json           result of the last `check`
@@ -1351,7 +1351,7 @@ def test_path(tid):
 # The server names the file (content hash + extension from the magic bytes), never the client; an
 # entry or an answer lists names only, never paths. The `*.json` globs do not see these folders.
 MAX_IMAGE = 10 * 1024 * 1024       # bytes per image
-MAX_IMAGES = 5                     # images per entry or card
+MAX_IMAGES = 100                   # sanity bound against abuse only; the pages warn past 5 but never refuse
 # Global cap on every stored screenshot (trial entries, QCM cards, removed-tests/ archives): above it the
 # oldest files (by mtime) are deleted after an upload, files only, never an entry's JSON. The env variable
 # is for the tests (a small cap); nobody sets it for real.
@@ -1437,7 +1437,7 @@ def enforce_image_cap(keep):
 
 
 def check_image_names(value, folder, recorded=()):
-    """(names, None) for a list of at most MAX_IMAGES names of files in `folder` (duplicates dropped), else (None, sentence).
+    """(names, None) for a list of at most MAX_IMAGES (a large sanity bound, not a user limit) names of files in `folder` (duplicates dropped), else (None, sentence).
     A name already in the stored record whose file the size cap removed is dropped silently."""
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         return None, "images must be a list of names"

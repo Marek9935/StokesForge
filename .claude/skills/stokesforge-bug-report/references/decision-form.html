@@ -349,7 +349,7 @@ $('h1').textContent=TITRE; document.title=document.title||TITRE;
 /*QIMG-START*/
 /* Screenshots on a card (local mode only, #456). Pure functions; limits mirror the server's. An answer is always
    {i|skip, note, images}: every rebuild goes through mkAns so that no change of option loses its images. */
-const QI_MAX_BYTES=10*1024*1024, QI_MAX=5, QI_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
+const QI_MAX_BYTES=10*1024*1024, QI_WARN=5, QI_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
 const QI_NAME=/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
 const QI_GONE='Capture supprimée (limite de 512 Mo)';
 const qNames=a=>a&&Array.isArray(a.images)?a.images.filter(n=>typeof n==='string'&&QI_NAME.test(n)):[];
@@ -362,9 +362,9 @@ function qFilter(files,have){
     if(!QI_TYPES.includes(f.type)){lines.push(nm+' : ce n’est pas une image PNG, JPEG, GIF ou WebP.');continue;}
     if(f.size>QI_MAX_BYTES){lines.push(nm+' : plus de 10 Mo, trop lourd.');continue;}
     if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
-    if(n>=QI_MAX){lines.push(nm+' : '+QI_MAX+' captures au plus par carte.');continue;}
     accept.push(f);n++;
   }
+  if(n>QI_WARN)lines.push('Plus de '+QI_WARN+' captures sur cette carte : elles sont toutes gardées, mais garde seulement les utiles.');
   return {accept:accept,lines:lines};
 }
 function qUploadLine(status){
@@ -535,7 +535,7 @@ function qAttach(d,files){
           if(typeof j.name==='string'&&QI_NAME.test(j.name)){
             const a=ans[d.c]||mkAns(null,{i:-1});      // a screenshot on an unanswered card acts like a comment: « Autre »
             const cur0=qNames(a);
-            if(!cur0.includes(j.name)&&cur0.length<QI_MAX)cur0.push(j.name);
+            if(!cur0.includes(j.name))cur0.push(j.name);
             a.images=cur0; ans[d.c]=a; ok=true;}}
       }catch(e){qLines[d.c].push(qUploadLine(0));}
       qBusy[d.c]--;

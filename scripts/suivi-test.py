@@ -2370,12 +2370,17 @@ class TestImages(ServerBase):
         a = self.stored(png(b"a"))
         self.assertEqual(self.post(body={"images": [a]})[0], 200)
         before, files = self.entry_text(), self.files()
-        names = [self.stored(png(bytes([i]))) for i in range(suivi.MAX_IMAGES)]           # MAX_IMAGES + a = one too many
+        names = [self.stored(png(bytes([i, 200]))) for i in range(suivi.MAX_IMAGES)]           # MAX_IMAGES + a = one too many
         for bad in ("abc", {"x": 1}, [1], ["0123456789abcdef01234567.png"], ["../x"], [a] + names, None):
             self.assertEqual(self.post(body={"images": bad})[0], 400, bad)
         self.assertEqual(self.entry_text(), before)
         self.assertEqual(self.files(), sorted(files + names))
-        self.assertEqual(self.post(body={"images": names})[0], 200)                            # exactly MAX_IMAGES is fine
+        self.assertEqual(self.post(body={"images": names})[0], 200)                            # exactly the sanity bound is fine
+
+    def test_more_than_five_images_are_accepted(self):
+        names = [self.stored(png(bytes([i]))) for i in range(8)]
+        self.assertEqual(self.post(body={"images": names})[0], 200)
+        self.assertEqual(json.loads(self.entry_text())["images"], names)
 
     def test_an_image_changes_neither_the_colour_nor_the_pending_count(self):
         held, pending = self.held(C[0]), json.loads(self.req("GET", "/api/state")[2])["pending"]
@@ -2801,8 +2806,12 @@ class TestFormTemplate(unittest.TestCase):
         f = lambda t, size=100, name="a": {"name": name, "type": t, "size": size}
         out = self.q_js("qFilter(%s, 4)" % json.dumps([f("image/png", name="a.png"), f("image/svg+xml", name="x.svg"),
                                                        f("image/gif", 10 * 1024 * 1024 + 1, "big.gif"), f("image/webp", name="w.webp")]))
-        self.assertEqual([x["name"] for x in out["accept"]], ["a.png"])                      # 4 + 1 = 5, the next is one too many
-        self.assertEqual(len(out["lines"]), 3)
+        self.assertEqual([x["name"] for x in out["accept"]], ["a.png", "w.webp"])            # no count cap
+        self.assertEqual(len(out["lines"]), 3)                                               # 2 refusals + the warning (6 > 5)
+        self.assertIn("Plus de 5 captures", out["lines"][-1])
+        self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 3).lines"), [])   # 4 images: no warning
+        self.assertEqual(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 4).lines"), [])   # exactly 5: no warning
+        self.assertEqual(len(self.q_js("qFilter([{name:'a',type:'image/png',size:1}], 9).lines")), 1)   # warning once per batch
         self.assertIn("relance-le", self.q_js("qUploadLine(404)"))
         self.assertIn("10 Mo", self.q_js("qUploadLine(413)"))
         ok = "0123456789abcdef01234567.png"
@@ -3920,8 +3929,10 @@ class TestPage(unittest.TestCase):
         self.assertTrue(all(l.split(" : ")[0] in ("x.svg", "n.txt", "big.webp", "empty.gif") for l in out["lines"]))
         self.assertEqual(self.img_js("imgFilter([%s], 0).accept.length" % json.dumps(f("image/png", 10 * 1024 * 1024))), 1)   # exactly 10 Mo
         full = self.img_js("imgFilter(%s, 4)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
-        self.assertEqual((len(full["accept"]), len(full["lines"])), (1, 1))                  # 5 per card, uploads in flight counted
-        self.assertIn("5 captures", full["lines"][0])
+        self.assertEqual((len(full["accept"]), len(full["lines"])), (2, 1))                  # no cap, in-flight uploads counted; one warning
+        self.assertIn("Plus de 5 captures", full["lines"][0])
+        few = self.img_js("imgFilter(%s, 3)" % json.dumps([f("image/png", name="a"), f("image/png", name="b")]))
+        self.assertEqual((len(few["accept"]), few["lines"]), (2, []))                        # 5 images: no warning
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_what_a_box_button_sends_keeps_the_images_and_refuses_only_an_empty_retour(self):
