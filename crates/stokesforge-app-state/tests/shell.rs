@@ -15150,6 +15150,7 @@ fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
         widths: vec![310.0],
         heights: vec![210.0],
         figure: false,
+        slack: None,
     });
     let after = graph_spec(&state, graph);
     assert_eq!(
@@ -15164,6 +15165,7 @@ fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
         widths: vec![330.0],
         heights: vec![220.0],
         figure: true,
+        slack: None,
     });
     assert_eq!(
         state.snapshot().history.undo_label,
@@ -15181,6 +15183,7 @@ fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
         widths: vec![310.0, 100.0],
         heights: vec![210.0],
         figure: false,
+        slack: None,
     });
     assert_eq!(state.snapshot().revision, revision, "wrong length: nothing");
 }
@@ -15392,6 +15395,7 @@ fn the_size_lock_is_session_state_shared_with_a_detached_fork() {
         widths,
         heights,
         figure: true,
+        slack: None,
     });
     let new_image =
         stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
@@ -16116,6 +16120,169 @@ fn set_layer_placement_is_one_step_with_the_draft_result() {
 
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), grid, "one Undo is enough");
+}
+
+/// #505: Fit Page to Layers on a Regular Grid clears the empty space around
+/// the grid, frames unchanged, in ONE step labelled Fit Page to Layers; Undo
+/// gives the space back; nothing to fit sends nothing. An outer-edge drag
+/// commits the slack with the frames as one Resize Plot Area step. Witness:
+/// the action doing nothing (the slack stays, no step).
+#[test]
+fn fit_page_to_layers_clears_the_grid_slack_in_one_step_and_nothing_to_fit_is_no_step() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_plot::GridSlack;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitPageToLayers { graph });
+    assert_eq!(state.snapshot().revision, revision, "nothing to fit");
+
+    // An outer edge pulled in: frames and slack in one Resize Plot Area step.
+    let widths = before.frame_widths.clone();
+    let mut heights = before.frame_heights.clone();
+    heights[0] -= 50.0;
+    let slack = GridSlack {
+        bottom: 50.0,
+        ..GridSlack::default()
+    };
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: widths.clone(),
+        heights: heights.clone(),
+        figure: false,
+        slack: Some(slack),
+    });
+    let slacked = graph_spec(&state, graph);
+    assert_eq!(slacked.grid_slack, Some(slack));
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::ResizeCell))
+    );
+    // The figure kept its size.
+    let size = |spec: &stokesforge_plot::PlotSpec| {
+        stokesforge_app_state::frame_sizes::figure_layout(spec)
+            .expect("layout")
+            .size
+    };
+    assert_eq!(size(&slacked), size(&before));
+
+    // An L corner leaves the slack where it is.
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: widths.clone(),
+        heights: vec![heights[0] + 10.0],
+        figure: true,
+        slack: None,
+    });
+    assert_eq!(graph_spec(&state, graph).grid_slack, Some(slack));
+    state.dispatch(Action::Undo);
+
+    state.dispatch(Action::FitPageToLayers { graph });
+    let fitted = graph_spec(&state, graph);
+    assert_eq!(fitted.grid_slack, None);
+    assert_eq!(
+        (&fitted.frame_widths, &fitted.frame_heights),
+        (&widths, &heights)
+    );
+    assert_eq!(size(&fitted).1, size(&slacked).1 - 50, "the page shrinks");
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::FitPage))
+    );
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitPageToLayers { graph });
+    assert_eq!(state.snapshot().revision, revision, "already fitted");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), slacked, "one Undo is enough");
+}
+
+/// #505: Fit Page to Layers in Free makes the page the bounding box of the
+/// graphs: bigger for a graph beyond the page, smaller around shrunk graphs;
+/// the graphs do not move; already fitted sends nothing. Witness: the page
+/// left as it was.
+#[test]
+fn fit_page_to_layers_in_free_grows_and_shrinks_the_page_around_the_graphs() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreeFrame;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    go_free(&mut state, graph);
+    let boxes_of = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        let layout = stokesforge_app_state::frame_sizes::figure_layout(&spec).expect("layout");
+        stokesforge_render::graph_boxes(&spec, &layout)
+    };
+    let page_of = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        stokesforge_app_state::frame_sizes::figure_layout(&spec)
+            .and_then(|layout| layout.free_page_rect())
+            .expect("page")
+    };
+    let bbox = |state: &AppState| {
+        stokesforge_render::page_fitted_to_layers(&boxes_of(state)).expect("a box")
+    };
+    // Fitted at creation: nothing to do.
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitPageToLayers { graph });
+    assert_eq!(state.snapshot().revision, revision, "already fitted");
+
+    // A graph pushed beyond the page: the page grows to hold it.
+    let a = graph_spec(&state, graph).panels[0].sanitized_free_frame();
+    let far = FreeFrame {
+        left: a.left + 700.0,
+        ..a
+    };
+    let drawn = page_of(&state);
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, far)],
+        page: Some(drawn),
+    });
+    let beyond = bbox(&state);
+    assert!(
+        beyond.left + beyond.width > drawn.left + drawn.width,
+        "the graph left the page: {beyond:?} vs {drawn:?}"
+    );
+    state.dispatch(Action::FitPageToLayers { graph });
+    let grown = graph_spec(&state, graph);
+    assert_eq!(grown.panels[0].sanitized_free_frame(), far, "graphs stay");
+    let fitted = grown.free_page.expect("a page");
+    assert_eq!(fitted, bbox(&state));
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::FitPage))
+    );
+
+    // Shrunk graphs: the page shrinks around them.
+    let small = FreeFrame {
+        width: 100.0,
+        height: 80.0,
+        ..far
+    };
+    let page = page_of(&state);
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, small)],
+        page: Some(page),
+    });
+    let wide = page_of(&state);
+    state.dispatch(Action::FitPageToLayers { graph });
+    let tight = page_of(&state);
+    assert!(tight.width < wide.width, "{tight:?} vs {wide:?}");
+    assert_eq!(tight.width, bbox(&state).width.round());
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitPageToLayers { graph });
+    assert_eq!(state.snapshot().revision, revision, "fitted again: no step");
+    state.dispatch(Action::Undo);
+    assert_eq!(page_of(&state), wide, "Undo gives the page back");
 }
 
 /// #423: duplicating a copy counts on instead of stacking the suffix.

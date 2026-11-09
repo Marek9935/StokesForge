@@ -726,3 +726,57 @@ mod tests {
         assert!(SizeLock::close((0.0, 10.0)).is_none());
     }
 }
+
+/// The page a Free graph would have once fitted to its `boxes` (#505), when it
+/// differs from the `image` it is drawn with by half a point or more; `None`
+/// when it already fits.
+fn free_page_to_fit(
+    boxes: &[stokesforge_render::GraphBox],
+    image: stokesforge_plot::FreePage,
+) -> Option<stokesforge_plot::FreePage> {
+    let page = stokesforge_render::page_fitted_to_layers(boxes)?;
+    let same = |a: f64, b: f64| (a - b).abs() < 0.5;
+    let fits = same(image.left, page.left)
+        && same(image.top, page.top)
+        && same(image.width, page.width)
+        && same(image.height, page.height);
+    (!fits).then_some(page)
+}
+
+/// True if the Page Layout Mode has something to fit (#505): on a Regular
+/// Grid, some empty space around the grid; in Free, a page (`image`) that is
+/// not the bounding box of the graph `boxes`. What enables the Fit Page to
+/// Layers button of the strip, without measuring anything.
+pub fn page_fit_available(
+    spec: &PlotSpec,
+    boxes: &[stokesforge_render::GraphBox],
+    image: stokesforge_plot::FreePage,
+) -> bool {
+    match spec.layer_placement {
+        LayerPlacement::Grid => spec.sanitized_grid_slack().is_some(),
+        LayerPlacement::Free => free_page_to_fit(boxes, image).is_some(),
+    }
+}
+
+/// The spec with its page fitted to its layers (#505), or `None` when there is
+/// nothing to fit (no action, no undo step).
+///
+/// **Regular Grid**: the empty space around the grid is cleared
+/// (`grid_slack`), the frames stay: the figure shrinks to the grid, margins
+/// and bands included. **Free**: the page becomes the bounding box of the
+/// graph boxes (frames, axis bands and the margin they keep), so it shrinks
+/// around smaller graphs and grows to hold a graph that went beyond it; the
+/// graphs do not move. Measures the figure (Typst titles included) in Free:
+/// the caller memoizes.
+pub fn spec_fitted_to_layers(spec: &PlotSpec) -> Option<PlotSpec> {
+    let mut fitted = spec.clone();
+    if spec.layer_placement == LayerPlacement::Grid {
+        spec.sanitized_grid_slack()?;
+        fitted.grid_slack = None;
+        return Some(fitted);
+    }
+    let layout = figure_layout(spec)?;
+    let boxes = stokesforge_render::graph_boxes(spec, &layout);
+    fitted.free_page = Some(free_page_to_fit(&boxes, layout.free_page_rect()?)?);
+    Some(fitted)
+}

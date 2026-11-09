@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use eframe::egui;
-use stokesforge_app_state::frame_sizes::SizeLock;
+use stokesforge_app_state::frame_sizes::{page_fit_available, SizeLock};
 use stokesforge_app_state::quantities::Quantity;
 use stokesforge_app_state::state::Action;
 use stokesforge_app_state::tr;
@@ -805,6 +805,18 @@ fn figure_size_controls(
                 None => SizeLock::close(size),
             },
         });
+    }
+    // #505: the page does not follow the layers by itself; this button does it.
+    let fit = tr!("action-layout-fit-page");
+    keep_together(ui, &[&fit], 1, ui.spacing().interact_size.x);
+    let available = page_fit_available(spec, &view.layout_boxes(), image);
+    if ui
+        .add_enabled(available, egui::Button::new(fit))
+        .on_hover_text(tr!("action-layout-fit-page", "hint"))
+        .on_disabled_hover_text(tr!("action-layout-fit-page", "disabled"))
+        .clicked()
+    {
+        model.push(Action::FitPageToLayers { graph });
     }
     if !(width_changed || height_changed) {
         return;

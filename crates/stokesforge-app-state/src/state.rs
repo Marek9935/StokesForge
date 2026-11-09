@@ -863,6 +863,15 @@ pub enum Action {
         /// (#505); `None` leaves it as it is.
         slack: Option<stokesforge_plot::GridSlack>,
     },
+    /// Fits the page of a graph to its layers (#505): on a Regular Grid the
+    /// empty space around the grid is cleared, in Free the page becomes the
+    /// bounding box of the graphs (margins included). One undo step
+    /// ([`PlotEditKind::FitPage`]); nothing sent, no undo step, when there is
+    /// nothing to fit. The size lock follows the new figure.
+    FitPageToLayers {
+        /// Target graph.
+        graph: NodeId,
+    },
     /// Moves a graph (the cell of layer `panel`, overlays included) on a
     /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
     /// in the Page Layout Mode. To a cell (swap if occupied, a hole accepted) or
@@ -5886,6 +5895,7 @@ impl AppState {
                 figure,
                 slack,
             } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
+            Action::FitPageToLayers { graph } => self.fit_page_to_layers(graph),
             Action::MoveGridCell {
                 graph,
                 panel,
@@ -11805,6 +11815,23 @@ impl AppState {
             } else {
                 PlotEditKind::ResizeCell
             },
+        });
+    }
+
+    /// [`Action::FitPageToLayers`]: the fitted spec committed as one step, or
+    /// nothing when the page already fits.
+    fn fit_page_to_layers(&mut self, graph: NodeId) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(spec) = crate::frame_sizes::spec_fitted_to_layers(&before) else {
+            return;
+        };
+        self.adopt_size_lock(graph);
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::FitPage,
         });
     }
 
