@@ -42,6 +42,7 @@ pub mod recent;
 pub mod recipe;
 pub mod sniff;
 pub mod store;
+pub mod templates;
 mod thousands;
 
 pub use choose::choose_recipe;
@@ -52,3 +53,7 @@ pub use preview::*;
 pub use recent::{RecentFiles, MAX_RECENT_FILES};
 pub use recipe::*;
 pub use store::*;
+pub use templates::{
+    recipe_for_file, ChooseError, ChosenRecipe, Condition, FileFacts, RecipeOrigin, SaveIssue,
+    TemplateMatch,
+};

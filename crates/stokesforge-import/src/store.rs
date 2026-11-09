@@ -7,7 +7,11 @@ use crate::recipe::ImportRecipe;
 /// The set of recipes saved by the user.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecipeStore {
-    recipes: Vec<ImportRecipe>,
+    pub(crate) recipes: Vec<ImportRecipe>,
+    /// Conditions of the templates and answers to doubts already given (#488),
+    /// additive fields: an older file has neither.
+    #[serde(flatten)]
+    pub(crate) extras: crate::templates::TemplateExtras,
 }
 
 impl RecipeStore {
@@ -28,11 +32,12 @@ impl RecipeStore {
     /// preferences, not in the `.stf` (invariant 12 does not apply); the
     /// `.stf` column sources keep their stored value, and Refresh from Source
     /// rewrites values only, never titles.
-    fn from_json(text: &str) -> Option<Self> {
+    pub(crate) fn from_json(text: &str) -> Option<Self> {
         let mut store: Self = serde_json::from_str(text).ok()?;
         for recipe in &mut store.recipes {
             recipe.adopt_joined_lines();
         }
+        store.adopt_auto_match();
         Some(store)
     }
 
@@ -69,6 +74,7 @@ impl RecipeStore {
 
     pub fn remove(&mut self, name: &str) {
         self.recipes.retain(|r| r.name != name);
+        self.extras.conditions.remove(name);
     }
 }
 
@@ -107,6 +113,7 @@ mod tests {
         recipe.subheader_roles.join_lines = false;
         let json = serde_json::to_string(&RecipeStore {
             recipes: vec![recipe],
+            ..Default::default()
         })
         .unwrap()
         .replace("\"join_lines\":false", "\"former_key\":false");
