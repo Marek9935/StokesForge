@@ -1224,8 +1224,9 @@ impl ObjectManagerPaint<'_> {
                                 .sense(egui::Sense::hover());
                                 ui.add(image).on_hover_text(tr!("stale-series-hint"));
                             }
-                            let text = list_row_text(&series.label, series.selected)
-                                .color(list_row_text_color(ui, series.selected, false));
+                            let text = list_row_text(&series.label, series.selected).color(
+                                list_row_text_color(ui, series.selected, series.label_fallback),
+                            );
                             // #151: the legend swatch is part of the target,
                             // like the name. The whole row, checkbox aside, grabs
                             // and clicks: we join the gestures before handling

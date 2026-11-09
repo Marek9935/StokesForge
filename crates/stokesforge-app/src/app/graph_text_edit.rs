@@ -20,7 +20,7 @@ use stokesforge_render_egui::{GraphView, TextTarget};
 use crate::color_picker::{ColorUsage, PickerEnv};
 use crate::number_field::number_field;
 use stokesforge_app_state::quantities;
-use stokesforge_app_state::state::{series_list_label, Action};
+use stokesforge_app_state::state::{series_legend_label, Action};
 use stokesforge_app_state::tr;
 
 use super::inplace_edit;
@@ -214,11 +214,7 @@ pub(super) fn open_legend_entry_editor(
     let Some(anchor) = view.legend_entry_screen_box(panel, series) else {
         return;
     };
-    let original = stokesforge_app_state::state::series_list_label(
-        tree,
-        spec_series,
-        &spec.panels[panel].legend.text,
-    );
+    let original = series_legend_label(tree, spec_series, &spec.panels[panel].legend.text);
     start_text_editor(
         ctx,
         view,
@@ -252,7 +248,7 @@ pub(super) fn open_series_name_editor(
         ctx,
         view,
         TextEditTarget::LegendEntry(series),
-        series_list_label(tree, value, &spec.panels[series.panel].legend.text),
+        series_legend_label(tree, value, &spec.panels[series.panel].legend.text),
         anchor,
     );
 }

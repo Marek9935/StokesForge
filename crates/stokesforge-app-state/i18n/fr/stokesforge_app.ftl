@@ -271,6 +271,7 @@ grid-drag-rows =
 graph-row-series = Ligne { $number }
 graph-series-broken-reference = (référence rompue)
 graph-series-broken-reference-named = { $name } — référence rompue
+graph-series-empty-text = (vide) { $column }
 graph-legend-more = { $count ->
     [one] … et { $count } autre
    *[other] … et { $count } autres

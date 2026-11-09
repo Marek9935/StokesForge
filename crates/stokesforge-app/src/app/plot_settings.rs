@@ -1970,7 +1970,13 @@ fn legend_row_columns(state: &AppState, graph: NodeId) -> Vec<(NodeId, String)> 
         .map(|node| node.children().to_vec())
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|id| Some((id, tree.node(id)?.name().to_string())))
+        .filter_map(|id| {
+            tree.node(id)?.as_column()?;
+            Some((
+                id,
+                stokesforge_app_state::state::column_letter_name(tree, id),
+            ))
+        })
         .collect()
 }
 

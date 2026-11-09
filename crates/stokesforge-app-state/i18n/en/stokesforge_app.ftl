@@ -272,6 +272,7 @@ grid-drag-rows =
 graph-row-series = Row { $number }
 graph-series-broken-reference = (broken reference)
 graph-series-broken-reference-named = { $name } — broken reference
+graph-series-empty-text = (empty) { $column }
 graph-legend-more = … and { $count } more
 status-row-no-x-prime = No column of this sheet has an x' value: nothing to plot
 row-drop-title = Plot Rows

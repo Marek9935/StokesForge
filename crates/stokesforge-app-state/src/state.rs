@@ -1770,18 +1770,71 @@ fn row_series_name(row: usize) -> String {
     crate::tr!("graph-row-series", number = (row + 1))
 }
 
-/// Displayed name of a series in the list of the properties window: the
-/// same rule as the graph legend, [`stokesforge_core::series_label`] (single
-/// source, issue #25).
-///
-/// `text` is the « Text from » setting of the legend of the panel that holds
-/// the series (#499).
+/// Displayed name of a series in the lists (Object Manager, series list of
+/// the properties window): the legend's name ([`series_legend_label`]), or, when
+/// the chosen « Text from » row is empty for the column, a grey fallback that
+/// names the column (#499). The second value is `true` for that fallback, so
+/// the list paints it muted. The decision « empty » stays in
+/// [`stokesforge_core::series_label`] (single source, issue #25); the
+/// legend itself stays empty.
+pub fn series_list_entry(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> (String, bool) {
+    let label = stokesforge_core::series_label(series, tree, text);
+    if series.row.is_none() && label.as_text() == Some("") {
+        let sheet = tree
+            .parent(series.y)
+            .ok()
+            .flatten()
+            .and_then(|id| tree.node(id))
+            .map(|node| node.name().to_string())
+            .unwrap_or_default();
+        let letters = tree.column_letters(series.y).unwrap_or_default();
+        let column = format!("{sheet} {letters}").trim().to_string();
+        return (crate::tr!("graph-series-empty-text", column = column), true);
+    }
+    (crate::figure_texts::series_label_text(&label), false)
+}
+
+/// [`series_list_entry`] without the flag: the text of a list row.
 pub fn series_list_label(
     tree: &Tree,
     series: &stokesforge_plot::SeriesSpec,
     text: &stokesforge_plot::LegendText,
 ) -> String {
+    series_list_entry(tree, series, text).0
+}
+
+/// The name the legend shows for a series (empty stays empty), same rule as
+/// the graph legend, [`stokesforge_core::series_label`] (single source, issue
+/// #25). It is what the legend-entry name editor starts from.
+///
+/// `text` is the « Text from » setting of the legend of the panel that holds
+/// the series (#499).
+pub fn series_legend_label(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> String {
     crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree, text))
+}
+
+/// Label of a column in the « Value of column… » picker (#499): the letter
+/// and the Long Name (« A — Wavelength »), the letter alone without a long name.
+pub fn column_letter_name(tree: &Tree, column: NodeId) -> String {
+    let letters = tree.column_letters(column).unwrap_or_default();
+    let long = tree
+        .node(column)
+        .and_then(Node::as_column)
+        .map(|c| c.meta().long_name.clone())
+        .unwrap_or_default();
+    if long.is_empty() {
+        letters
+    } else {
+        format!("{letters} \u{2014} {long}")
+    }
 }
 
 /// Payload of the drag of **whole rows** of a sheet to an open

@@ -297,7 +297,7 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
             LegendField::ShortName => y_node.name().to_string(),
             LegendField::XPrime => meta
                 .and_then(|m| m.x_prime)
-                .map(crate::column::format_f64_for_display)
+                .map(crate::number_format::format_grid)
                 .unwrap_or_default(),
         }
     };
@@ -345,7 +345,7 @@ fn row_cell_text(tree: &Tree, id: NodeId, row: usize) -> Option<String> {
     let column = tree.node(id)?.as_column()?;
     Some(match column.cell(row) {
         crate::column::MixedCell::Empty => String::new(),
-        crate::column::MixedCell::Number(value) => crate::column::format_f64_for_display(value),
+        crate::column::MixedCell::Number(value) => crate::number_format::format_grid(value),
         crate::column::MixedCell::Text(text) => text,
     })
 }
@@ -1228,6 +1228,52 @@ mod tests {
             ..chosen
         };
         assert_eq!(label_of(&project, &series, &gone), SeriesLabel::Row(1));
+    }
+
+    /// F5 (#499): a number inserted in a legend text is shown as the grid
+    /// shows it (6 significant digits), not at full precision. Witness: the
+    /// exact formatter gives `0.19633687222225316`.
+    #[test]
+    fn numbers_in_a_legend_text_read_like_the_grid() {
+        let f = Fixture::new();
+        let mut project = f.project;
+        project
+            .set_column_meta(
+                f.y,
+                ColumnMeta {
+                    x_prime: Some(0.19633687222225316),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+        let shown = SeriesLabel::Text("0.196337".to_string());
+        assert_eq!(
+            label_of(
+                &project,
+                &SeriesSpec::new(f.y),
+                &from(LegendTextFrom::XPrime)
+            ),
+            shown
+        );
+        // The cell of a chosen column on a row series.
+        let sheet = project.tree().parent(f.y).expect("parent").expect("sheet");
+        let values = project
+            .add_column(
+                sheet,
+                None,
+                Some("V"),
+                numeric_column(&[0.19633687222225316]),
+            )
+            .expect("column V");
+        let series = SeriesSpec {
+            row: Some(0),
+            ..SeriesSpec::new(f.y)
+        };
+        let chosen = LegendText {
+            row_column: Some(values),
+            ..LegendText::default()
+        };
+        assert_eq!(label_of(&project, &series, &chosen), shown);
     }
 
     /// Witness: skipping the escape would let `*` and `#` act as markup.

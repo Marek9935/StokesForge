@@ -33,14 +33,15 @@ use crate::icons::ICON_SIZE;
 use crate::theme;
 use stokesforge_app_state::object_drag::{step_panel, DragItem, DropOver};
 use stokesforge_app_state::object_manager::group_title;
-use stokesforge_app_state::state::{series_list_label, Action, SaveTarget};
+use stokesforge_app_state::state::{series_list_entry, Action, SaveTarget};
 use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::form::{choice, form, ChoiceOption, Form};
 use super::hover_help::help_text;
 use super::list_row::{
-    list_row_draggable, raise_to_list_row_height, restore_row_height, with_list_row_height,
+    list_row_draggable, list_row_draggable_dimmed, raise_to_list_row_height, restore_row_height,
+    with_list_row_height,
 };
 use super::object_dnd::{self, Hover};
 use super::plot_settings::series_editor;
@@ -167,7 +168,7 @@ fn series_row(
     dnd: &ListDnd,
     commit: &mut bool,
 ) -> f32 {
-    let label = series_list_label(tree, &panel.series[index], &panel.legend.text);
+    let (label, fallback) = series_list_entry(tree, &panel.series[index], &panel.legend.text);
     let row = ui
         .push_id(index, |ui| {
             with_list_row_height(ui, |ui| {
@@ -192,7 +193,8 @@ fn series_row(
                                 *commit = true;
                             }
                             // The whole row, outside the box, is clicked and dragged.
-                            let response = list_row_draggable(ui, &label, *selected == index);
+                            let response =
+                                list_row_draggable_dimmed(ui, &label, *selected == index, fallback);
                             clicked = response.clicked();
                             Some(response)
                         },

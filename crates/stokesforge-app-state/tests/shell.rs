@@ -8538,6 +8538,71 @@ fn new_graphs_take_the_legend_text_preference() {
     assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
 }
 
+/// #499 F2: with « Text from » on an empty header row, the legend entry stays
+/// empty, but the lists name the column in grey. Witness: a fallback in
+/// `series_label` would fill the legend; no fallback leaves the list row blank.
+/// F6: the « Value of column… » picker says « A — Wavelength », the letter
+/// alone without a long name.
+#[test]
+fn an_empty_legend_text_is_empty_in_the_legend_and_named_in_the_lists() {
+    use stokesforge_app_state::state::{
+        column_letter_name, series_legend_label, series_list_entry,
+    };
+    use stokesforge_plot::{LegendText, LegendTextFrom, SeriesSpec};
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let mut project = Project::new("Lists").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("book");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .expect("A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[2.0]))
+        .expect("B");
+    project
+        .set_column_meta(
+            a,
+            ColumnMeta {
+                long_name: "Wavelength".into(),
+                ..ColumnMeta::default()
+            },
+        )
+        .expect("meta");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, state) = start(project, &dir.path().join("projet.stf"));
+    let tree = state.tree();
+    let text = LegendText {
+        from: LegendTextFrom::Comments,
+        ..LegendText::default()
+    };
+    let series = SeriesSpec::new(b);
+    assert_eq!(
+        series_legend_label(tree, &series, &text),
+        "",
+        "legend empty"
+    );
+    let (label, fallback) = series_list_entry(tree, &series, &text);
+    assert!(fallback);
+    assert_eq!(label, "(empty) Sheet1 B");
+    // A typed name or a filled row is not a fallback.
+    let typed = SeriesSpec {
+        name: "mine".into(),
+        ..SeriesSpec::new(b)
+    };
+    assert_eq!(
+        series_list_entry(tree, &typed, &text),
+        ("mine".into(), false)
+    );
+    assert!(!series_list_entry(tree, &series, &LegendText::default()).1);
+    assert_eq!(column_letter_name(tree, a), "A \u{2014} Wavelength");
+    assert_eq!(column_letter_name(tree, b), "B");
+}
+
 /// A node that is not a graph opens nothing.
 #[test]
 fn open_plot_settings_ignores_a_node_that_is_not_a_graph() {
