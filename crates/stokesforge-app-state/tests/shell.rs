@@ -7729,6 +7729,9 @@ fn row_drag_payload_needs_full_rows_and_an_x_prime_row() {
     }
     state.select_row(sheet, 1);
     assert_eq!(state.row_drag_payload(sheet), None, "without x'");
+    // #493: the analysis still takes the rows, plotting does not.
+    let target = state.analysis_rows_target(sheet).expect("rows to analyze");
+    assert_eq!((target.sheet, target.rows), (sheet, vec![1]));
 
     // A cell selection (not whole rows) cannot be dragged either.
     set_x_prime(&mut state, sheet, "A", "1");

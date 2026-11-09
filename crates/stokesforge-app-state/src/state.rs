@@ -1864,6 +1864,11 @@ pub enum AlertKind {
     /// The session actor is dead (#310): the model is lost. Close closes
     /// the application; the message says where the backup copy was written.
     SessionLost,
+    /// A row analysis (or the recalculation of a transposed sheet) uses the
+    /// column numbers 1, 2, 3... as x' because the source has none (#493): a
+    /// plain warning, twin of `LowRSquared`. Close keeps the analysis; while the
+    /// analysis window is open it also offers to cancel it.
+    NoXPrime,
 }
 
 /// Row drop waiting for the answer to the axis dialog (#166).
@@ -3980,6 +3985,30 @@ impl AppState {
     pub fn row_drag_payload(&self, sheet: NodeId) -> Option<RowDragPayload> {
         let selection = self.selection(sheet)?;
         if !selection.is_full_rows() || x_prime_columns(&self.snapshot.tree, sheet).is_empty() {
+            return None;
+        }
+        let row_count = self.row_count(sheet);
+        let rows: Vec<usize> = selection
+            .full_row_indices()
+            .into_iter()
+            .filter(|row| *row < row_count)
+            .collect();
+        (!rows.is_empty()).then_some(RowDragPayload { sheet, rows })
+    }
+
+    /// The rows an **analysis** of the selection would take (#493): whole rows
+    /// (row-number gutter) of a sheet with at least one Y column, x' or not.
+    /// Without x' the transposed sheet numbers the columns 1, 2, 3... The
+    /// gestures that plot rows keep [`AppState::row_drag_payload`].
+    pub fn analysis_rows_target(&self, sheet: NodeId) -> Option<RowDragPayload> {
+        let selection = self.selection(sheet)?;
+        let tree = &self.snapshot.tree;
+        let has_y = tree.children(sheet).ok()?.iter().any(|id| {
+            tree.node(*id)
+                .and_then(|n| n.as_column())
+                .is_some_and(|c| c.meta().role == stokesforge_core::ColumnRole::Y)
+        });
+        if !selection.is_full_rows() || !has_y {
             return None;
         }
         let row_count = self.row_count(sheet);
@@ -8081,13 +8110,12 @@ impl AppState {
     /// any `dispatch`, each message is its own gesture, so the answer is that
     /// of the last message said.
     pub(crate) fn gesture_failed(&self) -> bool {
-        // The low R² warning (#288) is not a failure: the gesture that opened
-        // it succeeded.
+        // The low R² (#288) and no x' (#493) warnings are not failures: the
+        // gesture that opened them succeeded.
         self.dialog_error.is_some()
-            || self
-                .alert
-                .as_ref()
-                .is_some_and(|alert| alert.kind != AlertKind::LowRSquared)
+            || self.alert.as_ref().is_some_and(|alert| {
+                !matches!(alert.kind, AlertKind::LowRSquared | AlertKind::NoXPrime)
+            })
             || self.last_error_gesture == Some(self.gesture_id)
     }
 

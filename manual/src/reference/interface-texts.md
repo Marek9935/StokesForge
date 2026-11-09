@@ -103,6 +103,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | New Layer | Nouveau calque |
 | New Layer Beside | Calque à côté |
 | New Project | Nouveau projet |
+| No x' Values | Pas de valeurs x' |
 | Object Manager | Gestionnaire d’objets |
 | Object Properties | Propriétés de l'objet |
 | Open Project | Ouvrir un projet |

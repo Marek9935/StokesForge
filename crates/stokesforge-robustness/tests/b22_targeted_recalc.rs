@@ -683,8 +683,9 @@ fn columns_of(tree: &Tree, sheet: Option<NodeId>) -> Vec<NodeId> {
 
 /// Choice in worksheet order, without depending on the hash table. The
 /// computation and the command stay the same as in the real clients.
-/// Worksheets whose Y columns can all be transposed: numeric, with an x', formula
-/// columns included (#439), and not themselves transposed (same rule as `b23`).
+/// Worksheets whose Y columns can all be transposed: an x' on every one, or on
+/// none (index mode, #493), formula columns included (#439), and not themselves
+/// transposed (same rule as `b23`).
 fn transposable(tree: &Tree) -> Vec<NodeId> {
     worksheets_of(tree)
         .into_iter()
@@ -696,9 +697,12 @@ fn transposable(tree: &Tree) -> Vec<NodeId> {
                 .collect();
             tree.transpose_link(s).is_none()
                 && !ys.is_empty()
-                && ys
+                && (ys
                     .iter()
                     .all(|c| c.meta().x_prime.is_some_and(f64::is_finite))
+                    || ys
+                        .iter()
+                        .all(|c| !c.meta().x_prime.is_some_and(f64::is_finite)))
         })
         .collect()
 }

@@ -77,6 +77,15 @@ alert-session-lost-no-recovery = No recovery copy could be written: { $detail }
 
 alert-low-r2-title = Low R²
 alert-low-r2 = Some results follow the data poorly (R² below 0.6). Check the model and the starting values.
+alert-no-x-prime-title = No x' Values
+alert-no-x-prime =
+    { $count ->
+        [one] { $sheets } has no x' values. The analysis uses the column numbers 1, 2, 3… as x'.
+       *[other] { $sheets } have no x' values. The analysis uses the column numbers 1, 2, 3… as x'.
+    }
+alert-no-x-prime-recalculated = { $source } has no x' values any more. { $transposed } now uses the column numbers 1, 2, 3… as x'.
+alert-no-x-prime-cancel = Cancel Analysis
+    .hint = Closes the analysis and removes the transposed sheet
 low-r2-summary-head = R² < 0.6 for:
 low-r2-summary-see-results = See the Results pane for the values.
 low-r2-count-baseline =
@@ -2270,6 +2279,8 @@ transpose-auto = Recalculate automatically
     .hint = Updates { $sheet } whenever { $source } changes. A value typed in it stops the updates until Relink
     .disabled = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check this box
 transpose-state-stuck = Out of date: { $reason }
+transpose-stuck-lost-x-prime = { $source } has no x' values any more. Recalculate to use the column numbers 1, 2, 3… as x'
+row-plot-needs-x-prime = Set x' values to plot a row
 
 # Lissage (#324)
 analysis-kind-smooth = Smoothing

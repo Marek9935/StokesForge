@@ -325,13 +325,15 @@ Set the **Response shift** if the response and the signal are offset. The output
 
 Analyses work on columns. To analyse a row, for example a spectrum recorded across several columns, StokesForge transposes it first.
 
-1. Make sure the columns of the sheet have an **x'** value. This is the value that goes on the X axis for a row, such as a time or a wavelength. If you cannot see it, right-click the sheet and tick **Show x' Row**.
+1. Give the columns of the sheet an **x'** value. This is the value that goes on the X axis for a row, such as a time or a wavelength. If you cannot see it, right-click the sheet and tick **Show x' Row**. If no column has an x', StokesForge numbers them 1, 2, 3… in the order of the sheet and says so in a **No x' Values** window (see below).
 2. Select the whole rows and right-click.
 3. Choose **Analysis** and a category.
 
 StokesForge adds a linked sheet named like the source with a `ᵀ` suffix. It holds the x' values and one column per row, called **Row N**. The analysis then runs on those columns like on any other. If you cancel the analysis window, nothing is added.
 
-Only numeric columns can be transposed. A message names the column, by its letter, when it has no x' value or contains text.
+Only numeric columns can be transposed. A message names the column, by its letter, when it contains text, or when it has no x' value while other columns have one.
+
+When no column has an x', the analysis still runs: the x' column of the linked sheet, named **Column number**, holds 1, 2, 3… for the Y columns in the order of the sheet, and a **No x' Values** window tells you so. Press **Close** to carry on, or **Cancel Analysis** to stop and remove the linked sheet. Your sheet is not changed. If you give every column an x' later, the linked sheet is **Out of date** (or follows by itself) and takes them. If you remove every x' from a sheet that had them, the linked sheet keeps its numbers and reads **Out of date**, even when it follows its source; **Recalculate** then switches it to 1, 2, 3… and shows the same window. Plot and Send to stay greyed out on those rows, with the hint **Set x' values to plot a row**.
 
 <img src="../images/analysis-transposed-sheet.png" alt="The transposed sheet Kinetics: the banner Transposed from Kinetics with the box Recalculate automatically checked, the x' column and one column per row analysed." width="700">
 

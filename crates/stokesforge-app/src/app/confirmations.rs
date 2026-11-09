@@ -26,9 +26,9 @@ use stokesforge_app_state::state::{
 use stokesforge_app_state::tr;
 
 use super::dialogs::{
-    modal_alert, modal_confirm, modal_dialog_with, modal_read_only, modal_save_changes,
-    AlertOutcome, ConfirmOutcome, DialogFooter, DialogNature, DialogOutcome, PlainSize,
-    SaveChangesOutcome, SizeClass,
+    modal_alert, modal_confirm, modal_dialog_with, modal_read_only, modal_read_only_with,
+    modal_save_changes, AlertOutcome, ConfirmOutcome, DialogFooter, DialogNature, DialogOutcome,
+    PlainSize, SaveChangesOutcome, SizeClass,
 };
 
 // All blocking dialogs are of class Small (S-F11), the default size of their
@@ -54,6 +54,35 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             },
         );
         if outcome != DialogOutcome::Open {
+            actions.push(Action::DismissAlert);
+        }
+    } else if let Some(alert) = state.alert().filter(|a| a.kind == AlertKind::NoXPrime) {
+        // A warning (#493), twin of the low R² one: Close (Enter, Escape, cross)
+        // keeps the analysis. While the analysis window is open, "Cancel
+        // Analysis" also aborts it (same effect as the window's Cancel).
+        let mut cancel = false;
+        let cancellable = state.row_analysis_cancellable();
+        let outcome = modal_read_only_with(
+            ctx,
+            egui::Id::new("stokesforge_alert"),
+            &tr!("alert-no-x-prime-title"),
+            PlainSize::Class(SizeClass::Small),
+            |ui| {
+                if cancellable {
+                    cancel = ui
+                        .add(egui::Button::new(tr!("alert-no-x-prime-cancel")))
+                        .on_hover_text(tr!("alert-no-x-prime-cancel", "hint"))
+                        .clicked();
+                }
+            },
+            |ui| {
+                ui.label(&alert.message);
+            },
+        );
+        if cancel {
+            actions.push(Action::DismissAlert);
+            actions.push(Action::CloseAnalysis);
+        } else if outcome != DialogOutcome::Open {
             actions.push(Action::DismissAlert);
         }
     } else if let Some(alert) = state.alert().filter(|a| a.kind == AlertKind::SessionLost) {
@@ -87,7 +116,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ),
             // Handled above: neither the warning nor the lost session has an
             // action to retry.
-            AlertKind::LowRSquared | AlertKind::SessionLost => return,
+            AlertKind::LowRSquared | AlertKind::NoXPrime | AlertKind::SessionLost => return,
             AlertKind::OpenFailed => (
                 tr!("alert-open-failed-title"),
                 tr!("alert-open-failed"),

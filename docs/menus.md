@@ -132,6 +132,7 @@ Selection ▸ remains only in Edit.
 |---|---|
 | Cell, row, header field | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (Formula field holding a formula, #236; also Workbook › Columns) · Clear · Delete and Shift Up |
 | Column header | Plot ▸ · Add Column ─ clipboard ─ Move ▸ · Type ▸ (Numeric, Mixed: greyed with their reason on a formula column or a calculation output when no selected column can change type, otherwise only the others change, #431) · Role ▸ · Reset Width (default width of the selection, disabled with no stored width, #330) ─ Clear · Delete (removes the columns; a single Undo restores them); Move ▸ = Move to First · Move Left · Move Right · Move to Last, disabled with their reason when the gesture would change nothing (#319); same entries in Workbook › Columns |
+| Row numbers (gutter), whole rows | Plot ▸ · Send to ▸ · Analysis ▸ ─ clipboard ─ Clear · Delete. With no x' on the sheet (#493) Plot and Send to are grayed out ("Set x' values to plot a row") and only Analysis acts; no Move ▸ nor Type/Role (rows are not columns) |
 | Empty grid, blank area | Add Column |
 | Entry row (cells) | the cell menu above; its gutter `*` has none (#440) |
 | Sheet tab, empty strip | Add Sheet ─ Rename · Duplicate · Reset Column Widths (the whole sheet, disabled with no stored width, #330) ─ Delete |

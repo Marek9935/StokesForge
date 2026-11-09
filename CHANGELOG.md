@@ -28,6 +28,12 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Analysing whole rows of a sheet that has no x' values now works (#493): the
+  rows are analysed with the column numbers 1, 2, 3… as x', a **No x' Values**
+  window says so and offers **Cancel Analysis**, and the right-click of those
+  rows is the rows menu (Plot and Send to greyed out). It used to analyse, in
+  silence, the columns the rows cross.
+
 - A transposed sheet has a **Recalculate automatically** box, checked by
   default (#463). Checked, the sheet follows its source by itself; unchecked, it
   is the snapshot it was (banner, **Recalculate**). A value you type in the
