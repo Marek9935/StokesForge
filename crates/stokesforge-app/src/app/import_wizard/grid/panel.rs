@@ -995,10 +995,12 @@ fn advanced_fold(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
     let mut changes: Vec<AdvancedChange> = Vec::new();
+    // A new opening of the import is a new fold: closed by default (C1).
+    let opening = state.import_opening();
     ui.add_space(theme::SPACE_SECTION * 2.0);
     form(ui, "stokesforge_import_advanced_form", |f| {
         f.collapsible(
-            "stokesforge_import_advanced",
+            ("stokesforge_import_advanced", opening),
             tr!("import-advanced-title"),
             |f| {
                 for setting in ADVANCED_SETTINGS {

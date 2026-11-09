@@ -51,7 +51,8 @@ pub use preview::*;
 pub use recent::{RecentFiles, MAX_RECENT_FILES};
 pub use recipe::*;
 pub use store::*;
+pub use templates::tie_id_of;
 pub use templates::{
     kind_id, kind_summary, recipe_for_file, ChooseError, ChosenRecipe, Condition, FileFacts,
-    KindSummary, RecipeOrigin, SaveIssue, TemplateMatch,
+    KindSummary, RecipeOrigin, SaveIssue, TemplateMatch, TIE_PICK_SEPARATOR, TIE_PREFIX,
 };

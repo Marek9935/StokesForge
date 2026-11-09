@@ -1911,20 +1911,60 @@ pub fn build_view(
                     last.key = o.key.clone();
                 }
             }
-            None => out.push(finding(
-                kind,
-                Confidence::Missing,
-                Source::File,
-                if y {
-                    tr!("import-check-missing-yunit")
+            None => {
+                // The recipe (a template without unit roles) reads no unit,
+                // but the header may give one: say so rather than "not in
+                // the file".
+                let candidates: [&str; 2] = if y {
+                    ["YUNITS", "VERTICAL AXIS"]
                 } else {
-                    tr!("import-check-missing-xunit")
-                },
-                vec![],
-                String::new(),
-                vec![],
-                None,
-            )),
+                    ["XUNITS", "HORIZONTAL AXIS"]
+                };
+                let unused = keys
+                    .iter()
+                    .filter(|k| candidates.contains(&norm_key(&k.key).as_str()))
+                    .find_map(|k| {
+                        let (whole, bracket) = split_name_unit(&k.value);
+                        let text = stokesforge_import::props::short_unit(&bracket.unwrap_or(whole));
+                        (!text.is_empty()).then(|| (k.clone(), text))
+                    });
+                let axis = if y { "Y" } else { "X" };
+                match unused {
+                    Some((entry, text)) => out.push(finding(
+                        kind,
+                        Confidence::Missing,
+                        Source::File,
+                        tr!(
+                            "import-check-unit-unused",
+                            axis = axis,
+                            key = entry.key.clone(),
+                            line = entry.line.to_string(),
+                            text = text
+                        ),
+                        vec![],
+                        String::new(),
+                        vec![Evidence {
+                            line: entry.line,
+                            cell: Some(value_cell(map, recipe, entry.line - 1)),
+                        }],
+                        None,
+                    )),
+                    None => out.push(finding(
+                        kind,
+                        Confidence::Missing,
+                        Source::File,
+                        if y {
+                            tr!("import-check-missing-yunit")
+                        } else {
+                            tr!("import-check-missing-xunit")
+                        },
+                        vec![],
+                        String::new(),
+                        vec![],
+                        None,
+                    )),
+                }
+            }
         }
     }
     if xp_line.is_some() {

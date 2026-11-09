@@ -385,6 +385,20 @@ pub enum SaveIssue {
     NoCondition,
 }
 
+/// Start of the id of a tie between templates.
+pub const TIE_PREFIX: &str = "template-tie:";
+/// Between a tie id and the name of the template the user picked for it.
+pub const TIE_PICK_SEPARATOR: char = '>';
+
+/// The id of the doubt "these templates fit the file as well": the names of
+/// all the templates in the tie, sorted, so that it does not depend on which
+/// one wins.
+pub fn tie_id_of(names: &[&str]) -> String {
+    let mut names = names.to_vec();
+    names.sort_unstable();
+    format!("{TIE_PREFIX}{}", names.join("|"))
+}
+
 /// The template picked for a file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TemplateMatch<'a> {
@@ -501,12 +515,44 @@ impl RecipeStore {
                 _ => best = vec![(recipe, met)],
             }
         }
+        // A tie the user already settled for this kind of file: the template
+        // picked then goes first.
+        if best.len() > 1 {
+            if let Some(kind) = facts.kind.as_deref() {
+                let names: Vec<&str> = best.iter().map(|(r, _)| r.name.as_str()).collect();
+                if let Some(picked) = self.tie_pick(kind, &tie_id_of(&names)) {
+                    if let Some(at) = best.iter().position(|(r, _)| r.name == picked) {
+                        best.swap(0, at);
+                    }
+                }
+            }
+        }
         let (recipe, met) = *best.first()?;
         Some(TemplateMatch {
             recipe,
             met,
             tied: best.iter().skip(1).map(|(r, _)| *r).collect(),
         })
+    }
+
+    /// The template the user picked for a tie (`tie` is a [`tie_id`]) on this
+    /// kind of file, if they did.
+    pub fn tie_pick(&self, kind: &str, tie: &str) -> Option<&str> {
+        let prefix = format!("{tie}{TIE_PICK_SEPARATOR}");
+        self.extras
+            .remembered
+            .get(kind)?
+            .iter()
+            .find_map(|id| id.strip_prefix(prefix.as_str()))
+    }
+
+    /// Remembers that the user settled the tie `tie` for this kind of file by
+    /// picking `chosen`; an earlier pick or plain answer for it is replaced.
+    pub fn remember_tie_pick(&mut self, kind: &str, tie: &str, chosen: &str) {
+        let set = self.extras.remembered.entry(kind.to_string()).or_default();
+        let prefix = format!("{tie}{TIE_PICK_SEPARATOR}");
+        set.retain(|id| id != tie && !id.starts_with(&prefix));
+        set.insert(format!("{prefix}{chosen}"));
     }
 
     /// Remembers that the user answered this doubt for this kind of file.
@@ -519,10 +565,10 @@ impl RecipeStore {
     }
 
     pub fn is_remembered(&self, kind: &str, doubt: &str) -> bool {
-        self.extras
-            .remembered
-            .get(kind)
-            .is_some_and(|set| set.contains(doubt))
+        self.extras.remembered.get(kind).is_some_and(|set| {
+            set.contains(doubt)
+                || (doubt.starts_with(TIE_PREFIX) && self.tie_pick(kind, doubt).is_some())
+        })
     }
 
     /// Forgets one remembered answer. `false` if there was none.

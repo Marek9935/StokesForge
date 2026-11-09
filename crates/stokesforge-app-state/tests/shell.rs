@@ -4727,6 +4727,33 @@ fn committing_a_note_without_typing_writes_nothing() {
     assert!(!state.can_undo());
 }
 
+/// A file whose name is already a sheet of the workbook is imported under a
+/// free name, silently: the import worked, so no red « Name already used ».
+#[test]
+fn importing_a_title_already_used_names_the_new_sheet_freely_without_an_error() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "X,Y\n1,10\n2,20\n").expect("wrote measure_a.csv");
+    for _ in 0..2 {
+        state.dispatch(Action::ImportFiles {
+            destination: ImportDestination::ActiveBook(book),
+            recipe: stokesforge_import::ImportRecipe::new("Untitled"),
+            paths: vec![file.clone()],
+        });
+        let status = state.status().expect("a status message");
+        assert!(!status.is_error(), "{}", status.text);
+    }
+    let names: Vec<String> = state
+        .worksheets_of(book)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect();
+    assert!(names.contains(&"measure_a".to_string()), "{names:?}");
+    assert!(names.contains(&"measure_a (2)".to_string()), "{names:?}");
+}
+
 /// Importing several files creates one sheet per file, each named
 /// after its file (`file_stem`) and carrying the file's columns —
 /// and the whole batch fits in **one** history entry: a single
@@ -16126,6 +16153,140 @@ fn two_templates_that_tie_raise_a_point_to_check_offering_the_other() {
         state.shown_file_status(),
         stokesforge_app_state::state::ShownFileStatus::Check(before - 1)
     );
+}
+
+/// Two templates that fit every `.csv` file equally.
+fn save_two_tied_templates() {
+    let mut store = RecipeStore::default();
+    for name in ["Template A", "Template B"] {
+        store
+            .upsert_with_conditions(
+                ImportRecipe::new(name),
+                vec![stokesforge_import::Condition::Extension {
+                    exts: vec!["csv".into()],
+                }],
+            )
+            .unwrap();
+    }
+    store.save().unwrap();
+}
+
+/// Choosing the other template of a tie is an answer remembered for the kind
+/// of file: later files of that kind use it without raising the tie, it is
+/// listed in Manage Templates, and Forget brings the tie back.
+#[test]
+fn the_template_picked_in_a_tie_is_remembered_for_the_kind_of_file() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    save_two_tied_templates();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    let first = state.template_in_use().unwrap();
+    let other = if first == "Template A" {
+        "Template B"
+    } else {
+        "Template A"
+    };
+    state.template_use(other);
+    assert_eq!(state.template_in_use().as_deref(), Some(other));
+    let answers = state.remembered_answers();
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    assert!(
+        answers[0].doubt_text.contains(other),
+        "{}",
+        answers[0].doubt_text
+    );
+    // Another window, another file of the same kind: the pick is applied.
+    state.cancel_import();
+    import_window_on(&mut state, dir.path(), &[("b.csv", JASCO_SURE)]);
+    assert_eq!(state.template_in_use().as_deref(), Some(other));
+    assert!(
+        state.to_check().iter().all(|p| !matches!(
+            p.source,
+            stokesforge_app_state::state::ToCheckSource::Tie { .. }
+        )),
+        "no tie raised again"
+    );
+    // Forgetting it brings the tie back.
+    let answer = state.remembered_answers().remove(0);
+    state.forget_remembered_answer(&answer.kind, &answer.doubt);
+    state.cancel_import();
+    import_window_on(&mut state, dir.path(), &[("c.csv", JASCO_SURE)]);
+    assert!(state.to_check().iter().any(|p| matches!(
+        p.source,
+        stokesforge_app_state::state::ToCheckSource::Tie { .. }
+    )));
+}
+
+/// A template without unit roles over a file whose header gives the units:
+/// the sentence names the value found and says the template does not use it,
+/// never « not in the file ».
+#[test]
+fn a_template_without_unit_roles_does_not_say_the_unit_is_missing_from_the_file() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    // The header of JASCO_SURE is seven lines, `XYDATA` included.
+    let mut template = ImportRecipe::new("Plain");
+    template.header = HeaderSkip::Lines(7);
+    template.separator = Separator::Semicolon;
+    let mut store = RecipeStore::default();
+    store
+        .upsert_with_conditions(
+            template,
+            vec![stokesforge_import::Condition::Extension {
+                exts: vec!["csv".into()],
+            }],
+        )
+        .unwrap();
+    store.save().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    assert_eq!(state.template_in_use().as_deref(), Some("Plain"));
+    let view = state.import_check().expect("a check view");
+    let finding = view
+        .findings
+        .iter()
+        .find(|f| f.kind == stokesforge_app_state::state::CheckKind::XUnit)
+        .expect("a finding for the unit of X");
+    let text: String = finding
+        .pieces
+        .iter()
+        .map(|piece| match piece {
+            stokesforge_app_state::state::Piece::Text(t) => t.as_str(),
+            stokesforge_app_state::state::Piece::Chip { text, .. } => text.as_str(),
+        })
+        .collect();
+    assert!(
+        text.contains("XUNITS") && text.contains("does not use"),
+        "{text}"
+    );
+    assert!(!text.contains("not in the file"), "{text}");
+}
+
+/// The Advanced fold belongs to one opening of the import window.
+#[test]
+fn each_opening_of_the_import_window_is_a_new_one() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    let first = state.import_opening();
+    state.cancel_import();
+    state.open_import(None::<NodeId>);
+    assert_ne!(first, state.import_opening());
+}
+
+/// Only refused files in the window: nothing to import.
+#[test]
+fn a_window_with_only_refused_files_has_nothing_to_import() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("empty.csv", "")]);
+    assert!(!state.import_has_readable_file());
+    state.cancel_import();
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    assert!(state.import_has_readable_file());
 }
 
 #[test]

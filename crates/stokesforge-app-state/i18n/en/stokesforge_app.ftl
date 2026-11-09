@@ -1941,6 +1941,7 @@ disabled-no-last-import = No finished import to reopen
 disabled-needs-sheet = Bring a workbook sheet to the front first
 disabled-no-window = No window to maximize
 disabled-add-file-first = Add a file first
+disabled-no-readable-file = None of these files can be read
 disabled-import-no-active-book = Bring a workbook to the front first
 disabled-script-running = Wait for the script to finish
 disabled-script-unavailable = Python is not available in this build
@@ -2319,6 +2320,7 @@ import-check-xunit = X unit: { $c0 } from { $key } (line { $line })
 import-check-yunit = Y unit: { $c0 } from { $key } (line { $line })
 import-check-xunit-line = X unit: { $c0 } from line { $line }
 import-check-yunit-line = Y unit: { $c0 } from line { $line }
+import-check-unit-unused = Unit of { $axis }: the file gives { $text } ({ $key }, line { $line }), but this template does not use it
 import-check-missing-xunit = Unit of X: not in the file
 import-check-missing-yunit = Unit of Y: not in the file
 import-check-missing-xpunit = Unit of x′: not in the file
@@ -2495,6 +2497,11 @@ import-template-save-note = The number of header lines does not matter.
 import-template-save-reason-name = Type a name
 import-template-save-reason-trigger = Keep at least one condition
 import-template-save-replaces = Replaces the template of the same name
+import-template-save-unchecked =
+    { $count ->
+        [one] 1 point is still to check. It will be saved as it is now.
+       *[other] { $count } points are still to check. They will be saved as they are now.
+    }
 import-template-save-sets = What it sets
 import-template-save-title = Save as Template
 import-template-save-used = Used for files that
@@ -2641,6 +2648,7 @@ import-doubt-name-jcamp-dup-capped = A repeat count that was cut
 import-doubt-name-jcamp-points-capped = Points left out
 import-doubt-name-jcamp-nmr-left-out = NMR blocks left out
 import-doubt-name-template-tie = Two templates fit: { $names }
+import-doubt-name-template-pick = Two templates fit: { $names }. You chose { $chosen }
 error-choose-unknown-template = There is no template named “{ $name }”
 error-choose-unreadable = The file could not be read: { $detail }
 error-choose-no-numbers = No line of numbers was found in the file

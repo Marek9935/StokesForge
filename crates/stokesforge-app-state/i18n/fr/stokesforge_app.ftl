@@ -1938,6 +1938,7 @@ disabled-no-last-import = Aucun import terminé à rouvrir
 disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
 disabled-no-window = Aucune fenêtre à agrandir
 disabled-add-file-first = Ajoutez d'abord un fichier
+disabled-no-readable-file = Aucun de ces fichiers ne peut être lu
 disabled-import-no-active-book = Mettez d'abord un classeur au premier plan
 disabled-script-running = Attendez la fin du script
 disabled-script-unavailable = Python n'est pas disponible dans cette version
@@ -2318,6 +2319,7 @@ import-check-xunit = Unité de X : { $c0 }, lue dans { $key } (ligne { $line })
 import-check-yunit = Unité de Y : { $c0 }, lue dans { $key } (ligne { $line })
 import-check-xunit-line = Unité de X : { $c0 }, ligne { $line }
 import-check-yunit-line = Unité de Y : { $c0 }, ligne { $line }
+import-check-unit-unused = Unité de { $axis } : le fichier donne { $text } ({ $key }, ligne { $line }), mais ce modèle ne l’utilise pas
 import-check-missing-xunit = Unité de X : pas dans le fichier
 import-check-missing-yunit = Unité de Y : pas dans le fichier
 import-check-missing-xpunit = Unité de x′ : pas dans le fichier
@@ -2494,6 +2496,11 @@ import-template-save-note = Le nombre de lignes d’en-tête n’a pas d’impor
 import-template-save-reason-name = Saisir un nom
 import-template-save-reason-trigger = Garder au moins une condition
 import-template-save-replaces = Remplace le modèle du même nom
+import-template-save-unchecked =
+    { $count ->
+        [one] 1 point reste à vérifier. Il sera enregistré tel qu’il est maintenant.
+       *[other] { $count } points restent à vérifier. Ils seront enregistrés tels qu’ils sont maintenant.
+    }
 import-template-save-sets = Ce qu’il règle
 import-template-save-title = Enregistrer comme modèle
 import-template-save-used = Utilisé pour les fichiers qui
@@ -2640,6 +2647,7 @@ import-doubt-name-jcamp-dup-capped = Un nombre de répétitions coupé
 import-doubt-name-jcamp-points-capped = Des points laissés de côté
 import-doubt-name-jcamp-nmr-left-out = Des blocs RMN laissés de côté
 import-doubt-name-template-tie = Deux modèles conviennent : { $names }
+import-doubt-name-template-pick = Deux modèles conviennent : { $names }. Vous avez choisi { $chosen }
 error-choose-unknown-template = Il n’y a pas de modèle nommé « { $name } »
 error-choose-unreadable = Le fichier n’a pas pu être lu : { $detail }
 error-choose-no-numbers = Aucune ligne de nombres n’a été trouvée dans le fichier

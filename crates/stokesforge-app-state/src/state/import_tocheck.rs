@@ -56,11 +56,10 @@ pub struct ToCheckPoint {
 /// the template used and of the others, sorted, so that it does not depend on
 /// which one won.
 pub(super) fn tie_id(chosen: &str, others: &[String]) -> String {
-    let mut names: Vec<&str> = std::iter::once(chosen)
+    let names: Vec<&str> = std::iter::once(chosen)
         .chain(others.iter().map(String::as_str))
         .collect();
-    names.sort_unstable();
-    format!("template-tie:{}", names.join("|"))
+    stokesforge_import::tie_id_of(&names)
 }
 
 /// The sentence of a doubt of the detector.

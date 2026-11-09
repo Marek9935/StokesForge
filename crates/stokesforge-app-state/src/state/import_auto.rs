@@ -961,6 +961,14 @@ impl AppState {
         (each, skipped)
     }
 
+    /// Does the window hold a file that can be imported? A window with only
+    /// refused files has nothing to import.
+    pub fn import_has_readable_file(&self) -> bool {
+        self.import_state
+            .as_ref()
+            .is_some_and(|i| i.paths.iter().any(|p| i.auto.choices.contains_key(p)))
+    }
+
     /// « Import »: the action that imports every readable file of the window,
     /// each with its own recipe, and closes the window. `None` if the window
     /// is not open.
@@ -973,6 +981,11 @@ impl AppState {
             each,
             skipped,
         })
+    }
+
+    /// Which opening of the import window this is (0 when it is closed).
+    pub fn import_opening(&self) -> u64 {
+        self.import_state.as_ref().map_or(0, |i| i.opening)
     }
 
     // -- First-use guide -----------------------------------------------------

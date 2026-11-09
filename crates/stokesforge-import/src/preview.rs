@@ -288,7 +288,16 @@ impl FileMap {
     /// Tokens of line `index`, untrimmed, borrowed from the text (no copy).
     pub fn tokens(&self, index: usize, recipe: &ImportRecipe) -> Vec<&str> {
         let line = crate::layout::skip_str(self.line(index), recipe.skip_chars);
+        if self.is_whitespace_header_line(index) {
+            return vec![line];
+        }
         self.separator.tokenize(line)
+    }
+
+    /// A line of the main header in a file split on whitespace (`##TITLE=1-Butanol IR`):
+    /// it is text, not cells, so it stays whole instead of being cut at each space.
+    fn is_whitespace_header_line(&self, index: usize) -> bool {
+        self.is_whitespace_separated() && self.roles.get(index) == Some(&LineRole::MainHeader)
     }
 
     /// Would `token` of column `column` be kept as text in a mixed column?
@@ -319,8 +328,12 @@ impl FileMap {
     pub fn cells(&self, index: usize, recipe: &ImportRecipe) -> Vec<MapCell> {
         let line = crate::layout::skip_str(self.line(index), recipe.skip_chars);
         let data = self.roles.get(index) == Some(&LineRole::Data);
-        self.separator
-            .tokenize(line)
+        let tokens = if self.is_whitespace_header_line(index) {
+            vec![line]
+        } else {
+            self.separator.tokenize(line)
+        };
+        tokens
             .into_iter()
             .enumerate()
             .map(|(column, token)| MapCell {
@@ -751,5 +764,27 @@ mod tests {
             crate::recipe::DecimalStyle::Dot,
         );
         assert_eq!(layout, crate::recipe::HeaderLayout::default());
+    }
+
+    /// A header line of a whitespace-separated file stays whole (`##TITLE=1-Butanol IR`
+    /// is not cut at its spaces); the data lines are still cut.
+    #[test]
+    fn a_header_line_of_a_whitespace_file_is_one_cell() {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 1,
+            subheader_lines: 0,
+            auto_detect: false,
+        };
+        let bytes = b"##TITLE=1-Butanol IR spectrum\n400 1.5\n401 2.5\n402 3.5\n";
+        let map = file_map(bytes, &recipe).unwrap();
+        assert!(map.is_whitespace_separated());
+        assert_eq!(map.roles[0], LineRole::MainHeader);
+        assert_eq!(
+            map.tokens(0, &recipe),
+            vec!["##TITLE=1-Butanol IR spectrum"]
+        );
+        assert_eq!(map.cells(0, &recipe).len(), 1);
+        assert_eq!(map.tokens(1, &recipe), vec!["400", "1.5"]);
     }
 }

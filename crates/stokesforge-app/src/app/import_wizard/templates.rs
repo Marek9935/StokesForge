@@ -39,6 +39,7 @@ fn save_window(ctx: &egui::Context, state: &mut AppState) {
     };
     let issue = state.template_save_issue();
     let replaces = state.template_save_replaces();
+    let unchecked = state.to_check_count();
     let fp = state.import_fingerprint();
     let label = tr!("import-template-save-button");
     let hint = tr!("import-template-save-button", "hint");
@@ -64,6 +65,20 @@ fn save_window(ctx: &egui::Context, state: &mut AppState) {
                         ui.label(
                             egui::RichText::new(tr!("import-template-save-replaces"))
                                 .color(theme::warning_color(ui.visuals().dark_mode)),
+                        );
+                    });
+                }
+                if unchecked > 0 {
+                    rows.field(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(tr!(
+                                    "import-template-save-unchecked",
+                                    count = unchecked
+                                ))
+                                .color(theme::warning_color(ui.visuals().dark_mode)),
+                            )
+                            .wrap(),
                         );
                     });
                 }

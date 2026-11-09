@@ -2887,6 +2887,10 @@ pub struct ImportState {
     pub names_unwired: Option<usize>,
     /// The first-use guide is open.
     pub guide_open: bool,
+    /// Which opening of the import window this is (a new number at each
+    /// `open_import`): the interface keys the state of its folds with it, so
+    /// that "Advanced" starts closed at each opening.
+    pub opening: u64,
 }
 
 /// Typing pause before a preview is recomputed (S-T1, #224), in seconds.
@@ -6771,6 +6775,11 @@ impl AppState {
             checks: ImportChecks::default(),
             names_unwired: None,
             guide_open: !self.object_manager_preferences.import_guide_hidden(),
+            opening: {
+                static OPENINGS: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
+                OPENINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
         });
     }
 
@@ -10940,9 +10949,34 @@ impl AppState {
             failures.push(tr!("error-import-create-sheet", name = name));
             return None;
         };
+        // A title already used in this workbook: the new sheet takes a free
+        // name ("Title (2)") instead of a red « Name already used » for an
+        // import that worked.
+        let taken: Vec<String> = self
+            .snapshot
+            .tree
+            .node(book)
+            .map(|node| {
+                node.children()
+                    .iter()
+                    .filter(|id| **id != sheet)
+                    .filter_map(|id| self.snapshot.tree.node(*id))
+                    .map(|child| child.name().to_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_taken = |candidate: &str| taken.contains(&candidate.to_lowercase());
+        let free = if is_taken(name) {
+            (2u64..)
+                .map(|n| format!("{name} ({n})"))
+                .find(|candidate| !is_taken(candidate))
+                .unwrap_or_else(|| name.to_string())
+        } else {
+            name.to_string()
+        };
         self.execute(Command::Rename {
             id: sheet,
-            name: name.to_string(),
+            name: free,
         });
         Some(sheet)
     }

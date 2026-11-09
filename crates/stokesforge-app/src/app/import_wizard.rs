@@ -261,7 +261,12 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     };
     let finish_label = tr!("import-grid-import");
     let finish_hint = tr!("import-button-finish", "hint");
-    let add_file_first = tr!("disabled-add-file-first");
+    let can_finish = state.import_has_readable_file();
+    let add_file_first = if has_files {
+        tr!("disabled-no-readable-file")
+    } else {
+        tr!("disabled-add-file-first")
+    };
     let state_cell = std::cell::RefCell::new(&mut *state);
     let outcome = modal_dialog_with(
         ctx,
@@ -269,7 +274,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         &tr!("import-window-title"),
         // FREE-SIZE(#300): the one-screen import (tabs, left panel, grid, result line) needs the room; a smaller screen shrinks it
         DialogNature::Draft(InteractiveSize::Free(egui::vec2(1320.0, 840.0))),
-        DialogFooter::gated(&finish_label, &finish_hint, has_files, &add_file_first)
+        DialogFooter::gated(&finish_label, &finish_hint, can_finish, &add_file_first)
             .with_warning(&warning),
         |footer| {
             let mut guard = state_cell.borrow_mut();
@@ -564,6 +569,31 @@ mod tests {
             painted.iter().any(|t| t.text.contains(&sentence)),
             "the changed setting is a sentence of the left panel"
         );
+    }
+
+    /// Save as Template says how many points are still to check and that they
+    /// are saved as they are; with nothing left to check it says nothing.
+    #[test]
+    fn save_as_template_warns_about_the_points_still_to_check() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        let mut doubts = bench(DOUBTS);
+        without_guide(&ctx, &mut doubts.state, &mut actions);
+        let count = doubts.state.to_check_count();
+        assert!(count > 0);
+        doubts.state.template_save_open();
+        let painted = paint(&ctx, &mut doubts.state, &mut actions, Vec::new());
+        let warning = tr!("import-template-save-unchecked", count = count);
+        assert!(painted.iter().any(|t| t.text == warning), "{warning}");
+        drop(doubts);
+        let mut sure = bench(SURE);
+        without_guide(&ctx, &mut sure.state, &mut actions);
+        sure.state.template_save_open();
+        let painted = paint(&ctx, &mut sure.state, &mut actions, Vec::new());
+        assert!(!painted.iter().any(|t| t.text.contains("still to check")));
     }
 
     /// Forgetting a template asks first, in a modal confirmation: Enter

@@ -298,11 +298,18 @@ pub fn doubt_text(id: &str) -> String {
         "jcamp-dup-capped" => tr!("import-doubt-name-jcamp-dup-capped"),
         "jcamp-points-capped" => tr!("import-doubt-name-jcamp-points-capped"),
         "jcamp-nmr-left-out" => tr!("import-doubt-name-jcamp-nmr-left-out"),
-        other => match other.strip_prefix("template-tie:") {
-            Some(names) => tr!(
-                "import-doubt-name-template-tie",
-                names = names.replace('|', ", ")
-            ),
+        other => match other.strip_prefix(stokesforge_import::TIE_PREFIX) {
+            Some(rest) => match rest.split_once(stokesforge_import::TIE_PICK_SEPARATOR) {
+                Some((names, chosen)) => tr!(
+                    "import-doubt-name-template-pick",
+                    names = names.replace('|', ", "),
+                    chosen = chosen
+                ),
+                None => tr!(
+                    "import-doubt-name-template-tie",
+                    names = rest.replace('|', ", ")
+                ),
+            },
             None => other.to_string(),
         },
     }
@@ -653,6 +660,28 @@ impl AppState {
         else {
             return;
         };
+        // Choosing a template that fits as well as the one in use settles the
+        // tie for this kind of file: later files of that kind use it.
+        let tie_pick = state
+            .checks
+            .template_of_file
+            .get(&path)
+            .zip(state.checks.tied_of_file.get(&path))
+            .filter(|(chosen, others)| *chosen != name && others.iter().any(|o| o == name))
+            .and_then(|(chosen, others)| {
+                let kind = state
+                    .auto
+                    .sniffs
+                    .get(&path)?
+                    .as_ref()
+                    .ok()
+                    .map(stokesforge_import::kind_id)?;
+                let tie = super::import_tocheck::tie_id(chosen, others);
+                Some((kind, tie))
+            });
+        if let Some((kind, tie)) = &tie_pick {
+            state.store.remember_tie_pick(kind, tie, name);
+        }
         let mut recipe = template;
         recipe.unify_header();
         if let Some(bytes) = &bytes {
@@ -666,6 +695,9 @@ impl AppState {
         state.checks.tied_of_file.remove(&path);
         state.checks.template_of_file.insert(path, name.to_string());
         state.checks.generation += 1;
+        if tie_pick.is_some() {
+            self.save_import_store();
+        }
     }
 
     /// "Auto": forgets the template of the file shown, detects again.

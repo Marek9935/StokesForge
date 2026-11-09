@@ -26,7 +26,7 @@ A few things to know:
 
 1. Choose **File ▸ Import ▸ Import…**.
 2. Click **Add Files…** and pick one or more files.
-3. Look at what was recognised, deal with the points to check if you want to, then click **Import**.
+3. Look at what was recognised, deal with the points to check if you want to, then click **Import**. If none of the files can be read, **Import** is greyed out ("None of these files can be read").
 
 The shortcut is <kbd>Ctrl</kbd>+<kbd>"</kbd>. On an AZERTY keyboard, press <kbd>Ctrl</kbd>+<kbd>3</kbd> (the key that types `"`). On a QWERTY keyboard, press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>'</kbd>.
 
@@ -96,9 +96,9 @@ When StokesForge is not sure, it says so in an orange frame titled "n points to 
 - **Click the sentence** (or the **To check** tag of a row): the file shows where it comes from. This settles nothing.
 - **Mark as Checked**: you looked, and you accept the point as it is. The recipe is not changed.
 - **Check Now**: goes through the doubts one at a time, with the choices for each.
-- A point of the kind "two templates fit" offers a button to use the other template.
+- A point of the kind "two templates fit" offers a button to use the other template. Your choice is remembered for that kind of file: later files of the kind use the template you picked, and **Reopen Last Import** keeps it (**Manage Templates** lists it under **Answers remembered**, with **Forget**).
 
-Where the file gives nothing (a unit, for example), the frame says "not in the file". You can fill it in by marking a line in the grid.
+Where the file gives nothing (a unit, for example), the frame says "not in the file". When the file does give it but the template in use has no role for it, the sentence says so ("the file gives nm (XUNITS, line 11), but this template does not use it"). You can fill it in by marking a line in the grid.
 
 ### Answers remembered
 
@@ -158,7 +158,7 @@ The window proposes a **Name** (type your own) and shows **Used for files that**
 - **File name contains** a text;
 - **Extension**.
 
-**What it sets** lists in words what the template will do. The number of header lines does not matter: a template looks for the marker line (such as `XYDATA`), so a header of another length still fits. At least one condition must stay: without one, **Save** is greyed out ("Keep at least one condition").
+**What it sets** lists in words what the template will do. The number of header lines does not matter: a template looks for the marker line (such as `XYDATA`), so a header of another length still fits. At least one condition must stay: without one, **Save** is greyed out ("Keep at least one condition"). When points are still to check, an orange line under the name says how many and that they are saved as they are now; **Save** stays possible.
 
 ### Manage Templates
 
