@@ -80,7 +80,7 @@ const TITLE_ROW: i32 = 22;
 const COL_GAP: i32 = 4;
 /// Sample the tick column is at least as wide as: tick values come from the
 /// data, unknown when the room is reserved (only typed ends are in the spec).
-const TICK_SAMPLE: &str = "0.000";
+const TICK_SAMPLE: &str = "00.0";
 /// Gap between two segments.
 const SEG_GAP: i32 = 6;
 /// Distance between an inside bar and the frame.
@@ -434,11 +434,6 @@ pub fn draw<DB: DrawingBackend>(
     let ((fx, fy), (fw, fh)) = placing.frame;
     let (fw, fh) = (fw as i32, fh as i32);
     let cross = cross_size(area, bar, along_x)?;
-    let tick_col = if along_x {
-        0
-    } else {
-        label_columns(area, bar)?.0
-    };
     let (labels, title) = extras(bar);
 
     // Length of the strip.
@@ -646,7 +641,7 @@ pub fn draw<DB: DrawingBackend>(
             if !segments[index].label.is_empty() {
                 area.draw(&Text::new(
                     segments[index].label.as_str(),
-                    (bx + label_v + tick_col + COL_GAP, y + 2),
+                    (bx + label_v + reach + COL_GAP, y + 2),
                     styles.small.pos(Pos::new(HPos::Left, VPos::Center)),
                 ))?;
             }
