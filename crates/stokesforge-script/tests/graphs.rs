@@ -824,6 +824,25 @@ fn an_unnamed_python_graph_is_named_after_its_workbook() {
     }
 }
 
+/// #499: `visible` keeps the bar's value when not given, `row_column=None`
+/// clears the column (not giving it keeps it). Witness: restoring
+/// `visible.unwrap_or(true)` or treating `None` as
+/// "not given" fails the assertions.
+#[test]
+fn color_bar_keeps_visible_and_clears_row_column() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1')\ngid = pyst.group_series(g, [0, 1])\npyst.color_bar(g, [gid], row_column=x, visible=False)\npyst.color_bar(g, title='t')\n"),
+    );
+    let bar = graph_spec(&b).panels[0].color_bar.clone().expect("a bar");
+    assert!(!bar.visible, "an omitted visible keeps the hidden bar");
+    assert!(bar.row_column.is_some(), "an omitted row_column keeps it");
+    run(&b, "pyst.color_bar(g, row_column=None, visible=True)\n");
+    let bar = graph_spec(&b).panels[0].color_bar.clone().expect("a bar");
+    assert!(bar.visible && bar.row_column.is_none());
+}
+
 /// #499: `pyst.color_bar` builds the bar of a layer in one undo step, gives a
 /// group without a retained gradient the first palette, keeps the range and
 /// label of a group already on the bar, and refuses an unknown option

@@ -4843,6 +4843,41 @@ mod tests {
         }
     }
 
+    /// #499: choosing a Position after the bar was dragged takes effect (the
+    /// dragged anchor is dropped). Witness: keeping the anchor leaves the bar
+    /// where it was dragged.
+    #[test]
+    fn choosing_a_color_bar_position_drops_the_dragged_anchor() {
+        use stokesforge_plot::{ColorBarPosition, ColorBarSpec, TextAnchor};
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            segments: Vec::new(),
+            position: ColorBarPosition::Below,
+            anchor: Some(TextAnchor::new(1.0, 2.0)),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::ColorBar, None);
+        let context = test_support::context();
+        let (painted, _) = open_list(
+            &context,
+            &mut harness.state,
+            &tr!("plot-color-bar-position-below"),
+        );
+        let pos = text_exact(&painted, &tr!("plot-legend-top-left")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let model = harness.model();
+        let bar = model.panels[0].color_bar.as_ref().unwrap();
+        assert_eq!(bar.position, ColorBarPosition::TopLeft);
+        assert!(bar.anchor.is_none());
+    }
+
     /// The result of each frame of [`formula_field`] on `value`, and its
     /// texts painted in the last one.
     fn field(

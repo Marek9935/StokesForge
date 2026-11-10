@@ -32,6 +32,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Choose Files to Import | Choisir les fichiers à importer |
 | Clear | Effacer |
 | Color Bar | Barre de couleurs |
+| Color Bar… | Barre de couleurs… |
 | Column in use | Colonne utilisée |
 | Columns | Colonnes |
 | Copy | Copier |

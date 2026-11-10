@@ -1122,6 +1122,11 @@ pub(super) fn graph_properties_menu(ui: &mut egui::Ui, graph: NodeId, actions: &
             PlotSettingsTab::Legend,
         ),
         (
+            tr!("menu-graph-color-bar"),
+            tr!("menu-graph-color-bar", "hint"),
+            PlotSettingsTab::ColorBar,
+        ),
+        (
             tr!("menu-graph-theme"),
             tr!("menu-graph-theme", "hint"),
             PlotSettingsTab::Theme,

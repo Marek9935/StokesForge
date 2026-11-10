@@ -405,6 +405,26 @@ fn bar_choice<T: Clone + PartialEq>(
     )))
 }
 
+/// The `row_column` option of `color_bar`: not given keeps the column, `None`
+/// clears it, a column sets it.
+pub(crate) enum RowColumn {
+    Keep,
+    Clear,
+    Set(NodeId),
+}
+
+impl<'py> FromPyObject<'_, 'py> for RowColumn {
+    type Error = PyErr;
+
+    fn extract(object: pyo3::Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        if object.is_none() {
+            Ok(Self::Clear)
+        } else {
+            Ok(Self::Set(object.extract::<PyRef<'_, Handle>>()?.id))
+        }
+    }
+}
+
 /// Sets the color bar of the panel (#499): the groups on it, in bar order,
 /// and how it reads and draws them. Creates the bar (visible) when the layer
 /// has none; an option left out keeps its value. A group put on the bar
@@ -423,14 +443,14 @@ fn bar_choice<T: Clone + PartialEq>(
 /// `title`: Typst text; `visible`: show or hide the bar (hidden, the curves
 /// get their own colors and legend entries back).
 #[pyfunction]
-#[pyo3(signature = (graph, groups=None, *, value_from=None, row_column=None, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0)))]
+#[pyo3(signature = (graph, groups=None, *, value_from=None, row_column=RowColumn::Keep, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0)))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn color_bar(
     py: Python<'_>,
     graph: &Handle,
     groups: Option<Vec<u32>>,
     value_from: Option<String>,
-    row_column: Option<PyRef<'_, Handle>>,
+    row_column: RowColumn,
     chain: Option<bool>,
     scale: Option<String>,
     orientation: Option<String>,
@@ -448,7 +468,11 @@ pub(crate) fn color_bar(
     };
     let context = engine::current_context()?;
     context.check_interrupt()?;
-    let row_column = row_column.map(|handle| handle.id);
+    let row_column: Option<Option<NodeId>> = match row_column {
+        RowColumn::Keep => None,
+        RowColumn::Clear => Some(None),
+        RowColumn::Set(id) => Some(Some(id)),
+    };
     // Every option is read before anything is written: a refused one changes
     // nothing.
     let parsed = (|| -> Result<_, HostError> {
@@ -587,7 +611,7 @@ pub(crate) fn color_bar(
                 bar.value = value.clone();
             }
             if let Some(column) = row_column {
-                bar.row_column = Some(column);
+                bar.row_column = column;
             }
             if let Some(chain) = chain {
                 bar.chain = chain;
@@ -609,7 +633,10 @@ pub(crate) fn color_bar(
             if let Some(title) = &title {
                 bar.title.clone_from(title);
             }
-            bar.visible = visible.unwrap_or(true);
+            // A new bar is shown; an existing one keeps its visibility.
+            if let Some(visible) = visible {
+                bar.visible = visible;
+            }
             let on_bar: Vec<u32> = bar.segments.iter().map(|segment| segment.group).collect();
             panel.color_bar = Some(bar);
             for group in on_bar {

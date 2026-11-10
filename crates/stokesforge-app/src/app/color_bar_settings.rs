@@ -404,6 +404,7 @@ fn value_section(
 fn layout_section(form: &mut Form<'_>, bar: &mut ColorBarSpec, commit: &mut bool) {
     form.section(tr!("plot-color-bar-layout-section"));
     let unknown = unknown_of!(bar.position, ColorBarPosition);
+    let before = bar.position.clone();
     *commit |= form.row(tr!("plot-color-bar-position"), |ui| {
         keyed_choice(
             ui,
@@ -414,6 +415,10 @@ fn layout_section(form: &mut Form<'_>, bar: &mut ColorBarSpec, commit: &mut bool
             unknown.as_ref(),
         )
     });
+    // A dragged bar's anchor wins over the position: choosing a place drops it.
+    if bar.position != before {
+        bar.anchor = None;
+    }
     // Below / Right force the orientation (unless the bar was dragged):
     // the choice shows what is drawn, greyed with its reason.
     let forced = forced_orientation(bar);

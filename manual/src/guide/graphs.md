@@ -108,7 +108,7 @@ You can open them in several ways:
 
 - Double-click an axis, a curve or a shape on the figure. For an axis, double-click its numbers (the tick labels), just outside the plot area, or its line (the edge of the plot area). A double-click on the plot area itself resets the zoom.
 - Right-click a part of the figure and choose **Properties…**. The window opens on the page for that part.
-- Use the **Graph** menu, then **Properties**. It lists **Graph Properties…**, **Plot Area…**, **Axes…**, **Series…**, **Legend…** and **Theme…**.
+- Use the **Graph** menu, then **Properties**. It lists **Graph Properties…**, **Plot Area…**, **Axes…**, **Series…**, **Legend…**, **Color Bar…** and **Theme…**.
 - Double-click a row in the Object Manager.
 
 <img src="../images/graphs-graph-menu.png" alt="The Graph menu: Show Data, Add Text, New Layer, the mirror axes, Reset Zoom, Export and Properties." width="139">

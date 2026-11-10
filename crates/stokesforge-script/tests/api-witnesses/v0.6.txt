@@ -113,7 +113,7 @@ module pyst	exception UnknownPathError
 module pyst	function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', line_color='', line_width=1.5, fill_color='')
 module pyst	function apply_gradient(graph, group, gradient, *, panel=(0, 0))
 module pyst	function children(handle=None)
-module pyst	function color_bar(graph, groups=None, *, value_from=None, row_column=None, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0))
+module pyst	function color_bar(graph, groups=None, *, value_from=None, row_column=Ellipsis, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0))
 module pyst	function column(handle)
 module pyst	function create_column(worksheet, name=None, column_type='numeric')
 module pyst	function create_workbook(name=None, parent=None)
