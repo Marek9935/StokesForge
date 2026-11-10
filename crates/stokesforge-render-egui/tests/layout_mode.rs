@@ -1940,3 +1940,69 @@ fn the_guides_of_a_box_drag_show_while_the_pointer_is_down() {
     assert!(guides_during(egui::Modifiers::NONE) > 0, "a guide shows");
     assert_eq!(guides_during(SHIFT), 0, "Shift: no magnets, no guide");
 }
+
+/// How many rectangles of the preview carry the "under the pointer" fill.
+fn active_band_rects(
+    context: &egui::Context,
+    view: &GraphView,
+    place: Option<stokesforge_render_egui::edge_band::DropPlace>,
+) -> Vec<Rect> {
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        view.paint_drop_places(ui.painter(), place);
+    });
+    fn walk(shape: &egui::Shape, found: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Rect(rect)
+                if rect.fill == stokesforge_render_egui::edge_band::edge_band_fill() =>
+            {
+                found.push(rect.rect)
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+/// The bottom band of a 2 x 2 has one segment per column, a drop under a
+/// column takes that segment's reference cell, and only that segment is
+/// filled (#503). Witness: filling the whole band (every segment active) gives
+/// two filled rectangles.
+#[test]
+fn a_bottom_band_has_one_segment_per_column_and_only_the_one_under_the_pointer_is_filled() {
+    use stokesforge_render_egui::edge_band::DropPlace;
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let segments = view.band_segments(CellSide::Below, None);
+    assert_eq!(segments.len(), 2);
+    assert_eq!(
+        segments.iter().map(|s| s.reference).collect::<Vec<_>>(),
+        vec![Some(2), Some(3)]
+    );
+    for (column, reference) in [(0, 2), (1, 3)] {
+        let pointer = Pos2::new(segments[column].rect.center().x, layout.size.1 as f32 - 4.0);
+        let place = view.drop_place(pointer, None).expect("a drop place");
+        assert_eq!(
+            place,
+            DropPlace {
+                panel: reference,
+                side: CellSide::Below,
+                band: Some(CellSide::Below),
+                segment: column,
+            }
+        );
+        let filled = active_band_rects(&context, &view, Some(place));
+        assert_eq!(filled.len(), 1, "exactly the segment under the pointer");
+        assert!(
+            filled[0].center().x > segments[column].rect.min.x
+                && filled[0].center().x < segments[column].rect.max.x,
+            "the filled one lies under the pointer's column"
+        );
+    }
+    assert!(active_band_rects(&context, &view, None).is_empty());
+}
