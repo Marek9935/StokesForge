@@ -9,14 +9,24 @@
 //!
 //! # The bar
 //!
-//! The gradient is painted as **1-pixel stripes** (Plotters has no gradient
-//! element, and a stripe is the same rectangle on screen and in the export).
-//! A segment is as long as the span of its drawn range (the `chain` option
-//! shifts the ranges, never the colours), segments are separated by a small
-//! gap. Ticks are written by `scale::format_tick` through the epaint
+//! Each segment is a **rounded bar** (small corner radius: a cap and two
+//! filled circles per end). Its body is painted in **stripes** of a few pixels
+//! (Plotters has no gradient element, and a stripe is the same rectangle on
+//! screen and in the export), each reaching under the next one and at least 3
+//! points wide: egui's tessellator draws a rectangle of two points or less as a
+//! faint line, and a figure shown at a fraction of its size would show light
+//! seams between 1-pixel stripes. A segment is as long as the span of its drawn
+//! range (the `chain` option shifts the ranges, never the colours); segments are
+//! separated by an empty gap.
+//!
+//! A break is centred on its gap: a small triangle (a drawn polygon, not a
+//! glyph) touching the top of the bar, a tick and its value label (centred on
+//! the gap with a chain), and the break label under the bar just after the value
+//! label, smaller. Ticks go from the bar's edge outwards, never over the
+//! colours. Ticks are written by `scale::format_tick` through the epaint
 //! measurement, **never** by Typst; the title and the break labels are
-//! entered rich text (`formula::rich_style`). A break is marked by a small
-//! triangle (a drawn polygon, not a glyph, so no font can lack it).
+//! entered rich text (`formula::rich_style`). Vertical: the same, rotated
+//! (marker on the left, labels on the right).
 //!
 //! # Where it sits
 //!
@@ -46,15 +56,27 @@ use crate::scale;
 const GAP: i32 = 6;
 /// Thickness of the gradient strip.
 const THICK: i32 = 12;
-/// Height of the row of break markers and labels above a horizontal bar.
-const MARKER_ROW: i32 = 18;
+/// Height of the row of break markers above a horizontal bar (width of the
+/// column of markers left of a vertical one): the marker touches the strip.
+const MARKER_ROW: i32 = 10;
+/// Height (width, vertical) of a break marker triangle.
+const MARKER_SIZE: i32 = 8;
+/// Width of a gradient stripe, and how far it reaches under the next one.
+const STEP: i32 = 2;
+const BRIDGE: i32 = 2;
+/// Corner radius of a segment.
+const RADIUS: f64 = 4.0;
+/// Size of a break label against the other labels: it reads like a
+/// subscript of the break value.
+pub const BREAK_LABEL_SCALE: f64 = 0.8;
 /// Distance between the strip and its tick labels.
-const TICK_GAP: i32 = 6;
+const TICK_GAP: i32 = 8;
 /// Height of the row of tick labels under a horizontal bar.
 const TICK_ROW: i32 = 18;
 /// Height of the title row under a horizontal bar (width beside a vertical one).
 const TITLE_ROW: i32 = 22;
-/// Width of the column of break labels left of a vertical bar.
+/// Extra width right of a vertical bar for the break labels, which follow the
+/// tick labels.
 const LABEL_COL: i32 = 84;
 /// Width of the tick label column right of a vertical bar.
 const TICK_COL: i32 = 40;
@@ -63,10 +85,10 @@ const SEG_GAP: i32 = 6;
 /// Distance between an inside bar and the frame.
 const INSIDE_MARGIN: i32 = 8;
 /// Dash and gap of the tick marks.
-const DASH: i32 = 3;
-const DASH_GAP: i32 = 2;
-/// How far a tick mark goes past the strip.
-const TICK_OVERSHOOT: i32 = 4;
+const DASH: i32 = 2;
+const DASH_GAP: i32 = 1;
+/// Length of a tick mark, from the strip's edge outwards.
+const TICK_LEN: i32 = 6;
 
 /// One drawn segment of the bar.
 #[derive(Debug, Clone, PartialEq)]
@@ -263,9 +285,14 @@ fn cross_size(bar: &ColorBarSpec, horizontal: bool) -> i32 {
     let (labels, title) = extras(bar);
     let title = if title { grown(bar, TITLE_ROW) } else { 0 };
     if horizontal {
-        i32::from(labels) * grown(bar, MARKER_ROW) + THICK + TICK_GAP + grown(bar, TICK_ROW) + title
+        i32::from(labels) * MARKER_ROW + THICK + TICK_GAP + grown(bar, TICK_ROW) + title
     } else {
-        i32::from(labels) * grown(bar, LABEL_COL) + THICK + TICK_GAP + grown(bar, TICK_COL) + title
+        i32::from(labels) * MARKER_ROW
+            + THICK
+            + TICK_GAP
+            + grown(bar, TICK_COL)
+            + i32::from(labels) * grown(bar, LABEL_COL)
+            + title
     }
 }
 
@@ -298,8 +325,10 @@ pub fn band(bar: Option<&ColorBarSpec>) -> (u32, u32) {
 
 /// Text styles of the bar.
 pub struct BarStyles {
-    /// Break labels and title (`formula::rich_style`).
+    /// Title (`formula::rich_style`).
     pub rich: TextStyle<'static>,
+    /// Break labels: the same, smaller.
+    pub small: TextStyle<'static>,
     /// Tick labels (epaint, never Typst).
     pub tick: TextStyle<'static>,
     /// Ink of the marks.
@@ -394,11 +423,7 @@ pub fn draw<DB: DrawingBackend>(
         let (a, b) = (at(u0, v0), at(u1, v1));
         [(a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1))]
     };
-    let strip_v = if along_x {
-        i32::from(labels) * grown(bar, MARKER_ROW)
-    } else {
-        i32::from(labels) * grown(bar, LABEL_COL)
-    };
+    let strip_v = i32::from(labels) * MARKER_ROW;
 
     // Segment extents along the strip.
     let spans: Vec<f64> = segments
@@ -423,88 +448,148 @@ pub fn draw<DB: DrawingBackend>(
         cursor += len + f64::from(SEG_GAP);
     }
 
-    // The strip: 1-pixel stripes.
+    // The strip: one rounded bar per segment. The rounded ends are a cap and
+    // two filled circles per end (the corners), the body is painted in
+    // stripes of STEP pixels, each reaching under the next one and never
+    // narrower than the thin-rectangle limit of the screen's tessellator (a
+    // rectangle under two pixels wide becomes a faint line there): a figure
+    // shown at a fraction of its size would otherwise let the background shine
+    // between stripes, as a grid of light seams (#499).
+    let radius = RADIUS as i32;
+    let fill = |color: &str| -> ShapeStyle {
+        ShapeStyle {
+            color: paint::rgb(crate::color::rgb_or(color, paint::SERIES_FALLBACK)).into(),
+            filled: true,
+            stroke_width: 1,
+        }
+    };
     for (segment, (&start, &len)) in segments.iter().zip(starts.iter().zip(&lens)) {
-        for pixel in 0..len {
-            let t = (f64::from(pixel) + 0.5) / f64::from(len);
-            let Some(color) = gradient_at(&segment.stops, t) else {
-                continue;
+        let color_at =
+            |pixel: f64| gradient_at(&segment.stops, (pixel / f64::from(len)).clamp(0.0, 1.0));
+        let rounded = len >= 4 * radius;
+        let (from, to) = if rounded {
+            (radius, len - radius)
+        } else {
+            (0, len)
+        };
+        if rounded {
+            for (end, edge) in [(0, 0), (len - radius, len)] {
+                let Some(color) = color_at(f64::from(end) + f64::from(radius) / 2.0) else {
+                    continue;
+                };
+                let (cap_from, cap_to) = if edge == 0 {
+                    (0, radius + BRIDGE)
+                } else {
+                    (len - radius - BRIDGE, len)
+                };
+                area.draw(&Rectangle::new(
+                    rect(
+                        start + cap_from,
+                        start + cap_to,
+                        strip_v + radius,
+                        strip_v + THICK - radius,
+                    ),
+                    fill(&color),
+                ))?;
+                for v in [strip_v + radius, strip_v + THICK - radius] {
+                    let (x, y) = at(start + end + if edge == 0 { radius } else { 0 }, v);
+                    area.draw(&Circle::new((x, y), radius, fill(&color)))?;
+                }
+            }
+        }
+        let mut pixel = from;
+        while pixel < to {
+            let width = if to - pixel - STEP < 3 {
+                to - pixel
+            } else {
+                STEP
             };
-            let rgb = crate::color::rgb_or(&color, paint::SERIES_FALLBACK);
-            area.draw(&Rectangle::new(
-                rect(start + pixel, start + pixel + 1, strip_v, strip_v + THICK),
-                ShapeStyle {
-                    color: paint::rgb(rgb).into(),
-                    filled: true,
-                    stroke_width: 1,
-                },
-            ))?;
+            if let Some(color) = color_at(f64::from(pixel) + f64::from(width) / 2.0) {
+                let reach = (pixel + width + BRIDGE).min(to);
+                area.draw(&Rectangle::new(
+                    rect(start + pixel, start + reach, strip_v, strip_v + THICK),
+                    fill(&color),
+                ))?;
+            }
+            pixel += width;
         }
     }
 
-    // Ticks.
+    // Ticks: from the strip's edge outwards, never over the colours.
     let ink: ShapeStyle = paint::rgb(styles.ink).into();
     let ticks = tick_marks(bar, segments, &starts, &lens);
+    let label_v = strip_v + THICK + TICK_GAP;
+    let mut widths = Vec::with_capacity(ticks.len());
     for (u, text) in &ticks {
-        let end = strip_v + THICK + TICK_OVERSHOOT;
-        let mut v = strip_v;
+        let end = strip_v + THICK + TICK_LEN;
+        let mut v = strip_v + THICK;
         while v < end {
             let to = (v + DASH).min(end);
             area.draw(&PathElement::new(vec![at(*u, v), at(*u, to)], ink))?;
             v += DASH + DASH_GAP;
         }
-        let label_v = strip_v + THICK + TICK_GAP;
-        if along_x {
-            let (x, y) = at(*u, label_v);
-            area.draw(&Text::new(
-                text.as_str(),
-                (x, y),
-                styles.tick.pos(Pos::new(HPos::Center, VPos::Top)),
-            ))?;
+        let (x, y) = at(*u, label_v);
+        let pos = if along_x {
+            Pos::new(HPos::Center, VPos::Top)
         } else {
-            let (x, y) = at(*u, label_v);
-            area.draw(&Text::new(
-                text.as_str(),
-                (x, y),
-                styles.tick.pos(Pos::new(HPos::Left, VPos::Center)),
-            ))?;
-        }
+            Pos::new(HPos::Left, VPos::Center)
+        };
+        area.draw(&Text::new(text.as_str(), (x, y), styles.tick.pos(pos)))?;
+        let (w, _) = area.estimate_text_size(text, &styles.tick)?;
+        widths.push(w as i32);
     }
 
-    // Break markers and labels: at the end of every segment but the last.
-    let rich = |pos: Pos| styles.rich.pos(pos);
-    for (index, segment) in segments.iter().enumerate().take(segments.len() - 1) {
-        let u = (starts[index] + lens[index] - 1).max(0);
+    // Break markers and labels: centred on the gap after every segment but
+    // the last. The marker sits on the strip's edge, the label under the bar
+    // just after the break's value label, smaller (read like its subscript).
+    for index in 0..segments.len() - 1 {
+        let u = starts[index] + lens[index] + SEG_GAP / 2;
+        let (x, y) = at(u, strip_v);
+        // Room taken by the value labels of this break (past the gap centre).
+        let reach = ticks
+            .iter()
+            .zip(&widths)
+            .filter(|((other, _), _)| (other - u).abs() <= SEG_GAP)
+            .map(|((other, _), w)| if along_x { other - u + w / 2 } else { *w })
+            .max()
+            .unwrap_or(0);
         if along_x {
-            let (x, y) = at(u, strip_v);
             area.draw(&Polygon::new(
-                vec![(x - 4, y - 12), (x + 4, y - 12), (x, y - 2)],
+                vec![
+                    (x - MARKER_SIZE / 2, y - MARKER_SIZE),
+                    (x + MARKER_SIZE / 2, y - MARKER_SIZE),
+                    (x, y),
+                ],
                 ink.filled(),
             ))?;
-            if !segment.label.is_empty() {
+            if !segments[index].label.is_empty() {
                 area.draw(&Text::new(
-                    segment.label.as_str(),
-                    (x + 7, y - 9),
-                    rich(Pos::new(HPos::Left, VPos::Center)),
+                    segments[index].label.as_str(),
+                    (x + reach + 4, by + label_v + 2),
+                    styles.small.pos(Pos::new(HPos::Left, VPos::Top)),
                 ))?;
             }
         } else {
-            let (x, y) = at(u, strip_v);
             area.draw(&Polygon::new(
-                vec![(x - 12, y - 4), (x - 12, y + 4), (x - 2, y)],
+                vec![
+                    (x - MARKER_SIZE, y - MARKER_SIZE / 2),
+                    (x - MARKER_SIZE, y + MARKER_SIZE / 2),
+                    (x, y),
+                ],
                 ink.filled(),
             ))?;
-            if !segment.label.is_empty() {
+            if !segments[index].label.is_empty() {
                 area.draw(&Text::new(
-                    segment.label.as_str(),
-                    (x - 15, y),
-                    rich(Pos::new(HPos::Right, VPos::Center)),
+                    segments[index].label.as_str(),
+                    (bx + label_v + reach + 4, y + 2),
+                    styles.small.pos(Pos::new(HPos::Left, VPos::Center)),
                 ))?;
             }
         }
     }
 
     // Title, centred along the strip.
+    let rich = |pos: Pos| styles.rich.pos(pos);
     if title {
         if along_x {
             let (x, y) = (bx + length / 2, by + cross - grown(bar, TITLE_ROW) / 2);
@@ -563,6 +648,11 @@ fn position(scale: &ColorBarScale, (from, to): (f64, f64), value: f64) -> Option
 }
 
 /// The tick marks `(position along the strip in pixels, label)`.
+///
+/// A position is an edge coordinate: 0 is the strip's start, the strip's
+/// length its end. With a chain the value that ends a segment is the break,
+/// put at the centre of the gap (the next segment's start is the same value
+/// and has no tick of its own); otherwise every segment has its own ends.
 fn tick_marks(
     bar: &ColorBarSpec,
     segments: &[BarSegment],
@@ -570,28 +660,27 @@ fn tick_marks(
     lens: &[i32],
 ) -> Vec<(i32, String)> {
     let scale = bar.scale.effective();
+    let last = segments.len() - 1;
     let mut values: Vec<(usize, f64)> = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
         let (from, to) = segment.drawn;
-        match bar.ticks.effective() {
+        let mut points = match bar.ticks.effective() {
             ColorBarTicks::Auto => {
                 let mut points = match scale {
                     ColorBarScale::Log => decades(from, to),
                     _ => scale::linear_key_points((from, to), 4),
                 };
                 points.extend([from, to]);
-                for value in points {
-                    values.push((index, value));
-                }
+                points
             }
-            _ => {
-                // The ends and the breaks: with a chain the start of a
-                // segment is the break before it.
-                if index == 0 || !bar.chain {
-                    values.push((index, from));
-                }
-                values.push((index, to));
-            }
+            // The ends and the breaks.
+            _ => vec![from, to],
+        };
+        if bar.chain && index > 0 {
+            points.retain(|value| *value != from);
+        }
+        for value in points {
+            values.push((index, value));
         }
     }
     let mut out: Vec<(i32, String)> = Vec::new();
@@ -599,8 +688,11 @@ fn tick_marks(
         let Some(t) = position(&scale, segments[index].drawn, value) else {
             continue;
         };
-        let len = lens[index];
-        let pixel = starts[index] + (t * f64::from(len - 1)).round() as i32;
+        let pixel = if bar.chain && index < last && value == segments[index].drawn.1 {
+            starts[index] + lens[index] + SEG_GAP / 2
+        } else {
+            starts[index] + (t * f64::from(lens[index])).round() as i32
+        };
         if out.iter().any(|(other, _)| (other - pixel).abs() < 3) {
             continue;
         }

@@ -3817,6 +3817,12 @@ fn draw_panel<DB: DrawingBackend>(
             },
             &crate::color_bar::BarStyles {
                 rich: font_style(&bar.font, LABEL_SIZE, bar_ink, canvas.dim_in_pixel().0),
+                small: crate::formula::rich_style_layout(
+                    bar.font.effective_size(LABEL_SIZE) * crate::color_bar::BREAK_LABEL_SCALE,
+                    bar_ink,
+                    bar.font.family(),
+                    None,
+                ),
                 tick: if bar.font.is_default() {
                     text_style(LABEL_SIZE, bar_ink)
                 } else {

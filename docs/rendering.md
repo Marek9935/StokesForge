@@ -1270,10 +1270,12 @@ spec is never changed, and `Prepared::in_legend()` drops a series that has one
 (drawn entries and `entry_ranks` share that predicate). The bar itself is drawn
 in a later lot.
 
-Colour bar, lot 2 (#499 step C): `color_bar::draw` runs after `legend::draw`. The gradient is 1-pixel
-`Rectangle` stripes (no gradient element in Plotters); the ticks are `scale::format_tick` through the
+Colour bar, lot 2 (#499 step C): `color_bar::draw` runs after `legend::draw`. Each segment is a rounded bar (a cap and two
+circles per end) whose body is `Rectangle` stripes of 2 points reaching under the next one, never narrower than 3
+(egui draws a rectangle of 2 points or less as a faint line: seams on a scaled figure) (no gradient element in Plotters); the ticks are `scale::format_tick` through the
 epaint measurement, never Typst; the title and the break labels are `formula::rich_style`; a break is a
-drawn triangle (`Polygon`), not a glyph. Below / Right of the frame the bar owns a **band**
+drawn triangle (`Polygon`), not a glyph, centred on the gap and touching the bar's top, its tick and value label centred on
+the gap, its label under the bar after the value label, smaller (`BarStyles::small`); ticks leave the bar's edge outwards. Below / Right of the frame the bar owns a **band**
 (`color_bar::band(spec)`, a function of the spec alone, fixed thicknesses) that `CellPlan` adds to the
 gutters on that side: the image grows (and a Fixed figure reports `fixed_overflow`), the frame never
 changes, and `draw_panel` gives the chart `margin_bottom/right(MARGIN + band)` **for every layer of the

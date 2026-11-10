@@ -1420,24 +1420,34 @@ fn colour_bar_fixture() -> (Sample, (u32, u32)) {
     (fixture, size)
 }
 
-/// The screen and the export draw the same bar: the same 1-pixel stripes, the
-/// same dashed ticks, tick labels, break label and title, in a figure that
-/// grew by the band. Witness: a stripe of another width in one backend (or a
-/// tick written by one path only) makes `agree` fail; the bar drawn in the
-/// figure of the same spec without it (`without`) shows the band is the bar's.
+/// The screen and the export draw the same bar: the same stripes, the same
+/// dashed ticks, tick labels, break label and title, in a figure that grew by
+/// the band. Witness: a stripe of another width in one backend (or a tick
+/// written by one path only) makes `agree` fail; the bar drawn in the figure
+/// of the same spec without it (`without`) shows the band is the bar's.
+///
+/// Every stripe of the body is at least 3 points wide: egui's tessellator
+/// turns a rectangle of two points or less into a faint line, and a figure
+/// shown at a fraction of its size then has light seams between the stripes
+/// (#499). Witness: the 1-pixel stripes of before are refused here.
 #[test]
 fn the_screen_and_the_export_draw_the_same_colour_bar() {
     let (fixture, size) = colour_bar_fixture();
     let (primitives, drawn) = agree(fixture.project.tree(), &fixture.spec, size, "colour bar");
-    let stripes: Vec<_> = primitives
-        .iter()
-        .filter(|p| matches!(p, Primitive::Rect((x0, _), (x1, _)) if x1 - x0 == 1))
-        .collect();
+    let thickness =
+        |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 12);
+    let stripes: Vec<_> = primitives.iter().filter(thickness).collect();
     assert!(
-        stripes.len() >= 400,
-        "one stripe per pixel of the bar, found {}",
+        stripes.len() >= 100,
+        "the bar is painted in stripes, found {}",
         stripes.len()
     );
+    for stripe in &stripes {
+        let Primitive::Rect((x0, _), (x1, _)) = stripe else {
+            continue;
+        };
+        assert!(x1 - x0 >= 3, "a stripe {} points wide", x1 - x0);
+    }
     let has = |needle: &str| {
         primitives
             .iter()
@@ -1457,10 +1467,7 @@ fn the_screen_and_the_export_draw_the_same_colour_bar() {
     without.panels.get_mut(0).expect("panel").color_bar = None;
     let (bare, _) = agree(fixture.project.tree(), &without, size, "without the bar");
     assert!(
-        bare.iter()
-            .filter(|p| matches!(p, Primitive::Rect((x0, _), (x1, _)) if x1 - x0 == 1))
-            .count()
-            < 50,
+        bare.iter().filter(thickness).count() < 50,
         "the stripes come from the bar"
     );
 }

@@ -216,3 +216,178 @@ fn the_bar_font_size_reaches_the_export() {
         .iter()
         .any(|size| size.starts_with("24.19")));
 }
+
+/// `(x, y, width, height, fill)` of every rectangle of the document that is a
+/// gradient stripe (the strip is 12 high), left to right.
+fn stripes(document: &str) -> Vec<(i32, i32, i32, i32, String)> {
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        let key = format!("{name}=\"");
+        let rest = tag.split(&key).nth(1)?;
+        Some(rest.split('"').next()?.to_string())
+    };
+    let mut out: Vec<(i32, i32, i32, i32, String)> = document
+        .split("<RECT")
+        .skip(1)
+        .filter_map(|tag| {
+            let tag = tag.split('>').next()?;
+            let number = |name: &str| attr(tag, name)?.parse::<f64>().ok().map(|v| v as i32);
+            Some((
+                number("X")?,
+                number("Y")?,
+                number("WIDTH")?,
+                number("HEIGHT")?,
+                attr(tag, "FILL")?,
+            ))
+        })
+        .filter(|stripe| stripe.3 == 12)
+        .collect();
+    out.sort();
+    out
+}
+
+fn channels(hex: &str) -> [i32; 3] {
+    let value = i32::from_str_radix(hex.trim_start_matches('#'), 16).expect("hex");
+    [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+}
+
+fn two_group_spec(project: &mut Project, chain: bool) -> PlotSpec {
+    let mut spec = spec_with(project, Some(bar()), &[0.0, 20.0, 40.0, 57.0]);
+    let panel = spec.panels.get_mut(0).expect("panel");
+    for series in panel.series.iter_mut().skip(2) {
+        series.group = Some(2);
+    }
+    panel
+        .group_gradients
+        .insert(2, vec!["#ff1020".to_string(), "#ffa000".to_string()]);
+    let bar = panel.color_bar.as_mut().expect("bar");
+    bar.segments.push(ColorBarSegment::new(2));
+    bar.chain = chain;
+    bar.segments[0].label = "switch".to_string();
+    spec
+}
+
+/// The gradient is smooth, not a few blocks (#499): across a wide bar the
+/// stripes take more than a hundred distinct colours, two neighbours never
+/// differ by more than a few levels, and the stripes leave no hole in a
+/// segment. Witness: one stripe per member colour (4 curves) or a 12-pixel
+/// stripe fails the count and the neighbour difference.
+#[test]
+fn the_gradient_is_smooth_and_has_no_hole() {
+    let mut project = Project::new("Bar").expect("project");
+    let spec = spec_with(&mut project, Some(bar()), &[0.0, 20.0, 40.0, 57.0]);
+    let plot = resolve_spec(project.tree(), &spec);
+    let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+        .expect("export")
+        .to_uppercase();
+    let mut body: Vec<_> = stripes(&document)
+        .into_iter()
+        .filter(|stripe| stripe.2 >= 3)
+        .collect();
+    body.dedup_by_key(|stripe| stripe.0);
+    let distinct: std::collections::BTreeSet<&String> =
+        body.iter().map(|stripe| &stripe.4).collect();
+    assert!(distinct.len() >= 100, "{} colours", distinct.len());
+    for pair in body.windows(2) {
+        let (a, b) = (channels(&pair[0].4), channels(&pair[1].4));
+        let worst = (0..3).map(|c| (a[c] - b[c]).abs()).max().expect("channels");
+        assert!(worst <= 6, "jump of {worst} levels at x = {}", pair[1].0);
+        assert!(
+            pair[1].0 <= pair[0].0 + pair[0].2,
+            "hole between x = {} and x = {}",
+            pair[0].0,
+            pair[1].0
+        );
+    }
+}
+
+/// A break (#499): the two segments are separate bars with an empty gap, the
+/// marker is centred on the gap and touches the top of the bar, the break
+/// tick starts at the bar's bottom edge (nothing dark crosses the colours),
+/// and the value label is centred on the gap.
+#[test]
+fn the_break_is_centred_on_a_clean_gap() {
+    let mut project = Project::new("Bar").expect("project");
+    let spec = two_group_spec(&mut project, true);
+    let plot = resolve_spec(project.tree(), &spec);
+    let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+        .expect("export")
+        .to_uppercase();
+    let strip = stripes(&document);
+    let top = strip.iter().map(|stripe| stripe.1).min().expect("strip");
+    let bottom = top + 12;
+    // The gap: the widest empty interval between two stripes.
+    let mut spans: Vec<(i32, i32)> = strip
+        .iter()
+        .map(|stripe| (stripe.0, stripe.0 + stripe.2))
+        .collect();
+    spans.sort();
+    let mut reach = spans[0].1;
+    let mut gap = (0, 0);
+    for (from, to) in &spans {
+        if *from - reach > gap.1 - gap.0 {
+            gap = (reach, *from);
+        }
+        reach = reach.max(*to);
+    }
+    assert!(gap.1 - gap.0 >= 4, "no clean gap: {gap:?}");
+    let centre = (gap.0 + gap.1) / 2;
+    // The marker: apex on the bar's top edge, centred on the gap.
+    let polygon = document
+        .split("<POLYGON")
+        .nth(1)
+        .and_then(|rest| rest.split("POINTS=\"").nth(1))
+        .and_then(|rest| rest.split('"').next())
+        .expect("marker");
+    let points: Vec<(i32, i32)> = polygon
+        .split_whitespace()
+        .filter_map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            Some((x.parse().ok()?, y.parse().ok()?))
+        })
+        .collect();
+    let apex = points.iter().max_by_key(|point| point.1).expect("apex");
+    assert_eq!(apex.1, top, "the marker touches the bar");
+    assert!(
+        (apex.0 - centre).abs() <= 1,
+        "marker {} gap {centre}",
+        apex.0
+    );
+    // No dark mark over the colours: every polyline (tick dash) lies above
+    // the bar's top or below its bottom edge.
+    for line in document.split("<POLYLINE").skip(1) {
+        let Some(points) = line
+            .split("POINTS=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+        else {
+            continue;
+        };
+        for pair in points.split_whitespace() {
+            let Some((x, y)) = pair.split_once(',') else {
+                continue;
+            };
+            let (x, y): (i32, i32) = (x.parse().unwrap_or(0), y.parse().unwrap_or(0));
+            let over_bar = y > top && y < bottom && x >= spans[0].0 && x <= reach;
+            // Plot curves cross other areas: only marks near the bar count.
+            let near = y >= top - 2 && y <= bottom + 2;
+            assert!(!(over_bar && near), "a mark crosses the bar at ({x}, {y})");
+        }
+    }
+    // The value label is centred on the gap.
+    let label = document
+        .split("<TEXT")
+        .skip(1)
+        .find(|text| {
+            text.split('>')
+                .nth(1)
+                .is_some_and(|content| content.trim_start().starts_with("20"))
+        })
+        .expect("break value label");
+    let x: f64 = label
+        .split(" X=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|value| value.parse().ok())
+        .expect("x");
+    assert!((x as i32 - centre).abs() <= 1, "label {x} gap {centre}");
+}
