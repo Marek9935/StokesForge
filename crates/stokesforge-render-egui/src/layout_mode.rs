@@ -26,7 +26,7 @@
 //! result through [`FramePreview`] and paints the overlay. The overlay is a
 //! screen marker: it enters neither the cache key nor the export.
 
-use crate::edge_band::{edge_drop_side, EDGE_BAND_WIDTH};
+use crate::edge_band::edge_drop_side;
 use egui::{
     Color32, Context, CursorIcon, FontId, Painter, PointerButton, Pos2, Rect, Response, Shape,
     Stroke, StrokeKind, Visuals,
@@ -172,7 +172,7 @@ pub(crate) struct LayoutDrag {
     /// Where a [`DragKind::MoveCell`] would put the graph if released now.
     moving: Option<MoveTarget>,
     /// The edge band the pointer is in during a [`DragKind::MoveCell`], to fill.
-    moving_band: Option<CellSide>,
+    moving_band: Option<(CellSide, usize)>,
 }
 
 /// A burst of arrow-key nudges not yet committed.
@@ -924,7 +924,7 @@ impl GraphView {
         pos: Pos2,
         base: usize,
         source: (usize, usize),
-    ) -> (Option<MoveTarget>, Option<CellSide>) {
+    ) -> (Option<MoveTarget>, Option<(CellSide, usize)>) {
         let Some((_, layout)) = self.figure_memo.as_ref() else {
             return (None, None);
         };
@@ -937,9 +937,9 @@ impl GraphView {
                 panel: place.panel,
                 side: place.side,
             };
-            return (Some(target), place.band);
+            return (Some(target), place.band.map(|side| (side, place.segment)));
         }
-        if edge_drop_side(pos, display, EDGE_BAND_WIDTH).is_some() {
+        if edge_drop_side(pos, display, self.edge_band_width()).is_some() {
             return (None, None);
         }
         let target = self.cell_move_target(pos, layout, source);
@@ -1480,7 +1480,7 @@ impl GraphView {
         &self,
         painter: &Painter,
         target: Option<MoveTarget>,
-        band: Option<CellSide>,
+        band: Option<(CellSide, usize)>,
         accent: Color32,
     ) {
         let (Some((_, layout)), Some(display), Some(scale)) = (
@@ -1491,9 +1491,12 @@ impl GraphView {
             return;
         };
         let place = match target {
-            Some(MoveTarget::Beside { panel, side }) => {
-                Some(crate::edge_band::DropPlace { panel, side, band })
-            }
+            Some(MoveTarget::Beside { panel, side }) => Some(crate::edge_band::DropPlace {
+                panel,
+                side,
+                band: band.map(|(side, _)| side),
+                segment: band.map_or(0, |(_, segment)| segment),
+            }),
             _ => None,
         };
         self.paint_drop_places(painter, place);

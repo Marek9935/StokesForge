@@ -723,9 +723,8 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
   `compose::MAX_GRID_CELLS` (256, the size the renderer lays out as declared).
 - **Columns dropped on one of the four bands** of the figure
   (`GraphView::drop_place` in `stokesforge_render_egui::edge_band`, band
-  `EDGE_BAND_WIDTH`, painted during the drag by `GraphView::paint_drop_places`):
-  the new cell goes beside the cell **nearest the pointer**
-  (`GraphView::nearest_cell`), on the side of the band; in a corner the left
+  `EDGE_BAND_WIDTH` = 12 pt, widened to `MIN_EDGE_BAND_PX` screen pixels on a sparse screen by `edge_band_width`; painted during the drag by `GraphView::paint_drop_places`):
+  each band is cut into `BandSegment`s (`GraphView::band_segments`: one per row or column of a regular grid, one per band in Free placement), drawn as pale rounded strips with a gap, the one under the pointer filled; the drop takes its reference from the **segment** under the pointer (nearest cell, `GraphView::nearest_cell_except`, to the segment's centre), so drawing and drop cannot disagree (`DropPlace::segment`); the new cell goes on the side of the band. The insertion bar is only for a drop between two graphs (#504); in a corner the left
   or right band wins (`edge_drop_side`; the side bands are full height, the top
   and bottom ones stop at them; the top band is at the figure's very top, over
   the title, #503); when moving a graph, a band's reference is the nearest cell
