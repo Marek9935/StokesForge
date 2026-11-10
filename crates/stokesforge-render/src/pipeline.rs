@@ -484,7 +484,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // that superimposed layers (#167) share an identical plot area. `bases`
     // keeps, per cell, the last ordinary layer drawn: the one a superimposed
     // layer covers. The ranks of the superimposed layers come with them.
-    let (plans, ranks, bar_offsets) = cell_plans(spec, &layout);
+    let (plans, ranks, bar_offsets) = cell_plans(spec, &layout, &area)?;
 
     // Free placement (#398): every cell is its stored frame plus its own
     // gutters, placed where the frame says. `cells` is indexed by the cell key
@@ -845,7 +845,11 @@ type CellPlans = (
 
 /// The plans of the cells (union of what their layers ask for) and the rank of
 /// each layer among the superimposed ones of its cell, from the spec alone.
-fn cell_plans(spec: &PlotSpec, layout: &Layout) -> CellPlans {
+fn cell_plans<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    layout: &Layout,
+    probe: &DrawingArea<DB, Shift>,
+) -> Result<CellPlans, DrawingAreaErrorKind<DB::ErrorType>> {
     let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
     // The rank of each superimposed layer among those of its cell that show an
     // axis on the same side (#168): 0 against the plot area. It comes from the
@@ -860,13 +864,16 @@ fn cell_plans(spec: &PlotSpec, layout: &Layout) -> CellPlans {
             let plan = plans.entry(*cell).or_default();
             ranks.push((plan.top_levels, plan.right_levels));
             offsets.push((plan.bar_bottom, plan.bar_right));
-            plan.add(panel);
+            plan.add(
+                panel,
+                crate::color_bar::band(panel.color_bar.as_ref(), probe)?,
+            );
         } else {
             ranks.push((0, 0));
             offsets.push((0, 0));
         }
     }
-    (plans, ranks, offsets)
+    Ok((plans, ranks, offsets))
 }
 
 /// Measures a title: `(text, font, default size, figure width)` to the height
@@ -1506,7 +1513,7 @@ pub fn figure_layout<DB: DrawingBackend>(
 ) -> Result<FigureLayout, DrawingAreaErrorKind<DB::ErrorType>> {
     if spec.layer_placement == LayerPlacement::Free {
         let layout = free_layout_of(spec);
-        let (plans, _, _) = cell_plans(spec, &layout);
+        let (plans, _, _) = cell_plans(spec, &layout, probe)?;
         let free = FreeLayout::build(
             spec,
             &layout,
@@ -1590,7 +1597,7 @@ pub fn figure_layout<DB: DrawingBackend>(
             free_origin: (0.0, 0.0),
         });
     };
-    let (plans, _, _) = cell_plans(spec, &layout);
+    let (plans, _, _) = cell_plans(spec, &layout, probe)?;
     let grid = ExplicitGrid::build(
         spec,
         &layout,
@@ -2221,7 +2228,7 @@ pub fn place_beside<DB: DrawingBackend>(
     let frame = spec.panels[spec.cell_bases()[panel]].sanitized_free_frame();
     // The bands a new, default layer asks for around its frame.
     let mut plan = CellPlan::default();
-    plan.add(&PanelSpec::default());
+    plan.add(&PanelSpec::default(), (0, 0));
     let new = plan.gutters(0);
     let (new_left, new_top) = (f64::from(new.left), f64::from(new.top));
     let (width, height) = (
@@ -2289,7 +2296,7 @@ fn drawn_legacy_frames<DB: DrawingBackend>(
     let band = graph_title_band(spec, probe, width)?;
     let column_breaks = fit_breaks(None, layout.columns, width);
     let row_breaks = fit_breaks(None, layout.rows, total_height.saturating_sub(band));
-    let (plans, _, _) = cell_plans(spec, &layout);
+    let (plans, _, _) = cell_plans(spec, &layout, probe)?;
     let bands = panel_bands(spec, &layout, width, &mut |text, font, size, width| {
         text_band(probe, text, font, size, width)
     })?;
@@ -2549,10 +2556,9 @@ struct CellPlan {
 }
 
 impl CellPlan {
-    fn add(&mut self, spec: &PanelSpec) {
+    fn add(&mut self, spec: &PanelSpec, (bar_bottom, bar_right): (u32, u32)) {
         // The bands of the bars of the cell stack, in the order of the layers
         // (a layer draws its bar after the bands of the previous ones).
-        let (bar_bottom, bar_right) = crate::color_bar::band(spec.color_bar.as_ref());
         self.bar_bottom += bar_bottom;
         self.bar_right += bar_right;
         self.bottom_title |= spec.bottom.title_visible && !spec.bottom.display_label().is_empty();
@@ -3815,24 +3821,14 @@ fn draw_panel<DB: DrawingBackend>(
                 reserved: true,
                 center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
             },
-            &crate::color_bar::BarStyles {
-                rich: font_style(&bar.font, LABEL_SIZE, bar_ink, canvas.dim_in_pixel().0),
-                small: crate::formula::rich_style_layout(
-                    bar.font.effective_size(LABEL_SIZE) * crate::color_bar::BREAK_LABEL_SCALE,
-                    bar_ink,
-                    bar.font.family(),
-                    None,
-                ),
-                tick: if bar.font.is_default() {
-                    text_style(LABEL_SIZE, bar_ink)
-                } else {
-                    literal_style_font(
-                        bar.font.effective_size(LABEL_SIZE),
-                        bar_ink,
-                        bar.font.family(),
-                    )
-                },
-                ink,
+            &{
+                let (small, tick) = crate::color_bar::label_styles(bar, bar_ink);
+                crate::color_bar::BarStyles {
+                    rich: font_style(&bar.font, LABEL_SIZE, bar_ink, canvas.dim_in_pixel().0),
+                    small,
+                    tick,
+                    ink,
+                }
             },
         )?;
         if let Some(((left, top), (width, height))) = placed {
@@ -4396,7 +4392,7 @@ fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
 /// The style of the **ticks**, at the given size and in the given color
 /// (opacity included): laid out by `epaint`, never by Typst. Titles, axis
 /// titles and legend take [`rich_style`] (issue #32).
-fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
+pub(crate) fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 

@@ -93,6 +93,12 @@ fn layout_of(spec: &PlotSpec) -> FigureLayout {
     pipeline::figure_layout(spec, &probe).expect("layout")
 }
 
+/// The band the colour bar of the first layer asks, measured on a probe.
+fn bar_band(spec: &PlotSpec) -> (u32, u32) {
+    let probe = mute((1, 1)).into_drawing_area();
+    stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref(), &probe).expect("band")
+}
+
 /// A project with one live column, to feed a series.
 fn project_with_column() -> (Project, NodeId) {
     let mut project = Project::new("Layout").expect("project");
@@ -1441,7 +1447,7 @@ fn a_colour_bar_below_the_frame_grows_the_image_and_never_moves_the_frame() {
         Some(bar(ColorBarPosition::Below)),
     );
     let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
-    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref());
+    let band = bar_band(&spec);
     assert!(band.0 > 0 && band.1 == 0, "{band:?}");
     assert_eq!(layout.size.0, bare_layout.size.0);
     assert_eq!(layout.size.1, bare_layout.size.1 + band.0);
@@ -1480,11 +1486,33 @@ fn a_colour_bar_on_the_right_widens_the_image_and_never_moves_the_frame() {
         Some(bar(ColorBarPosition::Right)),
     );
     let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
-    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref());
+    let band = bar_band(&spec);
     assert!(band.1 > 0 && band.0 == 0, "{band:?}");
     assert_eq!(layout.size.0, bare_layout.size.0 + band.1);
     assert_eq!(layout.size.1, bare_layout.size.1);
     assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+}
+
+/// The label column of a vertical bar is as wide as its widest label: a long
+/// break label widens the band, a short one leaves no gap of the old fixed
+/// 84 pixels.
+/// Witness: a fixed label column makes the three widths equal.
+#[test]
+fn a_vertical_colour_bar_is_as_wide_as_its_widest_label() {
+    let (_, ids) = bar_project();
+    let right_with = |label: &str| {
+        let mut bar = bar(ColorBarPosition::Right);
+        bar.segments[0].label = label.into();
+        let spec = with_bar(framed(grid("", 1, 1), &[300.0], &[200.0]), &ids, Some(bar));
+        bar_band(&spec).1
+    };
+    let (short, long) = (right_with("a"), right_with("a very long break label"));
+    let none = right_with("");
+    assert!(long > short + 60, "{long} vs {short}");
+    assert!(short > none, "a short label still takes its room");
+    // Strip, markers, gaps, ticks, title row: far less than the old fixed
+    // 6 + 10 + 12 + 8 + 40 + 84 + 22 = 182 pixels.
+    assert!(short < 182 - 40, "{short}");
 }
 
 /// Same band in free placement; a fixed figure reports that it grew.
@@ -1495,7 +1523,7 @@ fn a_colour_bar_band_also_grows_a_free_figure_and_a_fixed_one_reports_it() {
     let bare = with_bar(free("", cell), &ids, None);
     let spec = with_bar(free("", cell), &ids, Some(bar(ColorBarPosition::Below)));
     let (bare_layout, layout) = (layout_of(&bare), layout_of(&spec));
-    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref()).0;
+    let band = bar_band(&spec).0;
     assert!(band > 0);
     assert_eq!(layout.size.1, bare_layout.size.1 + band);
     assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
@@ -1588,7 +1616,7 @@ fn two_colour_bars_in_one_cell_stack_their_bands() {
     });
     spec.panels.push(second);
     let layout = layout_of(&spec);
-    let band = stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref()).0;
+    let band = bar_band(&spec).0;
     assert_eq!(layout.size.1, single.size.1 + band);
     let plot = draw_in(&project, &spec, layout.size);
     let mut boxes: Vec<(f64, f64)> = plot

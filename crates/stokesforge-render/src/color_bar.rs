@@ -75,11 +75,12 @@ const TICK_GAP: i32 = 8;
 const TICK_ROW: i32 = 18;
 /// Height of the title row under a horizontal bar (width beside a vertical one).
 const TITLE_ROW: i32 = 22;
-/// Extra width right of a vertical bar for the break labels, which follow the
-/// tick labels.
-const LABEL_COL: i32 = 84;
-/// Width of the tick label column right of a vertical bar.
-const TICK_COL: i32 = 40;
+/// Gap between the tick labels and the break label of a vertical bar, and
+/// between the last label column and the title.
+const COL_GAP: i32 = 4;
+/// Sample the tick column is at least as wide as: tick values come from the
+/// data, unknown when the room is reserved (only typed ends are in the spec).
+const TICK_SAMPLE: &str = "0.000";
 /// Gap between two segments.
 const SEG_GAP: i32 = 6;
 /// Distance between an inside bar and the frame.
@@ -279,21 +280,77 @@ fn extras(bar: &ColorBarSpec) -> (bool, bool) {
     (labels, !bar.title.is_empty())
 }
 
+/// Widths of the label columns right of a vertical bar `(ticks, breaks)`,
+/// measured through the one text measure of the backend (invariant 4): the
+/// widest tick label (typed ends, at least [`TICK_SAMPLE`]) and the widest
+/// break label. Both are zero-free of any fixed room: a short label leaves no
+/// gap.
+fn label_columns<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    bar: &ColorBarSpec,
+) -> Result<(i32, i32), DrawingAreaErrorKind<DB::ErrorType>> {
+    let (small, tick) = label_styles(bar, (0, 0, 0, 255));
+    let mut ticks = area.estimate_text_size(TICK_SAMPLE, &tick)?.0 as i32;
+    for segment in &bar.segments {
+        for value in [segment.from, segment.to].into_iter().flatten() {
+            let text = scale::format_tick(stokesforge_plot::AxisScale::Linear, value);
+            ticks = ticks.max(area.estimate_text_size(&text, &tick)?.0 as i32);
+        }
+    }
+    let mut breaks = 0;
+    if let Some((_, rest)) = bar.segments.split_last() {
+        for segment in rest.iter().filter(|segment| !segment.label.is_empty()) {
+            breaks = breaks.max(area.estimate_text_size(&segment.label, &small)?.0 as i32);
+        }
+    }
+    Ok((ticks, breaks))
+}
+
+/// The text styles of the tick labels and the break labels `(small, tick)`.
+pub fn label_styles(
+    bar: &ColorBarSpec,
+    ink: (u8, u8, u8, u8),
+) -> (TextStyle<'static>, TextStyle<'static>) {
+    let small = crate::formula::rich_style_layout(
+        bar.font.effective_size(crate::pipeline::LABEL_SIZE) * BREAK_LABEL_SCALE,
+        ink,
+        bar.font.family(),
+        None,
+    );
+    let tick = if bar.font.is_default() {
+        crate::pipeline::text_style(crate::pipeline::LABEL_SIZE, ink)
+    } else {
+        crate::formula::literal_style_font(
+            bar.font.effective_size(crate::pipeline::LABEL_SIZE),
+            ink,
+            bar.font.family(),
+        )
+    };
+    (small, tick)
+}
+
 /// Size across the bar (its height when horizontal, its width when
-/// vertical): markers, strip, tick labels, title.
-fn cross_size(bar: &ColorBarSpec, horizontal: bool) -> i32 {
+/// vertical): markers, strip, tick labels, title. A vertical bar is as wide
+/// as its labels, no wider.
+fn cross_size<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    bar: &ColorBarSpec,
+    horizontal: bool,
+) -> Result<i32, DrawingAreaErrorKind<DB::ErrorType>> {
     let (labels, title) = extras(bar);
     let title = if title { grown(bar, TITLE_ROW) } else { 0 };
-    if horizontal {
+    Ok(if horizontal {
         i32::from(labels) * MARKER_ROW + THICK + TICK_GAP + grown(bar, TICK_ROW) + title
     } else {
+        let (ticks, breaks) = label_columns(area, bar)?;
         i32::from(labels) * MARKER_ROW
             + THICK
             + TICK_GAP
-            + grown(bar, TICK_COL)
-            + i32::from(labels) * grown(bar, LABEL_COL)
+            + ticks
+            + if labels { COL_GAP + breaks } else { 0 }
+            + if title > 0 { COL_GAP } else { 0 }
             + title
-    }
+    })
 }
 
 /// A text row or column, grown with the bar's font size above the default
@@ -310,17 +367,20 @@ fn grown(bar: &ColorBarSpec, size: i32) -> i32 {
 /// The band the bar asks outside the frame, in points: `(bottom, right)`.
 ///
 /// Only a visible bar with segments, put Below or Right and not dragged, asks
-/// for one. A function of the spec alone: the layout probe, the grid and the
+/// for one. A function of the spec and the text measure: the layout probe, the grid and the
 /// free placement read it before anything is drawn.
-pub fn band(bar: Option<&ColorBarSpec>) -> (u32, u32) {
+pub fn band<DB: DrawingBackend>(
+    bar: Option<&ColorBarSpec>,
+    probe: &DrawingArea<DB, Shift>,
+) -> Result<(u32, u32), DrawingAreaErrorKind<DB::ErrorType>> {
     let Some(bar) = bar.filter(|bar| bar.visible && !bar.segments.is_empty()) else {
-        return (0, 0);
+        return Ok((0, 0));
     };
-    match place_of(bar) {
-        Place::Below => ((GAP + cross_size(bar, true)) as u32, 0),
-        Place::Right => (0, (GAP + cross_size(bar, false)) as u32),
+    Ok(match place_of(bar) {
+        Place::Below => ((GAP + cross_size(probe, bar, true)?) as u32, 0),
+        Place::Right => (0, (GAP + cross_size(probe, bar, false)?) as u32),
         _ => (0, 0),
-    }
+    })
 }
 
 /// Text styles of the bar.
@@ -373,7 +433,12 @@ pub fn draw<DB: DrawingBackend>(
     let along_x = horizontal(bar, place);
     let ((fx, fy), (fw, fh)) = placing.frame;
     let (fw, fh) = (fw as i32, fh as i32);
-    let cross = cross_size(bar, along_x);
+    let cross = cross_size(area, bar, along_x)?;
+    let tick_col = if along_x {
+        0
+    } else {
+        label_columns(area, bar)?.0
+    };
     let (labels, title) = extras(bar);
 
     // Length of the strip.
@@ -581,7 +646,7 @@ pub fn draw<DB: DrawingBackend>(
             if !segments[index].label.is_empty() {
                 area.draw(&Text::new(
                     segments[index].label.as_str(),
-                    (bx + label_v + reach + 4, y + 2),
+                    (bx + label_v + tick_col + COL_GAP, y + 2),
                     styles.small.pos(Pos::new(HPos::Left, VPos::Center)),
                 ))?;
             }
