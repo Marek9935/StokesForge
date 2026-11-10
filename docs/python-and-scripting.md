@@ -544,7 +544,8 @@ the list of the API below. Automatic colors follow the palette, series after ser
 | `ungroup(g, group, *, panel)` | dissolves: the series stay, style kept |
 | `remove_group(g, group, *, panel)` | removes the group **and its series** |
 | `set_group_style(g, group, *, panel, line_style, line_width, symbol, symbol_size)` | sets each given option on all members |
-| `apply_gradient(g, group, gradient, *, panel)` | `gradient`: identifier of a provided palette (`blue-red`…), name of a palette saved **in the project**, or list of `#RRGGBB` stops |
+| `apply_gradient(g, group, gradient, *, panel)` | `gradient`: identifier of a provided palette (`blue-red`…), name of a palette saved **in the project**, or list of `#RRGGBB` stops. The group **retains** the stops (a color bar reads them) |
+| `color_bar(g, groups=None, *, value_from, row_column, chain, scale, orientation, position, ticks, title, labels, ranges, visible, panel)` | sets the layer's color bar (#499), creating it when there is none; one undo step. `groups`: group numbers in bar order (a group already on the bar keeps its range and label); `labels`: Typst break labels, one per group; `ranges`: `(from, to)` per group, `None` = automatic; `value_from`: `x_prime` (default), `comments`, `long_name`, `short_name`, `units`; `row_column`: the column read by row series; `scale`: `linear` or `log`; `orientation`: `horizontal` or `vertical` (forced by the places below / right); `position`: `top_left`, `top_right`, `bottom_left`, `bottom_right`, `below`, `right`; `ticks`: `breaks` or `auto`; `visible=False` hides the bar and gives the curves their own colors back. A group put on the bar without a retained gradient gets the first provided palette. An unknown key, an unknown group or a `labels` / `ranges` list of the wrong length is refused (`InvalidValueError`) and changes nothing |
 
 A group number is the spec's: stable as long as the group exists. The
 gestures replay those of the interface (`PanelSpec::group_series`,
@@ -745,6 +746,7 @@ function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', li
 module analysis
 function apply_gradient(graph, group, gradient, *, panel=(0, 0))
 function children(handle=None)
+function color_bar(graph, groups=None, *, value_from=None, row_column=None, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0))
 function column(handle)
 function create_column(worksheet, name=None, column_type='numeric')
 function create_workbook(name=None, parent=None)

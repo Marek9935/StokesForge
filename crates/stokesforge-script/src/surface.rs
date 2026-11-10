@@ -928,6 +928,7 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
         wrap_pyfunction!(crate::groups::remove_group, &module)?,
         wrap_pyfunction!(crate::groups::set_group_style, &module)?,
         wrap_pyfunction!(crate::groups::apply_gradient, &module)?,
+        wrap_pyfunction!(crate::groups::color_bar, &module)?,
     ] {
         module.add_function(function)?;
     }

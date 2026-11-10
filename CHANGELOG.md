@@ -37,6 +37,20 @@ without a message, see `docs/persistence.md`).
   `.stf` fields (an older version that saves the file again loses them);
   `pyst` API 0.6: `set_graph(legend_text_from=…, legend_template=…)`.
 
+- Color bar (#499): a layer can color the curves of one or more series
+  groups by a value (x' by default; also Comments, Long Name, Short Name,
+  Units, or the value of a column for a row series) instead of by their rank,
+  on a linear or log scale, and shows the scale as a bar that replaces those
+  groups in the legend. Graph Properties has a new **Color Bar** tab (groups
+  in bar order with a typed range and a Typst break label each, a chain
+  option, position in a corner, below or right of the frame, orientation,
+  ticks, title); the group page has **On the color bar**; the colors of a
+  group on the bar are greyed out in the Series window; the bar is dragged
+  like the legend and a double-click opens its tab. The value color is
+  computed at each draw, never stored. Additive `.stf` field (an older
+  version that saves the file again loses it); `pyst` API 0.6:
+  `pyst.color_bar(…)`, and `apply_gradient` now retains the stops.
+
 - Origin projects (#490): an `.opj` file dropped on the window, picked in the
   Import Wizard or reached by File > Import opens the "Import from Origin"
   window instead of the wizard. It lists the workbooks and sheets of the

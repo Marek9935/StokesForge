@@ -102,7 +102,7 @@ Deleting a series never deletes the columns of the workbook.
 
 ## Open the graph settings
 
-The settings of a graph are in the **Graph Properties** window. It has these tabs: **General**, **Plot Area**, **Axes**, **Legend** and **Theme**. The series have their own window, **Series Properties**.
+The settings of a graph are in the **Graph Properties** window. It has these tabs: **General**, **Plot Area**, **Axes**, **Legend**, **Color Bar** and **Theme**. The series have their own window, **Series Properties**.
 
 You can open them in several ways:
 
@@ -123,6 +123,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
 | **Legend** | **Show legend**, **Position**, **Text from** |
+| **Color Bar** | **Show color bar**, the groups on the bar, **Value from**, **Scale**, **Position**, **Orientation**, **Ticks**, **Title** |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
@@ -314,6 +315,26 @@ For a series made from a row of a worksheet, **Row series** chooses between **Ro
 New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**.
 
 Drag the legend to move it anywhere on the figure. Right-click it and choose **Reset Position** to put it back. A series with **Show in legend** cleared does not appear.
+
+## Color bar
+
+A color bar colors the curves of one or more groups by a **value** instead of by their rank in the group, and shows the scale. It replaces the entries of those groups in the legend. Each layer has at most one bar. It is the way to show, for example, the time of each spectrum of a kinetic: the curves keep the gradient of their group, and the bar says which color is which time.
+
+To put a group on the bar, open the page of the group in the Series window and tick **On the color bar**, or go to the **Color Bar** tab of Graph Properties and tick **Show color bar**, then choose **Add a group…**. A group that had no color gradient gets the first one of the list. Unticking **On the color bar**, or **Remove** in the tab, gives the curves their own colors and legend entries back. While a group is on a visible bar, the line and symbol colors of its curves are greyed out in the Series window: the color comes from the bar.
+
+<img src="../images/graphs-properties-color-bar.png" alt="The Graph Properties window on its Color Bar tab, with one group on the bar." width="640">
+
+The **Color Bar** tab has:
+
+- **Show color bar**. Cleared, the curves get their own colors and legend entries back; the settings are kept.
+- **Groups on the bar**. One block per group, in the order of the bar: **Move Up**, **Move Down**, **Remove**, then **From** and **to** (empty means **Auto**: the smallest and the largest value of the curves of the group), and a **Break label**. The break label is Typst text written above the break at the end of the segment, with a small triangle; the last segment has no break. **Chain the segments** makes each segment start where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change, only the scale.
+- **Value from**. The header row that gives the value of each curve: **x'** (the default), **Comments**, **Long Name**, **Short Name** or **Units**. For a row series, **Row series** chooses **No value** or **Value of column…** with the column to read. A cell that holds text or a unit (`57 min`) has no value. The value is read each time the figure is drawn: change the x' of a column and the color follows. A line such as **1 curve has no value** lists the curves of the bar that have none; they keep their own color and are left off the bar.
+- **Scale**: **Linear** or **Log**. On a log scale a value of zero or less has no color.
+- **Position**: the four corners of the plot area, **Below the frame** or **Right of the frame**. Outside the frame the figure grows to make room; the plot area keeps its size. **Orientation** (**Horizontal** or **Vertical**) is greyed out for those two places, which force it. Drag the bar to move it anywhere on the figure.
+- **Ticks**: **Ends and breaks** (the default) or **Automatic**.
+- **Title**: Typst text written under the bar.
+
+A value outside the range of a segment takes the color of the nearer end. Double-click the bar to open the tab. In a script, `pyst.color_bar(…)` does the same.
 
 ## Titles and formulas
 

@@ -377,7 +377,247 @@ pub(crate) fn apply_gradient(
                 return Err(unknown_group(group));
             }
             let stops = requested.stops(snapshot)?;
-            panel.apply_group_gradient(group, &stops);
+            // Retained too (#499): the color bar reads the group's gradient.
+            panel.set_group_gradient(group, &stops);
+            Ok(())
+        })
+    })
+    .map_err(to_py_error)
+}
+
+/// A choice of a keyed enum (`ColorBarScale`, ...) from the key a script wrote;
+/// a key outside `choices` is refused with the list of the accepted ones.
+fn bar_choice<T: Clone + PartialEq>(
+    what: &str,
+    key: &str,
+    choices: &[T],
+    from_key: impl Fn(&str) -> T,
+    key_of: impl Fn(&T) -> String,
+) -> Result<T, HostError> {
+    let value = from_key(key);
+    if choices.contains(&value) {
+        return Ok(value);
+    }
+    let accepted: Vec<String> = choices.iter().map(key_of).collect();
+    Err(HostError::InvalidValue(format!(
+        "unknown {what} \"{key}\": use {}",
+        accepted.join(", ")
+    )))
+}
+
+/// Sets the color bar of the panel (#499): the groups on it, in bar order,
+/// and how it reads and draws them. Creates the bar (visible) when the layer
+/// has none; an option left out keeps its value. A group put on the bar
+/// without a retained gradient gets the first built-in one, so its curves have
+/// colors to take. One undo step.
+///
+/// `groups`: group numbers in bar order (a group already on the bar keeps its
+/// range and break label); `labels`: Typst break labels, one per group
+/// (`''` for none); `ranges`: `(from, to)` per group, each end a number or
+/// `None` for automatic. `value_from`: `'x_prime'`, `'comments'`,
+/// `'long_name'`, `'short_name'`, `'units'`; `row_column`: the column whose
+/// cell gives the value of a row series; `scale`: `'linear'` or `'log'`;
+/// `orientation`: `'horizontal'` or `'vertical'` (forced by `'below'` and
+/// `'right'`); `position`: `'top_left'`, `'top_right'`, `'bottom_left'`,
+/// `'bottom_right'`, `'below'`, `'right'`; `ticks`: `'breaks'` or `'auto'`;
+/// `title`: Typst text; `visible`: show or hide the bar (hidden, the curves
+/// get their own colors and legend entries back).
+#[pyfunction]
+#[pyo3(signature = (graph, groups=None, *, value_from=None, row_column=None, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0)))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn color_bar(
+    py: Python<'_>,
+    graph: &Handle,
+    groups: Option<Vec<u32>>,
+    value_from: Option<String>,
+    row_column: Option<PyRef<'_, Handle>>,
+    chain: Option<bool>,
+    scale: Option<String>,
+    orientation: Option<String>,
+    position: Option<String>,
+    ticks: Option<String>,
+    title: Option<String>,
+    labels: Option<Vec<String>>,
+    ranges: Option<Vec<(Option<f64>, Option<f64>)>>,
+    visible: Option<bool>,
+    panel: Panel,
+) -> PyResult<()> {
+    use stokesforge_plot::{
+        ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment, ColorBarTicks,
+        ColorBarValue,
+    };
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let row_column = row_column.map(|handle| handle.id);
+    // Every option is read before anything is written: a refused one changes
+    // nothing.
+    let parsed = (|| -> Result<_, HostError> {
+        Ok((
+            value_from
+                .as_deref()
+                .map(|key| {
+                    bar_choice(
+                        "value source",
+                        key,
+                        ColorBarValue::CHOICES,
+                        ColorBarValue::from_key,
+                        |v| v.key().to_owned(),
+                    )
+                })
+                .transpose()?,
+            scale
+                .as_deref()
+                .map(|key| {
+                    bar_choice(
+                        "scale",
+                        key,
+                        ColorBarScale::CHOICES,
+                        ColorBarScale::from_key,
+                        |v| v.key().to_owned(),
+                    )
+                })
+                .transpose()?,
+            orientation
+                .as_deref()
+                .map(|key| {
+                    bar_choice(
+                        "orientation",
+                        key,
+                        ColorBarOrientation::CHOICES,
+                        ColorBarOrientation::from_key,
+                        |v| v.key().to_owned(),
+                    )
+                })
+                .transpose()?,
+            position
+                .as_deref()
+                .map(|key| {
+                    bar_choice(
+                        "position",
+                        key,
+                        ColorBarPosition::CHOICES,
+                        ColorBarPosition::from_key,
+                        |v| v.key().to_owned(),
+                    )
+                })
+                .transpose()?,
+            ticks
+                .as_deref()
+                .map(|key| {
+                    bar_choice(
+                        "ticks",
+                        key,
+                        ColorBarTicks::CHOICES,
+                        ColorBarTicks::from_key,
+                        |v| v.key().to_owned(),
+                    )
+                })
+                .transpose()?,
+        ))
+    })()
+    .map_err(to_py_error)?;
+    let (value_from, scale, orientation, position, ticks) = parsed;
+    if let Some(groups) = &groups {
+        let mut seen = Vec::new();
+        for group in groups {
+            if seen.contains(group) {
+                return Err(crate::graph::invalid(format!(
+                    "group {group} is listed twice"
+                )));
+            }
+            seen.push(*group);
+        }
+        for (name, len) in [
+            ("labels", labels.as_ref().map(Vec::len)),
+            ("ranges", ranges.as_ref().map(Vec::len)),
+        ] {
+            if len.is_some_and(|len| len != groups.len()) {
+                return Err(crate::graph::invalid(format!(
+                    "{name} needs one entry per group ({} groups)",
+                    groups.len()
+                )));
+            }
+        }
+    }
+    let (id, epoch) = (graph.id, graph.epoch);
+    py.detach(|| {
+        edit_panel(&context, id, epoch, panel, |panel, _| {
+            let mut bar = panel.color_bar.clone().unwrap_or_default();
+            if let Some(groups) = &groups {
+                let mut segments = Vec::with_capacity(groups.len());
+                for (rank, group) in groups.iter().enumerate() {
+                    if !panel.group_ids().contains(group) {
+                        return Err(unknown_group(*group));
+                    }
+                    let mut segment = bar
+                        .segment_of(*group)
+                        .cloned()
+                        .unwrap_or_else(|| ColorBarSegment::new(*group));
+                    if let Some(labels) = &labels {
+                        segment.label.clone_from(&labels[rank]);
+                    }
+                    if let Some(ranges) = &ranges {
+                        (segment.from, segment.to) = ranges[rank];
+                    }
+                    segments.push(segment);
+                }
+                bar.segments = segments;
+            } else if labels.is_some() || ranges.is_some() {
+                let count = bar.segments.len();
+                for (name, len) in [
+                    ("labels", labels.as_ref().map(Vec::len)),
+                    ("ranges", ranges.as_ref().map(Vec::len)),
+                ] {
+                    if len.is_some_and(|len| len != count) {
+                        return Err(HostError::InvalidValue(format!(
+                            "{name} needs one entry per group on the bar ({count})"
+                        )));
+                    }
+                }
+                for (rank, segment) in bar.segments.iter_mut().enumerate() {
+                    if let Some(labels) = &labels {
+                        segment.label.clone_from(&labels[rank]);
+                    }
+                    if let Some(ranges) = &ranges {
+                        (segment.from, segment.to) = ranges[rank];
+                    }
+                }
+            }
+            if let Some(value) = &value_from {
+                bar.value = value.clone();
+            }
+            if let Some(column) = row_column {
+                bar.row_column = Some(column);
+            }
+            if let Some(chain) = chain {
+                bar.chain = chain;
+            }
+            if let Some(scale) = &scale {
+                bar.scale = scale.clone();
+            }
+            if let Some(orientation) = &orientation {
+                bar.orientation = orientation.clone();
+            }
+            if let Some(position) = &position {
+                bar.position = position.clone();
+                // A place named in a script wins over a dragged position.
+                bar.anchor = None;
+            }
+            if let Some(ticks) = &ticks {
+                bar.ticks = ticks.clone();
+            }
+            if let Some(title) = &title {
+                bar.title.clone_from(title);
+            }
+            bar.visible = visible.unwrap_or(true);
+            let on_bar: Vec<u32> = bar.segments.iter().map(|segment| segment.group).collect();
+            panel.color_bar = Some(bar);
+            for group in on_bar {
+                if panel.group_gradient(group).is_none() {
+                    let first: Vec<&str> = GRADIENT_PRESETS[0].stops.to_vec();
+                    panel.set_group_gradient(group, &first);
+                }
+            }
             Ok(())
         })
     })

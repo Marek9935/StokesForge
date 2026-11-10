@@ -823,3 +823,57 @@ fn an_unnamed_python_graph_is_named_after_its_workbook() {
         assert!(snap.tree.resolve(path).is_ok(), "{path} resolves");
     }
 }
+
+/// #499: `pyst.color_bar` builds the bar of a layer in one undo step, gives a
+/// group without a retained gradient the first palette, keeps the range and
+/// label of a group already on the bar, and refuses an unknown option
+/// without writing. Witness: a second undo step, or a bar written before the
+/// refusal, fails the assertions.
+#[test]
+fn color_bar_is_one_undo_step_and_refuses_unknown_options() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1')\ngid = pyst.group_series(g, [0, 1])\n"),
+    );
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        "gid = pyst.series_groups(g)[0]['id']
+pyst.color_bar(g, [gid], labels=['switch'], position='right', title='t (min)', ticks='auto', chain=True)
+pyst.color_bar(g, scale='log')
+",
+    );
+    let spec = graph_spec(&b);
+    let panel = &spec.panels[0];
+    let bar = panel.color_bar.as_ref().expect("a bar");
+    assert_eq!(bar.segments.len(), 1);
+    assert_eq!(bar.segments[0].label, "switch");
+    assert_eq!(bar.position, stokesforge_plot::ColorBarPosition::Right);
+    assert_eq!(bar.scale, stokesforge_plot::ColorBarScale::Log);
+    assert!(bar.chain && bar.visible);
+    assert!(
+        panel.group_gradient(bar.segments[0].group).is_some(),
+        "the group retains a gradient"
+    );
+    // The whole script is one undo step.
+    b.session.undo().unwrap();
+    assert_eq!(*b.session.snapshot().unwrap().tree, *before.tree);
+
+    let after_refusals = b.session.snapshot().unwrap();
+    for refused in [
+        "pyst.color_bar(g, [gid], scale='cubic')",
+        "pyst.color_bar(g, [gid], position='middle')",
+        "pyst.color_bar(g, [99])",
+        "pyst.color_bar(g, [gid], labels=['a', 'b'])",
+        "pyst.color_bar(g, [gid, gid])",
+        "pyst.color_bar(g, [gid], colour='red')",
+    ] {
+        let out = b
+            .engine
+            .run(&format!("gid = pyst.series_groups(g)[0]['id']\n{refused}"))
+            .unwrap();
+        assert!(out.error.is_some(), "{refused} should be refused");
+    }
+    assert_eq!(*b.session.snapshot().unwrap().tree, *after_refusals.tree);
+}

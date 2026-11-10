@@ -31,6 +31,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Choose Default Folder | Choisir le dossier par défaut |
 | Choose Files to Import | Choisir les fichiers à importer |
 | Clear | Effacer |
+| Color Bar | Barre de couleurs |
 | Column in use | Colonne utilisée |
 | Columns | Colonnes |
 | Copy | Copier |
@@ -177,6 +178,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Text format | Format du texte |
 | Theme | Thème |
 | Theme… | Thème… |
+| Title | Titre |
 | Tools | Outils |
 | Top | Haut |
 | Top Mirror Axis | Axe miroir du haut |

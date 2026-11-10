@@ -835,16 +835,17 @@ impl CellPlan {
     }
 }
 
-/// The plans of the cells (union of what their layers ask for) and the rank of
-/// each layer among the superimposed ones of its cell, from the spec alone.
-fn cell_plans(
-    spec: &PlotSpec,
-    layout: &Layout,
-) -> (
+/// What [`cell_plans`] returns: the plan of each cell, the rank of each layer
+/// among the superimposed ones, and where the band of its colour bar starts.
+type CellPlans = (
     std::collections::HashMap<usize, CellPlan>,
     Vec<(u32, u32)>,
     Vec<(u32, u32)>,
-) {
+);
+
+/// The plans of the cells (union of what their layers ask for) and the rank of
+/// each layer among the superimposed ones of its cell, from the spec alone.
+fn cell_plans(spec: &PlotSpec, layout: &Layout) -> CellPlans {
     let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
     // The rank of each superimposed layer among those of its cell that show an
     // axis on the same side (#168): 0 against the plot area. It comes from the

@@ -1686,6 +1686,7 @@ fn axis_editor(
 /// the legend) are then grayed out, with a tooltip that says why, and the
 /// colors hidden (#213: the group's color gradient provides them); the others (line style, symbol shape and size) stay active and the
 /// page copies them to the whole group.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn series_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
@@ -2336,16 +2337,17 @@ mod tests {
     /// others. Chosen not to coincide with any other text of the six pages
     /// ("Axes" is both the tab and a theme color, "Line" is both
     /// a section and a plot type).
-    fn own_labels() -> [(PlotSettingsTab, String); 6] {
+    fn own_labels() -> [(PlotSettingsTab, String); 7] {
         [
             (PlotSettingsTab::Graph, tr!("plot-general-dark-note")),
             (
                 PlotSettingsTab::PlotArea,
                 tr!("plot-area-gridlines-vertical"),
             ),
-            (PlotSettingsTab::Axes, tr!("plot-axes-scale-section")),
+            (PlotSettingsTab::Axes, tr!("plot-axes-log-scale")),
             (PlotSettingsTab::Series, tr!("plot-series-line-width")),
             (PlotSettingsTab::Legend, tr!("plot-legend-show")),
+            (PlotSettingsTab::ColorBar, tr!("plot-color-bar-show")),
             (PlotSettingsTab::Theme, tr!("plot-theme-global-colors")),
         ]
     }
