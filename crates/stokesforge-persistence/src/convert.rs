@@ -606,6 +606,7 @@ fn color_bar_to_record(bar: &ColorBarSpec) -> ColorBarRecord {
         anchor: bar.anchor.map(anchor_to_record),
         ticks: key(bar.ticks.key(), ColorBarTicks::default().key()),
         title: bar.title.clone(),
+        font: font_to_record(&bar.font),
         visible: bar.visible,
     }
 }
@@ -631,6 +632,7 @@ fn record_to_color_bar(record: ColorBarRecord) -> ColorBarSpec {
         anchor: record.anchor.map(record_to_anchor),
         ticks: ColorBarTicks::from_key(&record.ticks),
         title: record.title,
+        font: record_to_font(record.font),
         visible: record.visible,
     }
 }
@@ -1525,6 +1527,10 @@ mod tests {
             anchor: None,
             ticks: ColorBarTicks::Auto,
             title: "Time".to_string(),
+            font: stokesforge_plot::TextFont {
+                size: Some(18.0),
+                ..Default::default()
+            },
             visible: false,
         };
         let panel = PanelSpec {
@@ -1534,6 +1540,29 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&panel_spec_to_record(&panel)).unwrap();
         let back = record_to_panel_spec(rmp_serde::from_slice(&bytes).unwrap()).unwrap();
         assert_eq!(back.color_bar, Some(bar));
+
+        // A bar with the default font writes no font key: a file stays
+        // byte-identical to one written before the font existed.
+        let plain = PanelSpec {
+            color_bar: Some(ColorBarSpec::default()),
+            ..PanelSpec::at(0, 0)
+        };
+        let written = rmp_serde::to_vec_named(&panel_spec_to_record(&plain)).unwrap();
+        let value = rmpv::decode::read_value(&mut std::io::Cursor::new(written)).unwrap();
+        let rmpv::Value::Map(fields) = &value else {
+            panic!("a layer is written as a map");
+        };
+        let bar_map = fields
+            .iter()
+            .find(|(key, _)| key.as_str() == Some("color_bar"))
+            .map(|(_, bar)| bar)
+            .expect("bar");
+        let rmpv::Value::Map(bar_fields) = bar_map else {
+            panic!("a bar is a map");
+        };
+        assert!(bar_fields
+            .iter()
+            .all(|(key, _)| key.as_str() != Some("font")));
 
         let none = panel_spec_to_record(&PanelSpec::at(0, 0));
         assert!(none.color_bar.is_none());

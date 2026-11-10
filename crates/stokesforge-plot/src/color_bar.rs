@@ -194,6 +194,9 @@ pub struct ColorBarSpec {
     pub ticks: ColorBarTicks,
     /// Typst title of the bar (empty = none).
     pub title: String,
+    /// Font and size of the bar's own texts (title, tick labels, break
+    /// labels). Default = the label size of the graph's font (today's look).
+    pub font: crate::TextFont,
     /// False hides the bar **and** gives the curves their stored colors and
     /// legend entries back.
     pub visible: bool,
@@ -212,6 +215,7 @@ impl Default for ColorBarSpec {
             anchor: None,
             ticks: ColorBarTicks::default(),
             title: String::new(),
+            font: crate::TextFont::default(),
             visible: true,
         }
     }

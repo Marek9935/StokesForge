@@ -106,9 +106,13 @@ fn resolve_segments(panel: &ResolvedPanel<'_>, bar: &ColorBarSpec) -> Vec<Resolv
             .filter(|(_, series)| on_bar(series, segment.group))
             .map(|(index, _)| index)
             .collect();
+        // On a log scale a value <= 0 has no colour: it takes no part in the
+        // range, the others keep theirs (#499, C8/C9).
+        let log = bar.scale.effective() == ColorBarScale::Log;
         let values: Vec<f64> = members
             .iter()
             .filter_map(|&index| panel.series[index].value)
+            .filter(|value| !log || *value > 0.0)
             .collect();
         let Some(natural) = ColorBarSpec::natural_range(segment, &values) else {
             continue;
@@ -257,11 +261,22 @@ fn extras(bar: &ColorBarSpec) -> (bool, bool) {
 /// vertical): markers, strip, tick labels, title.
 fn cross_size(bar: &ColorBarSpec, horizontal: bool) -> i32 {
     let (labels, title) = extras(bar);
-    let title = if title { TITLE_ROW } else { 0 };
+    let title = if title { grown(bar, TITLE_ROW) } else { 0 };
     if horizontal {
-        i32::from(labels) * MARKER_ROW + THICK + TICK_GAP + TICK_ROW + title
+        i32::from(labels) * grown(bar, MARKER_ROW) + THICK + TICK_GAP + grown(bar, TICK_ROW) + title
     } else {
-        i32::from(labels) * LABEL_COL + THICK + TICK_GAP + TICK_COL + title
+        i32::from(labels) * grown(bar, LABEL_COL) + THICK + TICK_GAP + grown(bar, TICK_COL) + title
+    }
+}
+
+/// A text row or column, grown with the bar's font size above the default
+/// label size (never shrunk: a smaller font keeps today's room).
+fn grown(bar: &ColorBarSpec, size: i32) -> i32 {
+    let ratio = bar.font.effective_size(crate::pipeline::LABEL_SIZE) / crate::pipeline::LABEL_SIZE;
+    if ratio > 1.0 {
+        (f64::from(size) * ratio).round() as i32
+    } else {
+        size
     }
 }
 
@@ -380,9 +395,9 @@ pub fn draw<DB: DrawingBackend>(
         [(a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1))]
     };
     let strip_v = if along_x {
-        i32::from(labels) * MARKER_ROW
+        i32::from(labels) * grown(bar, MARKER_ROW)
     } else {
-        i32::from(labels) * LABEL_COL
+        i32::from(labels) * grown(bar, LABEL_COL)
     };
 
     // Segment extents along the strip.
@@ -492,14 +507,14 @@ pub fn draw<DB: DrawingBackend>(
     // Title, centred along the strip.
     if title {
         if along_x {
-            let (x, y) = (bx + length / 2, by + cross - TITLE_ROW / 2);
+            let (x, y) = (bx + length / 2, by + cross - grown(bar, TITLE_ROW) / 2);
             area.draw(&Text::new(
                 bar.title.as_str(),
                 (x, y),
                 rich(Pos::new(HPos::Center, VPos::Center)),
             ))?;
         } else {
-            let (x, y) = (bx + cross - TITLE_ROW / 2, by + length / 2);
+            let (x, y) = (bx + cross - grown(bar, TITLE_ROW) / 2, by + length / 2);
             crate::pipeline::draw_centered_text(area, &bar.title, &styles.rich, -90.0, (x, y))?;
         }
     }

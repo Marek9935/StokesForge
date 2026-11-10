@@ -822,6 +822,12 @@ pub(crate) struct TextFontRecord {
     pub(crate) align: TextAlignRecord,
 }
 
+impl TextFontRecord {
+    pub(crate) fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// [`stokesforge_plot::TextAnchor`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TextAnchorRecord {
@@ -932,6 +938,10 @@ pub(crate) struct ColorBarRecord {
     pub(crate) ticks: String,
     #[serde(default)]
     pub(crate) title: String,
+    /// Font of the bar's texts; a default font is not written, so an older
+    /// file stays byte-identical.
+    #[serde(default, skip_serializing_if = "TextFontRecord::is_default")]
+    pub(crate) font: TextFontRecord,
     #[serde(default = "default_true")]
     pub(crate) visible: bool,
 }

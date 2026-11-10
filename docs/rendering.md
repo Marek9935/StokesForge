@@ -1281,6 +1281,8 @@ cell** (superimposed layers must keep the same plot area). Those two places forc
 (Below horizontal, Right vertical); corners and a dragged bar (`anchor`, wins over the position) are
 inside the frame and ask no band. In the legacy layout (no stored frame, no padding) nothing is reserved
 and an outside place draws at the bottom right corner. `DrawnText { ColorBar }` serves picking and drag
-exactly like the legend (`TextTarget::ColorBar` has no font and no colour of its own, is not listed in
+exactly like the legend (`TextTarget::ColorBar` has a font of its own (`ColorBarSpec::font`: title, ticks, break labels, measured through the same single measure; the band rows grow with a size above the label size) and no colour, is not listed in
 the Object Manager). Test: `figure_layout.rs` (band), `agreement.rs` (stripes, ticks, labels on both
 backends), `cache_session.rs` (click and drag).
+
+Colour bar, log scale: on a log scale only the curves whose value is <= 0 have no value (they keep their stored colour and the ordinary legend entry); the range and the ticks come from the valid values only.

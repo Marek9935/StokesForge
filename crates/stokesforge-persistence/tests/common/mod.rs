@@ -338,6 +338,10 @@ pub fn non_trivial_spec(
             anchor: None,
             ticks: stokesforge_plot::ColorBarTicks::Auto,
             title: "Time".to_string(),
+            font: stokesforge_plot::TextFont {
+                size: Some(13.0),
+                ..Default::default()
+            },
             visible: true,
         }),
         // #398: a free frame, negative left.

@@ -3816,13 +3816,16 @@ fn draw_panel<DB: DrawingBackend>(
                 center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
             },
             &crate::color_bar::BarStyles {
-                rich: font_style(
-                    &stokesforge_plot::TextFont::default(),
-                    LABEL_SIZE,
-                    bar_ink,
-                    canvas.dim_in_pixel().0,
-                ),
-                tick: text_style(LABEL_SIZE, bar_ink),
+                rich: font_style(&bar.font, LABEL_SIZE, bar_ink, canvas.dim_in_pixel().0),
+                tick: if bar.font.is_default() {
+                    text_style(LABEL_SIZE, bar_ink)
+                } else {
+                    literal_style_font(
+                        bar.font.effective_size(LABEL_SIZE),
+                        bar_ink,
+                        bar.font.family(),
+                    )
+                },
                 ink,
             },
         )?;
