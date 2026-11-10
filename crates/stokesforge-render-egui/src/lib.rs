@@ -225,6 +225,11 @@ pub enum GraphEvent {
         /// Side of the axis.
         side: stokesforge_render::AxisSide,
     },
+    /// Double click on the colour bar: open its tab (#499).
+    OpenColorBarProperties {
+        /// Index of the layer in `PlotSpec::panels`.
+        panel: usize,
+    },
     /// Double click on a curve: open the settings of the series
     /// (issue #113).
     OpenSeriesProperties(stokesforge_plot::SeriesRef),
@@ -2055,7 +2060,11 @@ impl GraphView {
                     self.events.push(match target {
                         // The legend has no text of its own: it is the series
                         // names, one per line.
-                        TextTarget::Legend { .. } | TextTarget::ColorBar { .. } => return,
+                        TextTarget::Legend { .. } => return,
+                        // The bar has no text to edit: it opens its tab.
+                        TextTarget::ColorBar { panel } => {
+                            GraphEvent::OpenColorBarProperties { panel }
+                        }
                         _ => GraphEvent::EditText(target),
                     });
                 }

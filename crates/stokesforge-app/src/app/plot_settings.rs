@@ -4814,7 +4814,8 @@ mod tests {
             let mut harness = grouped(1);
             let mut spec = harness.model();
             first_panel(&mut spec).color_bar = Some(ColorBarSpec {
-                segments: vec![stokesforge_plot::ColorBarSegment::new(1)],
+                // No group block: the Orientation row stays in the window.
+                segments: Vec::new(),
                 position: position.clone(),
                 ..ColorBarSpec::default()
             });

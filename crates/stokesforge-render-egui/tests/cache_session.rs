@@ -1635,3 +1635,34 @@ fn a_new_figure_text_language_rebuilds_the_figure_and_the_same_one_does_not() {
     );
     assert_eq!(view.cache().misses(), 2);
 }
+
+/// #499: a double-click on the colour bar opens its tab (it has no text to
+/// edit). Witness: the former `return` for the bar emits nothing.
+#[test]
+fn double_clicking_the_color_bar_asks_to_open_its_tab() {
+    use stokesforge_render_egui::{GraphEvent, TextTarget};
+    let fixture = Fixture::with_panel("Bar", |panel| {
+        panel.series[0].group = Some(1);
+        panel.color_bar = Some(stokesforge_plot::ColorBarSpec {
+            segments: vec![stokesforge_plot::ColorBarSegment {
+                from: Some(0.0),
+                to: Some(10.0),
+                ..stokesforge_plot::ColorBarSegment::new(1)
+            }],
+            position: stokesforge_plot::ColorBarPosition::TopRight,
+            ..Default::default()
+        });
+    });
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+    let (center, _, _) = view
+        .text_screen_box(TextTarget::ColorBar { panel: 0 })
+        .expect("the bar is drawn");
+    let signals = double_click(&context, &mut view, &fixture, rect, center);
+    assert!(
+        signals.contains(&GraphEvent::OpenColorBarProperties { panel: 0 }),
+        "{signals:?}"
+    );
+}

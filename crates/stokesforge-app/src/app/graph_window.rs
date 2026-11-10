@@ -1179,6 +1179,14 @@ fn annotation_interactions(
                     actions.push(Action::OpenObjectProperties { graph, target });
                 }
             }
+            stokesforge_render_egui::GraphEvent::OpenColorBarProperties { panel } => {
+                actions.push(Action::OpenObjectProperties {
+                    graph,
+                    target: stokesforge_app_state::object_manager::VisibilityTarget::Text(
+                        stokesforge_plot::TextTarget::ColorBar { panel },
+                    ),
+                });
+            }
             stokesforge_render_egui::GraphEvent::OpenSeriesProperties(series) => {
                 actions.push(Action::OpenObjectProperties {
                     graph,

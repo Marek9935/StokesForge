@@ -217,31 +217,38 @@ fn groups_section(
             .iter()
             .find(|(id, _)| *id == group)
             .map_or_else(|| group.to_string(), |(_, title)| title.clone());
-        form.row(title, |ui| {
-            for (up, label) in [
-                (true, tr!("plot-color-bar-move-up")),
-                (false, tr!("plot-color-bar-move-down")),
-            ] {
-                let movable = if up { rank > 0 } else { rank + 1 < count };
-                if ui
-                    .add_enabled(movable, egui::Button::new(label))
-                    .on_disabled_hover_text(if up {
-                        tr!("disabled-move-first")
-                    } else {
-                        tr!("disabled-move-last")
-                    })
-                    .clicked()
-                {
-                    intent.shift = Some((rank, up));
-                }
-            }
-            if ui
-                .button(tr!("plot-color-bar-remove"))
-                .on_hover_text(tr!("plot-color-bar-remove", "hint"))
-                .clicked()
-            {
-                intent.remove = Some(rank);
-            }
+        // The title on its row, the three buttons wrapped in the fields column
+        // (a long translation must not run past the page).
+        form.row(title, |_| {});
+        form.field(|ui| {
+            ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (up, label) in [
+                        (true, tr!("plot-color-bar-move-up")),
+                        (false, tr!("plot-color-bar-move-down")),
+                    ] {
+                        let movable = if up { rank > 0 } else { rank + 1 < count };
+                        if ui
+                            .add_enabled(movable, egui::Button::new(label))
+                            .on_disabled_hover_text(if up {
+                                tr!("disabled-move-first")
+                            } else {
+                                tr!("disabled-move-last")
+                            })
+                            .clicked()
+                        {
+                            intent.shift = Some((rank, up));
+                        }
+                    }
+                    if ui
+                        .button(tr!("plot-color-bar-remove"))
+                        .on_hover_text(tr!("plot-color-bar-remove", "hint"))
+                        .clicked()
+                    {
+                        intent.remove = Some(rank);
+                    }
+                });
+            });
         });
         let segment = &mut bar.segments[rank];
         let hint_from = tr!("common-auto");
