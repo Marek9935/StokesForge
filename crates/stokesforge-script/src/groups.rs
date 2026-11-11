@@ -425,15 +425,16 @@ impl<'py> FromPyObject<'_, 'py> for RowColumn {
     }
 }
 
-/// Sets the color bar of the panel (#499): the groups on it, in bar order,
-/// and how it reads and draws them. Creates the bar (visible) when the layer
+/// Sets the color bar of the panel (#499): the groups on it (they always
+/// follow the graph's order of the groups) and how it reads and draws them. Creates the bar (visible) when the layer
 /// has none; an option left out keeps its value. A group put on the bar
 /// without a retained gradient gets the first built-in one, so its curves have
 /// colors to take. One undo step.
 ///
-/// `groups`: group numbers in bar order (a group already on the bar keeps its
-/// range and break label); `labels`: Typst break labels, one per group
-/// (`''` for none); `ranges`: `(from, to)` per group, each end a number or
+/// `groups`: group numbers (the order of the list does not matter: the bar
+/// follows the graph's order; a group already on the bar keeps its range and
+/// break label); `labels`: Typst labels of the break after each group, one
+/// per group (`''` for none; the one of the last group on the bar is unused); `ranges`: `(from, to)` per group, each end a number or
 /// `None` for automatic. `value_from`: `'x_prime'`, `'comments'`,
 /// `'long_name'`, `'short_name'`, `'units'`; `row_column`: the column whose
 /// cell gives the value of a row series; `scale`: `'linear'` or `'log'`;
@@ -656,6 +657,8 @@ pub(crate) fn color_bar(
             if let Some(visible) = visible {
                 bar.visible = visible;
             }
+            // The graph's order wins over the order of the list.
+            let bar = bar.in_graph_order(&panel.group_ids()).into_owned();
             let on_bar: Vec<u32> = bar.segments.iter().map(|segment| segment.group).collect();
             panel.color_bar = Some(bar);
             for group in on_bar {

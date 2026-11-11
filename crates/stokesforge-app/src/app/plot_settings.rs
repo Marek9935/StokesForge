@@ -237,6 +237,8 @@ fn plot_settings_contents(
     }
 
     let mut commit = false;
+    // The Legend page honoured the request to unfold the colour bar section.
+    let mut unfolded = false;
     let unit = state.length_unit();
     // The ratio lock is session state of the graph, shared with the strip of
     // the Page Layout Mode (#426): the page edits a copy and hands it back.
@@ -355,20 +357,20 @@ fn plot_settings_contents(
                             return;
                         };
                         commit |= legend_editor(ui, &mut panel.legend, &row_columns);
-                    }
-                    PlotSettingsTab::ColorBar => {
-                        let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
-                            return;
-                        };
-                        commit |= super::color_bar_settings::color_bar_editor(
+                        commit |= super::color_bar_settings::color_bar_section(
                             ui,
                             panel,
                             tree,
                             &row_columns,
+                            settings.color_bar_unfold,
                         );
+                        unfolded = settings.color_bar_unfold;
                     }
                 });
         }
+    }
+    if unfolded {
+        state.spend_color_bar_unfold();
     }
     if commit {
         state.commit_plot_edit();
@@ -2337,7 +2339,7 @@ mod tests {
     /// others. Chosen not to coincide with any other text of the six pages
     /// ("Axes" is both the tab and a theme color, "Line" is both
     /// a section and a plot type).
-    fn own_labels() -> [(PlotSettingsTab, String); 7] {
+    fn own_labels() -> [(PlotSettingsTab, String); 6] {
         [
             (PlotSettingsTab::Graph, tr!("plot-general-dark-note")),
             (
@@ -2347,7 +2349,6 @@ mod tests {
             (PlotSettingsTab::Axes, tr!("plot-axes-log-scale")),
             (PlotSettingsTab::Series, tr!("plot-series-line-width")),
             (PlotSettingsTab::Legend, tr!("plot-legend-show")),
-            (PlotSettingsTab::ColorBar, tr!("plot-color-bar-show")),
             (PlotSettingsTab::Theme, tr!("plot-theme-global-colors")),
         ]
     }
@@ -4712,26 +4713,34 @@ mod tests {
         })
     }
 
-    /// #499: the Color Bar tab shows the bar; ticking « Show color bar »
-    /// commits at once, and a group added from the list lands on the bar with
-    /// a retained gradient. Witness: a tab that edits nothing fails both.
+    /// #499: the « Color bar » section of the Legend tab is folded on a layer
+    /// with no bar and lists EVERY group, each with its « on the bar » box;
+    /// ticking « Show color bar » commits at once, ticking a group puts it on
+    /// the bar with a retained gradient and unticking takes it off.
+    /// Witness: a section that edits nothing fails every step.
     #[test]
-    fn the_color_bar_tab_shows_the_bar_and_adds_a_group() {
+    fn the_color_bar_section_lists_every_group_and_ticks_them() {
         let mut harness = grouped(2);
-        harness.open(PlotSettingsTab::ColorBar, None);
+        harness.open(PlotSettingsTab::Legend, None);
         let context = test_support::context();
-        paint_window(&context, &mut harness.state, Vec::new());
-        assert!(harness.model().panels[0].color_bar.is_none());
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(
+            !is_painted(&painted, &tr!("plot-color-bar-show")),
+            "folded without a bar"
+        );
+        click_label(&context, &mut harness.state, &tr!("plot-color-bar-section"));
         click_label(&context, &mut harness.state, &tr!("plot-color-bar-show"));
         let bar = harness.model().panels[0].color_bar.clone().expect("bar");
         assert!(bar.visible && bar.segments.is_empty());
 
-        let painted = click_label(
-            &context,
-            &mut harness.state,
-            &tr!("plot-color-bar-add-group"),
-        );
-        let first = text_exact(&painted, "Group 1").center;
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let boxes: Vec<_> = painted
+            .iter()
+            .filter(|text| text.text == tr!("plot-color-bar-group-on"))
+            .collect();
+        assert_eq!(boxes.len(), 2, "one box per group of the layer");
+        assert!(is_painted(&painted, "Group 1") && is_painted(&painted, "Group 2"));
+        let first = boxes[0].center;
         click(&context, first, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), &mut harness.state)
         });
@@ -4741,6 +4750,69 @@ mod tests {
         assert_eq!(bar.segments.len(), 1);
         assert_eq!(bar.segments[0].group, 1);
         assert!(model.panels[0].group_gradient(1).is_some());
+        click(&context, first, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert!(harness.model().panels[0]
+            .color_bar
+            .as_ref()
+            .unwrap()
+            .segments
+            .is_empty());
+    }
+
+    /// #499: the break label sits between two ticked groups only (none after
+    /// the last), and the ranges fold opens by itself when an end is typed.
+    /// Witness: a break on every group, or a fold closed over a typed end,
+    /// fails.
+    #[test]
+    fn breaks_sit_between_ticked_groups_and_ranges_open_when_set() {
+        use super::super::color_bar_settings::{groups_with_a_break, ranges_open_by_default};
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let bar = |groups: &[u32]| ColorBarSpec {
+            segments: groups.iter().map(|g| ColorBarSegment::new(*g)).collect(),
+            ..ColorBarSpec::default()
+        };
+        assert_eq!(
+            groups_with_a_break(&bar(&[]), &[1, 2, 3]),
+            Vec::<u32>::new()
+        );
+        assert_eq!(
+            groups_with_a_break(&bar(&[2]), &[1, 2, 3]),
+            Vec::<u32>::new()
+        );
+        // A free group in the middle does not break the chain of two.
+        assert_eq!(groups_with_a_break(&bar(&[3, 1]), &[1, 2, 3]), [1]);
+        assert_eq!(groups_with_a_break(&bar(&[1, 2, 3]), &[1, 2, 3]), [1, 2]);
+        let mut segment = ColorBarSegment::new(1);
+        assert!(!ranges_open_by_default(&segment));
+        segment.to = Some(5.0);
+        assert!(ranges_open_by_default(&segment));
+    }
+
+    /// #499: the section opens by itself when the layer's bar is shown, and
+    /// the bar's double-click opens the Legend tab with it unfolded. Witness:
+    /// a section folded over a shown bar, or a request that opens another tab
+    /// or stays pending, fails.
+    #[test]
+    fn the_color_bar_section_opens_when_the_bar_is_shown() {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let context = test_support::context();
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment::new(1)],
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-color-bar-show")));
+        assert_eq!(PlotSettingsTab::ALL.len(), 5);
     }
 
     /// #499: the curves left without a value are reported, in the plural the
@@ -4764,7 +4836,7 @@ mod tests {
                 graph: harness.graph,
                 spec,
             });
-            harness.open(PlotSettingsTab::ColorBar, None);
+            harness.open(PlotSettingsTab::Legend, None);
             let painted = paint_window(&context, &mut harness.state, Vec::new());
             assert_eq!(is_painted(&painted, &line), reported, "{line}");
         }
@@ -4823,7 +4895,7 @@ mod tests {
                 graph: harness.graph,
                 spec,
             });
-            harness.open(PlotSettingsTab::ColorBar, None);
+            harness.open(PlotSettingsTab::Legend, None);
             click_label(
                 &context,
                 &mut harness.state,
@@ -4861,7 +4933,7 @@ mod tests {
             graph: harness.graph,
             spec,
         });
-        harness.open(PlotSettingsTab::ColorBar, None);
+        harness.open(PlotSettingsTab::Legend, None);
         let context = test_support::context();
         let (painted, _) = open_list(
             &context,

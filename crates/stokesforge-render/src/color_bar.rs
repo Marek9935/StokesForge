@@ -171,10 +171,10 @@ fn resolve_segments(panel: &ResolvedPanel<'_>, bar: &ColorBarSpec) -> Vec<Resolv
 
 /// The segments to draw for the visible bar of `panel` (empty without one).
 pub fn bar_segments(panel: &ResolvedPanel<'_>) -> Vec<BarSegment> {
-    let Some(bar) = panel.spec.color_bar.as_ref().filter(|bar| bar.visible) else {
+    let Some(bar) = panel.spec.color_bar_in_order().filter(|bar| bar.visible) else {
         return Vec::new();
     };
-    let resolved = resolve_segments(panel, bar);
+    let resolved = resolve_segments(panel, &bar);
     let natural: Vec<(f64, f64)> = resolved.iter().map(|segment| segment.natural).collect();
     let drawn = bar.drawn_ranges(&natural);
     resolved
@@ -200,15 +200,15 @@ pub fn bar_segments(panel: &ResolvedPanel<'_>) -> Vec<BarSegment> {
 /// none.
 pub fn value_colors(panel: &ResolvedPanel<'_>) -> Vec<Option<String>> {
     let mut colors = vec![None; panel.series.len()];
-    let Some(bar) = panel.spec.color_bar.as_ref().filter(|bar| bar.visible) else {
+    let Some(bar) = panel.spec.color_bar_in_order().filter(|bar| bar.visible) else {
         return colors;
     };
-    for segment in resolve_segments(panel, bar) {
+    for segment in resolve_segments(panel, &bar) {
         for index in segment.members {
             let Some(value) = panel.series[index].value else {
                 continue;
             };
-            colors[index] = value_color(bar, &segment.stops, segment.natural, value);
+            colors[index] = value_color(&bar, &segment.stops, segment.natural, value);
         }
     }
     colors
@@ -218,7 +218,7 @@ pub fn value_colors(panel: &ResolvedPanel<'_>) -> Vec<Option<String>> {
 /// without a value (no x', text in the cell, a value `<= 0` on a log scale):
 /// the tab reports them (#499, C8). Hidden and broken curves do not count.
 pub fn missing_value_count(panel: &ResolvedPanel<'_>) -> usize {
-    let Some(bar) = panel.spec.color_bar.as_ref().filter(|bar| bar.visible) else {
+    let Some(bar) = panel.spec.color_bar_in_order().filter(|bar| bar.visible) else {
         return 0;
     };
     let colors = value_colors(panel);

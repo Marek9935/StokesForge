@@ -1,5 +1,5 @@
 //! The « Color Bar » tab of the graph properties window (#499, step C): the
-//! groups on the bar of a layer, the source and scale of the value, the
+//! series groups of a layer with their « on the bar » box, the source and scale of the value, the
 //! placement, the ticks and the title.
 //!
 //! The page edits the draft (`PanelSpec::color_bar`) in place, like the legend
@@ -26,12 +26,8 @@ use super::plot_settings::formula_field;
 /// What the page asks of the panel once the form is painted.
 #[derive(Default)]
 struct Intent {
-    /// A group to put on the bar, at the end.
-    add: Option<u32>,
-    /// A segment to move: (rank, up).
-    shift: Option<(usize, bool)>,
-    /// A segment to take off the bar.
-    remove: Option<usize>,
+    /// A group to put on the bar (`true`) or take off it (`false`).
+    toggle: Option<(u32, bool)>,
 }
 
 /// Puts `group` on the bar of `panel` (creating or showing the bar) and makes
@@ -120,6 +116,41 @@ macro_rules! unknown_of {
     };
 }
 
+/// The « Color bar » section at the bottom of the Legend tab: a collapsing
+/// header, **closed** unless the layer's bar is shown (it then opens by
+/// itself, also when the bar becomes visible while the page is up).
+/// `unfold` forces it open and scrolls it into view (opened from the bar's
+/// double-click). Returns `true` if the draft must be committed.
+pub(super) fn color_bar_section(
+    ui: &mut egui::Ui,
+    panel: &mut PanelSpec,
+    tree: &Tree,
+    row_columns: &[(NodeId, String)],
+    unfold: bool,
+) -> bool {
+    let shown = panel.color_bar.as_ref().is_some_and(|bar| bar.visible);
+    let was_shown_id = ui.make_persistent_id("color_bar_section_was_shown");
+    let was_shown = ui.data(|data| data.get_temp::<bool>(was_shown_id));
+    ui.data_mut(|data| data.insert_temp(was_shown_id, shown));
+    ui.add_space(ui.spacing().item_spacing.y * 2.0);
+    let mut header = egui::CollapsingHeader::new(tr!("plot-color-bar-section"))
+        .id_salt("color_bar_section")
+        .default_open(shown);
+    if unfold || (shown && was_shown == Some(false)) {
+        header = header.open(Some(true));
+    }
+    let mut commit = false;
+    let response = header.show(ui, |ui| {
+        commit = color_bar_editor(ui, panel, tree, row_columns);
+    });
+    if unfold {
+        response
+            .header_response
+            .scroll_to_me(Some(egui::Align::TOP));
+    }
+    commit
+}
+
 /// Edits the colour bar of `panel`. Returns `true` if the draft must be
 /// committed — see the head doc of `plot_settings_window`.
 pub(super) fn color_bar_editor(
@@ -168,36 +199,49 @@ pub(super) fn color_bar_editor(
     });
 
     let mut commit = commit;
-    // The gestures on the list of segments.
-    if let Some(rank) = intent.remove {
-        if rank < bar.segments.len() {
-            bar.segments.remove(rank);
-            commit = true;
-        }
-    }
-    if let Some((rank, up)) = intent.shift {
-        let other = if up {
-            rank.checked_sub(1)
-        } else {
-            Some(rank + 1)
-        };
-        if let Some(other) = other.filter(|other| *other < bar.segments.len()) {
-            bar.segments.swap(rank, other);
-            commit = true;
-        }
-    }
+    // The segments follow the graph's order, whatever the file stored.
+    let order: Vec<u32> = groups.iter().map(|(id, _)| *id).collect();
+    let bar = bar.in_graph_order(&order).into_owned();
     if bar != baseline {
         panel.color_bar = Some(bar);
     }
-    if let Some(group) = intent.add {
-        put_group_on_bar(panel, group);
+    if let Some((group, on)) = intent.toggle {
+        if on {
+            put_group_on_bar(panel, group);
+        } else {
+            take_group_off_bar(panel, group);
+        }
         commit = true;
     }
     commit
 }
 
-/// The groups on the bar, in bar order, with their range and break label,
-/// then the « Add a group » list and the chain option.
+/// True if the « Ranges… » fold of a segment starts open: one of its ends is
+/// typed (#499).
+pub(super) fn ranges_open_by_default(segment: &ColorBarSegment) -> bool {
+    segment.from.is_some() || segment.to.is_some()
+}
+
+/// The groups of the bar that are followed by another one, in graph order
+/// (`order`): each carries the label of the break between the two. None for
+/// the last group on the bar; the label of a group is kept in its segment, so
+/// it comes back when a group removed after it is ticked again (#499).
+pub(super) fn groups_with_a_break(bar: &ColorBarSpec, order: &[u32]) -> Vec<u32> {
+    let on_bar: Vec<u32> = order
+        .iter()
+        .copied()
+        .filter(|group| bar.segment_of(*group).is_some())
+        .collect();
+    on_bar
+        .split_last()
+        .map(|(_, rest)| rest.to_vec())
+        .unwrap_or_default()
+}
+
+/// Every series group of the layer, in graph order, each with its « on the
+/// bar » box; under a ticked group its folded ranges; between two ticked
+/// groups the label of their break; then the chain option. Draws into any
+/// form, so the block can be moved to another page.
 fn groups_section(
     form: &mut Form<'_>,
     bar: &mut ColorBarSpec,
@@ -210,97 +254,70 @@ fn groups_section(
         form.note_dimmed(tr!("plot-color-bar-no-series-groups"));
         return;
     }
-    let count = bar.segments.len();
-    for rank in 0..count {
-        let group = bar.segments[rank].group;
-        let title = groups
-            .iter()
-            .find(|(id, _)| *id == group)
-            .map_or_else(|| group.to_string(), |(_, title)| title.clone());
-        // The title on its row, the three buttons wrapped in the fields column
-        // (a long translation must not run past the page).
-        form.row(title, |_| {});
-        form.field(|ui| {
-            ui.vertical(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for (up, label) in [
-                        (true, tr!("plot-color-bar-move-up")),
-                        (false, tr!("plot-color-bar-move-down")),
-                    ] {
-                        let movable = if up { rank > 0 } else { rank + 1 < count };
-                        if ui
-                            .add_enabled(movable, egui::Button::new(label))
-                            .on_disabled_hover_text(if up {
-                                tr!("disabled-move-first")
-                            } else {
-                                tr!("disabled-move-last")
-                            })
-                            .clicked()
-                        {
-                            intent.shift = Some((rank, up));
-                        }
-                    }
-                    if ui
-                        .button(tr!("plot-color-bar-remove"))
-                        .on_hover_text(tr!("plot-color-bar-remove", "hint"))
-                        .clicked()
-                    {
-                        intent.remove = Some(rank);
-                    }
-                });
-            });
-        });
-        let segment = &mut bar.segments[rank];
-        let hint_from = tr!("common-auto");
-        *commit |= form.row(tr!("plot-axes-from"), |ui| {
-            let first = auto_number_field(
-                ui,
-                ("color_bar_from", group),
-                &mut segment.from,
-                &quantities::COLOR_BAR_BOUND,
-                &hint_from,
-            );
-            ui.label(tr!("analysis-field-to"));
-            let second = auto_number_field(
-                ui,
-                ("color_bar_to", group),
-                &mut segment.to,
-                &quantities::COLOR_BAR_BOUND,
-                &hint_from,
-            );
-            first.changed || second.changed
-        });
-        *commit |= formula_field(
-            form,
-            &tr!("plot-color-bar-group-break"),
-            &tr!("plot-color-bar-group-break", "hint"),
-            &mut segment.label,
-        );
-    }
-    if count == 0 {
-        form.note_dimmed(tr!("plot-color-bar-no-groups"));
-    }
-    let free: Vec<&(u32, String)> = groups
-        .iter()
-        .filter(|(id, _)| bar.segment_of(*id).is_none())
-        .collect();
-    form.field(|ui| {
-        let list = ui.add_enabled_ui(!free.is_empty(), |ui| {
-            egui::ComboBox::from_id_salt("color_bar_add_group")
-                .selected_text(tr!("plot-color-bar-add-group"))
-                .show_ui(ui, |ui| {
-                    for (id, title) in &free {
-                        if ui.selectable_label(false, title).clicked() {
-                            intent.add = Some(*id);
-                        }
-                    }
-                });
-        });
-        if free.is_empty() {
-            list.response
-                .on_disabled_hover_text(tr!("plot-color-bar-add-group", "disabled"));
+    let order: Vec<u32> = groups.iter().map(|(id, _)| *id).collect();
+    let with_break = groups_with_a_break(bar, &order);
+    // The group of the previous ticked row, whose break is painted before the
+    // next ticked one.
+    let mut previous: Option<u32> = None;
+    let hint_from = tr!("common-auto");
+    for (group, title) in groups {
+        let group = *group;
+        let on_bar = bar.segment_of(group).is_some();
+        if on_bar {
+            if let Some(left) = previous.filter(|left| with_break.contains(left)) {
+                if let Some(segment) = bar.segments.iter_mut().find(|s| s.group == left) {
+                    *commit |= formula_field(
+                        form,
+                        &tr!("plot-color-bar-group-break"),
+                        &tr!("plot-color-bar-group-break", "hint"),
+                        &mut segment.label,
+                    );
+                }
+            }
         }
-    });
+        let mut ticked = on_bar;
+        let changed = form.row(title.as_str(), |ui| {
+            super::hover_help::help_beside(ui, tr!("plot-color-bar-group-on", "hint"), |ui| {
+                ui.checkbox(&mut ticked, tr!("plot-color-bar-group-on"))
+                    .changed()
+            })
+        });
+        if changed {
+            intent.toggle = Some((group, ticked));
+        }
+        if on_bar {
+            previous = Some(group);
+            if let Some(segment) = bar.segments.iter_mut().find(|s| s.group == group) {
+                let open = ranges_open_by_default(segment);
+                let edited = form.collapsible_open(
+                    ("color_bar_ranges", group),
+                    tr!("plot-color-bar-ranges"),
+                    open,
+                    |form| {
+                        form.row(tr!("plot-axes-from"), |ui| {
+                            let first = auto_number_field(
+                                ui,
+                                ("color_bar_from", group),
+                                &mut segment.from,
+                                &quantities::COLOR_BAR_BOUND,
+                                &hint_from,
+                            );
+                            ui.label(tr!("analysis-field-to"));
+                            let second = auto_number_field(
+                                ui,
+                                ("color_bar_to", group),
+                                &mut segment.to,
+                                &quantities::COLOR_BAR_BOUND,
+                                &hint_from,
+                            );
+                            first.changed || second.changed
+                        })
+                    },
+                );
+                *commit |= edited.unwrap_or(false);
+            }
+        }
+    }
     *commit |= form.checkbox(
         &mut bar.chain,
         tr!("plot-color-bar-chain"),

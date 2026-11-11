@@ -2600,8 +2600,6 @@ pub enum PlotSettingsTab {
     Series,
     /// The legend.
     Legend,
-    /// The colour bar of a layer (#499).
-    ColorBar,
     /// The global colors: background, text, axes, predefined themes.
     Theme,
 }
@@ -2609,12 +2607,11 @@ pub enum PlotSettingsTab {
 impl PlotSettingsTab {
     /// The tabs of the graph window, in display order (the series
     /// have their own window, #179).
-    pub const ALL: [PlotSettingsTab; 6] = [
+    pub const ALL: [PlotSettingsTab; 5] = [
         PlotSettingsTab::Graph,
         PlotSettingsTab::PlotArea,
         PlotSettingsTab::Axes,
         PlotSettingsTab::Legend,
-        PlotSettingsTab::ColorBar,
         PlotSettingsTab::Theme,
     ];
 
@@ -2626,7 +2623,6 @@ impl PlotSettingsTab {
             PlotSettingsTab::Axes => tr!("plot-tab-axes"),
             PlotSettingsTab::Series => tr!("plot-tab-series"),
             PlotSettingsTab::Legend => tr!("plot-tab-legend"),
-            PlotSettingsTab::ColorBar => tr!("plot-tab-color-bar"),
             PlotSettingsTab::Theme => tr!("plot-tab-theme"),
         }
     }
@@ -2754,7 +2750,8 @@ impl PlotTarget {
                 (PlotSettingsTab::PlotArea, None)
             }
             PlotTarget::Legend => (PlotSettingsTab::Legend, None),
-            PlotTarget::ColorBar => (PlotSettingsTab::ColorBar, None),
+            // The colour bar is a folded section of the Legend tab.
+            PlotTarget::ColorBar => (PlotSettingsTab::Legend, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
             }
@@ -2779,6 +2776,10 @@ pub struct PlotSettings {
     pub tab: PlotSettingsTab,
     /// Axis displayed in the "Axes" tab.
     pub axis: PlotAxis,
+    /// One-shot request: unfold the « Color bar » section of the Legend tab
+    /// and scroll it into view (opened from the bar itself). The page clears
+    /// it once it has done so.
+    pub color_bar_unfold: bool,
 }
 
 /// Edit draft of the graph properties window: a whole
@@ -6499,7 +6500,7 @@ impl AppState {
                         (PlotSettingsTab::Legend, None, panel, None)
                     }
                     T::Text(TextTarget::ColorBar { panel }) => {
-                        (PlotSettingsTab::ColorBar, None, panel, None)
+                        (PlotSettingsTab::Legend, None, panel, None)
                     }
                     // The address is a field of the layer; the tab is named
                     // where the axis is drawn (#396).
@@ -6525,6 +6526,11 @@ impl AppState {
                     _ => (PlotSettingsTab::Graph, None, 0, None),
                 };
                 self.open_plot_settings(graph, tab, axis);
+                if matches!(target, T::Text(TextTarget::ColorBar { .. })) {
+                    if let Some(settings) = self.plot_settings.as_mut() {
+                        settings.color_bar_unfold = true;
+                    }
+                }
                 if let Some(edit) = self.plot_edit.as_mut() {
                     edit.selected_panel = panel;
                     if let Some(series) = series {
@@ -6837,6 +6843,14 @@ impl AppState {
     /// See [`Action::OpenPlotSettings`]. Switching to another graph first
     /// commits the draft of the previous one; a graph that no longer exists (or
     /// is not a graph) leaves everything as it is.
+    /// The Legend page has unfolded the colour bar section as asked: the
+    /// request is spent.
+    pub fn spend_color_bar_unfold(&mut self) {
+        if let Some(settings) = self.plot_settings.as_mut() {
+            settings.color_bar_unfold = false;
+        }
+    }
+
     fn open_plot_settings(&mut self, graph: NodeId, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
         if self.plot_spec(graph).is_none() {
             return;
@@ -6860,6 +6874,7 @@ impl AppState {
             graph,
             tab,
             axis: axis.or(current_axis).unwrap_or(PlotAxis::Bottom),
+            color_bar_unfold: false,
         });
     }
 

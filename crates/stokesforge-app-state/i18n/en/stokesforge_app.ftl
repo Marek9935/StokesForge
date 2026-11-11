@@ -146,8 +146,6 @@ menu-graph-series = Series…
     .hint = Edits the plot type, line and symbol of each series
 menu-graph-legend = Legend…
     .hint = Edits legend visibility and position
-menu-graph-color-bar = Color Bar…
-    .hint = Edits the color bar of the layer
 menu-graph-theme = Theme…
     .hint = Edits global colors and applies predefined themes
 menu-graph-png-resolution = PNG Resolution
@@ -826,7 +824,6 @@ plot-tab-plot-area = Plot Area
 plot-tab-axes = Axes
 plot-tab-series = Series
 plot-tab-legend = Legend
-plot-tab-color-bar = Color Bar
 plot-tab-theme = Theme
 
 # The three axes of a layer
@@ -1105,19 +1102,16 @@ plot-legend-row-column = Column
 
 # Color Bar tab (#499)
 
+plot-color-bar-section = Color bar
 plot-color-bar-show =
     Show color bar
     .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
-plot-color-bar-groups-section = Groups on the bar
+plot-color-bar-groups-section = Series groups
 plot-color-bar-group-break = Break label
-    .hint = Typst text written at the end of this segment, above its break. Leave empty for none.
-plot-color-bar-move-up = Move Up
-plot-color-bar-move-down = Move Down
-plot-color-bar-remove = Remove
-    .hint = Takes this group off the bar. Its curves get their own colors back.
-plot-color-bar-add-group = Add a group…
-    .disabled = Every group of this layer is already on the bar
-plot-color-bar-no-groups = No group on the bar yet. Add a group, or tick « On the color bar » on its page in the Series window.
+    .hint = Typst text written above the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
+plot-color-bar-group-on = On the bar
+    .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
+plot-color-bar-ranges = Ranges…
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
 plot-color-bar-chain =
     Chain the segments

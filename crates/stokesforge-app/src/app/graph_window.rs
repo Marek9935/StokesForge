@@ -1122,11 +1122,6 @@ pub(super) fn graph_properties_menu(ui: &mut egui::Ui, graph: NodeId, actions: &
             PlotSettingsTab::Legend,
         ),
         (
-            tr!("menu-graph-color-bar"),
-            tr!("menu-graph-color-bar", "hint"),
-            PlotSettingsTab::ColorBar,
-        ),
-        (
             tr!("menu-graph-theme"),
             tr!("menu-graph-theme", "hint"),
             PlotSettingsTab::Theme,
@@ -1872,14 +1867,14 @@ pub(super) mod tests {
             })),
             PlotTarget::Legend
         );
-        // The colour bar opens its own tab.
+        // The colour bar opens the Legend tab (its section).
         assert_eq!(
             named(Some(PlotComponent::Text(T::ColorBar { panel: 0 }))),
             PlotTarget::ColorBar
         );
         assert_eq!(
             PlotTarget::ColorBar.settings_page().0,
-            PlotSettingsTab::ColorBar
+            PlotSettingsTab::Legend
         );
     }
 

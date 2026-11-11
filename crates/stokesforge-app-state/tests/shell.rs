@@ -8511,8 +8511,10 @@ fn editing_the_color_bar_is_one_undo_step() {
     state.dispatch(PlotTarget::ColorBar.open_settings(graph));
     assert_eq!(
         state.plot_settings().expect("window").tab,
-        PlotSettingsTab::ColorBar
+        PlotSettingsTab::Legend,
+        "the colour bar is a section of the Legend tab"
     );
+    assert!(!state.plot_settings().unwrap().color_bar_unfold);
     {
         let edit = state.plot_edit_mut().expect("draft");
         let panel = edit.spec.panels.get_mut(0).expect("panel");
@@ -8535,6 +8537,19 @@ fn editing_the_color_bar_is_one_undo_step() {
         bar.expect("bar").title = "t (min)".to_string();
     }
     state.commit_plot_edit();
+    // The bar's double-click: Legend tab, section to unfold (one-shot).
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: stokesforge_app_state::object_manager::VisibilityTarget::Text(
+            stokesforge_plot::TextTarget::ColorBar { panel: 0 },
+        ),
+    });
+    let settings = state.plot_settings().expect("window");
+    assert_eq!(settings.tab, PlotSettingsTab::Legend);
+    assert!(settings.color_bar_unfold);
+    state.spend_color_bar_unfold();
+    assert!(!state.plot_settings().unwrap().color_bar_unfold);
+    assert_eq!(PlotSettingsTab::ALL.len(), 5);
     state.close_plot_settings();
 
     let after = state.plot_spec(graph).expect("spec");
@@ -8621,14 +8636,14 @@ fn resizing_the_color_bar_is_one_bounded_undo_step() {
     );
 }
 
-/// #499 step C: the tab is the sixth of the window, and the bar opens it.
+/// #499 step C: the window keeps its five tabs; the bar is a section of the
+/// Legend tab and opens it.
 #[test]
-fn the_color_bar_has_its_own_tab() {
-    assert_eq!(PlotSettingsTab::ALL.len(), 6);
-    assert!(PlotSettingsTab::ALL.contains(&PlotSettingsTab::ColorBar));
+fn the_color_bar_is_a_section_of_the_legend_tab() {
+    assert_eq!(PlotSettingsTab::ALL.len(), 5);
     assert_eq!(
         PlotTarget::ColorBar.settings_page(),
-        (PlotSettingsTab::ColorBar, None)
+        (PlotSettingsTab::Legend, None)
     );
 }
 

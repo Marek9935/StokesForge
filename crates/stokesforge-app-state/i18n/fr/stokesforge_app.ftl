@@ -145,8 +145,6 @@ menu-graph-series = Séries…
     .hint = Modifie le type de tracé, le trait et le symbole de chaque série
 menu-graph-legend = Légende…
     .hint = Modifie l'affichage et la position de la légende
-menu-graph-color-bar = Barre de couleurs…
-    .hint = Modifie la barre de couleurs du calque
 menu-graph-theme = Thème…
     .hint = Modifie les couleurs globales et applique des thèmes prédéfinis
 menu-graph-png-resolution = Résolution PNG
@@ -825,7 +823,6 @@ plot-tab-plot-area = Zone de tracé
 plot-tab-axes = Axes
 plot-tab-series = Séries
 plot-tab-legend = Légende
-plot-tab-color-bar = Barre de couleurs
 plot-tab-theme = Thème
 
 # Les trois axes d'un calque
@@ -1104,19 +1101,16 @@ plot-legend-row-column = Colonne
 
 # Onglet Barre de couleurs (#499)
 
+plot-color-bar-section = Barre de couleurs
 plot-color-bar-show =
     Afficher la barre de couleurs
     .hint = Colore les courbes des groupes de la barre selon leur valeur, et remplace leurs entrées dans la légende. Masquée, la barre rend aux courbes leurs couleurs et leurs entrées de légende.
-plot-color-bar-groups-section = Groupes sur la barre
+plot-color-bar-groups-section = Groupes de séries
 plot-color-bar-group-break = Étiquette de rupture
-    .hint = Texte Typst écrit à la fin de ce segment, au-dessus de sa rupture. Laisser vide pour aucune.
-plot-color-bar-move-up = Monter
-plot-color-bar-move-down = Descendre
-plot-color-bar-remove = Retirer
-    .hint = Retire ce groupe de la barre. Ses courbes retrouvent leurs couleurs.
-plot-color-bar-add-group = Ajouter un groupe…
-    .disabled = Tous les groupes de cette couche sont déjà sur la barre
-plot-color-bar-no-groups = Aucun groupe sur la barre. Ajoutez un groupe, ou cochez « Sur la barre de couleurs » sur sa page dans la fenêtre Séries.
+    .hint = Texte Typst écrit au-dessus de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
+plot-color-bar-group-on = Sur la barre
+    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
+plot-color-bar-ranges = Plages…
 plot-color-bar-no-series-groups = Cette couche n’a aucun groupe de séries. Groupez d’abord ses courbes, dans la fenêtre Séries.
 plot-color-bar-chain =
     Enchaîner les segments

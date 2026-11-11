@@ -404,7 +404,15 @@ const SHOTS: &[Shot] = &[
             // The curves of Layer 1 in one group, put on the layer's bar.
             if let Some(mut spec) = h.state().app.state.plot_spec(graph) {
                 let layer = spec.panels.get_mut(0).expect("the first layer");
-                let members: Vec<usize> = (0..layer.series.len()).collect();
+                let count = layer.series.len();
+                // A second group, left off the bar (a reference spectrum).
+                let split = if count > 1 { count - 1 } else { count };
+                let members: Vec<usize> = (0..split).collect();
+                if split < count {
+                    if let Some(other) = layer.group_series(&(split..count).collect::<Vec<_>>()) {
+                        layer.rename_group(other, "References");
+                    }
+                }
                 if let Some(group) = layer.group_series(&members) {
                     layer.rename_group(group, "Kinetics");
                     layer.color_bar = Some(stokesforge_plot::ColorBarSpec {
@@ -417,15 +425,17 @@ const SHOTS: &[Shot] = &[
                 }
                 act(h, Action::SetPlotSpec { graph, spec });
             }
+            // As the double-click on the bar does: Legend tab, section unfolded.
             act(
                 h,
-                Action::OpenPlotSettings {
+                Action::OpenObjectProperties {
                     graph,
-                    tab: PlotSettingsTab::ColorBar,
-                    axis: None,
+                    target: stokesforge_app_state::object_manager::VisibilityTarget::Text(
+                        stokesforge_plot::TextTarget::ColorBar { panel: 0 },
+                    ),
                 },
             );
-            grow_dialog(h, 255.0);
+            grow_dialog(h, 150.0);
         },
         crop: Crop::Rect(dialog_rect),
     },
