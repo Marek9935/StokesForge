@@ -157,6 +157,16 @@ pub enum FormulaError {
     /// the orchestrator ([`topological_order`]), never by a loop that
     /// would run forever.
     Cycle,
+    /// The formula makes a sheet calculate from its own followed transposed
+    /// sheet (#463): while the box "Recalculate automatically" of
+    /// `transposed` is checked, `source` cannot calculate from it. Kept and
+    /// uncomputed like a loop when typed; refused by the strict entries.
+    ReadsFollowingSheet {
+        /// Name of the followed transposed sheet.
+        transposed: String,
+        /// Name of its source sheet.
+        source: String,
+    },
     /// The formula tree exceeds [`MAX_DEPTH`] (parentheses, signs or
     /// operator chain too long): refused at parse rather than letting
     /// parser, evaluation and `Drop` recurse until the process is
@@ -252,6 +262,10 @@ impl std::fmt::Display for FormulaError {
                 )
             }
             FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
+            FormulaError::ReadsFollowingSheet { transposed, source } => write!(
+                f,
+                "{transposed} follows {source}, so {source} cannot calculate from it"
+            ),
             FormulaError::TooDeep => write!(f, "formula nested too deeply"),
             FormulaError::UnknownFunction { name, suggestion } => {
                 write!(f, "unknown function {name}")?;

@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 
 use eframe::egui;
-use stokesforge_core::compose::CellSide;
 use stokesforge_core::{NodeId, Tree};
+use stokesforge_render_egui::edge_band::{edge_drop_side, paint_edge_bands, EDGE_BAND_WIDTH};
 use stokesforge_render_egui::{
     AxisSide, FigureLayout, GraphView, PlotComponent, TextTarget, DEFAULT_FIGURE_SIZE,
 };
@@ -132,56 +132,7 @@ pub(super) fn graph_drop_target(
         super::file_drop::set_drop_target(ui.ctx(), ui.layer_id());
     }
     if columns_over {
-        paint_edge_bands(ui, figure, edge);
-    }
-}
-
-/// Width, in points, of the right and bottom bands of a figure where dropped
-/// columns create a new cell (#357).
-const EDGE_BAND_WIDTH: f32 = 36.0;
-
-/// Which edge band of `figure` the pointer is in (#357): the right band gives
-/// [`CellSide::Right`], the bottom band [`CellSide::Below`], and the
-/// bottom-right corner, in both, gives `Right`. `None` elsewhere. Pure, so it is
-/// tested without a window.
-fn edge_drop_side(pointer: egui::Pos2, figure: egui::Rect, band: f32) -> Option<CellSide> {
-    if !figure.contains(pointer) {
-        return None;
-    }
-    if pointer.x >= figure.max.x - band {
-        Some(CellSide::Right)
-    } else if pointer.y >= figure.max.y - band {
-        Some(CellSide::Below)
-    } else {
-        None
-    }
-}
-
-/// The two bands, outlined while columns are dragged over the graph, the one
-/// under the pointer filled (theme strokes, nothing in the exported figure).
-fn paint_edge_bands(ui: &egui::Ui, figure: egui::Rect, active: Option<CellSide>) {
-    let right = egui::Rect::from_min_max(
-        egui::pos2(figure.max.x - EDGE_BAND_WIDTH, figure.min.y),
-        figure.max,
-    );
-    let below = egui::Rect::from_min_max(
-        egui::pos2(figure.min.x, figure.max.y - EDGE_BAND_WIDTH),
-        egui::pos2(figure.max.x - EDGE_BAND_WIDTH, figure.max.y),
-    );
-    let painter = ui.painter();
-    for (band, side) in [(right, CellSide::Right), (below, CellSide::Below)] {
-        let fill = if active == Some(side) {
-            crate::theme::drop_edge_band_fill()
-        } else {
-            egui::Color32::TRANSPARENT
-        };
-        painter.rect(
-            band,
-            0.0,
-            fill,
-            crate::theme::drop_edge_band_stroke(),
-            egui::StrokeKind::Inside,
-        );
+        paint_edge_bands(ui.painter(), figure, edge);
     }
 }
 
@@ -432,6 +383,11 @@ pub(super) fn graph_view_contents(
         figure_ui.painter().rect_filled(rect, 0.0, backdrop);
     }
     view.set_figure_texts(&stokesforge_app_state::figure_texts::figure_texts());
+    // The box the number fields of the layout strip edit: read before the
+    // canvas is painted, because a click on another box there selects it in
+    // this very frame and the typed number must go to the box it was typed
+    // for (#498).
+    let inspected_box = view.selected_box();
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             publish_axis_bounds(ui.ctx(), view, graph_id);
@@ -521,6 +477,7 @@ pub(super) fn graph_view_contents(
                         &spec,
                         layout.as_ref(),
                         graph_id,
+                        inspected_box,
                         actions,
                     );
                 }
@@ -1220,6 +1177,13 @@ fn annotation_interactions(
                     widths,
                     heights,
                     figure,
+                });
+            }
+            stokesforge_render_egui::GraphEvent::GridCellMoved { panel, target } => {
+                actions.push(Action::MoveGridCell {
+                    graph,
+                    panel,
+                    target,
                 });
             }
             stokesforge_render_egui::GraphEvent::LayoutEdited { frames, page } => {
@@ -2226,33 +2190,6 @@ pub(super) mod tests {
         assert!(
             xs[1].0 > 20.0 && xs[1].0 < 35.0 && xs[1].1 < 10.0,
             "badge 2 beside it"
-        );
-    }
-
-    /// #357: the right band gives a cell to the right, the bottom band a cell
-    /// below, the bottom-right corner (in both) the right; the interior and
-    /// the outside of the figure give nothing.
-    #[test]
-    fn the_edge_bands_of_the_figure_decide_where_the_new_cell_goes() {
-        use stokesforge_core::compose::CellSide;
-        let figure = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(500.0, 350.0));
-        let band = 36.0;
-        let side = |x: f32, y: f32| edge_drop_side(egui::pos2(x, y), figure, band);
-        assert_eq!(side(300.0, 200.0), None, "interior");
-        assert_eq!(side(480.0, 200.0), Some(CellSide::Right));
-        assert_eq!(
-            side(480.0, 60.0),
-            Some(CellSide::Right),
-            "top of the right band"
-        );
-        assert_eq!(side(300.0, 340.0), Some(CellSide::Below));
-        assert_eq!(side(490.0, 340.0), Some(CellSide::Right), "corner: right");
-        assert_eq!(side(300.0, 20.0), None, "outside");
-        assert_eq!(side(520.0, 200.0), None, "outside");
-        assert_eq!(
-            edge_drop_side(egui::pos2(480.0, 200.0), figure, 0.0),
-            None,
-            "a band of width 0 catches nothing"
         );
     }
 

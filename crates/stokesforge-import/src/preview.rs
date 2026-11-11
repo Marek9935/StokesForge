@@ -107,6 +107,10 @@ pub struct PreviewLine {
     /// Line number in the original file, 1-based.
     pub number: usize,
     pub role: LineRole,
+    /// Sub-header roles the line carries (empty unless `role` is a
+    /// sub-header one); `role` is the first of them, see
+    /// [`SubheaderRoleSet::primary`].
+    pub subheader_roles: SubheaderRoleSet,
     pub text: String,
     /// Cell by cell, only for a data line within the `recipe.preview_lines`
     /// window; `None` for any other line, including a data line beyond this
@@ -190,6 +194,7 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
         lines.push(PreviewLine {
             number: i + 1,
             role,
+            subheader_roles: layout.subheader_roles[i],
             text: layout.raw[i].to_string(),
             cells,
         });
@@ -202,26 +207,332 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     })
 }
 
-/// Role of a sub-header line, 1-based **within the sub-header block**
-/// (independent of the number of main header lines before it). A line that
-/// falls in several assigned ranges (unlikely but possible: nothing prevents
-/// the user from overlapping two roles) follows the priority `long_name` >
-/// `unit` > `comment` > `x_prime`, documented here rather than carrying
-/// several roles at once, which [`LineRole`] does not model.
-pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> LineRole {
-    let contains = |range: Option<crate::recipe::SubheaderLineRange>| {
-        range.is_some_and(|r| r.from <= sub_index && sub_index <= r.to)
+/// The whole file, line by line, with the
+/// zone of every line, for a file grid. Unlike [`FilePreview`] it
+/// holds **every** line (the grid is virtualised on the UI side) and tokenises
+/// a line only on request ([`FileMap::cells`]).
+#[derive(Debug)]
+pub struct FileMap {
+    text: String,
+    ranges: Vec<(usize, usize)>,
+    /// Zone of every file line (`Blank` outside the analysed zone, and
+    /// everywhere when the recipe leaves no data: see `error`).
+    pub roles: Vec<LineRole>,
+    pub subheader_roles: Vec<SubheaderRoleSet>,
+    /// Index (0-based) of the first non-blank line.
+    pub first: usize,
+    /// End (exclusive) of the analysed zone.
+    pub end: usize,
+    /// First and last data line (0-based), when the recipe gives data.
+    pub data_range: Option<(usize, usize)>,
+    /// Column names line, when the recipe has one.
+    pub column_header: Option<usize>,
+    /// Why the recipe gives no data (the grid is still shown).
+    pub error: Option<ImportError>,
+    pub block_count: usize,
+    separator: crate::parse::EffectiveSeparator,
+    numbers: NumberFormat,
+    /// Identity of this map (a fresh number per [`file_map`] call), so that a
+    /// cache built from it can tell when the map changed.
+    pub serial: u64,
+}
+
+/// A token of a [`FileMap`] line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapCell {
+    pub text: String,
+    /// Would be kept as text in a mixed column (data lines only).
+    pub is_text: bool,
+}
+
+impl FileMap {
+    pub fn line_count(&self) -> usize {
+        self.ranges.len()
+    }
+
+    pub fn line(&self, index: usize) -> &str {
+        self.ranges
+            .get(index)
+            .map_or("", |&(a, b)| &self.text[a..b])
+    }
+
+    /// Glyph that stands for the delimiter between two cells.
+    pub fn separator_glyph(&self) -> &'static str {
+        match &self.separator {
+            crate::parse::EffectiveSeparator::Char('\t') => "\u{21E5}",
+            crate::parse::EffectiveSeparator::Char(',') => ",",
+            crate::parse::EffectiveSeparator::Char(';') => ";",
+            crate::parse::EffectiveSeparator::Char('|') => "|",
+            crate::parse::EffectiveSeparator::Char(_) => "\u{00B7}",
+            crate::parse::EffectiveSeparator::Whitespace => "\u{00B7}",
+            crate::parse::EffectiveSeparator::Fixed(_) => "\u{2502}",
+        }
+    }
+
+    /// The delimiter as the cut bar shows it.
+    pub fn separator_char(&self) -> Option<char> {
+        match &self.separator {
+            crate::parse::EffectiveSeparator::Char(c) => Some(*c),
+            _ => None,
+        }
+    }
+
+    pub fn is_whitespace_separated(&self) -> bool {
+        matches!(self.separator, crate::parse::EffectiveSeparator::Whitespace)
+    }
+
+    pub fn decimal_is_comma(&self) -> bool {
+        self.numbers.decimal == crate::recipe::DecimalStyle::Comma
+    }
+
+    /// Tokens of line `index`, untrimmed, borrowed from the text (no copy).
+    pub fn tokens(&self, index: usize, recipe: &ImportRecipe) -> Vec<&str> {
+        let line = crate::layout::skip_str(self.line(index), recipe.skip_chars);
+        if self.is_whitespace_header_line(index) {
+            return vec![line];
+        }
+        self.separator.tokenize(line)
+    }
+
+    /// A line of the main header in a file split on whitespace (`##TITLE=1-Butanol IR`):
+    /// it is text, not cells, so it stays whole instead of being cut at each space.
+    fn is_whitespace_header_line(&self, index: usize) -> bool {
+        self.is_whitespace_separated() && self.roles.get(index) == Some(&LineRole::MainHeader)
+    }
+
+    /// Would `token` of column `column` be kept as text in a mixed column?
+    pub fn token_is_text(&self, column: usize, token: &str, recipe: &ImportRecipe) -> bool {
+        crate::parse::read_cell(
+            token,
+            recipe.column_kind(column),
+            &self.numbers,
+            recipe.date_order,
+        )
+        .1
+        .is_some()
+    }
+
+    /// The number `token` of column `column` is read as, when it is read as one
+    /// (`None`: text, an empty cell or a missing-value marker).
+    pub fn token_number(&self, column: usize, token: &str, recipe: &ImportRecipe) -> Option<f64> {
+        let (value, text) = crate::parse::read_cell(
+            token,
+            recipe.column_kind(column),
+            &self.numbers,
+            recipe.date_order,
+        );
+        (text.is_none() && value.is_finite()).then_some(value)
+    }
+
+    /// Tokens of line `index`. `is_text` is filled for data lines only.
+    pub fn cells(&self, index: usize, recipe: &ImportRecipe) -> Vec<MapCell> {
+        let line = crate::layout::skip_str(self.line(index), recipe.skip_chars);
+        let data = self.roles.get(index) == Some(&LineRole::Data);
+        let tokens = if self.is_whitespace_header_line(index) {
+            vec![line]
+        } else {
+            self.separator.tokenize(line)
+        };
+        tokens
+            .into_iter()
+            .enumerate()
+            .map(|(column, token)| MapCell {
+                text: token.trim().to_string(),
+                is_text: data
+                    && crate::parse::read_cell(
+                        token,
+                        recipe.column_kind(column),
+                        &self.numbers,
+                        recipe.date_order,
+                    )
+                    .1
+                    .is_some(),
+            })
+            .collect()
+    }
+
+    /// Value part of a `KEY<delimiter>VALUE` line (or `KEY: VALUE`, `KEY=VALUE`):
+    /// `(key, value)`, both trimmed, when the line has that shape.
+    pub fn key_value(&self, index: usize) -> Option<(String, String)> {
+        let line = self.line(index);
+        let by_delimiter = match &self.separator {
+            crate::parse::EffectiveSeparator::Char(c) => line.split_once(*c),
+            _ => None,
+        };
+        let (key, value) = by_delimiter
+            .filter(|(k, _)| !k.trim().is_empty())
+            .or_else(|| line.split_once([':', '=']))?;
+        let key = key.trim();
+        if key.is_empty() || key.chars().count() > 40 {
+            return None;
+        }
+        Some((key.to_string(), value.trim().to_string()))
+    }
+}
+
+/// Builds the [`FileMap`] of `bytes` for `recipe`. `Err` only for a file that
+/// cannot be shown at all (empty, binary): a recipe that leaves no data still
+/// gives a map (`error` says why), so the user can fix it on the grid.
+pub fn file_map(bytes: &[u8], recipe: &ImportRecipe) -> Result<FileMap, ImportError> {
+    if bytes.is_empty() {
+        return Err(ImportError::Empty);
+    }
+    let text = crate::decode::decode_with(bytes, recipe.encoding)?.into_owned();
+    let blocks = crate::layout::split_blocks(&text, &recipe.block_split);
+    let block_count = blocks.len().max(1);
+    let first_block = blocks.first().copied().unwrap_or(&text);
+    let mut ranges = Vec::new();
+    let raw = crate::layout::split_lines(&text);
+    for line in &raw {
+        let at = line.as_ptr() as usize - text.as_ptr() as usize;
+        ranges.push((at, at + line.len()));
+    }
+    let n = ranges.len();
+    let mut map = FileMap {
+        ranges,
+        roles: vec![LineRole::Blank; n],
+        subheader_roles: vec![SubheaderRoleSet::default(); n],
+        first: 0,
+        end: n,
+        data_range: None,
+        column_header: None,
+        error: None,
+        block_count,
+        serial: {
+            static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        },
+        separator: crate::parse::EffectiveSeparator::Whitespace,
+        numbers: NumberFormat::new(
+            recipe.decimal,
+            recipe.thousands,
+            &recipe.missing_tokens,
+            std::iter::empty(),
+        ),
+        text: String::new(),
     };
-    if contains(roles.long_name) {
-        LineRole::SubheaderLongName
-    } else if !roles.same_line_name_unit && contains(roles.unit) {
-        LineRole::SubheaderUnit
-    } else if contains(roles.comment) {
-        LineRole::SubheaderComment
-    } else if contains(roles.x_prime) {
-        LineRole::SubheaderXPrime
-    } else {
-        LineRole::Subheader
+    match crate::layout::analyze(first_block, recipe) {
+        Ok(layout) => {
+            for (i, r) in layout.roles.iter().enumerate().take(n) {
+                map.roles[i] = *r;
+            }
+            for (i, r) in layout.subheader_roles.iter().enumerate().take(n) {
+                map.subheader_roles[i] = *r;
+            }
+            map.first = layout.start;
+            map.end = layout.end;
+            map.column_header = layout.column_header;
+            map.data_range = layout
+                .data
+                .first()
+                .zip(layout.data.last())
+                .map(|(a, b)| (*a, *b));
+            map.separator = layout.separator.clone();
+            map.numbers = layout.numbers.clone();
+        }
+        Err(error) => {
+            // No data: guess the delimiter and the decimal from the first
+            // non-blank lines, so the grid still shows the file.
+            let lines: Vec<&str> = raw
+                .iter()
+                .copied()
+                .filter(|l| !l.trim().is_empty())
+                .take(60)
+                .collect();
+            if let Some(first_line) = lines.first() {
+                map.first = raw.iter().position(|l| !l.trim().is_empty()).unwrap_or(0);
+                let numbers = NumberFormat::resolve(recipe, lines.iter().copied());
+                if let Ok(separator) = resolve_separator(
+                    &recipe.separator,
+                    lines.last().unwrap_or(first_line),
+                    numbers.decimal,
+                    None,
+                ) {
+                    map.separator = separator;
+                }
+                map.numbers = numbers;
+            }
+            map.error = Some(error);
+        }
+    }
+    map.text = text;
+    Ok(map)
+}
+
+/// One role per file line (no 500-line cap), with the sub-header
+/// roles of the line.
+pub fn line_roles(
+    bytes: &[u8],
+    recipe: &ImportRecipe,
+) -> Result<Vec<(LineRole, SubheaderRoleSet)>, ImportError> {
+    let map = file_map(bytes, recipe)?;
+    Ok(map
+        .roles
+        .iter()
+        .copied()
+        .zip(map.subheader_roles.iter().copied())
+        .collect())
+}
+
+/// The sub-header roles a single line carries (#488): Long Name, Units,
+/// Comments and x'. A sub-header line may fall in several assigned ranges at
+/// once (e.g. `12.5,13` read both as long names and as x' values); the import
+/// reads each role range independently, so the preview shows every role of
+/// the line rather than one of them. [`LineRole`] stays the line's zone;
+/// this set is the detail of a sub-header line (empty for any other line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SubheaderRoleSet {
+    pub long_name: bool,
+    pub unit: bool,
+    pub comment: bool,
+    pub x_prime: bool,
+}
+
+impl SubheaderRoleSet {
+    /// True if the line carries no assigned role.
+    pub fn is_empty(&self) -> bool {
+        !(self.long_name || self.unit || self.comment || self.x_prime)
+    }
+
+    /// The roles of the set, in the fixed order L, U, C, X'.
+    pub fn roles(&self) -> Vec<LineRole> {
+        [
+            (self.long_name, LineRole::SubheaderLongName),
+            (self.unit, LineRole::SubheaderUnit),
+            (self.comment, LineRole::SubheaderComment),
+            (self.x_prime, LineRole::SubheaderXPrime),
+        ]
+        .into_iter()
+        .filter_map(|(on, role)| on.then_some(role))
+        .collect()
+    }
+
+    /// The single [`LineRole`] standing for the line (colour, code): the first
+    /// role in the order L, U, C, X', or plain `Subheader` if the set is empty.
+    pub fn primary(&self) -> LineRole {
+        self.roles().first().copied().unwrap_or(LineRole::Subheader)
+    }
+}
+
+/// Roles of a sub-header line, 1-based **within the sub-header block**
+/// (independent of the number of main header lines before it): every role
+/// whose range contains the line (#488; before, a fixed priority kept only
+/// one). `same_line_name_unit` still ignores Units, as the import does.
+pub(crate) fn subheader_line_roles(sub_index: usize, roles: &SubheaderRoles) -> SubheaderRoleSet {
+    // Long Name and Comments cover their whole range when the recipe joins
+    // its lines; Units and x' (and a recipe written before) only `from`:
+    // the colour is what the import reads.
+    let contains = |range: Option<crate::recipe::SubheaderLineRange>, joined: bool| {
+        range.is_some_and(|r| {
+            let last = if joined { r.last_joined() } else { r.from };
+            r.from <= sub_index && sub_index <= last
+        })
+    };
+    SubheaderRoleSet {
+        long_name: contains(roles.long_name, roles.join_lines),
+        unit: !roles.same_line_name_unit && contains(roles.unit, false),
+        comment: contains(roles.comment, roles.join_lines),
+        x_prime: contains(roles.x_prime, false),
     }
 }
 
@@ -329,6 +640,7 @@ mod tests {
             comment: None,
             x_prime: None,
             same_line_name_unit: false,
+            join_lines: true,
         };
         let bytes = b"Instrument XYZ\nTemperature,Pressure\ndegC,bar\n1,2\n3,4\n";
         let result = preview(bytes, &recipe).unwrap();
@@ -344,6 +656,60 @@ mod tests {
             ]
         );
         assert_eq!(result.total_data_lines, 2);
+    }
+
+    fn roles_of(
+        range_l: Option<(usize, usize)>,
+        range_x: Option<(usize, usize)>,
+    ) -> SubheaderRoles {
+        let r = |o: Option<(usize, usize)>| o.map(|(from, to)| SubheaderLineRange { from, to });
+        SubheaderRoles {
+            long_name: r(range_l),
+            x_prime: r(range_x),
+            ..SubheaderRoles::default()
+        }
+    }
+
+    #[test]
+    fn subheader_line_in_two_ranges_carries_both_roles() {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: 1,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = roles_of(Some((1, 1)), Some((1, 1)));
+        let result = preview(b"12.5,13\n1,2\n", &recipe).unwrap();
+        let line = &result.lines[0];
+        assert_eq!(
+            line.subheader_roles,
+            SubheaderRoleSet {
+                long_name: true,
+                x_prime: true,
+                ..SubheaderRoleSet::default()
+            }
+        );
+        assert_eq!(line.role, LineRole::SubheaderLongName);
+        assert!(result.lines[1].subheader_roles.is_empty());
+    }
+
+    #[test]
+    fn same_line_name_unit_ignores_an_overlapping_unit_range() {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: 1,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = SubheaderRoles {
+            long_name: Some(SubheaderLineRange::single(1)),
+            unit: Some(SubheaderLineRange::single(1)),
+            same_line_name_unit: true,
+            ..SubheaderRoles::default()
+        };
+        let result = preview(b"T (K),P (bar)\n1,2\n", &recipe).unwrap();
+        let set = result.lines[0].subheader_roles;
+        assert!(set.long_name && !set.unit);
     }
 
     #[test]
@@ -398,5 +764,27 @@ mod tests {
             crate::recipe::DecimalStyle::Dot,
         );
         assert_eq!(layout, crate::recipe::HeaderLayout::default());
+    }
+
+    /// A header line of a whitespace-separated file stays whole (`##TITLE=1-Butanol IR`
+    /// is not cut at its spaces); the data lines are still cut.
+    #[test]
+    fn a_header_line_of_a_whitespace_file_is_one_cell() {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 1,
+            subheader_lines: 0,
+            auto_detect: false,
+        };
+        let bytes = b"##TITLE=1-Butanol IR spectrum\n400 1.5\n401 2.5\n402 3.5\n";
+        let map = file_map(bytes, &recipe).unwrap();
+        assert!(map.is_whitespace_separated());
+        assert_eq!(map.roles[0], LineRole::MainHeader);
+        assert_eq!(
+            map.tokens(0, &recipe),
+            vec!["##TITLE=1-Butanol IR spectrum"]
+        );
+        assert_eq!(map.cells(0, &recipe).len(), 1);
+        assert_eq!(map.tokens(1, &recipe), vec!["400", "1.5"]);
     }
 }

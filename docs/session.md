@@ -193,6 +193,7 @@ the growth of its source is undone.
 | | |
 |---|---|
 | where the memo lives | in the actor, next to the `Project` (`Recalculator`): neither history nor `.stf` |
+| followed transposed sheets (#463) | the pass has a follow step (`run_follows`) between the formulas and the calculations, inside the same rounds: a checked sheet catches up with its source by content, outside the history; `follow_hold` keeps a sheet that was out of date in the file as it is until its source really changes |
 | what empties it | `Load` (the values of a file are not taken on trust, except that analysis calculations are trusted on the first pass after it, #316; a transposed link over a formula column stays up to date because the pass keeps the version of a column recomputed to the same content, #439) and `NewProject` |
 | the economy witness | `Snapshot::formula_evaluations`: monotonic count of the formula columns the passes computed (one per column the pass decided to compute, a `NaN` block of a cycle or unreadable formula included; none for a clean one). The versions cannot play that part since #439 |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |

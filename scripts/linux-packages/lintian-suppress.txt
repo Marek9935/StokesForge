@@ -18,3 +18,10 @@ no-manual-page
 binary-without-manpage
 changelog-file-missing-in-native-package
 no-copyright-file
+# Bundled Python, numpy and scipy, shipped as upstream built them (#486). Lintian
+# can only suppress by tag, not by path; every hit of these tags was in
+# opt/stokesforge/lib/python/ or is libpython.
+python3-script-but-no-python3-dep
+library-not-linked-against-libc
+shared-library-is-executable
+shell-script-fails-syntax-check

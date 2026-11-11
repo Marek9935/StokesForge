@@ -178,6 +178,7 @@ impl NodeCopy {
                         Some(node.id()),
                         NodeKind::Worksheet {
                             columns: columns.clone(),
+                            raw: None,
                         },
                     )?);
                     for column in columns {

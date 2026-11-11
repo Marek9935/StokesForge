@@ -505,6 +505,14 @@ fn with_test_recipes() -> RecipeStoreIsolation {
         isolation.dir.path().join("import_recipes.json"),
     )
     .expect("copy of the test templates");
+    // These tests are about templates that apply by themselves: the fixture
+    // holds old-format templates, which load as "not automatic" (F1 of #488).
+    let mut store = RecipeStore::load();
+    let names: Vec<String> = store.recipes().iter().map(|r| r.name.clone()).collect();
+    for name in names {
+        store.set_automatic(&name);
+    }
+    store.save().expect("writes the isolated templates");
     isolation
 }
 
@@ -549,8 +557,10 @@ fn the_isolation_redirects_the_config_folder_and_saving_writes_there() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
-    state.import_state_mut().unwrap().save_as_name = "Witness".to_string();
-    state.save_import_recipe();
+    state.add_import_paths(vec![fixture_path("jasco_uvvis_semicolon.csv")]);
+    state.template_save_open();
+    state.template_save_draft_mut().unwrap().name = "Witness".to_string();
+    state.template_save_commit();
     assert!(!state.status().unwrap().is_error());
     let file = isolation.path().join("import_recipes.json");
     assert!(file.is_file(), "the template is written to {file:?}");
@@ -4725,6 +4735,33 @@ fn committing_a_note_without_typing_writes_nothing() {
     assert!(!state.can_undo());
 }
 
+/// A file whose name is already a sheet of the workbook is imported under a
+/// free name, silently: the import worked, so no red « Name already used ».
+#[test]
+fn importing_a_title_already_used_names_the_new_sheet_freely_without_an_error() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "X,Y\n1,10\n2,20\n").expect("wrote measure_a.csv");
+    for _ in 0..2 {
+        state.dispatch(Action::ImportFiles {
+            destination: ImportDestination::ActiveBook(book),
+            recipe: stokesforge_import::ImportRecipe::new("Untitled"),
+            paths: vec![file.clone()],
+        });
+        let status = state.status().expect("a status message");
+        assert!(!status.is_error(), "{}", status.text);
+    }
+    let names: Vec<String> = state
+        .worksheets_of(book)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect();
+    assert!(names.contains(&"measure_a".to_string()), "{names:?}");
+    assert!(names.contains(&"measure_a (2)".to_string()), "{names:?}");
+}
+
 /// Importing several files creates one sheet per file, each named
 /// after its file (`file_stem`) and carrying the file's columns —
 /// and the whole batch fits in **one** history entry: a single
@@ -4839,10 +4876,31 @@ fn importing_into_new_books_groups_files_as_requested() {
             1
         };
         assert_eq!(added, expected);
-        let sheet_a = sheet_named(state.tree(), "measure_a");
-        let sheet_b = sheet_named(state.tree(), "measure_b");
+        // A new workbook per file takes the name of the file; its sheet is
+        // "Raw Data" (#488). Every file in one shared workbook keeps one sheet
+        // per file, named after the file.
+        let (sheet_a, sheet_b) = if destination == ImportDestination::NewBookPerFile {
+            let first_sheet = |name: &str| {
+                let book = book_named(state.tree(), name);
+                state.worksheets_of(book)[0].0
+            };
+            (first_sheet("measure_a"), first_sheet("measure_b"))
+        } else {
+            (
+                sheet_named(state.tree(), "measure_a"),
+                sheet_named(state.tree(), "measure_b"),
+            )
+        };
         let book_a = state.tree().node(sheet_a).unwrap().parent().unwrap();
         let book_b = state.tree().node(sheet_b).unwrap().parent().unwrap();
+        let sheet_name = |sheet| state.tree().node(sheet).unwrap().name().to_string();
+        if destination == ImportDestination::NewBookPerFile {
+            assert_eq!(sheet_name(sheet_a), "Raw Data");
+            assert_eq!(sheet_name(sheet_b), "Raw Data");
+        } else {
+            assert_eq!(sheet_name(sheet_a), "measure_a");
+            assert_eq!(sheet_name(sheet_b), "measure_b");
+        }
         assert_eq!(
             book_a == book_b,
             destination == ImportDestination::NewBookForAll
@@ -4865,6 +4923,122 @@ fn importing_into_new_books_groups_files_as_requested() {
             before
         );
     }
+}
+
+/// #488: one file imported into « New Workbook » is one workbook for that file:
+/// it takes the file's name and its sheet is "Raw Data", as with « One Workbook
+/// per File » (witness: the shared workbook keeps its default name and the
+/// sheet the file's name).
+#[test]
+fn one_file_into_a_new_workbook_is_named_like_a_workbook_per_file() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookForAll,
+        recipe: ImportRecipe::new("Untitled"),
+        paths: vec![file],
+    });
+    let book = book_named(state.tree(), "measure_a");
+    let sheets = state.worksheets_of(book);
+    assert_eq!(sheets.len(), 1);
+    assert_eq!(state.tree().node(sheets[0].0).unwrap().name(), "Raw Data");
+}
+
+/// #488: a new workbook per file holds a sheet "Raw Data" until a value of an
+/// imported column changes; the change renames it "Sheet1" in the same history
+/// step, and "Refresh from Source" keeps the current name.
+#[test]
+fn the_raw_data_sheet_of_a_new_book_renames_at_the_first_change() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Untitled"),
+        paths: vec![file],
+    });
+    let book = book_named(state.tree(), "measure_a");
+    let sheet = state.worksheets_of(book)[0].0;
+    let name = |state: &AppState| state.tree().node(sheet).unwrap().name().to_string();
+    assert_eq!(name(&state), "Raw Data");
+    let column = state.visible_columns(sheet)[0].0;
+
+    // A header edit is not a change.
+    state.dispatch(Action::SetColumnLongName {
+        column,
+        text: "Time".into(),
+    });
+    assert_eq!(state.column_meta(column).long_name, "Time");
+    assert_eq!(name(&state), "Raw Data");
+
+    state.select_cell(sheet, column, 1);
+    state.dispatch(Action::Paste {
+        sheet,
+        text: "7\n".to_string(),
+    });
+    assert_eq!(cell(&state, column, 1), Cell::Float(7.0));
+    assert_eq!(name(&state), "Sheet1");
+    state.dispatch(Action::Undo);
+    assert_eq!(cell(&state, column, 1), Cell::Float(2.0));
+    assert_eq!(name(&state), "Raw Data");
+    state.dispatch(Action::Redo);
+    assert_eq!(name(&state), "Sheet1");
+}
+
+/// Only "one sheet per file" gets the "Raw Data" sheet: files side by side in
+/// one sheet keep the name of the file, and no mark is set.
+#[test]
+fn files_side_by_side_do_not_get_a_raw_data_sheet() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let (a, b) = (
+        dir.path().join("measure_a.csv"),
+        dir.path().join("measure_b.csv"),
+    );
+    std::fs::write(&a, "1,10\n2,20\n").unwrap();
+    std::fs::write(&b, "3,30\n4,40\n").unwrap();
+    let mut recipe = ImportRecipe::new("Untitled");
+    recipe.files_layout = stokesforge_import::FilesLayout::SideBySide;
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe,
+        paths: vec![a, b],
+    });
+    assert!(
+        state.tree().walk_all().into_iter().all(|id| state
+            .tree()
+            .node(id)
+            .is_none_or(|node| node.name() != "Raw Data")),
+        "no sheet is called Raw Data"
+    );
+    assert!(state.tree().raw_sheets().is_empty());
+}
+
+#[test]
+fn refreshing_from_the_source_keeps_the_raw_data_name() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("measure_a.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Untitled"),
+        paths: vec![file.clone()],
+    });
+    let book = book_named(state.tree(), "measure_a");
+    let sheet = state.worksheets_of(book)[0].0;
+    std::fs::write(&file, "1,10\n2,20\n3,30\n").unwrap();
+    state.dispatch(Action::RefreshFromSource { sheet });
+    let column = state.visible_columns(sheet)[0].0;
+    assert_eq!(
+        cell(&state, column, 2),
+        Cell::Float(3.0),
+        "the file was re-read"
+    );
+    assert_eq!(state.tree().node(sheet).unwrap().name(), "Raw Data");
 }
 
 /// The detached view keeps its selections and its copies, then provides this
@@ -4964,7 +5138,7 @@ fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
 /// `AppState::open_import` starts on the first saved template if there is
 /// one, otherwise on a permissive recipe — the two branches of its doc.
 #[test]
-fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
+fn opening_import_starts_permissive_and_lists_the_saved_templates() {
     let _isolation = isolate_recipe_store();
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
@@ -4984,7 +5158,8 @@ fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
     state.cancel_import();
 
     // A template already saved on disk (written directly, without going
-    // through the window): `open_import` must offer it right away.
+    // through the window) is listed, but each file picks its own recipe: the
+    // window itself starts permissive.
     let mut store = RecipeStore::default();
     let mut jasco = ImportRecipe::new("Jasco UV-Vis");
     jasco.separator = Separator::Semicolon;
@@ -4994,9 +5169,100 @@ fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
 
     state.open_import(book);
     let import = state.import_state().expect("import window open");
-    assert_eq!(import.recipe.name, "Jasco UV-Vis");
-    assert_eq!(import.recipe.separator, Separator::Semicolon);
-    assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
+    assert_eq!(
+        import.recipe.name,
+        stokesforge_app_state::tr!("import-template-untitled")
+    );
+    assert!(import
+        .store
+        .recipes()
+        .iter()
+        .any(|r| r.name == "Jasco UV-Vis" && r.separator == Separator::Semicolon));
+}
+
+/// #488: a template saved before `join_lines` is applied by a file drop (no
+/// wizard) with the new reading: the Long Name lines 1..2 are joined.
+#[test]
+fn a_drop_with_a_template_saved_before_join_lines_joins_the_long_name() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let mut old = ImportRecipe::new("Old two-line names");
+    old.header_layout = stokesforge_import::HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 2,
+        auto_detect: false,
+    };
+    old.subheader_roles = stokesforge_import::SubheaderRoles {
+        long_name: Some(stokesforge_import::SubheaderLineRange { from: 1, to: 2 }),
+        join_lines: false,
+        ..Default::default()
+    };
+    old.auto_match.extensions = vec!["csv".into()];
+    let mut store = RecipeStore::default();
+    // Saved with its conditions: automatic (an old-format one is not, F1 of #488).
+    let conditions = stokesforge_import::templates::conditions_from_auto_match(&old.auto_match);
+    store.upsert_with_conditions(old, conditions).unwrap();
+    store.save().expect("writes the isolated template");
+    let file = write_csv(dir.path(), "two_lines.csv", "Abs,Abs2\nlow,high\n1,2\n");
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    let sheet = sheet_named(state.tree(), "two_lines");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(state.column_meta(columns[0].0).long_name, "Abs low");
+}
+
+/// #488: "Refresh from Source" re-reads with the stored recipe as it is: a
+/// column imported with the old reading (`join_lines` false) keeps reading the
+/// first line of a multi-line range.
+#[test]
+fn refreshing_from_the_source_keeps_the_stored_sub_header_reading() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = write_csv(dir.path(), "old.csv", "A,B\na,b\n1,2\n");
+    let mut recipe = ImportRecipe::new("Old reading");
+    recipe.header_layout = stokesforge_import::HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 2,
+        auto_detect: false,
+    };
+    recipe.subheader_roles = stokesforge_import::SubheaderRoles {
+        long_name: Some(stokesforge_import::SubheaderLineRange { from: 1, to: 2 }),
+        join_lines: false,
+        ..Default::default()
+    };
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file],
+    });
+    let sheet = sheet_named(state.tree(), "old");
+    let stored = |state: &AppState| {
+        let columns = state.visible_columns(sheet);
+        let source = state.column_meta(columns[0].0).import_source.unwrap();
+        ImportRecipe::from_json(&source.recipe_json).unwrap()
+    };
+    assert!(!stored(&state).subheader_roles.join_lines);
+    assert_eq!(
+        state
+            .column_meta(state.visible_columns(sheet)[0].0)
+            .long_name,
+        "A"
+    );
+
+    write_csv(dir.path(), "old.csv", "C,D\nc,d\n5,6\n");
+    state.dispatch(Action::RefreshFromSource { sheet });
+    assert!(state.status().is_some_and(|s| !s.is_error()));
+    assert!(
+        !stored(&state).subheader_roles.join_lines,
+        "the refresh keeps the stored reading"
+    );
 }
 
 /// S-T1 (#224): during typing, the import previews keep the previous
@@ -5037,193 +5303,6 @@ fn the_import_preview_waits_for_a_typing_pause_but_not_for_other_controls() {
     assert_eq!(import.preview_recipe().comment_prefix, ";");
 }
 
-/// "New Template" starts from a permissive recipe again, even after
-/// loading/modifying an existing template.
-#[test]
-fn new_import_recipe_resets_to_a_permissive_default() {
-    let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-
-    state.open_import(book);
-    {
-        let import = state.import_state_mut().expect("import window open");
-        import.recipe.separator = Separator::Tab;
-        import.recipe.decimal = DecimalStyle::Comma;
-        import.recipe.footer_skip_lines = 5;
-        import.recipe.has_column_header_row = true;
-        import.recipe.name = "Something else".to_string();
-    }
-
-    state.new_import_recipe();
-    let import = state.import_state().expect("import window open");
-    assert_eq!(
-        import.recipe.name,
-        stokesforge_app_state::tr!("import-template-untitled")
-    );
-    assert_eq!(import.recipe.separator, Separator::Auto);
-    assert_eq!(import.recipe.decimal, DecimalStyle::Dot);
-    assert_eq!(import.recipe.header, HeaderSkip::None);
-    assert_eq!(import.recipe.footer_skip_lines, 0);
-    assert!(!import.recipe.has_column_header_row);
-    assert_eq!(import.recipe.name_source, NameSource::Filename);
-}
-
-/// The template dropdown loads the chosen template into the recipe
-/// being edited; an unknown name has no effect (no panic, no
-/// half-replaced recipe).
-#[test]
-fn select_import_recipe_loads_a_saved_model_and_ignores_unknown_names() {
-    // `select_import_recipe` itself only searches the in-memory `Vec`,
-    // but `open_import` just below does call
-    // `RecipeStore::load()` for real: without isolation, it would read
-    // `XDG_CONFIG_HOME` as an *other* test of this file, running in
-    // parallel and isolated in its own temporary directory, would
-    // have left it at that precise moment — and would load its template instead of
-    // nothing, before the next line overwrites `store` anyway.
-    // Theory confirmed the hard way: about 1 run in 7 did make another
-    // test of this file fail this way before this isolation was
-    // added here.
-    let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-
-    state.open_import(book);
-    let mut store = RecipeStore::default();
-    store.upsert(ImportRecipe::new("Jasco"));
-    let mut fluo = ImportRecipe::new("Fluo");
-    fluo.separator = Separator::Tab;
-    store.upsert(fluo);
-    state.import_state_mut().expect("window open").store = store;
-
-    state.select_import_recipe("Fluo");
-    assert_eq!(
-        state.import_state().unwrap().recipe.name,
-        "Fluo",
-        "the chosen template replaces the current recipe"
-    );
-    assert_eq!(
-        state.import_state().unwrap().recipe.separator,
-        Separator::Tab
-    );
-
-    state.select_import_recipe("Does not exist");
-    assert_eq!(
-        state.import_state().unwrap().recipe.name,
-        "Fluo",
-        "an unknown name replaces nothing"
-    );
-}
-
-/// Saving a template without a name (or a blank name) is refused, without
-/// modifying the store — condition explicitly documented by
-/// `AppState::save_import_recipe`.
-#[test]
-fn save_import_recipe_requires_a_non_empty_name() {
-    let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-
-    state.open_import(book);
-    state.import_state_mut().unwrap().save_as_name = "   ".to_string();
-    state.save_import_recipe();
-
-    // S-M7 (#228): the error of a wizard gesture goes in its footer.
-    assert!(
-        state.dialog_error().is_some(),
-        "a blank name must be refused"
-    );
-    // Nothing was added or written.
-    assert!(
-        stokesforge_import::RecipeStore::load().recipes().is_empty(),
-        "nothing was added to the store"
-    );
-}
-
-/// A saved template survives closing the window: reopening it
-/// (new window session, but same disk) finds it as is —
-/// the full round trip through `RecipeStore::save`/`load`, never
-/// exercised before this test existed (the tests of `stokesforge-import` only
-/// covered deserialization, never the real write).
-#[test]
-fn save_import_recipe_persists_to_disk_and_is_visible_after_reopening() {
-    let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-
-    state.open_import(book);
-    {
-        let import = state.import_state_mut().unwrap();
-        import.recipe.separator = Separator::Semicolon;
-        import.recipe.decimal = DecimalStyle::Comma;
-        import.recipe.footer_skip_lines = 2;
-        import.recipe.has_column_header_row = true;
-        import.recipe.name_source = NameSource::HeaderKey("TITLE".to_string());
-        import.save_as_name = "Jasco UV".to_string();
-    }
-    state.save_import_recipe();
-    let status = state.status().expect("a status message");
-    assert!(!status.is_error(), "the save succeeded: {}", status.text);
-
-    state.cancel_import();
-    state.open_import(book);
-    let import = state.import_state().expect("import window open");
-    assert_eq!(import.recipe.name, "Jasco UV");
-    assert_eq!(import.recipe.separator, Separator::Semicolon);
-    assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
-    assert_eq!(import.recipe.footer_skip_lines, 2);
-    assert!(import.recipe.has_column_header_row);
-    assert_eq!(
-        import.recipe.name_source,
-        NameSource::HeaderKey("TITLE".to_string())
-    );
-}
-
-/// Deleting a template removes it from disk, not only from the in-memory
-/// list of the current window.
-#[test]
-fn delete_import_recipe_removes_it_from_the_store_on_disk() {
-    let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-
-    let mut store = RecipeStore::default();
-    store.upsert(ImportRecipe::new("Jasco"));
-    store.upsert(ImportRecipe::new("Fluo"));
-    store
-        .save()
-        .expect("writes the two isolated templates to disk");
-
-    state.open_import(book);
-    state.delete_import_recipe("Jasco");
-    let status = state.status().expect("a status message");
-    assert!(
-        !status.is_error(),
-        "the deletion succeeded: {}",
-        status.text
-    );
-
-    state.cancel_import();
-    state.open_import(book);
-    // The saved templates.
-    let user_recipes = stokesforge_import::RecipeStore::load();
-    let names: Vec<&str> = user_recipes
-        .recipes()
-        .iter()
-        .map(|r| r.name.as_str())
-        .collect();
-    assert_eq!(
-        names,
-        vec!["Fluo"],
-        "\"Jasco\" did disappear from the file on disk, \"Fluo\" stays"
-    );
-}
-
 /// The preview follows the current settings frame by frame (no
 /// caching): without "the first row gives the column names", the header
 /// row is read as unreadable data (missing values); enabling
@@ -5249,6 +5328,12 @@ fn import_preview_reflects_current_recipe_settings_and_reports_parse_errors() {
     );
 
     state.set_import_paths(vec![file.clone()]);
+    // The detector read the file and found its names row; undo that.
+    state
+        .import_state_mut()
+        .unwrap()
+        .recipe
+        .has_column_header_row = false;
     let table = state
         .import_preview()
         .expect("a preview, a file is chosen")
@@ -5299,7 +5384,8 @@ fn importing_resolves_series_name_from_a_header_key_when_the_column_has_no_name_
     });
 
     let tree = state.tree();
-    let sheet = sheet_named(tree, "spectrum");
+    // The TITLE key names the sheet as well as the series.
+    let sheet = sheet_named(tree, "MySample");
     let columns = state.visible_columns(sheet);
     assert_eq!(state.column_meta(columns[0].0).long_name, "X");
     assert_eq!(
@@ -5513,6 +5599,7 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
         comment: Some(stokesforge_import::SubheaderLineRange::single(3)),
         x_prime: Some(stokesforge_import::SubheaderLineRange::single(4)),
         same_line_name_unit: false,
+        join_lines: true,
     };
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
@@ -7729,6 +7816,9 @@ fn row_drag_payload_needs_full_rows_and_an_x_prime_row() {
     }
     state.select_row(sheet, 1);
     assert_eq!(state.row_drag_payload(sheet), None, "without x'");
+    // #493: the analysis still takes the rows, plotting does not.
+    let target = state.analysis_rows_target(sheet).expect("rows to analyze");
+    assert_eq!((target.sheet, target.rows), (sheet, vec![1]));
 
     // A cell selection (not whole rows) cannot be dragged either.
     set_x_prime(&mut state, sheet, "A", "1");
@@ -9402,24 +9492,27 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
 /// The last model really used takes precedence over the catalog order.
 /// A drop always creates new sheets, even after a replacement.
 #[test]
-fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
+fn dropping_files_uses_the_matching_template_and_always_creates_new_sheets() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-    let mut recipe = stokesforge_import::ImportRecipe::new("Last template used");
+    let mut recipe = stokesforge_import::ImportRecipe::new("Semicolon template");
     recipe.separator = stokesforge_import::Separator::Semicolon;
     recipe.has_column_header_row = true;
+    // The options of an earlier import must not decide the drop.
     recipe.import_mode = stokesforge_import::ImportMode::ReplaceSheet;
     recipe.files_layout = stokesforge_import::FilesLayout::SideBySide;
-    let initial = dir.path().join("initial.csv");
-    std::fs::write(&initial, "Time;Signal\n1;10\n").unwrap();
-    state.dispatch(Action::ImportFiles {
-        destination: ImportDestination::ActiveBook(book),
-        recipe,
-        paths: vec![initial],
-    });
-    assert!(!state.status().unwrap().is_error());
+    let mut store = RecipeStore::default();
+    store
+        .upsert_with_conditions(
+            recipe,
+            vec![stokesforge_import::Condition::Extension {
+                exts: vec!["csv".into()],
+            }],
+        )
+        .unwrap();
+    store.save().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
     let before = state.snapshot().tree.clone();
     let sheets_before = state.worksheets_of(book).len();
     let files: Vec<_> = ["drop1.csv", "drop2.csv"]
@@ -9440,7 +9533,7 @@ fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
     let columns = state.visible_columns(sheet);
     assert_eq!(state.column_meta(columns[0].0).long_name, "Time");
     assert_eq!(cell_f64(&state, columns[0].0, 0), 2.);
-    assert!(state.status().unwrap().text.contains("Last template used"));
+    assert!(state.status().unwrap().text.contains("Semicolon template"));
     state.dispatch(Action::Undo);
     assert_eq!(*state.snapshot().tree, *before);
 }
@@ -9522,7 +9615,7 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     assert!(!status.is_error());
     assert_eq!(
         status.text,
-        stokesforge_app_state::tr!("status-import-dropped", count = 2, models = "Untitled"),
+        stokesforge_app_state::tr!("status-import-dropped", count = 2, models = "Auto"),
         "{}",
         status.text
     );
@@ -9575,10 +9668,11 @@ fn dropping_a_project_file_queues_it_instead_of_importing() {
     assert!(state.take_projects_to_open().is_empty(), "queue emptied");
 }
 
-/// A file that the recipe reads badly is not imported: the import window
-/// opens, prefilled; a correct file of the same batch is imported.
+/// A file the detector refuses needs a look: nothing is imported and the
+/// import window opens on **all** the dropped files, the correct one included
+/// (one consistent behaviour: the user sees the whole drop in one place).
 #[test]
-fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
+fn dropping_an_unreadable_file_opens_the_import_window_on_the_whole_drop() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
@@ -9590,15 +9684,22 @@ fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
     std::fs::write(&good, "1,10\n2,20\n").unwrap();
 
     state.dispatch(Action::DropFiles {
-        paths: vec![bad.clone(), good],
+        paths: vec![bad.clone(), good.clone()],
         target_book: Some(book),
     });
     wait_import(&mut state);
 
-    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets_before,
+        "nothing yet"
+    );
     let import = state.import_state().expect("import window open");
-    assert_eq!(import.paths, vec![bad]);
+    assert_eq!(import.paths, vec![bad.clone(), good.clone()]);
     assert_eq!(import.destination, ImportDestination::ActiveBook(book));
+    // The window knows which one is refused.
+    assert!(matches!(import.auto.sniffs.get(&bad), Some(Err(_))));
+    assert!(matches!(import.auto.sniffs.get(&good), Some(Ok(_))));
 }
 
 // -- Creating a workbook or a sheet: X and Y columns by default --
@@ -9731,95 +9832,6 @@ fn a_hand_made_column_has_no_file_metadata() {
 
 // -- Step-by-step import wizard (issue #6) --
 
-/// Saving the template sets the reference of the "modified" witness, even
-/// after a rename. A new edit lights it up again.
-#[test]
-fn saving_an_import_template_updates_the_modified_witness() {
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    state.open_import(None::<NodeId>);
-    {
-        let import = state.import_state_mut().unwrap();
-        import.recipe.skip_chars = 2;
-        import.save_as_name = "My instrument".into();
-    }
-    assert!(state.import_recipe_modified());
-
-    state.save_import_recipe();
-
-    assert!(!state.status().unwrap().is_error());
-    assert!(
-        !state.import_recipe_modified(),
-        "the template was just saved"
-    );
-    let saved = state.import_state().unwrap().recipe.clone();
-    assert!(RecipeStore::load().recipes().contains(&saved));
-
-    state.import_state_mut().unwrap().recipe.skip_chars = 3;
-    assert!(state.import_recipe_modified());
-    state.import_state_mut().unwrap().recipe.skip_chars = 2;
-    assert!(
-        !state.import_recipe_modified(),
-        "back to the saved template"
-    );
-}
-
-/// A write failure must not make one believe the settings are saved.
-#[test]
-fn a_save_failure_keeps_the_import_template_modified() {
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    state.open_import(None::<NodeId>);
-    state.import_state_mut().unwrap().recipe.skip_chars = 2;
-    state.save_import_recipe();
-    assert!(!state.status().unwrap().is_error());
-    state.import_state_mut().unwrap().recipe.skip_chars = 3;
-
-    let file = stokesforge_import::config_dir::config_dir()
-        .unwrap()
-        .join("import_recipes.json");
-    std::fs::remove_file(&file).unwrap();
-    std::fs::create_dir(&file).unwrap();
-    state.save_import_recipe();
-
-    assert!(state.dialog_error().is_some(), "S-M7: in the wizard footer");
-    assert!(state.import_recipe_modified());
-    state.import_state_mut().unwrap().recipe.skip_chars = 2;
-    assert!(
-        !state.import_recipe_modified(),
-        "the reference stays the last success"
-    );
-}
-
-/// #267: an imported template whose saving fails stays "modified".
-#[test]
-fn a_save_failure_of_an_imported_template_keeps_it_modified() {
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    state.open_import(None::<NodeId>);
-    let mut recipe = state.import_state_mut().unwrap().recipe.clone();
-    recipe.name = "imported".to_string();
-    recipe.skip_chars = 7;
-    let json = dir.path().join("modele.json");
-    std::fs::write(&json, recipe.to_json()).unwrap();
-
-    let file = stokesforge_import::config_dir::config_dir()
-        .unwrap()
-        .join("import_recipes.json");
-    let _ = std::fs::remove_file(&file);
-    std::fs::create_dir_all(&file).unwrap();
-    state.import_import_recipe(&json);
-
-    assert!(state.dialog_error().is_some());
-    assert!(
-        state.import_recipe_modified(),
-        "not written to disk: the reference stays the old one"
-    );
-}
-
 fn jasco_like(dir: &std::path::Path) -> std::path::PathBuf {
     let file = dir.join("jasco.csv");
     std::fs::write(
@@ -9828,25 +9840,6 @@ fn jasco_like(dir: &std::path::Path) -> std::path::PathBuf {
     )
     .unwrap();
     file
-}
-
-/// The steps follow one another in order, bounded at both ends.
-#[test]
-fn import_wizard_steps_go_forward_and_back_within_bounds() {
-    use stokesforge_app_state::state::ImportStep;
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    state.open_import(None::<NodeId>);
-    assert_eq!(state.import_state().unwrap().step, ImportStep::Files);
-    state.import_step_back();
-    assert_eq!(state.import_state().unwrap().step, ImportStep::Files);
-    for _ in 0..10 {
-        state.import_step_forward();
-    }
-    assert_eq!(state.import_state().unwrap().step, ImportStep::Destination);
-    state.import_step_back();
-    assert_eq!(state.import_state().unwrap().step, ImportStep::Metadata);
 }
 
 /// The file is read only once: after its deletion from disk, the preview
@@ -9859,140 +9852,13 @@ fn import_preview_reads_the_file_only_once() {
     let file = jasco_like(dir.path());
     state.open_import(None::<NodeId>);
     state.set_import_paths(vec![file.clone()]);
-    assert!(matches!(state.import_line_preview(), Some(Ok(_))));
+    assert!(matches!(state.import_preview(), Some(Ok(_))));
     std::fs::remove_file(&file).unwrap();
     assert!(
-        matches!(state.import_line_preview(), Some(Ok(_))),
+        matches!(state.import_preview(), Some(Ok(_))),
         "the preview comes from the cache, not from the disk"
     );
     assert_eq!(state.import_encoding(), Some("UTF-8"));
-}
-
-/// Several files: one is removed, the one to preview is chosen,
-/// and each carries its own state (lines read or error) before the import.
-#[test]
-fn import_wizard_lists_files_with_their_status_and_previews_the_chosen_one() {
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    let good = jasco_like(dir.path());
-    let missing = dir.path().join("absent.csv");
-    state.open_import(None::<NodeId>);
-    state.set_import_paths(vec![good.clone(), missing.clone()]);
-
-    let statuses = state.import_file_statuses();
-    assert!(statuses[0].1.is_ok());
-    assert!(
-        statuses[1].1.is_err(),
-        "the error is known before importing"
-    );
-
-    state.set_import_preview_index(1);
-    assert!(matches!(state.import_line_preview(), Some(Err(_))));
-    state.remove_import_path(1);
-    assert_eq!(state.import_state().unwrap().paths, vec![good]);
-    assert!(matches!(state.import_line_preview(), Some(Ok(_))));
-}
-
-/// The two header settings are brought down to one when a template is
-/// opened; deleting a template asks for a confirmation.
-#[test]
-fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    state.open_import(None::<NodeId>);
-    {
-        let import = state.import_state_mut().unwrap();
-        import.recipe.header = HeaderSkip::Lines(3);
-        import.save_as_name = "Three lines".into();
-    }
-    state.save_import_recipe();
-    state.open_import(None::<NodeId>);
-    state.select_import_recipe("Three lines");
-    let recipe = &state.import_state().unwrap().recipe;
-    assert_eq!(recipe.header, HeaderSkip::None);
-    assert_eq!(recipe.header_layout.main_header_lines, 3);
-    assert!(!state.import_recipe_modified());
-
-    state.import_state_mut().unwrap().recipe.skip_chars = 2;
-    assert!(
-        state.import_recipe_modified(),
-        "modified without being saved"
-    );
-
-    state.request_delete_import_recipe("Three lines");
-    state.cancel_delete_import_recipe();
-    assert!(state
-        .import_state()
-        .unwrap()
-        .store
-        .recipes()
-        .iter()
-        .any(|r| r.name == "Three lines"));
-    state.request_delete_import_recipe("Three lines");
-    state.confirm_delete_import_recipe();
-    assert!(state
-        .import_state()
-        .unwrap()
-        .store
-        .recipes()
-        .iter()
-        .all(|r| r.name != "Three lines"));
-}
-
-/// The right-click on the preview sets the header, the units row and the end
-/// of the data.
-#[test]
-fn import_preview_line_actions_adjust_the_recipe() {
-    use stokesforge_app_state::state::ImportLineAction;
-    let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    let file = jasco_like(dir.path());
-    state.open_import(None::<NodeId>);
-    state.set_import_paths(vec![file]);
-    {
-        let recipe = &mut state.import_state_mut().unwrap().recipe;
-        recipe.separator = Separator::Semicolon;
-        recipe.header = HeaderSkip::None;
-        recipe.header_layout = Default::default();
-        // Automatic cut is no longer the default: this test exercises it.
-        recipe.data_end = stokesforge_import::DataEnd::Auto;
-    }
-
-    // The data starts at line 4: three header lines.
-    state.import_line_action(ImportLineAction::DataStartsHere, 4);
-    assert_eq!(
-        state
-            .import_state()
-            .unwrap()
-            .recipe
-            .header_layout
-            .main_header_lines,
-        3
-    );
-    assert_eq!(state.import_preview().unwrap().unwrap().row_count(), 3);
-
-    // End of the data at line 6 (the last data is line 6).
-    state.import_line_action(ImportLineAction::DataEndsHere, 6);
-    assert_eq!(state.import_preview().unwrap().unwrap().row_count(), 2);
-
-    state.import_line_action(ImportLineAction::NoAutoCut, 6);
-    assert_eq!(
-        state.import_state().unwrap().recipe.data_end,
-        stokesforge_import::DataEnd::None
-    );
-
-    // Line 2 gives the units: it opens the subheader.
-    state.import_line_action(ImportLineAction::UnitsLine, 2);
-    let recipe = &state.import_state().unwrap().recipe;
-    assert_eq!(recipe.header_layout.main_header_lines, 1);
-    assert_eq!(recipe.header_layout.subheader_lines, 2);
-    assert_eq!(
-        recipe.subheader_roles.unit,
-        Some(stokesforge_import::SubheaderLineRange::single(1))
-    );
 }
 
 /// The "Columns" step: an Ignore role removes the column, Y error is
@@ -10510,8 +10376,7 @@ fn dropping_a_big_csv_returns_immediately_and_applies_later() {
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
 }
 
-/// An unreadable file does not block the good one: the wizard only opens when
-/// the thread returns, with the unreadable file alone.
+/// The import window only opens when the thread answers, on the whole drop.
 #[test]
 fn a_background_drop_opens_the_wizard_only_when_the_thread_answers() {
     let _recipes = isolate_recipe_store();
@@ -10523,12 +10388,12 @@ fn a_background_drop_opens_the_wizard_only_when_the_thread_answers() {
     let good = dir.path().join("bon.csv");
     std::fs::write(&good, "1,10\n2,20\n").unwrap();
     state.dispatch(Action::DropFiles {
-        paths: vec![bad.clone(), good],
+        paths: vec![bad.clone(), good.clone()],
         target_book: Some(book),
     });
     assert!(state.import_state().is_none(), "wizard closed meanwhile");
     wait_import(&mut state);
-    assert_eq!(state.import_state().expect("wizard").paths, vec![bad]);
+    assert_eq!(state.import_state().expect("wizard").paths, vec![bad, good]);
 }
 
 /// All unreadable: the wizard opens, no empty macro in the history.
@@ -10815,39 +10680,10 @@ fn dropping_a_jasco_file_picks_the_saved_model_automatically() {
     assert!(state.import_state().is_none(), "read without wizard");
     let status = state.status().expect("message");
     assert!(status.text.contains("Jasco (semicolon)"), "{}", status.text);
-    let sheet = sheet_named(state.tree(), "jasco_uvvis_semicolon");
+    let sheet = sheet_named(state.tree(), "Fixture_Jasco_UVVis");
     let columns = state.visible_columns(sheet);
     assert_eq!(cell_f64(&state, columns[0].0, 0), 800.0);
     assert_eq!(column_type(&state, columns[0].0), ColumnType::Numeric);
-}
-
-/// In the wizard, the first file added chooses the template from its
-/// content as long as the current template has not been modified.
-#[test]
-fn the_wizard_chooses_the_model_from_the_first_file() {
-    let _recipes = with_test_recipes();
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    state.open_import(None::<NodeId>);
-    // The window starts on the first saved template; start from a blank one.
-    assert_eq!(
-        state.import_state().unwrap().recipe.name,
-        "Jasco (semicolon)"
-    );
-    state.new_import_recipe();
-    assert_eq!(
-        state.import_state().unwrap().recipe.name,
-        stokesforge_app_state::tr!("import-template-untitled")
-    );
-
-    state.add_import_paths(vec![fixture_path("jasco_fluo_tab.txt")]);
-
-    assert_eq!(state.import_state().unwrap().recipe.name, "Jasco (tab)");
-    assert!(!state.import_recipe_modified());
-    // A template modified by hand is not overwritten by a second add.
-    state.import_state_mut().unwrap().recipe.skip_chars = 1;
-    state.add_import_paths(vec![fixture_path("rpe_nohead_tab.asc")]);
-    assert_eq!(state.import_state().unwrap().recipe.name, "Jasco (tab)");
 }
 
 /// No template exists in the program (#378): with an empty store the window
@@ -10887,7 +10723,9 @@ fn a_model_can_be_exported_and_imported_from_a_file() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
-    state.select_import_recipe("EPR (tab)");
+    // The file meets the conditions of the template: it is applied at once.
+    state.add_import_paths(vec![fixture_path("rpe_nohead_tab.asc")]);
+    assert_eq!(state.import_state().unwrap().recipe.name, "EPR (tab)");
     state.import_state_mut().unwrap().recipe.skip_chars = 4;
     let file = dir.path().join("rpe.json");
     state.export_import_recipe(&file);
@@ -13514,8 +13352,9 @@ fn an_error_goes_to_the_footer_of_the_open_dialog_only() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
-    state.import_state_mut().unwrap().save_as_name = String::new();
-    state.save_import_recipe();
+    let bad = dir.path().join("not_a_template.json");
+    std::fs::write(&bad, "{ not json").unwrap();
+    state.import_import_recipe(&bad);
     assert!(state.dialog_error().is_some());
     assert!(!state.status().is_some_and(|status| status.is_error()));
     state.cancel_import();
@@ -15561,6 +15400,111 @@ fn a_grid_edit_of_the_layout_mode_is_one_undo_step() {
     assert_eq!(state.snapshot().revision, revision, "wrong length: nothing");
 }
 
+/// #491: moving a graph on a regular grid is ONE undo step labelled Move Layer
+/// (swap, or a new row beside another cell); a move that changes nothing, or
+/// that targets a free figure, sends no command; a legacy graph is given its
+/// frames first. Witness: the command sent with another kind, or sent even
+/// when the spec is unchanged.
+#[test]
+fn moving_a_graph_on_the_grid_is_one_move_layer_step_and_a_no_op_leaves_no_entry() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::{CellSide, MoveTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let before = graph_spec(&state, graph);
+    let position = |spec: &stokesforge_plot::PlotSpec| {
+        spec.panels
+            .iter()
+            .map(|p| (p.row, p.column))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(position(&before), [(0, 0), (0, 1)]);
+
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 0,
+        target: MoveTarget::Cell { row: 0, column: 1 },
+    });
+    assert_eq!(position(&graph_spec(&state, graph)), [(0, 1), (0, 0)]);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+
+    // Nothing to do: no entry.
+    let revision = state.snapshot().revision;
+    for target in [
+        MoveTarget::Cell { row: 0, column: 0 },
+        MoveTarget::Cell { row: 9, column: 9 },
+    ] {
+        state.dispatch(Action::MoveGridCell {
+            graph,
+            panel: 0,
+            target,
+        });
+    }
+    assert_eq!(state.snapshot().revision, revision, "no entry");
+
+    // [A B] -> [A; B] and back with one Undo.
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 1,
+        target: MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        },
+    });
+    let stacked = graph_spec(&state, graph);
+    assert_eq!(position(&stacked), [(0, 0), (1, 0)]);
+    assert_eq!(
+        stacked.frame_widths.len(),
+        1,
+        "B's column left with its width"
+    );
+    assert_eq!(stacked.frame_heights.len(), 2);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+
+    // A free figure is not moved by cell.
+    go_free(&mut state, graph);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 0,
+        target: MoveTarget::Cell { row: 0, column: 1 },
+    });
+    assert_eq!(state.snapshot().revision, revision, "free: nothing");
+
+    // A legacy graph (no stored frames) gets the ones it is drawn with.
+    state.dispatch(Action::Undo);
+    let mut legacy = graph_spec(&state, graph);
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy);
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 1,
+        target: MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        },
+    });
+    let moved = graph_spec(&state, graph);
+    assert_eq!(position(&moved), [(0, 0), (1, 0)]);
+    assert_eq!(
+        (moved.frame_widths.len(), moved.frame_heights.len()),
+        (1, 2)
+    );
+}
+
 /// #426: the figure size typed in the Page Layout Mode strip is ONE undo step
 /// of its own kind, the other axis follows the closed lock's ratio, and a free
 /// graph is left to `SetFreeLayout`. Witness: the ratio ignored.
@@ -17039,18 +16983,24 @@ mod origin_import {
         let (_session, mut state) = start_demo(dir.path());
         let tree_before = state.tree().clone();
         let csv = dir.path().join("measure.csv");
-        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        // A file the detector is sure about (#488): a bare "1,10" table would
+        // open the Import window instead of importing straight away.
+        std::fs::write(
+            &csv,
+            "TITLE;S13\nORIGIN;JASCO\nSPECTROMETER/DATA SYSTEM;JASCO Corp., V-770, Rev. 1.00\nDATA TYPE;ULTRAVIOLET SPECTRUM\nXUNITS;NANOMETERS\nYUNITS;ABSORBANCE\nXYDATA\n800;1,5;2,5\n799;2,5;3,5\n798;3,5;4,5\n797;4,5;5,5\n",
+        )
+        .unwrap();
         let opj = standard_opj(dir.path(), "kinetics.opj");
 
         drop_paths(&mut state, vec![csv, opj]);
 
-        sheet_named(state.tree(), "measure");
+        sheet_named(state.tree(), "Raw Data");
         assert!(state.origin_import_open());
         assert!(state.import_state().is_none());
         state.dispatch(Action::ImportOrigin);
-        // Two history entries: the Origin import, then the CSV one.
+        // Two history entries: the Origin import, then the CSV one (its sheet is the "Raw Data" one, #488).
         state.dispatch(Action::Undo);
-        sheet_named(state.tree(), "measure");
+        sheet_named(state.tree(), "Raw Data");
         assert_eq!(root_names(&state).len(), 2);
         state.dispatch(Action::Undo);
         assert!(same_tree(&state, &tree_before));
@@ -17133,5 +17083,1041 @@ mod origin_import {
             tr!("disabled-no-source-file"),
             "No column of this sheet can be read again from its file"
         );
+    }
+}
+
+// -- The one-screen import: detection, kinds, doubts, drop, reopen (#488) --
+
+/// A recognised JASCO file with two curves: nothing to check.
+const JASCO_SURE: &str = "TITLE;S13\nORIGIN;JASCO\nSPECTROMETER/DATA SYSTEM;JASCO Corp., V-770, Rev. 1.00\nDATA TYPE;ULTRAVIOLET SPECTRUM\nXUNITS;NANOMETERS\nYUNITS;ABSORBANCE\nXYDATA\n800;1,5;2,5\n799;2,5;3,5\n798;3,5;4,5\n797;4,5;5,5\n";
+
+/// Five curves under a line of times: the times and the single name of five
+/// curves are the two points to check.
+const JASCO_DOUBTS: &str = "TITLE;S13\nORIGIN;JASCO\nSPECTROMETER/DATA SYSTEM;JASCO Corp., V-770, Rev. 1.00\nDATA TYPE;ULTRAVIOLET SPECTRUM\nXUNITS;NANOMETERS\nYUNITS;ABSORBANCE\nXYDATA\n;0;15;30;45;60\n800;1;2;3;4;5\n799;2;3;4;5;6\n798;3;4;5;6;7\n797;4;5;6;7;8\n";
+
+/// A JCAMP file with an NMR block left out: a doubt of the detector.
+const JCAMP_WITH_NMR: &str = "##TITLE=ir\n##JCAMP-DX=4.24\n##DATA TYPE=INFRARED SPECTRUM\n##XUNITS=1/CM\n##YUNITS=ABSORBANCE\n##FIRSTX=400\n##LASTX=403\n##NPOINTS=4\n##XFACTOR=1\n##YFACTOR=1\n##XYDATA=(X++(Y..Y))\n400 1 2 3 4\n##END=\n##TITLE=nmr\n##JCAMP-DX=4.24\n##DATA TYPE=NMR SPECTRUM\n##FIRSTX=0\n##LASTX=3\n##XYDATA=(X++(Y..Y))\n0 9 9 9 9\n##END=\n";
+
+/// A window open on `files`, written in `dir`.
+fn import_window_on(state: &mut AppState, dir: &Path, files: &[(&str, &str)]) -> Vec<PathBuf> {
+    let paths: Vec<PathBuf> = files
+        .iter()
+        .map(|(name, text)| write_csv(dir, name, text))
+        .collect();
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(paths.clone());
+    paths
+}
+
+/// The ids of the points to check of the file shown.
+fn point_ids(state: &AppState) -> Vec<String> {
+    state.to_check().into_iter().map(|p| p.id).collect()
+}
+
+/// « Reopen Last Import » undoes the workbook it made, which the window of the
+/// application may still call active: the next import must go to a new workbook,
+/// not fail on a book that is gone.
+#[test]
+fn an_import_opened_on_a_removed_book_goes_to_a_new_workbook() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.open_import(book);
+    assert_eq!(
+        state.import_state().unwrap().destination,
+        ImportDestination::ActiveBook(book)
+    );
+    state.cancel_import();
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    assert!(state.tree().node(book).is_none(), "the workbook is gone");
+    state.open_import(book);
+    assert_eq!(
+        state.import_state().unwrap().destination,
+        ImportDestination::NewBookForAll
+    );
+}
+
+#[test]
+fn adding_files_detects_each_one() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let paths = import_window_on(
+        &mut state,
+        dir.path(),
+        &[
+            ("a.csv", JASCO_SURE),
+            ("b.csv", "1,10\n2,20\n3,30\n"),
+            ("c.jdx", JCAMP_WITH_NMR),
+        ],
+    );
+    let import = state.import_state().unwrap();
+    // The window shows the first file, but the detector read all three.
+    assert_eq!(import.auto.sniffs.len(), 3);
+    assert!(paths
+        .iter()
+        .all(|p| matches!(import.auto.sniffs.get(p), Some(Ok(_)))));
+    assert_eq!(import.auto.sniff_runs, 3);
+    // Three files, three kinds.
+    let kinds: std::collections::HashSet<_> = paths
+        .iter()
+        .map(|p| import.auto.sniffs[p].as_ref().unwrap().kind.clone())
+        .collect();
+    assert_eq!(kinds.len(), 3);
+}
+
+#[test]
+fn a_correction_on_one_file_applies_to_its_kind_and_not_to_another_kind() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let paths = import_window_on(
+        &mut state,
+        dir.path(),
+        &[
+            ("a.csv", JASCO_SURE),
+            ("b.csv", &JASCO_SURE.replace("S13", "S14")),
+            ("c.csv", "1,10\n2,20\n3,30\n"),
+        ],
+    );
+    // The correction is made while file A is shown.
+    state.import_state_mut().unwrap().recipe.skip_chars = 2;
+    let (each, skipped) = state.import_each_recipe();
+    assert_eq!(skipped, 0);
+    let skip = |path: &PathBuf| {
+        each.iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, recipe)| recipe.skip_chars)
+            .unwrap()
+    };
+    assert_eq!(skip(&paths[0]), 2);
+    assert_eq!(skip(&paths[1]), 2, "same kind as the file corrected");
+    assert_eq!(skip(&paths[2]), 0, "another kind keeps its own recipe");
+}
+
+#[test]
+fn a_refused_file_is_skipped_the_others_import_and_the_status_counts() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let before = state.worksheets_of(book).len();
+    let bad = dir.path().join("binary.dat");
+    std::fs::write(&bad, [0u8, 159, 146, 150, 0, 0]).unwrap();
+    let good = write_csv(dir.path(), "good.csv", "1,10\n2,20\n");
+    state.open_import(book);
+    state.add_import_paths(vec![bad, good]);
+    let action = state.import_finish().expect("the window was open");
+    let Action::StartImportEach { each, skipped, .. } = &action else {
+        panic!("one recipe per file");
+    };
+    assert_eq!((each.len(), *skipped), (1, 1));
+    state.dispatch(action);
+    wait_import(&mut state);
+    assert_eq!(state.worksheets_of(book).len(), before + 1);
+    assert_eq!(
+        state.status().unwrap().text,
+        stokesforge_app_state::tr!("status-import-skipped", count = 1)
+    );
+}
+
+#[test]
+fn the_detectors_own_doubts_are_among_the_points_to_check() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("ir.jdx", JCAMP_WITH_NMR)]);
+    let points = state.to_check();
+    let nmr = points
+        .iter()
+        .find(|p| p.id == "jcamp-nmr-left-out")
+        .expect("the NMR block left out is a point to check");
+    assert_eq!(
+        nmr.source,
+        stokesforge_app_state::state::ToCheckSource::Detector
+    );
+    assert!(!nmr.sentence.is_empty());
+}
+
+#[test]
+fn marked_as_checked_keeps_the_recipe_is_remembered_and_is_not_raised_again_for_its_kind() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let tab = JASCO_DOUBTS.replace(';', "\t");
+    let paths = import_window_on(
+        &mut state,
+        dir.path(),
+        &[
+            ("a.csv", JASCO_DOUBTS),
+            ("b.csv", &JASCO_DOUBTS.replace("S13", "S14")),
+            ("c.txt", &tab),
+        ],
+    );
+    assert!(point_ids(&state).contains(&"check-x-prime".to_string()));
+    let recipe_before = state.import_state().unwrap().recipe.clone();
+
+    state.to_check_mark("check-x-prime");
+
+    assert_eq!(state.import_state().unwrap().recipe, recipe_before);
+    assert!(!point_ids(&state).contains(&"check-x-prime".to_string()));
+    // Remembered in the store on disk, for the kind of file.
+    assert!(RecipeStore::load()
+        .remembered_answers()
+        .iter()
+        .any(|(_, id)| *id == "check-x-prime"));
+    // A second file of the same kind does not raise it again.
+    state.set_import_preview_index(1);
+    assert!(!point_ids(&state).contains(&"check-x-prime".to_string()));
+    // A file of another kind does.
+    state.set_import_preview_index(2);
+    assert!(point_ids(&state).contains(&"check-x-prime".to_string()));
+    // Forgetting the answer brings it back for the first kind.
+    let remembered = state.remembered_answers();
+    assert_eq!(remembered.len(), 1);
+    state.forget_remembered_answer(&remembered[0].kind, &remembered[0].doubt);
+    state.set_import_preview_index(0);
+    assert!(point_ids(&state).contains(&"check-x-prime".to_string()));
+    assert!(state.remembered_answers().is_empty());
+    let _ = paths;
+}
+
+#[test]
+fn two_templates_that_tie_raise_a_point_to_check_offering_the_other() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = RecipeStore::default();
+    for name in ["Template A", "Template B"] {
+        store
+            .upsert_with_conditions(
+                ImportRecipe::new(name),
+                vec![stokesforge_import::Condition::Extension {
+                    exts: vec!["csv".into()],
+                }],
+            )
+            .unwrap();
+    }
+    store.save().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    let used = state
+        .template_in_use()
+        .expect("a template was applied at once");
+    let points = state.to_check();
+    let tie = points
+        .iter()
+        .find(|p| {
+            matches!(
+                p.source,
+                stokesforge_app_state::state::ToCheckSource::Tie { .. }
+            )
+        })
+        .expect("the tie is a point to check");
+    let stokesforge_app_state::state::ToCheckSource::Tie { others } = &tie.source else {
+        unreachable!()
+    };
+    assert_eq!(others.len(), 1);
+    assert_ne!(others[0], used);
+    // The status line of the file counts the tie too, not only the findings.
+    let before = state.to_check_count();
+    assert!(before >= 1);
+    assert_eq!(
+        state.shown_file_status(),
+        stokesforge_app_state::state::ShownFileStatus::Check(before)
+    );
+    // Using the other template settles it.
+    state.template_use(&others[0].clone());
+    assert!(state.to_check().iter().all(|p| !matches!(
+        p.source,
+        stokesforge_app_state::state::ToCheckSource::Tie { .. }
+    )));
+    assert_eq!(
+        state.shown_file_status(),
+        stokesforge_app_state::state::ShownFileStatus::Check(before - 1)
+    );
+}
+
+/// Two templates that fit every `.csv` file equally.
+fn save_two_tied_templates() {
+    let mut store = RecipeStore::default();
+    for name in ["Template A", "Template B"] {
+        store
+            .upsert_with_conditions(
+                ImportRecipe::new(name),
+                vec![stokesforge_import::Condition::Extension {
+                    exts: vec!["csv".into()],
+                }],
+            )
+            .unwrap();
+    }
+    store.save().unwrap();
+}
+
+/// Choosing the other template of a tie is an answer remembered for the kind
+/// of file: later files of that kind use it without raising the tie, it is
+/// listed in Manage Templates, and Forget brings the tie back.
+#[test]
+fn the_template_picked_in_a_tie_is_remembered_for_the_kind_of_file() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    save_two_tied_templates();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    let first = state.template_in_use().unwrap();
+    let other = if first == "Template A" {
+        "Template B"
+    } else {
+        "Template A"
+    };
+    state.template_use(other);
+    assert_eq!(state.template_in_use().as_deref(), Some(other));
+    let answers = state.remembered_answers();
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    assert!(
+        answers[0].doubt_text.contains(other),
+        "{}",
+        answers[0].doubt_text
+    );
+    // Another window, another file of the same kind: the pick is applied.
+    state.cancel_import();
+    import_window_on(&mut state, dir.path(), &[("b.csv", JASCO_SURE)]);
+    assert_eq!(state.template_in_use().as_deref(), Some(other));
+    assert!(
+        state.to_check().iter().all(|p| !matches!(
+            p.source,
+            stokesforge_app_state::state::ToCheckSource::Tie { .. }
+        )),
+        "no tie raised again"
+    );
+    // Forgetting it brings the tie back.
+    let answer = state.remembered_answers().remove(0);
+    state.forget_remembered_answer(&answer.kind, &answer.doubt);
+    state.cancel_import();
+    import_window_on(&mut state, dir.path(), &[("c.csv", JASCO_SURE)]);
+    assert!(state.to_check().iter().any(|p| matches!(
+        p.source,
+        stokesforge_app_state::state::ToCheckSource::Tie { .. }
+    )));
+}
+
+/// A template without unit roles over a file whose header gives the units:
+/// the sentence names the value found and says the template does not use it,
+/// never « not in the file ».
+#[test]
+fn a_template_without_unit_roles_does_not_say_the_unit_is_missing_from_the_file() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    // The header of JASCO_SURE is seven lines, `XYDATA` included.
+    let mut template = ImportRecipe::new("Plain");
+    template.header = HeaderSkip::Lines(7);
+    template.separator = Separator::Semicolon;
+    let mut store = RecipeStore::default();
+    store
+        .upsert_with_conditions(
+            template,
+            vec![stokesforge_import::Condition::Extension {
+                exts: vec!["csv".into()],
+            }],
+        )
+        .unwrap();
+    store.save().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    assert_eq!(state.template_in_use().as_deref(), Some("Plain"));
+    let view = state.import_check().expect("a check view");
+    let finding = view
+        .findings
+        .iter()
+        .find(|f| f.kind == stokesforge_app_state::state::CheckKind::XUnit)
+        .expect("a finding for the unit of X");
+    let text: String = finding
+        .pieces
+        .iter()
+        .map(|piece| match piece {
+            stokesforge_app_state::state::Piece::Text(t) => t.as_str(),
+            stokesforge_app_state::state::Piece::Chip { text, .. } => text.as_str(),
+        })
+        .collect();
+    assert!(
+        text.contains("XUNITS") && text.contains("does not use"),
+        "{text}"
+    );
+    assert!(!text.contains("not in the file"), "{text}");
+}
+
+/// The Advanced fold belongs to one opening of the import window.
+#[test]
+fn each_opening_of_the_import_window_is_a_new_one() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    let first = state.import_opening();
+    state.cancel_import();
+    state.open_import(None::<NodeId>);
+    assert_ne!(first, state.import_opening());
+}
+
+/// Only refused files in the window: nothing to import.
+#[test]
+fn a_window_with_only_refused_files_has_nothing_to_import() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("empty.csv", "")]);
+    assert!(!state.import_has_readable_file());
+    state.cancel_import();
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    assert!(state.import_has_readable_file());
+}
+
+#[test]
+fn start_import_each_reads_each_file_with_its_own_recipe_and_reopen_restores_them() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    // A: semicolons and decimal commas. B: commas and decimal points.
+    let paths = import_window_on(
+        &mut state,
+        dir.path(),
+        &[
+            ("a.csv", "1,5;10,5\n2,5;20,5\n"),
+            ("b.csv", "1.5,10.5\n2.5,20.5\n"),
+        ],
+    );
+    state.import_state_mut().unwrap().destination = ImportDestination::ActiveBook(book);
+    // A correction made on file A, which the detector would not make again.
+    state.import_state_mut().unwrap().recipe.comment_prefix = "%".into();
+    state.set_import_preview_index(1);
+    state.import_state_mut().unwrap().recipe.comment_prefix = "//".into();
+    let action = state.import_finish().unwrap();
+    let Action::StartImportEach { each, .. } = &action else {
+        panic!("one recipe per file")
+    };
+    let used: Vec<_> = each
+        .iter()
+        .map(|(p, r)| (p.clone(), r.separator.clone(), r.comment_prefix.clone()))
+        .collect();
+    assert_ne!(used[0].1, used[1].1, "two kinds, two recipes");
+    assert_eq!((used[0].2.as_str(), used[1].2.as_str()), ("%", "//"));
+    state.dispatch(action);
+    wait_import(&mut state);
+    for (name, first, second) in [("a", 1.5, 10.5), ("b", 1.5, 10.5)] {
+        let sheet = sheet_named(state.tree(), name);
+        let columns = state.visible_columns(sheet);
+        assert_eq!(cell_f64(&state, columns[0].0, 0), first, "{name}");
+        assert_eq!(cell_f64(&state, columns[1].0, 0), second, "{name}");
+    }
+
+    // Reopen Last Import: every file comes back with its own recipe.
+    state.dispatch(Action::ReopenLastImport);
+    let import = state.import_state().expect("the window reopened");
+    assert_eq!(import.paths, paths);
+    let (again, skipped) = state.import_each_recipe();
+    assert_eq!(skipped, 0);
+    let again: Vec<_> = again
+        .iter()
+        .map(|(p, r)| (p.clone(), r.separator.clone(), r.comment_prefix.clone()))
+        .collect();
+    assert_eq!(again, used);
+}
+
+#[test]
+fn the_detector_runs_once_per_file_whatever_the_number_of_reads() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", JASCO_DOUBTS), ("b.csv", JASCO_SURE)],
+    );
+    for _ in 0..100 {
+        let _ = state.import_auto_info();
+        let _ = state.import_check();
+        let _ = state.import_file_map();
+        let _ = state.import_parsed_current();
+        let _ = state.to_check();
+        let _ = state.import_file_marks();
+        let _ = state.import_encoding();
+    }
+    state.set_import_preview_index(1);
+    for _ in 0..100 {
+        let _ = state.import_check();
+        let _ = state.to_check();
+    }
+    assert_eq!(state.import_state().unwrap().auto.sniff_runs, 2);
+}
+
+#[test]
+fn a_drop_without_a_point_to_check_imports_and_with_one_opens_the_window() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sure = write_csv(dir.path(), "sure.csv", JASCO_SURE);
+    let doubts = write_csv(dir.path(), "doubts.csv", JASCO_DOUBTS);
+
+    // Nothing to check: imported at once, no window.
+    let before = state.worksheets_of(book).len();
+    state.dispatch(Action::DropFiles {
+        paths: vec![sure],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    assert!(state.import_state().is_none());
+    assert_eq!(state.worksheets_of(book).len(), before + 1);
+
+    // A point to check: nothing imported, the window opens on the file.
+    state.dispatch(Action::DropFiles {
+        paths: vec![doubts.clone()],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    assert_eq!(state.worksheets_of(book).len(), before + 1);
+    assert_eq!(
+        state.import_state().expect("window").paths,
+        vec![doubts.clone()]
+    );
+    assert!(point_ids(&state).contains(&"check-x-prime".to_string()));
+
+    // The answers are remembered: the same kind of file now imports at once.
+    for id in point_ids(&state) {
+        state.to_check_mark(&id);
+    }
+    state.cancel_import();
+    state.dispatch(Action::DropFiles {
+        paths: vec![doubts],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    assert!(
+        state.import_state().is_none(),
+        "the doubt is not raised again"
+    );
+    assert_eq!(state.worksheets_of(book).len(), before + 2);
+}
+
+#[test]
+fn the_guide_shows_until_dont_show_again_and_show_guide_brings_it_back() {
+    use stokesforge_app_state::preferences::Preferences;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("preferences.json");
+    let session = Session::spawn(Project::new("Guide").unwrap(), None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        dir.path().join("projet.stf").display().to_string(),
+        Preferences::load_from(Some(file.clone())),
+    )
+    .unwrap();
+    state.open_import(None::<NodeId>);
+    assert!(state.import_guide_open(), "shown the first time");
+    state.import_guide_close();
+    assert!(!state.import_guide_open());
+    state.open_import(None::<NodeId>);
+    assert!(state.import_guide_open(), "every time until it is ticked");
+
+    state.import_guide_dont_show_again();
+    assert!(!state.import_guide_open());
+    state.open_import(None::<NodeId>);
+    assert!(!state.import_guide_open(), "ticked: not shown");
+    state.import_guide_show();
+    assert!(state.import_guide_open(), "Show Guide brings it back");
+    // The choice is in the preferences file, not in a temporary file.
+    assert!(Preferences::load_from(Some(file.clone())).import_guide_hidden());
+    // Closed with the box unticked, the guide comes back with the next window.
+    state.import_guide_finish(false);
+    assert!(!state.import_guide_hidden());
+    assert!(!Preferences::load_from(Some(file)).import_guide_hidden());
+    state.open_import(None::<NodeId>);
+    assert!(state.import_guide_open(), "unticked: shown again");
+    session.shutdown().unwrap();
+}
+
+#[test]
+fn a_change_in_the_advanced_group_produces_its_sentence() {
+    use stokesforge_app_state::state::AdvancedChange;
+    use stokesforge_import::{BlockSplit, DateOrder};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", "1,10\n2,20\n")]);
+    let before = state.import_advanced_sentences();
+    for (change, expected) in [
+        (
+            AdvancedChange::DateOrder(DateOrder::MonthFirst),
+            stokesforge_app_state::tr!("import-advanced-sentence-date-month-first"),
+        ),
+        (
+            AdvancedChange::SkipChars(3),
+            stokesforge_app_state::tr!("import-advanced-sentence-skip-chars", count = 3usize),
+        ),
+        (
+            AdvancedChange::Blocks(BlockSplit::BlankLines),
+            stokesforge_app_state::tr!("import-advanced-sentence-blocks-blank"),
+        ),
+        (
+            AdvancedChange::MissingValues("n/a, --".into()),
+            stokesforge_app_state::tr!("import-advanced-sentence-missing", tokens = "n/a, --"),
+        ),
+        (
+            AdvancedChange::CommentPrefix("#".into()),
+            stokesforge_app_state::tr!("import-advanced-sentence-comment", prefix = "#"),
+        ),
+        (
+            AdvancedChange::SkipLines(2),
+            stokesforge_app_state::tr!("import-advanced-sentence-skip-lines", count = 2usize),
+        ),
+        (
+            AdvancedChange::SheetNameFromFile(true),
+            stokesforge_app_state::tr!("import-advanced-sentence-sheet-name"),
+        ),
+    ] {
+        assert!(
+            !state.import_advanced_sentences().contains(&expected),
+            "{expected} is not there yet"
+        );
+        state.import_set_advanced(change);
+        let after = state.import_advanced_sentences();
+        assert!(after.contains(&expected), "{expected} in {after:?}");
+    }
+    assert!(state.import_advanced_sentences().len() >= before.len() + 7);
+    assert!(state.import_advanced().iter().all(|row| row.set));
+}
+
+#[test]
+fn a_saved_template_has_the_automatic_conditions_each_one_uncheckable() {
+    use stokesforge_import::Condition;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_DOUBTS)]);
+    state.template_save_open();
+    let draft = state.template_save_draft().unwrap().clone();
+    let sentences: Vec<&str> = draft
+        .automatic
+        .iter()
+        .map(|c| c.sentence.as_str())
+        .collect();
+    assert!(
+        draft.automatic.iter().all(|c| c.on),
+        "all checked: {sentences:?}"
+    );
+    let has = |f: &dyn Fn(&Condition) -> bool| draft.automatic.iter().any(|c| f(&c.condition));
+    assert!(has(
+        &|c| matches!(c, Condition::Origin { name } if name.starts_with("JASCO"))
+    ));
+    assert!(has(&|c| matches!(c, Condition::DataType { .. })));
+    assert!(has(&|c| matches!(c, Condition::Marker { .. })));
+    assert!(has(&|c| matches!(c, Condition::Numbers { .. })));
+    assert!(has(&|c| matches!(c, Condition::Kinetic)));
+    assert!(!draft.name.is_empty(), "a name is proposed");
+    // Unchecking all of them and adding none: refused, with its reason.
+    for c in &mut state.template_save_draft_mut().unwrap().automatic {
+        c.on = false;
+    }
+    assert_eq!(
+        state.template_save_issue(),
+        Some(stokesforge_import::SaveIssue::NoCondition)
+    );
+    // Only the origin left: saved, and a later JASCO file meets it.
+    state.template_save_draft_mut().unwrap().automatic[0].on = true;
+    state.template_save_commit();
+    assert!(!state.status().unwrap().is_error());
+    let store = RecipeStore::load();
+    let name = store.recipes()[0].name.clone();
+    assert_eq!(store.conditions(&name).len(), 1);
+    // The answers in doubt when it was saved are settled for that kind.
+    assert!(state.to_check().is_empty());
+}
+
+#[test]
+fn a_recipe_from_a_template_saved_before_join_lines_reads_the_joined_lines() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    // Two templates saved before the field: they read the first line only.
+    let mut store = RecipeStore::default();
+    for name in ["Old A", "Old B"] {
+        let mut old = ImportRecipe::new(name);
+        old.subheader_roles.join_lines = false;
+        old.auto_match.extensions = vec!["csv".into()];
+        let conditions = stokesforge_import::templates::conditions_from_auto_match(&old.auto_match);
+        store.upsert_with_conditions(old, conditions).unwrap();
+    }
+    store.save().expect("writes the isolated templates");
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", "1,10\n2,20\n")]);
+    let import = state.import_state().unwrap();
+    assert!(
+        import.recipe.name.starts_with("Old"),
+        "a template was applied"
+    );
+    assert!(import.recipe.subheader_roles.join_lines);
+}
+
+#[test]
+fn a_role_given_to_lines_is_written_to_the_recipe_and_given_back_by_the_same_click() {
+    use stokesforge_app_state::state::{GridCmd, LineRoleCmd};
+    use stokesforge_import::DataEnd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_SURE)]);
+    // Line 9 is the first data line of the file; line 8 is XYDATA.
+    state.import_grid_cmd(GridCmd::Role(LineRoleCmd::Units, vec![5]));
+    let roles = &state.import_state().unwrap().recipe.subheader_roles;
+    assert!(roles.unit.is_some(), "XUNITS line marked as the units");
+    let spans = state.import_spans().unwrap();
+    assert!(spans.carries(LineRoleCmd::Units, 5));
+    // The same role on the same line again takes it back.
+    state.import_grid_cmd(GridCmd::Role(LineRoleCmd::Units, vec![5]));
+    assert!(state
+        .import_state()
+        .unwrap()
+        .recipe
+        .subheader_roles
+        .unit
+        .is_none());
+    // The end of the data on a data line: the data stop after it.
+    state.import_grid_cmd(GridCmd::Handle { first: 9, last: 10 });
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        DataEnd::LinesAfterHeader(2)
+    );
+    // The same column role again goes back to Auto.
+    state.import_grid_cmd(GridCmd::ColumnText(vec![1]));
+    assert_eq!(
+        state.import_state().unwrap().recipe.column_kind(1),
+        stokesforge_import::ColumnKind::Text
+    );
+    state.import_grid_cmd(GridCmd::ColumnText(vec![1]));
+    assert_eq!(
+        state.import_state().unwrap().recipe.column_kind(1),
+        stokesforge_import::ColumnKind::Auto
+    );
+}
+
+#[test]
+fn a_long_data_zone_folds_and_the_rows_keep_every_other_line() {
+    use stokesforge_app_state::state::{build_rows, fold_range, row_of_line, Row, FOLD_KEEP};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let mut text = String::from("TITLE;x\nXYDATA\n");
+    for i in 0..100 {
+        text.push_str(&format!("{};{}\n", 800 - i, i));
+    }
+    import_window_on(&mut state, dir.path(), &[("long.csv", &text)]);
+    let map = state.import_file_map().unwrap();
+    let map = map.as_ref().as_ref().unwrap();
+    let (from, to) = fold_range(map).expect("100 data lines fold");
+    let (first, last) = map.data_range.unwrap();
+    assert_eq!((from, to), (first + FOLD_KEEP, last - FOLD_KEEP));
+    let rows = build_rows(map, false, None);
+    assert_eq!(rows.len(), map.line_count() - (to - from));
+    assert!(rows.contains(&Row::Fold(from, to)));
+    assert_eq!(build_rows(map, true, None).len(), map.line_count());
+    // A line inside the fold sits on the fold row.
+    assert_eq!(rows[row_of_line(&rows, from + 3)], Row::Fold(from, to));
+}
+
+#[test]
+fn answering_the_review_edits_the_recipe_and_settles_the_doubt_for_the_kind() {
+    use stokesforge_app_state::state::CheckKind;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(&mut state, dir.path(), &[("a.csv", JASCO_DOUBTS)]);
+    state.check_review_start_at(CheckKind::XPrime);
+    let info = state.check_review_info().expect("a doubt to review");
+    assert_eq!(info.finding.kind, CheckKind::XPrime);
+    // Answer 2: the line of times is a line of data.
+    let had_x_prime = state
+        .import_state()
+        .unwrap()
+        .recipe
+        .subheader_roles
+        .x_prime
+        .is_some();
+    assert!(had_x_prime);
+    state.check_answer(1);
+    assert!(state
+        .import_state()
+        .unwrap()
+        .recipe
+        .subheader_roles
+        .x_prime
+        .is_none());
+    assert!(!point_ids(&state).contains(&"check-x-prime".to_string()));
+    assert!(RecipeStore::load()
+        .remembered_answers()
+        .iter()
+        .any(|(_, id)| *id == "check-x-prime"));
+}
+
+// -- F1/F2 and rules instead of counts (#488) --------------------------------
+
+/// F1 of #488: templates of an old store are kept and listed as "not
+/// automatic"; a file their criteria fit does not use them until the user
+/// clicks "Use Automatically" (`template_use_automatically`).
+#[test]
+fn an_old_template_is_not_automatic_until_the_user_turns_it_on() {
+    let _recipes = isolate_recipe_store();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test/import/test_recipes.json"),
+        _recipes.path().join("import_recipes.json"),
+    )
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![fixture_path("jasco_uvvis_semicolon.csv")]);
+    assert_ne!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (semicolon)",
+        "an old template is not picked by itself"
+    );
+    let rows = state.template_rows();
+    let row = rows.iter().find(|r| r.name == "Jasco (semicolon)").unwrap();
+    assert!(row.not_automatic);
+    assert!(!row.conditions.is_empty(), "its conditions are kept");
+
+    state.template_use_automatically("Jasco (semicolon)");
+    assert!(!state
+        .template_rows()
+        .iter()
+        .any(|r| r.name == "Jasco (semicolon)" && r.not_automatic));
+    // Saved: a new window picks it for the same file.
+    state.cancel_import();
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![fixture_path("jasco_uvvis_semicolon.csv")]);
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (semicolon)"
+    );
+}
+
+const JASCO_LIKE_END: &str = "##### Extended Information\nnote\nmore\n";
+
+/// A JASCO-like file: `extra` more header lines before `XYDATA`, `rows` data
+/// lines, a blank line and a footer.
+fn jasco_text(extra: usize, rows: usize) -> String {
+    let mut text = String::from("TITLE;S13\nORIGIN;JASCO\nDATA TYPE;ULTRAVIOLET SPECTRUM\n");
+    for i in 0..extra {
+        text.push_str(&format!("EXTRA{i};x\n"));
+    }
+    text.push_str("XYDATA\n");
+    for i in 0..rows {
+        text.push_str(&format!("{};{},5\n", 800 - i, i));
+    }
+    text.push('\n');
+    text.push_str(JASCO_LIKE_END);
+    text
+}
+
+/// The hand-dragged end of the data is stored as the rule that stops there
+/// (a blank line, a footer line), never as the count of the file it was
+/// dragged on; one template then reads a longer file with a longer header
+/// completely, from the shared entry point and from a file drop.
+#[test]
+fn a_template_saved_on_one_jasco_like_file_reads_all_rows_of_a_longer_one() {
+    use stokesforge_app_state::state::GridCmd;
+    use stokesforge_import::templates::Condition;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let first = write_csv(dir.path(), "first.csv", &jasco_text(0, 4));
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![first]);
+    // Header 3 lines + XYDATA: data on lines 5..=8, then a blank line.
+    state.import_grid_cmd(GridCmd::Handle { first: 5, last: 8 });
+    let recipe = state.import_state().unwrap().recipe.clone();
+    assert_eq!(recipe.data_end, stokesforge_import::DataEnd::FirstBlankLine);
+    assert_eq!(recipe.main_until_marker.as_deref(), Some("XYDATA"));
+    // The end before a footer line with no blank line gives that line.
+    let tight = write_csv(
+        dir.path(),
+        "tight.csv",
+        "TITLE;S13\nORIGIN;JASCO\nXYDATA\n1;2\n2;3\n##### Extended Information\n",
+    );
+    state.cancel_import();
+    state.open_import(None::<NodeId>);
+    state.add_import_paths(vec![tight]);
+    state.import_grid_cmd(GridCmd::Handle { first: 4, last: 5 });
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        stokesforge_import::DataEnd::Marker("##### Extended Information".into())
+    );
+    state.cancel_import();
+
+    // One template, a second file with 6 more header lines and 40 rows.
+    let mut store = stokesforge_import::RecipeStore::load();
+    store
+        .upsert_with_conditions(
+            recipe,
+            vec![Condition::Extension {
+                exts: vec!["csv".into()],
+            }],
+        )
+        .unwrap();
+    store.save().unwrap();
+    let second_text = jasco_text(6, 40);
+    let second = write_csv(dir.path(), "second.csv", &second_text);
+    let store = stokesforge_import::RecipeStore::load();
+    let chosen =
+        stokesforge_import::recipe_for_file(&store, &second, second_text.as_bytes(), None).unwrap();
+    let table = stokesforge_import::parse(second_text.as_bytes(), &chosen.recipe).unwrap();
+    assert_eq!(table.row_count(), 40, "all rows of the longer file");
+
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::DropFiles {
+        paths: vec![second],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    let sheet = sheet_named(state.tree(), "S13");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(column_len(&state, columns[0].0), 40);
+}
+
+/// A hand-dragged end in the middle of the data (a number follows) keeps the
+/// count: no rule fits.
+#[test]
+fn a_hand_dragged_end_in_the_middle_of_the_data_keeps_the_count() {
+    use stokesforge_app_state::state::GridCmd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", "1,10\n2,20\n3,30\n4,40\n")],
+    );
+    state.import_grid_cmd(GridCmd::Handle { first: 1, last: 2 });
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        stokesforge_import::DataEnd::LinesAfterHeader(2)
+    );
+}
+
+/// A hand-moved start is anchored on the last line of the header when it is
+/// text, so a file with a longer header still starts at its data.
+#[test]
+fn a_hand_moved_start_is_anchored_on_the_header_line_before_it() {
+    use stokesforge_app_state::state::GridCmd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", "Title text\nnotes here\n1,10\n2,20\n3,30\n")],
+    );
+    assert_eq!(
+        state.import_state().unwrap().recipe.main_until_marker,
+        None,
+        "the detector found no marker: the anchor is the hand move's"
+    );
+    state.import_grid_cmd(GridCmd::Handle { first: 3, last: 5 });
+    let recipe = state.import_state().unwrap().recipe.clone();
+    assert_eq!(recipe.main_until_marker.as_deref(), Some("notes here"));
+    let longer = "Title\nextra 1\nextra 2\nextra 3\nnotes here\n1,10\n2,20\n3,30\n4,40\n5,50\n";
+    let table = stokesforge_import::parse(longer.as_bytes(), &recipe).unwrap();
+    assert_eq!(table.row_count(), 5);
+}
+
+/// Never silent: a template that fixes a number of lines says so in the
+/// Save as Template window; one made of rules says nothing.
+#[test]
+fn save_as_template_warns_about_a_fixed_number_of_lines() {
+    use stokesforge_app_state::state::GridCmd;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    import_window_on(
+        &mut state,
+        dir.path(),
+        &[("a.csv", "1,10\n2,20\n3,30\n4,40\n")],
+    );
+    state.import_grid_cmd(GridCmd::Handle { first: 1, last: 2 });
+    state.template_save_open();
+    let warnings = state.template_save_draft().unwrap().warnings.clone();
+    assert_eq!(
+        warnings,
+        [stokesforge_app_state::tr!(
+            "import-template-warn-data-count",
+            count = 2usize
+        )]
+    );
+    assert!(warnings[0].contains('2'), "{}", warnings[0]);
+    state.template_save_cancel();
+    state.cancel_import();
+
+    // Rules (the marker, the blank line): nothing to warn about.
+    import_window_on(&mut state, dir.path(), &[("b.csv", &jasco_text(0, 4))]);
+    state.import_grid_cmd(GridCmd::Handle { first: 5, last: 8 });
+    state.template_save_open();
+    assert!(state.template_save_draft().unwrap().warnings.is_empty());
+}
+
+#[test]
+fn the_count_warnings_name_each_fixed_count() {
+    use stokesforge_app_state::state::template_count_warnings;
+    use stokesforge_import::{DataEnd, ImportRecipe};
+    let mut recipe = ImportRecipe::new("x");
+    assert!(template_count_warnings(&recipe).is_empty());
+    recipe.data_end = DataEnd::LinesBeforeEnd(3);
+    recipe.header_layout.main_header_lines = 5;
+    assert_eq!(template_count_warnings(&recipe).len(), 2);
+    recipe.main_until_marker = Some("XYDATA".into());
+    assert_eq!(template_count_warnings(&recipe).len(), 1);
+}
+
+/// Every setting that is a line number of the file warns; the same settings
+/// carried by a marker do not (the sub-header roles then count from it).
+#[test]
+fn the_count_warnings_cover_every_line_based_setting() {
+    use stokesforge_app_state::state::template_count_warnings;
+    use stokesforge_import::{ImportRecipe, SubheaderLineRange};
+    let mut recipe = ImportRecipe::new("x");
+    recipe.header_layout.main_header_lines = 3;
+    recipe.header_layout.subheader_lines = 2;
+    recipe.subheader_roles.long_name = Some(SubheaderLineRange::single(1));
+    recipe.subheader_roles.unit = Some(SubheaderLineRange::single(2));
+    recipe.subheader_roles.x_prime = Some(SubheaderLineRange::single(2));
+    recipe.skip_data_rows = 2;
+    recipe.footer_skip_lines = 4;
+    let by_line = template_count_warnings(&recipe);
+    // header count, skipped rows, footer, three roles
+    assert_eq!(by_line.len(), 6, "{by_line:?}");
+    assert!(by_line.iter().any(|w| w.contains("line 4")), "{by_line:?}");
+    recipe.main_until_marker = Some("XYDATA".into());
+    let by_rule = template_count_warnings(&recipe);
+    assert_eq!(
+        by_rule.len(),
+        2,
+        "only the skipped rows and the footer: {by_rule:?}"
+    );
+}
+
+/// Sub-header roles count from the marker, not from the top of the file: a
+/// longer header before the marker does not move the Long Name line.
+#[test]
+fn sub_header_roles_follow_the_marker_with_two_header_lengths() {
+    use stokesforge_import::{ImportRecipe, Separator, SubheaderLineRange};
+    let mut recipe = ImportRecipe::new("x");
+    recipe.separator = Separator::Comma;
+    recipe.main_until_marker = Some("XYDATA".into());
+    recipe.header_layout.subheader_lines = 1;
+    recipe.subheader_roles.long_name = Some(SubheaderLineRange::single(1));
+    for header in ["TITLE\nXYDATA\n", "TITLE\nA\nB\nC\nXYDATA\n"] {
+        let text = format!("{header}Absorbance,Time\n1,2\n3,4\n");
+        let table = stokesforge_import::parse(text.as_bytes(), &recipe).unwrap();
+        assert_eq!(table.row_count(), 2, "{header:?}");
+        assert_eq!(table.columns.len(), 2);
     }
 }

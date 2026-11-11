@@ -121,7 +121,9 @@ selection of whole rows of a sheet with x' (right-click on a row number,
 Workbook menu), Plot creates a graph of rows (`Action::PlotRows`, same plot
 types) and Send to sends the rows (same axis question as on drop);
 the column menu is no longer offered in this case. Without x', a selection of
-rows keeps the menu of the columns they cross.
+rows keeps the menu of the columns they cross for **Plot / Send to / drag and
+drop** (`row_drag_payload` is `None`, `status-row-no-x-prime`); the **analysis**
+no longer falls back to those columns (#493), see below.
 
 **Analyzing a row (#253).** `Analysis ▸` is active on a "row" curve (right-click
 on the curve, Object Manager, Graph › Selection, same menu everywhere) and on
@@ -130,8 +132,14 @@ gesture does not analyze the row: it creates or completes the **linked transpose
 ("Sheet1ᵀ"), then opens the window on its "Row N" column. The result follows a column
 (results workbook, "Replace original data" acts on the column of the transposed sheet,
 no series is added to the graph of rows). A group that mixes column curves and
-row curves is disabled (`analysis-needs-same-curves`). A Y column of the sheet without x', or
-a text column, makes the gesture refuse, naming it by its letter. The transposed sheet carries
+row curves is disabled (`analysis-needs-same-curves`). A text column makes the gesture refuse, naming it by its letter, and so does a Y
+column without x' when **others have one** (partial x'). When **no** Y column has
+an x' (#493: `AppState::analysis_rows_target`, whole rows of a sheet with a Y
+column), the sheet is transposed all the same with x' = 1, 2, 3... (the rank of the
+Y columns, "Column number", only in the transposed sheet) and the
+"No x' Values" alert is raised after every such analysis (it offers Cancel
+Analysis); the right-click of those rows is the rows menu with Plot and Send to
+grayed out ("Set x' values to plot a row"), Analysis active. The transposed sheet carries
 a band at the top of the grid (`app/transpose_ui.rs`): origin, "Out of date" when the
 source has changed, "Values edited" when a value of a linked column has been edited, and
 Recalculate (Relink with confirmation in the latter case). Model details:
@@ -879,7 +887,14 @@ cursors, so outside the mode the plot area of a Free layer behaves like a Regula
 graph's: a plain drag does nothing. The mode signals `GraphEvent::LayoutEdited`,
 which `graph_window.rs` turns into `Action::SetFreeLayout` (one `EditPlotSpec`,
 `PlotEditKind::MoveLayer` when only positions change, `ResizeLayer` when a size does,
-`ResizeFigure` when the page does). `FigureFollow` also remembers the image's origin (`free_origin`):
+`ResizeFigure` when the page does). On a **Regular Grid** (#491) a drag that starts inside a graph, off
+every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` becomes `Action::MoveGridCell`
+(one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
+hole; or `MoveTarget::Beside` a cell, a new column or row made by `open_line`, the same code as
+`insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
+uses too. Only the `row` / `column` of the moved layers change, never the layer numbers. The edge bands
+(`stokesforge_render_egui::edge_band`) are shared with the drop of workbook columns in `graph_window.rs`.
+`FigureFollow` also remembers the image's origin (`free_origin`):
 `observe` returns a step when the origin moves while the size stays, and the
 shell moves the floating window by the shift at the kept scale
 (`FigureFollow::origin_follow`, `shifted_corner`); Undo and Redo go through the

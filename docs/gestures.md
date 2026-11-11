@@ -72,7 +72,8 @@ bands are 6 + 20 + 20 screen px wide in both placements; every inner reach is
 | Drag | line between two columns or two rows, **Regular Grid** | the column (row) trades size with its neighbour on the other side of the line; the figure keeps its size; one `SetGridFrames` (`Resize Cell`) |
 | Drag | corner shared by several graphs, Regular Grid | moves every internal line it lies on (middle of a 2x2: column and row together); a corner on one line and on the figure's edge moves that line, one-axis cursor |
 | Drag | L-shaped corner of the figure, either placement | scales the figure (one factor per axis, bands frozen); with the padlock closed the axis that moved most relatively leads and the other follows (`locked_corner_delta`); `Resize Figure` |
-| Drag, arrows | inside a graph, Regular Grid | nothing: no move, no single-graph resize, no nudge |
+| Drag | inside a graph (off every handle), **Regular Grid**, editable grid (#491) | moves the graph; nothing changes until the release. The target cell under the pointer is outlined (screen only): a graph there swaps places with it, an empty cell takes the graph. The right and bottom edge bands of the figure (`EDGE_BAND_WIDTH`, the bands of the drop of columns, #357, one code in `stokesforge_render_egui::edge_band`) are shown while dragging; released in one, the graph goes into a **new column** (right band) or **new row** (bottom band) beside the cell nearest the pointer. A column or row the move empties disappears with its size (the collapse of Delete Layer, `compose::close_empty_lines`). Release on its own cell or outside the figure: nothing. A click without moving only selects. Boundary, corner and L-corner handles keep priority. One `MoveGridCell` (`Move Layer`); layer numbers never change |
+| Arrows (Shift: still one cell) | Regular Grid, editable grid (#491) | the selected graph moves one cell in that direction (a swap or an empty cell); at the edge of the grid nothing; each key is one `MoveGridCell` |
 | Drag | inside a graph, handles, **Free** | moves / resizes the graph; magnets and the grid snap (**Shift** disables) |
 | Drag | line between two touching graphs, Free | centre band (6 px): both graphs; side band (20 px): the graph on the pointer's side, single arrow |
 | Arrows, Shift + arrows | Free | nudge the selected graphs by one grid step (ten with Shift); a burst is one `SetFreeLayout` 0.7 s after the last key, on leaving the mode or before any strip action |
@@ -198,7 +199,10 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 | Click | field arrow | opens the list |
 | Click, drag | square, wheel, bar of the color picker (`color_picker.rs`) | chooses the color |
 | Right-click | swatch of a saved color | removes it |
-| Right-click | row number of the import preview (`app/import_wizard.rs`) | row menu |
+| Wheel | file grid of the import (`app/import_wizard/grid.rs`) | scrolls the grid; Shift + wheel scrolls sideways; a role bar or menu open on a selection closes |
+| Click, drag | line numbers and cells of the file grid | selects lines, cells or columns; the role bar opens beside the selection |
+| Right-click | selection of the file grid | the same roles as a menu |
+| Wheel, hover | import screen under Save as Template, Manage Templates or Forget Template (`app/import_wizard.rs`) | not taken: the screen below is painted with the pointer and the wheel hidden, only the open window reacts |
 
 ## The guard
 
@@ -226,7 +230,8 @@ Surfaces read (paths relative to `src/`; `render-egui/` for
 - `app/tab_strip.rs`: the tabs;
 - `app/window_chrome.rs`: the windows;
 - `number_field.rs`, `color_picker.rs`: the fields;
-- `app/import_wizard.rs`: the import preview.
+- `app/import_wizard/grid.rs`: the file grid of the import;
+- `app/import_wizard.rs`: the import screen, which hides the wheel from itself under its template windows.
 
 ## Verification (2026-10-20)
 
@@ -289,5 +294,5 @@ Alt+Down are swallowed (`app/list_row.rs` `read_navigation`), the background
 right-click opens the settings. Not confirmed: an actual drag-and-drop
 reorder of OM rows with the mouse (read only through the unit tests), the
 Ctrl + wheel of the grid, and the right-click menu of the import preview row
-number (the code attaches a context menu to the row number, `app/import_wizard.rs`,
+number (the code attaches a context menu to the selection, `app/import_wizard/grid.rs`,
 but its content was not read).

@@ -325,15 +325,23 @@ Set the **Response shift** if the response and the signal are offset. The output
 
 Analyses work on columns. To analyse a row, for example a spectrum recorded across several columns, StokesForge transposes it first.
 
-1. Make sure the columns of the sheet have an **x'** value. This is the value that goes on the X axis for a row, such as a time or a wavelength. If you cannot see it, right-click the sheet and tick **Show x' Row**.
+1. Give the columns of the sheet an **x'** value. This is the value that goes on the X axis for a row, such as a time or a wavelength. If you cannot see it, right-click the sheet and tick **Show x' Row**. If no column has an x', StokesForge numbers them 1, 2, 3… in the order of the sheet and says so in a **No x' Values** window (see below).
 2. Select the whole rows and right-click.
 3. Choose **Analysis** and a category.
 
 StokesForge adds a linked sheet named like the source with a `ᵀ` suffix. It holds the x' values and one column per row, called **Row N**. The analysis then runs on those columns like on any other. If you cancel the analysis window, nothing is added.
 
-Only numeric columns can be transposed. A message names the column, by its letter, when it has no x' value or contains text.
+Only numeric columns can be transposed. A message names the column, by its letter, when it contains text, or when it has no x' value while other columns have one.
 
-The transposed sheet shows a banner **Transposed from** followed by the source name. It is a snapshot, not a live view. The banner shows **Out of date** when the source changed, and **Values edited** when you typed in the linked columns. Press **Recalculate** to refresh the sheet from its source. After you edited values, the button is **Relink**: it also erases your edits, and asks for confirmation first. Undo brings them back.
+When no column has an x', the analysis still runs: the x' column of the linked sheet, named **Column number**, holds 1, 2, 3… for the Y columns in the order of the sheet, and a **No x' Values** window tells you so. Press **Close** to carry on, or **Cancel Analysis** to stop and remove the linked sheet. Your sheet is not changed. If you give every column an x' later, the linked sheet is **Out of date** (or follows by itself) and takes them. If you remove every x' from a sheet that had them, the linked sheet keeps its numbers and reads **Out of date**, even when it follows its source; **Recalculate** then switches it to 1, 2, 3… and shows the same window. Plot and Send to stay greyed out on those rows, with the hint **Set x' values to plot a row**.
+
+<img src="../images/analysis-transposed-sheet.png" alt="The transposed sheet Kinetics: the banner Transposed from Kinetics with the box Recalculate automatically checked, the x' column and one column per row analysed." width="700">
+
+The transposed sheet shows a banner **Transposed from** followed by the source name, and a box **Recalculate automatically**, checked by default. While it is checked, the sheet follows its source: when you change the source, the rows and the analyses that read them update by themselves. Uncheck it to keep a snapshot. A snapshot shows **Out of date** when the source changed, and **Values edited** when you typed in the linked columns. Press **Recalculate** to refresh the sheet from its source. After you edited values, the button is **Relink**: it also erases your edits, and asks for confirmation first. Undo brings them back.
+
+A value you type in a linked column is never overwritten by itself. The whole sheet then stops following until you press **Relink** or undo your typing; the box stays checked. A source column without x' value or with text also stops it, and so does one whose formula reads the transposed sheet (it stays refused, with no values): the banner says **Out of date** and names the column in full on a second line, and the sheet follows again once it is fixed. A sheet saved in that state stays as it is when you open it, until the source really changes. An analysis whose own **Recalculate automatically** box is unchecked is refused too when it reads a followed sheet.
+
+While the box is checked, the source sheet cannot calculate from the transposed sheet, whether by a formula (directly or through another sheet) or by an analysis whose result lands in the source. A formula typed anyway stays empty and is framed in red with the sentence to read. If the source already calculates from the sheet, the box is greyed and its hover names the column: remove that formula to check it. In that state **Recalculate**, **Relink** and analysing a row of the sheet are refused too, with the same sentence ("Column C of Sheet1 calculates from Sheet1ᵀ. Remove that formula to follow"): the sheet keeps its last numbers and stays **Out of date**, instead of being refreshed from empty cells. Uncheck the box, or remove the formula, to refresh it. An unchecked sheet may be refreshed even when the source reads it. Another sheet may read the transposed sheet freely.
 
 ## Analysing curves of a graph
 

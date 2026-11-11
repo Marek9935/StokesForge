@@ -1,360 +1,184 @@
 # Importing data
 
-This page explains how to bring instrument files into a project. You use the **Import Wizard** to tell StokesForge how a file is laid out: delimiter, decimal separator, header lines, columns. A live preview shows the result as you change each setting.
+This page explains how to bring instrument files into a project. You open the **Import** window, a single screen. StokesForge reads the file, tells you what it recognised, and shows the file as a grid. You only act where it is not sure, or where you want something different.
 
 You can import several files at once. You can also save your settings as a template and reuse it for every file from the same instrument.
 
+<img src="../images/import-overview.png" alt="The Import window on a JASCO file: the file tab, what was recognised, the offer to save the settings, what was found at the left, and the file as a grid with its line numbers, roles and the data handles at the right." width="1000">
+
 ## What you can import
 
-StokesForge reads **delimited text files**: CSV, TXT, ASC, and any other text export from an instrument. The file extension does not matter. The file picker shows all files.
-
-It does not matter which instrument wrote the file. You describe the layout with the wizard settings. StokesForge has no built-in template for a given instrument. You save your own (see [Templates](#templates)).
+StokesForge reads **delimited text files**: CSV, TXT, ASC, and any other text export from an instrument, and **JCAMP-DX** files. It looks at what the file contains, never at its extension. The file picker shows all files.
 
 A few things to know:
 
-- Files can be encoded in UTF-8, UTF-16 or Windows-1252. The default **Auto** setting detects this.
-- A binary file is refused with the message "The file is not readable text".
-- An empty file is refused with "The file is empty".
+- Files can be encoded in UTF-8, UTF-16 or Windows-1252. StokesForge detects this.
+- **NMR is not supported.** A file that holds NMR data (JCAMP-DX) is refused with the message "This file holds NMR data (JCAMP-DX). StokesForge does not read NMR spectra." If a file mixes an NMR block with other spectra, the other spectra are read and a point to check says that the NMR blocks were left out.
+- A binary file is refused: "This file is not text (the format of the device software). Export it as CSV or TXT from that software, then import that file."
+- An empty file is refused, and so is a file with no line of numbers.
+- A refused file never stops the others: in a batch, it is marked **Refused** on its tab, skipped, and listed in the message at the end.
 - A column that mixes numbers and text is **not** an error. StokesForge keeps it, with the type **Mixed**.
 - Origin projects (`.opj`) are not text files. They open their own window, described in [Origin projects (.opj)](#origin-projects-opj).
 - Project files (`.stf`) are never imported. If you drop one on the window, it opens as a project in a new window.
 
-## Open the Import Wizard
-
-You have three ways to start an import.
+## Open the Import window
 
 ### From the menu
 
 1. Choose **File ▸ Import ▸ Import…**.
-2. In the first step, click **Add Files…** and pick one or more files.
-3. Check the preview, adjust the settings if needed, then click **Finish**.
+2. Click **Add Files…** and pick one or more files.
+3. Look at what was recognised, deal with the points to check if you want to, then click **Import**. If none of the files can be read, **Import** is greyed out ("None of these files can be read").
 
 The shortcut is <kbd>Ctrl</kbd>+<kbd>"</kbd>. On an AZERTY keyboard, press <kbd>Ctrl</kbd>+<kbd>3</kbd> (the key that types `"`). On a QWERTY keyboard, press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>'</kbd>.
+
+**Cancel**, <kbd>Esc</kbd> or the close cross closes the window without importing. <kbd>Enter</kbd> runs **Import**.
 
 ### By dropping files
 
 Drag files from your file manager onto the main window. The border of the window that receives the files turns light blue. Only one window is lit at a time.
 
-- StokesForge picks a template for each file. It uses the saved template that recognizes the file (see [Let a template pick itself](#let-a-template-pick-itself)). Otherwise it uses the template of the last import in this session. Otherwise it uses the default settings.
-- The wizard does not open. The files are imported straight away.
-- A message in the status bar names the template used.
-- If a file gives no numeric value with these settings, the wizard opens instead, with the file already added, so you can fix the settings.
+- StokesForge reads each file with the saved template that recognises it (see [Templates](#templates)), and otherwise with what it detected in the file.
+- **If nothing needs a look, the window does not open.** The files are imported straight away, and a message in the status bar names the templates used.
+- **If one file has a point to check** (or cannot be read), nothing is imported yet: the window opens on **all** the dropped files, each with its own settings, so you can look at it.
+- A point you already answered for a kind of file is not raised again for the next file of that kind (see [Answers remembered](#answers-remembered)), so the window does not open for nothing.
 
 Where the data goes depends on where you drop:
 
 - On an open workbook (its own border is lit): one new sheet per file, in that workbook.
 - Anywhere else (a graph, a note, a matrix, the Project Manager; the outline of the main window is lit): a new workbook.
 
-A drop always creates new sheets. It never replaces or extends a sheet.
-
-If the wizard is already open, dropped files are added to its list.
+A drop always creates new sheets. It never replaces or extends a sheet. If the window is already open, dropped files are added to its list.
 
 ### Reopen the last import
 
-Choose **File ▸ Import ▸ Reopen Last Import…**. The wizard opens again with the same files and settings, so you can adjust and rerun.
+Choose **File ▸ Import ▸ Reopen Last Import…**. The window opens again with the same files, each with its own settings, so you can adjust and rerun.
 
-If that import is still the last thing you did, StokesForge undoes it first. If you have done other work since, the previous import stays in place.
+If that import is still the last thing you did, StokesForge undoes it first. If you have done other work since, the previous import stays in place. This entry is greyed out until you have finished an import.
 
-This entry is greyed out until you have finished an import.
+## The screen
 
-## The wizard at a glance
+The window has two halves.
 
-The wizard is a window with six steps. The file preview stays on the right at every step.
+- At the **left**: what StokesForge understood about the file, in sentences. First the format (**Delimiter**, **Decimal separator**, **Thousands separator**, **Encoding**), then the points to check, then **What was found**, then the **Advanced** fold.
+- At the **right**: the file as a grid, with the **File** and **Result** tabs. **File** shows the lines of the file with their numbers. **Result** shows the worksheet that will be created. Under the grid, a line starting with "You get" sums it up (how many sheets, columns and rows).
 
-| Step | What you set |
-|---|---|
-| 1. **Files and Template** | The files, and the template to start from |
-| 2. **Format** | Delimiter, numbers, comments, blocks, encoding, skipped lines |
-| 3. **Header and Data End** | Header lines, subheader lines, where the data stops, column names |
-| 4. **Columns** | The role and the type of each column |
-| 5. **Metadata** | The header and footer information to keep |
-| 6. **Destination** | Where the data goes, and saving a template |
+Above them, one tab per file. With many files, the strip stays usable: filter the files by name, move with **Previous file** and **Next file**, and the tabs that do not fit are folded in a "+ n more" button. A tab says **Ready** or **Refused**.
 
-Use **Back** and **Next** to move between steps. **Cancel**, <kbd>Esc</kbd> or the close cross closes the wizard without importing.
+At the bottom, two menus and two buttons: **To:** (where the data goes), **Template:** (which template is used), **Cancel** and **Import**. **Import** is never greyed out because of a doubt: when points are left to check, the footer says "n points not checked", and you import anyway if you accept them.
 
-**Finish** imports with the settings as they are. You do not have to visit every step. For a file format you already know, a template makes it two clicks: pick the file, click **Finish**. <kbd>Enter</kbd> also runs **Finish**.
+### What was found
 
-## The live preview
+The groups **Data**, **Columns** and **Sheet** list what StokesForge read, each row with the line it comes from: the lines of data, the number of points, the column names, the x' line (the times of a kinetic), the Long Name, the units of X and Y, the Comments, the footer, and the name of the sheet. A sheet takes the name of the file, or the value of a title key such as `TITLE` when the file has one.
 
-The preview lists the lines of the file. Each line is coloured by its role, and a legend names the roles:
+Hover a row, and its line is framed in the grid. A long value is cut with "…": hover it to read it whole. Click a value to correct it: a small window lets you pick another line, or another key of the file.
 
-- **Header**: lines skipped or used for names, units and so on.
-- **Data**: lines that become cells.
-- **Footer**: lines after the end of the data.
-- **Comment line**: lines that start with your comment prefix.
-- **Skipped line**: data lines you chose to skip.
+### Give a line a role
 
-The preview updates as you change a setting. A line under the preview tells you how many data lines it shows, out of how many the file has.
+You do not need a dialog to say what a line is. In the grid:
 
-If you add several files, each one appears in the list of step 1 with its number of rows, or with the reason it cannot be read. Select a file with its radio button to preview it. Click <img class="icon" src="../images/icons/x.neutral.svg" alt=""> **Remove** to remove it.
+- Click a **line number**. A small bar offers the role of the line: **Long Name**, **Units**, **x'**, **Data starts here**, **Data ends here**, or **Clear role**. The bar closes by itself when the pointer leaves it or when the grid scrolls.
+- Click a **value** to use it, for example `NANOMETERS` as the units of X.
+- Click a **column letter** to give a column a role (X, Y, error…) or to read it as **Text**.
+- Drag the two **data handles** at the left of the grid to move the first and the last line of data.
+- The small **auto** tag beside an automatic choice takes the choice back. It never deletes it.
 
-### Set the import from the preview
+<img src="../images/import-correction.png" alt="The Import window on a kinetic file, with the correction window of the Data row open: First data line and Last data line." width="1000">
 
-You can right-click a line in the preview to set the import at that place. The menu offers:
+### The first-use guide
 
-- **Start Data Here**: the line becomes the first data line. The lines above it become the header.
-- **Use as Units Line**: the line becomes the units line.
-- **End Data Here**: the data stops at that line.
-- **Disable Auto Data End**: turns off the automatic end of data.
+Over the grid, a short guide explains the three gestures above: click a line number, click a value, hover a sentence on the left. It stays small, and never blocks the grid. It shows every time you open the window, until you click **Don't show again**. **Show Guide** (top right of the grid) brings it back.
 
-**End Data Here** is available only on a data or footer line. **Disable Auto Data End** is available only while the automatic end is on.
+## Points to check
 
-These entries change the same settings you find in the steps below.
+When StokesForge is not sure, it says so in an orange frame titled "n points to check". The doubt is a sentence, for example "Line 8 is x′ (the times)" or "All 5 curves are called Kinetic S13". The detector also raises its own doubts: text lines inside the data, several blocks of numbers in one file, a comma that may be a decimal, a JCAMP-DX table it cannot read fully, or two templates that fit the file equally. StokesForge never picks one of several blocks of numbers silently.
 
-## Step 1: files and template
+<img src="../images/import-to-check.png" alt="The Import window on a kinetic file: the orange frame '2 points to check' with a Mark as Checked button beside each sentence and the Check Now button, and the To check tags in the rows of What was found." width="1000">
 
-<img src="../images/import-wizard-files.png" alt="Step 1 of the Import Wizard, Files and Template: the template list and its buttons, the file list, and the preview of the file on the right." width="1000">
+- **Click the sentence** (or the **To check** tag of a row): the file shows where it comes from. This settles nothing.
+- **Mark as Checked**: you looked, and you accept the point as it is. The recipe is not changed.
+- **Check Now**: goes through the doubts one at a time, with the choices for each.
+- A point of the kind "two templates fit" offers a button to use the other template. Your choice is remembered for that kind of file: later files of the kind use the template you picked, and **Reopen Last Import** keeps it (**Manage Templates** lists it under **Answers remembered**, with **Forget**).
 
-### Choose files
+Where the file gives nothing (a unit, for example), the frame says "not in the file". When the file does give it but the template in use has no role for it, the sentence says so ("the file gives nm (XUNITS, line 11), but this template does not use it"). You can fill it in by marking a line in the grid.
 
-Click **Add Files…** and pick one or more files. The window starts in the default import folder (**File ▸ Preferences… ▸ Folders**) the first time, then in the last folder you used; without a default, in the folder of the last file you imported. You can also drop files into the window. **Recent Files…** lists the files you imported lately.
+### Answers remembered
 
-### Choose a template
+Every answer you give (checked, marked, corrected) is remembered for that **kind of file** (the instrument that wrote it, and how it writes numbers). The same point does not come back for the next file of the same kind. This is also what keeps the drop of many files from opening the window every time.
 
-The **Template** list holds the templates you saved. When the wizard opens, it starts on the first saved template. If you have saved none, it starts on a template called "Untitled" with permissive settings.
+You see these answers, and take them back, in **Manage Templates…** under **Answers remembered**: **Forget** brings the point back.
 
-When you change a setting, the template name shows "(modified)", and a note says "Unsaved changes. Save the template in the Destination step".
+## Advanced
 
-| Button | What it does |
-|---|---|
-| **Reset** | Restarts from the default settings. Your files stay in the list. |
-| **Delete…** | Deletes the saved template, after a confirmation. You cannot undo it. Available only for a saved template. |
-| **Export Template…** | Saves the template to a JSON file you can give to a colleague. |
-| **Import Template…** | Loads a template from a JSON file. |
-
-## Step 2: format
-
-<img src="../images/import-wizard-format.png" alt="Step 2 of the Import Wizard, Format: delimiter, numbers, comment lines, blocks, encoding and skipped lines, with the file preview." width="1000">
-
-### Delimiter
-
-The **Delimiter** is the character that separates the values on a line.
-
-| Choice | Use it when |
-|---|---|
-| **Auto** | StokesForge detects the delimiter from the first data line. This is the default. |
-| **Comma** | Values are separated by `,`. |
-| **Semicolon** | Values are separated by `;`. |
-| **Tab** | Values are separated by a tab. |
-| **Whitespace** | Values are separated by one or more spaces. |
-| **Other** | Another character. Type it in the field that appears (for example `|` or `:`). |
-| **Fixed width** | Columns have a set number of characters. Type the width of each column except the last, for example `10,8,8`. The last column takes the rest of the line. |
-
-### Numbers and dates
-
-| Setting | Choices |
-|---|---|
-| **Decimal separator** | **Auto**, **Dot**, **Comma** |
-| **Thousands separator** | **None**, **Space**, **Comma**, **Dot**, **Apostrophe** |
-| **Date order** | **Day, then month** (default), **Month, then day** |
-| **Missing values** | A comma-separated list of words read as empty cells, such as `--, n/a, *, NaN` |
-
-Some points to keep in mind:
-
-- On a new template, **Decimal separator** starts on **Dot**. If your file writes `1,5`, choose **Comma** or **Auto**.
-- With **Auto**, the decimal separator is a comma when a comma appears between two digits and the columns are separated by something else (a semicolon or a tab). Otherwise it is a dot.
-- **Date order** matters for dates such as `03/04/2026`. Dates written `2026-04-03` are not affected.
-- Without **Missing values**, a word like `n/a` makes the column **Mixed**. With it, the cell stays empty and the column stays numeric.
-- **Whitespace** cannot be combined with **Space** as the thousands separator. A number such as `1 234,5` would be cut in two. The wizard shows a message. Choose another delimiter or another thousands separator.
-
-### Comment lines
-
-**Comment prefix** is a text such as `#`, `;` or `//`. Data lines that start with it are skipped. Leave it empty if the file has no comment lines.
-
-### Blocks and encoding
-
-**Blocks** is for a file that holds several data blocks, such as several spectra one after the other, each with its own header.
-
-| Choice | Meaning |
-|---|---|
-| **Single block** | The whole file is one block. This is the default. |
-| **Line starting with** | A new block starts at each line that begins with the text you type (for example `TITLE`). |
-| **Blank lines** | Blocks are separated by empty lines. |
-
-Each block is read with the same settings, header included. Each block becomes its own sheet, or is spread according to the choice in [Several files](#several-files). The preview shows the first block and tells you how many blocks there are.
-
-**Encoding** is **Auto** by default. Choose another value only if accented characters look wrong: **UTF-8**, **Windows-1252**, **ISO 8859-1**, **UTF-16 LE** or **UTF-16 BE**.
-
-With **Auto**, a file that is almost UTF-8 is read as UTF-8, and each invalid byte is read as Windows-1252. In rare cases, a Windows-1252 file contains two bytes that look like a UTF-8 letter, and shows `é` instead of `Ã©`. Choose **Windows-1252** to fix it.
-
-### Skipped lines
+The rare settings are in the **Advanced** fold at the bottom of the left panel, closed by default:
 
 | Setting | Effect |
 |---|---|
-| **Remove leading characters** | Removes this many characters at the start of every data line. Some instruments write a fixed prefix. |
-| **Skip data lines** | Ignores this many lines at the start of the data, after the header. |
+| **Date order** | **Day, then month** (default) or **Month, then day**, for dates such as `03/04/2026`. |
+| **Remove leading characters** | Removes this many characters at the start of every data line. |
+| **Blocks** | **Single block** (default), **Line starting with** a text (for example `TITLE`), or **Blank lines**: each block becomes its own sheet. |
+| **Missing values** | A comma-separated list of words read as empty cells, such as `--, n/a, *, NaN`. |
+| **Comment prefix** | Data lines that start with this text (`#`, `;`, `//`) are skipped. |
+| **Skip data lines** | Ignores this many lines at the start of the data. |
+| **Sheet name** | **Title from the file** (default): the sheet takes the title written in the file when it has one, and the name of the file otherwise. **File name**: the sheet always takes the name of the file, even when the file has a title. Saved with a template. |
 
-## Step 3: header and data end
+<img src="../images/import-advanced.png" alt="The Import window on a plain two-column file, with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines." width="1000">
 
-<img src="../images/import-wizard-header.png" alt="Step 3 of the Import Wizard, Header and Data End: header and subheader lines, the Long Name and Units roles, and the coloured line roles in the preview." width="1000">
+A setting that is not at its default value also appears as a sentence under **Advanced settings in use**, below the fold, so nothing set there stays hidden.
 
-### Header
+## Where the data goes
 
-The header is the group of lines at the top of the file that is not data. Choose how StokesForge finds it with **Header**:
-
-| Choice | Meaning |
-|---|---|
-| **None** | The file has no header. The data starts on the first line. |
-| **Line count** | The header has a fixed number of lines. Set **Header lines**. |
-| **Until marker** | The header ends at the line equal to the **Marker** text you type. That line is skipped too. |
-
-Click **Detect Header** to let StokesForge count the header and subheader lines from the file. It needs a file in the list.
-
-### Subheader lines
-
-A subheader is the last part of the header: the lines that give a name, units or comments for each column. When you choose **Line count**, set **Subheader lines**. These lines are counted in the header lines.
-
-Then tell StokesForge what each subheader line holds. Each of these roles has a checkbox and a range of lines, **from** and **to**, counted inside the subheader block:
-
-| Role | The lines give… |
-|---|---|
-| **Long Name** | The long name of each column |
-| **Units** | The units of each column |
-| **Comments** | The comments of each column |
-| **x'** | The x' value of each column, such as the time of a spectrum in a kinetic series |
-
-Check **Combined line** when the long name and the units share one line, written like `Absorbance (a.u.)`. The text in parentheses becomes the unit, and the rest becomes the long name. The **Units** role then disappears, because the **Long Name** line carries both.
-
-### Names in first line
-
-Check **Names in first line** when the first data line gives the column names. Those names become the column names.
-
-### Column names
-
-If **Names in first line** is not checked, you choose where the name of each series comes from:
-
-- **File name**: the name of the file, without its extension. This is the default.
-- **Header key**: a value read from the header. Type the **Key**. StokesForge looks for a header line of the form `KEY<delimiter>VALUE` and uses the value.
-
-This section is greyed out while **Names in first line** is checked. Your choices are kept for later.
-
-### Data end
-
-**Data end** tells StokesForge where the data stops. The lines after it form the footer. They are not imported as data, but you can keep them as metadata.
-
-| Choice | The data stops… |
-|---|---|
-| **None** | At the end of the file. This is the default. |
-| **Auto** | At the first line whose X value is not a number (see below). |
-| **First blank line** | At the first empty line. |
-| **End marker** | At the first line equal to the text you type. That line is excluded. |
-| **Lines after header** | After the number of data lines you type. |
-| **Lines before end** | Before the last lines of the file. You type how many. |
-
-**Auto** starts counting once it has met a first numeric X value. It stops at the first line where X is not a number, empty lines included. Text lines before the first number are kept, and text in a Y column does not stop it.
-
-**Auto** is not the default for a reason. A single missing measurement such as `n/a` in the X column stops the reading, and all the lines after it are lost. Use **Auto** only for a device that writes a footer.
-
-**Skip footer lines** removes a fixed number of lines at the end of the file. It applies before **Data end**.
-
-## Step 4: columns
-
-<img src="../images/import-wizard-columns.png" alt="Step 4 of the Import Wizard, Columns: name, long name, units, read as, type and role of each column found in the file." width="1000">
-
-This step shows the result, column by column: what StokesForge read from the header, how it reads the values (**Read As**), what it found (**Type**, **Numeric** or **Mixed**), the **Role** of the column and a few sample values.
-
-By default, the first column is **X** and the following ones are **Y**. Choose **None** to leave a column out of the import.
-
-Use **Read As** to force how a column is read:
-
-- **Numeric**: numbers. A value that is not a number is kept as text, and the column becomes **Mixed**.
-- **Text**: every non-empty value is kept as is, even if it looks like a number. Use it for sample codes and identifiers.
-- **Date/Time**: values are read as dates and times. A value that is not a date stays text.
-
-If the table is empty, the step says "Choose a file in step 1". Add a file first.
-
-## Step 5: metadata
-
-<img src="../images/import-wizard-metadata.png" alt="Step 5 of the Import Wizard, Metadata: Keep header and Keep footer, and the list of keys found in the file." width="1000">
-
-A file often starts with information about the measurement: the date, the instrument, the sample. StokesForge can keep it as metadata of each imported column.
-
-- **Keep header**: keeps the header lines. This is on by default.
-- **Keep footer**: keeps the footer lines. This is off by default.
-
-The **File metadata** list shows every key and section found in the file. Uncheck a key or a section to drop it.
-
-## Step 6: destination
-
-<img src="../images/import-wizard-destination.png" alt="Step 6 of the Import Wizard, Destination: where the data goes, saving a template and the Auto-select criteria." width="1000">
-
-### Where the data goes
-
-Choose the **Destination**:
+The **To:** menu sets the destination:
 
 | Choice | Result |
 |---|---|
-| **Active workbook (one sheet per file)** | The data goes into the workbook in front. Greyed out if no workbook is open; it then reads **Active workbook (none)**. |
-| **New workbook per file** | Each file gets its own new workbook. |
-| **New workbook for all files** | One new workbook holds all the files. |
+| **New Workbook** | One new workbook holds all the files. |
+| **One Workbook per File** | Each file gets its own new workbook. |
+| **Active Workbook** | The data goes into the workbook in front. Greyed out if no workbook is open. |
 
-When you choose the active workbook, **In active workbook** adds four modes:
+With **Active Workbook**, **In active workbook** adds four modes: **New sheet** (default), **Replace active sheet**, **Add columns to active sheet** and **Add rows to active sheet** (column *j* of the file extends column *j* of the sheet).
 
-| Mode | Result |
-|---|---|
-| **New sheet** | A new sheet is added. This is the default. |
-| **Replace active sheet** | The content of the active sheet is replaced. |
-| **Add columns to active sheet** | The columns are added after the existing ones. |
-| **Add rows to active sheet** | The rows are added below. Column *j* of the file extends column *j* of the sheet. |
+When you import more than one file, **Multiple files** offers **One sheet per file** (default), **One sheet, side by side (X Y X Y…)** and **One sheet, X of first file shared**. Use the second or third to plot several spectra from one sheet.
 
-By default, the sheet takes the name of the file, without its extension. With a **Header key**, it takes the value of that key.
+With **One Workbook per File** and **One sheet per file**, or a single file imported into **New Workbook**, each workbook takes the title of the file (else its name) and holds one sheet called **Raw Data**. The sheet keeps that name as long as no value of an imported column changes. As soon as you type or paste a value, clear a cell, add, delete or sort rows, change the type of a column, change an x′ value, put a formula on an imported column or delete one, the sheet renames itself **Sheet1** (or **Sheet2** if that name is taken), in the same step: **Undo** gives back **Raw Data** and the old value. Editing a header (**Long Name**, **Units**, **Comments**), a role or a display format, moving columns or adding a calculated column beside the data does not count. A sheet you renamed yourself is never renamed again, and **Refresh from Source** keeps the current name. The other destinations name the sheet after the title or the file.
 
 The whole import is a single entry in the history: one **Undo** removes it.
 
-### Several files
-
-When you import more than one file, **Multiple files** appears:
-
-| Choice | Result |
-|---|---|
-| **One sheet per file** | Each file gets its own sheet. This is the default. |
-| **One sheet, side by side (X Y X Y…)** | All files in one sheet, each with its own X and Y columns. |
-| **One sheet, X of first file shared** | One X column from the first file, then the other columns of every file. |
-
-Use the second or third choice to plot several spectra from one sheet.
-
-### Save as template
-
-To reuse your settings, save them as a template:
-
-1. Type a **Template name**.
-2. Click **Save Template**.
-
-Saved templates are offered at the next import, in the **Template** list of step 1.
-
-### Let a template pick itself
-
-The **Auto-select** section lets StokesForge choose this template for a file that matches every criterion you fill in:
-
-| Criterion | Example |
-|---|---|
-| **Extensions** | `csv, txt, asc` |
-| **Name contains** | `uvvis` |
-| **File start contains** | A signature near the top of the file, such as `ORIGIN;JASCO` |
-
-Leave a criterion empty to ignore it. If you leave all three empty, the template is never chosen automatically.
-
-This is what makes drag and drop work well. Save a template for each instrument with a signature, and any file of that kind imports with the right settings.
-
 ## Templates
 
-A template stores all the settings of the wizard under a name. To sum up the actions:
+A template stores the settings of an import under a name, together with the **conditions** a file must meet to be read with it. StokesForge has no built-in template: you save your own.
 
-- **Create**: set up the wizard, then **Save Template** in step 6.
-- **Reuse**: pick it in the **Template** list of step 1.
-- **Update**: change its settings, then save it again under the same name.
-- **Share**: **Export Template…** writes a JSON file. A colleague loads it with **Import Template…**.
-- **Delete**: **Delete…** in step 1.
+- The **Template:** menu lists **Auto** first (StokesForge decides), then your templates. It also holds **Save as Template…** and **Manage Templates…**.
+- A template that fits a file is applied at once, and its name is shown ("Auto · name"). When two fit, the one that meets the most conditions is used, and a point to check offers the other.
+- After the first import of a kind of file, the window offers "Save these settings for JASCO files?" with **Save as Template…** and **Not Now**.
 
-StokesForge has no built-in template. The first time you import a file from an instrument, set the wizard up, then save it.
+### Save as Template
+
+<img src="../images/import-save-template.png" alt="The Save as Template window: the name, the conditions the detector found, each with a check box, Add condition, and what the template sets." width="500">
+
+The window proposes a **Name** (type your own) and shows **Used for files that**: the conditions found in the file, each with a check box (the instrument written in the file, the data type, the line the data come after, how numbers are written, a line of times before the data). Uncheck a condition you do not want. Under **Your conditions**, **Add condition** lets you add:
+
+- **Number of columns**: *equals* or *at least* (a way to tell a two-column spectrum from a kinetic of many curves);
+- a **header line** (pick a key such as `ORIGIN`) that equals or contains a value;
+- **File name contains** a text;
+- **Extension**.
+
+**What it sets** lists in words what the template will do. The number of header lines does not matter: a template looks for the marker line (such as `XYDATA`), so a header of another length still fits. At least one condition must stay: without one, **Save** is greyed out ("Keep at least one condition"). When points are still to check, an orange line under the name says how many and that they are saved as they are now; **Save** stays possible.
+
+### Manage Templates
+
+<img src="../images/import-manage-templates.png" alt="The Import Templates window: a template with its conditions and what it sets, Forget Template, and under Answers remembered the points already answered for a kind of file, each with a Forget button." width="640">
+
+**Manage Templates…** (also in the offer) opens the **Import Templates** window. Pick a template to rename it, remove or add its conditions, read what it sets, or **Forget Template…** (after a confirmation; the files it recognised go back to **Auto**; you cannot undo it). Under **Answers remembered** you see the points already answered per kind of file, each with **Forget**.
+
+Templates saved with earlier versions (before 1.1) are kept and listed here, but they are **no longer applied automatically**. Their old Auto-select criteria (extensions, name contains, file start contains) became conditions, and these conditions are not active: a file that fits them is read with what StokesForge detects in it, not with the old template. The reason is that those criteria were broad (for example "a `.csv` file that starts with `ORIGIN;JASCO`" fits every JASCO file) and an old template could silently misread a file of another shape, such as a kinetic whose x′ line it read as data. An old template shows **Not automatic** in this window. You can still choose it from the **Template:** menu. To let StokesForge use it by itself again, pick it and click **Use Automatically**: its conditions become active, and you can then edit them like those of any template. A template you save from the Import window is automatic.
+
+The command line (`stokesforge-cli import`) and the `pyst.import_file` scripts use the same templates and the same detector as the window, and the same rule for old templates (a template you name with `--recipe` or `recipe=` is always used). In the command line, a file that cannot be read is skipped and listed.
 
 ## Import progress
 
 An import runs in the background. For long files, the status bar shows "Importing… *k* of *n* files" with a **Stop** button. If you stop it, nothing is imported.
 
-A message at the end tells you how many files were imported. If some failed, the message gives the reason for each. Files that did import are kept.
-
-You cannot start a second import while one is running.
+A message at the end tells you how many files were imported. If some failed, the message gives the reason for each. Files that did import are kept. You cannot start a second import while one is running.
 
 ## Refresh from the source files
 
@@ -363,15 +187,15 @@ Each imported column remembers the file it came from and the settings used. When
 1. Click a sheet with imported columns.
 2. Choose **File ▸ Import ▸ Refresh from Source**.
 
-The values are rewritten in place. The columns keep their identity, so graphs that use them stay valid. The number of rows follows the longest of the new contents. It shrinks only if all the columns of the sheet are refreshed; columns that hold a formula are not a reason to keep the rows, they are recomputed on the new length. A column you typed by hand is never cut, so it keeps the rows.
+The values are rewritten in place. The columns keep their identity, so graphs that use them stay valid. The number of rows follows the longest of the new contents. It shrinks only if all the columns of the sheet are refreshed; a column you typed by hand is never cut.
 
-The entry is greyed out when no column of the sheet can be read again from its file, for example a sheet imported from an Origin project.
+**Limit.** Refresh from Source reads the file again with the **stored settings as they are**, without detecting anything again. It does not promise to give the same result from one version of StokesForge to the next: a newer version may read the same settings a little differently. The entry is greyed out when no column of the sheet comes from a file. The entry is also greyed out for a sheet imported from an Origin project.
 
 ## Origin projects (.opj)
 
 StokesForge reads the **workbooks** of an Origin project saved as `.opj`. Graphs and matrices of the project are left out.
 
-An `.opj` never goes through the Import Wizard. Drop it on the window, choose it with **Add Files…** in the wizard, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the wizard is open, the file moves to the new window and the wizard closes when nothing else is left in it.
+An `.opj` never goes through the text import. Drop it on the window, choose it with **Add Files…** in the **Import** window, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the **Import** window is open, the file moves to the new window and the **Import** window closes when nothing else is left in it.
 
 ### The Import from Origin window
 
@@ -413,41 +237,28 @@ Files saved as `.opju` (Origin 2018b and later) are not read yet. Save the proje
 
 A column becomes **Mixed** or **Text** when some values are not numbers. Check these, in this order:
 
-1. **Decimal separator.** If the file writes `1,5`, the decimal separator must be **Comma** or **Auto**. With **Dot**, `1,5` is not a number.
-2. **Delimiter.** If the delimiter is wrong, whole lines end up in one column. Look at the preview and choose the right one.
-3. **Thousands separator.** If the file writes `1 234.5`, set **Thousands separator** to **Space**. Use a delimiter other than **Whitespace**.
-4. **Missing values.** If the file writes `n/a` or `--` for a missing value, list it in **Missing values**.
-5. **Header lines.** If the header lines are counted as data, they make the column **Mixed**. In step 3, set the header with **Line count** or **Until marker**, or click **Detect Header**.
-6. **Read As.** Check that the column is not set to **Text** in step 4.
+1. **Decimal separator.** Look at the format line at the left: if the file writes `1,5`, the decimal must be the comma. Click it to change it.
+2. **Delimiter.** If the delimiter is wrong, whole lines end up in one column. Click **Delimiter** and choose the right one.
+3. **Missing values.** If the file writes `n/a` or `--` for a missing value, list it in **Missing values** under **Advanced**.
+4. **Header lines.** If a header line is counted as data, click its line number and give it a role (**Long Name**, **Units**), or move the first **data handle** below it.
+5. **Role of the column.** Click the column letter: the column may be set to **Text**.
 
 ### Everything is in one column
 
-The delimiter is wrong. In step 2, choose the right **Delimiter**. If the file uses `,` as the decimal separator and `;` between columns, choose **Semicolon**.
+The delimiter is wrong. Click **Delimiter** and choose another one.
 
-### The column names are the first row of data
+### The column names are the first row of data, or the units are missing
 
-In step 3, check **Names in first line**, or set the header so the name line is part of it.
+Click the line number of the names line and give it a role (**Long Name**), and the same for the units line (**Units**). If the file writes them as `KEY;value` lines, click the value (for example `NANOMETERS`) to use it.
 
-### Units and long names are missing
+### The data stops too early, or does not stop
 
-In step 3, set **Header** to **Line count**, set the **Subheader lines**, and check the **Long Name** and **Units** roles with their line numbers.
-
-### The data stops too early
-
-Look at **Data end** in step 3. With **Auto**, one non-numeric X value ends the data. Choose **None**, or **End marker** with the text that really closes the data.
-
-### The data does not stop
-
-The footer is read as data. In step 3, choose **First blank line**, **End marker** or **Auto**. Or right-click the first footer line in the preview and choose **End Data Here**.
+Drag the last **data handle**, or click a line number and choose **Data ends here**. A line that is no longer a number ends the data; a footer is shown as "End of file" and kept as file info if you want.
 
 ### Accented characters look wrong
 
-In step 2, set **Encoding** to **Windows-1252** or **UTF-8**.
-
-### "No data found after the header"
-
-The header takes more lines than the file has data. Check the number of header lines in step 3.
+Click **Encoding** and choose **Windows-1252** or **UTF-8**.
 
 ### The file is refused
 
-"The file is not readable text" means the file is binary. StokesForge cannot import binary formats. Export a text version from the instrument software.
+"This file is not text" means the file is binary: StokesForge cannot import binary formats, so export a text version from the instrument software. "StokesForge does not read NMR spectra" means the file is NMR: it is not supported.

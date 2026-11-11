@@ -161,6 +161,11 @@ for rel in "--dry-run --release 2" "--dry-run 2 --release" "--release --dry-run 
 done
 if "$here/try.sh" --dry-run 99 2> "$tmp/err"; then fail "try.sh 99 should fail"; fi
 grep -q 'try.sh main' "$tmp/err" || fail "try.sh 99 message"
+# A suffixed sibling worktree (feature999b, branch feature/999b-x) resolves like a plain number (#489).
+git worktree add -q "$tmp/_stokesforge/feature999b" -b "feature/999b-x" --no-track main
+out="$("$here/try.sh" --dry-run 999b)" || fail "try.sh 999b failed"
+echo "$out" | grep -q "CARGO_TARGET_DIR=$tmp/_stokesforge/feature999b/target" || fail "try 999b target: $out"
+git worktree remove "$tmp/_stokesforge/feature999b"; git branch -q -D feature/999b-x
 
 # Main lock: a second take fails, release frees.
 "$here/main-lock.sh" take "A #1" > /dev/null
@@ -420,6 +425,14 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     ! grep -q warning "$sb/rerr" || fail "warned although the merge closes the issue: $(cat "$sb/rerr")"
 
     # Refusals: main unchanged, lock free.
+    dsb; base="$(main_head)"
+    # #496: an unsettled retour of the issue refuses the delivery before anything moves; settled, it goes through.
+    set_status() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]=sys.argv[2]; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/7-1.json" "$1"; }
+    set_status retour
+    refused "unsettled retour"
+    grep -q '7-1' "$sb/out" && grep -q 'test settle' "$sb/out" || fail "unsettled retour: message names the entry and the command: $(cat "$sb/out")"
+    sbsuivi test settle 7-1 --note "fixed" > /dev/null || fail "settle in the sandbox"
+    deliver || fail "settled retour: refused: $(cat "$sb/out")"
     dsb; base="$(main_head)"
     echo 'Merge #77: x' > "$sb/bad"; DMSG="$sb/bad" refused "bad message"
     DMSG="$sb/none" refused "missing file"

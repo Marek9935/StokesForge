@@ -113,7 +113,7 @@ fn raw_windows(sources: &[SourceFile]) -> Vec<String> {
 
 /// Project rule: **every** window of the application goes through the common
 /// building block (`show_window_in_layer`, via `modal_dialog_with` for a
-/// dialog), never through a raw `egui::Window`. The import wizard once departed
+/// dialog), never through a raw `egui::Window`. The import window once departed
 /// from this rule: this guard prevents it from happening again.
 #[test]
 fn no_window_is_a_raw_egui_window() {
@@ -126,8 +126,8 @@ fn no_window_is_a_raw_egui_window() {
     );
     let import = unique_function(&sources, "import_window");
     assert!(
-        import.body.contains("modal_wizard("),
-        "the import wizard ({}:{}) is a modal dialog",
+        import.body.contains("modal_dialog_with("),
+        "the import window ({}:{}) is a modal dialog",
         import.path,
         import.line
     );
