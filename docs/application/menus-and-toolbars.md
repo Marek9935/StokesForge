@@ -76,7 +76,7 @@ is ignored on reading. The `//!` of the module says why the panel is an
   (label + shortcut + `.hint`), disabling. It pushes the same `Action` as the
   menu — never a second write. The content of each bar is
   `toolbar::bar_contents`; a gesture that is not an `Action` (file
-  picker, import wizard, export) goes up as a `ToolbarRequest`, executed by
+  picker, import window, export) goes up as a `ToolbarRequest`, executed by
   `StokesForgeApp::run_toolbar_request` (`app/format.rs`) with the very
   methods of the menus. File
   bar (#61, #73): new project, workbook, empty graph, import,

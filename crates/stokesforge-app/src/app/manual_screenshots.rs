@@ -38,7 +38,7 @@ use stokesforge_app_state::analysis::Preset;
 use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::object_manager::VisibilityTarget;
 use stokesforge_app_state::preferences::Preferences;
-use stokesforge_app_state::state::{Action, AppState, ImportStep, PlotAxis, PlotSettingsTab};
+use stokesforge_app_state::state::{Action, AppState, PlotAxis, PlotSettingsTab};
 use stokesforge_core::compose::CellSide;
 use stokesforge_core::{NodeId, NodeKind};
 use stokesforge_plot::SeriesRef;
@@ -266,21 +266,6 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "workbooks-formula-help",
         setup: formula_functions_open,
-        crop: Crop::Rect(dialog_rect),
-    },
-    Shot {
-        name: "import-wizard-format",
-        setup: |h| open_wizard_clean(h, ImportStep::Format),
-        crop: Crop::Rect(dialog_rect),
-    },
-    Shot {
-        name: "import-wizard-header",
-        setup: |h| open_wizard_clean(h, ImportStep::Header),
-        crop: Crop::Rect(dialog_rect),
-    },
-    Shot {
-        name: "import-wizard-columns",
-        setup: |h| open_wizard_clean(h, ImportStep::Columns),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
@@ -612,18 +597,58 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
-        name: "import-wizard-files",
-        setup: |h| open_wizard_clean(h, ImportStep::Files),
+        name: "import-overview",
+        setup: |h| open_import_screen(h, ImportSample::Jasco),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
-        name: "import-wizard-metadata",
-        setup: |h| open_wizard_clean(h, ImportStep::Metadata),
+        name: "import-to-check",
+        setup: |h| open_import_screen(h, ImportSample::Kinetic),
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
-        name: "import-wizard-destination",
-        setup: |h| open_wizard_clean(h, ImportStep::Destination),
+        name: "import-correction",
+        setup: |h| {
+            open_import_screen(h, ImportSample::Kinetic);
+            click(h, "Lines 9 to 12");
+        },
+        crop: Crop::Rect(dialog_with_popups_rect),
+    },
+    Shot {
+        name: "import-save-template",
+        setup: |h| {
+            open_import_screen(h, ImportSample::Jasco);
+            h.state_mut().app.state.template_save_open();
+            settle(h);
+        },
+        crop: Crop::Rect(layer_above_dialog_rect),
+    },
+    Shot {
+        name: "import-manage-templates",
+        setup: |h| {
+            open_import_screen(h, ImportSample::Kinetic);
+            let state = &mut h.state_mut().app.state;
+            let first = state.to_check()[0].id.clone();
+            state.to_check_mark(&first);
+            state.template_save_open();
+            state.template_save_commit();
+            state.template_manage_open();
+            settle(h);
+            super::dialogs::set_dialog_size(
+                &h.ctx,
+                egui::Id::new("stokesforge_import_templates"),
+                egui::vec2(640.0, 660.0),
+            );
+            settle(h);
+        },
+        crop: Crop::Rect(layer_above_dialog_rect),
+    },
+    Shot {
+        name: "import-advanced",
+        setup: |h| {
+            open_import_screen(h, ImportSample::Plain);
+            click(h, "Advanced");
+        },
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
@@ -659,6 +684,30 @@ const SHOTS: &[Shot] = &[
             settle(h);
         },
         crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "analysis-transposed-sheet",
+        setup: |h| {
+            // The first three rows of Kinetics, transposed: the sheet follows its
+            // source, so the banner shows the box checked and nothing out of date.
+            let source = node_named(h, "Kinetics");
+            h.state()
+                ._session
+                .handle()
+                .execute(stokesforge_commands::Command::TransposeRows {
+                    source,
+                    rows: vec![0, 1, 2],
+                })
+                .expect("transposed rows");
+            h.state_mut().app.state.refresh();
+            let name = format!("Kinetics{}", stokesforge_core::TRANSPOSE_MARK);
+            let sheet = node_named(h, &name);
+            act(h, Action::SelectSheet(sheet));
+            let book = Tab::Book(h.state().ids.book1);
+            h.state_mut().app.floating_tabs.retain(|tab| *tab == book);
+            place(h, book, egui::pos2(4.0, 4.0), egui::vec2(560.0, 300.0));
+        },
+        crop: Crop::Rect(workspace_window_rect),
     },
     Shot {
         name: "workbooks-workbook-menu",
@@ -784,42 +833,82 @@ fn show_only(h: &mut Harness<'static, Bench>, tab: Tab, size: egui::Vec2) {
     place(h, tab, egui::pos2(4.0, 4.0), size);
 }
 
-/// A small instrument file in the scratch folder, and the import wizard open
-/// on it at `step` (the file chooser is bypassed: the paths are given).
-fn open_wizard_clean(h: &mut Harness<'static, Bench>, step: ImportStep) {
-    empty_workspace(h);
-    open_wizard(h, step);
+/// The files the import shots open.
+#[derive(Clone, Copy)]
+enum ImportSample {
+    /// A JASCO V-770 file of `test/import/`: nothing to check.
+    Jasco,
+    /// A synthetic JASCO kinetic (five curves under a line of times): points
+    /// to check.
+    Kinetic,
+    /// A plain table with named columns of `test/import/`: a short panel, so
+    /// the Advanced fold fits under it.
+    Plain,
 }
 
-fn open_wizard(h: &mut Harness<'static, Bench>, step: ImportStep) {
-    let file = h.state().scratch.path().join("spectrum.csv");
-    let mut text =
-        String::from("Instrument: Demo spectrometer\nSample: S-12\nWavelength;Absorbance\nnm;AU\n");
-    for i in 0..12 {
-        let wavelength = 400 + 25 * i;
-        let absorbance = 0.05 + 0.8 * (-((f64::from(wavelength) - 520.0) / 60.0).powi(2)).exp();
-        text.push_str(&format!("{wavelength};{absorbance:.3}\n").replace('.', ","));
-    }
-    std::fs::write(&file, text).expect("csv");
+const KINETIC: &str = "TITLE;Kinetic S13\nORIGIN;JASCO\nSPECTROMETER/DATA SYSTEM;JASCO Corp., V-770, Rev. 1.00\nDATA TYPE;ULTRAVIOLET SPECTRUM\nXUNITS;NANOMETERS\nYUNITS;ABSORBANCE\nXYDATA\n;0;15;30;45;60\n800;0.11;0.12;0.13;0.14;0.15\n799;0.12;0.13;0.14;0.15;0.16\n798;0.13;0.14;0.15;0.16;0.17\n797;0.14;0.15;0.16;0.17;0.18\n";
+
+/// The one-screen import open on `sample` (the file chooser is bypassed: the
+/// paths are given), the first-use guide closed.
+fn open_import_screen(h: &mut Harness<'static, Bench>, sample: ImportSample) {
+    empty_workspace(h);
+    let file = h.state().scratch.path().join("sample.csv");
+    let text = match sample {
+        ImportSample::Jasco => std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../test/import/jasco_uvvis_semicolon.csv"),
+        )
+        .expect("test/import sample"),
+        ImportSample::Kinetic => KINETIC.to_string(),
+        ImportSample::Plain => std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../test/import/generic_named_header.csv"),
+        )
+        .expect("test/import sample"),
+    };
+    std::fs::write(&file, text).expect("sample file");
     let book = h.state().ids.book1;
     let state = &mut h.state_mut().app.state;
     state.open_import(Some(book));
     state.set_import_paths(vec![file]);
-    if let Some(import) = state.import_state_mut() {
-        import.recipe.separator = stokesforge_import::Separator::Semicolon;
-        import.recipe.decimal = stokesforge_import::DecimalStyle::Comma;
-    }
-    state.auto_detect_import_header();
-    if let Some(import) = state.import_state_mut() {
-        // Sub-header: line 1 holds the long names, line 2 the units.
-        let roles = &mut import.recipe.subheader_roles;
-        roles.long_name = Some(stokesforge_import::SubheaderLineRange::single(1));
-        roles.unit = Some(stokesforge_import::SubheaderLineRange::single(2));
-    }
+    state.import_guide_close();
     settle(h);
-    if let Some(import) = h.state_mut().app.state.import_state_mut() {
-        import.step = step;
-    }
+}
+
+/// The import dialog and the popups open over it.
+fn dialog_with_popups_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let screen = h.ctx.content_rect();
+    let all = h.ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == egui::Order::Foreground)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .filter(|rect| *rect != screen)
+            .reduce(|a, b| a.union(b))
+    });
+    all.expect("the dialog")
+        .shrink(super::window_chrome::RESIZE_BORDER)
+}
+
+/// The window above the import dialog (the Save as Template or Manage
+/// Templates window of the import).
+fn layer_above_dialog_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let screen = h.ctx.content_rect();
+    let smallest = h.ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == egui::Order::Foreground)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .filter(|rect| *rect != screen)
+            .min_by(|a, b| a.area().total_cmp(&b.area()))
+    });
+    smallest
+        .expect("a window over the import")
+        .shrink(super::window_chrome::RESIZE_BORDER)
 }
 
 /// The Import from Origin window open on the committed synthetic project

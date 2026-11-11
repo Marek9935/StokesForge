@@ -120,6 +120,12 @@ t "mime: glob *.stf" has '<glob pattern="*.stf"/>' "$snap/usr/share/mime/package
 t "no icons folder without icon" test ! -e "$snap/usr/share/icons"
 t "config: no icon entry" hasnt 'hicolor' "$snap/nfpm.yaml"
 t "config: placeholders filled" hasnt '@STAGE@' "$snap/nfpm.yaml"
+# The C library dependency follows the floor of scripts/glibc-floor.env (#486).
+floor="$(sed -n 's/^GLIBC_FLOOR=//p' "$HERE/glibc-floor.env")"
+t "glibc floor read" test -n "$floor"
+t "config: no glibc placeholder left" hasnt '@GLIBC_FLOOR@' "$snap/nfpm.yaml"
+t "config: rpm libc dependency at the floor" has "libc.so.6(GLIBC_${floor})(64bit)" "$snap/nfpm.yaml"
+t "config: deb libc dependency at the floor" has "libc6 (>= ${floor})" "$snap/nfpm.yaml"
 t "config: preinst script path filled" has "$REPO_ROOT/scripts/linux-packages/preinst.sh" "$snap/nfpm.yaml"
 t "final tag -> plain version" bash -c 'NFPM="$1" STOKESFORGE_DIST="$2" STOKESFORGE_PKG_OUT="$3" PUBLISH_LINUX_PACKAGES=0 "$4" v1.2.3 && test "$(cat "$3/snapshot-deb/version")" = 1.2.3' _ "$FAKE" "$tmp/d-plain" "$tmp/o-final" "$PKG"
 
@@ -210,6 +216,7 @@ if [ "${1:-}" = --nfpm ]; then
     for dep in libvulkan1 libwayland-client0 libwayland-egl1 libxkbcommon0 libxkbcommon-x11-0 libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libegl1; do
         t "deb depends on $dep" grep -q "^Depends:.*\\b$dep\\b" "$real/control"
     done
+    t "deb depends on libc6 at the glibc floor" grep -qF "libc6 (>= ${floor})" "$real/control"
     t "deb recommends mesa-vulkan-drivers" grep -qx 'Recommends: mesa-vulkan-drivers' "$real/control"
     t "deb: everything root/root" bash -c '! grep -v " root/root " "$1"' _ "$real/deb-list"
     t "deb: /opt/stokesforge/ is a directory entry" grep -q '^drwxr-xr-x root/root .* \./opt/stokesforge/$' "$real/deb-list"
@@ -223,6 +230,7 @@ if [ "${1:-}" = --nfpm ]; then
     for so in 'libvulkan.so.1()(64bit)' 'libwayland-client.so.0()(64bit)' 'libwayland-egl.so.1()(64bit)' 'libxkbcommon.so.0()(64bit)' 'libxkbcommon-x11.so.0()(64bit)' 'libX11.so.6()(64bit)' 'libX11-xcb.so.1()(64bit)' 'libxcb.so.1()(64bit)' 'libXcursor.so.1()(64bit)' 'libXi.so.6()(64bit)' 'libEGL.so.1()(64bit)'; do
         t "rpm requires $so" grep -qxF "$so" "$real/rpm-req"
     done
+    t "rpm requires the glibc floor" grep -qxF "libc.so.6(GLIBC_${floor})(64bit)" "$real/rpm-req"
     t "rpm requires nothing from lib/python" bash -c '! grep -qi python "$1"' _ "$real/rpm-req"
     t "rpm provides no .so" bash -c '! rpm -qp --provides "$1" | grep -q "\.so"' _ "$rpmf"
     t "rpm version" test "$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$rpmf")" = '1.2.3~rc4-1'

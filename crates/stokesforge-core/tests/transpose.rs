@@ -341,3 +341,681 @@ fn removing_the_transposed_sheet_drops_the_link_and_a_copy_is_ordinary() {
     f.project.remove(sheet).unwrap();
     assert!(f.project.tree().transposes().is_empty());
 }
+
+// -- #463: Recalculate automatically -------------------------------------------
+
+fn version(p: &Project, id: NodeId) -> u64 {
+    p.tree().node(id).unwrap().as_column().unwrap().version()
+}
+
+fn formula(p: &mut Project, column: NodeId, text: &str) {
+    let formula = p.tree().formula_from_letters(column, text).unwrap();
+    p.set_column_meta(
+        column,
+        ColumnMeta {
+            formula: Some(formula),
+            ..ColumnMeta::default()
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_new_link_is_checked_and_completing_an_unchecked_one_leaves_it_unchecked() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    assert!(f.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    assert!(!f.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+}
+
+#[test]
+fn following_rewrites_the_rows_of_a_changed_source_and_only_when_checked() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    let cols = children(&f.project, sheet);
+    f.project
+        .set_values(f.cols[1], 0, ValueBlock::Float(vec![40.0]))
+        .unwrap();
+    assert_eq!(state(&f.project, sheet), (true, false));
+    // Unchecked: nothing happens, the snapshot stays as it was.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    assert!(!f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 4.0, 7.0]);
+    // Checked: the row follows and the sheet is up to date.
+    f.project.set_transpose_auto(sheet, true).unwrap();
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 7.0]);
+    assert_eq!(values(&f.project, cols[2]), vec![2.0, 5.0, 8.0]);
+    assert_eq!(state(&f.project, sheet), (false, false));
+    // Up to date: a second call does nothing.
+    assert!(!f.project.follow_transpose(sheet).unwrap());
+}
+
+#[test]
+fn following_keeps_the_version_of_a_column_that_comes_out_the_same() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    let cols = children(&f.project, sheet);
+    // The same value typed again: the source gets a fresh version, the numbers
+    // do not change. Witness: `overwrite` instead of a comparison.
+    f.project
+        .set_values(f.cols[0], 0, ValueBlock::Float(vec![1.0]))
+        .unwrap();
+    assert_eq!(state(&f.project, sheet), (true, false));
+    let before: Vec<u64> = cols.iter().map(|c| version(&f.project, *c)).collect();
+    assert!(
+        !f.project.follow_transpose(sheet).unwrap(),
+        "nothing written"
+    );
+    let after: Vec<u64> = cols.iter().map(|c| version(&f.project, *c)).collect();
+    assert_eq!(before, after);
+    assert_eq!(state(&f.project, sheet), (false, false), "re-read");
+}
+
+#[test]
+fn following_never_overwrites_a_typed_value_nor_recreates_a_deleted_column() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0, 1]).unwrap();
+    let cols = children(&f.project, sheet);
+    // Rule 4: a value typed in Row 1 stops the sheet from following.
+    f.project
+        .set_values(cols[1], 0, ValueBlock::Float(vec![-1.0]))
+        .unwrap();
+    f.project
+        .set_values(f.cols[1], 0, ValueBlock::Float(vec![40.0]))
+        .unwrap();
+    assert_eq!(state(&f.project, sheet), (true, true));
+    assert!(!f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(values(&f.project, cols[1])[0], -1.0);
+    assert_eq!(
+        values(&f.project, cols[2]),
+        vec![2.0, 5.0, 8.0],
+        "other rows wait"
+    );
+    // Relink brings it all back.
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 7.0]);
+    // E8: a deleted Row column is not brought back by following.
+    f.project.remove(cols[2]).unwrap();
+    f.project
+        .set_values(f.cols[2], 0, ValueBlock::Float(vec![70.0]))
+        .unwrap();
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    assert_eq!(children(&f.project, sheet).len(), 2, "x' and Row 1 only");
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 40.0, 70.0]);
+}
+
+#[test]
+fn a_source_that_cannot_be_followed_keeps_the_last_numbers_and_names_the_column() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    let mut bare = Column::from_f64(&[0.5, 0.5, 0.5]);
+    bare.set_meta(ColumnMeta::default());
+    f.project
+        .add_column(f.sheet, None, Some("NoXPrime"), bare)
+        .unwrap();
+    let error = f.project.follow_transpose(sheet).unwrap_err();
+    assert!(matches!(error, CoreError::TransposeNoXPrime { ref letter, .. } if letter == "D"));
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 4.0, 7.0]);
+    assert_eq!(state(&f.project, sheet), (true, false), "stays out of date");
+    assert!(matches!(
+        stokesforge_core::unfollowable_column(f.project.tree(), f.sheet),
+        Some(CoreError::TransposeNoXPrime { .. })
+    ));
+}
+
+// Rules 2 and 3 and E1: what counts as "the source calculates from its sheet".
+
+/// Sheet2 in the same book, with one column `P`.
+fn second_sheet(f: &mut Fixture) -> (NodeId, NodeId) {
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let p = f
+        .project
+        .add_column(sheet2, None, Some("P"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    (sheet2, p)
+}
+
+#[test]
+fn a_direct_formula_of_the_source_reading_the_followed_sheet_is_refused() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    let label = f
+        .project
+        .add_column(
+            f.sheet,
+            None,
+            Some("Label"),
+            Column::new(ColumnType::Numeric),
+        )
+        .unwrap();
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    // Strict entry and field: refused / kept with the error.
+    let entry = f.project.tree().formula_for_entry(label, &text);
+    assert!(
+        matches!(
+            entry,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{entry:?}"
+    );
+    let (kept, error) = f.project.tree().formula_keeping(label, &text);
+    assert!(matches!(
+        error,
+        Some(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+    ));
+    // Stored anyway (an older file, a paste): the question sees it, whatever
+    // the role of the column (case 3: a label column).
+    f.project
+        .set_column_meta(
+            label,
+            ColumnMeta {
+                role: ColumnRole::Label,
+                formula: Some(kept),
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+    let readers = f.project.tree().columns_reading_followed_sheet();
+    assert_eq!(readers.get(&label), Some(&sheet));
+    // Rule 3: once unchecked, rechecking is refused, the refusal names the column.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    assert!(f.project.tree().columns_reading_followed_sheet().is_empty());
+    let refusal = f.project.set_transpose_auto(sheet, true).unwrap_err();
+    assert!(
+        matches!(refusal, CoreError::TransposeSourceReadsIt { ref letter, .. } if letter == "D"),
+        "{refusal:?}"
+    );
+    assert!(!f.project.tree().transpose_link(sheet).unwrap().auto_recalc);
+    // Remove the formula: the box can be checked again.
+    f.project
+        .set_column_meta(label, ColumnMeta::default())
+        .unwrap();
+    f.project.set_transpose_auto(sheet, true).unwrap();
+    let _ = cols;
+}
+
+#[test]
+fn a_chain_through_another_sheet_is_refused_but_another_sheet_reading_is_not() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let (_sheet2, p) = second_sheet(&mut f);
+    // Sheet2!P reads the followed sheet, nothing comes back: allowed.
+    let tname = name(&f.project, sheet);
+    let text = format!("max('{tname}'!B)");
+    let allowed = f.project.tree().formula_for_entry(p, &text);
+    assert!(allowed.is_ok(), "{allowed:?}");
+    formula(&mut f.project, p, &text);
+    assert!(f.project.tree().columns_reading_followed_sheet().is_empty());
+    // A column of Sheet1 reading Sheet2!P closes the chain: refused.
+    let d = f
+        .project
+        .add_column(f.sheet, None, Some("D"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    let chain = f.project.tree().formula_for_entry(d, "max(Sheet2!A)");
+    assert!(
+        matches!(
+            chain,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{chain:?}"
+    );
+    // And the same entry in the other order: the formula of Sheet2 refused
+    // when Sheet1's column already reads it.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    formula(&mut f.project, d, "max(Sheet2!A)");
+    f.project.set_column_meta(p, ColumnMeta::default()).unwrap();
+    f.project.set_transpose_auto(sheet, true).unwrap();
+    let late = f.project.tree().formula_for_entry(p, &text);
+    assert!(
+        matches!(
+            late,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{late:?}"
+    );
+}
+
+#[test]
+fn an_analysis_reading_the_followed_sheet_may_not_land_in_the_source() {
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{CalculationDraft, OutputDraft, SeriesRef, SeriesResult};
+
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    let draft = |x: NodeId, y: NodeId| CalculationDraft {
+        operation: Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        series: vec![SeriesRef {
+            x: Some(x),
+            y,
+            sigma: None,
+        }],
+        aux: None,
+        outputs: vec![OutputDraft {
+            series: 0,
+            key: "corrected".to_string(),
+            index: None,
+            meta: ColumnMeta::default(),
+            data: vec![1.0, 2.0, 3.0],
+        }],
+        results: vec![SeriesResult::default()],
+        keep_results: false,
+        auto_recalc: true,
+        low_r2_dialog: true,
+    };
+    // Y in the source, x' from the followed sheet: the result lands in the
+    // source (case 4). Refused, and nothing is left behind.
+    let before = f.project.tree().clone();
+    let refused = f.project.add_calculation(draft(cols[0], f.cols[0]));
+    assert!(
+        matches!(
+            refused,
+            Err(CoreError::CalculationReadsFollowingSheet { .. })
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(f.project.tree().as_ref(), before.as_ref());
+    // Analyzing a Row of the followed sheet lands in that sheet: allowed.
+    f.project.add_calculation(draft(cols[0], cols[1])).unwrap();
+    // An analysis with its own box unchecked is refused too (#463, G3).
+    let mut manual = draft(cols[0], f.cols[0]);
+    manual.auto_recalc = false;
+    assert!(
+        matches!(
+            f.project.add_calculation(manual),
+            Err(CoreError::CalculationReadsFollowingSheet { .. })
+        ),
+        "own box unchecked"
+    );
+    // Unchecked, the source may calculate from the sheet.
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    f.project
+        .add_calculation(draft(cols[0], f.cols[0]))
+        .unwrap();
+}
+
+#[test]
+fn a_loop_through_two_followed_sheets_is_refused() {
+    let mut f = fixture();
+    let first = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let mut p = Column::from_f64(&[1.0, 2.0, 3.0]);
+    p.set_meta(ColumnMeta {
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project.add_column(sheet2, None, Some("P"), p).unwrap();
+    let second = f.project.transpose_rows(sheet2, &[0]).unwrap();
+    // Added after the link: it is a Y column of Sheet2, so the second sheet
+    // depends on it (the link is an edge of the graph).
+    let q = f
+        .project
+        .add_column(sheet2, None, Some("Q"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    let d = f
+        .project
+        .add_column(f.sheet, None, Some("D"), Column::new(ColumnType::Numeric))
+        .unwrap();
+    // Sheet1!D reads the second sheet: no loop yet.
+    let text = format!("max('{}'!B)", name(&f.project, second));
+    assert!(f.project.tree().formula_for_entry(d, &text).is_ok());
+    formula(&mut f.project, d, &text);
+    // Sheet2!Q reading the first sheet closes the loop D -> second sheet ->
+    // Sheet2 (link) -> Q -> first sheet -> Sheet1 (link) -> D.
+    let closing = format!("max('{}'!B)", name(&f.project, first));
+    let refused = f.project.tree().formula_for_entry(q, &closing);
+    assert!(
+        matches!(
+            refused,
+            Err(stokesforge_core::FormulaError::ReadsFollowingSheet { .. })
+        ),
+        "{refused:?}"
+    );
+}
+
+// -- #484: Recalculate, Relink and Analyze Rows refuse a loop -------------------
+
+/// Stores the formula `text` on `column` the way an older file or a paste does
+/// (kept although refused), with the given role and x'.
+fn store_kept(p: &mut Project, column: NodeId, text: &str, role: ColumnRole, x_prime: Option<f64>) {
+    let (kept, _error) = p.tree().formula_keeping(column, text);
+    p.set_column_meta(
+        column,
+        ColumnMeta {
+            role,
+            formula: Some(kept),
+            x_prime,
+            ..ColumnMeta::default()
+        },
+    )
+    .unwrap();
+}
+
+fn y_column(project: &mut Project, sheet: NodeId, name: &str) -> NodeId {
+    project
+        .add_column(sheet, None, Some(name), Column::from_f64(&[0.0, 0.0, 0.0]))
+        .unwrap()
+}
+
+fn assert_reads_it(result: Result<(), CoreError>, expected_letter: &str) {
+    match result {
+        Err(CoreError::TransposeSourceReadsIt { letter, .. }) => {
+            assert_eq!(letter, expected_letter)
+        }
+        other => panic!("expected TransposeSourceReadsIt, got {other:?}"),
+    }
+}
+
+#[test]
+fn recalculate_is_refused_for_a_chain_through_a_second_sheet() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let (_sheet2, p) = second_sheet(&mut f);
+    let tname = name(&f.project, sheet);
+    store_kept(
+        &mut f.project,
+        p,
+        &format!("max('{tname}'!B)"),
+        ColumnRole::Y,
+        None,
+    );
+    let d = y_column(&mut f.project, f.sheet, "D");
+    store_kept(
+        &mut f.project,
+        d,
+        "max(Sheet2!A)",
+        ColumnRole::Y,
+        Some(30.0),
+    );
+    let before = f.project.tree().clone();
+    assert_reads_it(f.project.recalculate_transpose(sheet), "D");
+    assert_eq!(f.project.tree().as_ref(), before.as_ref());
+}
+
+#[test]
+fn recalculate_is_refused_for_a_loop_through_two_followed_sheets() {
+    let mut f = fixture();
+    let first = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let sheet2 = f.project.add_worksheet(f.book, Some("Sheet2")).unwrap();
+    let mut p = Column::from_f64(&[1.0, 2.0, 3.0]);
+    p.set_meta(ColumnMeta {
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project.add_column(sheet2, None, Some("P"), p).unwrap();
+    let second = f.project.transpose_rows(sheet2, &[0]).unwrap();
+    let q = y_column(&mut f.project, sheet2, "Q");
+    let d = y_column(&mut f.project, f.sheet, "D");
+    let to_second = format!("max('{}'!B)", name(&f.project, second));
+    let to_first = format!("max('{}'!B)", name(&f.project, first));
+    store_kept(&mut f.project, d, &to_second, ColumnRole::Y, Some(30.0));
+    store_kept(&mut f.project, q, &to_first, ColumnRole::Y, Some(6.0));
+    assert_reads_it(f.project.recalculate_transpose(first), "D");
+    assert_reads_it(f.project.recalculate_transpose(second), "B");
+}
+
+#[test]
+fn recalculate_is_refused_for_a_label_column_reading_the_sheet() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let label = y_column(&mut f.project, f.sheet, "Label");
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    store_kept(&mut f.project, label, &text, ColumnRole::Label, None);
+    assert_reads_it(f.project.recalculate_transpose(sheet), "D");
+}
+
+#[test]
+fn recalculate_is_not_refused_because_another_sheet_reads_the_followed_one() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let (_sheet2, p) = second_sheet(&mut f);
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    store_kept(&mut f.project, p, &text, ColumnRole::Y, None);
+    f.project.recalculate_transpose(sheet).unwrap();
+}
+
+#[test]
+fn a_reader_without_x_prime_is_refused_as_no_x_prime_before_the_loop() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let d = y_column(&mut f.project, f.sheet, "D");
+    let text = format!("max('{}'!B)", name(&f.project, sheet));
+    store_kept(&mut f.project, d, &text, ColumnRole::Y, None);
+    let error = f.project.recalculate_transpose(sheet).unwrap_err();
+    assert!(
+        matches!(error, CoreError::TransposeNoXPrime { .. }),
+        "{error:?}"
+    );
+}
+
+// Index mode (#493): no x' on any Y column, the x' column numbers them 1, 2, 3...
+
+fn set_x_prime(p: &mut Project, column: NodeId, x_prime: Option<f64>) {
+    let mut meta = p
+        .tree()
+        .node(column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.x_prime = x_prime;
+    p.set_column_meta(column, meta).unwrap();
+}
+
+fn long_name(p: &Project, column: NodeId) -> String {
+    p.tree()
+        .node(column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .long_name
+        .clone()
+}
+
+/// The fixture with no x' at all on its three Y columns.
+fn bare_fixture() -> Fixture {
+    let mut f = fixture();
+    for c in f.cols.clone() {
+        set_x_prime(&mut f.project, c, None);
+    }
+    f
+}
+
+#[test]
+fn without_any_x_prime_the_x_column_numbers_the_y_columns() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[1]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    assert_eq!(values(&f.project, cols[1]), vec![2.0, 5.0, 8.0]);
+    assert_eq!(name(&f.project, cols[0]), "x'");
+    assert_eq!(long_name(&f.project, cols[0]), "Column number");
+    assert!(f
+        .project
+        .tree()
+        .transpose_link(sheet)
+        .unwrap()
+        .is_index_mode());
+    assert_eq!(state(&f.project, sheet), (false, false));
+    // The source is never written.
+    for c in &f.cols {
+        let meta = f
+            .project
+            .tree()
+            .node(*c)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta();
+        assert_eq!(meta.x_prime, None);
+    }
+}
+
+#[test]
+fn the_rank_skips_the_columns_that_are_not_y() {
+    let mut f = bare_fixture();
+    let mut x = Column::from_f64(&[0.0, 1.0, 2.0]);
+    x.set_meta(ColumnMeta {
+        role: ColumnRole::X,
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(0), Some("Time"), x)
+        .unwrap();
+    let mut label = Column::from_f64(&[0.0, 0.0, 0.0]);
+    label.set_meta(ColumnMeta {
+        role: ColumnRole::Label,
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(2), Some("Tag"), label)
+        .unwrap();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn an_x_prime_on_the_x_column_only_is_index_mode() {
+    let mut f = bare_fixture();
+    let mut x = Column::from_f64(&[0.0, 1.0, 2.0]);
+    x.set_meta(ColumnMeta {
+        role: ColumnRole::X,
+        x_prime: Some(5.0),
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(0), Some("Time"), x)
+        .unwrap();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn real_x_prime_added_on_every_column_makes_the_index_sheet_stale_then_recalculate_takes_them() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    f.project.set_transpose_auto(sheet, false).unwrap();
+    for (i, c) in f.cols.clone().into_iter().enumerate() {
+        set_x_prime(&mut f.project, c, Some(10.0 * i as f64 + 0.5));
+    }
+    assert_eq!(state(&f.project, sheet), (true, false));
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(values(&f.project, cols[0]), vec![0.5, 10.5, 20.5]);
+    assert_eq!(long_name(&f.project, cols[0]), "x' of Sheet1");
+    assert!(!f
+        .project
+        .tree()
+        .transpose_link(sheet)
+        .unwrap()
+        .is_index_mode());
+}
+
+#[test]
+fn a_followed_index_sheet_takes_real_x_prime_by_itself() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    for (i, c) in f.cols.clone().into_iter().enumerate() {
+        set_x_prime(&mut f.project, c, Some(10.0 * i as f64 + 0.5));
+    }
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![0.5, 10.5, 20.5]);
+    assert_eq!(long_name(&f.project, cols[0]), "x' of Sheet1");
+}
+
+#[test]
+fn a_new_y_column_without_x_prime_extends_the_numbers_when_following() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    f.project
+        .add_column(f.sheet, None, Some("D"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    assert!(f.project.follow_transpose(sheet).unwrap());
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn an_x_prime_on_one_column_only_refuses_and_keeps_the_numbers() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    set_x_prime(&mut f.project, f.cols[0], Some(3.0));
+    let error = f.project.follow_transpose(sheet).unwrap_err();
+    assert!(matches!(error, CoreError::TransposeNoXPrime { ref letter, .. } if letter == "B"));
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    assert_eq!(state(&f.project, sheet), (true, false));
+    assert!(matches!(
+        f.project.transpose_rows(f.sheet, &[1]).unwrap_err(),
+        CoreError::TransposeNoXPrime { .. }
+    ));
+}
+
+#[test]
+fn partial_x_prime_is_still_refused_when_creating() {
+    let mut f = bare_fixture();
+    set_x_prime(&mut f.project, f.cols[1], Some(3.0));
+    let error = f.project.transpose_rows(f.sheet, &[0]).unwrap_err();
+    assert!(matches!(error, CoreError::TransposeNoXPrime { ref letter, .. } if letter == "A"));
+}
+
+#[test]
+fn real_x_prime_removed_everywhere_is_not_followed_but_recalculate_switches_to_numbers() {
+    let mut f = fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    for c in f.cols.clone() {
+        set_x_prime(&mut f.project, c, None);
+    }
+    let link = f.project.tree().transpose_link(sheet).unwrap().clone();
+    assert!(link.lost_x_prime(f.project.tree()));
+    assert!(
+        !f.project.follow_transpose(sheet).unwrap(),
+        "checked, but refuses"
+    );
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![0.0, 10.0, 20.0]);
+    assert_eq!(state(&f.project, sheet), (true, false));
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(values(&f.project, cols[0]), vec![1.0, 2.0, 3.0]);
+    assert_eq!(long_name(&f.project, cols[0]), "Column number");
+    assert_eq!(state(&f.project, sheet), (false, false));
+    let link = f.project.tree().transpose_link(sheet).unwrap();
+    assert!(!link.lost_x_prime(f.project.tree()));
+}
+
+#[test]
+fn a_renamed_long_name_of_the_x_column_survives_a_mode_switch() {
+    let mut f = bare_fixture();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let x = children(&f.project, sheet)[0];
+    let mut meta = f
+        .project
+        .tree()
+        .node(x)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.long_name = "Wavelength".into();
+    f.project.set_column_meta(x, meta).unwrap();
+    for (i, c) in f.cols.clone().into_iter().enumerate() {
+        set_x_prime(&mut f.project, c, Some(i as f64));
+    }
+    f.project.recalculate_transpose(sheet).unwrap();
+    assert_eq!(long_name(&f.project, x), "Wavelength");
+}

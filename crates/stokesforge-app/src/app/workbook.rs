@@ -218,7 +218,8 @@ pub(super) fn book_contents(
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height - results_height);
     // The banner of a linked transposed sheet (#253) takes the top of the grid.
     let banner_height = if state.transpose_info(selected).is_some() {
-        super::transpose_ui::BANNER_HEIGHT.min(grid_with_banner.height())
+        super::transpose_ui::banner_height(ui, state, selected, grid_with_banner.width())
+            .min(grid_with_banner.height())
     } else {
         0.0
     };

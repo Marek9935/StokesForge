@@ -53,10 +53,12 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::TransposeRows => 30,
         HistoryLabel::RecalculateTranspose => 31,
         HistoryLabel::SortFolder { .. } => 32,
+        HistoryLabel::SetTransposeAuto { .. } => 33,
+        HistoryLabel::SetSheetRawMark { .. } => 34,
     }
 }
 
-const VARIANTS: usize = 33;
+const VARIANTS: usize = 35;
 
 /// Each variant, in **each** of its forms (known target or not, 0, 1 and
 /// several rows, each kind of group).
@@ -72,6 +74,8 @@ fn all_labels() -> Vec<HistoryLabel> {
         HistoryLabel::AddColumn,
         HistoryLabel::TransposeRows,
         HistoryLabel::RecalculateTranspose,
+        HistoryLabel::SetTransposeAuto { auto: true },
+        HistoryLabel::SetTransposeAuto { auto: false },
         HistoryLabel::DeleteColumn { column: None },
         HistoryLabel::DeleteColumn {
             column: Some(ColumnRef(1)),
@@ -112,6 +116,10 @@ fn all_labels() -> Vec<HistoryLabel> {
         HistoryLabel::SetWindowMeta { name: None },
         HistoryLabel::SetWindowMeta {
             name: name("Book1"),
+        },
+        HistoryLabel::SetSheetRawMark { name: None },
+        HistoryLabel::SetSheetRawMark {
+            name: name("Sheet1"),
         },
         HistoryLabel::SetNoteText { name: None },
         HistoryLabel::SetNoteText { name: name("N1") },
@@ -175,6 +183,16 @@ fn the_english_catalogue_matches_the_display_of_the_label() {
             "{label:?}"
         );
     }
+}
+
+/// The box of a transposed sheet (#463) keeps its two history labels, whatever
+/// the banner says.
+#[test]
+fn the_transpose_box_labels_are_check_and_uncheck_recalculate_automatically() {
+    let english = build_loader(Language::English);
+    let label = |auto| history_text_in(&english, &HistoryLabel::SetTransposeAuto { auto });
+    assert_eq!(label(true), "Check Recalculate Automatically");
+    assert_eq!(label(false), "Uncheck Recalculate Automatically");
 }
 
 /// The two cases of the issue: the plural is Fluent's (CLDR rules).

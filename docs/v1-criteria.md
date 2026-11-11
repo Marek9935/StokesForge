@@ -111,8 +111,9 @@ Each line is observed by a command or a page; none is declared
      of `publier`, `scripts/release-publish.sh` starts a GitLab pipeline on the
      tag, which publishes the manual of the release on GitLab Pages
      (`https://askrzypczak.gitlab.io/stokesforge/`). The token's role must be
-     allowed to run pipelines on the protected tags `v*`, else raise it to
-     Maintainer.
+     allowed to create the protected tags `v*`, which also lets it create a
+     release and run a pipeline on them (`docs/tests.md`, "Settings outside
+     the repository").
 5. Observe: the GitLab release exists, the installer and the archive can be
    downloaded from it.
 6. The issues waiting for a tag (`glab issue list --label attente-rc` and
@@ -184,7 +185,8 @@ must not reach `main` before the V1.1 tag (see "Integration line" below).
 
 - **`main`**: the shippable line. Fixes, small risk-free additions
   and their tags (`v1.0.1`, `v1.1.0`…) are put there directly. It is
-  protected (no force-push, see `docs/tests.md` § CI (GitHub Actions for Linux and Windows)).
+  protected on GitLab, not on the GitHub mirror (no force-push, no deletion by push, see
+  `docs/tests.md` § CI (GitHub Actions for Linux and Windows)).
 - **Numbers**: `Z` (`1.0.1`) = fix, or additive field of the `.stf` format
   (see `persistence.md`: risk and announcement in the CHANGELOG); `Y` (`1.1.0`) =
   feature added without breaking anything; `X` (`2.0.0`) = compatibility

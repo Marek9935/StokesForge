@@ -1,6 +1,6 @@
 //! No import template is built into the program (#378): with an empty config
 //! folder, the CLI knows none, refuses the former built-in names, and still
-//! imports a file with the permissive recipe.
+//! imports a file with the detector's recipe (#488).
 
 use std::path::Path;
 
@@ -58,7 +58,7 @@ fn a_former_builtin_name_is_refused() {
 }
 
 #[test]
-fn a_jasco_file_imports_with_the_permissive_recipe() {
+fn a_jasco_file_imports_with_the_detector_recipe() {
     let dir = isolated();
     let out_path = dir.path().join("jasco.stf");
     let (result, output) = run(&[
@@ -68,5 +68,6 @@ fn a_jasco_file_imports_with_the_permissive_recipe() {
         &fixture("jasco_uvvis_semicolon.csv"),
     ]);
     result.unwrap();
-    assert!(!output.contains("Jasco"), "{output}");
+    // No saved template named after the instrument: the detector's recipe.
+    assert!(output.contains("template \"Auto\""), "{output}");
 }

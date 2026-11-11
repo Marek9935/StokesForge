@@ -104,6 +104,21 @@ pub fn grid_corners(layout: &FigureLayout, occupied: &[(usize, usize)]) -> Vec<G
         .collect()
 }
 
+/// The grid cell `(row, column)` under the figure pixel `(x, y)`, holes
+/// included (a cell no graph occupies is still a place a graph can be moved
+/// to, #491), or `None` outside the grid, in the title band, or for a layout
+/// that is not a regular grid. The extents are those of
+/// [`FigureLayout::cell_rect`]: the outer cells, which tile the grid below the
+/// title band.
+pub fn grid_cell_at(layout: &FigureLayout, x: f64, y: f64) -> Option<(usize, usize)> {
+    let (cols, rows, xs, ys) = lines(layout)?;
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    let find = |v: &[f64], at: f64, count: usize| (0..count).find(|i| at >= v[*i] && at < v[i + 1]);
+    Some((find(&ys, y, rows)?, find(&xs, x, cols)?))
+}
+
 /// The handle under the figure pixel `(x, y)`, or `None`. A corner square
 /// (the edge reach on both axes, shrunk inwards on small cells like every
 /// inner reach, see [`LayoutReach`]) wins; else the whole band of an internal
@@ -364,6 +379,29 @@ mod tests {
 
     fn at(layout: &FigureLayout, x: f64, y: f64) -> Option<GridHandle> {
         grid_handle_at(layout, &ALL, x, y, LayoutReach::standard(1.0))
+    }
+
+    #[test]
+    fn a_pixel_names_its_cell_hole_or_not_and_nothing_in_the_title_band_or_outside() {
+        let layout = grid();
+        assert_eq!(grid_cell_at(&layout, 10.0, 50.0), Some((0, 0)));
+        assert_eq!(grid_cell_at(&layout, 400.0, 100.0), Some((0, 1)));
+        // Rows are 40..240 and 240..490: the row line is the bottom of cell_rect.
+        assert_eq!(grid_cell_at(&layout, 10.0, 239.0), Some((0, 0)));
+        assert_eq!(grid_cell_at(&layout, 10.0, 240.0), Some((1, 0)));
+        assert_eq!(grid_cell_at(&layout, 499.0, 489.0), Some((1, 1)));
+        assert_eq!(grid_cell_at(&layout, 10.0, 39.0), None, "title band");
+        assert_eq!(
+            grid_cell_at(&layout, 500.0, 100.0),
+            None,
+            "right of the grid"
+        );
+        assert_eq!(grid_cell_at(&layout, 10.0, 490.0), None, "below the grid");
+        assert_eq!(grid_cell_at(&layout, -1.0, 100.0), None);
+        assert_eq!(grid_cell_at(&layout, f64::NAN, 100.0), None);
+        let mut free = grid();
+        free.placement = LayerPlacement::Free;
+        assert_eq!(grid_cell_at(&free, 10.0, 50.0), None, "free placement");
     }
 
     /// The row line is `row_breaks[j] + title_band`, which is the bottom of

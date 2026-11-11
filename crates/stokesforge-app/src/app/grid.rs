@@ -859,19 +859,27 @@ fn column_properties_menu(
 
 /// Menu of a selection of **whole rows** of an x' sheet (#166): Plot and Send to
 /// plot the rows (one series per row, against the x'), then clipboard and clear
-/// as for columns.
+/// as for columns. `plottable` is false on a sheet with no x' (#493): Plot and
+/// Send to stay, grayed out with their reason; only Analysis acts.
 fn row_properties_menu(
     ui: &mut egui::Ui,
     state: &mut AppState,
     actions: &mut Vec<Action>,
     payload: &RowDragPayload,
+    plottable: bool,
 ) {
     let sheet = payload.sheet;
     let menu = state.grid_menu(sheet);
     let mut sections = MenuSections::new();
     sections.section(ui, true, |ui| {
-        plot_rows_menu(ui, actions, payload);
-        send_rows_to_graph_menu(ui, state.tree(), actions, payload);
+        if plottable {
+            plot_rows_menu(ui, actions, payload);
+            send_rows_to_graph_menu(ui, state.tree(), actions, payload);
+        } else {
+            ui.add_enabled(false, egui::Button::new(tr!("workbook-plot-menu")))
+                .on_disabled_hover_text(tr!("row-plot-needs-x-prime"));
+            super::graph_targets::send_rows_to_graph_disabled(ui, state.tree());
+        }
         let rows: Vec<(NodeId, usize)> = payload.rows.iter().map(|row| (sheet, *row)).collect();
         super::analysis_menu::analysis_entry(
             ui,
@@ -929,7 +937,12 @@ fn selection_context_menu(
     // Whole rows on an x' sheet (#166): plot the **rows**, not all the columns
     // they cross.
     if let Some(payload) = state.row_drag_payload(sheet) {
-        row_properties_menu(ui, state, actions, &payload);
+        row_properties_menu(ui, state, actions, &payload, true);
+        return;
+    }
+    // Whole rows with no x' (#493): the rows menu all the same, to analyze them.
+    if let Some(payload) = state.analysis_rows_target(sheet) {
+        row_properties_menu(ui, state, actions, &payload, false);
         return;
     }
     match whole {
@@ -4524,12 +4537,18 @@ mod tests {
         rows_bench.image(Vec::new());
         rows_bench.click_button("102", egui::PointerButton::Secondary);
         let texts = rows_bench.texts();
-        for entry in &letter_specific {
+        // Whole rows have their own menu (#166, #493): Plot and Analysis, not
+        // the type and role of the columns they cross.
+        for entry in [tr!("workbook-plot-menu"), tr!("menu-analysis")] {
             assert!(
-                texts.contains(entry),
+                texts.contains(&entry),
                 "selected row: {entry:?} missing from {texts:?}"
             );
         }
+        assert!(
+            !texts.contains(&tr!("column-type")),
+            "selected rows: no column type in {texts:?}"
+        );
 
         let mut cell_bench = Bench::new();
         cell_bench.click_button("102", egui::PointerButton::Secondary);
@@ -5649,15 +5668,58 @@ mod tests {
         bench.image(Vec::new());
         let menu = open_move(&mut bench, 0);
         assert_eq!(actives(&menu), [true, false, false, true], "A and C");
-        // Whole rows: all the columns, nothing moves.
+        // Whole rows have their own menu (#493): no `Move ▸` at all.
         let mut bench = Bench::new();
         bench.context.enable_accesskit();
         bench.state.select_row(bench.sheet, 1);
         bench.image(Vec::new());
         bench.click_button("102", egui::PointerButton::Secondary);
-        bench.click_on(&tr!("column-move"));
+        assert!(!bench.texts().contains(&tr!("column-move")), "whole rows");
+    }
+
+    /// #493: whole rows of a sheet with no x' have the rows menu, Analysis
+    /// active, Plot grayed out (a click on it pushes nothing). Witness: with
+    /// the old fall-back the menu is the columns' one (it has `Type`).
+    #[test]
+    fn whole_rows_without_x_prime_offer_analysis_and_a_grayed_out_plot() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        bench.state.select_row(bench.sheet, 1);
+        bench.image(Vec::new());
+        bench.click_button("102", egui::PointerButton::Secondary);
         let menu = read_menu(&bench);
-        assert_eq!(actives(&menu), [false; 4], "whole rows");
+        assert!(
+            menu_entry(&menu, &tr!("menu-analysis")).1,
+            "Analysis active"
+        );
+        let plot = menu_entry(&menu, &tr!("workbook-plot-menu"));
+        assert!(!plot.1, "Plot grayed out");
+        let position = plot.2;
+        bench.actions.clear();
+        bench.image(vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        assert!(
+            !bench
+                .actions
+                .iter()
+                .any(|a| matches!(a, Action::PlotRows { .. } | Action::PlotColumns { .. })),
+            "{:?}",
+            bench.actions
+        );
+        assert!(!bench.texts().contains(&tr!("column-type")));
     }
 
     /// The active entry pushes `MoveColumns` on the selection, the grayed one does not.

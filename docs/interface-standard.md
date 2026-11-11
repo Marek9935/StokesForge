@@ -42,7 +42,7 @@ mechanics.
 |---|---|---|
 | S-N1 | `champ-nombre-unique` | A single numeric field, the "number" building block; `▼` only if the quantities table offers values. |
 | S-N2 | `molette-champ-a-liste` | The mouse wheel changes only a list field, on hover; a field without a list is never changed by the wheel. |
-| S-N3 | `nombre-applique-a-la-validation` | A number applies on Enter or when leaving the field; one history entry per validation. |
+| S-N3 | `nombre-applique-a-la-validation` | A number applies on Enter or when leaving the field, to the field's own target even when another target is clicked; one history entry per validation. |
 | S-N4 | `virgule-decimale-acceptee` | "," and "." are accepted in a field that holds a single number; the interface always writes the dot. |
 | S-N5 | `virgule-decimale-cellules` | The same reading applies in Numeric (and Mixed) cells. |
 | S-N6 | `saisie-illisible-refusee` | An unreadable input is refused: red frame, tooltip that states the rule, the old value comes back. |
@@ -214,7 +214,14 @@ entry) too (S-N9).
   The number field applies it, including the editable text size list of
   the format bar.
 - **Application** (S-N3): on Enter or when leaving the field; Esc gives back
-  the old value; one history entry per validation.
+  the old value; one history entry per validation. The value applies to the
+  field's **own target**, even when the leaving click is on another target (an
+  axis side tab, a series row, a group header, a main tab): the click frame
+  validates on the old target, then the pick is applied. An unreadable draft
+  blocks that switch: the field stays open in red with the rule, as on Enter
+  (fix it or Esc, then click again). A draft never outlives its focus: a field
+  that is no longer drawn, or whose target changed, forgets it, and it is
+  never committed elsewhere (#498).
 - **One quantity, one definition** (S-N8): a single table gives bounds, step,
   large step, decimals, unit and offered values (the wheel follows these
   values, #233; the step serves the keyboard arrows). Thickness: 0 to 20 pt,
@@ -348,6 +355,14 @@ History: #219; wiring: #220, #224, #240 (S-N11, S-T3).
   columns of which 2 are faulty counts 2); the types follow the fixed order of
   `OperationKind::ALL`, their names come from the glossary (keys
   `low-r2-count-*`, plurals fr+en). No series names and no scrolling list.
+- **Twin: "No x' Values"** (#493, `AlertKind::NoXPrime`): same shape (warning,
+  not failure, `gesture_failed` ignores it, Enter, Esc and the cross close it).
+  Raised after every row analysis that uses the column numbers as x' and after
+  the Recalculate that switches a sheet to them. Cancel Analysis is the one
+  secondary button, offered only while the analysis window is open: it aborts
+  the `AnalyzeRows` group like that window's Cancel. It takes the single alert
+  slot over a low R² box (the badge below keeps saying the R²) but never over a
+  failure.
 - **Status bar badge** (#290): "⚠ 13 low R²", on the right of the
   bar, in R² red (`theme::r_squared_color`), with a tooltip. It is a
   **state** recomputed at each snapshot (`AppState::low_r2_groups`,
@@ -756,7 +771,7 @@ How it is held:
   Guard `no_literal_add_space_outside_the_theme` (`tests/guards.rs`), without
   exemption; a computed gap passes.
 - Migrated: graph properties (all pages, series editor shared
-  with the series window), analysis form, import wizard
+  with the series window), analysis form, import window
   (files, format, header, metadata, destination; the rules between
   blocks became headings). The series window (group, scope,
   color gradient — `curve_settings.rs`) is migrated, as are the tools of

@@ -191,6 +191,11 @@ pub(crate) enum KindRecord {
     Worksheet {
         /// Columns, from left to right.
         columns: Vec<u64>,
+        /// Base of the automatic name of an untouched import sheet (#488):
+        /// present = the sheet carries the mark. Additive side field, written
+        /// only when set and absent from earlier files (`#[serde(default)]`:
+        /// no mark). A reader that does not know it keeps the sheet.
+        raw_modified_base: Option<String>,
     },
     /// Data column.
     Column {
@@ -301,6 +306,8 @@ enum KindRecordKnown {
     },
     Worksheet {
         columns: Vec<u64>,
+        #[serde(default)]
+        raw_modified_base: Option<String>,
     },
     Column {
         column_type: TypeRecord,
@@ -361,7 +368,13 @@ impl From<KindRecordKnown> for KindRecord {
                 label,
                 comment,
             },
-            KindRecordKnown::Worksheet { columns } => KindRecord::Worksheet { columns },
+            KindRecordKnown::Worksheet {
+                columns,
+                raw_modified_base,
+            } => KindRecord::Worksheet {
+                columns,
+                raw_modified_base,
+            },
             KindRecordKnown::Column {
                 column_type,
                 role,
@@ -480,6 +493,8 @@ enum KindRecordRef<'a> {
     },
     Worksheet {
         columns: &'a [u64],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        raw_modified_base: &'a Option<String>,
     },
     Column {
         column_type: TypeRecord,
@@ -537,9 +552,14 @@ impl Serialize for KindRecord {
                 comment,
             }
             .serialize(serializer),
-            KindRecord::Worksheet { columns } => {
-                KindRecordRef::Worksheet { columns }.serialize(serializer)
+            KindRecord::Worksheet {
+                columns,
+                raw_modified_base,
+            } => KindRecordRef::Worksheet {
+                columns,
+                raw_modified_base,
             }
+            .serialize(serializer),
             KindRecord::Column {
                 column_type,
                 role,

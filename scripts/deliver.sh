@@ -8,6 +8,8 @@
 # works on the repository of the current directory). The message file holds the merge
 # commit message; its first line starts with `Merge #<n>:`.
 #
+# Before anything else it refuses while a trial entry of the issue is a retour nobody settled (#496).
+#
 # Order: checks, take the main lock (main-lock.sh), then a trap that releases it on
 # every exit; clean main and clean branch worktree; fetch origin main (SF_NO_FETCH is
 # ignored: this is the one fetch that matters), fast-forward if behind, stop if
@@ -70,6 +72,16 @@ if [ -n "$wait_tag" ] && grep -qiE "\\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed
 fi
 first="$(head -n 1 "$msgfile")"
 case "$first" in "Merge #$n:"*) ;; *) die "the first line of the message must start with 'Merge #$n:' (got: $first)" ;; esac
+
+# #496: a retour fixed without a new trial must be settled first (read-only, before the lock).
+# Exit 1 = unsettled retours (listed); anything else (no state yet) is not a refusal.
+set +e
+unsettled="$(python3 -I "$here/suivi.py" test unsettled "$n" 2> /dev/null)"
+unsettled_rc=$?
+set -e
+if [ "$unsettled_rc" -eq 1 ] && [ -n "$unsettled" ]; then
+    die "#$n has unsettled retours: $(echo $unsettled). Settle each one first: scripts/suivi.py test settle <id> --commit <fix> --note \"...\""
+fi
 
 main="$(sf_main_dir)"
 top="$(realpath "$(git rev-parse --show-toplevel)")"

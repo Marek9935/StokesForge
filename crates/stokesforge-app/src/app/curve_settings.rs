@@ -97,10 +97,13 @@ pub(super) fn curve_settings_page(
     }
     *selected = (*selected).min(panel.series.len() - 1);
     let mut commit = false;
+    // A click in the list is applied after the page is drawn (#498): a
+    // draft being typed is validated on the series it was typed for.
+    let mut pick: ListPick = None;
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(LIST_WIDTH);
-            commit |= series_list(ui, panel, layer, tree, selected);
+            commit |= series_list(ui, panel, layer, tree, selected, &mut pick);
         });
         ui.separator();
         ui.vertical(|ui| {
@@ -112,8 +115,21 @@ pub(super) fn curve_settings_page(
                 });
         });
     });
+    if let Some((index, whole_group)) = pick {
+        if crate::field_state::pick_allowed(ui.ctx()) {
+            *selected = index;
+            if whole_group {
+                ui.data_mut(|d| d.insert_temp(egui::Id::new("curve_edit_scope"), EditScope::Group));
+            }
+            ui.ctx().request_repaint();
+        }
+    }
     commit
 }
+
+/// A row clicked in the list, applied once the page is drawn: the series
+/// to edit and whether the scope becomes "Whole group" (a group header).
+type ListPick = Option<(usize, bool)>;
 
 /// Whole group: copies into the members of `group` what the series `index`
 /// has just changed in its line and symbol style relative to `before` (only
@@ -159,6 +175,7 @@ struct ListDnd {
 /// A series row of the list; returns the vertical center of the row. Its
 /// handle drags it: within its group, to another group, out of the group, or
 /// among the single series.
+#[allow(clippy::too_many_arguments)]
 fn series_row(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -167,6 +184,7 @@ fn series_row(
     selected: &mut usize,
     dnd: &ListDnd,
     commit: &mut bool,
+    pick: &mut ListPick,
 ) -> f32 {
     let (label, fallback) = series_list_entry(tree, &panel.series[index], &panel.legend.text);
     let row = ui
@@ -206,7 +224,10 @@ fn series_row(
         .inner;
     let (outcome, clicked) = row.inner;
     if clicked {
-        *selected = index;
+        if index != *selected {
+            crate::field_state::pick_pending(ui.ctx());
+        }
+        *pick = Some((index, false));
     }
     if outcome.grabbed {
         *selected = index;
@@ -240,6 +261,7 @@ fn series_list(
     layer: usize,
     tree: &Tree,
     selected: &mut usize,
+    pick: &mut ListPick,
 ) -> bool {
     let mut commit = false;
     let dnd = ListDnd {
@@ -260,7 +282,7 @@ fn series_list(
             for slot in panel.slots() {
                 match slot {
                     SeriesSlot::Single(index) => {
-                        series_row(ui, panel, tree, index, selected, &dnd, &mut commit);
+                        series_row(ui, panel, tree, index, selected, &dnd, &mut commit, pick);
                     }
                     SeriesSlot::Group { id, members } => {
                         let state = ui.make_persistent_id(("curve_list_group", layer, id));
@@ -298,11 +320,20 @@ fn series_list(
                                         Some(response)
                                     },
                                 );
-                                if clicked || outcome.grabbed {
+                                // A click waits for the page (#498); a grab starts
+                                // a drag, the draft is let go.
+                                if outcome.grabbed {
                                     if let Some(first) = members.first() {
                                         *selected = *first;
                                     }
                                     ui.data_mut(|d| d.insert_temp(scope_id, EditScope::Group));
+                                } else if clicked {
+                                    if let Some(first) = members.first() {
+                                        if !on_group || *first != *selected {
+                                            crate::field_state::pick_pending(ui.ctx());
+                                        }
+                                        *pick = Some((*first, true));
+                                    }
                                 }
                                 if outcome.grabbed {
                                     object_dnd::begin(
@@ -333,6 +364,7 @@ fn series_list(
                                             selected,
                                             &dnd,
                                             &mut commit,
+                                            pick,
                                         );
                                         branch.mark(y);
                                     }
@@ -400,6 +432,9 @@ fn series_page(
     let mut scope = ui
         .data(|d| d.get_temp(scope_id))
         .unwrap_or(EditScope::Group);
+    // The scope in force while this page is drawn is the one of the previous
+    // frame: a draft typed under the old scope is validated under it (#498).
+    let scope_in_force = scope;
     let mut commit = membership_editor(ui, panel, layer, index, &mut scope);
     ui.data_mut(|d| d.insert_temp(scope_id, scope));
     // Deleting a group can empty the layer: nothing to edit afterwards.
@@ -408,7 +443,7 @@ fn series_page(
     }
     *index = (*index).min(panel.series.len() - 1);
     let group = panel.series[*index].group;
-    let whole_group = group.is_some() && scope == EditScope::Group;
+    let whole_group = group.is_some() && scope_in_force == EditScope::Group;
     // Outside a group there is nothing to spread: no color gradient (#213).
     if let Some(group) = group {
         commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
@@ -428,15 +463,18 @@ fn series_page(
             [series.x_error, series.y_error],
         )
     };
-    commit |= series_editor(
-        ui,
-        &mut panel.series[*index],
-        env,
-        whole_group,
-        auto_bar_width,
-        panel.overlay.is_some(),
-        &error_columns,
-    );
+    let has_overlay = panel.overlay.is_some();
+    commit |= crate::field_state::for_target(ui, (layer, *index), |ui| {
+        series_editor(
+            ui,
+            &mut panel.series[*index],
+            env,
+            whole_group,
+            auto_bar_width,
+            has_overlay,
+            &error_columns,
+        )
+    });
     // The Y axis (#358) goes through the panel, which makes the right axis
     // visible; in "whole group" scope every member gets it.
     let axis = panel.series[*index].axis;
@@ -578,8 +616,12 @@ fn group_editor(
 ) -> bool {
     let mut commit = false;
     // The text being typed lives only as long as the focus: the rest of the
-    // time, the field rereads the model (name changed elsewhere, other group).
+    // time, the field rereads the model (name changed elsewhere).
     let name_id = egui::Id::new(("curve_group_name", layer, group));
+    // An explicit identifier holding the group: the click that moves to
+    // another group is applied after this page, so the name is validated
+    // on the group it was typed for (#498).
+    let name_field_id = egui::Id::new(("curve_group_name_field", layer, group));
     let mut name: String = f
         .ui()
         .data(|d| d.get_temp(name_id))
@@ -587,6 +629,7 @@ fn group_editor(
     f.row(tr!("curve-group-name-field"), |ui| {
         let field = ui.add(
             egui::TextEdit::singleline(&mut name)
+                .id(name_field_id)
                 .hint_text(tr!("curve-group-name", number = group))
                 .desired_width(theme::FieldWidth::Medium.points(ui)),
         );
@@ -1210,6 +1253,90 @@ mod tests {
         assert_eq!(
             selected, 0,
             "the selection falls back on an existing series"
+        );
+    }
+
+    /// A line width typed for one series and a click on another series row:
+    /// the width goes to the series it was typed for, the clicked one opens
+    /// untouched (#498). Witness: `*selected = index` applied before the page.
+    #[test]
+    fn a_width_typed_for_one_series_stays_on_it_when_another_row_is_clicked() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut selected = 0; // "A", outside a group
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let width = format!("{}", panel.series[0].line.width);
+        let field = center_of(&output, &width);
+        click_at(&ctx, &mut panel, &mut selected, field);
+        page(
+            &ctx,
+            &mut panel,
+            &mut selected,
+            vec![egui::Event::Text("7".into())],
+        );
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let row = center_of(&output, "C");
+        let untouched = panel.series[2].line.width;
+        click_at(&ctx, &mut panel, &mut selected, row);
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        assert_eq!(panel.series[0].line.width, 7.0, "A took the width");
+        assert_eq!(panel.series[2].line.width, untouched, "C is untouched");
+        assert_eq!(selected, 2, "the clicked row is the edited series");
+    }
+
+    /// A group name typed and a click on another group header: the name is
+    /// validated on the first group (#498). Witness: the pick applied before
+    /// the page.
+    #[test]
+    fn a_group_name_typed_for_one_group_is_kept_when_another_group_is_clicked() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        for (n, name) in [(5, "E"), (6, "F")] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(n));
+            series.name = name.into();
+            series.group = Some(2);
+            panel.series.push(series);
+        }
+        assert!(panel.rename_group(2, "Second"));
+        let mut selected = 1; // "B", first member of "Batch"
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        // "Batch" is painted twice: the list header (left) and the name field.
+        let field = super::super::test_support::texts(&output.shapes)
+            .into_iter()
+            .filter(|t| t.text == "Batch")
+            .max_by(|a, b| a.center.x.total_cmp(&b.center.x))
+            .expect("the name field")
+            .center;
+        click_at(&ctx, &mut panel, &mut selected, field);
+        page(
+            &ctx,
+            &mut panel,
+            &mut selected,
+            vec![egui::Event::Text("Foo".into())],
+        );
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let header = center_of(&output, "Second");
+        click_at(&ctx, &mut panel, &mut selected, header);
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        // The caret sits inside the old name: the typed text is in the middle.
+        assert!(
+            panel
+                .group_label(1)
+                .is_some_and(|name| name.contains("Foo")),
+            "the first group is renamed: {:?}",
+            panel.group_label(1)
+        );
+        assert_eq!(
+            panel.group_label(2),
+            Some("Second"),
+            "the second is untouched"
+        );
+        assert_eq!(
+            panel.series[selected].group,
+            Some(2),
+            "the clicked group is open"
         );
     }
 
