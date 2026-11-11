@@ -35,6 +35,10 @@ pub enum IconRole {
     Note,
     Folder,
     Danger,
+    /// State to spot, in the accent (the closed size padlock, #505).
+    Accent,
+    /// Inactive state, muted (the open size padlock, #505).
+    Muted,
 }
 
 /// Available icons — a closed enum: adding an icon means adding a
@@ -340,13 +344,13 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     ),
     (
         Icon::LockClosed,
-        IconRole::Neutral,
-        svg!("lock-simple.neutral.svg"),
+        IconRole::Accent,
+        svg!("lock-simple-fill-modify.accent.svg"),
     ),
     (
         Icon::LockOpen,
-        IconRole::Neutral,
-        svg!("lock-simple-open.neutral.svg"),
+        IconRole::Muted,
+        svg!("lock-simple-open-outline-modify.muted.svg"),
     ),
     (
         Icon::Undo,
