@@ -26,7 +26,7 @@
 //! result through [`FramePreview`] and paints the overlay. The overlay is a
 //! screen marker: it enters neither the cache key nor the export.
 
-use crate::edge_band::edge_drop_side;
+use crate::edge_band::{edge_drop_side, DropAnchor, DropPlace};
 use egui::{
     Color32, Context, CursorIcon, FontId, Painter, PointerButton, Pos2, Rect, Response, Shape,
     Stroke, StrokeKind, Visuals,
@@ -931,11 +931,19 @@ impl GraphView {
         let Some(display) = self.display_rect else {
             return (None, None);
         };
-        // Beside its own cell is no move (the model refuses it too).
+        // A zone is a grid position, whoever sits there (the moving graph and
+        // holes included): the model opens the line at that row or column.
         if let Some(place) = self.drop_place(pos, Some(base)) {
-            let target = MoveTarget::Beside {
-                panel: place.panel,
-                side: place.side,
+            let target = match place.anchor {
+                DropAnchor::Cell { row, column } => MoveTarget::NewLine {
+                    row,
+                    column,
+                    side: place.side,
+                },
+                DropAnchor::Panel(panel) => MoveTarget::Beside {
+                    panel,
+                    side: place.side,
+                },
             };
             return (Some(target), place.band.map(|side| (side, place.segment)));
         }
@@ -1491,8 +1499,14 @@ impl GraphView {
             return;
         };
         let place = match target {
-            Some(MoveTarget::Beside { panel, side }) => Some(crate::edge_band::DropPlace {
-                panel,
+            Some(MoveTarget::NewLine { row, column, side }) => Some(DropPlace {
+                anchor: DropAnchor::Cell { row, column },
+                side,
+                band: band.map(|(side, _)| side),
+                segment: band.map_or(0, |(_, segment)| segment),
+            }),
+            Some(MoveTarget::Beside { panel, side }) => Some(DropPlace {
+                anchor: DropAnchor::Panel(panel),
                 side,
                 band: band.map(|(side, _)| side),
                 segment: band.map_or(0, |(_, segment)| segment),

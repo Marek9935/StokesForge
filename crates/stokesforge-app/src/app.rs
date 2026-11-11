@@ -1895,7 +1895,7 @@ impl StokesForgeApp {
         // (framing, active layer, selection), so they follow the move.
         let layer_changes: Vec<LayerChange> = self.layer_changes_before(&action);
         let added_cell = match &action {
-            Action::AddCell { graph, .. } => Some(*graph),
+            Action::AddCell { graph, .. } | Action::AddCellAt { graph, .. } => Some(*graph),
             _ => None,
         };
         let selection_change = match &action {
