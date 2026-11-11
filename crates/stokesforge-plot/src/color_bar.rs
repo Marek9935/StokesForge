@@ -194,9 +194,6 @@ pub struct ColorBarSpec {
     pub ticks: ColorBarTicks,
     /// Typst title of the bar (empty = none).
     pub title: String,
-    /// Font and size of the bar's own texts (title, tick labels, break
-    /// labels). Default = the label size of the graph's font (today's look).
-    pub font: crate::TextFont,
     /// Length of the strip in points (a bar inside the frame); `None` =
     /// automatic (a share of the frame). Outside the frame the length keeps
     /// following the frame and this value is only remembered.
@@ -221,7 +218,6 @@ impl Default for ColorBarSpec {
             anchor: None,
             ticks: ColorBarTicks::default(),
             title: String::new(),
-            font: crate::TextFont::default(),
             length: None,
             thickness: None,
             visible: true,

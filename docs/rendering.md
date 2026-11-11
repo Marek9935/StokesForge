@@ -137,6 +137,27 @@ compile gives the grey fallback of the lists. The Template field is checked
 `LegendTextFrom::template()` of the previous choice (`LegendText::choose_custom`,
 never over a typed template). A row series ignores the template. compile). Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
 
+Legend box (#507): `LegendSpec` carries the frame (shown, colour, thickness in
+pt), the background (empty = the panel's, else `#RRGGBB[AA]`), the number of
+columns, the row and column gaps and the swatch length; every empty / `None`
+value is today's constant (`LegendSpec::DEFAULT_*`, read through the clamping
+`*_pt` accessors), so a file that never set them draws the same pixels.
+`legend::draw` lays the entries out **column-major** (fill down first, then the
+next column; columns capped at the entries, one column width per column), the
+« … and N more » line spans the full width under the grid, and
+`DrawnLegendRow` carries `center_x` / `width` next to `center_y` / `height`:
+`hit::component_at` checks x as well, so a second column picks its own series,
+and `legend_entry_screen_box` returns the entry's cell (a lone column still
+spans the whole frame). The legend never moves the plot area: a corner legend
+grows away from its corner, a moved one around its centre. A **thick frame is a
+closed path**, not a `Rectangle`: the SVG backend of Plotters writes no width
+for a rectangle outline (frame off != thickness 0, and `paint::stroke_width`
+rounds, minimum 1). The object-manager thumbnail keeps the 26 pt swatch
+(`legend::KEY_WIDTH`). The colour bar uses the legend's font. Tests:
+`geometry.rs` (`the_default_legend_box_keeps_todays_formula`,
+`three_entries_on_two_columns_fill_down_first`), `hit.rs`,
+`render-svg/tests/legend_box.rs`, `agreement.rs` (`#507`).
+
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the
 whole legend, which can also be moved by dragging it from an entry.
@@ -1283,7 +1304,7 @@ cell** (superimposed layers must keep the same plot area). Those two places forc
 (Below horizontal, Right vertical); corners and a dragged bar (`anchor`, wins over the position) are
 inside the frame and ask no band. In the legacy layout (no stored frame, no padding) nothing is reserved
 and an outside place draws at the bottom right corner. `DrawnText { ColorBar }` serves picking and drag
-exactly like the legend (`TextTarget::ColorBar` has a font of its own (`ColorBarSpec::font`: title, ticks, break labels, measured through the same single measure; the band rows grow with a size above the label size) and no colour, is not listed in
+exactly like the legend (`TextTarget::ColorBar` shares the legend's font (#507: title, ticks, break labels, measured through the same single measure; the band rows grow with a size above the label size) and has no colour, is not listed in
 the Object Manager). Test: `figure_layout.rs` (band), `agreement.rs` (stripes, ticks, labels on both
 backends), `cache_session.rs` (click and drag).
 

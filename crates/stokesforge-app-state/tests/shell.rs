@@ -8123,6 +8123,50 @@ fn plot_rows_and_empty_graph_names() {
     assert!(!name.contains(" plot"), "{name}");
 }
 
+/// #507, D6: a graph created by `AddGraph`, `PlotColumns` or `PlotRows` has no
+/// legend frame, while a graph that is loaded keeps its own (the model
+/// default is the frame). Witness: a creation path that forgets
+/// `with_new_graph_legend` leaves the frame on.
+#[test]
+fn new_graphs_have_no_legend_frame() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    let last = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    let frames = |state: &AppState| {
+        state
+            .plot_spec(last(state))
+            .unwrap()
+            .panels
+            .iter()
+            .map(|panel| panel.legend.frame)
+            .collect::<Vec<_>>()
+    };
+    state.dispatch(Action::AddGraph);
+    assert_eq!(frames(&state), [false]);
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns,
+        plot_type: PlotType::Line,
+    });
+    assert!(frames(&state).iter().all(|frame| !frame));
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert!(frames(&state).iter().all(|frame| !frame));
+    // The model default is still today's look: a spec that did not go
+    // through a creation path keeps its frame.
+    assert!(stokesforge_plot::LegendSpec::default().frame);
+}
+
 /// Plot of a row selection (#166): a fresh graph where each row is
 /// a series, not all the columns crossed; a single undo step.
 #[test]
@@ -8557,15 +8601,17 @@ fn resizing_the_color_bar_is_one_bounded_undo_step() {
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     let mut spec = state.plot_spec(graph).expect("spec");
-    spec.panels.get_mut(0).expect("panel").color_bar = Some(ColorBarSpec {
+    let panel = spec.panels.get_mut(0).expect("panel");
+    panel.color_bar = Some(ColorBarSpec {
         segments: vec![ColorBarSegment::new(1)],
         position: ColorBarPosition::BottomRight,
-        font: TextFont {
-            size: Some(17.0),
-            ..TextFont::default()
-        },
         ..ColorBarSpec::default()
     });
+    // The bar's font is the legend's (#507): resizing leaves it alone.
+    panel.legend.font = TextFont {
+        size: Some(17.0),
+        ..TextFont::default()
+    };
     state.dispatch(Action::SetPlotSpec { graph, spec });
     let before = state.plot_spec(graph).expect("spec");
     let bar = |state: &AppState| {
@@ -8585,7 +8631,14 @@ fn resizing_the_color_bar_is_one_bounded_undo_step() {
     let resized = bar(&state);
     assert_eq!(resized.length, Some(ColorBarSpec::MIN_LENGTH), "bounded");
     assert_eq!(resized.thickness, Some(30.0));
-    assert_eq!(resized.font.size, Some(17.0), "the font is not resized");
+    assert_eq!(
+        state.plot_spec(graph).expect("spec").panels[0]
+            .legend
+            .font
+            .size,
+        Some(17.0),
+        "the font is not resized"
+    );
     assert_eq!(
         state.snapshot().history.undo_label,
         Some(HistoryLabel::EditPlotSpec(PlotEditKind::ColorBar))

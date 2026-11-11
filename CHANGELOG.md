@@ -37,6 +37,17 @@ without a message, see `docs/persistence.md`).
   `.stf` fields (an older version that saves the file again loses them);
   `pyst` API 0.6: `set_graph(legend_text_from=…, legend_template=…)`.
 
+- Legend box (#507): the legend gets a frame (shown or not, colour,
+  thickness), a background (automatic or a colour with opacity), several
+  columns (entries fill down first, then the next column), row and column
+  gaps and the length of the line sample, all in points. A graph you create
+  now has **no legend frame**; an existing file keeps its frame and its look.
+  The colour bar uses the legend's font. Additive `.stf` fields (an older
+  version that saves the file again loses them); `pyst` API 0.6:
+  `set_graph(legend_frame=…, legend_frame_color=…, legend_frame_width=…,
+  legend_background=…, legend_columns=…, legend_row_gap=…,
+  legend_column_gap=…, legend_swatch_length=…)`.
+
 - Color bar (#499): a layer can color the curves of one or more series
   groups by a value (x' by default; also Comments, Long Name, Short Name,
   Units, or the value of a column for a row series) instead of by their rank,

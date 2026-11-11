@@ -197,7 +197,15 @@ options set_graph	fixed_size
 options set_graph	layer_left
 options set_graph	layer_placement
 options set_graph	layer_top
+options set_graph	legend_background
+options set_graph	legend_column_gap
+options set_graph	legend_columns
+options set_graph	legend_frame
+options set_graph	legend_frame_color
+options set_graph	legend_frame_width
 options set_graph	legend_position
+options set_graph	legend_row_gap
+options set_graph	legend_swatch_length
 options set_graph	legend_template
 options set_graph	legend_text_from
 options set_graph	legend_visible

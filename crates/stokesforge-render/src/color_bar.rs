@@ -299,8 +299,9 @@ fn extras(bar: &ColorBarSpec) -> (bool, bool) {
 fn label_columns<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     bar: &ColorBarSpec,
+    font: &stokesforge_plot::TextFont,
 ) -> Result<(i32, i32), DrawingAreaErrorKind<DB::ErrorType>> {
-    let (small, tick) = label_styles(bar, (0, 0, 0, 255));
+    let (small, tick) = label_styles(font, (0, 0, 0, 255));
     let mut ticks = area.estimate_text_size(TICK_SAMPLE, &tick)?.0 as i32;
     for segment in &bar.segments {
         for value in [segment.from, segment.to].into_iter().flatten() {
@@ -319,22 +320,22 @@ fn label_columns<DB: DrawingBackend>(
 
 /// The text styles of the tick labels and the break labels `(small, tick)`.
 pub fn label_styles(
-    bar: &ColorBarSpec,
+    font: &stokesforge_plot::TextFont,
     ink: (u8, u8, u8, u8),
 ) -> (TextStyle<'static>, TextStyle<'static>) {
     let small = crate::formula::rich_style_layout(
-        bar.font.effective_size(crate::pipeline::LABEL_SIZE) * BREAK_LABEL_SCALE,
+        font.effective_size(crate::pipeline::LABEL_SIZE) * BREAK_LABEL_SCALE,
         ink,
-        bar.font.family(),
+        font.family(),
         None,
     );
-    let tick = if bar.font.is_default() {
+    let tick = if font.is_default() {
         crate::pipeline::text_style(crate::pipeline::LABEL_SIZE, ink)
     } else {
         crate::formula::literal_style_font(
-            bar.font.effective_size(crate::pipeline::LABEL_SIZE),
+            font.effective_size(crate::pipeline::LABEL_SIZE),
             ink,
-            bar.font.family(),
+            font.family(),
         )
     };
     (small, tick)
@@ -346,14 +347,15 @@ pub fn label_styles(
 fn cross_size<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     bar: &ColorBarSpec,
+    font: &stokesforge_plot::TextFont,
     horizontal: bool,
 ) -> Result<i32, DrawingAreaErrorKind<DB::ErrorType>> {
     let (labels, title) = extras(bar);
-    let title = if title { grown(bar, TITLE_ROW) } else { 0 };
+    let title = if title { grown(font, TITLE_ROW) } else { 0 };
     Ok(if horizontal {
-        i32::from(labels) * MARKER_ROW + thick(bar) + TICK_GAP + grown(bar, TICK_ROW) + title
+        i32::from(labels) * MARKER_ROW + thick(bar) + TICK_GAP + grown(font, TICK_ROW) + title
     } else {
-        let (ticks, breaks) = label_columns(area, bar)?;
+        let (ticks, breaks) = label_columns(area, bar, font)?;
         i32::from(labels) * MARKER_ROW
             + thick(bar)
             + TICK_GAP
@@ -464,8 +466,8 @@ pub fn resized(
 
 /// A text row or column, grown with the bar's font size above the default
 /// label size (never shrunk: a smaller font keeps today's room).
-fn grown(bar: &ColorBarSpec, size: i32) -> i32 {
-    let ratio = bar.font.effective_size(crate::pipeline::LABEL_SIZE) / crate::pipeline::LABEL_SIZE;
+fn grown(font: &stokesforge_plot::TextFont, size: i32) -> i32 {
+    let ratio = font.effective_size(crate::pipeline::LABEL_SIZE) / crate::pipeline::LABEL_SIZE;
     if ratio > 1.0 {
         (f64::from(size) * ratio).round() as i32
     } else {
@@ -480,14 +482,15 @@ fn grown(bar: &ColorBarSpec, size: i32) -> i32 {
 /// free placement read it before anything is drawn.
 pub fn band<DB: DrawingBackend>(
     bar: Option<&ColorBarSpec>,
+    font: &stokesforge_plot::TextFont,
     probe: &DrawingArea<DB, Shift>,
 ) -> Result<(u32, u32), DrawingAreaErrorKind<DB::ErrorType>> {
     let Some(bar) = bar.filter(|bar| bar.visible && !bar.segments.is_empty()) else {
         return Ok((0, 0));
     };
     Ok(match place_of(bar) {
-        Place::Below => ((GAP + cross_size(probe, bar, true)?) as u32, 0),
-        Place::Right => (0, (GAP + cross_size(probe, bar, false)?) as u32),
+        Place::Below => ((GAP + cross_size(probe, bar, font, true)?) as u32, 0),
+        Place::Right => (0, (GAP + cross_size(probe, bar, font, false)?) as u32),
         _ => (0, 0),
     })
 }
@@ -525,6 +528,7 @@ pub type DrawnBar = ((i32, i32), (u32, u32));
 pub fn draw<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     bar: &ColorBarSpec,
+    font: &stokesforge_plot::TextFont,
     segments: &[BarSegment],
     placing: &BarFrame,
     styles: &BarStyles,
@@ -542,7 +546,7 @@ pub fn draw<DB: DrawingBackend>(
     let along_x = horizontal(bar, place);
     let ((fx, fy), (fw, fh)) = placing.frame;
     let (fw, fh) = (fw as i32, fh as i32);
-    let cross = cross_size(area, bar, along_x)?;
+    let cross = cross_size(area, bar, font, along_x)?;
     let thick = thick(bar);
     let (labels, title) = extras(bar);
 
@@ -781,14 +785,14 @@ pub fn draw<DB: DrawingBackend>(
     let rich = |pos: Pos| styles.rich.pos(pos);
     if title {
         if along_x {
-            let (x, y) = (bx + length / 2, by + cross - grown(bar, TITLE_ROW) / 2);
+            let (x, y) = (bx + length / 2, by + cross - grown(font, TITLE_ROW) / 2);
             area.draw(&Text::new(
                 bar.title.as_str(),
                 (x, y),
                 rich(Pos::new(HPos::Center, VPos::Center)),
             ))?;
         } else {
-            let (x, y) = (bx + cross - grown(bar, TITLE_ROW) / 2, by + length / 2);
+            let (x, y) = (bx + cross - grown(font, TITLE_ROW) / 2, by + length / 2);
             crate::pipeline::draw_centered_text(area, &bar.title, &styles.rich, -90.0, (x, y))?;
         }
     }

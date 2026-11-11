@@ -822,12 +822,6 @@ pub(crate) struct TextFontRecord {
     pub(crate) align: TextAlignRecord,
 }
 
-impl TextFontRecord {
-    pub(crate) fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
 /// [`stokesforge_plot::TextAnchor`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TextAnchorRecord {
@@ -938,10 +932,6 @@ pub(crate) struct ColorBarRecord {
     pub(crate) ticks: String,
     #[serde(default)]
     pub(crate) title: String,
-    /// Font of the bar's texts; a default font is not written, so an older
-    /// file stays byte-identical.
-    #[serde(default, skip_serializing_if = "TextFontRecord::is_default")]
-    pub(crate) font: TextFontRecord,
     /// Strip length and thickness (#499); absent = automatic, not written, so
     /// an older file stays byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1383,6 +1373,44 @@ pub(crate) struct LegendSpecRecord {
     /// Column read by the row series of the legend (#499); absent = « Row N ».
     #[serde(default)]
     pub(crate) text_row_column: Option<u64>,
+    /// The frame is hidden (#507). Stored as « hidden », not « shown »: a
+    /// `#[serde(default)]` bool reads `false` on a file without the key, and
+    /// that file's legend has its frame. Not written when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) frame_hidden: bool,
+    /// Frame color, empty = automatic. Not written when empty, nor are the
+    /// next fields when absent / default: an older file stays byte-identical.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) frame_color: String,
+    /// Frame thickness in points, absent = 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) frame_width: Option<f64>,
+    /// Background, empty = automatic, else `#RRGGBB[AA]`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) background: String,
+    /// Number of columns; absent = one (0 from a damaged file reads as one).
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub(crate) columns: u32,
+    /// Gap between rows / columns and thumbnail length in points, absent =
+    /// the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) row_gap: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) column_gap: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) swatch_length: Option<f64>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn default_one() -> u32 {
+    1
+}
+
+fn is_one(value: &u32) -> bool {
+    *value == 1
 }
 
 impl Default for LegendSpecRecord {
@@ -1399,6 +1427,14 @@ impl Default for LegendSpecRecord {
             text_from: String::new(),
             text_template: String::new(),
             text_row_column: None,
+            frame_hidden: false,
+            frame_color: String::new(),
+            frame_width: None,
+            background: String::new(),
+            columns: 1,
+            row_gap: None,
+            column_gap: None,
+            swatch_length: None,
         }
     }
 }
@@ -1462,6 +1498,73 @@ mod tests {
         let record: LegendSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
         let legend = stokesforge_plot::LegendSpec::from(record);
         assert_eq!(legend.text, stokesforge_plot::LegendText::default());
+    }
+
+    /// A legend written before the box settings (#507) reads as today's look:
+    /// frame shown (the bool pitfall: a `#[serde(default)]` bool reads false),
+    /// one column, automatic colors and background, the default lengths.
+    /// Witness: reading `frame_hidden` as « frame » (a plain bool `frame`)
+    /// would hide every old frame; a missing `columns` read as 0 would draw
+    /// nothing.
+    #[test]
+    fn a_legend_without_box_settings_reads_as_the_default() {
+        #[derive(Serialize)]
+        struct Before {
+            visible: bool,
+            position: LegendPositionRecord,
+        }
+        let bytes = rmp_serde::to_vec_named(&Before {
+            visible: true,
+            position: LegendPositionRecord::TopRight,
+        })
+        .expect("encoding");
+        let record: LegendSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        let legend = stokesforge_plot::LegendSpec::from(record);
+        assert_eq!(legend, stokesforge_plot::LegendSpec::default());
+        assert!(legend.frame);
+        assert_eq!(legend.column_count(), 1);
+    }
+
+    /// The box settings survive a round trip, and a default legend writes
+    /// none of the keys (an old file stays byte-identical).
+    #[test]
+    fn the_legend_box_round_trips_and_a_default_one_writes_nothing() {
+        let boxed = stokesforge_plot::LegendSpec {
+            frame: false,
+            frame_color: "#cc2244".to_string(),
+            frame_width: Some(2.5),
+            background: "#ffee0080".to_string(),
+            columns: 3,
+            row_gap: Some(7.0),
+            column_gap: Some(20.5),
+            swatch_length: Some(41.0),
+            ..stokesforge_plot::LegendSpec::default()
+        };
+        let bytes = rmp_serde::to_vec_named(&LegendSpecRecord::from(&boxed)).expect("encoding");
+        let back: LegendSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        assert_eq!(stokesforge_plot::LegendSpec::from(back), boxed);
+
+        let plain = rmp_serde::to_vec_named(&LegendSpecRecord::from(
+            &stokesforge_plot::LegendSpec::default(),
+        ))
+        .expect("encoding");
+        let value = rmpv::decode::read_value(&mut std::io::Cursor::new(plain)).expect("value");
+        let rmpv::Value::Map(fields) = value else {
+            panic!("a legend is a map");
+        };
+        let keys: Vec<&str> = fields.iter().filter_map(|(key, _)| key.as_str()).collect();
+        for new in [
+            "frame_hidden",
+            "frame_color",
+            "frame_width",
+            "background",
+            "columns",
+            "row_gap",
+            "column_gap",
+            "swatch_length",
+        ] {
+            assert!(!keys.contains(&new), "{new} written for a default legend");
+        }
     }
 
     /// A choice from a newer version survives a save (kept as typed).

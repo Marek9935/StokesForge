@@ -243,6 +243,10 @@ impl DrawnText {
 pub struct DrawnLegendRow {
     /// Rank of the series in `PanelSpec::series`.
     pub series: usize,
+    /// Horizontal middle of the entry's cell, in backend pixels (#507).
+    pub center_x: f64,
+    /// Width of the cell: the whole frame for a lone column.
+    pub width: f64,
     /// Vertical middle of the row, in backend pixels.
     pub center_y: f64,
     /// Height of the row.
@@ -866,7 +870,7 @@ fn cell_plans<DB: DrawingBackend>(
             offsets.push((plan.bar_bottom, plan.bar_right));
             plan.add(
                 panel,
-                crate::color_bar::band(panel.color_bar.as_ref(), probe)?,
+                crate::color_bar::band(panel.color_bar.as_ref(), &panel.legend.font, probe)?,
             );
         } else {
             ranks.push((0, 0));
@@ -3775,7 +3779,12 @@ fn draw_panel<DB: DrawingBackend>(
             ),
         },
         figure_texts,
-        legend::LegendColors { background, ink },
+        legend::LegendColors {
+            // Automatic background = the panel's (#507).
+            background: rgba_or(&spec.legend.background, background),
+            ink,
+            frame: crate::color::rgb_or(&spec.legend.frame_color, ink),
+        },
         legend_center,
     )?;
     drawn.legend_entries = inscribed.entries;
@@ -3794,10 +3803,12 @@ fn draw_panel<DB: DrawingBackend>(
             .rows
             .iter()
             .zip(&entry_ranks)
-            .map(|(&(center_y, height), &series)| DrawnLegendRow {
+            .map(|(cell, &series)| DrawnLegendRow {
                 series,
-                center_y,
-                height,
+                center_x: cell.center_x,
+                width: cell.width,
+                center_y: cell.center_y,
+                height: cell.height,
             })
             .collect();
     }
@@ -3809,6 +3820,7 @@ fn draw_panel<DB: DrawingBackend>(
         let placed = crate::color_bar::draw(
             canvas,
             bar,
+            &spec.legend.font,
             &segments,
             &crate::color_bar::BarFrame {
                 frame: (origin, size),
@@ -3822,9 +3834,14 @@ fn draw_panel<DB: DrawingBackend>(
                 center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
             },
             &{
-                let (small, tick) = crate::color_bar::label_styles(bar, bar_ink);
+                let (small, tick) = crate::color_bar::label_styles(&spec.legend.font, bar_ink);
                 crate::color_bar::BarStyles {
-                    rich: font_style(&bar.font, LABEL_SIZE, bar_ink, canvas.dim_in_pixel().0),
+                    rich: font_style(
+                        &spec.legend.font,
+                        LABEL_SIZE,
+                        bar_ink,
+                        canvas.dim_in_pixel().0,
+                    ),
                     small,
                     tick,
                     ink,

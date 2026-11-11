@@ -263,6 +263,15 @@ pub fn non_trivial_spec(
                 template: "%(LL) (%(LU))".to_string(),
                 row_column: Some(y1),
             },
+            // #507: every box setting non-default.
+            frame: false,
+            frame_color: "#cc2244".to_string(),
+            frame_width: Some(2.5),
+            background: "#ffee0080".to_string(),
+            columns: 3,
+            row_gap: Some(7.0),
+            column_gap: Some(20.5),
+            swatch_length: Some(41.0),
         },
         title_color: "#aa8811".to_string(),
         // Issue #35: free texts, all fields non-default.
@@ -338,10 +347,6 @@ pub fn non_trivial_spec(
             anchor: None,
             ticks: stokesforge_plot::ColorBarTicks::Auto,
             title: "Time".to_string(),
-            font: stokesforge_plot::TextFont {
-                size: Some(13.0),
-                ..Default::default()
-            },
             length: Some(180.0),
             thickness: Some(10.0),
             visible: true,
@@ -371,6 +376,8 @@ pub fn non_trivial_spec(
                 from: stokesforge_plot::LegendTextFrom::LongNameComments,
                 ..Default::default()
             },
+            // #507: the default box (frame shown) next to the custom one.
+            ..LegendSpec::default()
         },
         title_font: stokesforge_plot::TextFont {
             family: "Noto Sans".to_string(),

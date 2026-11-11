@@ -45,12 +45,11 @@ use crate::texts::FigureTexts;
 const MARGIN: i32 = 8;
 /// Inner margin of the frame.
 const PADDING: i32 = 6;
-/// Width of the thumbnail (the line stub, or the solid fill).
+/// Default width of the thumbnail (the line stub, or the solid fill): the
+/// object-manager thumbnail keeps it whatever the legend's setting.
 pub const KEY_WIDTH: i32 = 26;
 /// Gap between the thumbnail and the text.
 const KEY_GAP: i32 = 6;
-/// Vertical gap between two entries.
-const ROW_GAP: i32 = 4;
 /// Number of entries beyond which the legend is truncated.
 ///
 /// A graph can carry hundreds of series (the load case of the document has
@@ -58,6 +57,20 @@ const ROW_GAP: i32 = 4;
 /// measurements per frame. Beyond the cap, the first entries are listed and
 /// the last line says how many are missing.
 const MAX_ENTRIES: usize = 24;
+
+/// Where one entry was drawn, in backend pixels: the cell it picks on
+/// (#507: a second column picks its own series).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawnCell {
+    /// Horizontal middle of the cell.
+    pub center_x: f64,
+    /// Width of the cell; a lone column spans the whole frame.
+    pub width: f64,
+    /// Vertical middle of the row.
+    pub center_y: f64,
+    /// Height of the row.
+    pub height: f64,
+}
 
 /// What the legend actually drew.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -69,9 +82,8 @@ pub struct DrawnLegend {
     /// The drawn frame, in backend pixels: top-left corner and size
     /// (issue #53: pick the legend under the pointer).
     pub frame: Option<((i32, i32), (u32, u32))>,
-    /// For each drawn entry, in order: vertical middle and height of its
-    /// row, in backend pixels.
-    pub rows: Vec<(f64, f64)>,
+    /// The cell of each drawn entry, in order.
+    pub rows: Vec<DrawnCell>,
 }
 
 /// The legend's two text styles: that of a typed name (Typst markup) and
@@ -94,8 +106,11 @@ pub struct LegendColors {
     /// Frame background, opacity included (transparent if the graph has no
     /// background).
     pub background: (u8, u8, u8, u8),
-    /// Outline of the frame and of the bar thumbnails.
+    /// Outline of the bar thumbnails (and of the frame when it has no color
+    /// of its own).
     pub ink: (u8, u8, u8),
+    /// Outline of the frame (#507): the spec's color, else the ink.
+    pub frame: (u8, u8, u8),
 }
 
 /// Draws a panel's legend in its plot area.
@@ -120,7 +135,11 @@ pub fn draw<DB: DrawingBackend>(
     colors: LegendColors,
     center: Option<BackendCoord>,
 ) -> Result<DrawnLegend, DrawingAreaErrorKind<DB::ErrorType>> {
-    let LegendColors { background, ink } = colors;
+    let LegendColors {
+        background,
+        ink,
+        frame: frame_ink,
+    } = colors;
     if !spec.visible || entries.is_empty() {
         return Ok(DrawnLegend::default());
     }
@@ -130,7 +149,7 @@ pub fn draw<DB: DrawingBackend>(
 
     // The texts are measured once, and the same measurement decides the
     // frame and was used to place the axes.
-    let mut texts: Vec<(String, &TextStyle<'_>)> = shown
+    let texts: Vec<(String, &TextStyle<'_>)> = shown
         .iter()
         .map(|entry| {
             let style = if entry.legend_is_typed() {
@@ -141,21 +160,59 @@ pub fn draw<DB: DrawingBackend>(
             (entry.legend_text(figure_texts), style)
         })
         .collect();
-    if omitted > 0 {
-        texts.push((figure_texts.more_entries(omitted), &styles.literal));
-    }
+    let more = (omitted > 0).then(|| figure_texts.more_entries(omitted));
 
-    let mut label_width = 0i32;
+    let mut widths = Vec::with_capacity(texts.len());
     let mut row_height = 1i32;
     for (text, style) in &texts {
         let (w, h) = area.estimate_text_size(text, style)?;
-        label_width = label_width.max(w as i32);
+        widths.push(w as i32);
+        row_height = row_height.max(h as i32);
+    }
+    let mut more_width = 0i32;
+    if let Some(text) = &more {
+        let (w, h) = area.estimate_text_size(text, &styles.literal)?;
+        more_width = w as i32;
         row_height = row_height.max(h as i32);
     }
 
-    let rows = texts.len() as i32;
-    let box_width = PADDING * 2 + KEY_WIDTH + KEY_GAP + label_width;
-    let box_height = PADDING * 2 + rows * row_height + (rows - 1).max(0) * ROW_GAP;
+    // Column-major grid (#507, D2): entries fill down first, then the next
+    // column. The number of columns never exceeds the number of entries.
+    let columns = spec.column_count().min(texts.len().max(1));
+    let per_column = texts.len().div_ceil(columns).max(1);
+    let row_gap = spec.row_gap_pt().round() as i32;
+    let column_gap = spec.column_gap_pt().round() as i32;
+    let key_width = spec.swatch_length_pt().round() as i32;
+    let used_columns = texts.len().div_ceil(per_column).max(1);
+    let column_text: Vec<i32> = (0..used_columns)
+        .map(|c| {
+            widths
+                .iter()
+                .skip(c * per_column)
+                .take(per_column)
+                .copied()
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut column_left = Vec::with_capacity(used_columns);
+    let mut grid_width = 0i32;
+    for (c, text) in column_text.iter().enumerate() {
+        if c > 0 {
+            grid_width += column_gap;
+        }
+        column_left.push(grid_width);
+        grid_width += key_width + KEY_GAP + text;
+    }
+    let more_row = i32::from(more.is_some());
+    let grid_rows = per_column as i32 + more_row;
+    let box_width = PADDING * 2
+        + grid_width.max(if more.is_some() {
+            key_width + KEY_GAP + more_width
+        } else {
+            0
+        });
+    let box_height = PADDING * 2 + grid_rows * row_height + (grid_rows - 1).max(0) * row_gap;
 
     let (area_w, area_h) = (size.0 as i32, size.1 as i32);
     let left = match spec.position {
@@ -183,33 +240,77 @@ pub fn draw<DB: DrawingBackend>(
             stroke_width: 1,
         },
     ))?;
-    area.draw(&Rectangle::new(
-        frame,
-        ShapeStyle {
-            color: paint::rgb(ink).into(),
+    if spec.frame {
+        let outline = ShapeStyle {
+            color: paint::rgb(frame_ink).into(),
             filled: false,
-            stroke_width: 1,
-        },
-    ))?;
+            stroke_width: paint::stroke_width(spec.frame_width_pt()),
+        };
+        if outline.stroke_width == 1 {
+            area.draw(&Rectangle::new(frame, outline))?;
+        } else {
+            // The SVG backend of Plotters writes no width for a rectangle
+            // outline: a thick frame is a closed path, started in the middle
+            // of the top edge so that no corner is left open.
+            let (x1, y1) = (x0 + box_width, y0 + box_height);
+            let middle = (x0 + box_width / 2, y0);
+            area.draw(&PathElement::new(
+                vec![middle, (x1, y0), (x1, y1), (x0, y1), (x0, y0), middle],
+                outline,
+            ))?;
+        }
+    }
 
+    let row_top_of = |row: usize| y0 + PADDING + row as i32 * (row_height + row_gap);
     for (index, (text, style)) in texts.iter().enumerate() {
-        let row_top = y0 + PADDING + index as i32 * (row_height + ROW_GAP);
+        let (column, row) = (index / per_column, index % per_column);
+        let row_top = row_top_of(row);
         let middle = row_top + row_height / 2;
-        let key_left = x0 + PADDING;
+        let key_left = x0 + PADDING + column_left[column];
         if let Some(entry) = shown.get(index) {
-            key(area, entry, (key_left, middle), ink)?;
+            key(area, entry, (key_left, middle), key_width, ink)?;
         }
         area.draw(&Text::new(
             text.as_str(),
-            (key_left + KEY_WIDTH + KEY_GAP, row_top),
+            (key_left + key_width + KEY_GAP, row_top),
             *style,
         ))?;
     }
+    if let Some(text) = &more {
+        // « … and N more » spans the whole width, under the grid.
+        area.draw(&Text::new(
+            text.as_str(),
+            (x0 + PADDING + key_width + KEY_GAP, row_top_of(per_column)),
+            &styles.literal,
+        ))?;
+    }
 
+    // The pick cell of a column runs from the middle of the gap before it to
+    // the middle of the gap after it; the first and last reach the frame, so
+    // a lone column spans the whole frame like it always did.
+    let cell_bounds = |column: usize| -> (f64, f64) {
+        let start = if column == 0 {
+            x0 as f64
+        } else {
+            (x0 + PADDING + column_left[column]) as f64 - column_gap as f64 / 2.0
+        };
+        let end = if column + 1 == used_columns {
+            (x0 + box_width) as f64
+        } else {
+            (x0 + PADDING + column_left[column + 1]) as f64 - column_gap as f64 / 2.0
+        };
+        (start, end)
+    };
     let row_boxes = (0..shown.len())
         .map(|index| {
-            let row_top = y0 + PADDING + index as i32 * (row_height + ROW_GAP);
-            (row_top as f64 + row_height as f64 / 2.0, row_height as f64)
+            let (column, row) = (index / per_column, index % per_column);
+            let (start, end) = cell_bounds(column);
+            DrawnCell {
+                center_x: (start + end) / 2.0,
+                width: end - start,
+                center_y: row_top_of(row) as f64 + row_height as f64 / 2.0,
+                height: row_height as f64,
+            }
         })
         .collect();
     Ok(DrawnLegend {
@@ -225,6 +326,7 @@ fn key<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     entry: &Prepared<'_>,
     (left, middle): BackendCoord,
+    key_width: i32,
     ink: (u8, u8, u8),
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
     series_key(
@@ -233,6 +335,7 @@ fn key<DB: DrawingBackend>(
         entry.broken,
         matches!(entry.geometry, Geometry::Bars { .. }),
         (left, middle),
+        key_width,
         ink,
     )
 }
@@ -245,6 +348,7 @@ pub fn series_key<DB: DrawingBackend>(
     broken: bool,
     bars: bool,
     (left, middle): BackendCoord,
+    key_width: i32,
     ink: (u8, u8, u8),
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
     if bars {
@@ -253,7 +357,7 @@ pub fn series_key<DB: DrawingBackend>(
         } else {
             crate::color::rgb_or(&spec.line.color, SERIES_FALLBACK)
         };
-        let swatch = [(left, middle - 5), (left + KEY_WIDTH, middle + 5)];
+        let swatch = [(left, middle - 5), (left + key_width, middle + 5)];
         area.draw(&Rectangle::new(
             swatch,
             ShapeStyle {
@@ -276,13 +380,13 @@ pub fn series_key<DB: DrawingBackend>(
     if draws_line {
         paint::polyline(
             area,
-            &[(left, middle), (left + KEY_WIDTH, middle)],
+            &[(left, middle), (left + key_width, middle)],
             &spec.line,
             broken,
         )?;
     }
     if spec.plot_type.draws_symbols() && !matches!(spec.plot_type, PlotType::Unknown(_)) {
-        paint::symbol_at(area, (left + KEY_WIDTH / 2, middle), &spec.symbol, broken)?;
+        paint::symbol_at(area, (left + key_width / 2, middle), &spec.symbol, broken)?;
     }
     Ok(())
 }

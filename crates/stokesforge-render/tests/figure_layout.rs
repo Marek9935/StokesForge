@@ -96,7 +96,12 @@ fn layout_of(spec: &PlotSpec) -> FigureLayout {
 /// The band the colour bar of the first layer asks, measured on a probe.
 fn bar_band(spec: &PlotSpec) -> (u32, u32) {
     let probe = mute((1, 1)).into_drawing_area();
-    stokesforge_render::color_bar::band(spec.panels[0].color_bar.as_ref(), &probe).expect("band")
+    stokesforge_render::color_bar::band(
+        spec.panels[0].color_bar.as_ref(),
+        &spec.panels[0].legend.font,
+        &probe,
+    )
+    .expect("band")
 }
 
 /// A project with one live column, to feed a series.

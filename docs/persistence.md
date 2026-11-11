@@ -769,13 +769,33 @@ regenerated with a custom template and a row column on one legend and a
 list choice on the other; unit tests in `schema.rs`
 (`a_legend_without_text_settings_reads_as_the_default`).
 
+## Legend box: additive fields (#507)
+
+`LegendSpecRecord` gained, all `#[serde(default)]` and **not written when
+default** (a file that never touched them stays byte-identical):
+`frame_hidden` (stored as « hidden » because a `#[serde(default)]` bool reads
+`false` on an older file, whose legend has its frame), `frame_color` (empty =
+automatic ink), `frame_width` (`Option<f64>` points, `None` = 1),
+`background` (empty = automatic, else `#RRGGBB[AA]`), `columns` (absent = 1,
+default fn, 0 from a damaged file reads as 1), `row_gap`, `column_gap` and
+`swatch_length` (`Option<f64>` points, `None` = 4 / 12 / 26). The reader of
+the model clamps every length (`LegendSpec::*_pt`), so a hand-edited file
+cannot ask for an absurd box. **A new graph is created without a frame**
+(`LegendSpec::frame = false` in every creation path); `LegendSpec::default()`
+keeps the frame, which is what an older record reads as. The colour bar has no
+font of its own: it shares the legend's (`TextTarget::ColorBar` reads and
+writes `legend.font`), and a `font` key a pre-release build wrote in a bar
+record is ignored on reading. Witness `tests/witnesses/v1/project.stf`
+regenerated with every box setting non-default; unit tests in `schema.rs`
+(`a_legend_without_box_settings_reads_as_the_default`,
+`the_legend_box_round_trips_and_a_default_one_writes_nothing`).
+
 ## Colour bar: additive field (#499, step C)
 
 `PanelSpecRecord` gained `color_bar` (`Option<ColorBarRecord>`),
 `#[serde(default)]`: segments (group, optional typed ends, break label),
 `chain`, the value source, scale, orientation, position, anchor, ticks, title
-`visible`, `font` (`TextFontRecord`, not written when default, so an older
-file stays byte-identical; the witness holds a non-default one) and the strip
+`visible` and the strip
 `length` / `thickness` in points (`Option<f64>`, `None` = automatic, not
 written, set by pulling a resize handle of a bar inside the frame; the witness
 holds both). **`FORMAT_VERSION` did not move**: a file without it has no bar

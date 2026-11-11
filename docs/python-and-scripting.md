@@ -443,6 +443,10 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booleans; `x_inverted=True` on increasing bounds swaps them (the direction is read from their order, `AxisSpec::orient`, #344); the surface itself does not change |
 | `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
 | `legend_text_from`, `legend_template` | the header row the legend entries read (`long_name`, `comments`, `x_prime`, `units`, `short_name`, `long_name_units`, `long_name_comments`, `custom`); the Typst template of `custom`, which reads the string variables `long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp` (#499) |
+| `legend_frame` | boolean; `False` hides the frame (a new graph is created without one, #507) |
+| `legend_frame_color`, `legend_background` | `'#RRGGBB'` or `'#RRGGBBAA'` (background only: opacity); `''` = automatic (the frame takes the ink, the background the panel's) |
+| `legend_frame_width`, `legend_row_gap`, `legend_column_gap`, `legend_swatch_length` | lengths in **points**, whatever `unit` says (#507): the frame thickness (0.25 to 400), the gap between two rows and between two columns (0 to 400), the length of the line sample (4 to 400); refused outside, never brought back |
+| `legend_columns` | integer from 1 to 1000; entries fill down first, then the next column; capped at the number of entries |
 | `plot_width`, `plot_height` | the plot area of the column (width) and of the row (height) of `panel`, a finite number in `unit`, from 1.27 to 70.56 cm (36 to 2000 pt); refused outside, never brought back (#399) |
 | `plot_left`, `plot_top` | distance from the image edge to the first plot area, `None` = Auto, otherwise from 0 to 70.56 cm; a value below what the axes need is kept and drawn raised to it, as in the application (#399) |
 | `fixed_size` | boolean, "Figure size = Fixed" (#399); works in both placements |
@@ -860,6 +864,14 @@ legend_visible
 legend_position
 legend_text_from
 legend_template
+legend_frame
+legend_frame_color
+legend_frame_width
+legend_background
+legend_columns
+legend_row_gap
+legend_column_gap
+legend_swatch_length
 plot_width
 plot_height
 plot_left
