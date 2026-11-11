@@ -18,6 +18,7 @@ A few things to know:
 - An empty file is refused, and so is a file with no line of numbers.
 - A refused file never stops the others: in a batch, it is marked **Refused** on its tab, skipped, and listed in the message at the end.
 - A column that mixes numbers and text is **not** an error. StokesForge keeps it, with the type **Mixed**.
+- Origin projects (`.opj`) are not text files. They open their own window, described in [Origin projects (.opj)](#origin-projects-opj).
 - Project files (`.stf`) are never imported. If you drop one on the window, it opens as a project in a new window.
 
 ## Open the Import window
@@ -188,7 +189,47 @@ Each imported column remembers the file it came from and the settings used. When
 
 The values are rewritten in place. The columns keep their identity, so graphs that use them stay valid. The number of rows follows the longest of the new contents. It shrinks only if all the columns of the sheet are refreshed; a column you typed by hand is never cut.
 
-**Limit.** Refresh from Source reads the file again with the **stored settings as they are**, without detecting anything again. It does not promise to give the same result from one version of StokesForge to the next: a newer version may read the same settings a little differently. The entry is greyed out when no column of the sheet comes from a file.
+**Limit.** Refresh from Source reads the file again with the **stored settings as they are**, without detecting anything again. It does not promise to give the same result from one version of StokesForge to the next: a newer version may read the same settings a little differently. The entry is greyed out when no column of the sheet comes from a file. The entry is also greyed out for a sheet imported from an Origin project.
+
+## Origin projects (.opj)
+
+StokesForge reads the **workbooks** of an Origin project saved as `.opj`. Graphs and matrices of the project are left out.
+
+An `.opj` never goes through the text import. Drop it on the window, choose it with **Add Files…** in the **Import** window, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the **Import** window is open, the file moves to the new window and the **Import** window closes when nothing else is left in it.
+
+### The Import from Origin window
+
+<img src="../images/import-origin-chooser.png" alt="The Import from Origin window on a small project: the file name, one workbook with its check box, its two sheets with their numbers of columns and rows, the line saying what will be created, and the buttons Check All, Check None, Cancel and Import." width="640">
+
+The window lists each file, then each Origin workbook of the file, then the sheets of each workbook, with the number of columns and rows of each sheet. Several files dropped together are listed together.
+
+- Check the sheets you want. A check box on a workbook checks or unchecks all its sheets; it shows a dash when only some are checked.
+- By default, the sheet called `Data` is checked in each workbook. When a workbook has no `Data` sheet, all its sheets that have columns are checked.
+- A sheet with no column is greyed out: there is nothing to import.
+- **Check All** checks every sheet that has columns. **Check None** unchecks everything.
+- The line under the list says what Import will create, for example "To create: 3 sheets in 2 workbooks".
+- **Import** is greyed out while nothing is checked, and says why. **Cancel** closes the window and creates nothing.
+
+**Import** creates one workbook for each Origin workbook that has a checked sheet, named after its Origin long name (its short name when there is no long name), with one sheet for each checked sheet. If a name is already used or not allowed, the workbook or sheet keeps its automatic name. The new workbooks open in the workspace, and the whole import is a single step in the history: one **Undo** removes it.
+
+### What is kept
+
+- The column names, long names, units and comments, and the X and Y roles.
+- The information of a Horiba file, when the workbook holds some, goes into the metadata of the columns.
+
+These columns do not remember a source file, so **Refresh from Source** does not apply to them.
+
+### Reopen the last import
+
+**File ▸ Import ▸ Reopen Last Import…** brings the **Import from Origin** window back on the same files, with the same sheets checked, so you can change your choice and import again. If the import is still the last thing you did, StokesForge undoes it first.
+
+### `.opju` files
+
+Files saved as `.opju` (Origin 2018b and later) are not read yet. Save the project as `.opj` from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as `.opj`.
+
+### From the command line and scripts
+
+`stokesforge-cli import` and `pyst.import_file` read an `.opj` without a window: they import the `Data` sheets of each workbook (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook.
 
 ## Common problems
 

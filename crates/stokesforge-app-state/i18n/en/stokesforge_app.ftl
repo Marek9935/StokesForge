@@ -659,6 +659,14 @@ error-import-empty = The file is empty
 error-import-no-data = No data found after the header. Check the number of header lines
 error-import-whitespace-thousands = A space cannot both separate the columns and group the thousands. Choose another delimiter or another thousands separator
 error-import-file = { $path }: { $detail }
+error-import-origin-not-origin = The file is not an Origin project
+error-import-origin-opju = Origin files in the .opju format cannot be opened yet. Save the project as .opj from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as .opj
+error-import-origin-version = This Origin file was saved by a version StokesForge cannot read
+error-import-origin-truncated = The Origin file is incomplete. It may have been cut short by a copy or a download
+error-import-origin-bad-structure = The Origin file is damaged: its structure is not valid
+error-import-origin-item-too-large = The Origin file is damaged: an item is larger than the file
+error-import-origin-too-deep = The Origin file is too complex to be read
+error-import-origin-short-item = The Origin file is damaged: an item is incomplete
 
 # Formulas
 error-formula-syntax = The formula is incomplete or not valid. Check the operators and the parentheses
@@ -1912,6 +1920,43 @@ status-script-none-running = No script is running
 error-import-not-open = The import window is closed
 error-template-import-read = Could not read the template { $path }: { $cause }
 error-template-import-invalid = The template { $path } is not valid: { $detail }
+status-import-origin-done = Imported { $sheets ->
+    [one] { $sheets } sheet
+   *[other] { $sheets } sheets
+} in { $books ->
+    [one] { $books } workbook
+   *[other] { $books } workbooks
+    }
+status-import-origin-left-wizard = { $count ->
+    [one] The Origin file was
+   *[other] { $count } Origin files were
+} moved from the Import window to the Import from Origin window
+status-origin-drop-refused = Only Origin files can be added here. The other dropped files were not imported
+origin-import-title = Import from Origin
+origin-import-summary = To create: { $sheets ->
+    [one] { $sheets } sheet
+   *[other] { $sheets } sheets
+} in { $books ->
+    [one] { $books } workbook
+   *[other] { $books } workbooks
+    }
+origin-import-accept =
+    Import
+    .hint = Creates a workbook for each checked workbook of the list (Enter)
+origin-import-check-all =
+    Check All
+    .hint = Checks every sheet that has columns
+origin-import-check-none =
+    Check None
+    .hint = Unchecks every sheet
+origin-import-book-hint = Checks or unchecks all the sheets of this workbook
+origin-import-sheet-size = { $columns ->
+    [one] { $columns } column
+   *[other] { $columns } columns
+}, { $rows ->
+    [one] { $rows } row
+   *[other] { $rows } rows
+}
 status-import-dropped = { $count ->
     [one] { $count } file imported with template “{ $models }”
    *[other] { $count } files imported with template “{ $models }”
@@ -1951,7 +1996,9 @@ disabled-nothing-to-redo = Nothing to redo
 disabled-new-project-busy = Finish or cancel the running script, import or edit first
 disabled-column-type-formula = This column is computed by a formula. Remove the formula to change its type
 disabled-column-type-calculated = This column is produced by a calculation. Detach it from the calculation to change its type
-disabled-no-source-file = No column of this sheet comes from a file
+disabled-no-source-file = No column of this sheet can be read again from its file
+disabled-origin-import-nothing-ticked = Check at least one sheet first
+disabled-origin-sheet-empty = This sheet has no column to import
 disabled-no-last-import = No finished import to reopen
 disabled-needs-sheet = Bring a workbook sheet to the front first
 disabled-no-window = No window to maximize
@@ -2116,7 +2163,7 @@ help-move-series-up = Move the selected series up
 help-move-series-down = Move the selected series down
 help-zoom = Zoom
 help-layout-snap = Turn Snap on or off (Page Layout Mode)
-help-layout-nudge = Nudge the selected graphs (Page Layout Mode)
+help-layout-nudge = Nudge the selected graphs, or on a Regular Grid move the selected graph one cell (Page Layout Mode)
 help-layout-nudge-ten = Nudge ten steps (Page Layout Mode)
 help-layout-leave = Leave the Page Layout Mode
 help-rename = Rename

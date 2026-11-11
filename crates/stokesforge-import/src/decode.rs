@@ -197,7 +197,7 @@ fn is_binary_control(c: char) -> bool {
 /// A Windows-1252 byte to its character. Identical to Latin-1 outside
 /// `0x80..=0x9F`, where Windows-1252 places typographic characters; the five
 /// unassigned positions fall back to Latin-1's C1 control.
-fn windows_1252(b: u8) -> char {
+pub(crate) fn windows_1252(b: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž',
         '\u{8F}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}',

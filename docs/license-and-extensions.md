@@ -114,6 +114,8 @@ Each distribution contains:
 - `licenses/epaint-default-fonts/`, copyrights and permissions of the egui
   fonts, including MIT and Bitstream Vera for Hack;
 - `licenses/winit/` and `licenses/smithay-clipboard/`, notices of the patches;
+- `licenses/liborigin/NOTICE`, the copyright lines of the ported Origin reader
+  (see "Ported source code" below);
 - `licenses/python/`, PSF texts and history of CPython, notices of its
   native libraries, provenance and text of the runtime actually shipped;
 - `licenses/numpy/`, all the texts shipped by the numpy wheel, including
@@ -132,6 +134,21 @@ The packaging refuses a set of notices that no longer matches the lock, or
 a runtime without the texts of CPython, numpy and scipy. A delivery must also
 provide the corresponding sources according to the applicable licenses; the
 notices file is not a source archive.
+
+## Ported source code: liborigin (#490)
+
+The reader of Origin `.opj` files (`crates/stokesforge-import/src/origin/`) is
+a Rust port of a subset of liborigin 3.0.3 (C++, Stefan Gerlach, Miquel
+Garriga, Alex Kargovsky, Ion Vasilief, Knut Franke), from
+`OriginAnyParser.cpp` (GPL-3.0-or-later) and `OriginParser.cpp`
+(GPL-2.0-or-later, used under its "or later" clause). The port is
+GPL-3.0-or-later, like the rest of the code. This is not a Cargo dependency,
+so `Cargo.lock`, `deny.toml` and `vendor/crate-license-notices/` do not see
+it: its copyright lines are kept in the header of each ported file and in
+[`vendor/liborigin/NOTICE`](../vendor/liborigin/NOTICE), which
+`scripts/licenses-dist.sh` copies to `licenses/liborigin/`. No liborigin file
+is shipped. A further port from another reader (for `.opju`, the
+Apache-2.0 reader `quantized` was considered) would get its own section here.
 
 ## Contributions
 

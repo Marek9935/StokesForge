@@ -10,6 +10,16 @@
 //! `Project`, the `pyst` scripts through the command bus of their session.
 //! This is what lets a single implementation of the conversion serve everywhere
 //! (`stokesforge-import` itself stays independent of the model).
+//!
+//! Origin project files (`.opj`) have their own path in [`origin`]: detection,
+//! reading, default choice of sheets, plan and column construction.
+
+pub mod origin;
+pub use origin::{
+    default_origin_selection, is_origin_bytes, is_origin_path, make_origin_column,
+    origin_book_name, plan_origin_import, read_origin_file, OriginBookPlan, OriginSelection,
+    OriginSheetPlan,
+};
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +49,8 @@ pub enum ImportFailureCause {
     Read(String),
     /// The file was read but not parsed.
     Parse(ImportError),
+    /// An Origin project file could not be read.
+    Origin(stokesforge_import::origin::OriginError),
 }
 
 impl std::fmt::Display for ImportFailureCause {
@@ -46,6 +58,7 @@ impl std::fmt::Display for ImportFailureCause {
         match self {
             Self::Read(message) => f.write_str(message),
             Self::Parse(error) => error.fmt(f),
+            Self::Origin(error) => error.fmt(f),
         }
     }
 }

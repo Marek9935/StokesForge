@@ -375,6 +375,34 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
     }
     let base = spec.panels.get(overlay_base(spec, panel))?;
     let (row, column) = (base.row, base.column);
+    // The sizes, read before the positions move.
+    let mut widths = spec.sanitized_frame_widths();
+    let mut heights = spec.sanitized_frame_heights();
+    let (new_row, new_column) = open_line(spec, (row, column), side, &mut widths, &mut heights)?;
+    if let Some(widths) = widths {
+        spec.frame_widths = widths;
+    }
+    if let Some(heights) = heights {
+        spec.frame_heights = heights;
+    }
+    spec.panels.push(PanelSpec::at(new_row, new_column));
+    Some(spec.panels.len() - 1)
+}
+
+/// Opens an empty grid column (Right) or row (Below) beside the cell `(row,
+/// column)` and returns the position of the new cell in it (#394, #491): every
+/// layer on the far side of the reference shifts one column (row) further, the
+/// size of the reference's column (row) is inserted in `widths` (`heights`) at
+/// the new place. Shared by [`insert_cell`] and [`move_cell`]. `None`, with the
+/// spec and the sizes unchanged, if a position would overflow or the grid would
+/// exceed [`MAX_GRID_CELLS`].
+fn open_line(
+    spec: &mut PlotSpec,
+    (row, column): (usize, usize),
+    side: CellSide,
+    widths: &mut Option<Vec<f64>>,
+    heights: &mut Option<Vec<f64>>,
+) -> Option<(usize, usize)> {
     let (new_row, new_column) = match side {
         CellSide::Right => (row, column.checked_add(1)?),
         CellSide::Below => (row.checked_add(1)?, column),
@@ -401,9 +429,6 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
     if rows.checked_mul(columns)? > MAX_GRID_CELLS {
         return None;
     }
-    // The sizes, read before the positions move.
-    let widths = spec.sanitized_frame_widths();
-    let heights = spec.sanitized_frame_heights();
     for candidate in spec.panels.iter_mut().filter(|candidate| shifts(candidate)) {
         match side {
             CellSide::Right => candidate.column += 1,
@@ -412,20 +437,17 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
     }
     match side {
         CellSide::Right => {
-            if let Some(mut widths) = widths {
+            if let Some(widths) = widths {
                 widths.insert(new_column, widths[column]);
-                spec.frame_widths = widths;
             }
         }
         CellSide::Below => {
-            if let Some(mut heights) = heights {
+            if let Some(heights) = heights {
                 heights.insert(new_row, heights[row]);
-                spec.frame_heights = heights;
             }
         }
     }
-    spec.panels.push(PanelSpec::at(new_row, new_column));
-    Some(spec.panels.len() - 1)
+    Some((new_row, new_column))
 }
 
 /// [`insert_cell`] in free placement (#398): nothing shifts and no frame size
@@ -971,38 +993,167 @@ pub fn remove_cell(spec: &mut PlotSpec, panel: usize) -> bool {
         spec.title_anchor = None;
     }
     if is_cell {
-        if !spec
-            .panels
-            .iter()
-            .any(|candidate| candidate.column == column)
-        {
-            for candidate in spec.panels.iter_mut() {
-                if candidate.column > column {
-                    candidate.column -= 1;
-                }
-            }
-            if let Some(mut widths) = widths {
-                if column < widths.len() {
-                    widths.remove(column);
-                }
-                spec.frame_widths = widths;
-            }
-        }
-        if !spec.panels.iter().any(|candidate| candidate.row == row) {
-            for candidate in spec.panels.iter_mut() {
-                if candidate.row > row {
-                    candidate.row -= 1;
-                }
-            }
-            if let Some(mut heights) = heights {
-                if row < heights.len() {
-                    heights.remove(row);
-                }
-                spec.frame_heights = heights;
-            }
-        }
+        close_empty_lines(spec, (row, column), widths, heights);
     }
     true
+}
+
+/// Closes the grid column and the grid row of the cell `(row, column)` that no
+/// layer occupies any more, with their width and height (#394, #491): the layers
+/// beyond move back one column (row) and `widths` / `heights` (the sizes read
+/// before the cell went) replace the stored ones. A column (row) that still
+/// holds a layer stays. The one collapse of Delete Layer ([`remove_cell`]) and
+/// of moving a graph ([`move_cell`]).
+fn close_empty_lines(
+    spec: &mut PlotSpec,
+    (row, column): (usize, usize),
+    widths: Option<Vec<f64>>,
+    heights: Option<Vec<f64>>,
+) {
+    if !spec
+        .panels
+        .iter()
+        .any(|candidate| candidate.column == column)
+    {
+        for candidate in spec.panels.iter_mut() {
+            if candidate.column > column {
+                candidate.column -= 1;
+            }
+        }
+        if let Some(mut widths) = widths {
+            if column < widths.len() {
+                widths.remove(column);
+            }
+            spec.frame_widths = widths;
+        }
+    }
+    if !spec.panels.iter().any(|candidate| candidate.row == row) {
+        for candidate in spec.panels.iter_mut() {
+            if candidate.row > row {
+                candidate.row -= 1;
+            }
+        }
+        if let Some(mut heights) = heights {
+            if row < heights.len() {
+                heights.remove(row);
+            }
+            spec.frame_heights = heights;
+        }
+    }
+}
+
+/// Where a graph goes when it is moved on a regular grid (#491).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveTarget {
+    /// The cell `(row, column)` of the grid as it is: a hole takes the graph, a
+    /// graph there swaps places with it.
+    Cell {
+        /// Row of the target cell.
+        row: usize,
+        /// Column of the target cell.
+        column: usize,
+    },
+    /// A new column (Right) or row (Below) beside the cell of layer `panel`.
+    Beside {
+        /// A layer of the reference cell.
+        panel: usize,
+        /// Which side of it.
+        side: CellSide,
+    },
+}
+
+/// Moves the graph of layer `panel` (with the overlay layers of its cell) on the
+/// regular grid (#491): to a cell (swap if occupied, hole accepted) or into a
+/// new column / row beside another cell. Layer indices never change, only the
+/// `row` / `column` of the layers that move. A column (row) the move leaves empty
+/// disappears with its size, by the same code as Delete Layer
+/// ([`close_empty_lines`]). `false`, with the spec unchanged, on free placement,
+/// a missing layer or cell, a target that is the graph's own cell, a move that
+/// changes nothing, or a grid that would exceed [`MAX_GRID_CELLS`].
+pub fn move_cell(spec: &mut PlotSpec, panel: usize, target: MoveTarget) -> bool {
+    if spec.layer_placement == LayerPlacement::Free {
+        return false;
+    }
+    let Some(base) = spec.panels.get(overlay_base(spec, panel)) else {
+        return false;
+    };
+    let source = (base.row, base.column);
+    let before = positions(spec);
+    let mut candidate = spec.clone();
+    let mut widths = candidate.sanitized_frame_widths();
+    let mut heights = candidate.sanitized_frame_heights();
+    match target {
+        MoveTarget::Cell { row, column } => {
+            if (row, column) == source || row >= candidate.rows() || column >= candidate.columns() {
+                return false;
+            }
+            for layer in candidate.panels.iter_mut() {
+                if (layer.row, layer.column) == (row, column) {
+                    (layer.row, layer.column) = source;
+                } else if (layer.row, layer.column) == source {
+                    (layer.row, layer.column) = (row, column);
+                }
+            }
+        }
+        MoveTarget::Beside {
+            panel: reference,
+            side,
+        } => {
+            let Some(reference) = candidate.panels.get(overlay_base(&candidate, reference)) else {
+                return false;
+            };
+            let reference = (reference.row, reference.column);
+            if reference == source {
+                return false;
+            }
+            let Some(new_cell) =
+                open_line(&mut candidate, reference, side, &mut widths, &mut heights)
+            else {
+                return false;
+            };
+            // The graph may have shifted with the far side of the reference.
+            let Some(travelling) = candidate
+                .panels
+                .get(overlay_base(spec, panel))
+                .map(|layer| (layer.row, layer.column))
+            else {
+                return false;
+            };
+            for layer in candidate.panels.iter_mut() {
+                if (layer.row, layer.column) == travelling {
+                    (layer.row, layer.column) = new_cell;
+                }
+            }
+            // The sizes with the new line in, then the collapse of the old one.
+            if let Some(widths) = &widths {
+                candidate.frame_widths.clone_from(widths);
+            }
+            if let Some(heights) = &heights {
+                candidate.frame_heights.clone_from(heights);
+            }
+            close_empty_lines(&mut candidate, travelling, widths, heights);
+            return commit_move(spec, candidate, &before);
+        }
+    }
+    close_empty_lines(&mut candidate, source, widths, heights);
+    commit_move(spec, candidate, &before)
+}
+
+/// The `(row, column)` of every layer, in layer order.
+fn positions(spec: &PlotSpec) -> Vec<(usize, usize)> {
+    spec.panels.iter().map(|p| (p.row, p.column)).collect()
+}
+
+/// Puts the moved `candidate` in `spec` if it differs from it (`before` being
+/// its positions).
+fn commit_move(spec: &mut PlotSpec, candidate: PlotSpec, before: &[(usize, usize)]) -> bool {
+    // Positions only: putting a graph in the new row right under itself would
+    // otherwise "move" it by giving it the size of its neighbour.
+    let changed = positions(&candidate) != before;
+    if changed {
+        *spec = candidate;
+    }
+    changed
 }
 
 /// Where each layer of a spec went after `removed` (sorted or not) layers
@@ -1820,6 +1971,180 @@ mod tests {
         assert!(remove_cell(&mut spec, 3));
         assert_eq!(spec.frame_widths, [100.0, 200.0]);
         assert_eq!(spec.frame_heights, [50.0, 60.0]);
+    }
+
+    fn cell_of(row: usize, column: usize) -> MoveTarget {
+        MoveTarget::Cell { row, column }
+    }
+
+    #[test]
+    fn moving_onto_a_graph_swaps_the_two_cells_and_keeps_the_layer_numbers() {
+        let mut spec = sized(&[(0, 0), (1, 0)], &[400.0], &[250.0, 100.0]);
+        assert!(move_cell(&mut spec, 0, cell_of(1, 0)));
+        assert_eq!(grid(&spec), [(1, 0, false), (0, 0, false)]);
+        assert_eq!(spec.frame_heights, [250.0, 100.0], "sizes stay");
+    }
+
+    #[test]
+    fn the_overlays_of_a_cell_travel_with_it() {
+        let first = PanelSpec::at(0, 0);
+        let mut spec = PlotSpec {
+            panels: Panels::new(vec![
+                first.clone(),
+                PanelSpec::at(0, 1),
+                PanelSpec::overlay_on(&first, OverlaySpec::TOP_X),
+            ]),
+            ..PlotSpec::default()
+        };
+        assert!(move_cell(&mut spec, 2, cell_of(0, 1)), "from an overlay");
+        assert_eq!(grid(&spec), [(0, 1, false), (0, 0, false), (0, 1, true)]);
+    }
+
+    #[test]
+    fn moving_onto_a_hole_leaves_a_hole_when_the_old_row_and_column_stay_used() {
+        let mut spec = sized(&[(0, 0), (0, 1), (1, 0)], &[100.0, 200.0], &[50.0, 60.0]);
+        assert!(move_cell(&mut spec, 0, cell_of(1, 1)));
+        assert_eq!(grid(&spec), [(1, 1, false), (0, 1, false), (1, 0, false)]);
+        assert_eq!(spec.frame_widths, [100.0, 200.0]);
+        assert_eq!(spec.frame_heights, [50.0, 60.0]);
+    }
+
+    #[test]
+    fn a_move_that_empties_a_column_closes_it_like_delete_layer_does() {
+        // Column 0 holds only graph 0, which goes into the hole (1, 2).
+        let cells = [(0, 0), (0, 1), (0, 2), (1, 1)];
+        let mut moved = sized(&cells, &[100.0, 200.0, 300.0], &[50.0, 60.0]);
+        assert!(move_cell(&mut moved, 0, cell_of(1, 2)));
+        let mut deleted = sized(&cells, &[100.0, 200.0, 300.0], &[50.0, 60.0]);
+        assert!(remove_cell(&mut deleted, 0));
+        assert_eq!(moved.frame_widths, deleted.frame_widths, "same collapse");
+        assert_eq!(moved.frame_heights, deleted.frame_heights);
+        assert_eq!(moved.frame_widths, [200.0, 300.0]);
+        assert_eq!(
+            grid(&moved),
+            [(1, 1, false), (0, 0, false), (0, 1, false), (1, 0, false)]
+        );
+    }
+
+    #[test]
+    fn a_move_that_empties_a_row_closes_it_with_its_height() {
+        // Row 0 holds only graph 0, which goes into the hole (1, 0).
+        let mut spec = sized(
+            &[(0, 0), (1, 1), (2, 0)],
+            &[100.0, 200.0],
+            &[50.0, 60.0, 70.0],
+        );
+        assert!(move_cell(&mut spec, 0, cell_of(1, 0)));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 1, false), (1, 0, false)]);
+        assert_eq!(spec.frame_heights, [60.0, 70.0]);
+        assert_eq!(spec.frame_widths, [100.0, 200.0], "both columns stay");
+    }
+
+    #[test]
+    fn moving_beside_below_makes_a_new_row_and_closes_the_emptied_column() {
+        // [A B] -> [A; B]
+        let mut spec = sized(&[(0, 0), (0, 1)], &[100.0, 200.0], &[50.0]);
+        let target = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        };
+        assert!(move_cell(&mut spec, 1, target));
+        assert_eq!(grid(&spec), [(0, 0, false), (1, 0, false)]);
+        assert_eq!(
+            spec.frame_widths,
+            [100.0],
+            "B's column is gone with its width"
+        );
+        assert_eq!(
+            spec.frame_heights,
+            [50.0, 50.0],
+            "the new row has A's height"
+        );
+    }
+
+    #[test]
+    fn moving_beside_right_makes_a_new_column_and_closes_the_emptied_row() {
+        // [A; B] -> [A B]
+        let mut spec = sized(&[(0, 0), (1, 0)], &[100.0], &[50.0, 70.0]);
+        let target = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Right,
+        };
+        assert!(move_cell(&mut spec, 1, target));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 1, false)]);
+        assert_eq!(spec.frame_widths, [100.0, 100.0]);
+        assert_eq!(
+            spec.frame_heights,
+            [50.0],
+            "B's row is gone with its height"
+        );
+    }
+
+    #[test]
+    fn moving_beside_a_cell_on_the_far_side_of_the_graph_shifts_it_too() {
+        // [A B C] -> B goes under C: [A C; . B] with the columns closed.
+        let mut spec = sized(&[(0, 0), (0, 1), (0, 2)], &[1.0e2, 2.0e2, 3.0e2], &[50.0]);
+        let target = MoveTarget::Beside {
+            panel: 2,
+            side: CellSide::Below,
+        };
+        assert!(move_cell(&mut spec, 1, target));
+        assert_eq!(grid(&spec), [(0, 0, false), (1, 1, false), (0, 1, false)]);
+        assert_eq!(spec.frame_widths, [100.0, 300.0]);
+        assert_eq!(spec.frame_heights, [50.0, 50.0]);
+    }
+
+    #[test]
+    fn a_move_that_changes_nothing_or_cannot_be_done_leaves_the_spec_alone() {
+        let mut spec = sized(&[(0, 0), (0, 1)], &[100.0, 200.0], &[50.0]);
+        let before = spec.clone();
+        assert!(!move_cell(&mut spec, 0, cell_of(0, 0)), "own cell");
+        assert!(!move_cell(&mut spec, 9, cell_of(0, 1)), "no such layer");
+        assert!(!move_cell(&mut spec, 0, cell_of(5, 5)), "outside the grid");
+        let beside_self = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Right,
+        };
+        assert!(!move_cell(&mut spec, 0, beside_self), "beside itself");
+        // [A; B] with B below A already: the move gives the same grid.
+        let mut stacked = sized(&[(0, 0), (1, 0)], &[100.0], &[50.0, 60.0]);
+        let again = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        };
+        let stacked_before = stacked.clone();
+        assert!(!move_cell(&mut stacked, 1, again), "identical result");
+        assert_eq!(stacked, stacked_before);
+        assert_eq!(spec, before);
+        let mut full = spec_of(&[(0, 0), (0, MAX_GRID_CELLS - 1)]);
+        let full_before = full.clone();
+        let beside = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Right,
+        };
+        assert!(!move_cell(&mut full, 1, beside), "cap");
+        assert_eq!(full, full_before);
+    }
+
+    #[test]
+    fn a_free_figure_cannot_be_moved_by_cell() {
+        let mut spec = spec_of(&[(0, 0), (0, 1)]);
+        spec.layer_placement = LayerPlacement::Free;
+        let before = spec.clone();
+        assert!(!move_cell(&mut spec, 0, cell_of(0, 1)));
+        assert_eq!(spec, before);
+    }
+
+    #[test]
+    fn moving_in_a_legacy_graph_keeps_the_sizes_unstored() {
+        let mut spec = spec_of(&[(0, 0), (0, 1)]);
+        let target = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        };
+        assert!(move_cell(&mut spec, 1, target));
+        assert_eq!(grid(&spec), [(0, 0, false), (1, 0, false)]);
+        assert!(spec.frame_widths.is_empty() && spec.frame_heights.is_empty());
     }
 
     #[test]

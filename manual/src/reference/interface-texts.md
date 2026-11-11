@@ -80,6 +80,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | How each one was found | Comment chacun a été trouvé |
 | How I recognised it | Comment je l'ai reconnu |
 | Import | Importer |
+| Import from Origin | Importer depuis Origin |
 | Import Template | Importer un modèle |
 | Import Templates | Modèles d’import |
 | Import… | Importer… |

@@ -1,0 +1,33 @@
+liborigin: notice for the Origin project reader of StokesForge
+================================================================
+
+The module `crates/stokesforge-import/src/origin/` (reader of the workbooks
+of Origin .opj files) is a Rust port of a subset of liborigin 3.0.3, a C++
+library for reading OriginLab project files:
+
+    https://sourceforge.net/projects/liborigin/
+    https://github.com/SciDAVis/liborigin
+
+Ported from: OriginAnyParser.cpp (object framing, datasets, windows, layers,
+curves) and OriginParser.cpp (grouping of columns into books and sheets).
+No liborigin source file is shipped; only the knowledge of the file format
+and the structure of these two parsers were ported, in new code.
+
+Copyright of the ported files:
+
+  OriginAnyParser.cpp (GPL-3.0-or-later)
+    Copyright 2017 Miquel Garriga <gbmiquel@gmail.com>
+    Copyright 2021-2024 Stefan Gerlach <stefan.gerlach@uni.kn>
+
+  OriginParser.cpp (GPL-2.0-or-later)
+    Copyright 2008 Alex Kargovsky <kargovsky@yumr.phys.msu.su>
+    Copyright 2017 Stefan Gerlach <stefan.gerlach@uni.kn>
+
+liborigin's README also credits, for the work these files build on: Stefan
+Gerlach (2005-2024), Miquel Garriga (2014-2018), Knut Franke (2010), Ion
+Vasilief (2006-2010), Alex Kargovsky (2007-2009) and Russell Standish.
+
+License: the GPL-2.0-or-later part is used under the "or later" clause, so
+the port as a whole is distributed under the GNU General Public License,
+version 3 or any later version, like the rest of StokesForge. The text of the
+GPL-3.0 is the LICENSE file at the root of the distribution.

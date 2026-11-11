@@ -658,6 +658,14 @@ error-import-empty = Le fichier est vide
 error-import-no-data = Aucune donnée après l'en-tête. Vérifier le nombre de lignes d'en-tête
 error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les colonnes et grouper les milliers. Choisir un autre séparateur de colonnes ou de milliers
 error-import-file = { $path } : { $detail }
+error-import-origin-not-origin = Le fichier n'est pas un projet Origin
+error-import-origin-opju = Les fichiers Origin au format .opju ne peuvent pas encore être ouverts. Enregistrer le projet en .opj depuis Origin 2018 à 2022b, ou l'ouvrir dans Origin Viewer (gratuit) et l'enregistrer en .opj
+error-import-origin-version = Ce fichier Origin a été enregistré par une version que StokesForge ne sait pas lire
+error-import-origin-truncated = Le fichier Origin est incomplet. Il a peut-être été coupé pendant une copie ou un téléchargement
+error-import-origin-bad-structure = Le fichier Origin est abîmé : sa structure n'est pas valide
+error-import-origin-item-too-large = Le fichier Origin est abîmé : un élément est plus grand que le fichier
+error-import-origin-too-deep = Le fichier Origin est trop complexe pour être lu
+error-import-origin-short-item = Le fichier Origin est abîmé : un élément est incomplet
 
 # Formules
 error-formula-syntax = La formule est incomplète ou invalide. Vérifier les opérateurs et les parenthèses
@@ -1911,6 +1919,43 @@ status-script-none-running = Aucun script en cours
 error-import-not-open = La fenêtre d'import est fermée
 error-template-import-read = Impossible de lire le modèle { $path } : { $cause }
 error-template-import-invalid = Le modèle { $path } n'est pas valide : { $detail }
+status-import-origin-done = Import terminé : { $sheets ->
+    [one] { $sheets } feuille
+   *[other] { $sheets } feuilles
+} dans { $books ->
+    [one] { $books } classeur
+   *[other] { $books } classeurs
+    }
+status-import-origin-left-wizard = { $count ->
+    [one] Le fichier Origin a été déplacé
+   *[other] { $count } fichiers Origin ont été déplacés
+} de la fenêtre d'import vers la fenêtre « Importer depuis Origin »
+status-origin-drop-refused = Seuls les fichiers Origin peuvent être ajoutés ici. Les autres fichiers déposés n'ont pas été importés
+origin-import-title = Importer depuis Origin
+origin-import-summary = À créer : { $sheets ->
+    [one] { $sheets } feuille
+   *[other] { $sheets } feuilles
+} dans { $books ->
+    [one] { $books } classeur
+   *[other] { $books } classeurs
+    }
+origin-import-accept =
+    Importer
+    .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)
+origin-import-check-all =
+    Tout cocher
+    .hint = Coche toutes les feuilles qui ont des colonnes
+origin-import-check-none =
+    Ne rien cocher
+    .hint = Décoche toutes les feuilles
+origin-import-book-hint = Coche ou décoche toutes les feuilles de ce classeur
+origin-import-sheet-size = { $columns ->
+    [one] { $columns } colonne
+   *[other] { $columns } colonnes
+}, { $rows ->
+    [one] { $rows } ligne
+   *[other] { $rows } lignes
+}
 status-import-dropped = { $count ->
     [one] { $count } fichier importé avec le modèle « { $models } »
    *[other] { $count } fichiers importés avec le modèle « { $models } »
@@ -1948,7 +1993,9 @@ disabled-nothing-to-undo = Rien à annuler
 disabled-copy-last-format = Au moins un format doit être offert
 disabled-nothing-to-redo = Rien à rétablir
 disabled-new-project-busy = Terminez ou annulez d'abord le script, l'import ou la modification en cours
-disabled-no-source-file = Aucune colonne de cette feuille ne vient d'un fichier
+disabled-no-source-file = Aucune colonne de cette feuille ne peut être relue depuis son fichier
+disabled-origin-import-nothing-ticked = Cochez d'abord au moins une feuille
+disabled-origin-sheet-empty = Cette feuille n'a aucune colonne à importer
 disabled-no-last-import = Aucun import terminé à rouvrir
 disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
 disabled-no-window = Aucune fenêtre à agrandir
@@ -2115,7 +2162,7 @@ help-move-series-up = Monter la série sélectionnée
 help-move-series-down = Descendre la série sélectionnée
 help-zoom = Zoomer
 help-layout-snap = Activer ou désactiver l’aimantation (mode mise en page)
-help-layout-nudge = Décaler les graphiques sélectionnés (mode mise en page)
+help-layout-nudge = Décaler les graphiques sélectionnés ou, sur une grille régulière, déplacer le graphique sélectionné d’une cellule (mode mise en page)
 help-layout-nudge-ten = Décaler de dix pas (mode mise en page)
 help-layout-leave = Quitter le mode mise en page
 help-rename = Renommer

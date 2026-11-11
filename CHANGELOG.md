@@ -24,6 +24,17 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Added
+
+- Origin projects (#490): an `.opj` file dropped on the window, picked in the
+  Import window or reached by File > Import opens the "Import from Origin"
+  window instead of the wizard. It lists the workbooks and sheets of the
+  project (several files at once are listed together) with a check box for
+  each; Import creates one workbook per checked Origin workbook, named after
+  its long name, with the Horiba information in the columns' metadata. Only
+  workbooks are read: graphs and matrices are left out. `.opju` is not read
+  yet. The CLI and `pyst.import_file` import the `Data` sheets of an `.opj`.
+
 ## [1.1.0] - 2026-11-11
 
 ### Added
