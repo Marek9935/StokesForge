@@ -927,3 +927,91 @@ fn b3_hostile_transposed_sheets() {
         "the sheet of a dropped link stays"
     );
 }
+
+/// #463: a file whose checked transposed sheet is read by its own source (a
+/// direct formula, then a chain through another sheet): the loop cannot be
+/// entered any more, but a file can hold it. Opening it, then editing the
+/// source, neither hangs nor panics nor writes into the transposed sheet; the
+/// column that reads it is empty. Witness: the guard of the follow step.
+#[test]
+fn b3_a_followed_sheet_read_by_its_own_source_does_not_loop() {
+    use stokesforge_commands::Command;
+    use stokesforge_core::{Column, ColumnMeta, Project, ValueBlock};
+    use stokesforge_session::{FormulaRecalc, Session};
+
+    for chain in [false, true] {
+        let mut p = Project::new("P").unwrap();
+        let book = p.add_workbook(p.root(), Some("Book1")).unwrap();
+        let source = p.tree().children(book).unwrap()[0];
+        for (i, name) in ["B", "C"].iter().enumerate() {
+            let mut column = Column::from_f64(&[1.0 + i as f64, 5.0]);
+            column.set_meta(ColumnMeta {
+                x_prime: Some(i as f64),
+                ..ColumnMeta::default()
+            });
+            p.add_column(source, None, Some(name), column).unwrap();
+        }
+        let sheet = p.transpose_rows(source, &[0, 1]).unwrap();
+        assert!(p.tree().transpose_link(sheet).unwrap().auto_recalc);
+        let tname = p.tree().node(sheet).unwrap().name().to_string();
+        let reader = p
+            .add_column(source, None, Some("L"), Column::from_f64(&[0.0, 0.0]))
+            .unwrap();
+        let set = |p: &mut Project, column, text: &str| {
+            let formula = p.tree().formula_from_letters(column, text).unwrap();
+            p.set_column_meta(
+                column,
+                ColumnMeta {
+                    formula: Some(formula),
+                    ..ColumnMeta::default()
+                },
+            )
+            .unwrap();
+        };
+        if chain {
+            let sheet2 = p.add_worksheet(book, Some("Sheet2")).unwrap();
+            let hop = p
+                .add_column(sheet2, None, Some("H"), Column::from_f64(&[0.0]))
+                .unwrap();
+            set(&mut p, hop, &format!("max('{tname}'!B)"));
+            set(&mut p, reader, "max(Sheet2!A)");
+        } else {
+            set(&mut p, reader, &format!("max('{tname}'!B)"));
+        }
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("loop.stf");
+        stokesforge_persistence::save(&p, &path).unwrap();
+        let project = load(&path).expect("the file loads");
+
+        let session = Session::spawn_with_recalc(project, None, FormulaRecalc::Targeted).unwrap();
+        let handle = session.handle();
+        let before = handle.snapshot().unwrap().tree;
+        let rows = before.children(sheet).unwrap().to_vec();
+        let first = before.children(source).unwrap()[0];
+        handle
+            .execute(Command::SetCells {
+                column: first,
+                start: 0,
+                values: ValueBlock::Float(vec![42.0]),
+                expected_version: None,
+            })
+            .unwrap();
+        assert!(handle.actor_alive(), "chain: {chain}");
+        let after = handle.snapshot().unwrap().tree;
+        for row in rows {
+            assert_eq!(
+                before.node(row).unwrap().as_column().unwrap().values(),
+                after.node(row).unwrap().as_column().unwrap().values(),
+                "chain: {chain}: nothing written into the followed sheet"
+            );
+        }
+        let reads = after.node(reader).unwrap().as_column().unwrap();
+        assert!(
+            (0..reads.len()).all(
+                |r| matches!(reads.get(r), stokesforge_core::Cell::Float(v) if v.is_nan())
+                    || matches!(reads.get(r), stokesforge_core::Cell::Text(None))
+            ),
+            "chain: {chain}: the reader is empty"
+        );
+    }
+}

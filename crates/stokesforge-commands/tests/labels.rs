@@ -86,10 +86,12 @@ fn rank(command: &Command) -> usize {
         Command::RecalculateTranspose { .. } => 32,
         Command::InsertCopies { .. } => 33,
         Command::SetFolderOrder { .. } => 34,
+        Command::SetTransposeAuto { .. } => 35,
+        Command::SetSheetRawMark { .. } => 36,
     }
 }
 
-const VARIANTS: usize = 35;
+const VARIANTS: usize = 37;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -292,6 +294,15 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
             },
         ),
         (
+            Command::SetSheetRawMark {
+                sheet: w.sheet,
+                mark: None,
+            },
+            HistoryLabel::SetSheetRawMark {
+                name: named("Sheet1"),
+            },
+        ),
+        (
             Command::SetNoteText {
                 id: w.book,
                 text: String::new(),
@@ -343,6 +354,13 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
         (
             Command::RecalculateTranspose { sheet: w.sheet },
             HistoryLabel::RecalculateTranspose,
+        ),
+        (
+            Command::SetTransposeAuto {
+                sheet: w.sheet,
+                auto: false,
+            },
+            HistoryLabel::SetTransposeAuto { auto: false },
         ),
         (
             Command::AddCalculation {

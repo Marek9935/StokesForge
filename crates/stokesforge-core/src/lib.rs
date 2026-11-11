@@ -89,7 +89,7 @@ pub use formula::{
 };
 pub use id::{IdAllocator, NodeId};
 pub use name::{check_name, natural_cmp, same_name_ignoring_case, RESERVED_NAME_CHARS};
-pub use node::{Node, NodeKind, WindowMeta};
+pub use node::{Node, NodeKind, RawSheetMark, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::{spreadsheet_name, Project};
 pub use resolve::{
@@ -99,7 +99,7 @@ pub use resolve::{
 };
 pub use sheet_refs::{FormulaInput, FormulaInputs};
 pub use transpose::{
-    content_stamp, transposed_name, TransposeLink, TransposeSourceColumn, TransposeState,
-    TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
+    content_stamp, transposed_name, unfollowable_column, TransposeLink, TransposeSourceColumn,
+    TransposeState, TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
 };
 pub use tree::Tree;

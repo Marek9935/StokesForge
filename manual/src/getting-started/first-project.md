@@ -49,29 +49,23 @@ See [Projects](../guide/projects-and-workbooks.md#projects).
 
 ## Import the data
 
-### 2. Open the Import Wizard
+### 2. Open the Import window
 
-Choose **File ▸ Import ▸ Import…**. The **Import Wizard** opens on its first step, **Files and Template**.
+Choose **File ▸ Import ▸ Import…**. The **Import** window opens on one screen.
 
-Click **Add Files…** and pick `spectrum.csv`. The preview on the right shows the lines of the file.
+Click **Add Files…** and pick `spectrum.csv`. The grid on the right shows the lines of the file, and the left panel says what StokesForge recognised: the **Delimiter**, the **Decimal separator**, the lines of data.
 
-Click **Next** to go to the second step, **Format**. The default settings suit this file: the **Delimiter** is **Auto** and the **Decimal separator** is **Dot**. Click **Next** again.
+See [The screen](../guide/import.md#the-screen).
 
-See [The Import Wizard at a glance](../guide/import.md#the-wizard-at-a-glance).
+### 3. Check the names
 
-### 3. Tell the wizard about the names
+Under **Columns**, **Column Names** should read **Line 1**: the first line of the file gives the column names, so it is not read as data. If the names come out as a row of data, click the line number of the names line in the grid and choose **Long Name**.
 
-You are now in the third step, **Header and Data End**.
+See [Give a line a role](../guide/import.md#give-a-line-a-role).
 
-Tick **Names in first line**. The first line of the file gives the column names, so it must not be read as data. In the preview, the first line now carries the **S** marker (column names). It is no longer counted as a data line.
+### 4. Choose the destination and import
 
-See [Names in first line](../guide/import.md#names-in-first-line) and [The live preview](../guide/import.md#the-live-preview).
-
-### 4. Choose the destination and finish
-
-Click **Next** until you reach the last step, **Destination**. Leave the other steps as they are.
-
-Under **Destination**, choose **New workbook per file**. Click **Finish**.
+Open the **To:** menu at the bottom and choose **One Workbook per File**. Click **Import**.
 
 A workbook opens with your data. The status bar tells you that one file was imported.
 

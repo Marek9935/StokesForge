@@ -152,6 +152,17 @@ pub(super) fn send_rows_to_graph_menu(
     }
 }
 
+/// `Send to Graph` of a selection of rows that cannot be plotted (#493: no x'):
+/// the entry stays, grayed out, with its reason on hover. Nothing when there is
+/// no graph to send to, like [`send_rows_to_graph_menu`].
+pub(super) fn send_rows_to_graph_disabled(ui: &mut egui::Ui, tree: &Tree) {
+    if targets(ui.ctx(), tree).is_empty() {
+        return;
+    }
+    ui.add_enabled(false, egui::Button::new(tr!("workbook-send-to-graph-menu")))
+        .on_disabled_hover_text(tr!("row-plot-needs-x-prime"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

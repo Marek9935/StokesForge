@@ -3,15 +3,25 @@
 //!
 //! Analysis stays entirely in columns. A sheet "`<Source>ᵀ`" carries
 //! an x' column (the x' of the source columns) then one column per requested
-//! row ("Row 10"). The link is a **recomputable snapshot**, not a
-//! live link: it remembers what it read ([`TransposeSourceColumn`]) and the
-//! sheet is called *stale* when the source no longer matches it, *modified*
-//! when a value of a column created by the link has been edited. Neither
-//! state is stored: they are derived from the tree (like the staleness
-//! of a calculation), and do not go through the targeted recalculation of
-//! formulas. A link over a formula column stays up to date as long as the
-//! recalculation pass finds the same type and the same values there: the pass
-//! then writes nothing and the column keeps its version (#439).
+//! row ("Row 10"). A source with no x' on any Y column is read in **index
+//! mode** (#493): the x' column holds the rank 1, 2, 3... of the Y columns,
+//! only in the transposed sheet (the link keeps `NaN` bits; the source is never
+//! written). The link is a **recomputable snapshot**: it remembers what
+//! it read ([`TransposeSourceColumn`]) and the sheet is called *stale* when the
+//! source no longer matches it, *modified* when a value of a column created by
+//! the link has been edited. Neither state is stored: they are derived from
+//! the tree (like the staleness of a calculation). A link over a formula
+//! column stays up to date as long as the recalculation pass finds the same
+//! type and the same values there: the pass then writes nothing and the column
+//! keeps its version (#439).
+//!
+//! With the **Recalculate automatically** box checked (#463,
+//! [`TransposeLink::auto_recalc`], the default of a new link) the sheet follows
+//! its source: the recalculation pass of the session calls
+//! [`Project::follow_transpose`] outside the history, like an analysis pass.
+//! Following rewrites only what differs (a column recomputed to the same
+//! numbers keeps its version), never a modified sheet, never a deleted column.
+//! Unchecked, the sheet is the snapshot described above.
 //!
 //! The link is carried by the tree ([`Tree::transposes`]), like calculations:
 //! it travels with the history snapshots and the file.
@@ -72,6 +82,10 @@ pub struct TransposeLink {
     /// The source columns as the link read them, in the order
     /// of the sheet.
     pub inputs: Vec<TransposeSourceColumn>,
+    /// The "Recalculate automatically" box (#463): the sheet follows its
+    /// source by itself. A new link is checked; a file written before the box
+    /// existed opens unchecked.
+    pub auto_recalc: bool,
 }
 
 /// The derived state of a transposed sheet.
@@ -86,6 +100,11 @@ pub struct TransposeState {
 /// What the link of a transposed sheet contains, to write it into a
 /// file (persistence does not touch the link fields one by one).
 impl TransposeLink {
+    /// The source columns as the link would read them in `tree` now.
+    pub fn current_inputs(&self, tree: &Tree) -> Vec<TransposeSourceColumn> {
+        read_inputs(tree, self.source)
+    }
+
     /// The state of the link in `tree`.
     pub fn state(&self, tree: &Tree) -> TransposeState {
         let current = read_inputs(tree, self.source);
@@ -98,6 +117,21 @@ impl TransposeLink {
         let modified = changed(self.x_column, self.x_stamp)
             || self.rows.iter().any(|r| changed(r.column, r.stamp));
         TransposeState { stale, modified }
+    }
+
+    /// The link read no x' at all (#493): its x' column holds the rank
+    /// 1, 2, 3... of the Y columns, not x' values of the source.
+    pub fn is_index_mode(&self) -> bool {
+        is_index_mode(&self.inputs)
+    }
+
+    /// The link read real x' and the source now has none on any Y column
+    /// (#493, A5): a followed sheet keeps its numbers and reads Out of date;
+    /// only an explicit recalculation switches it to 1, 2, 3...
+    pub fn lost_x_prime(&self, tree: &Tree) -> bool {
+        !self.inputs.is_empty()
+            && !self.is_index_mode()
+            && is_index_mode(&read_inputs(tree, self.source))
     }
 }
 
@@ -142,6 +176,78 @@ pub fn content_stamp(column: &Column) -> u64 {
         }
     }
     hash
+}
+
+/// The refusal that names the first Y column of `source` a link cannot read:
+/// text in it, or an x' missing while others have one. `None` if every Y
+/// column can be transposed. A source where **no** Y column has an x' is
+/// readable: the link numbers its columns 1, 2, 3... (index mode, #493). This is
+/// what keeps an automatic sheet from following (#463, banner "Out of date").
+pub fn unfollowable_column(tree: &Tree, source: NodeId) -> Option<CoreError> {
+    let node = tree.node(source)?;
+    let has_finite_x_prime = |id: &NodeId| {
+        tree.node(*id)
+            .and_then(|n| n.as_column())
+            .is_some_and(|c| c.meta().role == ColumnRole::Y && has_x_prime(c))
+    };
+    let any_x_prime = node.children().iter().any(has_finite_x_prime);
+    for (position, id) in node.children().iter().enumerate() {
+        let Some(child) = tree.node(*id) else {
+            continue;
+        };
+        let Some(column) = child.as_column() else {
+            continue;
+        };
+        if column.meta().role != ColumnRole::Y {
+            continue;
+        }
+        let letter = spreadsheet_name(position);
+        let name = child.name().to_string();
+        if !is_numeric(column) {
+            return Some(CoreError::TransposeNotNumeric { letter, name });
+        }
+        if any_x_prime && !has_x_prime(column) {
+            return Some(CoreError::TransposeNoXPrime { letter, name });
+        }
+    }
+    None
+}
+
+fn has_x_prime(column: &Column) -> bool {
+    column.meta().x_prime.is_some_and(f64::is_finite)
+}
+
+/// Whether the inputs of a link carry no x' at all (index mode, #493): the
+/// transposed sheet then numbers the Y columns 1, 2, 3... by rank.
+fn is_index_mode(inputs: &[TransposeSourceColumn]) -> bool {
+    !inputs.is_empty()
+        && inputs
+            .iter()
+            .all(|i| !f64::from_bits(i.x_prime_bits).is_finite())
+}
+
+/// The values of the x' column of a transposed sheet: the x' of each input, or
+/// in index mode its rank (base 1). A pure function of the inputs.
+fn x_prime_values(inputs: &[TransposeSourceColumn]) -> Vec<f64> {
+    if is_index_mode(inputs) {
+        (1..=inputs.len()).map(|n| n as f64).collect()
+    } else {
+        inputs
+            .iter()
+            .map(|i| f64::from_bits(i.x_prime_bits))
+            .collect()
+    }
+}
+
+/// The generated long name of the x' column of a transposed sheet.
+const INDEX_LONG_NAME: &str = "Column number";
+
+fn x_long_name(source_name: &str, index_mode: bool) -> String {
+    if index_mode {
+        INDEX_LONG_NAME.to_string()
+    } else {
+        format!("x' of {source_name}")
+    }
 }
 
 /// The columns of `source` as a link would read them now.
@@ -192,14 +298,18 @@ impl Project {
     /// - A row already present reuses its column; otherwise a column
     ///   "Row N" is added at the end of the sheet.
     /// - Only columns with the Y role are transposed (the others are skipped).
-    /// - Every Y column of `source` must be numeric and carry an x': otherwise
-    ///   the refusal names the column (`CoreError::TransposeNotNumeric`,
-    ///   `TransposeNoXPrime`). A column shorter than the row gives
-    ///   `NaN`.
+    /// - Every Y column of `source` must be numeric, and carry an x' if any
+    ///   other does: otherwise the refusal names the column
+    ///   (`CoreError::TransposeNotNumeric`, `TransposeNoXPrime`). If **no** Y
+    ///   column has an x', the x' column holds their rank 1, 2, 3... (index
+    ///   mode, #493; long name "Column number"). A column shorter than the
+    ///   row gives `NaN`.
     /// - If the sheet is stale but not modified, its linked columns are
     ///   refreshed first. Modified, it is not overwritten: the new
     ///   columns are read from the current state of the source, and the link
     ///   keeps its reading (it stays stale).
+    /// - A checked sheet whose source has a column calculating from it is
+    ///   refused (`CoreError::TransposeSourceReadsIt`, #484), before any write.
     pub fn transpose_rows(&mut self, source: NodeId, rows: &[usize]) -> CoreResult<NodeId> {
         let before = self.tree().clone();
         let result = self.transpose_rows_inner(source, rows);
@@ -228,6 +338,7 @@ impl Project {
                     x_stamp: 0,
                     rows: Vec::new(),
                     inputs: Vec::new(),
+                    auto_recalc: true,
                 };
                 (sheet, link, true)
             }
@@ -237,6 +348,14 @@ impl Project {
         } else {
             link.state(self.tree())
         };
+        // #484: a checked sheet whose source has a column calculating from it
+        // is refused in every state, even when nothing would be read from the
+        // source. A fresh sheet has no loop.
+        if !fresh_sheet {
+            if let Some(refusal) = self.tree().transpose_loop_refusal(sheet) {
+                return Err(refusal);
+            }
+        }
         // A stale, untouched sheet is refreshed first: it would otherwise be
         // inconsistent (new columns longer than the old ones).
         let refresh = fresh_sheet || (state.stale && !state.modified);
@@ -276,7 +395,9 @@ impl Project {
     /// Refreshes the transposed sheet `sheet` from its source: rewrites
     /// the values of all its linked columns (those the user edited
     /// lose their changes), recreates those that disappeared and
-    /// re-reads the source. Atomic.
+    /// re-reads the source. Atomic. Refused with
+    /// `CoreError::TransposeSourceReadsIt` (#484) while the box is checked
+    /// and a column of the source calculates from the sheet.
     pub fn recalculate_transpose(&mut self, sheet: NodeId) -> CoreResult<()> {
         let before = self.tree().clone();
         let result = self.recalculate_transpose_inner(sheet);
@@ -292,9 +413,133 @@ impl Project {
                 CoreError::Structure(format!("{sheet} is not a transposed sheet"))
             })?;
         let inputs = self.checked_transpose_inputs(link.source)?;
+        if let Some(refusal) = self.tree().transpose_loop_refusal(sheet) {
+            return Err(refusal);
+        }
         let rows: Vec<usize> = link.rows.iter().map(|r| r.row).collect();
         self.write_transpose(sheet, &mut link, &inputs, true, &rows)?;
         link.inputs = inputs;
+        Arc::make_mut(self.tree_arc_mut())
+            .transposes_mut()
+            .insert(sheet, Arc::new(link));
+        Ok(())
+    }
+
+    /// **Outside history**, called by the session's recalculation pass (#463):
+    /// makes the checked transposed sheet `sheet` follow its source. Does
+    /// nothing (`Ok(false)`) unless the box is checked, the source changed
+    /// and no value of the sheet was typed by hand. Rewrites only the linked
+    /// columns whose numbers differ (an identical column keeps its version,
+    /// #439), never recreates a deleted column (E8), then re-reads the
+    /// source. A source that cannot be followed (text, partial x') leaves the sheet
+    /// as it is and returns the refusal that names the column. Returns whether
+    /// a column was really written.
+    pub fn follow_transpose(&mut self, sheet: NodeId) -> CoreResult<bool> {
+        let Some(link) = self.tree().transpose_link(sheet).cloned() else {
+            return Ok(false);
+        };
+        if !link.auto_recalc {
+            return Ok(false);
+        }
+        let state = link.state(self.tree());
+        if !state.stale || state.modified {
+            return Ok(false);
+        }
+        // #493, A5: never switch to increments by itself.
+        if link.lost_x_prime(self.tree()) {
+            return Ok(false);
+        }
+        let before = self.tree().clone();
+        let result = self.follow_transpose_inner(sheet, link);
+        if result.is_err() {
+            self.replace_tree(before);
+        }
+        result
+    }
+
+    fn follow_transpose_inner(
+        &mut self,
+        sheet: NodeId,
+        mut link: TransposeLink,
+    ) -> CoreResult<bool> {
+        let inputs = self.checked_transpose_inputs(link.source)?;
+        let x_values = x_prime_values(&inputs);
+        let index_mode = is_index_mode(&inputs);
+        let source_name = self.tree().get(link.source)?.name().to_string();
+        let columns: Vec<Arc<Vec<f64>>> = inputs
+            .iter()
+            .map(|i| {
+                self.tree()
+                    .node(i.column)
+                    .and_then(|n| n.as_column())
+                    .and_then(Column::numeric_view)
+                    .unwrap_or_default()
+            })
+            .collect();
+        let mut written = false;
+        let is_column = |project: &Self, id: NodeId| {
+            id != sheet
+                && project
+                    .tree()
+                    .node(id)
+                    .is_some_and(|n| n.as_column().is_some())
+        };
+        if is_column(self, link.x_column) {
+            written |= self.overwrite_if_changed(link.x_column, x_values)?;
+            self.refresh_x_long_name(link.x_column, &source_name, index_mode)?;
+            link.x_stamp = self.stamp_of(link.x_column)?;
+        }
+        for index in 0..link.rows.len() {
+            let TransposedRow { row, column, .. } = link.rows[index];
+            if !is_column(self, column) {
+                continue;
+            }
+            let data: Vec<f64> = columns
+                .iter()
+                .map(|values| values.get(row).copied().unwrap_or(f64::NAN))
+                .collect();
+            written |= self.overwrite_if_changed(column, data)?;
+            link.rows[index].stamp = self.stamp_of(column)?;
+        }
+        link.inputs = inputs;
+        Arc::make_mut(self.tree_arc_mut())
+            .transposes_mut()
+            .insert(sheet, Arc::new(link));
+        Ok(written)
+    }
+
+    /// Like [`Project::overwrite`], but leaves the column (and its version)
+    /// alone when it is numeric and already holds these very numbers.
+    fn overwrite_if_changed(&mut self, column: NodeId, data: Vec<f64>) -> CoreResult<bool> {
+        let new = ColumnValues::Float(Arc::new(data));
+        let same = self
+            .tree()
+            .node(column)
+            .and_then(|n| n.as_column())
+            .is_some_and(|c| c.column_type() == ColumnType::Numeric && *c.values() == new);
+        if same {
+            return Ok(false);
+        }
+        self.restore_column(column, ColumnType::Numeric, new)?;
+        Ok(true)
+    }
+
+    /// Checks or unchecks the "Recalculate automatically" box of the
+    /// transposed sheet `sheet` (#463). Checking is refused while its source
+    /// calculates from it, directly or through another sheet (rule 3): the
+    /// refusal names the column. Atomic. The values are not touched here: the
+    /// session pass follows right after the command.
+    pub fn set_transpose_auto(&mut self, sheet: NodeId, auto: bool) -> CoreResult<()> {
+        let mut link =
+            self.tree().transpose_link(sheet).cloned().ok_or_else(|| {
+                CoreError::Structure(format!("{sheet} is not a transposed sheet"))
+            })?;
+        if auto && !link.auto_recalc {
+            if let Some(refusal) = self.tree().transpose_check_refusal(sheet) {
+                return Err(refusal);
+            }
+        }
+        link.auto_recalc = auto;
         Arc::make_mut(self.tree_arc_mut())
             .transposes_mut()
             .insert(sheet, Arc::new(link));
@@ -316,24 +561,8 @@ impl Project {
                 "the worksheet has no column to transpose".to_string(),
             ));
         }
-        for (position, id) in node.children().iter().enumerate() {
-            let Some(child) = self.tree().node(*id) else {
-                continue;
-            };
-            let Some(column) = child.as_column() else {
-                continue;
-            };
-            if column.meta().role != ColumnRole::Y {
-                continue;
-            }
-            let letter = spreadsheet_name(position);
-            let name = child.name().to_string();
-            if !is_numeric(column) {
-                return Err(CoreError::TransposeNotNumeric { letter, name });
-            }
-            if column.meta().x_prime.is_none_or(|v| !v.is_finite()) {
-                return Err(CoreError::TransposeNoXPrime { letter, name });
-            }
+        if let Some(refusal) = unfollowable_column(self.tree(), source) {
+            return Err(refusal);
         }
         let inputs = read_inputs(self.tree(), source);
         if inputs.is_empty() {
@@ -365,6 +594,7 @@ impl Project {
             &name,
             NodeKind::Worksheet {
                 columns: Vec::new(),
+                raw: None,
             },
         )
     }
@@ -399,10 +629,8 @@ impl Project {
         fresh_rows: &[usize],
     ) -> CoreResult<()> {
         let source_name = self.tree().get(link.source)?.name().to_string();
-        let x_values: Vec<f64> = inputs
-            .iter()
-            .map(|i| f64::from_bits(i.x_prime_bits))
-            .collect();
+        let x_values = x_prime_values(inputs);
+        let index_mode = is_index_mode(inputs);
         let columns: Vec<Arc<Vec<f64>>> = inputs
             .iter()
             .map(|i| {
@@ -425,7 +653,7 @@ impl Project {
             let mut column = Column::from_f64(&x_values);
             column.set_meta(ColumnMeta {
                 role: ColumnRole::X,
-                long_name: format!("x' of {source_name}"),
+                long_name: x_long_name(&source_name, index_mode),
                 ..ColumnMeta::default()
             });
             let name = self.free_child_name(sheet, TRANSPOSE_X_NAME)?;
@@ -433,6 +661,7 @@ impl Project {
             link.x_stamp = self.stamp_of(link.x_column)?;
         } else if refresh {
             self.overwrite(link.x_column, x_values)?;
+            self.refresh_x_long_name(link.x_column, &source_name, index_mode)?;
             link.x_stamp = self.stamp_of(link.x_column)?;
         }
 
@@ -468,6 +697,33 @@ impl Project {
                 self.overwrite(column, data)?;
                 link.rows[index].stamp = self.stamp_of(column)?;
             }
+        }
+        Ok(())
+    }
+
+    /// Gives the x' column the long name of the mode it is in (#493), unless
+    /// the user renamed it.
+    fn refresh_x_long_name(
+        &mut self,
+        column: NodeId,
+        source_name: &str,
+        index_mode: bool,
+    ) -> CoreResult<()> {
+        let Some(mut meta) = self
+            .tree()
+            .node(column)
+            .and_then(|n| n.as_column())
+            .map(|c| c.meta().clone())
+        else {
+            return Ok(());
+        };
+        if meta.long_name != INDEX_LONG_NAME && !meta.long_name.starts_with("x' of ") {
+            return Ok(());
+        }
+        let wanted = x_long_name(source_name, index_mode);
+        if meta.long_name != wanted {
+            meta.long_name = wanted;
+            self.set_column_meta(column, meta)?;
         }
         Ok(())
     }

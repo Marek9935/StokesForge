@@ -27,13 +27,46 @@ without a message, see `docs/persistence.md`).
 ### Added
 
 - Origin projects (#490): an `.opj` file dropped on the window, picked in the
-  Import Wizard or reached by File > Import opens the "Import from Origin"
+  Import window or reached by File > Import opens the "Import from Origin"
   window instead of the wizard. It lists the workbooks and sheets of the
   project (several files at once are listed together) with a check box for
   each; Import creates one workbook per checked Origin workbook, named after
   its long name, with the Horiba information in the columns' metadata. Only
   workbooks are read: graphs and matrices are left out. `.opju` is not read
   yet. The CLI and `pyst.import_file` import the `Data` sheets of an `.opj`.
+
+## [1.1.0] - 2026-11-11
+
+### Added
+
+- Import: the six-step Import Wizard is replaced by **one screen** (#488). StokesForge reads every file once, says in sentences what it recognised (delimiter, decimal, encoding, lines of data, x' line, column names, units, long name, sheet name) and shows the file as a grid: click a line number or a value to give it a role, drag the data handles, **File** and **Result** tabs. What it is not sure of is listed under **To check**, with **Mark as Checked** and **Check Now**; the answers are remembered per kind of file (**Answers remembered** in **Manage Templates…**, **Forget** takes one back). The rare settings (date order, leading characters, blocks, missing values, comment prefix, skipped lines) are in an **Advanced** fold; a short first-use guide shows until **Don't show again** (**Show Guide** brings it back).
+  - The detector reads **JCAMP-DX** files (not NMR: an NMR file is refused with a clear message, an NMR block of a mixed file is left out and flagged), recognises the instrument from the content, never picks one of several blocks of numbers silently, and guesses a thousands separator only on strict evidence.
+  - **Templates** carry conditions (the instrument, the data type, the number of columns, a header line, the file name, the extension): **Save as Template…** proposes a name and shows what triggers the template; **Manage Templates…** edits them. A template that fits is applied at once; when two fit, the one with the most conditions wins and a point to check offers the other. Templates saved before 1.1 are **kept but no longer applied automatically**: their old Auto-select criteria became conditions that are not active, because those criteria were broad (a `.csv` that starts with `ORIGIN;JASCO` fits every JASCO file) and an old template silently misread a file of another shape (a kinetic whose x' line it read as data). Such a template shows **Not automatic** in **Manage Templates…**, stays usable from the **Template:** menu, and **Use Automatically** turns its conditions back on. A template saved from the new window is automatic. The command line and `pyst.import_file` follow the same rule (a named template still works).
+  - **Dropping files** imports straight away when nothing needs a look; if a file has a point to check (or cannot be read), the window opens on all the dropped files. **Reopen Last Import…** reopens every file with its own settings.
+  - `stokesforge-cli import` and `pyst.import_file` use the same detector and templates (a named template still comes first); the command line skips a file it cannot read and lists it. A sheet takes the title of the file (a `TITLE` key) when it has one, else the name of the file; the **Sheet name** setting in the **Advanced** fold (**Title from the file** or **File name**, saved with templates) makes it always the file name.
+  - **Refresh from Source** reads the file again with the stored settings, without detection, and is not promised to give the same result from one version to the next.
+  - The window is now titled **Import** (it was the Import Wizard). The `.stf` format stays version 1 and gains optional fields on the stored import settings (`main_until_marker`, `header_props`, `skip_text_rows`, `format`, `name_unit_slash`, `strip_unit_brackets`, `sheet_name_from_file`): a 1.0 that opens and saves such a file again loses them.
+
+- Import: with **One Workbook per File** (or a single file into **New Workbook**), the workbook takes the title of the file (else its name) and its sheet is called **Raw Data** (#488). The sheet keeps that name while no value of an imported column changes. At the first change (a typed or pasted cell, a cleared cell, rows added, deleted or sorted, a column type changed, an x' changed, a formula put on an imported column, an imported column deleted) the sheet renames itself **Sheet1** (the first free `SheetN`) in the same undoable step: Ctrl+Z gives **Raw Data** back. Editing a header (Long Name, Units, Comments), a role, a display format, the order of the columns or adding a calculated column beside is not a change; a sheet you renamed yourself is never renamed again, and **Refresh from Source** keeps the name. The other destinations are unchanged. The `.stf` format stays version 1 and gains one optional field on a sheet (`raw_modified_base`, written only on a sheet that still carries the mark): a 1.0 that opens and saves such a file again drops it and the sheet keeps its name for good.
+- Import: **Long Name** and **Comments** can span several sub-header lines (joined with a space), **Units** and **x'** read one line, and x' takes the first number of its text (`t=12.5 s` gives 12.5) (#488). The recipe gains the optional field `join_lines` (`.stf` stays version 1): a project saved before keeps its first-line reading on Refresh from Source, and an older version that saves it again drops the field. Saved import templates all read the new way, and a sub-header line used as Long Name, Units, Comments or x' is no longer listed as file metadata.
+- Analysing whole rows of a sheet that has no x' values now works (#493): the
+  rows are analysed with the column numbers 1, 2, 3… as x', a **No x' Values**
+  window says so and offers **Cancel Analysis**, and the right-click of those
+  rows is the rows menu (Plot and Send to greyed out). It used to analyse, in
+  silence, the columns the rows cross.
+
+- A transposed sheet has a **Recalculate automatically** box, checked by
+  default (#463). Checked, the sheet follows its source by itself; unchecked, it
+  is the snapshot it was (banner, **Recalculate**). A value you type in the
+  sheet is never overwritten: the whole sheet waits until **Relink** or
+  Ctrl+Z. While the box is checked, the source sheet cannot calculate from the
+  transposed sheet (a formula, directly or through another sheet, or an
+  analysis whose result lands in the source), and the box is greyed with the
+  column to fix while one does. Sheets of files saved before this change open
+  unchecked. The `.stf` format keeps version 1 and gains the optional field
+  `auto_recalc` on the link of a transposed sheet: an older version that opens
+  and saves such a file again loses it (the box comes back unchecked, no number
+  is lost).
 
 - A detached window or panel says why a gesture did nothing or failed (#471):
   a band at the bottom of that window, for 5 seconds, orange for a refusal or
@@ -45,6 +78,19 @@ without a message, see `docs/persistence.md`).
   status bar and the history of the main window, no longer in the footer of the
   dialog. Warnings of the local view of a detached workbook (an unreadable
   clipboard) now show in its window and in the main history.
+
+- Copy, paste and duplicate a folder in the Project Manager (#391): what is
+  inside the copy reads the copy (a graph of the copied folder plots the copied
+  workbook), and what is outside is still read from the original. Windows copied
+  together in one gesture keep each other the same way. Pasting a folder into
+  another project brings what it plots.
+- An empty **entry row** (marked `*`) is always shown below the last row of a
+  sheet (#440), also in a new workbook, which has no row yet. Typing in it
+  creates the row, and one Undo removes it. It is not data: not saved, not
+  plotted, not part of Select All.
+- User manual (#364, #365, #366, #367): the guide chapters, the Shortcuts, Mouse
+  gestures and Interface texts references (generated from the application) and
+  reproducible screenshots are written, published with each release.
 
 ### Changed
 
@@ -72,6 +118,24 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- A number being typed in a field is entered on its own target when another
+  target is clicked (#498): typing a From on the Bottom axis, then clicking the
+  Left tab, sets Bottom and leaves Left unchanged (before, Left received the
+  number).
+- Legend entries with the same text all show their text on screen (#500):
+  before, only the last one did, the others kept their line and symbol with no
+  text. The export was already right.
+- The third-party notices (`THIRD-PARTY-LICENSES.txt`) are readable by every
+  user (#486): the file was written with mode 600 and an installation by the
+  RPM, the DEB or `install.sh --system` kept it, so a normal user could not
+  open it. The RPM and the DEB now declare the glibc of the archive (2.35):
+  an older system refuses the package instead of failing at start.
+- **Recalculate**, **Relink** and Analyze Rows on a checked transposed sheet no
+  longer empty a row while a column of the source calculates from that sheet
+  (#484). They are refused and say why (Column C of Sheet1 calculates from
+  Sheet1ᵀ. Remove that formula to follow): the sheet keeps its last numbers and
+  stays out of date. Relink says so before asking for confirmation. An
+  unchecked sheet is not concerned.
 - Enter in a cell of a detached workbook moves the cursor to the row below, as
   in the main window (#470): the move was undone by the window's own selection.
 - Ctrl+Z, Ctrl+Y and Ctrl+S now work in the detached windows (#459): the graph,
@@ -93,10 +157,65 @@ without a message, see `docs/persistence.md`).
   time (#457): before, on Wayland, every second grab did nothing, and moving a
   window could then extend the selected columns of a sheet when the mouse
   passed over the column letters. Present on `main` too.
+- Esc closes a dialog that is open over a visible workbook (#406): the grid
+  no longer takes the key first. While a dialog is open, the keys of the grid
+  and of the Project Manager stand aside.
+- Saving includes what you are still typing (#465, #466): Ctrl+S, Save As and
+  the **Save** answer of the Unsaved Changes question first enter the open
+  cell, header field or note, in a detached window too, and the graph title,
+  legend name or free text being edited. A number the cell refuses stays open
+  and is left out of the save.
+- Undoing or redoing a group of changes over formula columns or calculation
+  results no longer stops half way (#448): the columns are made to fit and
+  recalculated. A manual calculation whose result had to be refitted is marked
+  out of date.
+- Inserting or deleting rows beyond the last row of the data, when that moves a
+  series plotted by rows, now adds its Undo step (#436).
+- The axis line, the edge of the plot area, is a target like the numbers of the
+  axis (#385): double-click it to open Graph Properties on that axis, even when
+  a curve runs along the edge.
+- Tick labels never overlap (#397): the number of labels follows the length of
+  the axis, so a short axis writes fewer numbers.
+- On Windows, dropping files from Explorer onto the application reads the real
+  position of the cursor (#383), so the drop reaches the window under it.
 
 ### Changed
 
 - The logo in `assets/logo/` is now under GPL-3.0-or-later, like the code (#450).
+- Project Manager (#423): a click selects a window or a folder and opens
+  nothing; a double-click opens a window or opens or closes a folder, and
+  Enter does the same on the selection. There is no more slow click to rename:
+  use F2. Left and Right close and open a folder, Shift with Up or Down
+  extends the selection, **Cut** then **Paste** moves entries into the
+  selected folder in one Undo step, and a copy keeps its name when the
+  destination folder does not use it. While the panel has the focus, Ctrl+C,
+  Ctrl+X, Ctrl+V, Delete, F2, Ctrl+D and the arrows act on it, not on the graph
+  or workbook in front.
+- Layer numbers sit at the top left of the layer's own cell (#395), above its
+  plot area, instead of at the corner of the graph window. Overlay layers of one
+  cell have their badges side by side.
+- **Graph Properties** > **Axes** (#396) lists the four sides, Bottom, Left,
+  Right and Top, on every layer, each axis named where it is drawn. A side that
+  another layer of the same plot area already uses is greyed, with the reason on
+  hover. An overlay layer has an **Own scale** box on its Top and Right sides.
+  A mirror axis and an overlay axis cannot share a side.
+- Primary tabs are on top and secondary tabs are vertical at the left (#393):
+  the Preferences rubrics are across the top and the tabs inside a page (Display,
+  the axes of Graph Properties) are listed at the left.
+- Secondary text (help, reasons) is one step smaller than body text, 11 pt, and
+  empty states or labels beside a result are dimmed at body size (#392). The
+  header rows of a sheet (x', Long Name, Units, Comments, F(x)) are no longer
+  dimmed.
+- In a cell, a refused entry or a formula in error tints the cell instead of
+  drawing a red frame (#410). The **?** icon of the F(x)= help sits in the next
+  cell, so the field keeps the whole width of its cell.
+- Pages that scroll keep a margin under their last control (#347).
+- The history entry of **Refresh from Source** reads "Refresh from Source", like
+  its menu (#451).
+- Opening a menu and moving the pointer over another menu title opens that one
+  without a click (#343). With no menu open, hovering opens nothing.
+- The Formula Functions help and the manual say that `mod(-1e-20, 3)` is 3,
+  like Python and Excel (#412).
 - A transposed sheet over a formula column no longer says "Out of date" when
   the formula still gives the same numbers, nor after reopening the file (#439).
   The recalculation now keeps the version of a formula column it recomputes to
@@ -499,8 +618,7 @@ without a message, see `docs/persistence.md`).
   never touches projects, preferences or recovery copies.
 
 - User manual skeleton (#362): `manual/`, built with mdBook, attached to each
-  release and published on GitLab Pages for final versions. Chapters are
-  still to be written.
+  release and published on GitLab Pages for final versions.
 
 ### Removed
 
@@ -590,6 +708,13 @@ without a message, see `docs/persistence.md`).
   change.
 - The robustness probes are renamed `stokesforge-alloc-probe` and
   `stokesforge-stack-probe` (arguments `build`, `undo`, `clear`, `drop`).
+
+## [1.0.1] - 2026-10-27
+
+License fix only (#348), with no code change: StokesForge is under the pure
+GPL-3.0-or-later, with no additional permission. The extension exception for
+`pyst` of 1.0.0 is removed (`LICENSE-EXCEPTION` deleted). An additional
+permission is asked of the author, case by case.
 
 ## [1.0.0] - 2026-10-27
 

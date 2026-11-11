@@ -280,6 +280,10 @@ struct PreferencesFile {
     /// edited (#404); missing or unreadable: shown.
     #[serde(default, deserialize_with = "lenient")]
     show_column_formula_help: Option<bool>,
+    /// "Don't show again" of the first-use guide of the import screen (#488);
+    /// missing or unreadable: the guide is shown.
+    #[serde(default, deserialize_with = "lenient")]
+    import_guide_hidden: Option<bool>,
     /// Decimal comma on the axes of **new** graphs (R9, #148); missing or
     /// unreadable: decimal point.
     #[serde(default, deserialize_with = "lenient")]
@@ -352,6 +356,7 @@ pub struct Preferences {
     png_export_scale: f32,
     show_formula_help: bool,
     show_column_formula_help: bool,
+    import_guide_hidden: bool,
     new_graph_decimal_comma: bool,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
@@ -426,6 +431,7 @@ impl Preferences {
                 .unwrap_or(DEFAULT_PNG_EXPORT_SCALE),
             show_formula_help: file.show_formula_help.unwrap_or(true),
             show_column_formula_help: file.show_column_formula_help.unwrap_or(true),
+            import_guide_hidden: file.import_guide_hidden.unwrap_or(false),
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
@@ -601,6 +607,18 @@ impl Preferences {
     pub fn save_show_column_formula_help(&mut self, show: bool) -> std::io::Result<()> {
         self.show_column_formula_help = show;
         self.save_field("show_column_formula_help", show.into())
+    }
+
+    /// Has "Don't show again" been ticked on the first-use guide of the import
+    /// screen (#488)? No by default: the guide shows every time until then.
+    pub fn import_guide_hidden(&self) -> bool {
+        self.import_guide_hidden
+    }
+
+    /// Remembers the choice without replacing the other preferences.
+    pub fn save_import_guide_hidden(&mut self, hidden: bool) -> std::io::Result<()> {
+        self.import_guide_hidden = hidden;
+        self.save_field("import_guide_hidden", hidden.into())
     }
 
     /// Do **new** graphs write their numbers with a decimal comma? No by default.

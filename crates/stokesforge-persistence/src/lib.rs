@@ -1709,8 +1709,24 @@ mod tests {
                         comment: String::new(),
                     },
                 ),
-                node(3, "Sheet1", 2, KindRecord::Worksheet { columns: vec![5] }),
-                node(6, "Sheet2", 2, KindRecord::Worksheet { columns: vec![4] }),
+                node(
+                    3,
+                    "Sheet1",
+                    2,
+                    KindRecord::Worksheet {
+                        columns: vec![5],
+                        raw_modified_base: None,
+                    },
+                ),
+                node(
+                    6,
+                    "Sheet2",
+                    2,
+                    KindRecord::Worksheet {
+                        columns: vec![4],
+                        raw_modified_base: None,
+                    },
+                ),
                 node(4, "A", 6, column(10.0, None, Vec::new())),
                 node(5, "A", 3, column(0.0, Some(parts), remote)),
             ],
