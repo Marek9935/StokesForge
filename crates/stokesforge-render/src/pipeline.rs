@@ -2202,6 +2202,10 @@ pub enum BesideSide {
     Right,
     /// Below: same left, same frame size.
     Below,
+    /// To the left: same top, same frame size.
+    Left,
+    /// Above: same left, same frame size.
+    Above,
 }
 
 /// The frame of a layer added beside the cell of `panel` in a **free** graph
@@ -2261,6 +2265,8 @@ pub fn place_beside<DB: DrawingBackend>(
     let mut candidate = match side {
         BesideSide::Right => (base_outer.2, frame.top - new_top),
         BesideSide::Below => (frame.left - new_left, base_outer.3),
+        BesideSide::Left => (base_outer.0 - width, frame.top - new_top),
+        BesideSide::Above => (frame.left - new_left, base_outer.1 - height),
     };
     for _ in 0..=outers.len() {
         let taken = outers.iter().find(|(_, _, o)| {
@@ -2273,6 +2279,8 @@ pub fn place_beside<DB: DrawingBackend>(
         match side {
             BesideSide::Right => candidate.0 = o.2,
             BesideSide::Below => candidate.1 = o.3,
+            BesideSide::Left => candidate.0 = o.0 - width,
+            BesideSide::Above => candidate.1 = o.1 - height,
         }
     }
     Ok(Some(FreeFrame {

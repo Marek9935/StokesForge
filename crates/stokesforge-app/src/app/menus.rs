@@ -1114,9 +1114,19 @@ pub(super) fn layout_menu_contents(
         ui.menu_button(tr!("menu-new-layer-beside"), |ui| {
             for (label, hint, side) in [
                 (
+                    tr!("action-new-layer-beside-left"),
+                    tr!("action-new-layer-beside-left", "hint"),
+                    CellSide::Left,
+                ),
+                (
                     tr!("action-new-layer-beside-right"),
                     tr!("action-new-layer-beside-right", "hint"),
                     CellSide::Right,
+                ),
+                (
+                    tr!("action-new-layer-beside-above"),
+                    tr!("action-new-layer-beside-above", "hint"),
+                    CellSide::Above,
                 ),
                 (
                     tr!("action-new-layer-beside-below"),
@@ -2660,7 +2670,9 @@ mod tests {
         });
         let tab = Some(Tab::Graph(graph));
         for (label, side) in [
+            (tr!("action-new-layer-beside-left"), CellSide::Left),
             (tr!("action-new-layer-beside-right"), CellSide::Right),
+            (tr!("action-new-layer-beside-above"), CellSide::Above),
             (tr!("action-new-layer-beside-below"), CellSide::Below),
         ] {
             let ctx = context();

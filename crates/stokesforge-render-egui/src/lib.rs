@@ -1397,11 +1397,17 @@ impl GraphView {
     /// `pos`, in the **last** drawn figure (#357): where a drop on the edge of
     /// the figure puts its new cell beside. `None` before the first draw.
     pub fn nearest_cell(&self, pos: Pos2) -> Option<usize> {
+        self.nearest_cell_except(pos, None)
+    }
+
+    /// [`nearest_cell`](Self::nearest_cell) without the cell `except` (the graph
+    /// being moved, #503): the nearest **other** cell. Holes are never cells.
+    pub fn nearest_cell_except(&self, pos: Pos2, except: Option<usize>) -> Option<usize> {
         let drawn = self.last.as_ref()?;
         drawn
             .panels
             .iter()
-            .filter(|panel| panel.overlay.is_none())
+            .filter(|panel| panel.overlay.is_none() && Some(panel.index) != except)
             .filter_map(|panel| {
                 let rect = self.plot_rect_screen(panel.index)?;
                 Some((panel.index, rect.distance_to_pos(pos)))

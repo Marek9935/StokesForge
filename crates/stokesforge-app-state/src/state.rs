@@ -50,9 +50,9 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::compose::{
-    current_plot_spec, free_role_layer, insert_cell, overlay_base, overlays_full, panel_plot_type,
-    remove_cell, role_layer_of, row_series, series_from_columns, spec_has_x, x_prime_columns,
-    CellSide, OVERLAY_ROLES,
+    current_plot_spec, free_role_layer, insert_cell, insert_cell_at, overlay_base, overlays_full,
+    panel_plot_type, remove_cell, role_layer_of, row_series, series_from_columns, spec_has_x,
+    x_prime_columns, CellSide, OVERLAY_ROLES,
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -115,6 +115,14 @@ pub enum LayerArrange {
     Match(stokesforge_core::compose::Dimension),
     /// Spread the cells with equal gaps between their outer rectangles.
     Distribute(stokesforge_render::pipeline::DistributeAxis),
+}
+
+/// What a new cell is placed beside: a layer (the menu, free placement) or a
+/// grid position (a drop zone, #503).
+#[derive(Debug, Clone, Copy)]
+enum CellAnchor {
+    Layer(usize),
+    Position(usize, usize),
 }
 
 /// What the user can ask for. The window layer only produces these values; it
@@ -823,6 +831,22 @@ pub enum Action {
         /// Where the new cell goes.
         side: CellSide,
         /// Dragged columns; empty for the menu.
+        columns: Vec<NodeId>,
+    },
+    /// [`Action::AddCell`] by **grid position** (#503): the new column (row)
+    /// opens beside the cell `(row, column)` of a regular grid, whether a graph
+    /// or a hole is there. What a drop on an edge band or a line sends: the
+    /// zone is a position, not a graph. One undo step.
+    AddCellAt {
+        /// Target graph.
+        graph: NodeId,
+        /// Row of the reference position.
+        row: usize,
+        /// Column of the reference position.
+        column: usize,
+        /// Which side of it the new cell goes.
+        side: CellSide,
+        /// Dragged columns; empty for none.
         columns: Vec<NodeId>,
     },
     /// Sets the frame (plot area) width of grid column `index` or the frame
@@ -6159,7 +6183,14 @@ impl AppState {
                 panel,
                 side,
                 columns,
-            } => self.add_cell(graph, panel, side, columns),
+            } => self.add_cell(graph, CellAnchor::Layer(panel), side, columns),
+            Action::AddCellAt {
+                graph,
+                row,
+                column,
+                side,
+                columns,
+            } => self.add_cell(graph, CellAnchor::Position(row, column), side, columns),
             Action::AddRowsToGraph {
                 graph,
                 panel,
@@ -11617,23 +11648,50 @@ impl AppState {
     /// reference layer, like a drop on the graph). One `EditPlotSpec`, one undo
     /// step; nothing sent, and a message, if the grid is full, the layer is gone
     /// or the columns have no Y.
-    fn add_cell(&mut self, graph: NodeId, panel: usize, side: CellSide, columns: Vec<NodeId>) {
+    fn add_cell(
+        &mut self,
+        graph: NodeId,
+        anchor: CellAnchor,
+        side: CellSide,
+        columns: Vec<NodeId>,
+    ) {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
             return;
         };
-        let Some(reference) = spec.panels.get(panel) else {
+        // The layer whose plot type the new cell takes: the anchor itself, or
+        // for a grid position the graph there, else one of its row or column.
+        let reference = match anchor {
+            CellAnchor::Layer(panel) => Some(panel),
+            CellAnchor::Position(row, column) => spec
+                .cell_bases()
+                .into_iter()
+                .filter_map(|base| spec.panels.get(base).map(|p| (base, p.row, p.column)))
+                .min_by_key(|(_, r, c)| {
+                    (
+                        (*r, *c) != (row, column),
+                        *r != row && *c != column,
+                        r.abs_diff(row) + c.abs_diff(column),
+                    )
+                })
+                .map(|(base, _, _)| base),
+        };
+        let Some(panel) = reference.filter(|panel| spec.panels.get(*panel).is_some()) else {
             self.fail(tr!("error-layer-gone"));
             return;
         };
-        let plot_type = panel_plot_type(reference);
+        let plot_type = panel_plot_type(&spec.panels[panel]);
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
         crate::frame_sizes::fix_new(&mut spec);
         // Free placement (#398, L8): the new layer is placed beside the
         // reference, never over another one, in the same command.
         let beside = crate::frame_sizes::place_beside(&spec, panel, side);
-        let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
+        let inserted = match anchor {
+            CellAnchor::Layer(panel) => insert_cell(&mut spec, panel, side),
+            CellAnchor::Position(row, column) => insert_cell_at(&mut spec, (row, column), side),
+        };
+        let Some(new_cell) = inserted else {
             self.fail(tr!("error-layer-grid-full"));
             return;
         };

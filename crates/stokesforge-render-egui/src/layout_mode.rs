@@ -30,11 +30,12 @@
 //! result through [`FramePreview`] and paints the overlay. The overlay is a
 //! screen marker: it enters neither the cache key nor the export.
 
+use crate::edge_band::{edge_drop_side, DropAnchor, DropPlace};
 use egui::{
     Color32, Context, CursorIcon, FontId, Painter, PointerButton, Pos2, Rect, Response, Shape,
     Stroke, StrokeKind, Visuals,
 };
-use stokesforge_core::compose::MoveTarget;
+use stokesforge_core::compose::{CellSide, MoveTarget};
 use stokesforge_plot::{FreeFrame, FreePage, GridSlack, LayerPlacement, LengthUnit, PlotSpec};
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
@@ -45,7 +46,6 @@ use stokesforge_render::{
     LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
 };
 
-use crate::edge_band::{edge_drop_side, paint_edge_bands, EDGE_BAND_WIDTH};
 use crate::{FramePreview, GraphEvent, GraphView};
 
 /// Room the host must leave around the figure, and let its clip rectangle
@@ -180,6 +180,8 @@ pub(crate) struct LayoutDrag {
     pub(crate) guides: Vec<Guide>,
     /// Where a [`DragKind::MoveCell`] would put the graph if released now.
     moving: Option<MoveTarget>,
+    /// The edge band the pointer is in during a [`DragKind::MoveCell`], to fill.
+    moving_band: Option<(CellSide, usize)>,
 }
 
 /// A burst of arrow-key nudges not yet committed.
@@ -931,17 +933,59 @@ impl GraphView {
     }
 
     /// Where releasing a dragged graph at the screen position `pos` would put
-    /// it (#491): into a new column or row in an edge band of the figure, else
-    /// on the cell under the pointer (a hole is a place); `None` on its own
-    /// cell, outside the grid, or beside itself.
-    fn move_target(&self, pos: Pos2, base: usize, source: (usize, usize)) -> Option<MoveTarget> {
-        let (_, layout) = self.figure_memo.as_ref()?;
-        let display = self.display_rect?;
-        if let Some(side) = edge_drop_side(pos, display, EDGE_BAND_WIDTH) {
-            let panel = self.nearest_cell(pos)?;
-            // Beside its own cell is no move (the model refuses it too).
-            return (panel != base).then_some(MoveTarget::Beside { panel, side });
+    /// it (#491, #503, #504): into a new column or row in one of the four edge
+    /// bands or on an internal line ([`GraphView::drop_place`], which wins over
+    /// the cell under the pointer), else on the cell under the pointer (a hole
+    /// is a place); `None` on its own cell, outside the grid, or beside itself.
+    /// The second value is the edge band to fill in the preview.
+    fn move_target(
+        &self,
+        pos: Pos2,
+        base: usize,
+        source: (usize, usize),
+    ) -> (Option<MoveTarget>, Option<(CellSide, usize)>) {
+        let Some((_, layout)) = self.figure_memo.as_ref() else {
+            return (None, None);
+        };
+        let Some(display) = self.display_rect else {
+            return (None, None);
+        };
+        // A zone is a grid position, whoever sits there (the moving graph and
+        // holes included): the model opens the line at that row or column.
+        if let Some(place) = self.drop_place(pos, Some(base)) {
+            let target = match place.anchor {
+                DropAnchor::Cell { row, column } => MoveTarget::NewLine {
+                    row,
+                    column,
+                    side: place.side,
+                },
+                DropAnchor::Panel(panel) => MoveTarget::Beside {
+                    panel,
+                    side: place.side,
+                },
+            };
+            return (Some(target), place.band.map(|side| (side, place.segment)));
         }
+        if edge_drop_side(
+            pos,
+            self.drop_outline().unwrap_or(display),
+            self.edge_band_width(),
+        )
+        .is_some()
+        {
+            return (None, None);
+        }
+        let target = self.cell_move_target(pos, layout, source);
+        (target, None)
+    }
+
+    /// The cell a release at `pos` would swap with or move into.
+    fn cell_move_target(
+        &self,
+        pos: Pos2,
+        layout: &stokesforge_render::pipeline::FigureLayout,
+        source: (usize, usize),
+    ) -> Option<MoveTarget> {
         let figure = self.figure_position(pos)?;
         let cell = grid_cell_at(layout, f64::from(figure.x), f64::from(figure.y))?;
         (cell != source).then_some(MoveTarget::Cell {
@@ -1122,9 +1166,10 @@ impl GraphView {
                 }));
             }
             DragKind::MoveCell { base, source } => {
-                let target = self.move_target(pos, *base, *source);
+                let (target, band) = self.move_target(pos, *base, *source);
                 if let Some(active) = self.layout.drag.as_mut() {
                     active.moving = target;
+                    active.moving_band = band;
                 }
             }
             DragKind::Grid {
@@ -1225,6 +1270,7 @@ impl GraphView {
                         placement: view.placement,
                         guides: Vec::new(),
                         moving: None,
+                        moving_band: None,
                     });
                     return true;
                 };
@@ -1309,6 +1355,7 @@ impl GraphView {
             placement: view.placement,
             guides: Vec::new(),
             moving: None,
+            moving_band: None,
         });
         true
     }
@@ -1488,7 +1535,7 @@ impl GraphView {
 
         if let Some(drag) = &self.layout.drag {
             if matches!(drag.kind, DragKind::MoveCell { .. }) {
-                self.paint_move_target(painter, drag.moving, accent);
+                self.paint_move_target(painter, drag.moving, drag.moving_band, accent);
             }
         }
         let in_selection = |graph: &GraphBox| view.selected.contains(&graph.base);
@@ -1521,10 +1568,17 @@ impl GraphView {
         }
     }
 
-    /// The target of a graph being moved (#491): the cell it would take is
-    /// outlined, the two edge bands of the figure are shown, the one under the
-    /// pointer filled. Screen only.
-    fn paint_move_target(&self, painter: &Painter, target: Option<MoveTarget>, accent: Color32) {
+    /// The target of a graph being moved (#491, #503): the four edge bands are
+    /// shown pale, the one under the pointer filled, with a bar at the exact
+    /// place the new cell would go; or the cell it would take is outlined.
+    /// Screen only.
+    fn paint_move_target(
+        &self,
+        painter: &Painter,
+        target: Option<MoveTarget>,
+        band: Option<(CellSide, usize)>,
+        accent: Color32,
+    ) {
         let (Some((_, layout)), Some(display), Some(scale)) = (
             self.figure_memo.as_ref(),
             self.display_rect,
@@ -1532,11 +1586,22 @@ impl GraphView {
         ) else {
             return;
         };
-        let side = match target {
-            Some(MoveTarget::Beside { side, .. }) => Some(side),
+        let place = match target {
+            Some(MoveTarget::NewLine { row, column, side }) => Some(DropPlace {
+                anchor: DropAnchor::Cell { row, column },
+                side,
+                band: band.map(|(side, _)| side),
+                segment: band.map_or(0, |(_, segment)| segment),
+            }),
+            Some(MoveTarget::Beside { panel, side }) => Some(DropPlace {
+                anchor: DropAnchor::Panel(panel),
+                side,
+                band: band.map(|(side, _)| side),
+                segment: band.map_or(0, |(_, segment)| segment),
+            }),
             _ => None,
         };
-        paint_edge_bands(painter, display, side);
+        self.paint_drop_places(painter, place);
         if let Some(MoveTarget::Cell { row, column }) = target {
             if let Some((x, y, w, h)) = layout.cell_rect(row, column) {
                 let min = display.min + egui::vec2(x as f32, y as f32) * scale;

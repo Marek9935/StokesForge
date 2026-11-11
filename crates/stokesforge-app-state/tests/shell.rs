@@ -15004,6 +15004,74 @@ fn a_new_graph_is_480_by_360_and_a_cell_beside_it_has_the_same_frame() {
     assert_eq!(layout_of(&graph_spec(&state, graph)).size, (960, 720));
 }
 
+/// #503: `AddCell` with side Left is one undo step; the reference shifts right,
+/// the new column takes the reference's width, and Undo restores positions and
+/// widths.
+#[test]
+fn add_cell_left_is_one_undo_step_that_restores_positions_and_widths() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Left,
+        columns: Vec::new(),
+    });
+    let after = graph_spec(&state, graph);
+    let positions: Vec<_> = after.panels.iter().map(|p| (p.row, p.column)).collect();
+    assert_eq!(
+        positions,
+        [(0, 1), (0, 0)],
+        "reference shifted, new on its left"
+    );
+    assert_eq!(after.frame_widths, [before.frame_widths[0]; 2]);
+    state.dispatch(Action::Undo);
+    let undone = graph_spec(&state, graph);
+    assert_eq!(undone, before, "one Undo is enough");
+    assert_eq!(undone.frame_widths, before.frame_widths);
+}
+
+/// #503 (retour 2): `AddCellAt` opens the line at a grid position, one undo
+/// step, like `AddCell` for the layer there; a position outside the grid
+/// changes nothing and says so. Witness: `AddCellAt` handled as `AddCell` on
+/// layer 0 (row 0 only) puts the new cell on the wrong row.
+#[test]
+fn add_cell_at_a_position_is_one_undo_step_and_refuses_a_position_outside_the_grid() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Below,
+        columns: Vec::new(),
+    });
+    let two_rows = graph_spec(&state, graph);
+    // Left of the cell of row 1: a new column, the new cell at row 1.
+    state.dispatch(Action::AddCellAt {
+        graph,
+        row: 1,
+        column: 0,
+        side: CellSide::Left,
+        columns: Vec::new(),
+    });
+    let after = graph_spec(&state, graph);
+    let positions: Vec<_> = after.panels.iter().map(|p| (p.row, p.column)).collect();
+    assert_eq!(positions, [(0, 1), (1, 1), (1, 0)], "row 1, not row 0");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), two_rows, "one Undo is enough");
+    state.dispatch(Action::AddCellAt {
+        graph,
+        row: 7,
+        column: 0,
+        side: CellSide::Left,
+        columns: Vec::new(),
+    });
+    assert_eq!(graph_spec(&state, graph), two_rows, "outside the grid");
+}
+
 /// #394 (G7): a graph from an old file (nothing stored, the bands and the title
 /// inside the 480 x 360) is fixed by its first edit, whatever the edit: removing
 /// the title keeps the plot area exactly where and as large as it was, and the
@@ -15291,6 +15359,53 @@ fn moving_a_graph_on_the_grid_is_one_move_layer_step_and_a_no_op_leaves_no_entry
         (moved.frame_widths.len(), moved.frame_heights.len()),
         (1, 2)
     );
+}
+
+/// #504: a graph dropped on the line between two graphs ([A B; C _], C released
+/// on the A|B line: `NewLine { 0, 0, Right }`) is ONE undo step labelled Move Layer;
+/// the row it empties disappears and one Undo gives the figure back. Witness:
+/// the command sent in two steps (an insertion, then a move).
+#[test]
+fn a_graph_dropped_between_two_graphs_is_one_move_layer_step() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::{CellSide, MoveTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    for (panel, side) in [(0, CellSide::Right), (0, CellSide::Below)] {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel,
+            side,
+            columns: Vec::new(),
+        });
+    }
+    let before = graph_spec(&state, graph);
+    let position = |spec: &stokesforge_plot::PlotSpec| {
+        spec.panels
+            .iter()
+            .map(|p| (p.row, p.column))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(position(&before), [(0, 0), (0, 1), (1, 0)]);
+    state.dispatch(Action::MoveGridCell {
+        graph,
+        panel: 2,
+        target: MoveTarget::NewLine {
+            row: 0,
+            column: 0,
+            side: CellSide::Right,
+        },
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(position(&after), [(0, 0), (0, 2), (0, 1)]);
+    assert_eq!(after.frame_heights.len(), 1, "the emptied row is gone");
+    assert_eq!(after.frame_widths.len(), 3);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
 }
 
 /// #426: the figure size typed in the Page Layout Mode strip is ONE undo step
@@ -15608,8 +15723,8 @@ fn add_cell_in_free_places_the_layer_beside_never_over_the_other() {
         let second = after.panels[1].free_frame.expect("a stored frame");
         assert_eq!((second.width, second.height), (first.width, first.height));
         match side {
-            CellSide::Right => assert_eq!(second.top, first.top, "same top"),
-            CellSide::Below => assert_eq!(second.left, first.left, "same left"),
+            CellSide::Right | CellSide::Left => assert_eq!(second.top, first.top, "same top"),
+            CellSide::Below | CellSide::Above => assert_eq!(second.left, first.left, "same left"),
         }
         let (outers, _) = free_outers(&after);
         assert_eq!(outers.len(), 2);
@@ -15617,6 +15732,8 @@ fn add_cell_in_free_places_the_layer_beside_never_over_the_other() {
         match side {
             CellSide::Right => assert_eq!(outers[0].2, outers[1].0, "touching, right"),
             CellSide::Below => assert_eq!(outers[0].3, outers[1].1, "touching, below"),
+            CellSide::Left => assert_eq!(outers[1].2, outers[0].0, "touching, left"),
+            CellSide::Above => assert_eq!(outers[1].3, outers[0].1, "touching, above"),
         }
 
         state.dispatch(Action::Undo);

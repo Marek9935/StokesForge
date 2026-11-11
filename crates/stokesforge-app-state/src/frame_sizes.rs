@@ -334,6 +334,8 @@ pub fn place_beside(spec: &PlotSpec, panel: usize, side: CellSide) -> Option<Fre
     let side = match side {
         CellSide::Right => BesideSide::Right,
         CellSide::Below => BesideSide::Below,
+        CellSide::Left => BesideSide::Left,
+        CellSide::Above => BesideSide::Above,
     };
     stokesforge_render_svg::place_beside(spec, &measurer, &choice, panel, side)
         .ok()

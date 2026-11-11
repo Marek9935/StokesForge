@@ -130,9 +130,9 @@ pub use free_gesture::{
     MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
-    grid_cell_at, grid_corners, grid_handle_at, locked_corner_delta, resized_edge, resized_frames,
-    resized_line_alone, scaled_axis, scaled_frames, splitter, EdgeSide, GridCorner, GridHandle,
-    OuterEdge,
+    grid_cell_at, grid_corners, grid_handle_at, grid_line_at, locked_corner_delta, resized_edge,
+    resized_frames, resized_line_alone, scaled_axis, scaled_frames, splitter, EdgeSide, GridCorner,
+    GridHandle, GridLine, LineAxis, OuterEdge,
 };
 pub use hit::{
     component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,

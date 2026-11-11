@@ -180,7 +180,7 @@ Properties, icon `Icon::PageLayout`, does the same) ─ **Fit Page to Layout** (
 when the page already fits; the same button is in the Page Layout Mode strip) ─
 **Layer Placement ▸**
 (Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
-(Right / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
+(Left / Right / Above / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
 **Align ▸** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center) · Same
 Width · Same Height · Distribute Horizontally · Distribute Vertically ─ Bring to
 Front · Send to Back ─ **Delete Layer** (the active layer; disabled with the

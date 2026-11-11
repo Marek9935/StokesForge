@@ -326,6 +326,84 @@ fn edge_handle(side: EdgeSide, index: usize) -> GridHandle {
     }
 }
 
+/// Which way an internal grid line runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineAxis {
+    /// A vertical line, between two columns.
+    Column,
+    /// A horizontal line, between two rows.
+    Row,
+}
+
+/// The internal line under a pixel (#504), with where along it the pixel is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridLine {
+    /// Which way the line runs.
+    pub axis: LineAxis,
+    /// The line sits between column (row) `n` and `n + 1`.
+    pub n: usize,
+    /// The row (for a column line) or the column (for a row line) the pixel is
+    /// in, along the line.
+    pub along: usize,
+}
+
+/// The internal line of a regular grid under the figure pixel `(x, y)`, or
+/// `None` (#504): the same reach as the resize handles ([`BOUNDARY_SIDE_PX`]
+/// screen pixels on each side, each side limited by a quarter of its own column
+/// or row), the nearest line where two bands cross (a column line on a tie). The
+/// outer edges of the grid, the title band and anything outside the grid have no
+/// line. Unlike [`grid_handle_at`] a line needs no graph beside it: whether a
+/// drop there has a neighbour is the caller's question.
+pub fn grid_line_at(layout: &FigureLayout, x: f64, y: f64, reach: LayoutReach) -> Option<GridLine> {
+    let (cols, rows, xs, ys) = lines(layout)?;
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    if x < xs[0] || x >= xs[cols] || y < ys[0] || y >= ys[rows] {
+        return None;
+    }
+    let scale = if reach.scale.is_finite() && reach.scale > 0.0 {
+        reach.scale
+    } else {
+        1.0
+    };
+    // The cell index holding a coordinate.
+    let index_of = |v: &[f64], at: f64, count: usize| (0..count).rev().find(|k| v[*k] <= at);
+    let nearest = |v: &[f64], count: usize, at: f64| -> Option<(f64, usize)> {
+        let mut found: Option<(f64, usize)> = None;
+        for i in 1..count {
+            let d = at - v[i];
+            let extent = if d < 0.0 {
+                v[i] - v[i - 1]
+            } else {
+                v[i + 1] - v[i]
+            };
+            if d.abs() * scale > reach.inner_px(BOUNDARY_SIDE_PX, extent) {
+                continue;
+            }
+            if found.is_none_or(|(b, _)| d.abs() < b) {
+                found = Some((d.abs(), i - 1));
+            }
+        }
+        found
+    };
+    let column = nearest(&xs, cols, x);
+    let row = nearest(&ys, rows, y);
+    match (column, row) {
+        (Some((dc, n)), Some((dr, _))) if dc <= dr => Some((LineAxis::Column, n)),
+        (_, Some((_, n))) => Some((LineAxis::Row, n)),
+        (Some((_, n)), None) => Some((LineAxis::Column, n)),
+        (None, None) => None,
+    }
+    .and_then(|(axis, n)| {
+        let along = match axis {
+            LineAxis::Column => index_of(&ys, y, rows)?,
+            LineAxis::Row => index_of(&xs, x, cols)?,
+        };
+        Some(GridLine { axis, n, along })
+    })
+}
+
 /// The sizes of one axis after dragging the splitter `n` (between frame `n`
 /// and `n + 1`) by `delta` points: the delta, rounded to whole points, moves
 /// from the next frame to this one (or back), clamped so that both stay in
@@ -592,6 +670,51 @@ mod tests {
         let mut free = grid();
         free.placement = LayerPlacement::Free;
         assert_eq!(grid_cell_at(&free, 10.0, 50.0), None, "free placement");
+    }
+
+    /// #504: a pixel near an internal line names it and where along it it is;
+    /// a crossing gives the nearest line; the title band and the outer edges
+    /// give nothing. Witness: the loop `1..count` of `nearest` turned into
+    /// `0..count` (the outer edge becomes a line).
+    #[test]
+    fn a_pixel_near_an_internal_line_names_it_and_the_outer_edges_have_none() {
+        let layout = grid();
+        let reach = LayoutReach::standard(1.0);
+        let line = |x: f64, y: f64| grid_line_at(&layout, x, y, reach);
+        assert_eq!(
+            line(310.0, 100.0),
+            Some(GridLine {
+                axis: LineAxis::Column,
+                n: 0,
+                along: 0
+            })
+        );
+        assert_eq!(
+            line(290.0, 300.0),
+            Some(GridLine {
+                axis: LineAxis::Column,
+                n: 0,
+                along: 1
+            })
+        );
+        assert_eq!(
+            line(100.0, 250.0),
+            Some(GridLine {
+                axis: LineAxis::Row,
+                n: 0,
+                along: 0
+            })
+        );
+        assert_eq!(line(150.0, 100.0), None, "inside a cell");
+        // Crossing at (300, 240): 5 points from the column line, 2 from the row.
+        assert_eq!(line(305.0, 242.0).map(|l| l.axis), Some(LineAxis::Row));
+        assert_eq!(line(302.0, 245.0).map(|l| l.axis), Some(LineAxis::Column));
+        assert_eq!(line(5.0, 100.0), None, "left outer edge");
+        assert_eq!(line(495.0, 100.0), None, "right outer edge");
+        assert_eq!(line(100.0, 45.0), None, "top outer edge");
+        assert_eq!(line(100.0, 485.0), None, "bottom outer edge");
+        assert_eq!(line(300.0, 20.0), None, "title band");
+        assert_eq!(line(f64::NAN, 100.0), None);
     }
 
     /// The row line is `row_breaks[j] + title_band`, which is the bottom of
