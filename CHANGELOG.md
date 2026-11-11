@@ -24,7 +24,7 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
-## [1.1.0] - undated
+## [1.1.0] - 2026-11-11
 
 ### Added
 
@@ -107,6 +107,13 @@ without a message, see `docs/persistence.md`).
 
 ### Fixed
 
+- A number being typed in a field is entered on its own target when another
+  target is clicked (#498): typing a From on the Bottom axis, then clicking the
+  Left tab, sets Bottom and leaves Left unchanged (before, Left received the
+  number).
+- Legend entries with the same text all show their text on screen (#500):
+  before, only the last one did, the others kept their line and symbol with no
+  text. The export was already right.
 - The third-party notices (`THIRD-PARTY-LICENSES.txt`) are readable by every
   user (#486): the file was written with mode 600 and an installation by the
   RPM, the DEB or `install.sh --system` kept it, so a normal user could not
