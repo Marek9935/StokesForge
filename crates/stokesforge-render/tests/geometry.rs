@@ -1117,3 +1117,69 @@ fn the_row_and_column_gaps_size_the_frame() {
     assert_eq!(colx.1, base.1);
     assert_eq!(rows.len(), 4);
 }
+
+/// A corner legend on several columns grows away from its corner and stays
+/// inside the plot area (#507): top right grows left and down.
+/// Witness: anchoring the frame by its left edge in the right corners pushes
+/// the second column out through the right side.
+#[test]
+fn a_corner_legend_with_two_columns_stays_inside_the_plot_area() {
+    use stokesforge_plot::LegendPosition;
+    for position in [
+        LegendPosition::TopLeft,
+        LegendPosition::TopRight,
+        LegendPosition::BottomLeft,
+        LegendPosition::BottomRight,
+    ] {
+        let mut columns = vec![("X", vec![0.0, 1.0, 2.0])];
+        let names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+        for name in names {
+            columns.push((name, vec![10.0, 20.0, 30.0]));
+        }
+        let drawn = geometry(&columns, move |ids| {
+            let mut panel = PanelSpec::at(0, 0);
+            for index in 0..8 {
+                panel
+                    .series
+                    .push(SeriesSpec::new_xy(ids[0], ids[index + 1]));
+            }
+            panel.legend.columns = 2;
+            panel.legend.position = position;
+            PlotSpec::empty("Test").with_panels(panel)
+        });
+        let panel = drawn.panel(0).expect("panel");
+        let frame = panel
+            .texts
+            .iter()
+            .find(|text| matches!(text.target, stokesforge_plot::TextTarget::Legend { .. }))
+            .expect("legend");
+        let (ox, oy) = (panel.pixel_origin.0 as f64, panel.pixel_origin.1 as f64);
+        let (w, h) = (panel.pixel_size.0 as f64, panel.pixel_size.1 as f64);
+        // The cells of the entries are the drawn frame's own measure.
+        let rows = &panel.legend_rows;
+        let left = rows
+            .iter()
+            .map(|r| r.center_x - r.width / 2.0)
+            .fold(f64::MAX, f64::min);
+        let right = rows
+            .iter()
+            .map(|r| r.center_x + r.width / 2.0)
+            .fold(f64::MIN, f64::max);
+        assert!(left >= ox, "{position:?}: left edge {left} < {ox}");
+        assert!(
+            right <= ox + w,
+            "{position:?}: right edge {right} > {}",
+            ox + w
+        );
+        let top = rows
+            .iter()
+            .map(|r| r.center_y - r.height / 2.0)
+            .fold(f64::MAX, f64::min);
+        let bottom = rows
+            .iter()
+            .map(|r| r.center_y + r.height / 2.0)
+            .fold(f64::MIN, f64::max);
+        assert!(top >= oy && bottom <= oy + h, "{position:?}: vertical");
+        let _ = frame;
+    }
+}
