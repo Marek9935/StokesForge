@@ -44,9 +44,9 @@ use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
     layout_handle_at, moved_boundary, moved_box, moved_page_corner, nudged_box, page_corner_slack,
-    resized_edge, resized_frames, resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide,
-    GraphBox, GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX,
-    MAGNET_THRESHOLD_POINTS,
+    page_corner_slack_keeping_ratio, page_edge_bumped, resized_edge, resized_frames,
+    resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide, GraphBox, GridCorner,
+    GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::{FramePreview, GraphEvent, GraphView};
@@ -162,6 +162,8 @@ enum DragKind {
         slack: GridSlack,
         /// The image `(width, height)` at the press.
         image: (f64, f64),
+        /// Ctrl was held at the press: the page keeps its ratio (#505).
+        keep_ratio: bool,
     },
     /// A graph of a regular grid dragged to another place (#491). Nothing
     /// is previewed on the figure; the target is outlined by the overlay.
@@ -188,6 +190,8 @@ pub(crate) struct LayoutDrag {
     moving: Option<MoveTarget>,
     /// The edge band the pointer is in during a [`DragKind::MoveCell`], to fill.
     moving_band: Option<(CellSide, usize)>,
+    /// The page-edge message was already signalled in this drag (#505, F3).
+    bumped: bool,
 }
 
 /// A burst of arrow-key nudges not yet committed.
@@ -1141,10 +1145,11 @@ impl GraphView {
                 heights,
                 slack,
                 image,
+                keep_ratio,
             } => {
                 // Snapped like the lines: the page edge lands on a grid line
                 // counted from the top-left corner of the page.
-                let grid = self.layout.grid.filter(|_| !shift);
+                let grid = self.layout.grid.filter(|_| !shift && !*keep_ratio);
                 let snapped = |start: f64, moved: f64| match grid {
                     Some(step) => ((start + moved) / step).round() * step - start,
                     None => moved,
@@ -1153,7 +1158,11 @@ impl GraphView {
                     snapped(if corner.0 { image.0 } else { 0.0 }, delta.0),
                     snapped(if corner.1 { image.1 } else { 0.0 }, delta.1),
                 );
-                let new_slack = page_corner_slack(*corner, *image, *slack, delta);
+                let new_slack = if *keep_ratio {
+                    page_corner_slack_keeping_ratio(*corner, *image, *slack, delta)
+                } else {
+                    page_corner_slack(*corner, *image, *slack, delta)
+                };
                 self.set_frame_preview(Some(FramePreview {
                     grid: Some((widths.clone(), heights.clone())),
                     slack: Some(new_slack),
@@ -1181,6 +1190,13 @@ impl GraphView {
                     None => moved,
                 };
                 let delta = (snapped(line.0, delta.0), snapped(line.1, delta.1));
+                let bumps = page_edge_bumped(handle, *alone, *slack, delta);
+                if bumps && self.layout.drag.as_ref().is_some_and(|drag| !drag.bumped) {
+                    if let Some(active) = self.layout.drag.as_mut() {
+                        active.bumped = true;
+                    }
+                    self.events.push(GraphEvent::PageEdgeReached);
+                }
                 let (new_widths, new_heights, new_slack) = match handle.edge {
                     Some(edge) => {
                         let (w, h, slack) = resized_edge(edge, widths, heights, *slack, delta);
@@ -1243,6 +1259,7 @@ impl GraphView {
                         f64::from(layout.size.0),
                         f64::from(layout.size.1.saturating_sub(layout.title_band)),
                     ),
+                    keep_ratio: context.input(|input| input.modifiers.ctrl),
                 }
             }
             (Some(grid), _) => {
@@ -1267,6 +1284,7 @@ impl GraphView {
                         guides: Vec::new(),
                         moving: None,
                         moving_band: None,
+                        bumped: false,
                     });
                     return true;
                 };
@@ -1352,6 +1370,7 @@ impl GraphView {
             guides: Vec::new(),
             moving: None,
             moving_band: None,
+            bumped: false,
         });
         true
     }

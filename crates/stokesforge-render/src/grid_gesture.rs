@@ -612,6 +612,86 @@ pub fn page_corner_slack(
     out
 }
 
+/// Whether a drag of `handle` asks for more room than the page has left on
+/// the side it pulls outward (#505, F3): an outer edge pulled outward, or an
+/// internal line pulled with Alt (`alone`) toward the slack on the bottom
+/// (rows) or the right (columns). `delta` is the pointer movement in points.
+/// An edge pulled inward, an ordinary line and a non-finite delta never bump.
+pub fn page_edge_bumped(
+    handle: &GridHandle,
+    alone: bool,
+    slack: GridSlack,
+    delta: (f64, f64),
+) -> bool {
+    if !(delta.0.is_finite() && delta.1.is_finite()) {
+        return false;
+    }
+    let beyond = |outward: f64, side: f64| outward.round() > side.max(0.0);
+    if let Some(edge) = handle.edge {
+        return match edge.side {
+            EdgeSide::Left => beyond(-delta.0, slack.left),
+            EdgeSide::Right => beyond(delta.0, slack.right),
+            EdgeSide::Top => beyond(-delta.1, slack.top),
+            EdgeSide::Bottom => beyond(delta.1, slack.bottom),
+        };
+    }
+    alone
+        && ((handle.column.is_some() && beyond(delta.0, slack.right))
+            || (handle.row.is_some() && beyond(delta.1, slack.bottom)))
+}
+
+/// [`page_corner_slack`] with the page's ratio kept (Ctrl + drag of a page
+/// corner, #505): the page takes the larger of the two relative changes the
+/// pointer asks for on both axes, so `(40, 10)` on a 400 x 300 page gives
+/// 440 x 330. When a side stops (the graphs, the largest figure), the other
+/// follows the scale that was actually reached, so the ratio holds to the
+/// rounding of whole points.
+pub fn page_corner_slack_keeping_ratio(
+    corner: (bool, bool),
+    image: (f64, f64),
+    slack: GridSlack,
+    delta: (f64, f64),
+) -> GridSlack {
+    let (w, h) = image;
+    if !(w > 0.0 && h > 0.0 && delta.0.is_finite() && delta.1.is_finite()) {
+        return page_corner_slack(corner, image, slack, delta);
+    }
+    let sign = |outward: bool| if outward { 1.0 } else { -1.0 };
+    let wanted = ((w + sign(corner.0) * delta.0) / w)
+        .max((h + sign(corner.1) * delta.1) / h)
+        .max(0.0);
+    let at = |scale: f64| {
+        let pulled = (
+            sign(corner.0) * (scale - 1.0) * w,
+            sign(corner.1) * (scale - 1.0) * h,
+        );
+        page_corner_slack(corner, image, slack, pulled)
+    };
+    let out = at(wanted);
+    let (gain_w, gain_h) = (
+        if corner.0 {
+            out.right - slack.right
+        } else {
+            out.left - slack.left
+        },
+        if corner.1 {
+            out.bottom - slack.bottom
+        } else {
+            out.top - slack.top
+        },
+    );
+    let (reached_w, reached_h) = (1.0 + gain_w / w, 1.0 + gain_h / h);
+    if (reached_w - reached_h).abs() < 1.0 / w.max(h) {
+        return out;
+    }
+    let scale = if wanted >= 1.0 {
+        reached_w.min(reached_h)
+    } else {
+        reached_w.max(reached_h)
+    };
+    at(scale)
+}
+
 /// The frames and the slack after **Fit Layout to Page** (#505, K1), the
 /// inverse of fitting the page to the layout: the empty space around the grid
 /// goes to zero and the graphs grow to fill it, the page keeping its size.
@@ -1164,6 +1244,94 @@ mod tests {
             right,
             bottom,
         }
+    }
+
+    /// F3 (#505): an edge pulled outward past the room left bumps; inward, or
+    /// within the room, or an ordinary line, does not. Witness: the function
+    /// always returning false.
+    #[test]
+    fn a_pull_past_the_page_edge_bumps() {
+        let edge = |side| GridHandle {
+            edge: Some(OuterEdge { side, index: 0 }),
+            column: None,
+            row: None,
+            corner: false,
+        };
+        let line = GridHandle {
+            edge: None,
+            column: Some(0),
+            row: Some(0),
+            corner: false,
+        };
+        let room = slack(5.0, 5.0, 5.0, 5.0);
+        assert!(page_edge_bumped(
+            &edge(EdgeSide::Right),
+            false,
+            room,
+            (6.0, 0.0)
+        ));
+        assert!(!page_edge_bumped(
+            &edge(EdgeSide::Right),
+            false,
+            room,
+            (5.0, 0.0)
+        ));
+        assert!(!page_edge_bumped(
+            &edge(EdgeSide::Right),
+            false,
+            room,
+            (-50.0, 0.0)
+        ));
+        assert!(page_edge_bumped(
+            &edge(EdgeSide::Left),
+            false,
+            room,
+            (-9.0, 0.0)
+        ));
+        assert!(page_edge_bumped(
+            &edge(EdgeSide::Top),
+            false,
+            room,
+            (0.0, -9.0)
+        ));
+        assert!(page_edge_bumped(
+            &edge(EdgeSide::Bottom),
+            false,
+            room,
+            (0.0, 9.0)
+        ));
+        assert!(page_edge_bumped(&line, true, room, (0.0, 9.0)));
+        assert!(!page_edge_bumped(&line, false, room, (0.0, 90.0)));
+        assert!(!page_edge_bumped(&line, true, room, (f64::NAN, -3.0)));
+    }
+
+    /// Ctrl + drag of a page corner (#505): the page keeps its ratio. On a
+    /// 4:3 page (400 x 300), `(+40, +10)` gives 440 x 330; a side stopped by
+    /// the graphs drags the other one along. Witness: the plain
+    /// `page_corner_slack` (the ratio ignored).
+    #[test]
+    fn a_page_corner_with_ctrl_keeps_the_ratio() {
+        let image = (400.0, 300.0);
+        let none = slack(0.0, 0.0, 0.0, 0.0);
+        assert_eq!(
+            page_corner_slack_keeping_ratio((true, true), image, none, (40.0, 10.0)),
+            slack(0.0, 0.0, 40.0, 30.0)
+        );
+        // The top-left corner, pulled mostly vertically.
+        assert_eq!(
+            page_corner_slack_keeping_ratio((false, false), image, none, (-4.0, -60.0)),
+            slack(80.0, 60.0, 0.0, 0.0)
+        );
+        // Inward: the bottom stops at 3 points of slack, the width follows.
+        assert_eq!(
+            page_corner_slack_keeping_ratio(
+                (true, true),
+                image,
+                slack(0.0, 0.0, 40.0, 3.0),
+                (-40.0, -40.0)
+            ),
+            slack(0.0, 0.0, 36.0, 0.0)
+        );
     }
 
     /// K1: a page corner adds empty space on the two edges that meet there;

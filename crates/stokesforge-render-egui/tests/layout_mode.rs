@@ -253,7 +253,13 @@ fn drag(
             time,
             modifiers,
         ));
-        assert!(signals.is_empty(), "a signal before the release");
+        // Only the page-edge message (F3) may come while dragging.
+        assert!(
+            signals
+                .iter()
+                .all(|signal| matches!(signal, GraphEvent::PageEdgeReached)),
+            "a signal before the release"
+        );
     }
     signals.extend(frame(
         context,
@@ -263,6 +269,8 @@ fn drag(
         time + 0.05,
         modifiers,
     ));
+    // The page-edge message has its own test.
+    signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
     signals
 }
 
@@ -1637,6 +1645,100 @@ fn the_page_outline_is_dashed_only_when_a_grid_has_slack() {
     let (context, mut view) = in_mode(&fixture);
     let slacked = hover_at(&context, &mut view, &fixture, away, 1.0);
     assert!(page_dashes(&slacked.shapes) > 4, "a dashed page");
+}
+
+/// Ctrl held at the press of an L corner keeps the page's ratio (#505): the
+/// page grows by the larger relative change, the graphs keep their frames; a
+/// plain drag of the same movement does not keep it. Witness: the Ctrl branch
+/// ignored (`keep_ratio` always false).
+#[test]
+fn ctrl_on_an_l_corner_keeps_the_ratio_of_the_page() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    let grown = |modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            corner,
+            corner + egui::vec2(40.0, 10.0),
+            modifiers,
+        );
+        let [GraphEvent::GridFramesEdited {
+            figure: true,
+            slack: Some(slack),
+            ..
+        }] = signals.as_slice()
+        else {
+            panic!("one figure event expected, got {signals:?}");
+        };
+        (slack.right, slack.bottom)
+    };
+    assert_eq!(grown(egui::Modifiers::NONE), (40.0, 10.0));
+    let ctrl = egui::Modifiers {
+        ctrl: true,
+        ..egui::Modifiers::NONE
+    };
+    let (right, bottom) = grown(ctrl);
+    let ratio = f64::from(before.size.0) / f64::from(before.size.1 - before.title_band);
+    let (new_w, new_h) = (
+        f64::from(before.size.0) + right,
+        f64::from(before.size.1 - before.title_band) + bottom,
+    );
+    assert!(
+        (new_w / new_h - ratio).abs() < 0.01,
+        "{new_w} x {new_h} vs {ratio}"
+    );
+    assert!(right >= 40.0, "{right}");
+}
+
+/// F3 (#505): pulling an outer edge outward with no room left signals
+/// `PageEdgeReached` once during the drag, not once per frame; pulling it
+/// inward never does. Witness: the signal never sent.
+#[test]
+fn a_blocked_outer_edge_says_so_once_per_drag() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let run = |dy: f32| {
+        let (context, mut view) = in_mode(&fixture);
+        let before = layout_of(&context, &mut view, &fixture);
+        let band = before.title_band as f32;
+        let from = Pos2::new(before.column_breaks[1] as f32 / 2.0, band + 1.0);
+        let mut all = frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![
+                egui::Event::PointerMoved(from),
+                button(from, true, egui::Modifiers::NONE),
+            ],
+            0.1,
+            egui::Modifiers::NONE,
+        );
+        let mut time = 0.1;
+        for step in 1..=5 {
+            time += 0.05;
+            let pos = from + egui::vec2(0.0, dy) * (step as f32 / 5.0);
+            all.extend(frame(
+                &context,
+                &mut view,
+                &fixture,
+                vec![egui::Event::PointerMoved(pos)],
+                time,
+                egui::Modifiers::NONE,
+            ));
+        }
+        all.iter()
+            .filter(|event| matches!(event, GraphEvent::PageEdgeReached))
+            .count()
+    };
+    // The top edge pulled up (outward) with no slack: blocked.
+    assert_eq!(run(-30.0), 1);
+    // Pulled down (inward): fine.
+    assert_eq!(run(30.0), 0);
 }
 
 /// K1: an L corner of a Regular figure is a page corner. Pulled out it adds

@@ -198,6 +198,10 @@ pub enum GraphEvent {
         /// (#505); `None` for every other gesture (the slack stays as it is).
         slack: Option<stokesforge_plot::GridSlack>,
     },
+    /// An outer edge (or an Alt-dragged line) is pulled outward and the page
+    /// has no room left: signalled **once per drag**, while it bumps (#505,
+    /// F3), so the application can say how to enlarge the page.
+    PageEdgeReached,
     /// A graph of a regular grid was dragged to another place, or moved by an
     /// arrow key, in the Page Layout Mode (#491): the base layer of the graph
     /// and where it goes, to commit as **one** change of the model. Nothing is

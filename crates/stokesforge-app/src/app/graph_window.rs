@@ -1205,6 +1205,9 @@ fn annotation_interactions(
                     slack,
                 });
             }
+            stokesforge_render_egui::GraphEvent::PageEdgeReached => {
+                actions.push(Action::PageEdgeReached);
+            }
             stokesforge_render_egui::GraphEvent::GridCellMoved { panel, target } => {
                 actions.push(Action::MoveGridCell {
                     graph,

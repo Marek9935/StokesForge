@@ -803,12 +803,16 @@ fn figure_size_controls(
     let width_changed = number_field(ui, ("layout_figure", 0), &mut fields.0, &quantity).changed;
     ui.label(by);
     let height_changed = number_field(ui, ("layout_figure", 1), &mut fields.1, &quantity).changed;
-    let (icon, tooltip) = if published.is_some() {
-        (Icon::LockClosed, tr!("plot-size-lock-closed"))
+    let (icon, role, tooltip) = if published.is_some() {
+        (
+            Icon::LockClosed,
+            IconRole::Accent,
+            tr!("plot-size-lock-closed"),
+        )
     } else {
-        (Icon::LockOpen, tr!("plot-size-lock-open"))
+        (Icon::LockOpen, IconRole::Muted, tr!("plot-size-lock-open"))
     };
-    if icon_button(ui, icon, IconRole::Neutral, tooltip).clicked() {
+    if icon_button(ui, icon, role, tooltip).clicked() {
         session.push(Action::SetSizeLock {
             graph,
             lock: match published {

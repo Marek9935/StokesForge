@@ -931,6 +931,10 @@ pub enum Action {
         /// (#505); `None` leaves it as it is.
         slack: Option<stokesforge_plot::GridSlack>,
     },
+    /// An outer edge or an Alt-dragged line is pulled past the page edge
+    /// (#505, F3): the status bar says how to enlarge the page. Changes no
+    /// model.
+    PageEdgeReached,
     /// Fits the page of a graph to its layers (#505): on a Regular Grid the
     /// empty space around the grid is cleared, in Free the page becomes the
     /// bounding box of the graphs (margins included). One undo step
@@ -5938,6 +5942,7 @@ impl AppState {
                 figure,
                 slack,
             } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
+            Action::PageEdgeReached => self.notice(tr!("status-page-edge-reached")),
             Action::FitPageToLayout { graph } => self.fit_page_to_layout(graph),
             Action::FitLayoutToPage { graph, uniform } => self.fit_layout_to_page(graph, uniform),
             Action::MoveGridCell {

@@ -131,8 +131,9 @@ pub use free_gesture::{
 };
 pub use grid_gesture::{
     grid_cell_at, grid_corners, grid_handle_at, grid_line_at, layout_fitted_to_page,
-    page_corner_slack, resized_edge, resized_frames, resized_line_alone, scaled_axis, splitter,
-    EdgeSide, GridCorner, GridHandle, GridLine, LineAxis, OuterEdge,
+    page_corner_slack, page_corner_slack_keeping_ratio, page_edge_bumped, resized_edge,
+    resized_frames, resized_line_alone, scaled_axis, splitter, EdgeSide, GridCorner, GridHandle,
+    GridLine, LineAxis, OuterEdge,
 };
 pub use hit::{
     component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,

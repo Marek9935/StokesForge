@@ -2195,6 +2195,7 @@ help-open-list = Ouvrir la liste des valeurs
 busy-stop = Arrêter
     .hint = Arrête le travail en cours
 status-import-stopped = Import arrêté. Rien n'a été importé
+status-page-edge-reached = Bord de la page atteint : tirez un coin pour agrandir la page
 status-figure-grew = L’image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
 status-recalculating = Recalcul en cours…
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée

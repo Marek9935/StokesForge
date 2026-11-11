@@ -2197,6 +2197,7 @@ busy-stop = Stop
     .hint = Stops the work in progress
 status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
+status-page-edge-reached = Page edge reached: drag a corner to enlarge the page
 status-figure-grew = The image grew beyond the room kept by the Fixed figure size. The plot area kept its size
 status-recalc-stopped = Recalculation stopped. The change was undone
 
