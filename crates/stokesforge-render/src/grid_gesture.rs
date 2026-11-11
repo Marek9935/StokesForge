@@ -453,8 +453,9 @@ pub fn resized_frames(
 /// **Only the row or column of that edge changes.** Pulled inward by `p`, its
 /// frame shrinks by `p` and the slack of that side grows by `p`: frame plus
 /// slack is constant, so the page keeps its size. Pulled outward by `q`, the
-/// frame grows by `q`; the slack on that side is eaten first, then the page
-/// grows by what is left. The movement is rounded to whole points and bounded
+/// frame grows by `q`, taking it from the slack of that side; it **stops when
+/// the slack is used up**: the page size changes only through the page tools
+/// (P1). The movement is rounded to whole points and bounded
 /// so that the frame stays in `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`. A `delta`
 /// that is not finite, or an `index` out of range, returns the start untouched.
 pub fn resized_edge(
@@ -478,15 +479,16 @@ pub fn resized_edge(
         return untouched();
     }
     // A frame already out of range is never pushed further out.
-    let low = (MIN_FRAME_SIZE - frame).min(0.0);
-    let high = (MAX_FRAME_SIZE - frame).max(0.0);
-    let moved = outward.round().clamp(low, high);
     let side_slack = match edge.side {
         EdgeSide::Left => slack.left,
         EdgeSide::Top => slack.top,
         EdgeSide::Right => slack.right,
         EdgeSide::Bottom => slack.bottom,
     };
+    // Outward the frame stops when the slack is used up: the page never grows.
+    let low = (MIN_FRAME_SIZE - frame).min(0.0);
+    let high = (MAX_FRAME_SIZE - frame).max(0.0).min(side_slack.max(0.0));
+    let moved = outward.round().clamp(low, high);
     let new_slack = (side_slack - moved).max(0.0);
     let mut sizes = sizes.to_vec();
     sizes[edge.index] = frame + moved;
@@ -504,7 +506,7 @@ pub fn resized_edge(
 }
 
 /// The frames and the slack after dragging an internal line **alone**, with
-/// Shift held at the press (#505, G9): the row above (column left of) each
+/// Alt held at the press (#505, G9): the row above (column left of) each
 /// grabbed line takes the whole change, every other row (column) keeps its
 /// size, and the empty space on the far edge (bottom, right) absorbs the
 /// difference exactly as for [`resized_edge`] of that far edge: the slack
@@ -896,9 +898,9 @@ mod tests {
         assert_eq!(slack.top, 40.0);
     }
 
-    /// #505 G9: Shift on an internal line changes only the row before it; the
-    /// bottom slack absorbs the difference; outward past the slack the figure
-    /// grows. Witness: `splitter` instead (the next row would trade).
+    /// #505 G9: Alt on an internal line changes only the row before it; the
+    /// bottom slack absorbs the difference; outward past the slack it stops
+    /// (the page never grows). Witness: `splitter` instead (the next row would trade).
     #[test]
     fn a_line_dragged_alone_changes_one_row_and_the_slack_absorbs() {
         let row = GridHandle {
@@ -912,14 +914,13 @@ mod tests {
             resized_line_alone(&row, &[200.0], &heights, GridSlack::default(), (0.0, -30.0));
         assert_eq!((w, h), (vec![200.0], vec![70.0, 100.0, 100.0]));
         assert_eq!(slack.bottom, 30.0);
-        // Back out beyond the slack: the row grows, the slack is eaten, the
-        // figure grows by the rest.
+        // Back out beyond the slack: the row grows by the slack only.
         let start = GridSlack {
             bottom: 10.0,
             ..GridSlack::default()
         };
         let (_, h, slack) = resized_line_alone(&row, &[200.0], &heights, start, (0.0, 25.0));
-        assert_eq!(h, vec![125.0, 100.0, 100.0]);
+        assert_eq!(h, vec![110.0, 100.0, 100.0], "clamped at the slack");
         assert_eq!(slack.bottom, 0.0);
         // A column line takes the same rule on the right.
         let column = GridHandle {
@@ -938,24 +939,37 @@ mod tests {
         assert_eq!(slack.right, 20.0);
     }
 
-    /// #505: pulled outward, the slack goes first, then the frame keeps growing
-    /// and so does the page. Witness: a negative slack allowed.
+    /// #505 (P1): pulled outward, the edge eats the slack and stops at the
+    /// page. Witness: letting the frame keep growing past the slack.
     #[test]
-    fn an_outer_edge_pulled_outward_eats_the_slack_then_grows_the_figure() {
+    fn an_outer_edge_pulled_outward_stops_at_the_page() {
         let edge = OuterEdge {
             side: EdgeSide::Bottom,
             index: 1,
         };
         let start = GridSlack {
-            bottom: 50.0,
+            bottom: 30.0,
             ..GridSlack::default()
         };
         let (_, h, slack) =
             resized_edge(edge, &[220.0, 130.0], &[140.0, 160.0], start, (0.0, 80.0));
-        assert_eq!(h, vec![140.0, 240.0]);
+        assert_eq!(h, vec![140.0, 190.0], "frame +30 only");
         assert_eq!(slack.bottom, 0.0);
-        // Frame + slack changed by 30: the figure grew by 30.
-        assert_eq!(h[1] + slack.bottom - (160.0 + 50.0), 30.0);
+        // Frame + slack is unchanged: the page keeps its size.
+        assert_eq!(h[1] + slack.bottom, 160.0 + 30.0);
+        // With no slack at all the edge does not move outward.
+        let (_, h, _) = resized_edge(
+            edge,
+            &[220.0, 130.0],
+            &[140.0, 160.0],
+            GridSlack::default(),
+            (0.0, 80.0),
+        );
+        assert_eq!(h, vec![140.0, 160.0]);
+        let start = GridSlack {
+            bottom: 50.0,
+            ..GridSlack::default()
+        };
         // Within the slack the figure keeps its size.
         let (_, h, slack) =
             resized_edge(edge, &[220.0, 130.0], &[140.0, 160.0], start, (0.0, 20.0));
@@ -973,7 +987,8 @@ mod tests {
         let (w, _, slack) = resized_edge(edge, &[200.0, 100.0], &[100.0], none, (-1e9, 0.0));
         assert_eq!(w[0], MIN_FRAME_SIZE);
         assert_eq!(slack.right, 200.0 - MIN_FRAME_SIZE);
-        let (w, _, _) = resized_edge(edge, &[200.0, 100.0], &[100.0], none, (1e9, 0.0));
+        let room = GridSlack { right: 1e9, ..none };
+        let (w, _, _) = resized_edge(edge, &[200.0, 100.0], &[100.0], room, (1e9, 0.0));
         assert_eq!(w[0], MAX_FRAME_SIZE);
         let same = resized_edge(edge, &[200.0], &[100.0], none, (f64::NAN, 0.0));
         assert_eq!(same, (vec![200.0], vec![100.0], none));

@@ -14,7 +14,8 @@
 //!   corners lying on one of them, are the handles (they keep priority). The
 //!   **outer edge** of the first and last row and column, over a graph, is a
 //!   handle too (#505): pulling it changes that row or column alone, and the
-//!   empty space it leaves (or eats) is the page's slack; the figure does not
+//!   empty space it leaves (or eats) is the page's slack, and pulling it out
+//!   stops at the page edge (the page changes only through page tools); the figure does not
 //!   follow, the L corners still scale the whole figure. A drag
 //!   that starts **inside a graph**, off a handle, **moves that graph** (#491):
 //!   the cell under the pointer is outlined (a graph there swaps places, a hole
@@ -1309,7 +1310,7 @@ impl GraphView {
                         right,
                         bottom,
                     },
-                    alone: handle.edge.is_none() && context.input(|input| input.modifiers.shift),
+                    alone: handle.edge.is_none() && context.input(|input| input.modifiers.alt),
                 }
             }
             (None, Some(page)) => {

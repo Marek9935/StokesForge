@@ -676,7 +676,7 @@ fn a_boundary_drag_trades_the_two_columns_and_keeps_the_figure_size() {
 
 /// The outer edge of a row, pulled inward, changes that row alone (#505): one
 /// event, only the first height down by 40, the slack on top 40, the image the
-/// same size, the preview held. Pulling it back outward eats the slack. An L
+/// same size, the preview held. Pulling it back outward eats the slack and stops at the page. An L
 /// corner still scales everything. Witness: the drag routed to the figure kind
 /// (every row would scale).
 #[test]
@@ -742,10 +742,13 @@ fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     else {
         panic!("one edge event expected, got {signals:?}");
     };
-    assert_eq!(heights, &vec![170.0, 150.0], "the frame grows by 60");
-    assert_eq!(slack.top, 0.0, "the slack is eaten, the figure grows by 20");
+    assert_eq!(heights, &vec![150.0, 150.0], "the frame grows by the slack");
+    assert_eq!(
+        slack.top, 0.0,
+        "the slack is eaten and the edge stops there"
+    );
     let grown = layout_of(&context, &mut view, &fixture);
-    assert_eq!(grown.size.1, layout.size.1 + 20);
+    assert_eq!(grown.size.1, layout.size.1, "the page never grows (P1)");
 
     // The L corner is untouched: it scales every row (slack frozen).
     let (context, mut view) = in_mode(&fixture);
@@ -772,12 +775,13 @@ fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     assert!(heights[0] < heights[1], "proportions kept: {heights:?}");
 }
 
-/// #505 G9: Shift held at the press on an internal row line changes only the
+/// #505 G9 (P2): Alt held at the press on an internal row line changes only the
 /// row above: one event, the first height down by 30, the second untouched, the
-/// slack at the bottom 30, the figure the same size. Without Shift the two
-/// rows trade. Witness: the Shift flag ignored (the second row would grow).
+/// slack at the bottom 30, the figure the same size. Without Alt the two
+/// rows trade, and Shift (snap off) does not make it alone. Witness: the flag
+/// read from Shift instead of Alt (the Shift trade below would fail).
 #[test]
-fn shift_on_an_internal_line_changes_one_row_and_makes_bottom_slack() {
+fn alt_on_an_internal_line_changes_one_row_and_makes_bottom_slack() {
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
     let before = layout_of(&context, &mut view, &fixture);
@@ -785,14 +789,14 @@ fn shift_on_an_internal_line_changes_one_row_and_makes_bottom_slack() {
         before.column_breaks[1] as f32 / 2.0,
         (before.row_breaks[1] + before.title_band) as f32,
     );
-    let shift = egui::Modifiers::SHIFT;
+    let alt = egui::Modifiers::ALT;
     let signals = drag(
         &context,
         &mut view,
         &fixture,
         from,
         from - egui::vec2(0.0, 30.0),
-        shift,
+        alt,
     );
     let [GraphEvent::GridFramesEdited {
         heights,
@@ -808,18 +812,20 @@ fn shift_on_an_internal_line_changes_one_row_and_makes_bottom_slack() {
     let after = layout_of(&context, &mut view, &fixture);
     assert_eq!(after.size, before.size, "the page keeps its size");
 
-    // Without Shift the same drag trades the two rows.
-    let (context, mut view) = in_mode(&fixture);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        from,
-        from - egui::vec2(0.0, 30.0),
-        egui::Modifiers::NONE,
-    );
-    let (_, heights) = grid_edited(&signals);
-    assert_eq!(heights, [120.0, 180.0]);
+    // Without Alt, and with Shift (no snap), the same drag trades the rows.
+    for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+        let (context, mut view) = in_mode(&fixture);
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            from,
+            from - egui::vec2(0.0, 30.0),
+            modifiers,
+        );
+        let (_, heights) = grid_edited(&signals);
+        assert_eq!(heights, [120.0, 180.0], "{modifiers:?}");
+    }
 }
 
 /// With four graphs the middle corner moves the column and the row in one
@@ -877,6 +883,7 @@ fn corners_move_every_boundary_they_lie_on() {
         meeting(&layout, 2, 2),
         edge_middle,
     ];
+    let centre = meeting(&layout, 1, 1);
     for (n, at) in spots.into_iter().enumerate() {
         let (context, mut view) = in_mode(&fixture);
         let signals = drag(
@@ -884,7 +891,11 @@ fn corners_move_every_boundary_they_lie_on() {
             &mut view,
             &fixture,
             at,
-            at + egui::vec2(10.0, 10.0),
+            // Inward: an outward pull would stop at the page (no slack yet).
+            at + egui::vec2(
+                10.0 * (centre.x - at.x).signum(),
+                10.0 * (centre.y - at.y).signum(),
+            ),
             egui::Modifiers::NONE,
         );
         assert!(
