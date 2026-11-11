@@ -342,6 +342,8 @@ pub fn non_trivial_spec(
                 size: Some(13.0),
                 ..Default::default()
             },
+            length: Some(180.0),
+            thickness: Some(10.0),
             visible: true,
         }),
         // #398: a free frame, negative left.

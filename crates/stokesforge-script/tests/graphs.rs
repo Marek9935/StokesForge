@@ -843,6 +843,24 @@ fn color_bar_keeps_visible_and_clears_row_column() {
     assert!(bar.visible && bar.row_column.is_none());
 }
 
+/// #499: `length` / `thickness` set the strip size, bounded; a call that
+/// leaves them out keeps them; a non-finite value is refused. Witness: a
+/// size reset by the second call, or no bound, fails the assertions.
+#[test]
+fn color_bar_sets_and_keeps_its_size() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1')\ngid = pyst.group_series(g, [0, 1])\npyst.color_bar(g, [gid], length=150, thickness=1)\npyst.color_bar(g, title='t')\n"),
+    );
+    let bar = graph_spec(&b).panels[0].color_bar.clone().expect("a bar");
+    assert_eq!(bar.length, Some(150.0));
+    assert_eq!(
+        bar.thickness,
+        Some(stokesforge_plot::ColorBarSpec::MIN_THICKNESS)
+    );
+}
+
 /// #499: `pyst.color_bar` builds the bar of a layer in one undo step, gives a
 /// group without a retained gradient the first palette, keeps the range and
 /// label of a group already on the bar, and refuses an unknown option

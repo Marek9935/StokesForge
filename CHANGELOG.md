@@ -49,7 +49,12 @@ without a message, see `docs/persistence.md`).
   like the legend and a double-click opens its tab. The value color is
   computed at each draw, never stored. Additive `.stf` field (an older
   version that saves the file again loses it); `pyst` API 0.6:
-  `pyst.color_bar(…)`, and `apply_gradient` now retains the stops.
+  `pyst.color_bar(…)` (with `length=` / `thickness=`), and `apply_gradient`
+  now retains the stops. A bar inside the plot area shows resize handles when
+  selected, like a drawn rectangle: pulling one changes the length and
+  thickness of the strip, the texts keep their size; below / right of the
+  frame only the thickness handle exists. Additive stored fields, one undo
+  step per pull.
 
 - Origin projects (#490): an `.opj` file dropped on the window, picked in the
   Import Wizard or reached by File > Import opens the "Import from Origin"

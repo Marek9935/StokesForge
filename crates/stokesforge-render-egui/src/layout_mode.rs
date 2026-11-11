@@ -432,6 +432,7 @@ impl GraphView {
             self.drag_box = None;
             self.annotation_drag = None;
             self.text_drag = None;
+            self.bar_drag = None;
             self.shape_drag = None;
             self.layout.mode = true;
             return;

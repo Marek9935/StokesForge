@@ -34,7 +34,7 @@ use stokesforge_app_state::state::{
     MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, StatusLevel,
     UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN, WARNING_LIFETIME,
 };
-use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
+use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::{
     Cell, Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, FormulaPart, NodeId, Project,
     Tree,
@@ -8544,6 +8544,81 @@ fn editing_the_color_bar_is_one_undo_step() {
     state.dispatch(Action::Undo);
     assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
     assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
+/// #499: a released resize handle of the colour bar is one history entry
+/// labelled for the bar; the size is bounded, the font is left alone, a
+/// repeated size stacks nothing and a size left out is kept. Witness: no
+/// bound, a font reset, or a second entry per field fails the assertions.
+#[test]
+fn resizing_the_color_bar_is_one_bounded_undo_step() {
+    use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec, TextFont};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let mut spec = state.plot_spec(graph).expect("spec");
+    spec.panels.get_mut(0).expect("panel").color_bar = Some(ColorBarSpec {
+        segments: vec![ColorBarSegment::new(1)],
+        position: ColorBarPosition::BottomRight,
+        font: TextFont {
+            size: Some(17.0),
+            ..TextFont::default()
+        },
+        ..ColorBarSpec::default()
+    });
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    let before = state.plot_spec(graph).expect("spec");
+    let bar = |state: &AppState| {
+        state.plot_spec(graph).expect("spec").panels[0]
+            .color_bar
+            .clone()
+            .expect("a bar")
+    };
+
+    state.dispatch(Action::SetColorBarSize {
+        graph,
+        panel: 0,
+        length: Some(1.0),
+        thickness: Some(30.0),
+        anchor: None,
+    });
+    let resized = bar(&state);
+    assert_eq!(resized.length, Some(ColorBarSpec::MIN_LENGTH), "bounded");
+    assert_eq!(resized.thickness, Some(30.0));
+    assert_eq!(resized.font.size, Some(17.0), "the font is not resized");
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(PlotEditKind::ColorBar))
+    );
+
+    // A size left out is kept; the same sizes stack nothing.
+    state.dispatch(Action::SetColorBarSize {
+        graph,
+        panel: 0,
+        length: None,
+        thickness: Some(2.0),
+        anchor: None,
+    });
+    assert_eq!(bar(&state).thickness, Some(ColorBarSpec::MIN_THICKNESS));
+    assert_eq!(bar(&state).length, Some(ColorBarSpec::MIN_LENGTH));
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetColorBarSize {
+        graph,
+        panel: 0,
+        length: None,
+        thickness: Some(2.0),
+        anchor: None,
+    });
+    assert_eq!(state.snapshot().revision, revision, "nothing stacked");
+
+    state.dispatch(Action::Undo);
+    assert_eq!(bar(&state).thickness, Some(30.0));
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.plot_spec(graph).expect("spec"),
+        before,
+        "one Undo each"
+    );
 }
 
 /// #499 step C: the tab is the sixth of the window, and the bar opens it.

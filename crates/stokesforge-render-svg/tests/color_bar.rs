@@ -220,6 +220,11 @@ fn the_bar_font_size_reaches_the_export() {
 /// `(x, y, width, height, fill)` of every rectangle of the document that is a
 /// gradient stripe (the strip is 12 high), left to right.
 fn stripes(document: &str) -> Vec<(i32, i32, i32, i32, String)> {
+    stripes_high(document, 12)
+}
+
+/// Same, for a strip of `height` points.
+fn stripes_high(document: &str, height: i32) -> Vec<(i32, i32, i32, i32, String)> {
     let attr = |tag: &str, name: &str| -> Option<String> {
         let key = format!("{name}=\"");
         let rest = tag.split(&key).nth(1)?;
@@ -239,7 +244,7 @@ fn stripes(document: &str) -> Vec<(i32, i32, i32, i32, String)> {
                 attr(tag, "FILL")?,
             ))
         })
-        .filter(|stripe| stripe.3 == 12)
+        .filter(|stripe| stripe.3 == height)
         .collect();
     out.sort();
     out
@@ -445,4 +450,63 @@ fn a_break_between_different_values_has_two_labels_apart() {
     let all = texts(&document);
     assert_eq!(all.iter().filter(|text| text.2 == "20").count(), 1);
     assert!(!all.iter().any(|text| text.2 == "40"), "{all:?}");
+}
+
+/// A bar in a corner with a custom length and thickness (#499): the strip is
+/// as long and as thick as asked, in the export as on screen (one drawing
+/// code), and **no text changes size**: the same font sizes appear with and
+/// without the custom size. The automatic size is back with `None`.
+/// Witness: a font scaled with the strip, a length not read, or a thickness
+/// stuck at 12 fails the assertions.
+#[test]
+fn a_custom_size_resizes_the_strip_and_not_the_texts() {
+    let mut project = Project::new("Bar").expect("project");
+    let mut plain = bar();
+    plain.position = stokesforge_plot::ColorBarPosition::TopRight;
+    plain.title = "Time".to_string();
+    let automatic = spec_with(&mut project, Some(plain.clone()), &[0.0, 57.0]);
+    let mut sized = plain;
+    sized.length = Some(210.0);
+    sized.thickness = Some(20.0);
+    let custom = spec_with(&mut project, Some(sized), &[0.0, 57.0]);
+
+    let (before, after) = (export(&automatic, &project), export(&custom, &project));
+    assert!(stripes_high(&before, 20).is_empty());
+    let strip = stripes_high(&after, 20);
+    assert!(strip.len() > 50, "{} stripes of 20 points", strip.len());
+    let left = strip.iter().map(|s| s.0).min().expect("stripes");
+    let right = strip.iter().map(|s| s.0 + s.2).max().expect("stripes");
+    // The body leaves the rounded caps (4 points each end) to other shapes.
+    assert!((right - left - 202).abs() <= 1, "length {}", right - left);
+    assert_eq!(
+        font_sizes(&before),
+        font_sizes(&after),
+        "texts keep their size"
+    );
+}
+
+/// Below the frame the length keeps following the frame, the thickness
+/// applies. Witness: a stored length that shortens the strip below the frame.
+#[test]
+fn below_the_frame_only_the_thickness_applies() {
+    let mut project = Project::new("Bar").expect("project");
+    let mut below = bar();
+    below.position = stokesforge_plot::ColorBarPosition::Below;
+    let automatic = spec_with(&mut project, Some(below.clone()), &[0.0, 57.0]);
+    below.length = Some(40.0);
+    below.thickness = Some(20.0);
+    let custom = spec_with(&mut project, Some(below), &[0.0, 57.0]);
+    let (before, after) = (
+        stripes(&export(&automatic, &project)),
+        stripes_high(&export(&custom, &project), 20),
+    );
+    let width = |s: &[(i32, i32, i32, i32, String)]| {
+        s.iter().map(|s| s.0 + s.2).max().unwrap_or(0) - s.iter().map(|s| s.0).min().unwrap_or(0)
+    };
+    assert!(!after.is_empty(), "the thickness applies");
+    assert_eq!(
+        width(&before),
+        width(&after),
+        "the length follows the frame"
+    );
 }

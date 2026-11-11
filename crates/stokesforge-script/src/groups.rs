@@ -440,10 +440,12 @@ impl<'py> FromPyObject<'_, 'py> for RowColumn {
 /// `orientation`: `'horizontal'` or `'vertical'` (forced by `'below'` and
 /// `'right'`); `position`: `'top_left'`, `'top_right'`, `'bottom_left'`,
 /// `'bottom_right'`, `'below'`, `'right'`; `ticks`: `'breaks'` or `'auto'`;
-/// `title`: Typst text; `visible`: show or hide the bar (hidden, the curves
+/// `title`: Typst text; `length`, `thickness`: size of the strip in points
+/// (bounded; the length applies to a bar inside the frame, a bar below or
+/// right of it follows the frame); `visible`: show or hide the bar (hidden, the curves
 /// get their own colors and legend entries back).
 #[pyfunction]
-#[pyo3(signature = (graph, groups=None, *, value_from=None, row_column=RowColumn::Keep, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, visible=None, panel=(0, 0)))]
+#[pyo3(signature = (graph, groups=None, *, value_from=None, row_column=RowColumn::Keep, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, length=None, thickness=None, visible=None, panel=(0, 0)))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn color_bar(
     py: Python<'_>,
@@ -459,12 +461,14 @@ pub(crate) fn color_bar(
     title: Option<String>,
     labels: Option<Vec<String>>,
     ranges: Option<Vec<(Option<f64>, Option<f64>)>>,
+    length: Option<f64>,
+    thickness: Option<f64>,
     visible: Option<bool>,
     panel: Panel,
 ) -> PyResult<()> {
     use stokesforge_plot::{
-        ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment, ColorBarTicks,
-        ColorBarValue,
+        ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment, ColorBarSpec,
+        ColorBarTicks, ColorBarValue,
     };
     let context = engine::current_context()?;
     context.check_interrupt()?;
@@ -541,6 +545,13 @@ pub(crate) fn color_bar(
     })()
     .map_err(to_py_error)?;
     let (value_from, scale, orientation, position, ticks) = parsed;
+    for (name, value) in [("length", length), ("thickness", thickness)] {
+        if value.is_some_and(|value| !value.is_finite()) {
+            return Err(crate::graph::invalid(format!(
+                "{name} must be a finite number of points"
+            )));
+        }
+    }
     if let Some(groups) = &groups {
         let mut seen = Vec::new();
         for group in groups {
@@ -632,6 +643,14 @@ pub(crate) fn color_bar(
             }
             if let Some(title) = &title {
                 bar.title.clone_from(title);
+            }
+            // Bounded like a pulled handle; the length applies to a bar
+            // inside the frame only.
+            if length.is_some() {
+                bar.length = ColorBarSpec::clamp_size(length, ColorBarSpec::MIN_LENGTH);
+            }
+            if thickness.is_some() {
+                bar.thickness = ColorBarSpec::clamp_size(thickness, ColorBarSpec::MIN_THICKNESS);
             }
             // A new bar is shown; an existing one keeps its visibility.
             if let Some(visible) = visible {

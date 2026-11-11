@@ -76,6 +76,7 @@
 )]
 
 pub mod backend;
+mod bar_resize;
 pub mod cache;
 pub mod feathering;
 mod layout_mode;
@@ -244,6 +245,19 @@ pub enum GraphEvent {
         target: TextTarget,
         /// Its new anchor.
         anchor: TextAnchor,
+    },
+    /// A resize handle of the colour bar was pulled then released (#499):
+    /// the new strip size (and, for a dragged bar, its new anchor, so the
+    /// opposite edge stays still), to commit as **one** change of the model.
+    ColorBarResized {
+        /// Index of the layer in `PlotSpec::panels`.
+        panel: usize,
+        /// New strip length in points; `None` = unchanged.
+        length: Option<f64>,
+        /// New strip thickness in points; `None` = unchanged.
+        thickness: Option<f64>,
+        /// New anchor of a dragged bar; `None` = unchanged.
+        anchor: Option<TextAnchor>,
     },
     /// A width handle of a title or an axis title was pulled then released
     /// (#244): its new width, as a fraction of the width of the figure, to
@@ -637,6 +651,11 @@ pub struct GraphView {
     /// Preview of the width of a title being resized (#244).
     text_width_preview: Option<(TextTarget, f64)>,
     text_drag: Option<TextDrag>,
+    /// Preview of the colour bar being resized (#499) and the gesture.
+    bar_size_preview: Option<bar_resize::BarSize>,
+    bar_drag: Option<bar_resize::BarDrag>,
+    /// The first frame of the current drag already looked for a bar handle.
+    bar_grab_tried: bool,
     /// Preview of the frame sizes of a cell handle being pulled (#394).
     frame_preview: Option<FramePreview>,
     /// The Page Layout Mode (#426): view state, never saved.
@@ -767,6 +786,9 @@ impl GraphView {
             text_preview: None,
             text_width_preview: None,
             text_drag: None,
+            bar_size_preview: None,
+            bar_drag: None,
+            bar_grab_tried: false,
             frame_preview: None,
             layout: layout_mode::LayoutState::default(),
             selected_annotation: None,
@@ -884,6 +906,8 @@ impl GraphView {
         self.annotation_preview = None;
         self.text_drag = None;
         self.text_preview = None;
+        self.bar_drag = None;
+        self.bar_size_preview = None;
         self.frame_preview = None;
         self.layout.forget_gestures();
         self.shape_drag = None;
@@ -1182,6 +1206,7 @@ impl GraphView {
         self.set_annotation_preview(None);
         self.set_text_preview(None);
         self.set_text_width_preview(None);
+        self.set_bar_size_preview(None);
         self.set_shape_preview(None);
         self.set_frame_preview(None);
     }
@@ -1219,6 +1244,15 @@ impl GraphView {
     pub fn set_figure_texts(&mut self, texts: &FigureTexts) {
         if self.figure_texts.language != texts.language {
             self.figure_texts = texts.clone();
+            self.preview_generation += 1;
+        }
+    }
+
+    /// Sets (or removes) the preview of a resized colour bar (#499).
+    fn set_bar_size_preview(&mut self, preview: Option<bar_resize::BarSize>) {
+        self.preview_until = None;
+        if self.bar_size_preview != preview {
+            self.bar_size_preview = preview;
             self.preview_generation += 1;
         }
     }
@@ -1714,6 +1748,7 @@ impl GraphView {
                 || self.drag_box.is_some()
                 || self.shape_drag.is_some()
                 || self.annotation_drag.is_some()
+                || self.bar_drag.is_some()
                 || self.text_drag.is_some());
         feathering::apply(&context, Feathering::during_drag(real_gesture));
 
@@ -1731,6 +1766,7 @@ impl GraphView {
         let preview = &self.annotation_preview;
         let text_preview = &self.text_preview;
         let width_preview = self.text_width_preview;
+        let bar_preview = self.bar_size_preview;
         let shape_preview = &self.shape_preview;
         let frame_preview = &self.frame_preview;
         let formulas = &self.formulas;
@@ -1753,6 +1789,9 @@ impl GraphView {
             }
             if let Some((target, anchor)) = text_preview {
                 target.set_anchor(&mut framed, Some(*anchor));
+            }
+            if let Some(size) = bar_preview {
+                size.apply(&mut framed);
             }
             if let Some((target, width)) = width_preview {
                 if let Some(mut font) = target.font(&framed) {
@@ -2103,6 +2142,7 @@ impl GraphView {
             && !pan
             && (self.handle_annotation_drag(response, spec)
                 || self.handle_shape_drag(response, spec)
+                || self.handle_bar_resize(response, spec)
                 || self.handle_text_drag(response, spec))
         {
             return;
@@ -2523,6 +2563,7 @@ impl GraphView {
             ));
         }
 
+        self.paint_bar_handles(painter, spec);
         self.paint_shape_selection(painter);
         self.paint_series_selection(painter, spec);
 

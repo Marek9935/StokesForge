@@ -351,17 +351,115 @@ fn cross_size<DB: DrawingBackend>(
     let (labels, title) = extras(bar);
     let title = if title { grown(bar, TITLE_ROW) } else { 0 };
     Ok(if horizontal {
-        i32::from(labels) * MARKER_ROW + THICK + TICK_GAP + grown(bar, TICK_ROW) + title
+        i32::from(labels) * MARKER_ROW + thick(bar) + TICK_GAP + grown(bar, TICK_ROW) + title
     } else {
         let (ticks, breaks) = label_columns(area, bar)?;
         i32::from(labels) * MARKER_ROW
-            + THICK
+            + thick(bar)
             + TICK_GAP
             + ticks
             + if labels { COL_GAP + breaks } else { 0 }
             + if title > 0 { COL_GAP } else { 0 }
             + title
     })
+}
+
+/// Thickness of the strip in points: the stored one, bounded, or [`THICK`].
+pub fn thick(bar: &ColorBarSpec) -> i32 {
+    ColorBarSpec::clamp_size(bar.thickness, ColorBarSpec::MIN_THICKNESS)
+        .map_or(THICK, |value| value.round() as i32)
+}
+
+/// The resize handles the bar offers, as `(hx, hy)` sides of its box
+/// (`-1|0|1`, left/top = -1; the same convention as the handles of a drawn
+/// rectangle).
+///
+/// Inside the frame: a dragged bar offers the eight handles; a bar in a
+/// corner the ones facing the frame only (the sides against the corner stay
+/// put). Outside (Below / Right) the length follows the frame, so only the
+/// thickness handle is offered, on the side away from the frame.
+pub fn resize_handles(bar: &ColorBarSpec) -> Vec<(i8, i8)> {
+    let (pinned_x, pinned_y) = match place_of(bar) {
+        Place::Below => return vec![(0, 1)],
+        Place::Right => return vec![(1, 0)],
+        Place::Free => (2, 2),
+        Place::Corner { left, top } => (if left { -1 } else { 1 }, if top { -1 } else { 1 }),
+    };
+    let mut handles = Vec::with_capacity(8);
+    for hy in [-1i8, 0, 1] {
+        for hx in [-1i8, 0, 1] {
+            if (hx, hy) != (0, 0) && hx != pinned_x && hy != pinned_y {
+                handles.push((hx, hy));
+            }
+        }
+    }
+    handles
+}
+
+/// True if the bar is drawn along the horizontal, wherever it sits.
+pub fn is_horizontal(bar: &ColorBarSpec) -> bool {
+    horizontal(bar, place_of(bar))
+}
+
+/// Whether a pulled handle moves the centre of the bar (a dragged bar keeps
+/// the opposite edge still; a bar in a corner stays against it).
+pub fn resize_moves_centre(bar: &ColorBarSpec) -> bool {
+    matches!(place_of(bar), Place::Free)
+}
+
+/// Result of pulling a resize handle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Resized {
+    /// New strip length, if the handle changes it.
+    pub length: Option<f64>,
+    /// New strip thickness, if the handle changes it.
+    pub thickness: Option<f64>,
+    /// New centre of the box (unchanged for a bar in a corner).
+    pub centre: (f64, f64),
+}
+
+/// The bar once `handle` was pulled by `delta` (figure points), from the
+/// state at the start of the gesture: `length` is the strip length then,
+/// `centre` the centre of its box. The sizes are bounded
+/// ([`ColorBarSpec::MIN_LENGTH`], [`ColorBarSpec::MIN_THICKNESS`]) and the
+/// opposite edge of a dragged bar does not move, even against a bound. Only
+/// sizes: the texts keep their font size.
+pub fn resized(
+    bar: &ColorBarSpec,
+    length: f64,
+    handle: (i8, i8),
+    delta: (f64, f64),
+    centre: (f64, f64),
+) -> Resized {
+    let along_x = horizontal(bar, place_of(bar));
+    let grow = (f64::from(handle.0) * delta.0, f64::from(handle.1) * delta.1);
+    let ((dl, hl), (dt, ht)) = if along_x {
+        ((grow.0, handle.0), (grow.1, handle.1))
+    } else {
+        ((grow.1, handle.1), (grow.0, handle.0))
+    };
+    let thick_now = f64::from(thick(bar));
+    let new_length = (length + dl).clamp(ColorBarSpec::MIN_LENGTH, ColorBarSpec::MAX_SIZE);
+    let new_thickness = (thick_now + dt).clamp(ColorBarSpec::MIN_THICKNESS, ColorBarSpec::MAX_SIZE);
+    let (applied_l, applied_t) = (new_length - length, new_thickness - thick_now);
+    let (aw, ah) = if along_x {
+        (applied_l, applied_t)
+    } else {
+        (applied_t, applied_l)
+    };
+    let centre = if resize_moves_centre(bar) {
+        (
+            centre.0 + f64::from(handle.0) * aw / 2.0,
+            centre.1 + f64::from(handle.1) * ah / 2.0,
+        )
+    } else {
+        centre
+    };
+    Resized {
+        length: (hl != 0).then_some(new_length),
+        thickness: (ht != 0).then_some(new_thickness),
+        centre,
+    }
 }
 
 /// A text row or column, grown with the bar's font size above the default
@@ -445,6 +543,7 @@ pub fn draw<DB: DrawingBackend>(
     let ((fx, fy), (fw, fh)) = placing.frame;
     let (fw, fh) = (fw as i32, fh as i32);
     let cross = cross_size(area, bar, along_x)?;
+    let thick = thick(bar);
     let (labels, title) = extras(bar);
 
     // Length of the strip.
@@ -453,6 +552,15 @@ pub fn draw<DB: DrawingBackend>(
         Place::Right => fh,
         _ if along_x => (fw * 2 / 5).clamp(120, 260),
         _ => (fh / 2).clamp(100, 260),
+    };
+    // A pulled length applies inside the frame only; outside the strip
+    // follows the frame.
+    let length = match (
+        place,
+        ColorBarSpec::clamp_size(bar.length, ColorBarSpec::MIN_LENGTH),
+    ) {
+        (Place::Below | Place::Right, _) | (_, None) => length,
+        (_, Some(custom)) => custom.round() as i32,
     }
     .max(8 * segments.len() as i32 + 12);
     let (bw, bh) = if along_x {
@@ -526,7 +634,7 @@ pub fn draw<DB: DrawingBackend>(
     // rectangle under two pixels wide becomes a faint line there): a figure
     // shown at a fraction of its size would otherwise let the background shine
     // between stripes, as a grid of light seams (#499).
-    let radius = RADIUS as i32;
+    let radius = (RADIUS as i32).min(thick / 2);
     let fill = |color: &str| -> ShapeStyle {
         ShapeStyle {
             color: paint::rgb(crate::color::rgb_or(color, paint::SERIES_FALLBACK)).into(),
@@ -558,11 +666,11 @@ pub fn draw<DB: DrawingBackend>(
                         start + cap_from,
                         start + cap_to,
                         strip_v + radius,
-                        strip_v + THICK - radius,
+                        strip_v + thick - radius,
                     ),
                     fill(&color),
                 ))?;
-                for v in [strip_v + radius, strip_v + THICK - radius] {
+                for v in [strip_v + radius, strip_v + thick - radius] {
                     let (x, y) = at(start + end + if edge == 0 { radius } else { 0 }, v);
                     area.draw(&Circle::new((x, y), radius, fill(&color)))?;
                 }
@@ -578,7 +686,7 @@ pub fn draw<DB: DrawingBackend>(
             if let Some(color) = color_at(f64::from(pixel) + f64::from(width) / 2.0) {
                 let reach = (pixel + width + BRIDGE).min(to);
                 area.draw(&Rectangle::new(
-                    rect(start + pixel, start + reach, strip_v, strip_v + THICK),
+                    rect(start + pixel, start + reach, strip_v, strip_v + thick),
                     fill(&color),
                 ))?;
             }
@@ -589,11 +697,11 @@ pub fn draw<DB: DrawingBackend>(
     // Ticks: from the strip's edge outwards, never over the colours.
     let ink: ShapeStyle = paint::rgb(styles.ink).into();
     let ticks = tick_marks(bar, segments, &starts, &lens);
-    let label_v = strip_v + THICK + TICK_GAP;
+    let label_v = strip_v + thick + TICK_GAP;
     let mut widths = Vec::with_capacity(ticks.len());
     for (u, text, anchor) in &ticks {
-        let end = strip_v + THICK + TICK_LEN;
-        let mut v = strip_v + THICK;
+        let end = strip_v + thick + TICK_LEN;
+        let mut v = strip_v + thick;
         while v < end {
             let to = (v + DASH).min(end);
             area.draw(&PathElement::new(vec![at(*u, v), at(*u, to)], ink))?;
@@ -815,4 +923,84 @@ fn decades(from: f64, to: f64) -> Vec<f64> {
     }
     let (low, high) = (from.log10().ceil() as i32, to.log10().floor() as i32);
     (low..=high).map(|k| 10f64.powi(k)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stokesforge_plot::TextAnchor;
+
+    fn bar_at(position: ColorBarPosition, anchor: Option<TextAnchor>) -> ColorBarSpec {
+        ColorBarSpec {
+            position,
+            anchor,
+            orientation: ColorBarOrientation::Horizontal,
+            ..ColorBarSpec::default()
+        }
+    }
+
+    /// A dragged bar offers the eight handles, a bar in a corner the ones
+    /// facing the frame, a bar outside only the thickness. Witness: the
+    /// pinned sides offered in a corner, or a length handle below.
+    #[test]
+    fn the_handles_depend_on_where_the_bar_sits() {
+        let free = bar_at(ColorBarPosition::Below, Some(TextAnchor::new(1.0, 1.0)));
+        assert_eq!(resize_handles(&free).len(), 8);
+        let corner = resize_handles(&bar_at(ColorBarPosition::BottomRight, None));
+        assert_eq!(corner.len(), 3);
+        assert!(corner.iter().all(|&(hx, hy)| hx != 1 && hy != 1));
+        assert_eq!(
+            resize_handles(&bar_at(ColorBarPosition::TopLeft, None)).len(),
+            3
+        );
+        assert_eq!(
+            resize_handles(&bar_at(ColorBarPosition::Below, None)),
+            [(0, 1)]
+        );
+        assert_eq!(
+            resize_handles(&bar_at(ColorBarPosition::Right, None)),
+            [(1, 0)]
+        );
+    }
+
+    /// Pulling the top-left handle of a corner bar grows both sizes by the
+    /// pointer's move, a vertical bar swaps the axes, and the sizes stop at
+    /// the minimum; a dragged bar keeps its opposite edge, also against the
+    /// bound. Witness: length and thickness swapped, no clamp, or a centre
+    /// that moves with the clamped part of the pull.
+    #[test]
+    fn pulling_a_handle_changes_the_sizes_within_the_bounds() {
+        let corner = bar_at(ColorBarPosition::BottomRight, None);
+        let grown = resized(&corner, 100.0, (-1, -1), (-30.0, -8.0), (500.0, 300.0));
+        assert_eq!(grown.length, Some(130.0));
+        assert_eq!(grown.thickness, Some(20.0));
+        assert_eq!(grown.centre, (500.0, 300.0), "a corner bar stays put");
+
+        let vertical = ColorBarSpec {
+            orientation: ColorBarOrientation::Vertical,
+            ..bar_at(ColorBarPosition::BottomRight, None)
+        };
+        let grown = resized(&vertical, 100.0, (-1, -1), (-30.0, -8.0), (0.0, 0.0));
+        assert_eq!(grown.length, Some(108.0));
+        assert_eq!(grown.thickness, Some(42.0));
+
+        let squeezed = resized(&corner, 100.0, (-1, -1), (500.0, 500.0), (0.0, 0.0));
+        assert_eq!(squeezed.length, Some(ColorBarSpec::MIN_LENGTH));
+        assert_eq!(squeezed.thickness, Some(ColorBarSpec::MIN_THICKNESS));
+
+        // A side handle moves one size only.
+        let side = resized(&corner, 100.0, (-1, 0), (-10.0, 99.0), (0.0, 0.0));
+        assert_eq!((side.length, side.thickness), (Some(110.0), None));
+
+        // Dragged: the opposite edge (right, bottom) stays where it is.
+        let free = bar_at(ColorBarPosition::Below, Some(TextAnchor::new(1.0, 1.0)));
+        let moved = resized(&free, 100.0, (1, 1), (20.0, 6.0), (300.0, 200.0));
+        assert_eq!(moved.centre, (310.0, 203.0));
+        let held = resized(&free, 100.0, (-1, 0), (500.0, 0.0), (300.0, 200.0));
+        assert_eq!(
+            held.centre.0,
+            300.0 + (100.0 - ColorBarSpec::MIN_LENGTH) / 2.0,
+            "the centre follows what was applied, not what was asked"
+        );
+    }
 }

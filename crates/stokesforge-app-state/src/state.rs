@@ -63,8 +63,9 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec, PanelSpec, Panels,
-    PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorBarSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec,
+    PanelSpec, Panels, PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor,
+    TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -1300,6 +1301,21 @@ pub enum Action {
         /// The moved text.
         target: TextTarget,
         /// Its new anchor; `None` puts it back at its default place.
+        anchor: Option<TextAnchor>,
+    },
+    /// Sets the strip size of a colour bar inside the frame (#499): the
+    /// resize handle that was pulled and released. One undo entry
+    /// ([`PlotEditKind::ColorBar`]). A `None` field is left as it is.
+    SetColorBarSize {
+        /// Target graph.
+        graph: NodeId,
+        /// Index of the layer in the graph's panels.
+        panel: usize,
+        /// Strip length in points (bounded by the model).
+        length: Option<f64>,
+        /// Strip thickness in points (bounded by the model).
+        thickness: Option<f64>,
+        /// New anchor of a dragged bar.
         anchor: Option<TextAnchor>,
     },
     /// Sets the font and size of a title or of the legend (issues #77,
@@ -6588,6 +6604,32 @@ impl AppState {
                 target,
                 anchor,
             } => self.edit_annotations(graph, |spec| target.set_anchor(spec, anchor)),
+            Action::SetColorBarSize {
+                graph,
+                panel,
+                length,
+                thickness,
+                anchor,
+            } => self.edit_plot_object(graph, PlotEditKind::ColorBar, |spec| {
+                let Some(bar) = spec
+                    .panels
+                    .get_mut(panel)
+                    .and_then(|panel| panel.color_bar.as_mut())
+                else {
+                    return false;
+                };
+                if let Some(length) = length {
+                    bar.length = ColorBarSpec::clamp_size(Some(length), ColorBarSpec::MIN_LENGTH);
+                }
+                if let Some(thickness) = thickness {
+                    bar.thickness =
+                        ColorBarSpec::clamp_size(Some(thickness), ColorBarSpec::MIN_THICKNESS);
+                }
+                if anchor.is_some() {
+                    bar.anchor = anchor;
+                }
+                true
+            }),
             Action::SetTextFont {
                 graph,
                 target,

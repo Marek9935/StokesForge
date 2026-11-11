@@ -1234,6 +1234,20 @@ fn annotation_interactions(
                     page,
                 });
             }
+            stokesforge_render_egui::GraphEvent::ColorBarResized {
+                panel,
+                length,
+                thickness,
+                anchor,
+            } => {
+                actions.push(Action::SetColorBarSize {
+                    graph,
+                    panel,
+                    length,
+                    thickness,
+                    anchor,
+                });
+            }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {
                     graph,

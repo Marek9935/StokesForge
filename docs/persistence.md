@@ -774,8 +774,11 @@ list choice on the other; unit tests in `schema.rs`
 `PanelSpecRecord` gained `color_bar` (`Option<ColorBarRecord>`),
 `#[serde(default)]`: segments (group, optional typed ends, break label),
 `chain`, the value source, scale, orientation, position, anchor, ticks, title
-`visible` and `font` (`TextFontRecord`, not written when default, so an older
-file stays byte-identical; the witness holds a non-default one). **`FORMAT_VERSION` did not move**: a file without it has no bar
+`visible`, `font` (`TextFontRecord`, not written when default, so an older
+file stays byte-identical; the witness holds a non-default one) and the strip
+`length` / `thickness` in points (`Option<f64>`, `None` = automatic, not
+written, set by pulling a resize handle of a bar inside the frame; the witness
+holds both). **`FORMAT_VERSION` did not move**: a file without it has no bar
 and its curves keep their stored colors. Every choice is a stored key; a
 default is written as an empty string and an unknown key (newer version)
 becomes `Unknown(key)`, read as the default and written back as it was

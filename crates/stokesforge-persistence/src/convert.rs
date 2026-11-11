@@ -607,6 +607,8 @@ fn color_bar_to_record(bar: &ColorBarSpec) -> ColorBarRecord {
         ticks: key(bar.ticks.key(), ColorBarTicks::default().key()),
         title: bar.title.clone(),
         font: font_to_record(&bar.font),
+        length: bar.length,
+        thickness: bar.thickness,
         visible: bar.visible,
     }
 }
@@ -633,6 +635,8 @@ fn record_to_color_bar(record: ColorBarRecord) -> ColorBarSpec {
         ticks: ColorBarTicks::from_key(&record.ticks),
         title: record.title,
         font: record_to_font(record.font),
+        length: record.length,
+        thickness: record.thickness,
         visible: record.visible,
     }
 }
@@ -1531,6 +1535,8 @@ mod tests {
                 size: Some(18.0),
                 ..Default::default()
             },
+            length: Some(140.0),
+            thickness: Some(9.0),
             visible: false,
         };
         let panel = PanelSpec {
@@ -1562,7 +1568,7 @@ mod tests {
         };
         assert!(bar_fields
             .iter()
-            .all(|(key, _)| key.as_str() != Some("font")));
+            .all(|(key, _)| !matches!(key.as_str(), Some("font" | "length" | "thickness"))));
 
         let none = panel_spec_to_record(&PanelSpec::at(0, 0));
         assert!(none.color_bar.is_none());

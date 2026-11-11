@@ -1471,3 +1471,32 @@ fn the_screen_and_the_export_draw_the_same_colour_bar() {
         "the stripes come from the bar"
     );
 }
+
+/// A bar in a corner with a custom length and thickness is drawn the same on
+/// screen and in the export, and the strip really has the asked thickness.
+/// Witness: a size read by one backend only, or a thickness left at 12,
+/// fails `agree` or the count.
+#[test]
+fn the_screen_and_the_export_agree_on_a_custom_bar_size() {
+    let (mut fixture, size) = colour_bar_fixture();
+    let bar = fixture
+        .spec
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar");
+    bar.position = stokesforge_plot::ColorBarPosition::TopRight;
+    bar.orientation = stokesforge_plot::ColorBarOrientation::Horizontal;
+    bar.length = Some(240.0);
+    bar.thickness = Some(22.0);
+    let (primitives, _) = agree(fixture.project.tree(), &fixture.spec, size, "custom bar");
+    let thick = |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 22);
+    assert!(
+        primitives.iter().filter(thick).count() >= 50,
+        "the strip is 22 points thick"
+    );
+    let default = |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 12);
+    assert!(primitives.iter().filter(default).count() < 20);
+}

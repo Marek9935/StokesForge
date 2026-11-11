@@ -197,6 +197,12 @@ pub struct ColorBarSpec {
     /// Font and size of the bar's own texts (title, tick labels, break
     /// labels). Default = the label size of the graph's font (today's look).
     pub font: crate::TextFont,
+    /// Length of the strip in points (a bar inside the frame); `None` =
+    /// automatic (a share of the frame). Outside the frame the length keeps
+    /// following the frame and this value is only remembered.
+    pub length: Option<f64>,
+    /// Thickness of the strip in points; `None` = automatic.
+    pub thickness: Option<f64>,
     /// False hides the bar **and** gives the curves their stored colors and
     /// legend entries back.
     pub visible: bool,
@@ -216,12 +222,29 @@ impl Default for ColorBarSpec {
             ticks: ColorBarTicks::default(),
             title: String::new(),
             font: crate::TextFont::default(),
+            length: None,
+            thickness: None,
             visible: true,
         }
     }
 }
 
 impl ColorBarSpec {
+    /// Smallest strip length, in points, a resize or a stored value can give.
+    pub const MIN_LENGTH: f64 = 20.0;
+    /// Smallest strip thickness, in points.
+    pub const MIN_THICKNESS: f64 = 4.0;
+    /// Largest value of either, in points (a stored value beyond is clamped).
+    pub const MAX_SIZE: f64 = 4000.0;
+
+    /// A requested strip size bounded to what can be drawn; a non-finite
+    /// value reads as automatic.
+    pub fn clamp_size(value: Option<f64>, min: f64) -> Option<f64> {
+        value
+            .filter(|value| value.is_finite())
+            .map(|value| value.clamp(min, Self::MAX_SIZE))
+    }
+
     /// The segment of `group`, if the bar has one.
     pub fn segment_of(&self, group: u32) -> Option<&ColorBarSegment> {
         self.segments.iter().find(|segment| segment.group == group)

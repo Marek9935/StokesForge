@@ -942,6 +942,12 @@ pub(crate) struct ColorBarRecord {
     /// file stays byte-identical.
     #[serde(default, skip_serializing_if = "TextFontRecord::is_default")]
     pub(crate) font: TextFontRecord,
+    /// Strip length and thickness (#499); absent = automatic, not written, so
+    /// an older file stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) length: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) thickness: Option<f64>,
     #[serde(default = "default_true")]
     pub(crate) visible: bool,
 }
