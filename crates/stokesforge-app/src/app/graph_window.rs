@@ -415,6 +415,11 @@ pub(super) fn graph_view_contents(
         figure_ui.painter().rect_filled(rect, 0.0, backdrop);
     }
     view.set_figure_texts(&stokesforge_app_state::figure_texts::figure_texts());
+    // The box the number fields of the layout strip edit: read before the
+    // canvas is painted, because a click on another box there selects it in
+    // this very frame and the typed number must go to the box it was typed
+    // for (#498).
+    let inspected_box = view.selected_box();
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             publish_axis_bounds(ui.ctx(), view, graph_id);
@@ -504,6 +509,7 @@ pub(super) fn graph_view_contents(
                         &spec,
                         layout.as_ref(),
                         graph_id,
+                        inspected_box,
                         actions,
                     );
                 }

@@ -183,7 +183,7 @@ Browse… answer that is not valid UTF-8 changes nothing and says so
 too.
 
 **Separate thread (#192).** All the pickers (Open, Save As, graph export,
-import wizard, Browse… of the default folders) go through `Action::PickFile(PickRequest)` and
+import window, Browse… of the default folders) go through `Action::PickFile(PickRequest)` and
 `file_picker.rs` (in `stokesforge-app-state`): `rfd` runs on a dedicated thread, the answer comes back through a
 channel polled at every frame (`StokesForgeApp::poll_file_picker`). Before, the
 synchronous call on the egui thread froze the application when the picker closed

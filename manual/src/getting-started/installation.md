@@ -103,7 +103,7 @@ You can delete the unpacked folder once the installer has finished: the program 
 
 The folder of the program holds `stokesforge-app`, the Python it uses (in `lib/python`), the notices of the licences of the software it contains, and a check program, `stokesforge-selftest`. Keep these files together.
 
-The archive is built on Ubuntu 22.04. It runs on Ubuntu 22.04, Debian 12 and any later distribution whose glibc (the system C library) is 2.35 or newer, for example Fedora 36 and later. Older distributions, such as RHEL, AlmaLinux and Rocky Linux 9, are not supported: the program does not start there. To see your version, run `ldd --version`.
+The archive is built on Ubuntu 22.04. It runs on Ubuntu 22.04, Debian 12 and any later distribution whose glibc (the system C library) is 2.35 or newer, for example Fedora 36 and later. Older distributions, such as RHEL, AlmaLinux and Rocky Linux 9, are not supported: the program does not start there. The RPM and DEB packages declare the same glibc, so an older system refuses them at installation. To see your version, run `ldd --version`.
 
 ### Open `.stf` files
 

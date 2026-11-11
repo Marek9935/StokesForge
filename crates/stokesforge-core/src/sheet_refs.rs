@@ -212,6 +212,9 @@ impl Tree {
         if self.formula_loop(column, &formula) {
             return Err(FormulaError::Cycle);
         }
+        if let Some(refusal) = self.formula_follow_error(column, Some(&formula)) {
+            return Err(refusal);
+        }
         Ok(formula)
     }
 
@@ -235,8 +238,11 @@ impl Tree {
         if error.is_some() {
             return (formula, error);
         }
-        let cycle = self.formula_loop(column, &formula);
-        (formula, cycle.then_some(FormulaError::Cycle))
+        if self.formula_loop(column, &formula) {
+            return (formula, Some(FormulaError::Cycle));
+        }
+        let follow = self.formula_follow_error(column, Some(&formula));
+        (formula, follow)
     }
 
     /// The kept formulas that can **now** be read (#433, Q3): a formula the
@@ -400,6 +406,153 @@ impl Tree {
             }
         }
         false
+    }
+}
+
+/// What a column reads, for the question "does the source of a followed sheet
+/// read that sheet" (#463).
+impl Tree {
+    /// The columns a column depends on, across the three kinds of edge: the
+    /// columns its formula names (and the X paired with them), the input
+    /// columns of the calculation that produced it, and, for a column that a
+    /// followed transposed sheet keeps up to date, the Y columns of its source
+    /// (the link). `over` replaces the formula of one column (a candidate being
+    /// entered); `assume` counts that transposed sheet as followed even if its
+    /// box is unchecked (rule 3: "could I check it?").
+    fn column_dependencies(
+        &self,
+        id: NodeId,
+        over: Option<(NodeId, &ColumnFormula)>,
+        assume: Option<NodeId>,
+    ) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let Some(column) = self.node(id).and_then(crate::node::Node::as_column) else {
+            return out;
+        };
+        let formula = match over {
+            Some((target, candidate)) if target == id => Some(candidate),
+            _ => column.meta().formula.as_ref(),
+        };
+        if let Some(formula) = formula {
+            if let Ok(compiled) = formula.compile() {
+                out.extend(self.formula_inputs(id, formula, &compiled).dependencies());
+            }
+        } else if let Some(calc) = self
+            .calculation_of_column(id)
+            .and_then(|(calc, _)| self.calculation(calc))
+        {
+            out.extend(calc.input_columns());
+        }
+        for (sheet, link) in self.transposes() {
+            let followed = link.auto_recalc || assume == Some(*sheet);
+            if followed && (link.x_column == id || link.rows.iter().any(|r| r.column == id)) {
+                if let Ok(children) = self.children(link.source) {
+                    out.extend(children.iter().copied().filter(|c| {
+                        self.node(*c)
+                            .and_then(crate::node::Node::as_column)
+                            .is_some_and(|c| c.meta().role == crate::column::ColumnRole::Y)
+                    }));
+                }
+            }
+        }
+        out
+    }
+
+    /// The columns of the source of each followed transposed sheet that
+    /// calculate, in whatever way, from that sheet (E1 of #463), each with the
+    /// transposed sheet it reads. Directly, through another sheet, whatever the
+    /// role of the column, or as the output of an analysis fed by the sheet.
+    /// Another sheet reading the followed sheet is not a reader as long as
+    /// nothing comes back into the source. Empty (and free) when no sheet is
+    /// followed.
+    pub fn columns_reading_followed_sheet(&self) -> BTreeMap<NodeId, NodeId> {
+        self.readers_of_followed(None, None)
+    }
+
+    fn readers_of_followed(
+        &self,
+        over: Option<(NodeId, &ColumnFormula)>,
+        assume: Option<NodeId>,
+    ) -> BTreeMap<NodeId, NodeId> {
+        let mut readers = BTreeMap::new();
+        for (sheet, link) in self.transposes() {
+            if !(link.auto_recalc || assume == Some(*sheet)) {
+                continue;
+            }
+            let Ok(columns) = self.children(link.source) else {
+                continue;
+            };
+            for &start in columns {
+                let mut stack = self.column_dependencies(start, over, assume);
+                let mut seen = HashSet::new();
+                while let Some(id) = stack.pop() {
+                    if self.parent(id).ok().flatten() == Some(*sheet) {
+                        readers.insert(start, *sheet);
+                        break;
+                    }
+                    if seen.insert(id) {
+                        stack.extend(self.column_dependencies(id, over, assume));
+                    }
+                }
+            }
+        }
+        readers
+    }
+
+    /// Rule 3 of #463: the refusal to check the box of `sheet`, naming the
+    /// first column of its source that calculates from it; `None` if the box
+    /// can be checked.
+    pub fn transpose_check_refusal(&self, sheet: NodeId) -> Option<crate::error::CoreError> {
+        let link = self.transpose_link(sheet)?;
+        let reader = *self
+            .readers_of_followed(None, Some(sheet))
+            .iter()
+            .find(|(_, t)| **t == sheet)?
+            .0;
+        Some(crate::error::CoreError::TransposeSourceReadsIt {
+            letter: self.column_letters(reader).unwrap_or_default(),
+            source_sheet: self.node(link.source)?.name().to_string(),
+            transposed: self.node(sheet)?.name().to_string(),
+        })
+    }
+
+    /// #484: the refusal of an explicit Recalculate, Relink or Analyze Rows on
+    /// `sheet`: `None` unless its box is checked, otherwise
+    /// [`Self::transpose_check_refusal`]. Same predicate as the follow pass
+    /// uses to skip a checked sheet; an unchecked sheet with such a reader
+    /// stays legal.
+    pub fn transpose_loop_refusal(&self, sheet: NodeId) -> Option<crate::error::CoreError> {
+        if !self.transpose_link(sheet)?.auto_recalc {
+            return None;
+        }
+        self.transpose_check_refusal(sheet)
+    }
+
+    /// Rule 2 of #463 for one column: the error to show when the stored
+    /// formula of `column` (or `candidate`, a formula being entered) makes the
+    /// source of a followed sheet calculate from that sheet. A candidate is
+    /// refused when it adds a reader or makes `column` one.
+    pub fn formula_follow_error(
+        &self,
+        column: NodeId,
+        candidate: Option<&ColumnFormula>,
+    ) -> Option<FormulaError> {
+        let current = self.readers_of_followed(None, None);
+        let hit = match candidate {
+            None => current.get(&column).copied(),
+            Some(formula) => {
+                let after = self.readers_of_followed(Some((column, formula)), None);
+                after
+                    .iter()
+                    .find(|(reader, _)| **reader == column || !current.contains_key(reader))
+                    .map(|(_, sheet)| *sheet)
+            }
+        }?;
+        let source = self.transpose_link(hit)?.source;
+        Some(FormulaError::ReadsFollowingSheet {
+            transposed: self.node(hit)?.name().to_string(),
+            source: self.node(source)?.name().to_string(),
+        })
     }
 }
 
@@ -1186,6 +1339,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(6)],
+                    raw: None,
                 },
             ),
             node(
@@ -1194,6 +1348,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(7)],
+                    raw: None,
                 },
             ),
             node(
@@ -1202,6 +1357,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(8)],
+                    raw: None,
                 },
             ),
             node(6, "A", Some(3), NodeKind::Column(Column::from_f64(&[1.0]))),

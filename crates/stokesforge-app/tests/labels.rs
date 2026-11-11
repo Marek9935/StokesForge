@@ -109,7 +109,7 @@ const CONSTRUCTORS: &[&str] = &[
 ];
 
 /// The functions whose body is a table of labels: no text literal inside.
-/// The last five are the tables of the import wizard
+/// The last five are the tables of the import window
 /// (#44, `data_end_label` moved out of `data_end_row` by #118);
 /// `encoding_label` and `column_role_label` are not there: their technical
 /// names (`UTF-8`, `Windows-1252`, `X`, `Y`) are legitimate literals.
@@ -823,7 +823,7 @@ fn dead_keys<'c>(catalog: &'c str, sources: &[SourceFile]) -> Vec<&'c str> {
 fn no_catalog_key_is_dead() {
     let keys = catalog_keys(EN);
     assert!(keys.len() > 500, "the catalog is read: {} keys", keys.len());
-    let dead = dead_keys(EN, &sources::sources());
+    let dead: Vec<&str> = dead_keys(EN, &sources::sources());
     assert!(
         dead.is_empty(),
         "{} key(s) of `en` unused in `src/`: {dead:?}",

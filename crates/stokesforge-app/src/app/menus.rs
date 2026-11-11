@@ -406,7 +406,7 @@ impl StokesForgeApp {
             })
             .unwrap_or_default();
         let row_pairs: Vec<(NodeId, usize)> = sheet
-            .and_then(|sheet| self.state.row_drag_payload(sheet))
+            .and_then(|sheet| self.state.analysis_rows_target(sheet))
             .map(|payload| {
                 payload
                     .rows
@@ -432,8 +432,8 @@ impl StokesForgeApp {
                     spec,
                 }),
                 None if graph.is_some() => None,
-                // Whole rows of a sheet at x' (#253): we analyze
-                // rows, not the columns they cross.
+                // Whole rows of a sheet (#253, #493: x' or not): we
+                // analyze rows, not the columns they cross.
                 None if !row_pairs.is_empty() => {
                     Some(super::analysis_menu::AnalysisTarget::Rows { rows: &row_pairs })
                 }
@@ -2084,6 +2084,33 @@ mod tests {
             }]
         );
         assert_closed(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    /// #493: the top Analysis menu on whole rows of a sheet with no x' analyzes
+    /// the rows (through the transposed sheet), not the columns they cross.
+    /// Witness: with `row_drag_payload` as the target the click opens
+    /// `OpenAnalysis` on the columns.
+    #[test]
+    fn the_analysis_menu_takes_whole_rows_of_a_sheet_without_x_prime() {
+        use stokesforge_app_state::analysis::Preset;
+        let (session, mut app, _) = bench();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let tab = Some(Tab::Book(book));
+        app.state.select_row(sheet, 1);
+        assert!(app.state.row_drag_payload(sheet).is_none(), "no x'");
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
+        let integrate = active(&menu, &tr!("action-analysis-integrate"));
+        assert!(integrate.enabled);
+        assert_eq!(
+            click_at(&mut app, &ctx, tab, integrate.center),
+            vec![Action::OpenRowAnalysis {
+                preset: Preset::Integrate,
+                rows: vec![(sheet, 1)],
+            }]
+        );
         session.shutdown().unwrap();
     }
 

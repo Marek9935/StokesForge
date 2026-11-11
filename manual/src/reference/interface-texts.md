@@ -22,8 +22,12 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Add Graph | Ajouter un graphique |
 | Add Text | Ajouter un texte |
 | Add Workbook | Ajouter un classeur |
+| Advanced | Avancé |
+| Advanced settings in use | Réglages avancés utilisés |
 | Align | Aligner |
+| All checked | Tout est vérifié |
 | Analysis | Analyse |
+| Answers remembered | Réponses mémorisées |
 | Axes | Axes |
 | Axes… | Axes… |
 | Below | En dessous |
@@ -31,6 +35,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Bring to Front | Amener devant |
 | Choose Default Folder | Choisir le dossier par défaut |
 | Choose Files to Import | Choisir les fichiers à importer |
+| Chosen automatically | Choisi automatiquement |
 | Clear | Effacer |
 | Column in use | Colonne utilisée |
 | Columns | Colonnes |
@@ -47,7 +52,6 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Delete Calculation… | Supprimer le calcul… |
 | Delete Layer | Supprimer le calque |
 | Delete Recovery Copy | Supprimer la copie de secours |
-| Delete Template | Supprimer le modèle |
 | Detach from Calculation | Détacher du calcul |
 | Detach Project Manager | Détacher le gestionnaire de projet |
 | Direct Deconvolution… | Déconvolution directe… |
@@ -63,25 +67,25 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Export Template | Exporter le modèle |
 | File | Fichier |
 | File Metadata | Métadonnées du fichier |
-| Files and Template | Fichiers et modèle |
 | Fit Layout to Page | Ajuster la disposition à la page |
 | Fit Page to Layout | Ajuster la page à la disposition |
 | Fitting | Ajustement |
 | Fitting… | Ajustement… |
-| Format | Format |
+| Forget Template | Oublier le modèle |
 | Formula Functions | Fonctions de formule |
 | Free | Libre |
 | General | Général |
 | Graph | Graphique |
 | Graph Properties… | Propriétés du graphique… |
-| Header and Data End | En-tête et fin des données |
 | Help | Aide |
 | Hide | Masquer |
 | Horizontal Center | Centre horizontal |
+| How each one was found | Comment chacun a été trouvé |
+| How I recognised it | Comment je l'ai reconnu |
 | Import | Importer |
 | Import from Origin | Importer depuis Origin |
 | Import Template | Importer un modèle |
-| Import Wizard | Assistant d'import |
+| Import Templates | Modèles d’import |
 | Import… | Importer… |
 | Insert Object | Insérer un objet |
 | Integrate | Intégrer |
@@ -108,8 +112,10 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | New Layer | Nouveau calque |
 | New Layer Beside | Calque à côté |
 | New Project | Nouveau projet |
+| No x' Values | Pas de valeurs x' |
 | Object Manager | Gestionnaire d’objets |
 | Object Properties | Propriétés de l'objet |
+| One name for every curve? | Un seul nom pour toutes les courbes ? |
 | Open Project | Ouvrir un projet |
 | Open… | Ouvrir… |
 | Out-of-date data | Données pas à jour |
@@ -160,6 +166,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Same Height | Même hauteur |
 | Same Width | Même largeur |
 | Save | Enregistrer |
+| Save as Template | Enregistrer comme modèle |
 | Save As… | Enregistrer sous… |
 | Save Project | Enregistrer le projet |
 | Select All | Tout sélectionner |
@@ -179,8 +186,10 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | SVG Text | Texte SVG |
 | Text | Texte |
 | Text format | Format du texte |
+| the file has no title | le fichier n'a pas de titre |
 | Theme | Thème |
 | Theme… | Thème… |
+| Title from the file | Titre du fichier |
 | Tools | Outils |
 | Top | Haut |
 | Top Mirror Axis | Axe miroir du haut |
@@ -191,5 +200,6 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Untitled project | Projet sans titre |
 | Vertical Center | Centre vertical |
 | View | Affichage |
+| WHAT I FOUND IN THE FILE | CE QUE J'AI TROUVÉ DANS LE FICHIER |
 | Window | Fenêtre |
 | Workbook | Classeur |

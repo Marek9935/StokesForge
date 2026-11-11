@@ -222,6 +222,48 @@ and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
 (literal values); changing it would make every calculation of the files already
 written stale on reading.
 
+## Import recipe: `join_lines` (#488)
+
+`SubheaderRolesRecord` (the recipe stored with the source of an imported
+column) gained `join_lines` (`bool`, `#[serde(default)]`): Long Name and
+Comments ranges of several sub-header lines are joined with a space. **Absent
+means false, the reading from before: the first line of the range only**, so a
+stored range `1` to `2` keeps its meaning in an older file and `FORMAT_VERSION`
+stays 1 (changing the meaning of the range would have raised it). Refresh from
+Source keeps the stored value; a recipe opened in the import window is switched
+to true. Witness `tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens
+and saves the file again loses the field (CHANGELOG).
+
+## Import recipe: the detector fields (#488)
+
+`ImportRecipeRecord` stores six more fields, all `#[serde(default)]`:
+`main_until_marker` (`Option<String>`), `header_props` (`Vec<HeaderPropRecord>`,
+with `PropFieldRecord` and `PropTargetRecord`), `skip_text_rows`, `format`
+(`FileFormatRecord`: `Table` or `Jcamp`), `name_unit_slash`,
+`strip_unit_brackets`. A record without them reads the reading from before
+(plain table, no header property, no marker), so **`FORMAT_VERSION` stays 1**
+and every existing `.stf` loads. Witness `tests/witnesses/v1/project.stf`
+regenerated with non-default values. A 1.0 that opens and saves the file again
+loses the six fields (CHANGELOG).
+
+**Limitation (user decision, 2026-11-09).** Refresh from Source re-reads the
+source file with the **stored recipe as it is**, without running the detector.
+It is not promised to reproduce an import from one version to the next: a
+newer reader may interpret the same recipe differently (a recipe stored by an
+older version has no detector fields, a newer detector may know more).
+
+## Import recipe: `sheet_name_from_file` (#488)
+
+`ImportRecipeRecord` gained `sheet_name_from_file` (`bool`, `#[serde(default)]`):
+the worksheet takes the file name even when the file has a title. Absent means
+false, the reading from before (the title names the sheet when the recipe
+reads one), so **`FORMAT_VERSION` stays 1**. Witness
+`tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens and saves the
+file again loses the field (CHANGELOG). The same field is in
+`import_recipes.json` (preferences, not the `.stf`); the same file also holds
+`not_automatic`, the names of the old templates kept but not applied by
+themselves (F1 of #488), absent in an older file and ignored by an older app.
+
 ## Frame sizes: additive fields (#394)
 
 `PlotSpecRecord` gained `frame_widths` and `frame_heights` (`Vec<f64>`, points;
@@ -368,6 +410,18 @@ it in `Targeted` and `Full`, and compares the literal formula texts and the
 literal values (computed by hand, `==`): a renamed function, a changed
 associativity or a changed text of the witness fails it. Regenerating the
 witness with other formulas means editing that table by hand.
+
+## Sheet of an untouched import: additive field (#488)
+
+The `Worksheet` record gained `raw_modified_base` (`Option<String>`,
+`#[serde(default)]`): the base of the name the sheet takes at the first change
+to an imported column ("Sheet", « Feuille »), present only while the sheet is
+the untouched "Raw Data" of a new workbook per file. It is **not written** on a
+sheet without the mark, so every file that has none is byte-identical to before
+(the `v1` witness did not change) and a file without the field reads no mark.
+**`FORMAT_VERSION` did not move.** A 1.0 reader keeps the sheet and ignores the
+field; if it saves the file again, the field is dropped without a message and
+the sheet keeps its name for good. Tests: `tests/raw_sheet_mark.rs`.
 
 ## Mixed-type columns: additive change, no migration
 
@@ -754,6 +808,13 @@ read them (column, version, x' in bits). "Stale" and "modified" are **not**
 written: they are derived on reading, hence the importance of the column versions
 (written by the file) and of the content fingerprints (FNV-1a written in hard code, stable
 from one Rust version to another).
+
+`TransposeRecord::auto_recalc` (#463, the "Recalculate automatically" box) is an
+additive `#[serde(default)]` field: **absent means unchecked**, so a file written
+before the box opens with its sheets as the snapshots they were, and
+`FORMAT_VERSION` stays 1. A 1.0 that opens and saves such a file again loses the
+field: the box is unchecked when reopened later, no number is lost
+(CHANGELOG).
 
 On load, the first recalculation pass recomputes the formula columns, and a
 column that gets the same type and values keeps its version (#439: the pass

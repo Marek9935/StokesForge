@@ -67,7 +67,7 @@ guards.
 | `stokesforge-commands` | the commands, the hybrid undo stack, the macros | [commands](commands-and-history.md) |
 | `stokesforge-persistence` | `save`/`load`, transport schema, `.stf` format | [persistence](persistence.md) |
 | `stokesforge-session` | the actor, the `Snapshot`s, the `revision` | [session](session.md) |
-| `stokesforge-import` | reading of instrument files (CSV/TXT/ASC), recipes, preview; independent of core/UI | [application](application/project-and-import.md) |
+| `stokesforge-import` | reading of instrument files (CSV/TXT/ASC, JCAMP-DX), the detector (`sniff`, `instrument`, `jcamp`, `thousands`, `props`), recipes, templates with conditions (`templates`, `recipe_for_file`), preview; independent of core/UI | [application](application/project-and-import.md) |
 | `stokesforge-render` | text measurement, Plotters pipeline, **all the rendering** | [rendering](rendering.md) |
 | `stokesforge-render-egui` | screen backend (`DrawingBackend` → `egui::Shape`), shape cache, reading of egui inputs (wheel, drag), feathering; the computation of zoom/pan and of the nearest point is in `stokesforge-render` (#262) | [rendering](rendering.md) |
 | `stokesforge-render-svg` | SVG export, and PDF and PNG on top of it | [rendering](rendering.md) |

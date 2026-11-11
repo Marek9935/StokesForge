@@ -121,7 +121,9 @@ selection of whole rows of a sheet with x' (right-click on a row number,
 Workbook menu), Plot creates a graph of rows (`Action::PlotRows`, same plot
 types) and Send to sends the rows (same axis question as on drop);
 the column menu is no longer offered in this case. Without x', a selection of
-rows keeps the menu of the columns they cross.
+rows keeps the menu of the columns they cross for **Plot / Send to / drag and
+drop** (`row_drag_payload` is `None`, `status-row-no-x-prime`); the **analysis**
+no longer falls back to those columns (#493), see below.
 
 **Analyzing a row (#253).** `Analysis ▸` is active on a "row" curve (right-click
 on the curve, Object Manager, Graph › Selection, same menu everywhere) and on
@@ -130,8 +132,14 @@ gesture does not analyze the row: it creates or completes the **linked transpose
 ("Sheet1ᵀ"), then opens the window on its "Row N" column. The result follows a column
 (results workbook, "Replace original data" acts on the column of the transposed sheet,
 no series is added to the graph of rows). A group that mixes column curves and
-row curves is disabled (`analysis-needs-same-curves`). A Y column of the sheet without x', or
-a text column, makes the gesture refuse, naming it by its letter. The transposed sheet carries
+row curves is disabled (`analysis-needs-same-curves`). A text column makes the gesture refuse, naming it by its letter, and so does a Y
+column without x' when **others have one** (partial x'). When **no** Y column has
+an x' (#493: `AppState::analysis_rows_target`, whole rows of a sheet with a Y
+column), the sheet is transposed all the same with x' = 1, 2, 3... (the rank of the
+Y columns, "Column number", only in the transposed sheet) and the
+"No x' Values" alert is raised after every such analysis (it offers Cancel
+Analysis); the right-click of those rows is the rows menu with Plot and Send to
+grayed out ("Set x' values to plot a row"), Analysis active. The transposed sheet carries
 a band at the top of the grid (`app/transpose_ui.rs`): origin, "Out of date" when the
 source has changed, "Values edited" when a value of a linked column has been edited, and
 Recalculate (Relink with confirmation in the latter case). Model details:
