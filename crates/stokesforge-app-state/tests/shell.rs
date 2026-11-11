@@ -15033,6 +15033,45 @@ fn add_cell_left_is_one_undo_step_that_restores_positions_and_widths() {
     assert_eq!(undone.frame_widths, before.frame_widths);
 }
 
+/// #503 (retour 2): `AddCellAt` opens the line at a grid position, one undo
+/// step, like `AddCell` for the layer there; a position outside the grid
+/// changes nothing and says so. Witness: `AddCellAt` handled as `AddCell` on
+/// layer 0 (row 0 only) puts the new cell on the wrong row.
+#[test]
+fn add_cell_at_a_position_is_one_undo_step_and_refuses_a_position_outside_the_grid() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Below,
+        columns: Vec::new(),
+    });
+    let two_rows = graph_spec(&state, graph);
+    // Left of the cell of row 1: a new column, the new cell at row 1.
+    state.dispatch(Action::AddCellAt {
+        graph,
+        row: 1,
+        column: 0,
+        side: CellSide::Left,
+        columns: Vec::new(),
+    });
+    let after = graph_spec(&state, graph);
+    let positions: Vec<_> = after.panels.iter().map(|p| (p.row, p.column)).collect();
+    assert_eq!(positions, [(0, 1), (1, 1), (1, 0)], "row 1, not row 0");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), two_rows, "one Undo is enough");
+    state.dispatch(Action::AddCellAt {
+        graph,
+        row: 7,
+        column: 0,
+        side: CellSide::Left,
+        columns: Vec::new(),
+    });
+    assert_eq!(graph_spec(&state, graph), two_rows, "outside the grid");
+}
+
 /// #394 (G7): a graph from an old file (nothing stored, the bands and the title
 /// inside the 480 x 360) is fixed by its first edit, whatever the edit: removing
 /// the title keeps the plot area exactly where and as large as it was, and the
@@ -15320,7 +15359,7 @@ fn moving_a_graph_on_the_grid_is_one_move_layer_step_and_a_no_op_leaves_no_entry
 }
 
 /// #504: a graph dropped on the line between two graphs ([A B; C _], C released
-/// on the A|B line: `Beside { A, Right }`) is ONE undo step labelled Move Layer;
+/// on the A|B line: `NewLine { 0, 0, Right }`) is ONE undo step labelled Move Layer;
 /// the row it empties disappears and one Undo gives the figure back. Witness:
 /// the command sent in two steps (an insertion, then a move).
 #[test]
@@ -15348,8 +15387,9 @@ fn a_graph_dropped_between_two_graphs_is_one_move_layer_step() {
     state.dispatch(Action::MoveGridCell {
         graph,
         panel: 2,
-        target: MoveTarget::Beside {
-            panel: 0,
+        target: MoveTarget::NewLine {
+            row: 0,
+            column: 0,
             side: CellSide::Right,
         },
     });

@@ -378,7 +378,28 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
         return insert_free_cell(spec, panel, side);
     }
     let base = spec.panels.get(overlay_base(spec, panel))?;
-    let (row, column) = (base.row, base.column);
+    let position = (base.row, base.column);
+    insert_cell_at(spec, position, side)
+}
+
+/// [`insert_cell`] by **grid position** (#503): the new column (row) opens
+/// beside the grid position `(row, column)` whether a graph sits there or it is
+/// a hole, and the new cell takes its place in it. The one code path of
+/// [`insert_cell`] (which resolves its layer to a position) and of the drop
+/// zones, which are positions of the grid, not layers. `None`, with the spec
+/// unchanged, on free placement (no grid), a position outside the grid, or the
+/// refusals of [`insert_cell`].
+pub fn insert_cell_at(
+    spec: &mut PlotSpec,
+    (row, column): (usize, usize),
+    side: CellSide,
+) -> Option<usize> {
+    if spec.layer_placement == LayerPlacement::Free
+        || row >= spec.rows()
+        || column >= spec.columns()
+    {
+        return None;
+    }
     // The sizes, read before the positions move.
     let mut widths = spec.sanitized_frame_widths();
     let mut heights = spec.sanitized_frame_heights();
@@ -1064,7 +1085,19 @@ pub enum MoveTarget {
         /// Column of the target cell.
         column: usize,
     },
-    /// A new column (Right) or row (Below) beside the cell of layer `panel`.
+    /// A new column (Left, Right) or row (Above, Below) opened beside the grid
+    /// **position** `(row, column)`, which may be a hole or the graph's own cell
+    /// (#503): the graph takes its place in the new line, at `row` for a new
+    /// column and at `column` for a new row. What a drop zone designates.
+    NewLine {
+        /// Row of the reference position.
+        row: usize,
+        /// Column of the reference position.
+        column: usize,
+        /// Which side of it the new line opens.
+        side: CellSide,
+    },
+    /// [`MoveTarget::NewLine`] at the position of the cell of layer `panel`.
     Beside {
         /// A layer of the reference cell.
         panel: usize,
@@ -1079,7 +1112,7 @@ pub enum MoveTarget {
 /// `row` / `column` of the layers that move. A column (row) the move leaves empty
 /// disappears with its size, by the same code as Delete Layer
 /// ([`close_empty_lines`]). `false`, with the spec unchanged, on free placement,
-/// a missing layer or cell, a target that is the graph's own cell, a move that
+/// a missing layer or cell, a [`MoveTarget::Cell`] that is the graph's own cell, a move that
 /// changes nothing, or a grid that would exceed [`MAX_GRID_CELLS`].
 pub fn move_cell(spec: &mut PlotSpec, panel: usize, target: MoveTarget) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
@@ -1106,15 +1139,22 @@ pub fn move_cell(spec: &mut PlotSpec, panel: usize, target: MoveTarget) -> bool 
                 }
             }
         }
-        MoveTarget::Beside {
-            panel: reference,
-            side,
-        } => {
-            let Some(reference) = candidate.panels.get(overlay_base(&candidate, reference)) else {
-                return false;
+        MoveTarget::NewLine { .. } | MoveTarget::Beside { .. } => {
+            let (reference, side) = match target {
+                MoveTarget::NewLine { row, column, side } => ((row, column), side),
+                MoveTarget::Beside {
+                    panel: reference,
+                    side,
+                } => {
+                    let Some(reference) = candidate.panels.get(overlay_base(&candidate, reference))
+                    else {
+                        return false;
+                    };
+                    ((reference.row, reference.column), side)
+                }
+                MoveTarget::Cell { .. } => return false,
             };
-            let reference = (reference.row, reference.column);
-            if reference == source {
+            if reference.0 >= candidate.rows() || reference.1 >= candidate.columns() {
                 return false;
             }
             let Some(new_cell) =
@@ -2063,6 +2103,94 @@ mod tests {
         let before = spec.clone();
         assert!(!move_cell(&mut spec, 0, target));
         assert_eq!(spec, before);
+    }
+
+    /// #503 (retour 2): a drop zone is a grid position. Dropping graph 1 of
+    /// [1 2; 3 4] on the left of its own cell opens column 0 and puts it at the
+    /// top of it: [1 _ 2; _ 3 4], not on a row of another cell.
+    /// Witness: resolving the position to the nearest cell other than the moved
+    /// one (the old drop) lands the graph on the second row.
+    #[test]
+    fn a_new_line_beside_the_graphs_own_position_opens_there() {
+        let mut spec = sized(
+            &[(0, 0), (0, 1), (1, 0), (1, 1)],
+            &[100.0, 200.0],
+            &[50.0, 60.0],
+        );
+        let target = MoveTarget::NewLine {
+            row: 0,
+            column: 0,
+            side: CellSide::Left,
+        };
+        assert!(move_cell(&mut spec, 0, target));
+        assert_eq!(
+            grid(&spec),
+            [(0, 0, false), (0, 2, false), (1, 1, false), (1, 2, false)]
+        );
+        assert_eq!(spec.frame_widths, [100.0, 100.0, 200.0]);
+        assert_eq!(spec.frame_heights, [50.0, 60.0]);
+        // The same on the right of its own cell: [_ 1 2; 3 _ 4].
+        let mut spec = spec_of(&[(0, 0), (0, 1), (1, 0), (1, 1)]);
+        let target = MoveTarget::NewLine {
+            row: 0,
+            column: 0,
+            side: CellSide::Right,
+        };
+        assert!(move_cell(&mut spec, 0, target));
+        assert_eq!(
+            grid(&spec),
+            [(0, 1, false), (0, 2, false), (1, 0, false), (1, 2, false)]
+        );
+    }
+
+    #[test]
+    fn a_new_line_beside_a_hole_or_a_graph_that_stays_put_is_refused_cleanly() {
+        // [A B] with A to the left of its own cell: nothing changes.
+        let mut spec = spec_of(&[(0, 0), (0, 1)]);
+        let before = spec.clone();
+        let own = MoveTarget::NewLine {
+            row: 0,
+            column: 0,
+            side: CellSide::Left,
+        };
+        assert!(!move_cell(&mut spec, 0, own));
+        assert_eq!(spec, before);
+        // A position outside the grid.
+        let outside = MoveTarget::NewLine {
+            row: 4,
+            column: 0,
+            side: CellSide::Left,
+        };
+        assert!(!move_cell(&mut spec, 0, outside));
+        assert_eq!(spec, before);
+        // [A B; C _]: C on the right of the hole (1, 1)... into a new column 2.
+        let mut spec = spec_of(&[(0, 0), (0, 1), (1, 0)]);
+        let hole = MoveTarget::NewLine {
+            row: 1,
+            column: 1,
+            side: CellSide::Right,
+        };
+        assert!(move_cell(&mut spec, 2, hole));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 1, false), (1, 2, false)]);
+    }
+
+    /// Adding a cell by position: [_ 2; 3 4], a cell on the left of the hole
+    /// (0, 0) opens column 0 and takes (0, 0): [N _ 2; _ 3 4].
+    #[test]
+    fn inserting_a_cell_by_position_works_on_a_hole() {
+        let mut spec = sized(&[(0, 1), (1, 0), (1, 1)], &[100.0, 200.0], &[50.0, 60.0]);
+        assert_eq!(insert_cell_at(&mut spec, (0, 0), CellSide::Left), Some(3));
+        assert_eq!(
+            grid(&spec),
+            [(0, 2, false), (1, 1, false), (1, 2, false), (0, 0, false)]
+        );
+        assert_eq!(spec.frame_widths, [100.0, 100.0, 200.0]);
+        let before = spec.clone();
+        assert_eq!(insert_cell_at(&mut spec, (9, 0), CellSide::Left), None);
+        assert_eq!(spec, before, "outside the grid: unchanged");
+        let mut free = spec_of(&[(0, 0)]);
+        free.layer_placement = LayerPlacement::Free;
+        assert_eq!(insert_cell_at(&mut free, (0, 0), CellSide::Right), None);
     }
 
     #[test]

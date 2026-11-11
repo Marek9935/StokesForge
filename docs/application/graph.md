@@ -723,16 +723,9 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
   `compose::MAX_GRID_CELLS` (256, the size the renderer lays out as declared).
 - **Columns dropped on one of the four bands** of the figure
   (`GraphView::drop_place` in `stokesforge_render_egui::edge_band`, band
-  `EDGE_BAND_WIDTH` = 12 pt, widened to `MIN_EDGE_BAND_PX` screen pixels on a sparse screen by `edge_band_width`; painted during the drag by `GraphView::paint_drop_places`):
-  each band is cut into `BandSegment`s (`GraphView::band_segments`: one per row or column of a regular grid, one per band in Free placement), drawn as pale rounded strips with a gap, the one under the pointer filled; the drop takes its reference from the **segment** under the pointer (nearest cell, `GraphView::nearest_cell_except`, to the segment's centre), so drawing and drop cannot disagree (`DropPlace::segment`); the new cell goes on the side of the band. The insertion bar is only for a drop between two graphs (#504); in a corner the left
-  or right band wins (`edge_drop_side`; the side bands are full height, the top
-  and bottom ones stop at them; the top band is at the figure's very top, over
-  the title, #503); when moving a graph, a band's reference is the nearest cell
-  other than the moving graph (`GraphView::nearest_cell_except`). Dropped on an **internal line**
-  between two graphs (`stokesforge_render::grid_line_at`, the reach of the resize
-  handles), the new cell goes between them: `drop_place` takes the cell of the
-  pointer's row (column) on the near side of the line, the other side if that
-  one is a hole (#504, one mechanism for both gestures). While columns are dragged, a floating graph window not in front that keeps the pointer for `SPRING_LOAD_DELAY` (`stokesforge_app_state::spring_load`, timer per window kept in the egui memory by `spring_load_raise`, `graph_window.rs`) is raised with `Context::move_to_top`; the end-of-frame resync of `floating_tabs` follows. Detached windows are out of reach. The series are planned like a drop on the graph
+  `EDGE_BAND_WIDTH` = 24 pt, widened to `MIN_EDGE_BAND_PX` screen pixels on a sparse screen by `edge_band_width`; painted during the drag by `GraphView::paint_drop_places`):
+  each band is cut into `BandSegment`s (`GraphView::band_segments`: one per row or column of a regular grid, one per band in Free placement), drawn as pale strips, the one under the pointer filled. A segment is a grid **position**, not a graph: row `k` at the outer column for the left and right bands, column `k` at the outer row for the top and bottom ones (`DropAnchor::Cell`); the drop opens the new column or row there (`compose::insert_cell_at`, `MoveTarget::NewLine`) whoever sits at that position, the moving graph or a hole included, so the new line opens at the row or column drawn. Only a Free figure, which has no grid, anchors on the layer nearest the pointer (`DropAnchor::Panel`). The bands are mitred at 45 degrees in the corners like a picture frame (`band_polygon`): in a corner square the nearer edge decides, no band takes it whole, and the hit test (`polygon_contains`) is made on the very polygons that are painted, so drawing and drop cannot disagree (`DropPlace::segment`). The top band is at the figure's very top, over
+  the title, #503. Dropped on an **internal line** between two graphs (`stokesforge_render::grid_line_at`, the reach of the resize handles), the new cell goes between them (#504, one mechanism for both gestures): the line between columns `n` and `n+1` at row `r` is `NewLine { row: r, column: n, side: Right }` (rows likewise with `Below`), a position like a band's, so a hole or the moving graph on either side needs no special case; it is shown as a bar as thick as a band (`EDGE_BAND_WIDTH`), centred on the line, filled like the active band. While columns are dragged, a floating graph window not in front that keeps the pointer for `SPRING_LOAD_DELAY` (`stokesforge_app_state::spring_load`, timer per window kept in the egui memory by `spring_load_raise`, `graph_window.rs`) is raised with `Context::move_to_top`; the end-of-frame resync of `floating_tabs` follows. Detached windows are out of reach. The series are planned like a drop on the graph
   (`AppState::add_columns_to_spec`, plot type of the reference layer); the Y2-Y4
   role layers go on the **new** cell. Without a Y column: `error-add-no-y`, no cell.
   Detached windows go through the same `graph_drop_target`.
@@ -889,7 +882,7 @@ which `graph_window.rs` turns into `Action::SetFreeLayout` (one `EditPlotSpec`,
 `ResizeFigure` when the page does). On a **Regular Grid** (#491) a drag that starts inside a graph, off
 every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` becomes `Action::MoveGridCell`
 (one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
-hole; or `MoveTarget::Beside` a cell, a new column or row made by `open_line`, the same code as
+hole; or `MoveTarget::NewLine` at a grid position, or `Beside` the cell of a layer, a new column or row made by `open_line`, the same code as
 `insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
 uses too. A release on an internal line between two graphs is a `MoveTarget::Beside` too (`GraphView::drop_place`, #504), so it is the same single `MoveLayer` step. Only the `row` / `column` of the moved layers change, never the layer numbers. The four edge bands
 (`stokesforge_render_egui::edge_band`, #503) are shared with the drop of workbook columns in `graph_window.rs`.

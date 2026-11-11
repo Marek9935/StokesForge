@@ -989,8 +989,9 @@ fn dropping_in_the_bottom_edge_band_asks_for_a_new_row_beside_the_nearest_cell()
         moved(&signals),
         (
             1,
-            MoveTarget::Beside {
-                panel: 0,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 0,
                 side: CellSide::Below
             }
         )
@@ -1009,20 +1010,22 @@ fn dropping_in_the_bottom_edge_band_asks_for_a_new_row_beside_the_nearest_cell()
         moved(&signals),
         (
             0,
-            MoveTarget::Beside {
-                panel: 1,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 1,
                 side: CellSide::Right
             }
         )
     );
 }
 
-/// In an edge band the reference is the nearest cell other than the moving
-/// graph (#503): `[A B; C _]`, C dragged to the left band at the height of its
-/// own row, goes beside A, not nowhere. Witness: `moving` not excluded in
-/// `drop_place` (the nearest cell is C itself and the drop gives nothing).
+/// A drop zone is a grid position (#503, retour 2): `[A B; C _]`, C dragged to
+/// the left band at the height of its own row opens column 0 at row 1, beside
+/// C's own position, not beside another row's cell. Witness: `drop_place`
+/// substituting the nearest cell other than the moving one (it answers A, row
+/// 0).
 #[test]
-fn the_moving_graph_is_never_the_nearest_cell_of_an_edge_band() {
+fn a_band_zone_is_a_position_even_when_the_moving_graph_sits_there() {
     let fixture = Fixture::grid_with_hole();
     let (context, mut view) = in_mode(&fixture);
     let c = middle(&view, 2);
@@ -1038,12 +1041,50 @@ fn the_moving_graph_is_never_the_nearest_cell_of_an_edge_band() {
         moved(&signals),
         (
             2,
-            MoveTarget::Beside {
-                panel: 0,
+            MoveTarget::NewLine {
+                row: 1,
+                column: 0,
                 side: CellSide::Left
             }
         )
     );
+}
+
+/// The user's case (#503, retour 2): graph 1 of `[1 2; 3 4]` dropped on the left
+/// band at the height of its own row asks for a new column at row 0, and once
+/// applied the grid is `[1 _ 2; _ 3 4]`. Witness: the moving graph excluded
+/// from the zone's position (the graph lands on the second row).
+#[test]
+fn dropping_the_top_left_graph_on_its_own_left_band_gives_one_empty_cell_below_it() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let first = middle(&view, 0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        first,
+        Pos2::new(10.0, first.y),
+        egui::Modifiers::NONE,
+    );
+    let (panel, target) = moved(&signals);
+    assert_eq!(
+        (panel, target),
+        (
+            0,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 0,
+                side: CellSide::Left
+            }
+        )
+    );
+    let mut spec = spec_of(&fixture);
+    assert!(stokesforge_core::compose::move_cell(
+        &mut spec, panel, target
+    ));
+    let places: Vec<(usize, usize)> = spec.panels.iter().map(|p| (p.row, p.column)).collect();
+    assert_eq!(places, [(0, 0), (0, 2), (1, 1), (1, 2)], "[1 _ 2; _ 3 4]");
 }
 
 /// The left and top bands give a new column on the left and a new row above,
@@ -1067,8 +1108,9 @@ fn dropping_in_the_left_and_top_edge_bands_asks_for_a_cell_on_that_side() {
         moved(&signals),
         (
             1,
-            MoveTarget::Beside {
-                panel: 0,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 0,
                 side: CellSide::Left
             }
         )
@@ -1086,8 +1128,9 @@ fn dropping_in_the_left_and_top_edge_bands_asks_for_a_cell_on_that_side() {
         moved(&signals),
         (
             0,
-            MoveTarget::Beside {
-                panel: 1,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 1,
                 side: CellSide::Above
             }
         )
@@ -1106,10 +1149,11 @@ fn grid_with_a_hole() -> Fixture {
 }
 
 /// Released on the line between two graphs, a graph asks for a new column (or
-/// row) there (#504): C dropped on the A|B line is beside A, on its right; a
-/// line next to the moving graph's own cell uses the cell on its other side.
-/// Witness: the line test removed from `drop_place` (the release becomes a
-/// swap with the cell under the pointer).
+/// row) there (#504), as a grid position like a band's (#503): C dropped on the
+/// A|B line opens a column right of column 0 at row 0; the moving graph's own
+/// neighbour and holes need no special case. Witness: the line test removed
+/// from `drop_place` (the release becomes a swap with the cell under the
+/// pointer).
 #[test]
 fn dropping_on_the_line_between_two_graphs_asks_for_a_cell_between_them() {
     let fixture = grid_with_a_hole();
@@ -1129,17 +1173,13 @@ fn dropping_on_the_line_between_two_graphs_asks_for_a_cell_between_them() {
         on_line,
         egui::Modifiers::NONE,
     );
-    assert_eq!(
-        moved(&signals),
-        (
-            2,
-            MoveTarget::Beside {
-                panel: 0,
-                side: CellSide::Right
-            }
-        )
-    );
-    // A, the moving graph, dropped on its own right line: B is the reference.
+    let between_a_and_b = MoveTarget::NewLine {
+        row: 0,
+        column: 0,
+        side: CellSide::Right,
+    };
+    assert_eq!(moved(&signals), (2, between_a_and_b));
+    // A, the moving graph, dropped on its own right line: the same position.
     let a = middle(&view, 0);
     let signals = drag(
         &context,
@@ -1149,18 +1189,9 @@ fn dropping_on_the_line_between_two_graphs_asks_for_a_cell_between_them() {
         on_line,
         egui::Modifiers::NONE,
     );
-    assert_eq!(
-        moved(&signals),
-        (
-            0,
-            MoveTarget::Beside {
-                panel: 1,
-                side: CellSide::Left
-            }
-        )
-    );
+    assert_eq!(moved(&signals), (0, between_a_and_b));
     // The horizontal line under B, in the right column: a new row between B
-    // and the hole, beside B (below it).
+    // and the hole, below row 0 at column 1.
     let right_col_mid = f32::midpoint(
         layout.column_breaks[1] as f32,
         layout.column_breaks[2] as f32,
@@ -1181,11 +1212,84 @@ fn dropping_on_the_line_between_two_graphs_asks_for_a_cell_between_them() {
         moved(&signals),
         (
             2,
-            MoveTarget::Beside {
-                panel: 1,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 1,
                 side: CellSide::Below
             }
         )
+    );
+    // The line at row 1 has C on one side and a hole on the other: it is still
+    // a zone, the new column opens at row 1.
+    let bottom_row_mid = f32::midpoint(
+        (layout.row_breaks[1] + layout.title_band) as f32,
+        (layout.row_breaks[2] + layout.title_band) as f32,
+    );
+    let hole_line = Pos2::new(layout.column_breaks[1] as f32 + 2.0, bottom_row_mid);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        hole_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::NewLine {
+                row: 1,
+                column: 0,
+                side: CellSide::Right
+            }
+        ),
+        "witness: the hole fallback of the old zone found no neighbour to use"
+    );
+}
+
+/// The highlight of a drop between two graphs is as thick as an edge band
+/// (#504, retour 2), centred on the line. Witness: the old 4 pt bar.
+#[test]
+fn the_highlight_between_two_graphs_is_as_thick_as_a_band() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let row_mid = f32::midpoint(
+        (layout.row_breaks[0] + layout.title_band) as f32,
+        (layout.row_breaks[1] + layout.title_band) as f32,
+    );
+    let on_line = Pos2::new(layout.column_breaks[1] as f32 + 2.0, row_mid);
+    let place = view.drop_place(on_line, None).expect("a line zone");
+    assert_eq!(place.band, None);
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        view.paint_drop_places(ui.painter(), Some(place));
+    });
+    fn walk(shape: &egui::Shape, found: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Rect(rect)
+                if rect.fill == stokesforge_render_egui::edge_band::edge_band_fill() =>
+            {
+                found.push(rect.rect)
+            }
+            _ => {}
+        }
+    }
+    let mut bars = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut bars);
+    }
+    assert_eq!(bars.len(), 1, "one bar");
+    let bar = bars[0];
+    assert!(
+        (bar.width() - stokesforge_render_egui::edge_band::EDGE_BAND_WIDTH).abs() < 0.5,
+        "{bar:?}"
+    );
+    let line_x = view.display_rect().expect("drawn").min.x + layout.column_breaks[1] as f32;
+    assert!(
+        (bar.center().x - line_x).abs() < 14.0,
+        "centred on the line"
     );
 }
 
@@ -2048,10 +2152,10 @@ fn active_band_rects(
     fn walk(shape: &egui::Shape, found: &mut Vec<Rect>) {
         match shape {
             egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, found)),
-            egui::Shape::Rect(rect)
-                if rect.fill == stokesforge_render_egui::edge_band::edge_band_fill() =>
+            egui::Shape::Path(path)
+                if path.fill == stokesforge_render_egui::edge_band::edge_band_fill() =>
             {
-                found.push(rect.rect)
+                found.push(Rect::from_points(&path.points))
             }
             _ => {}
         }
@@ -2069,23 +2173,27 @@ fn active_band_rects(
 /// two filled rectangles.
 #[test]
 fn a_bottom_band_has_one_segment_per_column_and_only_the_one_under_the_pointer_is_filled() {
-    use stokesforge_render_egui::edge_band::DropPlace;
+    use stokesforge_render_egui::edge_band::{DropAnchor, DropPlace};
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
     let layout = layout_of(&context, &mut view, &fixture);
-    let segments = view.band_segments(CellSide::Below, None);
+    let segments = view.band_segments(CellSide::Below);
     assert_eq!(segments.len(), 2);
     assert_eq!(
-        segments.iter().map(|s| s.reference).collect::<Vec<_>>(),
-        vec![Some(2), Some(3)]
+        segments.iter().map(|s| s.cell).collect::<Vec<_>>(),
+        vec![Some((1, 0)), Some((1, 1))]
     );
-    for (column, reference) in [(0, 2), (1, 3)] {
-        let pointer = Pos2::new(segments[column].rect.center().x, layout.size.1 as f32 - 4.0);
+    let bounds = |polygon: &[Pos2]| Rect::from_points(polygon);
+    for column in [0, 1] {
+        let pointer = Pos2::new(
+            bounds(&segments[column].polygon).center().x,
+            layout.size.1 as f32 - 4.0,
+        );
         let place = view.drop_place(pointer, None).expect("a drop place");
         assert_eq!(
             place,
             DropPlace {
-                panel: reference,
+                anchor: DropAnchor::Cell { row: 1, column },
                 side: CellSide::Below,
                 band: Some(CellSide::Below),
                 segment: column,
@@ -2094,8 +2202,8 @@ fn a_bottom_band_has_one_segment_per_column_and_only_the_one_under_the_pointer_i
         let filled = active_band_rects(&context, &view, Some(place));
         assert_eq!(filled.len(), 1, "exactly the segment under the pointer");
         assert!(
-            filled[0].center().x > segments[column].rect.min.x
-                && filled[0].center().x < segments[column].rect.max.x,
+            filled[0].center().x > bounds(&segments[column].polygon).min.x
+                && filled[0].center().x < bounds(&segments[column].polygon).max.x,
             "the filled one lies under the pointer's column"
         );
     }

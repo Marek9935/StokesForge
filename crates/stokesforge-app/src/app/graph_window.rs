@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
+use stokesforge_render_egui::edge_band::DropAnchor;
 use stokesforge_render_egui::{
     AxisSide, FigureLayout, GraphView, PlotComponent, TextTarget, DEFAULT_FIGURE_SIZE,
 };
@@ -104,11 +105,20 @@ pub(super) fn graph_drop_target(
         if egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
                 if let Some(place) = place {
-                    actions.push(Action::AddCell {
-                        graph: graph_id,
-                        panel: place.panel,
-                        side: place.side,
-                        columns: payload.columns.clone(),
+                    actions.push(match place.anchor {
+                        DropAnchor::Cell { row, column } => Action::AddCellAt {
+                            graph: graph_id,
+                            row,
+                            column,
+                            side: place.side,
+                            columns: payload.columns.clone(),
+                        },
+                        DropAnchor::Panel(panel) => Action::AddCell {
+                            graph: graph_id,
+                            panel,
+                            side: place.side,
+                            columns: payload.columns.clone(),
+                        },
                     });
                 } else {
                     let panel = published_active_panel(ui.ctx(), graph_id);
@@ -2356,9 +2366,10 @@ pub(super) mod tests {
         let (_, actions) = paint(vec![release(right_edge)], false);
         assert_eq!(
             actions,
-            vec![Action::AddCell {
+            vec![Action::AddCellAt {
                 graph,
-                panel: 0,
+                row: 0,
+                column: 0,
                 side: stokesforge_core::compose::CellSide::Right,
                 columns: payload.columns.clone(),
             }],
@@ -2370,9 +2381,10 @@ pub(super) mod tests {
         let (_, actions) = paint(vec![release(bottom_edge)], false);
         assert_eq!(
             actions,
-            vec![Action::AddCell {
+            vec![Action::AddCellAt {
                 graph,
-                panel: 0,
+                row: 0,
+                column: 0,
                 side: stokesforge_core::compose::CellSide::Below,
                 columns: payload.columns.clone(),
             }],
@@ -2386,9 +2398,10 @@ pub(super) mod tests {
         let (_, actions) = paint(vec![release(left_edge)], false);
         assert_eq!(
             actions,
-            vec![Action::AddCell {
+            vec![Action::AddCellAt {
                 graph,
-                panel: 0,
+                row: 0,
+                column: 0,
                 side: stokesforge_core::compose::CellSide::Left,
                 columns: payload.columns.clone(),
             }],
@@ -2399,9 +2412,10 @@ pub(super) mod tests {
         let (_, actions) = paint(vec![release(top_edge)], false);
         assert_eq!(
             actions,
-            vec![Action::AddCell {
+            vec![Action::AddCellAt {
                 graph,
-                panel: 0,
+                row: 0,
+                column: 0,
                 side: stokesforge_core::compose::CellSide::Above,
                 columns: payload.columns.clone(),
             }],
@@ -2425,8 +2439,110 @@ pub(super) mod tests {
         );
     }
 
+    /// #503 (retour 2): columns dropped on the left band beside the **first**
+    /// row of a 2 x 2 grid send the grid position (row 0, column 0), whoever
+    /// sits there; the second row's segment sends row 1. Witness: the segment
+    /// reference replaced by the cell nearest the pointer (a layer, not a
+    /// position).
+    #[test]
+    fn columns_dropped_on_a_band_segment_send_its_grid_position() {
+        let mut project = Project::new("Grid").unwrap();
+        let root = project.root();
+        let (x, y) = xy_columns(&mut project);
+        let panels: Vec<PanelSpec> = [(0, 0), (0, 1), (1, 0), (1, 1)]
+            .into_iter()
+            .map(|(row, column)| {
+                let mut panel = PanelSpec::at(row, column);
+                panel.series.push(SeriesSpec::new_xy(x, y));
+                panel
+            })
+            .collect();
+        let graph = project
+            .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panels))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let contents =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(560.0, 540.0));
+        let payload = ColumnDragPayload {
+            sheet: NodeId::from_raw(7),
+            columns: vec![NodeId::from_raw(8)],
+        };
+        let graph_views = std::cell::RefCell::new(HashMap::new());
+        let paint = |events: Vec<egui::Event>, drag: bool| {
+            let mut actions = Vec::new();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                if drag {
+                    egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
+                }
+                show_floating_window(
+                    ui.ctx(),
+                    egui::Id::new("drop_bench_window"),
+                    contents,
+                    ui.ctx().content_rect(),
+                    false,
+                    |ui| {
+                        graph_drop_target(
+                            ui,
+                            &state,
+                            &mut actions,
+                            &mut graph_views.borrow_mut(),
+                            graph,
+                        );
+                    },
+                    |_, _| {},
+                );
+            });
+            output.textures_delta.clear();
+            actions
+        };
+        let release = |pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let inside = egui::pos2(380.0, 322.0);
+        paint(vec![egui::Event::PointerMoved(inside)], false);
+        paint(vec![egui::Event::PointerMoved(inside)], false);
+        let segments = graph_views
+            .borrow()
+            .get(&graph)
+            .expect("the view is drawn")
+            .band_segments(stokesforge_core::compose::CellSide::Left);
+        assert_eq!(segments.len(), 2, "one segment per row");
+        for (row, segment) in segments.iter().enumerate() {
+            let bounds = egui::Rect::from_points(&segment.polygon);
+            let pos = bounds.center();
+            paint(vec![egui::Event::PointerMoved(pos)], true);
+            let actions = paint(vec![release(pos)], false);
+            assert_eq!(
+                actions,
+                vec![Action::AddCellAt {
+                    graph,
+                    row,
+                    column: 0,
+                    side: stokesforge_core::compose::CellSide::Left,
+                    columns: payload.columns.clone(),
+                }],
+                "row {row}"
+            );
+        }
+        session.shutdown().unwrap();
+    }
+
     /// #504 (G6): columns dropped on the line between two graphs make a new
-    /// cell between them: beside the cell on the left of the line, on its right.
+    /// cell between them: at the grid position left of the line, on its right.
     /// Elsewhere inside a graph they are a series as before. Witness: the line
     /// test removed from `GraphView::drop_place`.
     #[test]
@@ -2502,9 +2618,10 @@ pub(super) mod tests {
         let actions = paint(&mut graph_views, vec![release(on_line)], false);
         assert_eq!(
             actions,
-            vec![Action::AddCell {
+            vec![Action::AddCellAt {
                 graph,
-                panel: 0,
+                row: 0,
+                column: 0,
                 side: stokesforge_core::compose::CellSide::Right,
                 columns: payload.columns.clone(),
             }],
