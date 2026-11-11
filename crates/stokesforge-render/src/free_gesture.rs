@@ -1163,27 +1163,15 @@ pub fn moved_page_corner(
 
 /// The frames of **Fit Layout to Page** in Free (#505, K1), the inverse of
 /// [`page_fitted_to_layers`]: the graph boxes are mapped affinely from their
-/// bounding box to the `page` ([`scaled_to_page`]), bands frozen. With `uniform`
-/// (the Figure size padlock is closed) one factor, the smaller of the two,
-/// scales both axes from the top-left corner of the page, so the leftover
-/// space stays on its right or bottom. `None` without a box, or when the boxes
-/// already fill the page (nothing to do, no undo step).
-pub fn boxes_fitted_to_page(
-    boxes: &[GraphBox],
-    page: FreePage,
-    uniform: bool,
-) -> Option<Vec<(usize, FreeFrame)>> {
+/// bounding box to the `page` ([`scaled_to_page`]), bands frozen, one factor
+/// per axis (the Figure size padlock plays no part). `None` without a box, or
+/// when the boxes already fill the page (nothing to do, no undo step).
+pub fn boxes_fitted_to_page(boxes: &[GraphBox], page: FreePage) -> Option<Vec<(usize, FreeFrame)>> {
     let from = page_fitted_to_layers(boxes)?;
     if from.width <= 0.0 || from.height <= 0.0 {
         return None;
     }
-    let mut to = page;
-    if uniform {
-        let factor = (page.width / from.width).min(page.height / from.height);
-        to.width = from.width * factor;
-        to.height = from.height * factor;
-    }
-    let frames = scaled_to_page(boxes, from, to);
+    let frames = scaled_to_page(boxes, from, page);
     let unchanged = frames.iter().all(|(base, frame)| {
         boxes
             .iter()
@@ -2233,11 +2221,9 @@ mod page_corner_tests {
     }
 
     /// K1: Fit Layout to Page maps the bounding box of the graphs to the page,
-    /// one factor per axis; a closed padlock keeps one factor and the page
-    /// corner; nothing to do gives `None`. Witness: the `uniform` branch
-    /// removed.
+    /// one factor per axis; nothing to do gives `None`.
     #[test]
-    fn the_boxes_fill_the_page_and_the_padlock_keeps_their_proportions() {
+    fn the_boxes_fill_the_page_with_one_factor_per_axis() {
         let boxes = [boxed(0, 100.0, 50.0, 300.0, 200.0)];
         let page = FreePage {
             left: 0.0,
@@ -2246,7 +2232,7 @@ mod page_corner_tests {
             height: 500.0,
         };
         // The bounding box (100, 50, 300 x 200) fills the whole page.
-        let frames = boxes_fitted_to_page(&boxes, page, false).expect("something to do");
+        let frames = boxes_fitted_to_page(&boxes, page).expect("something to do");
         let scaled = frames[0].1;
         // Outer 300 x 200, bands 60 across and 40 down: frame = outer - bands.
         let (sx, sy) = (800.0 / 300.0, 500.0 / 200.0);
@@ -2258,15 +2244,9 @@ mod page_corner_tests {
             (scaled.height - (200.0 * sy - 40.0)).abs() < 0.02,
             "{scaled:?}"
         );
-        // Padlock closed: the smaller factor (2.5) on both axes, from the
-        // top-left corner of the page.
-        let uniform = boxes_fitted_to_page(&boxes, page, true).expect("something to do");
-        let u = uniform[0].1;
-        assert!((u.width - (300.0 * sy - 60.0)).abs() < 0.02, "{u:?}");
-        assert!((u.height - (200.0 * sy - 40.0)).abs() < 0.02, "{u:?}");
         // Already filling the page: nothing to do.
         let exact = page_fitted_to_layers(&boxes).expect("a box");
-        assert!(boxes_fitted_to_page(&boxes, exact, false).is_none());
-        assert!(boxes_fitted_to_page(&[], page, false).is_none());
+        assert!(boxes_fitted_to_page(&boxes, exact).is_none());
+        assert!(boxes_fitted_to_page(&[], page).is_none());
     }
 }

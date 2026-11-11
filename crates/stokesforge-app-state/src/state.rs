@@ -50,9 +50,9 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::compose::{
-    current_plot_spec, free_role_layer, insert_cell, insert_cell_at, overlay_base, overlays_full,
-    panel_plot_type, remove_cell, role_layer_of, row_series, series_from_columns, spec_has_x,
-    x_prime_columns, CellSide, OVERLAY_ROLES,
+    current_plot_spec, free_role_layer, insert_cell_at_with, insert_cell_with, overlay_base,
+    overlays_full, panel_plot_type, remove_cell, role_layer_of, row_series, series_from_columns,
+    spec_has_x, x_prime_columns, CellSide, OVERLAY_ROLES,
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -948,16 +948,13 @@ pub enum Action {
     /// [`Action::FitPageToLayout`]: the graphs scale to fill the page, which
     /// keeps its size. Regular Grid: one factor per axis, bands frozen, the
     /// empty space around the grid goes to zero; Free: the graph boxes are
-    /// scaled from their bounding box to the page. `uniform` (the padlock of
-    /// Figure size is closed) takes one factor, the smaller, for both axes and
-    /// leaves the rest as empty space on the right or bottom. One undo step
+    /// scaled from their bounding box to the page. The padlock of Figure size
+    /// plays no part: always one factor per axis. One undo step
     /// ([`PlotEditKind::FitLayout`]); nothing sent, no undo step, when there is
     /// nothing to do.
     FitLayoutToPage {
         /// Target graph.
         graph: NodeId,
-        /// One factor for both axes.
-        uniform: bool,
     },
     /// Moves a graph (the cell of layer `panel`, overlays included) on a
     /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
@@ -5944,7 +5941,7 @@ impl AppState {
             } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
             Action::PageEdgeReached => self.notice(tr!("status-page-edge-reached")),
             Action::FitPageToLayout { graph } => self.fit_page_to_layout(graph),
-            Action::FitLayoutToPage { graph, uniform } => self.fit_layout_to_page(graph, uniform),
+            Action::FitLayoutToPage { graph } => self.fit_layout_to_page(graph),
             Action::MoveGridCell {
                 graph,
                 panel,
@@ -11546,9 +11543,12 @@ impl AppState {
         // Free placement (#398, L8): the new layer is placed beside the
         // reference, never over another one, in the same command.
         let beside = crate::frame_sizes::place_beside(&spec, panel, side);
+        let gutters = crate::frame_sizes::grid_gutters(&spec);
         let inserted = match anchor {
-            CellAnchor::Layer(panel) => insert_cell(&mut spec, panel, side),
-            CellAnchor::Position(row, column) => insert_cell_at(&mut spec, (row, column), side),
+            CellAnchor::Layer(panel) => insert_cell_with(&mut spec, panel, side, &gutters),
+            CellAnchor::Position(row, column) => {
+                insert_cell_at_with(&mut spec, (row, column), side, &gutters)
+            }
         };
         let Some(new_cell) = inserted else {
             self.fail(tr!("error-layer-grid-full"));
@@ -11754,11 +11754,11 @@ impl AppState {
 
     /// [`Action::FitLayoutToPage`]: the fitted spec committed as one step, or
     /// nothing when the graphs already fill the page.
-    fn fit_layout_to_page(&mut self, graph: NodeId, uniform: bool) {
+    fn fit_layout_to_page(&mut self, graph: NodeId) {
         let Some(before) = self.plot_spec(graph) else {
             return;
         };
-        let Some(spec) = crate::frame_sizes::spec_layout_fitted_to_page(&before, uniform) else {
+        let Some(spec) = crate::frame_sizes::spec_layout_fitted_to_page(&before) else {
             return;
         };
         self.execute(Command::EditPlotSpec {
@@ -11785,7 +11785,8 @@ impl AppState {
         }
         let mut spec = before.clone();
         crate::frame_sizes::fix_new(&mut spec);
-        if !stokesforge_core::compose::move_cell(&mut spec, panel, target) {
+        let gutters = crate::frame_sizes::grid_gutters(&spec);
+        if !stokesforge_core::compose::move_cell_with(&mut spec, panel, target, &gutters) {
             return;
         }
         self.execute(Command::EditPlotSpec {

@@ -420,11 +420,9 @@ pub fn spec_fitted_to_layers(spec: &PlotSpec) -> Option<PlotSpec> {
 /// frames grow to fill it, one factor per axis (bands frozen), see
 /// [`stokesforge_render::layout_fitted_to_page`]. **Free**: the graph boxes
 /// are mapped affinely from their bounding box to the page
-/// ([`stokesforge_render::boxes_fitted_to_page`]). With `uniform` (the padlock
-/// of Figure size is closed) one factor scales both axes and the leftover stays
-/// as empty space on the right or bottom. Measures the figure: the caller
-/// memoizes.
-pub fn spec_layout_fitted_to_page(spec: &PlotSpec, uniform: bool) -> Option<PlotSpec> {
+/// ([`stokesforge_render::boxes_fitted_to_page`]). The padlock of Figure size
+/// plays no part. Measures the figure: the caller memoizes.
+pub fn spec_layout_fitted_to_page(spec: &PlotSpec) -> Option<PlotSpec> {
     let mut fitted = spec.clone();
     if spec.layer_placement == LayerPlacement::Grid {
         let slack = spec.sanitized_grid_slack()?;
@@ -443,7 +441,7 @@ pub fn spec_layout_fitted_to_page(spec: &PlotSpec, uniform: bool) -> Option<Plot
                 - sum(heights),
         );
         let (widths, heights, slack) =
-            stokesforge_render::layout_fitted_to_page(widths, heights, slack, bands, uniform);
+            stokesforge_render::layout_fitted_to_page(widths, heights, slack, bands);
         fitted.frame_widths = widths;
         fitted.frame_heights = heights;
         fitted.grid_slack = Some(slack).filter(|slack| !slack.is_zero());
@@ -451,8 +449,7 @@ pub fn spec_layout_fitted_to_page(spec: &PlotSpec, uniform: bool) -> Option<Plot
     }
     let layout = figure_layout(spec)?;
     let boxes = stokesforge_render::graph_boxes(spec, &layout);
-    let frames =
-        stokesforge_render::boxes_fitted_to_page(&boxes, layout.free_page_rect()?, uniform)?;
+    let frames = stokesforge_render::boxes_fitted_to_page(&boxes, layout.free_page_rect()?)?;
     for (base, frame) in frames {
         for (field, value) in [
             (FreeField::Left, frame.left),
@@ -466,6 +463,30 @@ pub fn spec_layout_fitted_to_page(spec: &PlotSpec, uniform: bool) -> Option<Plot
         }
     }
     (fitted != *spec).then_some(fitted)
+}
+
+/// The measured space around each column and row of the grid outside its frame
+/// (#505, F1): what a new line costs beside its frame, so the empty space of
+/// the grid can pay for the whole line. Empty when the figure cannot be
+/// measured (the new line is then paid by its frame alone).
+pub fn grid_gutters(spec: &PlotSpec) -> stokesforge_core::compose::Gutters {
+    // The empty space of the grid is folded into the outer gutters of the
+    // layout: measure the grid without it.
+    let mut bare = spec.clone();
+    bare.grid_slack = None;
+    let Some(layout) = figure_layout(&bare) else {
+        return Default::default();
+    };
+    let sum = |gutters: &[(u32, u32)]| {
+        gutters
+            .iter()
+            .map(|&(before, after)| f64::from(before) + f64::from(after))
+            .collect()
+    };
+    stokesforge_core::compose::Gutters {
+        columns: sum(&layout.column_gutters),
+        rows: sum(&layout.row_gutters),
+    }
 }
 
 #[cfg(test)]

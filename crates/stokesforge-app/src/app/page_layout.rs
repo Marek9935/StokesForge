@@ -834,8 +834,8 @@ fn figure_size_controls(
     {
         model.push(Action::FitPageToLayout { graph });
     }
-    // K1: the inverse, the graphs scale to fill the page. A closed padlock
-    // keeps their proportions.
+    // K1: the inverse, the graphs scale to fill the page (the padlock plays
+    // no part).
     let fill = tr!("action-layout-fit-layout");
     keep_together(ui, &[&fill], 1, ui.spacing().interact_size.x);
     if ui
@@ -844,10 +844,7 @@ fn figure_size_controls(
         .on_disabled_hover_text(tr!("action-layout-fit-layout", "disabled"))
         .clicked()
     {
-        model.push(Action::FitLayoutToPage {
-            graph,
-            uniform: published.is_some(),
-        });
+        model.push(Action::FitLayoutToPage { graph });
     }
     if !(width_changed || height_changed) {
         return;

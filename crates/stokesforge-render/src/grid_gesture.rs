@@ -698,27 +698,18 @@ pub fn page_corner_slack_keeping_ratio(
 /// `bands` is the part of the grid's extent that is not plot area, per axis
 /// `(across, down)`, the slack excluded; it keeps its size, and **one** factor
 /// per axis scales the frames ([`scaled_axis`], so the stops of the frame sizes
-/// apply). With `uniform` (the Figure size padlock is closed) both axes take the
-/// smaller of the two factors, so the graphs keep their proportions; what the
-/// other axis could not fill stays as empty space on its right or bottom side.
-/// The left and top spaces always go to zero. Empty space left by a stop, or
-/// by rounding at half a point or more, stays on the right or bottom.
+/// apply). The Figure size padlock plays no part. The left and top spaces
+/// always go to zero. Empty space left by a stop, or by rounding at half a
+/// point or more, stays on the right or bottom.
 pub fn layout_fitted_to_page(
     widths: &[f64],
     heights: &[f64],
     slack: GridSlack,
     bands: (f64, f64),
-    uniform: bool,
 ) -> (Vec<f64>, Vec<f64>, GridSlack) {
     let free = (slack.left + slack.right, slack.top + slack.bottom);
-    let (sum_w, sum_h) = (widths.iter().sum::<f64>(), heights.iter().sum::<f64>());
-    let mut grow = free;
-    if uniform && sum_w > 0.0 && sum_h > 0.0 {
-        let factor = ((sum_w + free.0) / sum_w).min((sum_h + free.1) / sum_h);
-        grow = (sum_w * (factor - 1.0), sum_h * (factor - 1.0));
-    }
-    let new_widths = scaled_axis(widths, bands.0, grow.0, true);
-    let new_heights = scaled_axis(heights, bands.1, grow.1, true);
+    let new_widths = scaled_axis(widths, bands.0, free.0, true);
+    let new_heights = scaled_axis(heights, bands.1, free.1, true);
     let rest = |free: f64, old: &[f64], new: &[f64]| {
         let left = free + old.iter().sum::<f64>() - new.iter().sum::<f64>();
         if left >= 0.5 {
@@ -1410,42 +1401,18 @@ mod tests {
             &[100.0, 100.0],
             slack(20.0, 5.0, 40.0, 15.0),
             (100.0, 50.0),
-            false,
         );
         assert_eq!(w, vec![220.0, 440.0]);
         assert_eq!(h, vec![110.0, 110.0]);
         assert_eq!(s, slack(0.0, 0.0, 0.0, 0.0));
     }
 
-    /// K1: with the padlock closed both axes take the smaller factor; what the
-    /// other axis could not fill stays on the right or bottom. Witness: the
-    /// `uniform` branch removed (per-axis factors).
-    #[test]
-    fn fit_layout_to_page_with_the_padlock_closed_keeps_the_proportions() {
-        // Horizontal factor 1.1 (60 on 600), vertical 1.2 (20 on 100).
-        let (w, h, s) = layout_fitted_to_page(
-            &[200.0, 400.0],
-            &[100.0],
-            slack(20.0, 10.0, 40.0, 10.0),
-            (100.0, 50.0),
-            true,
-        );
-        assert_eq!(w, vec![220.0, 440.0]);
-        assert_eq!(h, vec![110.0]);
-        assert_eq!(s, slack(0.0, 0.0, 0.0, 10.0));
-    }
-
     /// A stop of the frame size leaves the rest as space; nothing to fill keeps
     /// the frames.
     #[test]
     fn fit_layout_to_page_without_space_changes_nothing() {
-        let (w, h, s) = layout_fitted_to_page(
-            &[200.0],
-            &[100.0],
-            slack(0.0, 0.0, 0.0, 0.0),
-            (100.0, 50.0),
-            false,
-        );
+        let (w, h, s) =
+            layout_fitted_to_page(&[200.0], &[100.0], slack(0.0, 0.0, 0.0, 0.0), (100.0, 50.0));
         assert_eq!(
             (w, h, s),
             (vec![200.0], vec![100.0], slack(0.0, 0.0, 0.0, 0.0))
@@ -1456,7 +1423,6 @@ mod tests {
             &[100.0],
             slack(0.0, 0.0, 600.0, 0.0),
             (100.0, 50.0),
-            false,
         );
         assert_eq!(w, vec![2000.0]);
         assert_eq!(s.right, 500.0);

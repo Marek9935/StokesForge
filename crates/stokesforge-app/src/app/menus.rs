@@ -1086,10 +1086,7 @@ pub(super) fn layout_menu_contents(
             .on_disabled_hover_text(tr!("action-layout-fit-layout", "disabled"))
             .clicked()
         {
-            actions.push(Action::FitLayoutToPage {
-                graph,
-                uniform: super::page_layout::published_size_lock(ui.ctx(), graph).is_some(),
-            });
+            actions.push(Action::FitLayoutToPage { graph });
             ui.close();
         }
     });

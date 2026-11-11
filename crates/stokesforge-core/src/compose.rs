@@ -374,12 +374,35 @@ pub enum CellSide {
 /// would overflow (rows and columns are free `usize`s once read from a file)
 /// or if the grid would exceed [`MAX_GRID_CELLS`].
 pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<usize> {
+    insert_cell_with(spec, panel, side, &Gutters::default())
+}
+
+/// The measured space around each grid column and row outside its frame (the
+/// axis bands and margins, in points): what a new line costs beside its frame.
+/// Core does not measure; the application hands it over so a new line can be
+/// paid for from the empty space of the grid ([`eat_slack`]). Missing entries
+/// read 0.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Gutters {
+    /// Per column: the space left and right of its frame.
+    pub columns: Vec<f64>,
+    /// Per row: the space above and below its frame.
+    pub rows: Vec<f64>,
+}
+
+/// [`insert_cell`] with the measured `gutters` of the grid (#505, F1).
+pub fn insert_cell_with(
+    spec: &mut PlotSpec,
+    panel: usize,
+    side: CellSide,
+    gutters: &Gutters,
+) -> Option<usize> {
     if spec.layer_placement == LayerPlacement::Free {
         return insert_free_cell(spec, panel, side);
     }
     let base = spec.panels.get(overlay_base(spec, panel))?;
     let position = (base.row, base.column);
-    insert_cell_at(spec, position, side)
+    insert_cell_at_with(spec, position, side, gutters)
 }
 
 /// [`insert_cell`] by **grid position** (#503): the new column (row) opens
@@ -391,8 +414,18 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
 /// refusals of [`insert_cell`].
 pub fn insert_cell_at(
     spec: &mut PlotSpec,
+    position: (usize, usize),
+    side: CellSide,
+) -> Option<usize> {
+    insert_cell_at_with(spec, position, side, &Gutters::default())
+}
+
+/// [`insert_cell_at`] with the measured `gutters` of the grid (#505, F1).
+pub fn insert_cell_at_with(
+    spec: &mut PlotSpec,
     (row, column): (usize, usize),
     side: CellSide,
+    gutters: &Gutters,
 ) -> Option<usize> {
     if spec.layer_placement == LayerPlacement::Free
         || row >= spec.rows()
@@ -403,7 +436,14 @@ pub fn insert_cell_at(
     // The sizes, read before the positions move.
     let mut widths = spec.sanitized_frame_widths();
     let mut heights = spec.sanitized_frame_heights();
-    let (new_row, new_column) = open_line(spec, (row, column), side, &mut widths, &mut heights)?;
+    let (new_row, new_column) = open_line(
+        spec,
+        (row, column),
+        side,
+        &mut widths,
+        &mut heights,
+        gutters,
+    )?;
     if let Some(widths) = widths {
         spec.frame_widths = widths;
     }
@@ -418,7 +458,8 @@ pub fn insert_cell_at(
 /// column)` and returns the position of the new cell in it (#394, #491): every
 /// layer on the far side of the reference shifts one column (row) further, the
 /// size of the reference's column (row) is inserted in `widths` (`heights`) at
-/// the new place. Shared by [`insert_cell`] and [`move_cell`]. `None`, with the
+/// the new place, and the empty space of the grid on that axis pays for it first
+/// ([`eat_slack`]). Shared by [`insert_cell`] and [`move_cell`]. `None`, with the
 /// spec and the sizes unchanged, if a position would overflow or the grid would
 /// exceed [`MAX_GRID_CELLS`].
 fn open_line(
@@ -427,6 +468,7 @@ fn open_line(
     side: CellSide,
     widths: &mut Option<Vec<f64>>,
     heights: &mut Option<Vec<f64>>,
+    gutters: &Gutters,
 ) -> Option<(usize, usize)> {
     let (new_row, new_column) = match side {
         CellSide::Right => (row, column.checked_add(1)?),
@@ -469,16 +511,50 @@ fn open_line(
     match side {
         CellSide::Right | CellSide::Left => {
             if let Some(widths) = widths {
-                widths.insert(new_column, widths[column]);
+                let size = widths[column];
+                widths.insert(new_column, size);
+                eat_slack(
+                    spec,
+                    true,
+                    size + gutters.columns.get(column).copied().unwrap_or(0.0),
+                );
             }
         }
         CellSide::Below | CellSide::Above => {
             if let Some(heights) = heights {
-                heights.insert(new_row, heights[row]);
+                let size = heights[row];
+                heights.insert(new_row, size);
+                eat_slack(
+                    spec,
+                    false,
+                    size + gutters.rows.get(row).copied().unwrap_or(0.0),
+                );
             }
         }
     }
     Some((new_row, new_column))
+}
+
+/// The new line first uses the empty space of the grid on its axis (#505, F1),
+/// `size` being its frame and its measured gutters: a new column eats the right space then the left, a new row the bottom space
+/// then the top, each down to 0, so the page grows only by what the space could
+/// not cover. The one place where an opened line meets `grid_slack`; removing a
+/// line leaves the space alone.
+fn eat_slack(spec: &mut PlotSpec, column: bool, mut size: f64) {
+    let Some(mut slack) = spec.sanitized_grid_slack() else {
+        return;
+    };
+    let (first, second) = if column {
+        (&mut slack.right, &mut slack.left)
+    } else {
+        (&mut slack.bottom, &mut slack.top)
+    };
+    for side in [first, second] {
+        let taken = side.min(size);
+        *side -= taken;
+        size -= taken;
+    }
+    spec.grid_slack = Some(slack).filter(|slack| !slack.is_zero());
 }
 
 /// [`insert_cell`] in free placement (#398): nothing shifts and no frame size
@@ -1119,6 +1195,16 @@ pub enum MoveTarget {
 /// a missing layer or cell, a [`MoveTarget::Cell`] that is the graph's own cell, a move that
 /// changes nothing, or a grid that would exceed [`MAX_GRID_CELLS`].
 pub fn move_cell(spec: &mut PlotSpec, panel: usize, target: MoveTarget) -> bool {
+    move_cell_with(spec, panel, target, &Gutters::default())
+}
+
+/// [`move_cell`] with the measured `gutters` of the grid (#505, F1).
+pub fn move_cell_with(
+    spec: &mut PlotSpec,
+    panel: usize,
+    target: MoveTarget,
+    gutters: &Gutters,
+) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
         return false;
     }
@@ -1161,9 +1247,14 @@ pub fn move_cell(spec: &mut PlotSpec, panel: usize, target: MoveTarget) -> bool 
             if reference.0 >= candidate.rows() || reference.1 >= candidate.columns() {
                 return false;
             }
-            let Some(new_cell) =
-                open_line(&mut candidate, reference, side, &mut widths, &mut heights)
-            else {
+            let Some(new_cell) = open_line(
+                &mut candidate,
+                reference,
+                side,
+                &mut widths,
+                &mut heights,
+                gutters,
+            ) else {
                 return false;
             };
             // The graph may have shifted with the far side of the reference.
@@ -1986,6 +2077,72 @@ mod tests {
         assert_eq!(insert_cell(&mut spec, 0, CellSide::Below), Some(2));
         assert_eq!(spec.frame_heights, [250.0, 250.0, 100.0]);
         assert_eq!(spec.frame_widths, [400.0]);
+    }
+
+    fn slack(left: f64, top: f64, right: f64, bottom: f64) -> stokesforge_plot::GridSlack {
+        stokesforge_plot::GridSlack {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    /// #505 (F1): a new row eats the bottom space then the top one, a new
+    /// column the right then the left, each down to 0; what the space cannot
+    /// cover stays to the page. Witness: `eat_slack` not called.
+    #[test]
+    fn a_new_line_first_uses_the_empty_space_of_its_axis() {
+        let two = || {
+            sized(
+                &[(0, 0), (0, 1), (1, 0), (1, 1)],
+                &[300.0, 200.0],
+                &[140.0, 100.0],
+            )
+        };
+        // Slack 50 below, new row of 140: all of it used, 90 left to the page.
+        let mut spec = two();
+        spec.grid_slack = Some(slack(0.0, 0.0, 0.0, 50.0));
+        assert!(insert_cell_at(&mut spec, (0, 0), CellSide::Below).is_some());
+        assert_eq!(spec.grid_slack, None);
+        assert_eq!(spec.frame_heights, [140.0, 140.0, 100.0]);
+        // Slack 200 below: 60 left, the row is paid for.
+        let mut spec = two();
+        spec.grid_slack = Some(slack(0.0, 0.0, 0.0, 200.0));
+        assert!(insert_cell_at(&mut spec, (0, 0), CellSide::Below).is_some());
+        assert_eq!(spec.grid_slack, Some(slack(0.0, 0.0, 0.0, 60.0)));
+        // Bottom first, then top.
+        let mut spec = two();
+        spec.grid_slack = Some(slack(7.0, 100.0, 0.0, 50.0));
+        assert!(insert_cell_at(&mut spec, (0, 0), CellSide::Below).is_some());
+        assert_eq!(spec.grid_slack, Some(slack(7.0, 10.0, 0.0, 0.0)));
+        // The measured gutters of the line are paid too: 140 + 20 = 160.
+        let mut spec = two();
+        spec.grid_slack = Some(slack(0.0, 0.0, 0.0, 200.0));
+        let gutters = Gutters {
+            columns: Vec::new(),
+            rows: vec![20.0, 5.0],
+        };
+        assert!(insert_cell_at_with(&mut spec, (0, 0), CellSide::Below, &gutters).is_some());
+        assert_eq!(spec.grid_slack, Some(slack(0.0, 0.0, 0.0, 40.0)));
+        // A column: right then left; the vertical space is not touched.
+        let mut spec = two();
+        spec.grid_slack = Some(slack(400.0, 9.0, 120.0, 30.0));
+        assert!(insert_cell_at(&mut spec, (0, 0), CellSide::Right).is_some());
+        assert_eq!(spec.grid_slack, Some(slack(220.0, 9.0, 0.0, 30.0)));
+        // The move that opens a line pays the same way.
+        let mut spec = two();
+        spec.grid_slack = Some(slack(0.0, 0.0, 0.0, 50.0));
+        assert!(move_cell(
+            &mut spec,
+            0,
+            MoveTarget::NewLine {
+                row: 1,
+                column: 1,
+                side: CellSide::Below
+            }
+        ));
+        assert_eq!(spec.grid_slack, None);
     }
 
     #[test]

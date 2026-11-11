@@ -16153,6 +16153,64 @@ fn fit_page_to_layers_clears_the_grid_slack_in_one_step_and_nothing_to_fit_is_no
     assert_eq!(graph_spec(&state, graph), slacked, "one Undo is enough");
 }
 
+/// #505 (F1): a new row first eats the empty space below the grid, then the
+/// space above; the page grows only by what it could not cover; one step, and
+/// Undo gives back both the space and the size. Witness: `eat_slack` not
+/// called (the space stays, the page grows by the whole row).
+#[test]
+fn a_new_row_eats_the_bottom_space_and_the_page_grows_by_the_rest() {
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::GridSlack;
+    let size = |spec: &stokesforge_plot::PlotSpec| {
+        stokesforge_app_state::frame_sizes::figure_layout(spec)
+            .expect("layout")
+            .size
+            .1 as i64
+    };
+    // Adds a row of height 100 under a grid with `bottom` points of space.
+    let run = |bottom: f64| {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let (_session, mut state, graph, _c) = cell_bench(dir.path());
+        let widths = graph_spec(&state, graph).frame_widths.clone();
+        state.dispatch(Action::SetGridFrames {
+            graph,
+            widths,
+            heights: vec![100.0],
+            figure: false,
+            slack: (bottom > 0.0).then_some(GridSlack {
+                bottom,
+                ..GridSlack::default()
+            }),
+        });
+        let before = graph_spec(&state, graph);
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Below,
+            columns: Vec::new(),
+        });
+        let after = graph_spec(&state, graph);
+        state.dispatch(Action::Undo);
+        assert_eq!(
+            graph_spec(&state, graph),
+            before,
+            "one Undo: space and size"
+        );
+        (size(&after) - size(&before), after.grid_slack)
+    };
+    let (whole, none) = run(0.0);
+    assert_eq!(none, None);
+    // Space 50 < the row: all used, the page grows by 50 less (the bands of
+    // the row are paid by the space too).
+    let (grown, rest) = run(50.0);
+    assert_eq!((rest, grown), (None, whole - 50));
+    // Space 300 > the whole row (frame and bands): the rest is left, the
+    // page does not move.
+    let (grown, rest) = run(300.0);
+    assert_eq!(grown, 0);
+    assert_eq!(rest.map(|slack| slack.bottom), Some(300.0 - whole as f64));
+}
+
 /// #505: Fit Page to Layout in Free makes the page the bounding box of the
 /// graphs: bigger for a graph beyond the page, smaller around shrunk graphs;
 /// the graphs do not move; already fitted sends nothing. Witness: the page
@@ -16243,9 +16301,9 @@ fn fit_page_to_layers_in_free_grows_and_shrinks_the_page_around_the_graphs() {
 
 /// #505 (K1): Fit Layout to Page on a Regular Grid scales the frames to fill
 /// the page, one factor per axis, the empty space goes to zero and the image
-/// keeps its size, in ONE step labelled Fit Layout to Page; the padlock
-/// (`uniform`) takes one factor and leaves the rest as space; nothing to do
-/// sends nothing. Witness: the action leaving the slack in place.
+/// keeps its size, in ONE step labelled Fit Layout to Page; a closed padlock
+/// changes nothing to it; nothing to do sends nothing. Witness: the action
+/// leaving the slack in place, or reading the padlock again.
 #[test]
 fn fit_layout_to_page_fills_the_grid_page_in_one_step_and_nothing_to_do_is_no_step() {
     use stokesforge_commands::PlotEditKind as K;
@@ -16259,10 +16317,7 @@ fn fit_layout_to_page_fills_the_grid_page_in_one_step_and_nothing_to_do_is_no_st
             .size
     };
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitLayoutToPage {
-        graph,
-        uniform: false,
-    });
+    state.dispatch(Action::FitLayoutToPage { graph });
     assert_eq!(
         state.snapshot().revision,
         revision,
@@ -16289,10 +16344,7 @@ fn fit_layout_to_page_fills_the_grid_page_in_one_step_and_nothing_to_do_is_no_st
     let slacked = graph_spec(&state, graph);
     assert_eq!(size(&slacked), size(&before));
 
-    state.dispatch(Action::FitLayoutToPage {
-        graph,
-        uniform: false,
-    });
+    state.dispatch(Action::FitLayoutToPage { graph });
     let filled = graph_spec(&state, graph);
     assert_eq!(filled.grid_slack, None, "the space is used");
     assert_eq!(size(&filled), size(&before), "the page keeps its size");
@@ -16303,32 +16355,29 @@ fn fit_layout_to_page_fills_the_grid_page_in_one_step_and_nothing_to_do_is_no_st
         Some(HistoryLabel::EditPlotSpec(K::FitLayout))
     );
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitLayoutToPage {
-        graph,
-        uniform: false,
-    });
+    state.dispatch(Action::FitLayoutToPage { graph });
     assert_eq!(state.snapshot().revision, revision, "already filled");
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), slacked, "one Undo is enough");
 
-    // Padlock closed: one factor, the smaller; the rest stays as space.
-    state.dispatch(Action::FitLayoutToPage {
+    // Padlock closed: still one factor per axis, the space goes to zero (the
+    // padlock plays no part).
+    let lock = stokesforge_app_state::frame_sizes::SizeLock::close((
+        f64::from(size(&slacked).0),
+        f64::from(size(&slacked).1),
+    ))
+    .expect("lock");
+    state.dispatch(Action::SetSizeLock {
         graph,
-        uniform: true,
+        lock: Some(lock),
     });
-    let kept = graph_spec(&state, graph);
-    let (fx, fy) = (
-        kept.frame_widths[0] / widths[0],
-        kept.frame_heights[0] / heights[0],
+    state.dispatch(Action::FitLayoutToPage { graph });
+    assert_eq!(
+        state.size_lock(graph),
+        Some(lock),
+        "the padlock stays closed"
     );
-    assert!((fx - fy).abs() < 0.01, "one factor: {fx} vs {fy}");
-    let rest = kept.grid_slack.expect("some space is left");
-    assert!(
-        (rest.right > 0.0) != (rest.bottom > 0.0),
-        "one axis is not filled: {rest:?}"
-    );
-    assert_eq!((rest.left, rest.top), (0.0, 0.0));
-    assert_eq!(size(&kept), size(&before));
+    assert_eq!(graph_spec(&state, graph), filled, "same result as open");
 }
 
 /// #505 (K1): Fit Layout to Page in Free maps the bounding box of the graphs
@@ -16361,10 +16410,7 @@ fn fit_layout_to_page_in_free_scales_the_graphs_to_the_page() {
         stokesforge_render::graph_boxes(&spec, &layout)
     };
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitLayoutToPage {
-        graph,
-        uniform: false,
-    });
+    state.dispatch(Action::FitLayoutToPage { graph });
     assert_eq!(state.snapshot().revision, revision, "already filling");
 
     // Shrink both graphs: the page now has empty space.
@@ -16391,10 +16437,7 @@ fn fit_layout_to_page_in_free_scales_the_graphs_to_the_page() {
     let narrow = boxes_of(&state);
     let bbox_before = stokesforge_render::page_fitted_to_layers(&narrow).expect("a box");
     assert!(bbox_before.width < page.width - 1.0 || bbox_before.height < page.height - 1.0);
-    state.dispatch(Action::FitLayoutToPage {
-        graph,
-        uniform: false,
-    });
+    state.dispatch(Action::FitLayoutToPage { graph });
     assert_eq!(page_of(&state), page, "the page keeps its size");
     let bbox_after = stokesforge_render::page_fitted_to_layers(&boxes_of(&state)).expect("a box");
     let near = |a: f64, b: f64| (a - b).abs() < 0.5;
@@ -16410,10 +16453,7 @@ fn fit_layout_to_page_in_free_scales_the_graphs_to_the_page() {
         Some(HistoryLabel::EditPlotSpec(K::FitLayout))
     );
     let revision = state.snapshot().revision;
-    state.dispatch(Action::FitLayoutToPage {
-        graph,
-        uniform: false,
-    });
+    state.dispatch(Action::FitLayoutToPage { graph });
     assert_eq!(state.snapshot().revision, revision, "already filling");
     state.dispatch(Action::Undo);
     assert_eq!(boxes_of(&state).len(), narrow.len());
