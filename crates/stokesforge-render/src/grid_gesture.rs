@@ -571,52 +571,89 @@ pub fn scaled_axis(sizes: &[f64], bands: f64, delta: f64, far: bool) -> Vec<f64>
         .collect()
 }
 
-/// The frame widths and heights after pulling the figure's corner
-/// `(right, bottom)` by `delta`: [`scaled_axis`] on each axis, with the bands
-/// `(across, down)` of the figure.
-pub fn scaled_frames(
-    widths: &[f64],
-    heights: &[f64],
-    bands: (f64, f64),
-    corner: (bool, bool),
-    delta: (f64, f64),
-) -> (Vec<f64>, Vec<f64>) {
-    (
-        scaled_axis(widths, bands.0, delta.0, corner.0),
-        scaled_axis(heights, bands.1, delta.1, corner.1),
-    )
+/// The empty space of one side after the page edge on that side is pulled
+/// `outward` points (negative: inward): rounded to whole points, never below
+/// zero (the edge stops at the graphs) and never growing the `extent` of the
+/// page past [`MAX_FIGURE_EXTENT`]. Untouched if `outward` is not finite.
+fn side_moved(side: f64, extent: f64, outward: f64) -> f64 {
+    if !outward.is_finite() {
+        return side;
+    }
+    let high = (MAX_FIGURE_EXTENT - extent).max(0.0);
+    let moved = outward.round().clamp(-side.max(0.0), high);
+    (side + moved).max(0.0)
 }
 
-/// The drag `delta` of a figure corner `(right, bottom)` once the ratio lock is
-/// closed (#426): the image `(width, height)` keeps `ratio` = height / width.
-/// The axis that moved most **relatively** leads and the other follows, so the
-/// result changes the extent along both axes by the amounts that keep the
-/// ratio. A `delta` or `ratio` that is not usable is returned untouched.
-pub fn locked_corner_delta(
-    image: (f64, f64),
+/// The empty space around the grid after the **page corner** `(right, bottom)`
+/// is pulled by `delta` points `(dx, dy)` (#505, K1): the two page edges that
+/// meet there move, adding or removing empty space; the graphs neither move
+/// nor change size. The bottom-right corner pulled by `(40, 20)` adds 40 to the
+/// right slack and 20 to the bottom one; the top-left corner pulled by
+/// `(-40, -20)` adds the same to the left and top slack. Pulled inward, a side
+/// stops when its slack is 0 (at the graphs). `image` is the `(width, height)`
+/// of the page at the press, to keep it under [`MAX_FIGURE_EXTENT`].
+pub fn page_corner_slack(
     corner: (bool, bool),
+    image: (f64, f64),
+    slack: GridSlack,
     delta: (f64, f64),
-    ratio: f64,
-) -> (f64, f64) {
-    let usable = image.0 > 0.0
-        && image.1 > 0.0
-        && ratio.is_finite()
-        && ratio > 0.0
-        && delta.0.is_finite()
-        && delta.1.is_finite();
-    if !usable {
-        return delta;
-    }
-    // Signed growth of each extent for this corner.
-    let sign = |far: bool| if far { 1.0 } else { -1.0 };
-    let (grow_x, grow_y) = (sign(corner.0) * delta.0, sign(corner.1) * delta.1);
-    if grow_x.abs() / image.0 >= grow_y.abs() / image.1 {
-        let wanted = (image.0 + grow_x).max(0.0) * ratio - image.1;
-        (delta.0, sign(corner.1) * wanted)
+) -> GridSlack {
+    let mut out = slack;
+    if corner.0 {
+        out.right = side_moved(slack.right, image.0, delta.0);
     } else {
-        let wanted = (image.1 + grow_y).max(0.0) / ratio - image.0;
-        (sign(corner.0) * wanted, delta.1)
+        out.left = side_moved(slack.left, image.0, -delta.0);
     }
+    if corner.1 {
+        out.bottom = side_moved(slack.bottom, image.1, delta.1);
+    } else {
+        out.top = side_moved(slack.top, image.1, -delta.1);
+    }
+    out
+}
+
+/// The frames and the slack after **Fit Layout to Page** (#505, K1), the
+/// inverse of fitting the page to the layout: the empty space around the grid
+/// goes to zero and the graphs grow to fill it, the page keeping its size.
+/// `bands` is the part of the grid's extent that is not plot area, per axis
+/// `(across, down)`, the slack excluded; it keeps its size, and **one** factor
+/// per axis scales the frames ([`scaled_axis`], so the stops of the frame sizes
+/// apply). With `uniform` (the Figure size padlock is closed) both axes take the
+/// smaller of the two factors, so the graphs keep their proportions; what the
+/// other axis could not fill stays as empty space on its right or bottom side.
+/// The left and top spaces always go to zero. Empty space left by a stop, or
+/// by rounding at half a point or more, stays on the right or bottom.
+pub fn layout_fitted_to_page(
+    widths: &[f64],
+    heights: &[f64],
+    slack: GridSlack,
+    bands: (f64, f64),
+    uniform: bool,
+) -> (Vec<f64>, Vec<f64>, GridSlack) {
+    let free = (slack.left + slack.right, slack.top + slack.bottom);
+    let (sum_w, sum_h) = (widths.iter().sum::<f64>(), heights.iter().sum::<f64>());
+    let mut grow = free;
+    if uniform && sum_w > 0.0 && sum_h > 0.0 {
+        let factor = ((sum_w + free.0) / sum_w).min((sum_h + free.1) / sum_h);
+        grow = (sum_w * (factor - 1.0), sum_h * (factor - 1.0));
+    }
+    let new_widths = scaled_axis(widths, bands.0, grow.0, true);
+    let new_heights = scaled_axis(heights, bands.1, grow.1, true);
+    let rest = |free: f64, old: &[f64], new: &[f64]| {
+        let left = free + old.iter().sum::<f64>() - new.iter().sum::<f64>();
+        if left >= 0.5 {
+            left.round()
+        } else {
+            0.0
+        }
+    };
+    let slack = GridSlack {
+        left: 0.0,
+        top: 0.0,
+        right: rest(free.0, widths, &new_widths),
+        bottom: rest(free.1, heights, &new_heights),
+    };
+    (new_widths, new_heights, slack)
 }
 
 #[cfg(test)]
@@ -1120,35 +1157,140 @@ mod tests {
         assert_eq!(scaled_axis(&w, 100.0, f64::NAN, true), w.to_vec());
     }
 
-    /// With the lock closed the axis that moved most relatively leads, for
-    /// every corner. Witness: the horizontal axis always leading.
+    fn slack(left: f64, top: f64, right: f64, bottom: f64) -> GridSlack {
+        GridSlack {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    /// K1: a page corner adds empty space on the two edges that meet there;
+    /// the frames are not an input of the function, so they cannot move.
+    /// Witness: the corner scaling the frames (`scaled_axis`) instead.
     #[test]
-    fn a_locked_corner_keeps_the_ratio_with_the_leading_axis() {
-        // 400 x 200, ratio 0.5.
-        let image = (400.0, 200.0);
-        // Far corner, x leads: +40 wide (10 %) asks +20 high.
+    fn a_page_corner_adds_empty_space_on_its_two_edges() {
+        let image = (500.0, 450.0);
+        let none = slack(0.0, 0.0, 0.0, 0.0);
         assert_eq!(
-            locked_corner_delta(image, (true, true), (40.0, 3.0), 0.5),
-            (40.0, 20.0)
+            page_corner_slack((true, true), image, none, (40.0, 20.0)),
+            slack(0.0, 0.0, 40.0, 20.0)
         );
-        // Far corner, y leads: +30 high (15 %) asks +60 wide.
+        // The top-left corner moves the left and top edges outward.
         assert_eq!(
-            locked_corner_delta(image, (true, true), (5.0, 30.0), 0.5),
-            (60.0, 30.0)
+            page_corner_slack((false, false), image, none, (-40.0, -20.0)),
+            slack(40.0, 20.0, 0.0, 0.0)
         );
-        // Near corner: growing means moving left and up (negative deltas).
+        // A mixed corner, whole points, the other sides untouched.
         assert_eq!(
-            locked_corner_delta(image, (false, false), (-40.0, 0.0), 0.5),
-            (-40.0, -20.0)
+            page_corner_slack(
+                (true, false),
+                image,
+                slack(1.0, 2.0, 3.0, 4.0),
+                (10.4, -7.6)
+            ),
+            slack(1.0, 10.0, 13.0, 4.0)
         );
-        // Mixed corner: top-right, pulled inward along y leads.
+        // Not finite: untouched.
+        let start = slack(1.0, 2.0, 3.0, 4.0);
         assert_eq!(
-            locked_corner_delta(image, (true, false), (0.0, 40.0), 0.5),
-            (-80.0, 40.0)
+            page_corner_slack((true, true), image, start, (f64::NAN, f64::INFINITY)),
+            start
+        );
+    }
+
+    /// K1: inward the corner stops at the graphs (slack 0), never beyond; the
+    /// page never goes past the largest figure. Witness: the `.max(0.0)` of
+    /// `side_moved` removed (negative slack).
+    #[test]
+    fn a_page_corner_pulled_inward_stops_at_the_graphs() {
+        let image = (500.0, 450.0);
+        let start = slack(0.0, 0.0, 30.0, 10.0);
+        assert_eq!(
+            page_corner_slack((true, true), image, start, (-100.0, -100.0)),
+            slack(0.0, 0.0, 0.0, 0.0)
         );
         assert_eq!(
-            locked_corner_delta(image, (true, true), (f64::NAN, 1.0), 0.5).1,
-            1.0
+            page_corner_slack((true, true), image, start, (-10.0, -4.0)),
+            slack(0.0, 0.0, 20.0, 6.0)
         );
+        // No slack: the graphs stop the edge.
+        assert_eq!(
+            page_corner_slack(
+                (false, false),
+                image,
+                slack(0.0, 0.0, 5.0, 5.0),
+                (60.0, 60.0)
+            ),
+            slack(0.0, 0.0, 5.0, 5.0)
+        );
+        let huge = page_corner_slack((true, true), image, start, (1e9, 1e9));
+        assert_eq!(huge.right, 30.0 + (MAX_FIGURE_EXTENT - 500.0));
+        assert_eq!(huge.bottom, 10.0 + (MAX_FIGURE_EXTENT - 450.0));
+    }
+
+    /// K1: Fit Layout to Page scales each axis by its own factor, the empty
+    /// space goes to zero and the page keeps its size. Witness: slack left
+    /// unchanged in the result.
+    #[test]
+    fn fit_layout_to_page_fills_the_page_with_one_factor_per_axis() {
+        // 200 + 400 wide with 100 of bands and 60 of space: factor 660/600.
+        // 100 + 100 high with 50 of bands and 20 of space: factor 220/200.
+        let (w, h, s) = layout_fitted_to_page(
+            &[200.0, 400.0],
+            &[100.0, 100.0],
+            slack(20.0, 5.0, 40.0, 15.0),
+            (100.0, 50.0),
+            false,
+        );
+        assert_eq!(w, vec![220.0, 440.0]);
+        assert_eq!(h, vec![110.0, 110.0]);
+        assert_eq!(s, slack(0.0, 0.0, 0.0, 0.0));
+    }
+
+    /// K1: with the padlock closed both axes take the smaller factor; what the
+    /// other axis could not fill stays on the right or bottom. Witness: the
+    /// `uniform` branch removed (per-axis factors).
+    #[test]
+    fn fit_layout_to_page_with_the_padlock_closed_keeps_the_proportions() {
+        // Horizontal factor 1.1 (60 on 600), vertical 1.2 (20 on 100).
+        let (w, h, s) = layout_fitted_to_page(
+            &[200.0, 400.0],
+            &[100.0],
+            slack(20.0, 10.0, 40.0, 10.0),
+            (100.0, 50.0),
+            true,
+        );
+        assert_eq!(w, vec![220.0, 440.0]);
+        assert_eq!(h, vec![110.0]);
+        assert_eq!(s, slack(0.0, 0.0, 0.0, 10.0));
+    }
+
+    /// A stop of the frame size leaves the rest as space; nothing to fill keeps
+    /// the frames.
+    #[test]
+    fn fit_layout_to_page_without_space_changes_nothing() {
+        let (w, h, s) = layout_fitted_to_page(
+            &[200.0],
+            &[100.0],
+            slack(0.0, 0.0, 0.0, 0.0),
+            (100.0, 50.0),
+            false,
+        );
+        assert_eq!(
+            (w, h, s),
+            (vec![200.0], vec![100.0], slack(0.0, 0.0, 0.0, 0.0))
+        );
+        // 1900 + 600 of space cannot all be filled: frames stop at 2000.
+        let (w, _, s) = layout_fitted_to_page(
+            &[1900.0],
+            &[100.0],
+            slack(0.0, 0.0, 600.0, 0.0),
+            (100.0, 50.0),
+            false,
+        );
+        assert_eq!(w, vec![2000.0]);
+        assert_eq!(s.right, 500.0);
     }
 }

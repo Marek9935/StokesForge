@@ -191,8 +191,8 @@ pub enum GraphEvent {
         widths: Vec<f64>,
         /// Frame height of every row.
         heights: Vec<f64>,
-        /// The whole figure was scaled with an L corner (else a boundary or
-        /// a graph corner was pulled).
+        /// An L corner was pulled, a page corner that adds or removes empty
+        /// space (else a boundary or a graph corner was pulled).
         figure: bool,
         /// The empty space around the grid after an outer edge was pulled
         /// (#505); `None` for every other gesture (the slack stays as it is).

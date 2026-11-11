@@ -242,6 +242,9 @@ action-layout-distribute-vertically = Distribute Vertically
 action-layout-fit-page = Fit Page to Layout
     .hint = Resizes the page to the space the layers use, margins included. The layers do not move
     .disabled = The page already fits the layout
+action-layout-fit-layout = Fit Layout to Page
+    .hint = Scales the layers to fill the page. The page does not change
+    .disabled = The layers already fill the page
 action-delete-layer = Delete Layer
     .hint = Deletes the active layer
 action-properties = Properties…
@@ -1460,6 +1463,7 @@ history-plot-match-layer-size = Match Layer Size
 history-plot-distribute-layers = Distribute Layers
 history-plot-layer-placement = Change Layer Placement
 history-plot-fit-page = Fit Page to Layout
+history-plot-fit-layout = Fit Layout to Page
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel

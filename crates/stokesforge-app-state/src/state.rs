@@ -896,6 +896,21 @@ pub enum Action {
         /// Target graph.
         graph: NodeId,
     },
+    /// Fits the layout of a graph to its page (#505, K1), the inverse of
+    /// [`Action::FitPageToLayout`]: the graphs scale to fill the page, which
+    /// keeps its size. Regular Grid: one factor per axis, bands frozen, the
+    /// empty space around the grid goes to zero; Free: the graph boxes are
+    /// scaled from their bounding box to the page. `uniform` (the padlock of
+    /// Figure size is closed) takes one factor, the smaller, for both axes and
+    /// leaves the rest as empty space on the right or bottom. One undo step
+    /// ([`PlotEditKind::FitLayout`]); nothing sent, no undo step, when there is
+    /// nothing to do.
+    FitLayoutToPage {
+        /// Target graph.
+        graph: NodeId,
+        /// One factor for both axes.
+        uniform: bool,
+    },
     /// Moves a graph (the cell of layer `panel`, overlays included) on a
     /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
     /// in the Page Layout Mode. To a cell (swap if occupied, a hole accepted) or
@@ -5920,6 +5935,7 @@ impl AppState {
                 slack,
             } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
             Action::FitPageToLayout { graph } => self.fit_page_to_layout(graph),
+            Action::FitLayoutToPage { graph, uniform } => self.fit_layout_to_page(graph, uniform),
             Action::MoveGridCell {
                 graph,
                 panel,
@@ -11890,6 +11906,22 @@ impl AppState {
             graph,
             spec,
             kind: PlotEditKind::FitPage,
+        });
+    }
+
+    /// [`Action::FitLayoutToPage`]: the fitted spec committed as one step, or
+    /// nothing when the graphs already fill the page.
+    fn fit_layout_to_page(&mut self, graph: NodeId, uniform: bool) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(spec) = crate::frame_sizes::spec_layout_fitted_to_page(&before, uniform) else {
+            return;
+        };
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::FitLayout,
         });
     }
 

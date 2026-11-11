@@ -750,7 +750,7 @@ fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     let grown = layout_of(&context, &mut view, &fixture);
     assert_eq!(grown.size.1, layout.size.1, "the page never grows (P1)");
 
-    // The L corner is untouched: it scales every row (slack frozen).
+    // The L corner is a page corner: it adds space below, the rows stay.
     let (context, mut view) = in_mode(&fixture);
     let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
     let corner = Pos2::new(w + 4.0, h + 4.0);
@@ -765,14 +765,14 @@ fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     let [GraphEvent::GridFramesEdited {
         heights,
         figure: true,
-        slack: None,
+        slack: Some(slack),
         ..
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
-    assert!(heights.iter().all(|h| *h > 110.0), "{heights:?}");
-    assert!(heights[0] < heights[1], "proportions kept: {heights:?}");
+    assert_eq!(heights, &layout.frame_heights, "the rows keep their size");
+    assert_eq!(slack.bottom, f64::from(layout.grid_slack[3]) + 30.0);
 }
 
 /// #505 G9 (P2): Alt held at the press on an internal row line changes only the
@@ -1639,12 +1639,13 @@ fn the_page_outline_is_dashed_only_when_a_grid_has_slack() {
     assert!(page_dashes(&slacked.shapes) > 4, "a dashed page");
 }
 
-/// An L corner of a Regular figure scales every column and row by one factor
-/// per axis, whichever corner; one event flagged as a figure resize, the
-/// figure bigger; nothing without a drag. Witness: only the last column
-/// scaled.
+/// K1: an L corner of a Regular figure is a page corner. Pulled out it adds
+/// empty space on the two page edges that meet there (right and bottom for the
+/// bottom-right one, left and top for the top-left one), the graphs keep their
+/// frames; one event flagged as a figure resize, the page bigger; nothing
+/// without a drag. Witness: the old scaling path (`scaled_frames`) put back.
 #[test]
-fn an_l_corner_scales_the_whole_regular_figure() {
+fn an_l_corner_adds_empty_space_and_the_graphs_keep_their_size() {
     let fixture = Fixture::grid(2, 2, false, true, false);
     let (context, mut view) = in_mode(&fixture);
     let before = layout_of(&context, &mut view, &fixture);
@@ -1662,19 +1663,21 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         widths,
         heights,
         figure: true,
-        slack: None,
+        slack: Some(slack),
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
-    assert_eq!(widths, &vec![220.0, 220.0]);
-    assert_eq!(heights, &vec![165.0, 165.0]);
-    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(widths, &before.frame_widths, "the graphs keep their size");
+    assert_eq!(heights, &before.frame_heights);
     assert_eq!(
-        after.size,
-        (before.size.0 + 40, before.size.1 + 30),
-        "bands keep their size"
+        (slack.left, slack.top, slack.right, slack.bottom),
+        (0.0, 0.0, 40.0, 30.0)
     );
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, (before.size.0 + 40, before.size.1 + 30));
+    assert_eq!(after.frame_widths, before.frame_widths);
+    assert_eq!(after.frame_heights, before.frame_heights);
     let (context, mut view) = in_mode(&fixture);
     assert_eq!(
         hover_at(
@@ -1688,7 +1691,7 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         egui::CursorIcon::ResizeNwSe
     );
 
-    // A corner on the left or top scales too.
+    // The top-left corner adds space on the left and top.
     let (context, mut view) = in_mode(&fixture);
     // The figure's top is under the graph title, as the page of a free figure.
     let top_left = Pos2::new(-4.0, before.title_band as f32 - 4.0);
@@ -1704,14 +1707,18 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         widths,
         heights,
         figure: true,
-        slack: None,
+        slack: Some(slack),
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
     assert_eq!(
         (widths, heights),
-        (&vec![220.0, 220.0], &vec![165.0, 165.0])
+        (&before.frame_widths, &before.frame_heights)
+    );
+    assert_eq!(
+        (slack.left, slack.top, slack.right, slack.bottom),
+        (40.0, 30.0, 0.0, 0.0)
     );
 
     // No movement, no event.
@@ -1727,97 +1734,87 @@ fn an_l_corner_scales_the_whole_regular_figure() {
     assert!(signals.is_empty(), "{signals:?}");
 }
 
-/// With the ratio lock closed, an L corner of a Regular figure keeps the image
-/// ratio whichever axis the pointer moved most. Witness: the lock not fed to
-/// the view (the other axis stays as dragged).
+/// K1: pulled inward, an L corner removes the empty space and stops at the
+/// graphs; the padlock of Figure size does not apply. With no space left,
+/// pulling in does nothing. Witness: slack allowed below zero (`max(0.0)`).
 #[test]
-fn a_locked_l_corner_keeps_the_ratio_of_the_regular_image() {
+fn an_l_corner_pulled_inward_stops_at_the_graphs() {
     let fixture = Fixture::grid(2, 2, false, true, false);
+    let mut spec = spec_of(&fixture);
+    spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        left: 0.0,
+        top: 0.0,
+        right: 30.0,
+        bottom: 20.0,
+    });
+    fixture.replace(spec);
     let (context, mut view) = in_mode(&fixture);
     let before = layout_of(&context, &mut view, &fixture);
     let (w, h) = (before.size.0 as f32, before.size.1 as f32);
-    let ratio = f64::from(h) / f64::from(w);
-    view.set_figure_ratio_lock(Some(ratio));
     let corner = Pos2::new(w + 4.0, h + 4.0);
-    // The pointer mostly goes right: the height follows.
     let signals = drag(
         &context,
         &mut view,
         &fixture,
         corner,
-        corner + egui::vec2(60.0, 2.0),
-        egui::Modifiers::NONE,
-    );
-    assert!(
-        matches!(
-            signals.as_slice(),
-            [GraphEvent::GridFramesEdited { figure: true, .. }]
-        ),
-        "{signals:?}"
-    );
-    let after = layout_of(&context, &mut view, &fixture);
-    let kept = f64::from(after.size.1) / f64::from(after.size.0);
-    assert!((kept - ratio).abs() < 0.004, "{kept} vs {ratio}");
-    assert!(after.size.0 >= before.size.0 + 59, "{:?}", after.size);
-}
-
-/// Same for the page corner of a Free figure.
-#[test]
-fn a_locked_page_corner_keeps_the_ratio_of_the_free_page() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let page = view.layout_page().expect("page");
-    view.set_figure_ratio_lock(Some(page.height / page.width));
-    let corner = screen(
-        &view,
-        page.left + page.width + 4.0,
-        page.top + page.height + 4.0,
-    );
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(100.0, 1.0),
-        SHIFT,
-    );
-    let (_, new_page) = edited(&signals);
-    let new_page = new_page.expect("a page");
-    assert!(
-        (new_page.height / new_page.width - page.height / page.width).abs() < 1e-3,
-        "{new_page:?} from {page:?}"
-    );
-    assert!(new_page.width > page.width + 90.0);
-}
-
-/// Pulled far inward, the columns and rows stop together at the minimum with
-/// their proportions. Witness: a per-frame clamp.
-#[test]
-fn an_l_corner_pulled_far_inward_stops_every_frame_together() {
-    let fixture = Fixture::grid(2, 1, false, false, false);
-    let mut spec = spec_of(&fixture);
-    spec.frame_widths = vec![100.0, 300.0];
-    fixture.replace(spec);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let corner = Pos2::new(layout.size.0 as f32 + 4.0, layout.size.1 as f32 + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner - egui::vec2(380.0, 100.0),
+        corner - egui::vec2(500.0, 500.0),
         egui::Modifiers::NONE,
     );
     let [GraphEvent::GridFramesEdited {
         widths,
+        heights,
         figure: true,
-        ..
+        slack: Some(slack),
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
-    assert_eq!(widths, &vec![36.0, 108.0], "3:1 kept at the stop");
+    assert_eq!(widths, &before.frame_widths);
+    assert_eq!(heights, &before.frame_heights);
+    assert_eq!(
+        (slack.left, slack.top, slack.right, slack.bottom),
+        (0.0, 0.0, 0.0, 0.0),
+        "stops at the graphs"
+    );
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, (before.size.0 - 30, before.size.1 - 20));
+}
+
+/// K1: the page edge snaps to the grid step like the lines, and Shift turns
+/// the snap off. Witness: the snap ignored.
+#[test]
+fn an_l_corner_snaps_to_the_grid_and_shift_does_not() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    view.set_layout_grid(Some(50.0));
+    let before = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    let right = |modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        view.set_layout_grid(Some(50.0));
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            corner,
+            corner + egui::vec2(37.0, 0.0),
+            modifiers,
+        );
+        match signals.as_slice() {
+            [GraphEvent::GridFramesEdited {
+                slack: Some(slack), ..
+            }] => slack.right,
+            other => panic!("one figure event expected, got {other:?}"),
+        }
+    };
+    let snapped = right(egui::Modifiers::NONE);
+    assert_eq!(
+        (f64::from(before.size.0) + snapped) % 50.0,
+        0.0,
+        "{snapped}"
+    );
+    assert_eq!(right(SHIFT), 37.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1907,12 +1904,15 @@ fn a_corner_handle_of_the_selected_box_resizes_it() {
     );
 }
 
-/// Pulling a page corner scales the page and every box with it.
+/// K1: pulling a page corner of a Free figure resizes the page only: the
+/// graphs keep their frames (no frame in the event), one event. Witness: the
+/// boxes scaled with the page (`scaled_to_page`).
 #[test]
-fn a_page_corner_drag_scales_the_page_and_the_boxes() {
+fn a_page_corner_drag_resizes_the_page_and_the_boxes_stay() {
     let fixture = Fixture::free_two_layers();
     let (context, mut view) = in_mode(&fixture);
     let page = view.layout_page().expect("page");
+    let boxes = view.layout_boxes();
     let corner = screen(
         &view,
         page.left + page.width + 4.0,
@@ -1936,7 +1936,45 @@ fn a_page_corner_drag_scales_the_page_and_the_boxes() {
         (new_page.height - page.height - 50.0).abs() < 0.02,
         "{new_page:?}"
     );
-    assert_eq!(frames.len(), 2, "every box follows");
+    assert!(frames.is_empty(), "no box follows: {frames:?}");
+    for graph in boxes {
+        assert_eq!(box_of(&view, graph.base).frame, graph.frame);
+    }
+    // Pulled far inward from a bigger page it stops at the graphs.
+    let mut spec = spec_of(&fixture);
+    spec.free_page = Some(stokesforge_plot::FreePage {
+        width: page.width + 100.0,
+        height: page.height + 100.0,
+        ..page
+    });
+    fixture.replace(spec);
+    let (context, mut view) = in_mode(&fixture);
+    let big = view.layout_page().expect("page");
+    let corner = screen(
+        &view,
+        big.left + big.width + 4.0,
+        big.top + big.height + 4.0,
+    );
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner - egui::vec2(5000.0, 5000.0),
+        SHIFT,
+    );
+    let (frames, new_page) = edited(&signals);
+    let new_page = new_page.expect("a page");
+    assert!(frames.is_empty());
+    let right = view
+        .layout_boxes()
+        .iter()
+        .map(|graph| graph.outer.left + graph.outer.width)
+        .fold(f64::MIN, f64::max);
+    assert!(
+        (new_page.left + new_page.width - right).abs() < 0.02,
+        "{new_page:?} vs {right}"
+    );
 }
 
 /// Centre band: only the two graphs on the line move, in a 2 x 2. Side band:

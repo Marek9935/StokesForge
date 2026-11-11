@@ -412,6 +412,62 @@ pub fn spec_fitted_to_layers(spec: &PlotSpec) -> Option<PlotSpec> {
     Some(fitted)
 }
 
+/// The spec with its layout fitted to its page (#505, K1: **Fit Layout to
+/// Page**, the inverse of [`spec_fitted_to_layers`]), or `None` when there is
+/// nothing to do (no action, no undo step). The page keeps its size.
+///
+/// **Regular Grid**: the empty space around the grid goes to zero and the
+/// frames grow to fill it, one factor per axis (bands frozen), see
+/// [`stokesforge_render::layout_fitted_to_page`]. **Free**: the graph boxes
+/// are mapped affinely from their bounding box to the page
+/// ([`stokesforge_render::boxes_fitted_to_page`]). With `uniform` (the padlock
+/// of Figure size is closed) one factor scales both axes and the leftover stays
+/// as empty space on the right or bottom. Measures the figure: the caller
+/// memoizes.
+pub fn spec_layout_fitted_to_page(spec: &PlotSpec, uniform: bool) -> Option<PlotSpec> {
+    let mut fitted = spec.clone();
+    if spec.layer_placement == LayerPlacement::Grid {
+        let slack = spec.sanitized_grid_slack()?;
+        fix_new(&mut fitted);
+        let layout = figure_layout(&fitted)?;
+        let (widths, heights) = (&layout.frame_widths, &layout.frame_heights);
+        if widths.is_empty() || heights.is_empty() {
+            return None;
+        }
+        let sum = |sizes: &[f64]| sizes.iter().sum::<f64>();
+        let bands = (
+            f64::from(layout.size.0) - slack.left - slack.right - sum(widths),
+            f64::from(layout.size.1.saturating_sub(layout.title_band))
+                - slack.top
+                - slack.bottom
+                - sum(heights),
+        );
+        let (widths, heights, slack) =
+            stokesforge_render::layout_fitted_to_page(widths, heights, slack, bands, uniform);
+        fitted.frame_widths = widths;
+        fitted.frame_heights = heights;
+        fitted.grid_slack = Some(slack).filter(|slack| !slack.is_zero());
+        return (fitted != *spec).then_some(fitted);
+    }
+    let layout = figure_layout(spec)?;
+    let boxes = stokesforge_render::graph_boxes(spec, &layout);
+    let frames =
+        stokesforge_render::boxes_fitted_to_page(&boxes, layout.free_page_rect()?, uniform)?;
+    for (base, frame) in frames {
+        for (field, value) in [
+            (FreeField::Left, frame.left),
+            (FreeField::Top, frame.top),
+            (FreeField::Width, frame.width),
+            (FreeField::Height, frame.height),
+        ] {
+            if !set_free_frame(&mut fitted, base, field, value) {
+                return None;
+            }
+        }
+    }
+    (fitted != *spec).then_some(fitted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

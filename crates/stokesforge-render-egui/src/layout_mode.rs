@@ -16,7 +16,9 @@
 //!   handle too (#505): pulling it changes that row or column alone, and the
 //!   empty space it leaves (or eats) is the page's slack, and pulling it out
 //!   stops at the page edge (the page changes only through page tools); the figure does not
-//!   follow, the L corners still scale the whole figure. A drag
+//!   follow. The four L corners are **page corners** (K1): pulling one moves the
+//!   two page edges that meet there, adding or removing empty space while the
+//!   graphs keep their place and size. A drag
 //!   that starts **inside a graph**, off a handle, **moves that graph** (#491):
 //!   the cell under the pointer is outlined (a graph there swaps places, a hole
 //!   takes the graph), the right and bottom edge bands of the figure make a new
@@ -41,10 +43,10 @@ use stokesforge_plot::{FreeFrame, FreePage, GridSlack, LayerPlacement, LengthUni
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
-    layout_handle_at, locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_edge,
-    resized_frames, resized_line_alone, resized_page, scaled_frames, scaled_to_page,
-    stored_to_figure, BoundaryGroup, EdgeSide, GraphBox, GridCorner, GridHandle, Guide,
-    LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
+    layout_handle_at, moved_boundary, moved_box, moved_page_corner, nudged_box, page_corner_slack,
+    resized_edge, resized_frames, resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide,
+    GraphBox, GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX,
+    MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::{FramePreview, GraphEvent, GraphView};
@@ -118,7 +120,7 @@ pub(crate) struct LayoutView {
     boxes: Vec<GraphBox>,
     page: Option<FreePage>,
     /// Regular: the figure as a page (stored coordinates, no origin), whose L
-    /// corners scale the whole figure.
+    /// corners add or remove empty space.
     figure: Option<FreePage>,
     grid: Option<GridView>,
     /// Selected layers as base layers, the active one first.
@@ -148,14 +150,17 @@ enum DragKind {
         /// only the row (column) before it, the slack absorbs the rest (G9).
         alone: bool,
     },
-    /// An L corner of a regular grid: the whole figure scales.
+    /// An L corner of a regular grid, a page corner (#505, K1): the two page
+    /// edges that meet there move, the graphs stay as they are and the empty
+    /// space around the grid grows or shrinks.
     Figure {
         corner: (bool, bool),
+        /// The frames, unchanged by the drag.
         widths: Vec<f64>,
         heights: Vec<f64>,
-        /// Extent of the figure that is not plot area: `(across, down)`.
-        bands: (f64, f64),
-        /// The image `(width, height)` at the press, for the ratio lock.
+        /// The empty space around the grid at the press.
+        slack: GridSlack,
+        /// The image `(width, height)` at the press.
         image: (f64, f64),
     },
     /// A graph of a regular grid dragged to another place (#491). Nothing
@@ -204,9 +209,6 @@ pub(crate) struct LayoutState {
     pub(crate) drag: Option<LayoutDrag>,
     nudge: Option<Nudge>,
     pub(crate) view: Option<LayoutView>,
-    /// Height / width the page corners keep while the shell's ratio lock is
-    /// closed (fed by the shell, never stored).
-    ratio_lock: Option<f64>,
     /// Bases of the graphs under the pointer, to show their handles faintly.
     hovered: Vec<usize>,
 }
@@ -507,12 +509,6 @@ impl GraphView {
     /// The snapping grid step in points, `None` when the grid is off.
     pub fn layout_grid(&self) -> Option<f64> {
         self.layout.grid
-    }
-
-    /// Closes the ratio lock of the figure's corners with `ratio` = height /
-    /// width of the image, or opens it (`None`). Fed by the shell each frame.
-    pub fn set_figure_ratio_lock(&mut self, ratio: Option<f64>) {
-        self.layout.ratio_lock = ratio.filter(|ratio| ratio.is_finite() && *ratio > 0.0);
     }
 
     /// Whether a box, boundary or corner drag is in progress.
@@ -1137,32 +1133,30 @@ impl GraphView {
                     threshold: MAGNET_THRESHOLD_POINTS / f64::from(drag.scale),
                     enabled: !shift,
                 };
-                let delta = match (handle, self.layout.ratio_lock) {
-                    (LayoutHandle::Page { right, bottom }, Some(ratio)) => locked_corner_delta(
-                        (page.width, page.height),
-                        (*right, *bottom),
-                        delta,
-                        ratio,
-                    ),
-                    _ => delta,
-                };
                 self.drag_free(handle, boxes, *page, boundary.as_ref(), delta, snap);
             }
             DragKind::Figure {
                 corner,
                 widths,
                 heights,
-                bands,
+                slack,
                 image,
             } => {
-                let delta = match self.layout.ratio_lock {
-                    Some(ratio) => locked_corner_delta(*image, *corner, delta, ratio),
-                    None => delta,
+                // Snapped like the lines: the page edge lands on a grid line
+                // counted from the top-left corner of the page.
+                let grid = self.layout.grid.filter(|_| !shift);
+                let snapped = |start: f64, moved: f64| match grid {
+                    Some(step) => ((start + moved) / step).round() * step - start,
+                    None => moved,
                 };
-                let (new_widths, new_heights) =
-                    scaled_frames(widths, heights, *bands, *corner, delta);
+                let delta = (
+                    snapped(if corner.0 { image.0 } else { 0.0 }, delta.0),
+                    snapped(if corner.1 { image.1 } else { 0.0 }, delta.1),
+                );
+                let new_slack = page_corner_slack(*corner, *image, *slack, delta);
                 self.set_frame_preview(Some(FramePreview {
-                    grid: Some((new_widths, new_heights)),
+                    grid: Some((widths.clone(), heights.clone())),
+                    slack: Some(new_slack),
                     ..FramePreview::default()
                 }));
             }
@@ -1234,20 +1228,21 @@ impl GraphView {
                 let Some((_, layout)) = self.figure_memo.as_ref() else {
                     return false;
                 };
-                let sum = |sizes: &[f64]| sizes.iter().sum::<f64>();
-                let extent = (
-                    f64::from(layout.size.0),
-                    f64::from(layout.size.1.saturating_sub(layout.title_band)),
-                );
+                let [left, top, right, bottom] = layout.grid_slack.map(f64::from);
                 DragKind::Figure {
                     corner,
                     widths: layout.frame_widths.clone(),
                     heights: layout.frame_heights.clone(),
-                    bands: (
-                        extent.0 - sum(&layout.frame_widths),
-                        extent.1 - sum(&layout.frame_heights),
+                    slack: GridSlack {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    },
+                    image: (
+                        f64::from(layout.size.0),
+                        f64::from(layout.size.1.saturating_sub(layout.title_band)),
                     ),
-                    image: (f64::from(layout.size.0), f64::from(layout.size.1)),
                 }
             }
             (Some(grid), _) => {
@@ -1393,8 +1388,9 @@ impl GraphView {
                 (frames, page, guides)
             }
             LayoutHandle::Page { right, bottom } => {
-                let new_page = resized_page(boxes, page, (right, bottom), delta, snap);
-                (scaled_to_page(boxes, page, new_page), new_page, Vec::new())
+                // K1: the graphs stay, the page gains or loses empty space.
+                let new_page = moved_page_corner(boxes, page, (right, bottom), delta, snap);
+                (Vec::new(), new_page, Vec::new())
             }
         };
         if let Some(active) = self.layout.drag.as_mut() {
@@ -1452,10 +1448,13 @@ impl GraphView {
             ) => grid_event(widths, heights, Some(*slack), false),
             (
                 DragKind::Figure {
-                    widths, heights, ..
+                    widths,
+                    heights,
+                    slack,
+                    ..
                 },
                 _,
-            ) => grid_event(widths, heights, None, true),
+            ) => grid_event(widths, heights, Some(*slack), true),
             (DragKind::Free { boxes, page, .. }, Some(preview))
                 if preview.page.is_some_and(|shown| page_differs(shown, *page))
                     || preview.frees.iter().any(|(base, frame)| {

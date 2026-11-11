@@ -1077,6 +1077,21 @@ pub(super) fn layout_menu_contents(
             actions.push(Action::FitPageToLayout { graph });
             ui.close();
         }
+        if ui
+            .add_enabled(
+                available,
+                egui::Button::new(tr!("action-layout-fit-layout")),
+            )
+            .on_hover_text(tr!("action-layout-fit-layout", "hint"))
+            .on_disabled_hover_text(tr!("action-layout-fit-layout", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::FitLayoutToPage {
+                graph,
+                uniform: super::page_layout::published_size_lock(ui.ctx(), graph).is_some(),
+            });
+            ui.close();
+        }
     });
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-layer-placement"), |ui| {

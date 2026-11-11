@@ -177,7 +177,7 @@ right-click's `Layout ▸`). Sections, create before organize: **Page Layout Mod
 view state: no action, no undo step, no shortcut to enter; a toolbar button beside
 Properties, icon `Icon::PageLayout`, does the same) ─ **Fit Page to Layout** (#505,
 `Action::FitPageToLayout`, one undo step; greyed out with the `.disabled` reason
-when the page already fits; the same button is in the Page Layout Mode strip) ─
+when the page already fits; the same button is in the Page Layout Mode strip), then **Fit Layout to Page** (K1, `Action::FitLayoutToPage`, one undo step; the inverse, the graphs scale to fill the page; greyed out when the graphs already fill it; same button in the strip) ─
 **Layer Placement ▸**
 (Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
 (Left / Right / Above / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─

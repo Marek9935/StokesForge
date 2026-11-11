@@ -16402,6 +16402,189 @@ fn fit_page_to_layers_in_free_grows_and_shrinks_the_page_around_the_graphs() {
     assert_eq!(page_of(&state), wide, "Undo gives the page back");
 }
 
+/// #505 (K1): Fit Layout to Page on a Regular Grid scales the frames to fill
+/// the page, one factor per axis, the empty space goes to zero and the image
+/// keeps its size, in ONE step labelled Fit Layout to Page; the padlock
+/// (`uniform`) takes one factor and leaves the rest as space; nothing to do
+/// sends nothing. Witness: the action leaving the slack in place.
+#[test]
+fn fit_layout_to_page_fills_the_grid_page_in_one_step_and_nothing_to_do_is_no_step() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_plot::GridSlack;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    let size = |spec: &stokesforge_plot::PlotSpec| {
+        stokesforge_app_state::frame_sizes::figure_layout(spec)
+            .expect("layout")
+            .size
+    };
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: false,
+    });
+    assert_eq!(
+        state.snapshot().revision,
+        revision,
+        "no space: nothing to do"
+    );
+
+    // Shrink the row by 50 and the column by 30: the space is 30 right, 50 below.
+    let mut widths = before.frame_widths.clone();
+    let mut heights = before.frame_heights.clone();
+    widths[0] -= 30.0;
+    heights[0] -= 50.0;
+    let slack = GridSlack {
+        right: 30.0,
+        bottom: 50.0,
+        ..GridSlack::default()
+    };
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: widths.clone(),
+        heights: heights.clone(),
+        figure: false,
+        slack: Some(slack),
+    });
+    let slacked = graph_spec(&state, graph);
+    assert_eq!(size(&slacked), size(&before));
+
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: false,
+    });
+    let filled = graph_spec(&state, graph);
+    assert_eq!(filled.grid_slack, None, "the space is used");
+    assert_eq!(size(&filled), size(&before), "the page keeps its size");
+    assert!(filled.frame_widths[0] > widths[0] + 20.0, "{filled:?}");
+    assert!(filled.frame_heights[0] > heights[0] + 40.0, "{filled:?}");
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::FitLayout))
+    );
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: false,
+    });
+    assert_eq!(state.snapshot().revision, revision, "already filled");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), slacked, "one Undo is enough");
+
+    // Padlock closed: one factor, the smaller; the rest stays as space.
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: true,
+    });
+    let kept = graph_spec(&state, graph);
+    let (fx, fy) = (
+        kept.frame_widths[0] / widths[0],
+        kept.frame_heights[0] / heights[0],
+    );
+    assert!((fx - fy).abs() < 0.01, "one factor: {fx} vs {fy}");
+    let rest = kept.grid_slack.expect("some space is left");
+    assert!(
+        (rest.right > 0.0) != (rest.bottom > 0.0),
+        "one axis is not filled: {rest:?}"
+    );
+    assert_eq!((rest.left, rest.top), (0.0, 0.0));
+    assert_eq!(size(&kept), size(&before));
+}
+
+/// #505 (K1): Fit Layout to Page in Free maps the bounding box of the graphs
+/// onto the page: the page does not change, the graphs grow to fill it; one
+/// step; already filling sends nothing. Witness: the page fitted to the graphs
+/// instead (the page changes, the frames do not).
+#[test]
+fn fit_layout_to_page_in_free_scales_the_graphs_to_the_page() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreeFrame;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    go_free(&mut state, graph);
+    let page_of = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        stokesforge_app_state::frame_sizes::figure_layout(&spec)
+            .and_then(|layout| layout.free_page_rect())
+            .expect("page")
+    };
+    let boxes_of = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        let layout = stokesforge_app_state::frame_sizes::figure_layout(&spec).expect("layout");
+        stokesforge_render::graph_boxes(&spec, &layout)
+    };
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: false,
+    });
+    assert_eq!(state.snapshot().revision, revision, "already filling");
+
+    // Shrink both graphs: the page now has empty space.
+    let shrunk: Vec<(usize, FreeFrame)> = (0..2)
+        .map(|base| {
+            let frame = graph_spec(&state, graph).panels[base].sanitized_free_frame();
+            (
+                base,
+                FreeFrame {
+                    width: frame.width / 2.0,
+                    height: frame.height / 2.0,
+                    ..frame
+                },
+            )
+        })
+        .collect();
+    let small = shrunk[0].1;
+    let page = page_of(&state);
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: shrunk,
+        page: Some(page),
+    });
+    let narrow = boxes_of(&state);
+    let bbox_before = stokesforge_render::page_fitted_to_layers(&narrow).expect("a box");
+    assert!(bbox_before.width < page.width - 1.0 || bbox_before.height < page.height - 1.0);
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: false,
+    });
+    assert_eq!(page_of(&state), page, "the page keeps its size");
+    let bbox_after = stokesforge_render::page_fitted_to_layers(&boxes_of(&state)).expect("a box");
+    let near = |a: f64, b: f64| (a - b).abs() < 0.5;
+    assert!(
+        near(bbox_after.left, page.left)
+            && near(bbox_after.top, page.top)
+            && near(bbox_after.width, page.width)
+            && near(bbox_after.height, page.height),
+        "{bbox_after:?} vs {page:?}"
+    );
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::FitLayout))
+    );
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::FitLayoutToPage {
+        graph,
+        uniform: false,
+    });
+    assert_eq!(state.snapshot().revision, revision, "already filling");
+    state.dispatch(Action::Undo);
+    assert_eq!(boxes_of(&state).len(), narrow.len());
+    assert_eq!(
+        graph_spec(&state, graph).panels[0].sanitized_free_frame(),
+        small,
+        "Undo gives the graphs back"
+    );
+}
+
 /// #423: duplicating a copy counts on instead of stacking the suffix.
 /// Witness: using the whole name as the base gives "Sheet1 copy 1 copy 1".
 #[test]

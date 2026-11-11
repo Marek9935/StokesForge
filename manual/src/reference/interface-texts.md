@@ -64,6 +64,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | File | Fichier |
 | File Metadata | Métadonnées du fichier |
 | Files and Template | Fichiers et modèle |
+| Fit Layout to Page | Ajuster la disposition à la page |
 | Fit Page to Layout | Ajuster la page à la disposition |
 | Fitting | Ajustement |
 | Fitting… | Ajustement… |

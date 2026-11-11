@@ -272,7 +272,7 @@ same command**, never in a separate step and never at load: any
 `SetPlotSpec` / `EditPlotSpec` / `AddGraph` that goes through `AppState::execute`
 (or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
 legacy file as it was. The mouse gestures of #394, #405 and #398 (cell boundary, figure edge, layer move) are gone (#426): `Action::SetFrameSizes`, `SetFigureOffsets`, `SetFreeFrame` and `PlotEditKind::PlaceFigure` no longer exist.
-`Action::SetGridFrames` (#426) = the whole grid's frame sizes in ONE `EditPlotSpec` (`ResizeCell`, or `ResizeFigure` for an L corner).
+`Action::SetGridFrames` (#426) = the whole grid's frame sizes in ONE `EditPlotSpec` (`ResizeCell`, or `ResizeFigure` for an L corner, which adds or removes empty space, K1; `Action::FitLayoutToPage` is `FitLayout`).
 `Action::SetFreeLayout` (#426) = several frames of a free graph and its page in ONE `EditPlotSpec`: `PlotEditKind::ResizeFigure` ("Resize Figure") when the page size changes (against the stored page, or the figure as drawn when there is none), `ResizeLayer` when a frame size changes, else `MoveLayer`; nothing sent on the grid, for a missing layer or when nothing changes; one Undo gives back every frame and the page.
 "Figure size",
 Left and Top typed in Graph Properties are part of the window's draft and macro.
