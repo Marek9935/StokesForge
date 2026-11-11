@@ -50,6 +50,11 @@
     "shows": "The Graph Properties window on its Axes tab for an overlay layer (Layer 2): Top tab selected with Own scale and Show axis, Bottom and Left grayed out."
   },
   {
+    "image": "graphs-properties-legend.png",
+    "page": "guide/graphs.md",
+    "shows": "The Graph Properties window on its Legend tab for a graph with a two-column legend: Show legend, Position, Text from, then the Text section (Font, Font size, Text color), the Frame section (Show frame, Frame color red, Frame width 2 pt, Background white at 50 % opacity) and the Layout section (Columns 2, row and column gaps, Line sample length 40 pt)."
+  },
+  {
     "image": "graphs-properties-color-bar.png",
     "page": "guide/graphs.md",
     "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the series group Kinetics with its On the bar box ticked and its folded Ranges, Chain the segments, the value, scale, placement, ticks and title settings."

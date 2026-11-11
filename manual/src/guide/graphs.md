@@ -122,7 +122,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 | **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
-| **Legend** | **Show legend**, **Position**, **Text from**, and the folded **Color bar** section at the bottom |
+| **Legend** | **Show legend**, **Position**, **Text from**, the **Text**, **Frame** and **Layout** settings, and the folded **Color bar** section at the bottom |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
@@ -308,6 +308,16 @@ To repeat a scale on the opposite side of the plot, choose **Graph ▸ Top Mirro
 ## Legend
 
 The **Legend** tab has **Show legend** and **Position**: **Top left**, **Top right**, **Bottom left** or **Bottom right**.
+
+Choosing a **Position** puts the legend back in that corner, even if you had dragged it: a dragged legend shows **Dragged** in the list.
+
+<img src="../images/graphs-properties-legend.png" alt="The Graph Properties window on its Legend tab: Show legend, Position, Text from, then the Text, Frame and Layout sections." width="640">
+
+The **Text** section has **Font**, **Font size (pt)** and **Text color**. They are the values of the **Text format** toolbar: set on the toolbar or here, it is the same setting. **Graph font** and **Auto** follow the figure.
+
+The **Frame** section has **Show frame**, **Frame color** (**Auto (text color)** by default), **Frame width (pt)** and **Background**. **Background** is **Auto (background of the layer)** or a color; write it as `#RRGGBBAA` or use the opacity of the color picker to let the curves show through. A legend without a frame stays clickable, and its background is still painted. New graphs start without a frame; graphs from earlier files keep theirs.
+
+The **Layout** section has **Columns**, **Row gap (pt)**, **Column gap (pt)** and **Line sample length (pt)**. The entries fill the first column from top to bottom, then the next one. The number of columns never exceeds the number of entries, and a legend of more than 24 entries still ends with its line "… and N more" over the full width. Auto gives the usual spacing. All lengths are in points; a legend wider than the plot area is clipped.
 
 Each entry shows the name of its series. To rename a series, double-click its entry in the legend and type the new name. An empty name goes back to the column name.
 

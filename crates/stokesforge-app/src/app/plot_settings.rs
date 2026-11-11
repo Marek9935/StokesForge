@@ -365,7 +365,7 @@ fn plot_settings_contents(
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= legend_editor(ui, &mut panel.legend, &row_columns);
+                        commit |= legend_editor(ui, &mut panel.legend, &row_columns, &mut env);
                         commit |= super::color_bar_settings::color_bar_section(
                             ui,
                             panel,
@@ -1993,36 +1993,194 @@ fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>)
     out.inner
 }
 
-/// Edits a [`stokesforge_plot::LegendSpec`]: visibility, anchor corner. Returns
-/// `true` if the draft must be committed — see the head doc of
-/// [`plot_settings_window`].
+/// Edits a [`stokesforge_plot::LegendSpec`]: visibility, place, text, font,
+/// frame, background and layout (#507). Returns `true` if the draft must be
+/// committed — see the head doc of [`plot_settings_window`].
 ///
 /// `row_columns` lists the columns a row series of the panel can read
 /// (#499); empty when the panel has no row series.
+///
+/// The controls mirror what the application already has: the font, size and
+/// text color of the format toolbar, the width and the Auto color of the axis
+/// ticks, the Auto background of a layer (#398).
 fn legend_editor(
     ui: &mut egui::Ui,
     legend: &mut stokesforge_plot::LegendSpec,
     row_columns: &[(NodeId, String)],
+    env: &mut PickerEnv,
 ) -> bool {
     form(ui, "plot_legend_page", |form| {
         let mut commit = form.checkbox(&mut legend.visible, tr!("plot-legend-show"), None);
-        commit |= form.row(tr!("plot-legend-position"), |ui| {
-            choice(
-                ui,
-                "plot_config_legend_position",
-                &mut legend.position,
-                &[
-                    LegendPosition::TopLeft,
-                    LegendPosition::TopRight,
-                    LegendPosition::BottomLeft,
-                    LegendPosition::BottomRight,
-                ]
-                .map(|candidate| ChoiceOption::new(candidate, legend_position_label(candidate))),
-            )
-        });
+        commit |= legend_position_row(form, legend);
         commit |= legend_text_editor(form, &mut legend.text, row_columns);
+        commit |= legend_font_section(form, legend, env);
+        commit |= legend_frame_section(form, legend, env);
+        commit |= legend_layout_section(form, legend);
         commit
     })
+}
+
+/// Position: a dragged legend (its anchor wins over the corner) shows
+/// « Dragged »; choosing any corner, even the one it names, drops the anchor.
+fn legend_position_row(form: &mut Form<'_>, legend: &mut stokesforge_plot::LegendSpec) -> bool {
+    let dragged = legend.anchor.is_some();
+    let mut shown = (!dragged).then_some(legend.position);
+    let mut options: Vec<ChoiceOption<Option<LegendPosition>>> = [
+        LegendPosition::TopLeft,
+        LegendPosition::TopRight,
+        LegendPosition::BottomLeft,
+        LegendPosition::BottomRight,
+    ]
+    .map(|place| ChoiceOption::new(Some(place), legend_position_label(place)))
+    .into();
+    if dragged {
+        options.insert(
+            0,
+            ChoiceOption::new(None, tr!("plot-legend-position-dragged")),
+        );
+    }
+    let picked = form.row(tr!("plot-legend-position"), |ui| {
+        choice(ui, "plot_config_legend_position", &mut shown, &options)
+    });
+    if let (true, Some(place)) = (picked, shown) {
+        legend.set_position(place);
+        return true;
+    }
+    false
+}
+
+/// Font, size and color of the entries: the values of the format toolbar,
+/// with its labels and its list (graph font, then embedded, then installed).
+fn legend_font_section(
+    form: &mut Form<'_>,
+    legend: &mut stokesforge_plot::LegendSpec,
+    env: &mut PickerEnv,
+) -> bool {
+    form.section(tr!("plot-legend-text-section"));
+    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
+    options.extend(
+        stokesforge_render_egui::available_families()
+            .iter()
+            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
+    );
+    // A font that is not installed here stays visible, and selected.
+    if !options
+        .iter()
+        .any(|option| option.value == legend.font.family)
+    {
+        options.push(ChoiceOption::new(
+            legend.font.family.clone(),
+            legend.font.family.clone(),
+        ));
+    }
+    let mut commit = form.row(tr!("format-font"), |ui| {
+        choice(ui, "plot_legend_font", &mut legend.font.family, &options)
+    });
+    commit |= form.row(tr!("plot-text-size"), |ui| {
+        auto_number_field(
+            ui,
+            "plot_legend_font_size",
+            &mut legend.font.size,
+            &quantities::TEXT_FORMAT_SIZE,
+            &tr!("common-auto"),
+        )
+        .changed
+    });
+    commit |= form.color(
+        &tr!("format-color"),
+        &mut legend.color,
+        ColorUsage::Text,
+        Some(&tr!("plot-color-auto-contrast")),
+        env,
+    );
+    commit
+}
+
+/// Frame (shown, color, thickness) and background of the legend.
+fn legend_frame_section(
+    form: &mut Form<'_>,
+    legend: &mut stokesforge_plot::LegendSpec,
+    env: &mut PickerEnv,
+) -> bool {
+    form.section(tr!("plot-legend-frame-section"));
+    let mut commit = form.checkbox(&mut legend.frame, tr!("plot-legend-frame-show"), None);
+    let shown = legend.frame;
+    commit |= form
+        .enabled(shown, |form| {
+            form.color(
+                &tr!("plot-legend-frame-color"),
+                &mut legend.frame_color,
+                ColorUsage::Text,
+                Some(&tr!("plot-legend-frame-color", "auto")),
+                env,
+            )
+        })
+        .inner;
+    commit |= auto_value_row(
+        form,
+        tr!("plot-legend-frame-width"),
+        "plot_legend_frame_width",
+        &mut legend.frame_width,
+        &quantities::LEGEND_FRAME_WIDTH,
+        shown,
+        tr!("disabled-legend-frame-off"),
+    );
+    commit |= form.color(
+        &tr!("plot-general-background"),
+        &mut legend.background,
+        ColorUsage::Background,
+        Some(&tr!("plot-legend-background-auto")),
+        env,
+    );
+    commit
+}
+
+/// Columns, gaps and length of the line sample.
+fn legend_layout_section(form: &mut Form<'_>, legend: &mut stokesforge_plot::LegendSpec) -> bool {
+    form.section(tr!("plot-legend-layout-section"));
+    let mut commit = form.row(tr!("plot-legend-columns"), |ui| {
+        number_field(
+            ui,
+            "plot_legend_columns",
+            &mut legend.columns,
+            &quantities::LEGEND_COLUMNS,
+        )
+        .changed
+    });
+    for (label, id_salt, value) in [
+        (
+            tr!("plot-legend-row-gap"),
+            "plot_legend_row_gap",
+            &mut legend.row_gap,
+        ),
+        (
+            tr!("plot-legend-column-gap"),
+            "plot_legend_column_gap",
+            &mut legend.column_gap,
+        ),
+    ] {
+        commit |= form.row(label, |ui| {
+            auto_number_field(
+                ui,
+                id_salt,
+                value,
+                &quantities::LEGEND_GAP,
+                &tr!("common-auto"),
+            )
+            .changed
+        });
+    }
+    commit |= form.row(tr!("plot-legend-swatch-length"), |ui| {
+        auto_number_field(
+            ui,
+            "plot_legend_swatch_length",
+            &mut legend.swatch_length,
+            &quantities::LEGEND_SWATCH_LENGTH,
+            &tr!("common-auto"),
+        )
+        .changed
+    });
+    commit
 }
 
 /// The columns a row series (#166) of the selected layer can read for its
@@ -4859,12 +5017,14 @@ mod tests {
         let mut harness = grouped(2);
         harness.open(PlotSettingsTab::Legend, None);
         let context = test_support::context();
+        scroll_page(&context, &mut harness, -1000.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
             !is_painted(&painted, &tr!("plot-color-bar-show")),
             "folded without a bar"
         );
         click_label(&context, &mut harness.state, &tr!("plot-color-bar-section"));
+        scroll_page(&context, &mut harness, -1000.0);
         click_label(&context, &mut harness.state, &tr!("plot-color-bar-show"));
         let bar = harness.model().panels[0].color_bar.clone().expect("bar");
         assert!(bar.visible && bar.segments.is_empty());
@@ -4946,6 +5106,7 @@ mod tests {
             spec,
         });
         harness.open(PlotSettingsTab::Legend, None);
+        scroll_page(&context, &mut harness, -1000.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &tr!("plot-color-bar-show")));
         assert_eq!(PlotSettingsTab::ALL.len(), 5);
@@ -4973,6 +5134,7 @@ mod tests {
                 spec,
             });
             harness.open(PlotSettingsTab::Legend, None);
+            scroll_page(&context, &mut harness, -1000.0);
             let painted = paint_window(&context, &mut harness.state, Vec::new());
             assert_eq!(is_painted(&painted, &line), reported, "{line}");
         }
@@ -5032,6 +5194,7 @@ mod tests {
                 spec,
             });
             harness.open(PlotSettingsTab::Legend, None);
+            scroll_page(&context, &mut harness, -1000.0);
             click_label(
                 &context,
                 &mut harness.state,
@@ -5071,6 +5234,7 @@ mod tests {
         });
         harness.open(PlotSettingsTab::Legend, None);
         let context = test_support::context();
+        scroll_page(&context, &mut harness, -1000.0);
         let (painted, _) = open_list(
             &context,
             &mut harness.state,
@@ -5084,6 +5248,50 @@ mod tests {
         let bar = model.panels[0].color_bar.as_ref().unwrap();
         assert_eq!(bar.position, ColorBarPosition::TopLeft);
         assert!(bar.anchor.is_none());
+    }
+
+    /// #507: choosing a Position after the legend was dragged takes effect
+    /// (the list shows « Dragged », and the anchor is dropped). Witness: a tab
+    /// that sets the corner without `set_position` leaves the anchor, which
+    /// wins, so the legend stays where it was dragged.
+    #[test]
+    fn choosing_a_legend_position_drops_the_dragged_anchor() {
+        use stokesforge_plot::TextAnchor;
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).legend.anchor = Some(TextAnchor::new(0.3, 0.4));
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let (painted, _) = open_list(
+            &context,
+            &mut harness.state,
+            &tr!("plot-legend-position-dragged"),
+        );
+        let pos = text_exact(&painted, &tr!("plot-legend-bottom-left")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let legend = harness.model().panels[0].legend.clone();
+        assert_eq!(legend.position, LegendPosition::BottomLeft);
+        assert!(legend.anchor.is_none());
+    }
+
+    /// #507: the « Show frame » box of the Legend tab reaches the spec.
+    /// Witness: a box bound to nothing leaves the frame on.
+    #[test]
+    fn unticking_show_frame_hides_the_legend_frame() {
+        let mut harness = grouped(1);
+        assert!(harness.model().panels[0].legend.frame);
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let painted = click_label(&context, &mut harness.state, &tr!("plot-legend-frame-show"));
+        assert!(is_painted(&painted, &tr!("plot-legend-frame-width")));
+        harness.state.close_plot_settings();
+        assert!(!harness.model().panels[0].legend.frame);
     }
 
     /// #499: a dragged bar shows « Dragged » in Position, and choosing the
@@ -5106,6 +5314,7 @@ mod tests {
         });
         harness.open(PlotSettingsTab::Legend, None);
         let context = test_support::context();
+        scroll_page(&context, &mut harness, -1000.0);
         let (painted, _) = open_list(
             &context,
             &mut harness.state,

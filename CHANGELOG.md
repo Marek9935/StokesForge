@@ -47,6 +47,9 @@ without a message, see `docs/persistence.md`).
   `set_graph(legend_frame=…, legend_frame_color=…, legend_frame_width=…,
   legend_background=…, legend_columns=…, legend_row_gap=…,
   legend_column_gap=…, legend_swatch_length=…)`.
+  The **Legend** tab of Graph Properties edits all of it (with the font, size
+  and colour of the format toolbar), and choosing a **Position** puts a
+  dragged legend back in its corner.
 
 - Color bar (#499): a layer can color the curves of one or more series
   groups by a value (x' by default; also Comments, Long Name, Short Name,

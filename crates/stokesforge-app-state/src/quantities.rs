@@ -177,6 +177,27 @@ pub const TICK_WIDTH: Quantity = Quantity::whole(1.0)
     .between(1.0, 20.0)
     .with_auto(AutoKind::Field);
 
+/// Thickness of a legend frame, in points (#507): whole (the renderer draws in
+/// whole pixels), 1 to 20, Auto by default.
+pub const LEGEND_FRAME_WIDTH: Quantity = Quantity::whole(1.0)
+    .between(1.0, 20.0)
+    .with_auto(AutoKind::Field);
+
+/// Number of columns of a legend (#507): 1 to 24 (the legend draws at most 24
+/// entries).
+pub const LEGEND_COLUMNS: Quantity = Quantity::whole(1.0).between(1.0, 24.0);
+
+/// A gap between legend entries, in points (#507); Auto by default.
+pub const LEGEND_GAP: Quantity = Quantity::real(1.0, 4.0, 1)
+    .between(0.0, 100.0)
+    .with_auto(AutoKind::Field);
+
+/// Length of the line sample of a legend entry, in points (#507); Auto by
+/// default.
+pub const LEGEND_SWATCH_LENGTH: Quantity = Quantity::real(2.0, 26.0, 1)
+    .between(4.0, 200.0)
+    .with_auto(AutoKind::Field);
+
 /// An axis bound: free. The word `auto` (or the "Auto" button of the From / To
 /// row) gives both bounds back to the data; an emptied field is rejected (#344).
 pub const AXIS_BOUND: Quantity = FREE.with_auto(AutoKind::Group);

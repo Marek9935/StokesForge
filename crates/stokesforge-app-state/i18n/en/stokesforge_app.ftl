@@ -154,7 +154,7 @@ menu-graph-axes = Axes…
 menu-graph-series = Series…
     .hint = Edits the plot type, line and symbol of each series
 menu-graph-legend = Legend…
-    .hint = Edits legend visibility and position
+    .hint = Edits legend text, font, frame, background and layout
 menu-graph-theme = Theme…
     .hint = Edits global colors and applies predefined themes
 menu-graph-png-resolution = PNG Resolution
@@ -1047,6 +1047,19 @@ plot-legend-row-text = Row series
 plot-legend-row-number = Row number
 plot-legend-row-column-value = Value of column…
 plot-legend-row-column = Column
+plot-legend-position-dragged = Dragged
+plot-legend-text-section = Text
+plot-legend-frame-section = Frame
+plot-legend-frame-show = Show frame
+plot-legend-frame-color = Frame color
+    .auto = Auto (text color)
+plot-legend-frame-width = Frame width (pt)
+plot-legend-background-auto = Auto (background of the layer)
+plot-legend-layout-section = Layout
+plot-legend-columns = Columns
+plot-legend-row-gap = Row gap (pt)
+plot-legend-column-gap = Column gap (pt)
+plot-legend-swatch-length = Line sample length (pt)
 
 # Color Bar tab (#499)
 
@@ -2083,6 +2096,7 @@ disabled-color-invalid = Enter a valid color first
 disabled-gradient-min-colors = A gradient needs at least two colors
 disabled-mirror-off = Turn on the mirror axis first
 disabled-ticks-off = Show the ticks first
+disabled-legend-frame-off = Show the frame first
 disabled-minor-ticks-off = Show the minor ticks first
 disabled-analysis-issues = Fix the problem shown in the form first
 

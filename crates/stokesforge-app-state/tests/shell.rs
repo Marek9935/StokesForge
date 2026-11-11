@@ -8628,6 +8628,97 @@ fn changing_the_legend_text_source_is_one_undo_step() {
     assert_eq!(state.undo_label(), label_before, "a single history entry");
 }
 
+/// #507: the size set with the format toolbar (`Action::SetTextFont` on the
+/// legend) is what the Legend tab's draft holds when the window opens, and a
+/// size set while the window is open reaches the draft too (an untouched draft
+/// follows the model). Witness: a tab that kept its own copy of the font shows
+/// the old size.
+#[test]
+fn the_toolbar_font_size_of_the_legend_is_the_tab_value() {
+    use stokesforge_plot::{TextFont, TextTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let font = |size| TextFont {
+        family: "Noto Sans".into(),
+        size: Some(size),
+        ..TextFont::default()
+    };
+    state.dispatch(Action::SetTextFont {
+        graph,
+        target: TextTarget::Legend { panel: 0 },
+        font: font(20.0),
+    });
+    state.dispatch(PlotTarget::Legend.open_settings(graph));
+    let shown = |state: &AppState| {
+        state.plot_edit().unwrap().spec.panels[0]
+            .legend
+            .font
+            .clone()
+    };
+    assert_eq!(shown(&state).size, Some(20.0));
+    assert_eq!(shown(&state).family, "Noto Sans");
+
+    state.dispatch(Action::SetTextFont {
+        graph,
+        target: TextTarget::Legend { panel: 0 },
+        font: font(24.0),
+    });
+    state.begin_plot_edit(graph);
+    assert_eq!(shown(&state).size, Some(24.0));
+}
+
+/// #507: several edits of the Legend tab (font, frame, columns, spacing) are
+/// one history entry, and the committed values reach the model. Witness: one
+/// entry per commit (the first Undo leaves the later edits), or a setting the
+/// commit drops.
+#[test]
+fn several_legend_tab_edits_are_one_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    let label_before = state.undo_label();
+
+    state.dispatch(PlotTarget::Legend.open_settings(graph));
+    let edit_legend = |state: &mut AppState, apply: &dyn Fn(&mut stokesforge_plot::LegendSpec)| {
+        let edit = state.plot_edit_mut().expect("draft");
+        apply(&mut edit.spec.panels.get_mut(0).expect("panel").legend);
+        state.commit_plot_edit();
+    };
+    edit_legend(&mut state, &|legend| legend.font.size = Some(20.0));
+    edit_legend(&mut state, &|legend| {
+        legend.frame = false;
+        legend.frame_color = "#ff0000".into();
+        legend.frame_width = Some(2.0);
+        legend.background = "#ffffff80".into();
+    });
+    edit_legend(&mut state, &|legend| {
+        legend.columns = 2;
+        legend.row_gap = Some(6.0);
+        legend.column_gap = Some(20.0);
+        legend.swatch_length = Some(40.0);
+    });
+    state.close_plot_settings();
+
+    let legend = state.plot_spec(graph).expect("spec").panels[0]
+        .legend
+        .clone();
+    assert_eq!(legend.font.size, Some(20.0));
+    assert!(!legend.frame);
+    assert_eq!(legend.frame_color, "#ff0000");
+    assert_eq!(legend.frame_width_pt(), 2.0);
+    assert_eq!(legend.background, "#ffffff80");
+    assert_eq!(legend.column_count(), 2);
+    assert_eq!(legend.row_gap_pt(), 6.0);
+    assert_eq!(legend.column_gap_pt(), 20.0);
+    assert_eq!(legend.swatch_length_pt(), 40.0);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
 /// #499 step C: editing the colour bar in Graph Properties is one history
 /// entry, and one Undo brings back the graph without a bar. Witness: a bar
 /// edit that is not part of the committed draft (or one entry per field)

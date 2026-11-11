@@ -382,6 +382,35 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
+        name: "graphs-properties-legend",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            // A legend with the new settings: two columns, a red 2 pt frame,
+            // a half-transparent white background, a longer line sample.
+            if let Some(mut spec) = h.state().app.state.plot_spec(graph) {
+                let legend = &mut spec.panels.get_mut(0).expect("the first layer").legend;
+                legend.columns = 2;
+                legend.frame = true;
+                legend.frame_color = "#d62728".to_owned();
+                legend.frame_width = Some(2.0);
+                legend.background = "#ffffff80".to_owned();
+                legend.swatch_length = Some(40.0);
+                act(h, Action::SetPlotSpec { graph, spec });
+            }
+            act(
+                h,
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Legend,
+                    axis: None,
+                },
+            );
+            grow_dialog(h, 130.0);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
         name: "graphs-properties-color-bar",
         setup: |h| {
             empty_workspace(h);
