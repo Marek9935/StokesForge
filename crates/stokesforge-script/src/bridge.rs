@@ -85,9 +85,15 @@ impl HostError {
             CoreError::CalculatedColumnReadOnly { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
-            // #253: a row transposes only if all the columns of
-            // its sheet are numeric and carry an x'.
+            // #253: a row transposes only if all the Y columns of its sheet
+            // are numeric and carry an x' (or none does, #493: column numbers).
             CoreError::TransposeNoXPrime { .. } | CoreError::TransposeNotNumeric { .. } => {
+                HostError::InvalidValue(error.to_string())
+            }
+            // #463, #484: a formula or a calculation that would read the checked
+            // transposed sheet of its own source (a loop) is refused as a value.
+            CoreError::TransposeSourceReadsIt { .. }
+            | CoreError::CalculationReadsFollowingSheet { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
         }
@@ -692,9 +698,11 @@ pub(crate) fn import_file(
             .find(|r| r.name == name)
             .cloned()
             .ok_or_else(|| HostError::InvalidValue(format!("unknown template \"{name}\"")))?,
-        None => stokesforge_import::choose_recipe(store.recipes(), path, &bytes)
-            .cloned()
-            .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Untitled")),
+        None => {
+            stokesforge_import::recipe_for_file(&store, path, &bytes, None)
+                .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?
+                .recipe
+        }
     };
     let items = stokesforge_importer::import_items(path, &recipe);
     if let Some(error) = items.iter().find_map(|item| item.table.as_ref().err()) {

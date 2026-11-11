@@ -37,7 +37,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use stokesforge_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, WindowMeta};
+use stokesforge_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, RawSheetMark, WindowMeta};
 use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Staleness, Tree, ValueBlock};
 use stokesforge_plot::{PlotSpec, SavedColors};
 
@@ -131,6 +131,15 @@ pub enum DataDelta {
         before: WindowMeta,
         /// Metadata after.
         after: WindowMeta,
+    },
+    /// Setting or clearing the untouched-import mark of a sheet (#488).
+    RawMark {
+        /// Target sheet.
+        sheet: NodeId,
+        /// Mark before.
+        before: Option<RawSheetMark>,
+        /// Mark after.
+        after: Option<RawSheetMark>,
     },
     /// Replacing the text of a note.
     NoteText {
@@ -796,6 +805,13 @@ impl History {
         first_error.map_or(Ok(()), Err)
     }
 
+    /// Kinds of the open macros, from the outermost to the innermost (#488:
+    /// the actor does not rename an untouched import sheet while an `Import`
+    /// or `RefreshFromSource` macro is open).
+    pub fn open_macro_kinds(&self) -> impl Iterator<Item = MacroKind> + '_ {
+        self.macros.iter().map(|(kind, _)| *kind)
+    }
+
     /// True if at least one macro is open.
     pub fn in_macro(&self) -> bool {
         !self.macros.is_empty()
@@ -1198,6 +1214,10 @@ impl History {
                 project.recalculate_transpose(sheet)?;
                 Ok(structural(before, project, label))
             }
+            Command::SetTransposeAuto { sheet, auto } => {
+                project.set_transpose_auto(sheet, auto)?;
+                Ok(structural(before, project, label))
+            }
             Command::SetCells { .. }
             | Command::SetCellsPromoting { .. }
             | Command::SetColumnType { .. }
@@ -1205,6 +1225,7 @@ impl History {
             | Command::DeleteRows { .. }
             | Command::DeleteCells { .. }
             | Command::SetWindowMeta { .. }
+            | Command::SetSheetRawMark { .. }
             | Command::SetNoteText { .. }
             | Command::SetColumnMeta { .. }
             | Command::SetPlotSpec { .. }
@@ -1411,6 +1432,17 @@ impl History {
                     label,
                 })
             }
+            Command::SetSheetRawMark { sheet, mark } => {
+                let before = project.set_raw_mark(sheet, mark.clone())?;
+                Ok(Entry::Data {
+                    delta: Box::new(DataDelta::RawMark {
+                        sheet,
+                        before,
+                        after: mark,
+                    }),
+                    label,
+                })
+            }
             Command::SetNoteText { id, text } => {
                 let before = project.set_note_text(id, &text)?;
                 Ok(Entry::Data {
@@ -1511,7 +1543,8 @@ impl History {
             | Command::UpdateCalculation { .. }
             | Command::RemoveCalculation { .. }
             | Command::TransposeRows { .. }
-            | Command::RecalculateTranspose { .. } => {
+            | Command::RecalculateTranspose { .. }
+            | Command::SetTransposeAuto { .. } => {
                 unreachable!("apply_data called with a structural command")
             }
         }
@@ -1618,6 +1651,10 @@ impl History {
                 project.set_window_meta(*id, before.clone())?;
                 Ok(())
             }
+            DataDelta::RawMark { sheet, before, .. } => {
+                project.set_raw_mark(*sheet, before.clone())?;
+                Ok(())
+            }
             DataDelta::NoteText { id, before, .. } => {
                 project.set_note_text(*id, before)?;
                 Ok(())
@@ -1716,6 +1753,10 @@ impl History {
                 project.set_window_meta(*id, after.clone())?;
                 Ok(())
             }
+            DataDelta::RawMark { sheet, after, .. } => {
+                project.set_raw_mark(*sheet, after.clone())?;
+                Ok(())
+            }
             DataDelta::NoteText { id, after, .. } => {
                 project.set_note_text(*id, after)?;
                 Ok(())
@@ -1788,6 +1829,7 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             DataDelta::Cells { .. }
             | DataDelta::ColumnType { .. }
             | DataDelta::WindowMeta { .. }
+            | DataDelta::RawMark { .. }
             | DataDelta::NoteText { .. }
             | DataDelta::ColumnMeta { .. }
             | DataDelta::PlotSpec { .. }
@@ -1976,7 +2018,9 @@ fn is_derived(project: &Project, column: NodeId) -> bool {
         .ok()
         .and_then(|node| node.as_column())
         .is_some_and(|c| c.meta().formula.is_some());
-    formula || tree.calculation_of_column(column).is_some()
+    formula
+        || tree.calculation_of_column(column).is_some()
+        || tree.followed_transpose_column(column).is_some()
 }
 
 /// Type and length of a column, `None` if it is not one.
@@ -2125,6 +2169,11 @@ fn restamp_regressed_versions(
             targets.push(id);
         }
     }
+    // Ascending identifier order, never the order of `Tree::iter` (a hash table
+    // with a random seed per tree): two sessions replaying the same history
+    // must draw the same numbers (found by `b22` once the links of followed
+    // transposed sheets recorded them, #463).
+    targets.sort_unstable();
     for id in targets {
         let fresh = project.next_column_version();
         project.restamp_column_version(id, fresh)?;
@@ -2264,6 +2313,7 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
         // volume that justifies this mechanism (data columns). Same
         // choice as `InsertRows` above.
         DataDelta::WindowMeta { .. }
+        | DataDelta::RawMark { .. }
         | DataDelta::NoteText { .. }
         | DataDelta::PlotSpec { .. }
         | DataDelta::SavedColors { .. }
@@ -2351,7 +2401,9 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::RemoveCalculation { .. }
         | Command::TransposeRows { .. }
         | Command::RecalculateTranspose { .. }
+        | Command::SetTransposeAuto { .. }
         | Command::SetWindowMeta { .. }
+        | Command::SetSheetRawMark { .. }
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }
         | Command::SetPlotSpec { .. }
@@ -2397,6 +2449,7 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
         // See `prior_columns` and `data_delta_footprint`: these four deltas
         // never carry a column buffer, nothing to orphan here.
         DataDelta::WindowMeta { .. }
+        | DataDelta::RawMark { .. }
         | DataDelta::NoteText { .. }
         | DataDelta::ColumnMeta { .. }
         | DataDelta::PlotSpec { .. }

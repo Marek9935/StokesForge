@@ -172,7 +172,11 @@ impl ColorBarSegment {
 /// The colour bar of a layer (`PanelSpec::color_bar`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColorBarSpec {
-    /// The segments, in bar order.
+    /// The segments. **The order on the bar is the graph's group order**, never
+    /// this vector's (see [`Self::in_graph_order`]): an older file may store
+    /// another order, which is read and then ignored. A segment's `label` is
+    /// the break label *after* its group (keyed by the left group of the
+    /// break; unused when that group is the last one on the bar).
     pub segments: Vec<ColorBarSegment>,
     /// A segment starts where the previous one ends (group 1 0–57, group 2
     /// 0–25 is drawn 57–82). Changes the drawn scale only, never the color.
@@ -244,6 +248,28 @@ impl ColorBarSpec {
     /// The segment of `group`, if the bar has one.
     pub fn segment_of(&self, group: u32) -> Option<&ColorBarSegment> {
         self.segments.iter().find(|segment| segment.group == group)
+    }
+
+    /// The bar with its segments in the order of `order` (the group ids of
+    /// the layer, in graph order); a segment whose group is not in `order`
+    /// goes last. Borrowed when the order is already right.
+    pub fn in_graph_order(&self, order: &[u32]) -> std::borrow::Cow<'_, Self> {
+        let rank = |segment: &ColorBarSegment| {
+            order
+                .iter()
+                .position(|group| *group == segment.group)
+                .unwrap_or(usize::MAX)
+        };
+        if self
+            .segments
+            .windows(2)
+            .all(|pair| rank(&pair[0]) <= rank(&pair[1]))
+        {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut sorted = self.clone();
+        sorted.segments.sort_by_key(rank);
+        std::borrow::Cow::Owned(sorted)
     }
 
     /// Drops the segment of `group` (the group was dissolved or deleted).
@@ -449,5 +475,27 @@ mod tests {
         assert!(bar.remove_group(1));
         assert!(!bar.remove_group(1));
         assert_eq!(bar.segments.len(), 1);
+    }
+
+    /// The order of the segments is the graph's order of the groups, never the
+    /// stored one; already in order, nothing is copied. Witness: sorting by
+    /// the stored order keeps `[2, 1]`.
+    #[test]
+    fn segments_follow_the_graph_order() {
+        let bar = ColorBarSpec {
+            segments: vec![
+                ColorBarSegment::new(2),
+                ColorBarSegment::new(9),
+                ColorBarSegment::new(1),
+            ],
+            ..ColorBarSpec::default()
+        };
+        let sorted = bar.in_graph_order(&[1, 2]);
+        let groups: Vec<u32> = sorted.segments.iter().map(|s| s.group).collect();
+        assert_eq!(groups, [1, 2, 9], "unknown group goes last");
+        assert!(matches!(
+            sorted.in_graph_order(&[1, 2]),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 }

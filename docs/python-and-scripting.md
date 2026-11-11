@@ -178,7 +178,7 @@ describes its effects.
 | `save()` | saves at the project's current path; `InvalidValueError` if it has none (use `save_as`) |
 | `save_as(path)` | saves at this path (text or `pathlib.Path`), which becomes the current path |
 | `export_graph(graph, path, *, png_scale=4.0)` | exports a graph to `.svg`, `.pdf` or `.png` (unknown extension: `InvalidValueError`), same rendering as the application's export |
-| `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets |
+| `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets (the sheet is named after the file, not "Raw Data": only the application's **One Workbook per File** marks its sheet, #488) |
 | `set_graph(graph, *, panel=(0, 0), axis="left", unit="cm", **options)` | sets an existing graph through the Graph Properties keys ("`set_graph`" table below), sizes included (#399, in `unit`); **a single history entry**; unknown key, unit or refused value: `InvalidValueError`, nothing is written |
 | `graph_size(graph, *, unit="cm")` | reads the size of a graph (#399): dict `width`, `height`, `plot_widths`, `plot_heights`, `plot_left`, `plot_top`, `fixed_size`, `layer_placement`, `layers`, lengths in `unit` (`cm`, `mm`, `pt`, `in`); never writes |
 | `insert_rows(worksheet, at, count=1)` | inserts empty rows at row `at` (0 = at the top) in all columns of the sheet; `at` beyond the last row: `InvalidValueError` |
@@ -549,7 +549,7 @@ the list of the API below. Automatic colors follow the palette, series after ser
 | `remove_group(g, group, *, panel)` | removes the group **and its series** |
 | `set_group_style(g, group, *, panel, line_style, line_width, symbol, symbol_size)` | sets each given option on all members |
 | `apply_gradient(g, group, gradient, *, panel)` | `gradient`: identifier of a provided palette (`blue-red`…), name of a palette saved **in the project**, or list of `#RRGGBB` stops. The group **retains** the stops (a color bar reads them) |
-| `color_bar(g, groups=None, *, value_from, row_column, chain, scale, orientation, position, ticks, title, labels, ranges, length, thickness, visible, panel)` | sets the layer's color bar (#499), creating it when there is none; one undo step. `groups`: group numbers in bar order (a group already on the bar keeps its range and label); `labels`: Typst break labels, one per group; `ranges`: `(from, to)` per group, `None` = automatic; `value_from`: `x_prime` (default), `comments`, `long_name`, `short_name`, `units`; `row_column`: the column read by row series (`None` clears it, leaving it out keeps it); `scale`: `linear` or `log`; `orientation`: `horizontal` or `vertical` (forced by the places below / right); `position` (also drops a dragged place): `top_left`, `top_right`, `bottom_left`, `bottom_right`, `below`, `right`; `ticks`: `breaks` or `auto`; `length`, `thickness`: size of the strip in points, bounded (4 to 4000; at least 20 for the length), the length applying to a bar inside the frame only (below / right it follows the frame); a left-out value keeps the current one, and a script cannot go back to the automatic size; `visible` keeps its current value when left out (a new bar is shown); `visible=False` hides the bar and gives the curves their own colors back. A group put on the bar without a retained gradient gets the first provided palette. An unknown key, an unknown group or a `labels` / `ranges` list of the wrong length is refused (`InvalidValueError`) and changes nothing |
+| `color_bar(g, groups=None, *, value_from, row_column, chain, scale, orientation, position, ticks, title, labels, ranges, length, thickness, visible, panel)` | sets the layer's color bar (#499), creating it when there is none; one undo step. `groups`: group numbers (the order of the list does not matter: the bar always follows the graph's order of the groups; a group already on the bar keeps its range and label); `labels`: Typst label of the break after each group, one per group (the last group on the bar has no break); `ranges`: `(from, to)` per group, `None` = automatic; `value_from`: `x_prime` (default), `comments`, `long_name`, `short_name`, `units`; `row_column`: the column read by row series (`None` clears it, leaving it out keeps it); `scale`: `linear` or `log`; `orientation`: `horizontal` or `vertical` (forced by the places below / right); `position` (also drops a dragged place): `top_left`, `top_right`, `bottom_left`, `bottom_right`, `below`, `right`; `ticks`: `breaks` or `auto`; `length`, `thickness`: size of the strip in points, bounded (4 to 4000; at least 20 for the length), the length applying to a bar inside the frame only (below / right it follows the frame); a left-out value keeps the current one, and a script cannot go back to the automatic size; `visible` keeps its current value when left out (a new bar is shown); `visible=False` hides the bar and gives the curves their own colors back. A group put on the bar without a retained gradient gets the first provided palette. An unknown key, an unknown group or a `labels` / `ranges` list of the wrong length is refused (`InvalidValueError`) and changes nothing |
 
 A group number is the spec's: stable as long as the group exists. The
 gestures replay those of the interface (`PanelSpec::group_series`,
@@ -653,7 +653,13 @@ An Origin project (`.opj`) is read too: one workbook per Origin book and one
 sheet per `Data` sheet (every sheet with columns when a book has none named
 `Data`), columns carrying their long names, units, roles and the Horiba
 information; a template name with an `.opj` is refused.
-A single `pyst.undo()` or Ctrl+Z removes the whole import. An unknown template or an
+A single `pyst.undo()` or Ctrl+Z removes the whole import. The sheet it creates
+is named after the file and carries no "Raw Data" mark (#488: only the
+application's **One Workbook per File** marks its sheet). A script that writes
+the value of an imported column of a still-marked "Raw Data" sheet renames it
+"Sheet1" inside its group, like the interface, so a path such as
+`[x]Raw Data!A` stops resolving after the write and `[x]Sheet1!A` takes over; a
+script resolves the name again after a write. An unknown template or an
 unreadable file raises `InvalidValueError` before any mutation; an error
 during creation aborts the macro. Parsing and commands run with
 the GIL released, like the other calls to the model.

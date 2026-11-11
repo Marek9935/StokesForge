@@ -870,7 +870,11 @@ fn cell_plans<DB: DrawingBackend>(
             offsets.push((plan.bar_bottom, plan.bar_right));
             plan.add(
                 panel,
-                crate::color_bar::band(panel.color_bar.as_ref(), &panel.legend.font, probe)?,
+                crate::color_bar::band(
+                    panel.color_bar_in_order().as_deref(),
+                    &panel.legend.font,
+                    probe,
+                )?,
             );
         } else {
             ranks.push((0, 0));
@@ -3814,7 +3818,8 @@ fn draw_panel<DB: DrawingBackend>(
     }
 
     // The colour bar (#499), after the legend.
-    if let Some(bar) = spec.color_bar.as_ref().filter(|bar| bar.visible) {
+    if let Some(bar) = spec.color_bar_in_order().filter(|bar| bar.visible) {
+        let bar = &*bar;
         let segments = crate::color_bar::bar_segments(panel);
         let bar_ink = opaque(ink);
         let placed = crate::color_bar::draw(

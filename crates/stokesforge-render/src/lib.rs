@@ -131,8 +131,8 @@ pub use free_gesture::{
     TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
-    grid_corners, grid_handle_at, locked_corner_delta, resized_frames, scaled_axis, scaled_frames,
-    splitter, GridCorner, GridHandle,
+    grid_cell_at, grid_corners, grid_handle_at, locked_corner_delta, resized_frames, scaled_axis,
+    scaled_frames, splitter, GridCorner, GridHandle,
 };
 pub use hit::{
     component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,

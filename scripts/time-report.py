@@ -169,7 +169,7 @@ def note_commands(state, cmd):
         state['pend_trial'] = False
     elif re.search(r'suivi\.py\s+test\s+add\b|\btry\.sh\b', c):
         state['pend_trial'] = True
-    if re.search(r'suivi\.py\s+qcm\s+answers\b', c):
+    if re.search(r'suivi\.py\s+qcm\s+(answers|withdraw)\b', c):
         state['pend_form'] = False
     elif re.search(r'suivi\.py\s+qcm\s+pose\b', c):
         state['pend_form'] = True

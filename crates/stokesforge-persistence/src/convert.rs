@@ -6,7 +6,8 @@
 use stokesforge_core::column::MAX_COLUMN_ROWS;
 use stokesforge_core::{
     Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError,
-    FormulaPart, MixedCell, Node, NodeId, NodeKind, RemoteRef, ValueBlock, WindowMeta,
+    FormulaPart, MixedCell, Node, NodeId, NodeKind, RawSheetMark, RemoteRef, ValueBlock,
+    WindowMeta,
 };
 use stokesforge_plot::{
     AnnotationSpec, AxisScale, AxisSpec, ColorBarOrientation, ColorBarPosition, ColorBarScale,
@@ -1065,8 +1066,9 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             label: meta.label.clone(),
             comment: meta.comment.clone(),
         },
-        NodeKind::Worksheet { columns } => KindRecord::Worksheet {
+        NodeKind::Worksheet { columns, raw } => KindRecord::Worksheet {
             columns: columns.iter().map(|id| id.raw()).collect(),
+            raw_modified_base: raw.as_ref().map(|mark| mark.modified_base.clone()),
         },
         NodeKind::Column(column) => {
             let meta = column.meta();
@@ -1171,8 +1173,12 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 hidden,
             },
         },
-        KindRecord::Worksheet { columns } => NodeKind::Worksheet {
+        KindRecord::Worksheet {
+            columns,
+            raw_modified_base,
+        } => NodeKind::Worksheet {
             columns: columns.into_iter().map(NodeId::from_raw).collect(),
+            raw: raw_modified_base.map(|modified_base| RawSheetMark { modified_base }),
         },
         KindRecord::Column {
             column_type,

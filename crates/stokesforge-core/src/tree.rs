@@ -160,6 +160,19 @@ impl Tree {
             .map(|(sheet, link)| (*sheet, link.as_ref()))
     }
 
+    /// The followed transposed sheet (box "Recalculate automatically"
+    /// checked, #463) whose link keeps `column` up to date: its x' or one of
+    /// its Row columns. Such a column is derived, like a formula column.
+    pub fn followed_transpose_column(&self, column: NodeId) -> Option<NodeId> {
+        self.transposes
+            .iter()
+            .find(|(_, link)| {
+                link.auto_recalc
+                    && (link.x_column == column || link.rows.iter().any(|r| r.column == column))
+            })
+            .map(|(sheet, _)| *sheet)
+    }
+
     /// The same tree, with these links — for persistence.
     pub fn with_transposes(mut self, transposes: BTreeMap<NodeId, Arc<TransposeLink>>) -> Self {
         self.transposes = transposes;
@@ -568,6 +581,25 @@ impl Tree {
                 }
             }
         }
+    }
+
+    /// The worksheets that still carry the mark of an untouched import
+    /// (#488), in walk order. Visits folders, workbooks and sheets only,
+    /// never a column, and allocates nothing but the result.
+    pub fn raw_sheets(&self) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        self.visit_windows(|book| {
+            for &sheet in self.node(book).map_or(&[][..], |node| node.children()) {
+                let marked = self.node(sheet).is_some_and(|node| {
+                    matches!(node.kind(), NodeKind::Worksheet { raw: Some(_), .. })
+                });
+                if marked {
+                    out.push(sheet);
+                }
+            }
+            false
+        });
+        out
     }
 
     /// Direct child of `parent` with this name, or `None`.
@@ -1109,6 +1141,7 @@ mod tests {
     fn worksheet_kind() -> NodeKind {
         NodeKind::Worksheet {
             columns: Vec::new(),
+            raw: None,
         }
     }
 

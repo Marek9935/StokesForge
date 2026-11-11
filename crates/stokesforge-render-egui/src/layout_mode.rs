@@ -9,10 +9,17 @@
 //!   handles, the box under the pointer shows them faintly. The figure is a
 //!   **page** whose corners can be pulled. All the geometry is in
 //!   `stokesforge_render::free_gesture` (stored page coordinates).
-//! * **Regular Grid**: the grid is not converted. Nothing moves and no single
-//!   graph is resized; the internal boundaries between columns and rows, and
-//!   the graph corners lying on one of them, are the handles. All the geometry
-//!   is in `stokesforge_render::grid_gesture` (figure pixels).
+//! * **Regular Grid**: the grid is not converted and no single graph is
+//!   resized; the internal boundaries between columns and rows, and the graph
+//!   corners lying on one of them, are the handles (they keep priority). A drag
+//!   that starts **inside a graph**, off a handle, **moves that graph** (#491):
+//!   the cell under the pointer is outlined (a graph there swaps places, a hole
+//!   takes the graph), the right and bottom edge bands of the figure make a new
+//!   column or row, and nothing moves until the release, which sends one
+//!   [`GraphEvent::GridCellMoved`]. The arrow keys move the selected graph by
+//!   one cell ([`GraphView::nudge`]). All the geometry is in
+//!   `stokesforge_render::grid_gesture` (figure pixels); the edge bands are
+//!   those of [`crate::edge_band`], shared with the drop of workbook columns.
 //!
 //! In both, the primary drag does nothing else (no pan, no zoom, no object
 //! drag). This module only maps pointer events to the geometry, previews the
@@ -23,15 +30,18 @@ use egui::{
     Color32, Context, CursorIcon, FontId, Painter, PointerButton, Pos2, Rect, Response, Shape,
     Stroke, StrokeKind, Visuals,
 };
+use stokesforge_core::compose::MoveTarget;
 use stokesforge_plot::{FreeFrame, FreePage, LayerPlacement, LengthUnit, PlotSpec};
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
-    boundary_group, figure_to_stored, graph_boxes, grid_corners, grid_handle_at, layout_handle_at,
-    locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_frames, resized_page,
-    scaled_frames, scaled_to_page, stored_to_figure, BoundaryGroup, GraphBox, GridCorner,
-    GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
+    boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
+    layout_handle_at, locked_corner_delta, moved_boundary, moved_box, nudged_box, resized_frames,
+    resized_page, scaled_frames, scaled_to_page, stored_to_figure, BoundaryGroup, GraphBox,
+    GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX,
+    MAGNET_THRESHOLD_POINTS,
 };
 
+use crate::edge_band::{edge_drop_side, paint_edge_bands, EDGE_BAND_WIDTH};
 use crate::{FramePreview, GraphEvent, GraphView};
 
 /// Room the host must leave around the figure, and let its clip rectangle
@@ -138,6 +148,14 @@ enum DragKind {
         /// The image `(width, height)` at the press, for the ratio lock.
         image: (f64, f64),
     },
+    /// A graph of a regular grid dragged to another place (#491). Nothing
+    /// is previewed on the figure; the target is outlined by the overlay.
+    MoveCell {
+        /// The base layer of the dragged graph.
+        base: usize,
+        /// Its cell `(row, column)` at the press.
+        source: (usize, usize),
+    },
 }
 
 /// A box, boundary or page-corner drag in progress. Everything is frozen at
@@ -151,6 +169,8 @@ pub(crate) struct LayoutDrag {
     /// The placement the figure was drawn with at the press.
     placement: LayerPlacement,
     pub(crate) guides: Vec<Guide>,
+    /// Where a [`DragKind::MoveCell`] would put the graph if released now.
+    moving: Option<MoveTarget>,
 }
 
 /// A burst of arrow-key nudges not yet committed.
@@ -561,8 +581,8 @@ impl GraphView {
     /// previewed. The burst is committed as **one** [`GraphEvent::LayoutEdited`]
     /// after 0.7 s without a nudge (`now` and the frame clock are the same
     /// clock, `egui::InputState::time`), when the mode is left, when a drag
-    /// starts or on [`GraphView::commit_layout_edit`]. A regular grid is never
-    /// nudged.
+    /// starts or on [`GraphView::commit_layout_edit`]. On a regular grid a key
+    /// moves the selected graph one cell instead (#491), sent at once.
     pub fn nudge(&mut self, steps: (i32, i32), now: f64) {
         if !self.layout.mode || steps == (0, 0) || self.layout.drag.is_some() {
             return;
@@ -570,6 +590,10 @@ impl GraphView {
         let Some(view) = self.layout.view.clone() else {
             return;
         };
+        if view.placement == LayerPlacement::Grid {
+            self.nudge_grid_cell(&view, steps);
+            return;
+        }
         let Some(page) = view.page.filter(|_| view.placement == LayerPlacement::Free) else {
             return;
         };
@@ -613,6 +637,44 @@ impl GraphView {
             page: Some(page),
             ..FramePreview::default()
         }));
+    }
+
+    /// An arrow key on a regular grid (#491): the selected graph moves one cell
+    /// in the direction of the key, as one [`GraphEvent::GridCellMoved`] (a swap
+    /// if the cell is occupied). Nothing at the edge of the grid, on a grid with
+    /// no frames to edit, or with no selection. The size of the step does not
+    /// matter (Shift counts as one cell); a horizontal key wins over a vertical
+    /// one pressed in the same frame.
+    fn nudge_grid_cell(&mut self, view: &LayoutView, steps: (i32, i32)) {
+        let Some(grid) = view.grid.as_ref().filter(|grid| grid.editable) else {
+            return;
+        };
+        let Some(cell) = view
+            .selected
+            .first()
+            .and_then(|base| grid.cells.iter().find(|cell| cell.base == *base))
+        else {
+            return;
+        };
+        let (dx, dy) = if steps.0 != 0 {
+            (steps.0.signum(), 0)
+        } else {
+            (0, steps.1.signum())
+        };
+        let moved = |from: usize, by: i32, count: usize| {
+            let to = i64::try_from(from).ok()? + i64::from(by);
+            usize::try_from(to).ok().filter(|to| *to < count)
+        };
+        let (Some(row), Some(column)) = (
+            moved(cell.row, dy, grid.rows),
+            moved(cell.column, dx, grid.columns),
+        ) else {
+            return;
+        };
+        self.events.push(GraphEvent::GridCellMoved {
+            panel: cell.base,
+            target: MoveTarget::Cell { row, column },
+        });
     }
 
     /// Commits the pending nudge burst as one event, if it moved anything.
@@ -834,6 +896,42 @@ impl GraphView {
             .map(|cell| cell.base)
     }
 
+    /// The occupied cell of a regular grid under the screen position `pos`
+    /// (an editable grid only: a move needs its frames), or `None` over a hole
+    /// or off the grid.
+    fn grid_cell_at_screen(&self, pos: Pos2, grid: &GridView) -> Option<GridCell> {
+        if !grid.editable {
+            return None;
+        }
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let figure = self.figure_position(pos)?;
+        let (row, column) = grid_cell_at(layout, f64::from(figure.x), f64::from(figure.y))?;
+        grid.cells
+            .iter()
+            .find(|cell| (cell.row, cell.column) == (row, column))
+            .copied()
+    }
+
+    /// Where releasing a dragged graph at the screen position `pos` would put
+    /// it (#491): into a new column or row in an edge band of the figure, else
+    /// on the cell under the pointer (a hole is a place); `None` on its own
+    /// cell, outside the grid, or beside itself.
+    fn move_target(&self, pos: Pos2, base: usize, source: (usize, usize)) -> Option<MoveTarget> {
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let display = self.display_rect?;
+        if let Some(side) = edge_drop_side(pos, display, EDGE_BAND_WIDTH) {
+            let panel = self.nearest_cell(pos)?;
+            // Beside its own cell is no move (the model refuses it too).
+            return (panel != base).then_some(MoveTarget::Beside { panel, side });
+        }
+        let figure = self.figure_position(pos)?;
+        let cell = grid_cell_at(layout, f64::from(figure.x), f64::from(figure.y))?;
+        (cell != source).then_some(MoveTarget::Cell {
+            row: cell.0,
+            column: cell.1,
+        })
+    }
+
     /// The cells whose band a grid handle is on, shown faintly.
     fn grid_handle_cells(&self, handle: &GridHandle, grid: &GridView) -> Vec<usize> {
         grid.cells
@@ -893,6 +991,7 @@ impl GraphView {
                 DragKind::Free { handle, .. } => handle_cursor(handle),
                 DragKind::Grid { handle, .. } => grid_cursor(handle),
                 DragKind::Figure { corner, .. } => resize_cursor(true, true, corner.0 == corner.1),
+                DragKind::MoveCell { .. } => CursorIcon::Grabbing,
             }),
             None if response.hovered() => self.hover_cursor(response.hover_pos(), &view, spec),
             None => None,
@@ -1001,6 +1100,12 @@ impl GraphView {
                     ..FramePreview::default()
                 }));
             }
+            DragKind::MoveCell { base, source } => {
+                let target = self.move_target(pos, *base, *source);
+                if let Some(active) = self.layout.drag.as_mut() {
+                    active.moving = target;
+                }
+            }
             DragKind::Grid {
                 handle,
                 widths,
@@ -1063,7 +1168,27 @@ impl GraphView {
             }
             (Some(grid), _) => {
                 let Some(handle) = self.grid_handle_under(origin, grid) else {
-                    return false;
+                    // Off every handle: inside a graph, the drag moves it.
+                    let Some(cell) = self.grid_cell_at_screen(origin, grid) else {
+                        return false;
+                    };
+                    if !self.layer_in_selection(cell.base, spec) {
+                        self.set_active_panel(cell.base, spec);
+                        self.clear_extra_layers();
+                    }
+                    self.commit_nudge();
+                    self.layout.drag = Some(LayoutDrag {
+                        kind: DragKind::MoveCell {
+                            base: cell.base,
+                            source: (cell.row, cell.column),
+                        },
+                        press: origin,
+                        scale,
+                        placement: view.placement,
+                        guides: Vec::new(),
+                        moving: None,
+                    });
+                    return true;
                 };
                 let Some((_, layout)) = self.figure_memo.as_ref() else {
                     return false;
@@ -1127,6 +1252,7 @@ impl GraphView {
             scale,
             placement: view.placement,
             guides: Vec::new(),
+            moving: None,
         });
         true
     }
@@ -1197,6 +1323,12 @@ impl GraphView {
             _ => None,
         };
         let event = match (&drag.kind, preview.clone()) {
+            (DragKind::MoveCell { base, .. }, _) => {
+                drag.moving.map(|target| GraphEvent::GridCellMoved {
+                    panel: *base,
+                    target,
+                })
+            }
             (
                 DragKind::Grid {
                     widths, heights, ..
@@ -1273,6 +1405,11 @@ impl GraphView {
             }
         }
 
+        if let Some(drag) = &self.layout.drag {
+            if matches!(drag.kind, DragKind::MoveCell { .. }) {
+                self.paint_move_target(painter, drag.moving, accent);
+            }
+        }
         let in_selection = |graph: &GraphBox| view.selected.contains(&graph.base);
         let dragging = self.layout.drag.is_some();
         for selected in [false, true] {
@@ -1299,6 +1436,37 @@ impl GraphView {
                     5.0,
                     3.0,
                 ));
+            }
+        }
+    }
+
+    /// The target of a graph being moved (#491): the cell it would take is
+    /// outlined, the two edge bands of the figure are shown, the one under the
+    /// pointer filled. Screen only.
+    fn paint_move_target(&self, painter: &Painter, target: Option<MoveTarget>, accent: Color32) {
+        let (Some((_, layout)), Some(display), Some(scale)) = (
+            self.figure_memo.as_ref(),
+            self.display_rect,
+            self.display_scale(),
+        ) else {
+            return;
+        };
+        let side = match target {
+            Some(MoveTarget::Beside { side, .. }) => Some(side),
+            _ => None,
+        };
+        paint_edge_bands(painter, display, side);
+        if let Some(MoveTarget::Cell { row, column }) = target {
+            if let Some((x, y, w, h)) = layout.cell_rect(row, column) {
+                let min = display.min + egui::vec2(x as f32, y as f32) * scale;
+                let rect = Rect::from_min_size(min, egui::vec2(w as f32, h as f32) * scale);
+                painter.rect(
+                    rect,
+                    0.0,
+                    accent.gamma_multiply(0.15),
+                    Stroke::new(2.5, accent),
+                    StrokeKind::Inside,
+                );
             }
         }
     }

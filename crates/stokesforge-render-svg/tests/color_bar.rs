@@ -516,3 +516,88 @@ fn below_the_frame_only_the_thickness_applies() {
         "the length follows the frame"
     );
 }
+
+/// The drawn segments of the first layer, as `(label, natural start)`.
+fn drawn_order(project: &Project, spec: &PlotSpec) -> Vec<(String, f64)> {
+    let panel = stokesforge_core::resolve::resolve_panel(project.tree(), &spec.panels[0]);
+    stokesforge_render::color_bar::bar_segments(&panel)
+        .into_iter()
+        .map(|segment| (segment.label, segment.natural.0))
+        .collect()
+}
+
+/// The order on the bar is the graph's order of the groups (#499, page A):
+/// reordering the groups in the graph reorders the bar, and a stored order
+/// that differs (an older file) is ignored. Witness: reading the stored
+/// order of the segments fails the second and third assertions.
+#[test]
+fn the_bar_follows_the_graph_order_of_the_groups() {
+    let mut project = Project::new("Bar").expect("project");
+    let mut spec = two_group_spec(&mut project, false);
+    // Group 1 holds 0..20 and carries the break label, group 2 holds 40..57.
+    assert_eq!(
+        drawn_order(&project, &spec),
+        [("switch".to_string(), 0.0), (String::new(), 40.0)]
+    );
+    // An old file stored the segments the other way round: the graph wins.
+    spec.panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar")
+        .segments
+        .reverse();
+    assert_eq!(drawn_order(&project, &spec)[0].1, 0.0);
+    // The groups change places in the graph: the bar follows.
+    spec.panels.get_mut(0).expect("panel").series.reverse();
+    let after = drawn_order(&project, &spec);
+    assert_eq!(after[0].1, 40.0, "{after:?}");
+    assert_eq!(after[1], ("switch".to_string(), 0.0));
+}
+
+/// A group left off the bar keeps its own colours and legend entries, and
+/// only the break between two groups on the bar is labelled: the label of the
+/// last group is never drawn. Witness: a bar that takes every group fails the
+/// first part; drawing the last label fails the second.
+#[test]
+fn an_unchecked_group_keeps_its_entries_and_the_last_has_no_break() {
+    let mut project = Project::new("Bar").expect("project");
+    let mut spec = two_group_spec(&mut project, false);
+    let bar = spec
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar");
+    bar.segments.pop();
+    bar.segments[0].label = "gone".to_string();
+    let plot = resolve_spec(project.tree(), &spec);
+    let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+        .expect("export")
+        .to_uppercase();
+    let all = texts(&document);
+    let has = |text: &str| all.iter().any(|t| t.2 == text);
+    assert!(has("C") && has("D"), "legend entries of the free group");
+    assert!(!has("A") && !has("B"), "entries of the group on the bar");
+    assert!(document.contains("#112233"), "own colour of the free group");
+    assert!(!has("GONE"), "a single group on the bar has no break");
+
+    let mut other = Project::new("Two").expect("project");
+    let mut spec = two_group_spec(&mut other, false);
+    spec.panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar")
+        .segments[1]
+        .label = "TAIL".to_string();
+    let plot = resolve_spec(other.tree(), &spec);
+    let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+        .expect("export")
+        .to_uppercase();
+    assert!(texts(&document).iter().any(|t| t.2 == "SWITCH"));
+    assert!(!texts(&document).iter().any(|t| t.2 == "TAIL"));
+}

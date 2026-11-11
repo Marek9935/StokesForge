@@ -450,6 +450,7 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
             comment: Some(SubheaderLineRange { from: 4, to: 5 }),
             x_prime: Some(SubheaderLineRange::single(6)),
             same_line_name_unit: true,
+            join_lines: true,
         },
         skip_chars: 5,
         preview_lines: 33,
@@ -473,5 +474,25 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
         import_mode: ImportMode::AddRows,
         files_layout: FilesLayout::SharedX,
         block_split: BlockSplit::BeforeLine("XYDATA".into()),
+        main_until_marker: Some("XYDATA".into()),
+        header_props: vec![
+            HeaderProp {
+                key: "XUNITS".into(),
+                field: PropField::Units,
+                target: PropTarget::X,
+                short_unit: true,
+            },
+            HeaderProp {
+                key: "TITLE".into(),
+                field: PropField::LongName,
+                target: PropTarget::All,
+                short_unit: false,
+            },
+        ],
+        skip_text_rows: true,
+        format: FileFormat::Jcamp,
+        name_unit_slash: true,
+        strip_unit_brackets: true,
+        sheet_name_from_file: true,
     }
 }

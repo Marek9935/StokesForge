@@ -25,7 +25,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use stokesforge_core::Project;
-use stokesforge_import::{choose_recipe, FilesLayout, ImportRecipe, RecipeStore};
+use stokesforge_import::{recipe_for_file, FilesLayout, RecipeStore};
 
 const USAGE: &str = "usage:
   stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.stf] FILE...
@@ -150,11 +150,12 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         ),
         None => None,
     };
-    // One template per file: the one named, otherwise the automatic choice,
-    // otherwise the permissive recipe. An Origin project has no template.
+    // One template per file: the one named, otherwise the template whose
+    // conditions the file meets, otherwise the detector (the same choice as
+    // the application and `pyst.import_file`). An Origin project has no template.
     let mut items = Vec::new();
     let mut origin_files = Vec::new();
-    let mut failures: Vec<String> = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
     for path in &args.files {
         let bytes = std::fs::read(path).ok();
         let is_origin = stokesforge_importer::is_origin_path(path)
@@ -164,27 +165,43 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         if is_origin {
             match stokesforge_importer::read_origin_file(path) {
                 Ok(project) => origin_files.push((path, project)),
-                Err(failure) => failures.push(failure.to_string()),
+                Err(failure) => refused.push(failure.to_string()),
             }
             continue;
         }
         let mut recipe = match &named {
             Some(recipe) => recipe.clone(),
-            None => bytes
-                .and_then(|bytes| choose_recipe(store.recipes(), path, &bytes).cloned())
-                .unwrap_or_else(|| ImportRecipe::new("Untitled")),
+            None => {
+                let chosen = std::fs::read(path)
+                    .map_err(|err| err.to_string())
+                    .and_then(|bytes| {
+                        recipe_for_file(&store, path, &bytes, None).map_err(|err| err.to_string())
+                    });
+                match chosen {
+                    Ok(chosen) => chosen.recipe,
+                    // A file nobody can read (missing, NMR, binary) is skipped
+                    // and reported; the others go on.
+                    Err(message) => {
+                        refused.push(format!("{}: {message}", path.display()));
+                        continue;
+                    }
+                }
+            }
         };
         if let Some(layout) = args.layout {
             recipe.files_layout = layout;
         }
         items.extend(stokesforge_importer::import_items(path, &recipe));
     }
-    failures.extend(
-        items
-            .iter()
-            .filter_map(|item| item.table.as_ref().err())
-            .map(ToString::to_string),
-    );
+    let failures: Vec<String> = refused
+        .into_iter()
+        .chain(
+            items
+                .iter()
+                .filter_map(|item| item.table.as_ref().err())
+                .map(ToString::to_string),
+        )
+        .collect();
     let layout = items
         .iter()
         .find(|item| item.table.is_ok())

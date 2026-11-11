@@ -649,6 +649,7 @@ fn transpose_reads_formula_columns_and_a_formula_reads_a_transposed_column() {
             rows: vec![0, 1],
         })
         .expect("transpose");
+        uncheck_auto(&h, source);
         let t = snap(&h).tree;
         let tsheet = t
             .children(node(&t, "[Book1]"))
@@ -2288,6 +2289,15 @@ fn link_state(h: &SessionHandle, source: NodeId) -> stokesforge_core::TransposeS
     link.state(&t)
 }
 
+/// Unchecks "Recalculate automatically" on the sheet transposed from `source`:
+/// these tests pin the behavior of the snapshot link (#463: a new link follows
+/// its source by default).
+fn uncheck_auto(h: &SessionHandle, source: NodeId) {
+    let sheet = snap(h).tree.transposed_from(source).expect("link").0;
+    h.execute(Command::SetTransposeAuto { sheet, auto: false })
+        .expect("uncheck");
+}
+
 fn add_folder(h: &SessionHandle, name: &str) {
     h.execute(Command::AddFolder {
         parent: snap(h).tree.root(),
@@ -2311,6 +2321,7 @@ fn a_transposed_sheet_over_a_formula_column_is_not_stale_after_reload_or_unrelat
         rows: vec![0, 1],
     })
     .expect("transpose");
+    uncheck_auto(&h, source);
     assert!(!link_state(&h, source).stale, "fresh");
     add_folder(&h, "Later");
     assert!(!link_state(&h, source).stale, "after an unrelated command");
@@ -2341,6 +2352,7 @@ fn a_link_stale_in_the_file_stays_stale_after_load() {
         rows: vec![0, 1],
     })
     .expect("transpose");
+    uncheck_auto(&h, source);
     let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
     h.execute(enter(b, 0, &[11.0])).expect("edit");
     assert!(link_state(&h, source).stale, "stale before saving");
@@ -2359,7 +2371,8 @@ fn a_link_whose_formula_input_really_changes_on_load_is_stale() {
     let mut p = transposable();
     let source = p.tree().resolve("[Book1]Sheet1").expect("sheet");
     // No session: D keeps its stored (empty) values, the link reads them.
-    p.transpose_rows(source, &[0, 1]).expect("transpose");
+    let sheet = p.transpose_rows(source, &[0, 1]).expect("transpose");
+    p.set_transpose_auto(sheet, false).expect("uncheck");
     let dir = scratch("transpose-differing");
     let path = dir.path().join("t.stf");
     stokesforge_persistence::save(&p, &path).expect("save");
@@ -2425,6 +2438,7 @@ fn run_a_noop_over_an_up_to_date_link(
         rows: vec![0, 1],
     })
     .expect("transpose");
+    uncheck_auto(&h, source);
     let sheet = snap(&h).tree.transposed_from(source).expect("link").0;
     add_folder(&h, "Between");
     noop(&h, source, sheet);
@@ -2483,6 +2497,7 @@ fn writing_the_same_value_in_the_source_makes_the_link_stale() {
             rows: vec![0, 1],
         })
         .expect("transpose");
+        uncheck_auto(&h, source);
         assert!(!link_state(&h, source).stale, "{mode:?}: fresh");
         let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
         h.execute(enter(b, 0, &[10.0])).expect("write 10 on 10");
@@ -2510,6 +2525,7 @@ fn a_changed_then_restored_source_stays_stale() {
             rows: vec![0, 1],
         })
         .expect("transpose");
+        uncheck_auto(&h, source);
         let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
         h.execute(enter(b, 0, &[11.0])).expect("change");
         h.undo().expect("undo the change");
@@ -2571,6 +2587,7 @@ fn a_formula_recomputed_to_the_same_numbers_does_not_make_the_link_stale() {
             rows: vec![0],
         })
         .expect("transpose");
+        uncheck_auto(&h, source);
         assert!(!link_state(&h, source).stale, "{mode:?}: fresh");
 
         // An edit that does not change the max: D is evaluated, not renumbered.
@@ -2697,6 +2714,7 @@ fn a_link_stays_up_to_date_after_load_and_an_unrelated_edit_undone() {
         rows: vec![0, 1],
     })
     .expect("transpose");
+    uncheck_auto(&h, source);
     let dir = scratch("transpose-after-load-edit");
     let path = dir.path().join("t.stf");
     h.save(&path).expect("save");
@@ -2818,5 +2836,492 @@ fn a_kept_formula_binds_when_the_file_is_loaded() {
             .as_ref()
             .is_some_and(|f| f.compile().is_err()));
         assert!(s.tree.pending_bindings().is_empty());
+    }
+}
+
+// -- 5. a transposed sheet that follows its source (#463) ------------------------
+
+/// The followed sheet of `source` and its columns (x', Row 1, Row 2).
+fn followed(h: &SessionHandle, source: NodeId) -> (NodeId, Vec<NodeId>) {
+    let t = snap(h).tree;
+    let sheet = t.transposed_from(source).expect("link").0;
+    (sheet, t.children(sheet).expect("columns").to_vec())
+}
+
+/// `transposable()` with its two rows transposed; the box is checked.
+fn followed_start(mode: FormulaRecalc) -> (Session, SessionHandle, NodeId) {
+    let (s, h) = spawn(transposable(), mode);
+    let source = node(&snap(&h).tree, "[Book1]Sheet1");
+    h.execute(Command::TransposeRows {
+        source,
+        rows: vec![0, 1],
+    })
+    .expect("transpose");
+    (s, h, source)
+}
+
+/// Edit a source value: the followed sheet follows by itself, through the
+/// source's own formula column, with no entry of its own; undo brings both back.
+/// Witnesses: the follow step removed; the box ignored (the unchecked case).
+#[test]
+fn a_followed_sheet_follows_its_source_and_one_undo_takes_both_back() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (_sheet, cols) = followed(&h, source);
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("edit B");
+        let t = snap(&h).tree;
+        // Row 1 = [B, C, D] at row 0; D = B + C was recomputed in the same pass.
+        assert_eq!(nums(&t, cols[1]), some(&[11.0, 100.0, 111.0]), "{mode:?}");
+        assert_eq!(nums(&t, cols[2]), some(&[20.0, 200.0, 220.0]), "{mode:?}");
+        assert!(!link_state(&h, source).stale, "{mode:?}: not stale");
+        // One Ctrl+Z undoes the edit; the sheet follows the restored source.
+        h.undo().expect("undo").expect("an entry");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), some(&[10.0, 100.0, 110.0]), "{mode:?}");
+        assert!(
+            !link_state(&h, source).stale,
+            "{mode:?}: not stale after undo"
+        );
+        // The next entry down is the transposition itself: no entry for the follow.
+        h.undo().expect("undo").expect("the transposition");
+        assert!(snap(&h).tree.transposes().is_empty(), "{mode:?}");
+    }
+}
+
+#[test]
+fn an_unchecked_sheet_stays_a_snapshot() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (sheet, cols) = followed(&h, source);
+        h.execute(Command::SetTransposeAuto { sheet, auto: false })
+            .expect("uncheck");
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("edit B");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), some(&[10.0, 100.0, 110.0]), "{mode:?}");
+        assert!(
+            link_state(&h, source).stale,
+            "{mode:?}: out of date as before"
+        );
+        // Checking it again catches up at once.
+        h.execute(Command::SetTransposeAuto { sheet, auto: true })
+            .expect("check");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), some(&[11.0, 100.0, 111.0]), "{mode:?}");
+        assert!(!link_state(&h, source).stale, "{mode:?}");
+    }
+}
+
+/// Rule 4: a value typed in the followed sheet is never overwritten; the whole
+/// sheet waits (box stays checked) until Relink or Ctrl+Z. Witness: the pass
+/// ignores `modified`.
+#[test]
+fn a_typed_value_stops_the_whole_sheet_following_until_relink_or_undo() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (sheet, cols) = followed(&h, source);
+        h.execute(enter(cols[1], 0, &[-5.0]))
+            .expect("type in Row 1");
+        assert!(link_state(&h, source).modified, "{mode:?}");
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("edit B");
+        let t = snap(&h).tree;
+        assert_eq!(
+            nums(&t, cols[1])[0],
+            Some(-5.0),
+            "{mode:?}: typed value kept"
+        );
+        assert_eq!(
+            nums(&t, cols[2]),
+            some(&[20.0, 200.0, 220.0]),
+            "{mode:?}: other rows wait too"
+        );
+        let state = link_state(&h, source);
+        assert!(state.stale && state.modified, "{mode:?}: both shown");
+        assert!(
+            t.transpose_link(sheet).expect("link").auto_recalc,
+            "{mode:?}"
+        );
+        // Relink follows again.
+        h.execute(Command::RecalculateTranspose { sheet })
+            .expect("relink");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), some(&[11.0, 100.0, 111.0]), "{mode:?}");
+        // Ctrl+Z brings the typed value (and the sheet's stoppage) back, then
+        // undoing the typing leaves a sheet that follows again.
+        h.undo().expect("undo relink");
+        h.undo().expect("undo edit B");
+        h.undo().expect("undo typing");
+        let state = link_state(&h, source);
+        assert!(!state.stale && !state.modified, "{mode:?}: following again");
+        h.execute(enter(b, 0, &[12.0])).expect("edit B again");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), some(&[12.0, 100.0, 112.0]), "{mode:?}");
+    }
+}
+
+/// The same value typed again in the source: the pass compares by content, so
+/// Row 1 keeps its version and the link is up to date. Witness: `overwrite`.
+#[test]
+fn retyping_the_same_source_value_leaves_the_rows_untouched() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (_sheet, cols) = followed(&h, source);
+        let before = versions(&snap(&h).tree);
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[10.0])).expect("same value");
+        let after = versions(&snap(&h).tree);
+        for column in &cols {
+            assert_eq!(
+                before[column], after[column],
+                "{mode:?}: {column} untouched"
+            );
+        }
+        assert!(!link_state(&h, source).stale, "{mode:?}: up to date");
+    }
+}
+
+/// A deleted Row column stays deleted when the sheet follows (E8).
+#[test]
+fn following_does_not_bring_a_deleted_row_column_back() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (sheet, cols) = followed(&h, source);
+        h.execute(Command::DeleteColumn { column: cols[2] })
+            .expect("delete Row 2");
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("edit B");
+        let t = snap(&h).tree;
+        assert_eq!(t.children(sheet).expect("columns").len(), 2, "{mode:?}");
+        assert_eq!(nums(&t, cols[1]), some(&[11.0, 100.0, 111.0]), "{mode:?}");
+        assert!(!link_state(&h, source).stale, "{mode:?}");
+    }
+}
+
+/// A source column that cannot be followed (a new column has no x'): the last
+/// numbers stay, the sheet reads Out of date, and it resumes once the x' is set.
+#[test]
+fn a_source_that_cannot_be_followed_keeps_its_numbers_and_resumes_when_fixed() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (_sheet, cols) = followed(&h, source);
+        h.execute(Command::AddColumn {
+            sheet: source,
+            index: None,
+            name: Some("New".into()),
+            column: Column::from_f64(&[1.0, 2.0, 3.0]),
+        })
+        .expect("a column without x'");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), some(&[10.0, 100.0, 110.0]), "{mode:?}");
+        assert!(link_state(&h, source).stale, "{mode:?}: out of date");
+        assert!(matches!(
+            stokesforge_core::unfollowable_column(&t, source),
+            Some(stokesforge_core::CoreError::TransposeNoXPrime { .. })
+        ));
+        let new = colat(&t, "[Book1]Sheet1", "New");
+        h.execute(Command::SetColumnMeta {
+            column: new,
+            meta: ColumnMeta {
+                x_prime: Some(4.0),
+                ..ColumnMeta::default()
+            },
+        })
+        .expect("x' set");
+        let t = snap(&h).tree;
+        assert!(!link_state(&h, source).stale, "{mode:?}: resumed");
+        assert_eq!(
+            nums(&t, cols[1]),
+            some(&[10.0, 100.0, 110.0, 1.0]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// Source formula -> followed row -> formula of another sheet, in one pass,
+/// with no calculation in the project (witness: the follow step is not skipped
+/// when there is no calculation) and then with an automatic fit of the row.
+#[test]
+fn a_change_travels_from_the_source_through_the_followed_row_in_one_pass() {
+    for mode in BOTH {
+        let (_s, h, source) = followed_start(mode);
+        let (_sheet, cols) = followed(&h, source);
+        let book = node(&snap(&h).tree, "[Book1]");
+        h.execute(Command::AddWorksheet {
+            book,
+            name: Some("Sheet2".into()),
+        })
+        .expect("Sheet2");
+        let t = snap(&h).tree;
+        let sheet2 = node(&t, "[Book1]Sheet2");
+        let tname = t
+            .node(t.transposed_from(source).expect("link").0)
+            .expect("sheet")
+            .name()
+            .to_string();
+        h.execute(Command::AddColumn {
+            sheet: sheet2,
+            index: None,
+            name: Some("M".into()),
+            column: Column::new(ColumnType::Numeric),
+        })
+        .expect("M");
+        let t = snap(&h).tree;
+        let m = colat(&t, "[Book1]Sheet2", "M");
+        let text = format!("max('{tname}'!B)");
+        h.execute(set_meta_formula(&t, m, &text))
+            .expect("M reads Row 1");
+        assert_eq!(nums(&snap(&h).tree, m)[0], Some(110.0), "{mode:?}");
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("edit B");
+        // B -> D (source formula) -> Row 1 (followed) -> M (formula of Sheet2).
+        assert_eq!(
+            nums(&snap(&h).tree, m)[0],
+            Some(111.0),
+            "{mode:?}: one pass"
+        );
+
+        // The same chain ending in an automatic fit of (x', Row 1).
+        let fit = add_fit_chain(&h, cols[0], cols[1]);
+        let slope_before = fit_slope(&snap(&h), fit);
+        h.execute(enter(b, 0, &[500.0])).expect("edit B again");
+        let s = snap(&h);
+        assert_ne!(
+            fit_slope(&s, fit),
+            slope_before,
+            "{mode:?}: the fit followed"
+        );
+        let fresh = stokesforge_core::compute(
+            &s.tree,
+            &fit_op(),
+            &[stokesforge_core::SeriesRef {
+                x: Some(cols[0]),
+                y: cols[1],
+                sigma: None,
+            }],
+            None,
+        )
+        .expect("fresh fit");
+        let fresh_slope = fresh.results[0]
+            .values
+            .iter()
+            .find(|v| v.key == "param.slope")
+            .expect("slope")
+            .value;
+        assert_eq!(fit_slope(&s, fit), fresh_slope, "{mode:?}");
+    }
+}
+
+fn fit_op() -> stokesforge_analysis::ops::Operation {
+    stokesforge_analysis::ops::Operation::Fit {
+        spec: stokesforge_analysis::fit::FitSpec {
+            model: stokesforge_analysis::model::Model::Linear,
+            params: vec![],
+        },
+        range: None,
+        residuals: false,
+    }
+}
+
+fn add_fit_chain(h: &SessionHandle, x: NodeId, y: NodeId) -> NodeId {
+    let series = vec![stokesforge_core::SeriesRef {
+        x: Some(x),
+        y,
+        sigma: None,
+    }];
+    let computed = stokesforge_core::compute(&snap(h).tree, &fit_op(), &series, None).expect("fit");
+    let outputs = computed
+        .columns
+        .iter()
+        .map(|c| stokesforge_core::OutputDraft {
+            series: c.series,
+            key: c.key.clone(),
+            index: c.index,
+            meta: ColumnMeta::default(),
+            data: c.data.clone(),
+        })
+        .collect();
+    h.execute(Command::AddCalculation {
+        draft: stokesforge_core::CalculationDraft {
+            operation: fit_op(),
+            series,
+            aux: None,
+            outputs,
+            results: computed.results,
+            keep_results: true,
+            auto_recalc: true,
+            low_r2_dialog: true,
+        },
+    })
+    .expect("add the fit");
+    *snap(h)
+        .tree
+        .calculations()
+        .keys()
+        .max()
+        .expect("calculation")
+}
+
+fn fit_slope(s: &Snapshot, id: NodeId) -> f64 {
+    s.tree.calculation(id).expect("calculation").results[0]
+        .values
+        .iter()
+        .find(|v| v.key == "param.slope")
+        .expect("slope")
+        .value
+}
+
+/// A followed sheet that was out of date in the file stays out of date on
+/// opening, through unrelated commands, and follows on a real change (A1,
+/// #316). Witness: the load hold removed (the next command rewrites the sheet).
+#[test]
+fn a_followed_sheet_out_of_date_in_the_file_is_not_rewritten_until_the_source_changes() {
+    // No formula column here: one recomputed on load would be a real change.
+    let mut p = Project::new("P").expect("project");
+    let root = p.root();
+    let book = add_book(&mut p, root, "Book1");
+    let source = first_sheet(&p, book);
+    for (name, values, x) in [
+        ("B", [10.0, 20.0, 30.0], 1.0),
+        ("C", [100.0, 200.0, 300.0], 2.0),
+    ] {
+        let id = add_col(&mut p, source, name, &values);
+        p.set_column_meta(
+            id,
+            ColumnMeta {
+                x_prime: Some(x),
+                ..Default::default()
+            },
+        )
+        .expect("x'");
+    }
+    let sheet = p.transpose_rows(source, &[0, 1]).expect("transpose");
+    // Stale in the file: the source changes with no pass.
+    let b = p
+        .tree()
+        .child_by_name(source, "B")
+        .expect("source")
+        .expect("B");
+    p.set_values(b, 0, ValueBlock::Float(vec![11.0]))
+        .expect("edit");
+    let dir = scratch("followed-stale-in-file");
+    let path = dir.path().join("t.stf");
+    stokesforge_persistence::save(&p, &path).expect("save");
+    for mode in BOTH {
+        let (_s, h) = spawn(Project::new("Other").expect("project"), mode);
+        h.load(&path).expect("load");
+        let row = snap(&h).tree.children(sheet).expect("columns")[1];
+        assert!(link_state(&h, source).stale, "{mode:?}: stale after load");
+        assert_eq!(nums(&snap(&h).tree, row)[0], Some(10.0), "{mode:?}: kept");
+        add_folder(&h, "Later");
+        assert!(link_state(&h, source).stale, "{mode:?}: still stale");
+        assert_eq!(
+            nums(&snap(&h).tree, row)[0],
+            Some(10.0),
+            "{mode:?}: not rewritten"
+        );
+        let b = colat(&snap(&h).tree, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[12.0])).expect("a real change");
+        assert!(!link_state(&h, source).stale, "{mode:?}: follows");
+        assert_eq!(nums(&snap(&h).tree, row)[0], Some(12.0), "{mode:?}");
+    }
+}
+
+/// A file (or a paste, or a Move) that brings a formula of the source reading
+/// its followed sheet: the column is framed and empty, the sheet is not
+/// followed, nothing hangs and nothing is written (invariant 10). Unchecking
+/// computes the formula again. Witnesses: the blanking removed; the follow
+/// block removed.
+#[test]
+fn a_stored_formula_reading_the_followed_sheet_is_blanked_and_blocks_following() {
+    for mode in BOTH {
+        let mut p = transposable();
+        let source = p.tree().resolve("[Book1]Sheet1").expect("sheet");
+        let sheet = p.transpose_rows(source, &[0, 1]).expect("transpose");
+        let label = add_col(&mut p, source, "L", &[1.0, 1.0, 1.0]);
+        let tname = p.tree().node(sheet).expect("sheet").name().to_string();
+        set_f(&mut p, label, &format!("max('{tname}'!B)"));
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        assert!(
+            nums(&t, label).iter().all(Option::is_none),
+            "{mode:?}: blanked {:?}",
+            nums(&t, label)
+        );
+        assert!(t.formula_follow_error(label, None).is_some());
+        let cols = t.children(sheet).expect("columns").to_vec();
+        let held = nums(&t, cols[1]);
+        let b = colat(&t, "[Book1]Sheet1", "B");
+        h.execute(enter(b, 0, &[11.0])).expect("edit B");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, cols[1]), held, "{mode:?}: not followed");
+        h.execute(Command::SetTransposeAuto { sheet, auto: false })
+            .expect("uncheck");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, label)[0], Some(100.0), "{mode:?}: computes again");
+        // Rule 3: rechecking is refused while the formula is there.
+        assert!(h
+            .execute(Command::SetTransposeAuto { sheet, auto: true })
+            .is_err());
+    }
+}
+
+/// #484: Recalculate on a followed sheet whose source keeps a formula reading
+/// it is refused (the column is blanked, so the gesture would write empty
+/// cells): the rows and the link are untouched and the sheet stays out of
+/// date; once the formula is removed the sheet follows by itself. Witness: the
+/// loop check removed from `recalculate_transpose_inner` (empty cells appear).
+#[test]
+fn recalculate_is_refused_while_a_kept_formula_reads_the_followed_sheet() {
+    for mode in BOTH {
+        let mut p = transposable();
+        let source = p.tree().resolve("[Book1]Sheet1").expect("sheet");
+        let sheet = p.transpose_rows(source, &[0, 1]).expect("transpose");
+        let label = add_col(&mut p, source, "L", &[1.0, 1.0, 1.0]);
+        let tname = p.tree().node(sheet).expect("sheet").name().to_string();
+        let (kept, _error) = p
+            .tree()
+            .formula_keeping(label, &format!("max('{tname}'!B)"));
+        p.set_column_meta(
+            label,
+            ColumnMeta {
+                x_prime: Some(4.0),
+                formula: Some(kept),
+                ..Default::default()
+            },
+        )
+        .expect("kept formula");
+        let (_s, h) = spawn(p, mode);
+        let (sheet, cols) = followed(&h, source);
+        assert!(link_state(&h, source).stale, "{mode:?}: out of date");
+        let before = snap(&h).tree;
+        let error = h
+            .execute(Command::RecalculateTranspose { sheet })
+            .expect_err("refused");
+        assert!(
+            format!("{error:?}").contains("TransposeSourceReadsIt"),
+            "{mode:?}: {error:?}"
+        );
+        let after = snap(&h).tree;
+        for column in &cols {
+            assert_eq!(nums(&before, *column), nums(&after, *column), "{mode:?}");
+        }
+        assert_eq!(
+            before.transpose_link(sheet).expect("link").inputs,
+            after.transpose_link(sheet).expect("link").inputs,
+            "{mode:?}: link untouched"
+        );
+        assert!(link_state(&h, source).stale, "{mode:?}: still out of date");
+        // Removing the formula: the sheet follows alone, no gesture needed.
+        h.execute(Command::SetColumnMeta {
+            column: label,
+            meta: ColumnMeta {
+                x_prime: Some(4.0),
+                ..Default::default()
+            },
+        })
+        .expect("formula removed");
+        assert!(!link_state(&h, source).stale, "{mode:?}: follows alone");
     }
 }

@@ -102,13 +102,13 @@ Deleting a series never deletes the columns of the workbook.
 
 ## Open the graph settings
 
-The settings of a graph are in the **Graph Properties** window. It has these tabs: **General**, **Plot Area**, **Axes**, **Legend**, **Color Bar** and **Theme**. The series have their own window, **Series Properties**.
+The settings of a graph are in the **Graph Properties** window. It has these tabs: **General**, **Plot Area**, **Axes**, **Legend** and **Theme**. The color bar is a section of the **Legend** tab. The series have their own window, **Series Properties**.
 
 You can open them in several ways:
 
 - Double-click an axis, a curve or a shape on the figure. For an axis, double-click its numbers (the tick labels), just outside the plot area, or its line (the edge of the plot area). A double-click on the plot area itself resets the zoom.
 - Right-click a part of the figure and choose **Properties…**. The window opens on the page for that part.
-- Use the **Graph** menu, then **Properties**. It lists **Graph Properties…**, **Plot Area…**, **Axes…**, **Series…**, **Legend…**, **Color Bar…** and **Theme…**.
+- Use the **Graph** menu, then **Properties**. It lists **Graph Properties…**, **Plot Area…**, **Axes…**, **Series…**, **Legend…** and **Theme…**.
 - Double-click a row in the Object Manager.
 
 <img src="../images/graphs-graph-menu.png" alt="The Graph menu: Show Data, Add Text, New Layer, the mirror axes, Reset Zoom, Export and Properties." width="139">
@@ -122,8 +122,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 | **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
-| **Legend** | **Show legend**, **Position**, **Text from** |
-| **Color Bar** | **Show color bar**, the groups on the bar, **Value from**, **Scale**, **Position**, **Orientation**, **Ticks**, **Title** |
+| **Legend** | **Show legend**, **Position**, **Text from**, and the folded **Color bar** section at the bottom |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
@@ -192,7 +191,11 @@ Under the figure, a strip of settings follows what is selected.
 - **Grid mode:** with **Regular | Free** is the placement of the layers, the same as **Layout ▸ Layer Placement** and the field in Graph Properties. It is one button that shows both, the one in use highlighted: click it anywhere to switch to the other, one step of **Undo**.
 - **When axes are added** with **Grows with the axes | Fixed** is the choice of the same name in the **Advanced** block of Graph Properties, shown the same way: one button, a click anywhere switches.
 
-On a regular grid, the line between two graphs has a handle: drag it, and the graph on one side takes the size the other one gives up, for every graph on that line; the figure keeps its size. A corner shared by several graphs moves all the lines it lies on at once. The four L-shaped corners of the figure scale the whole figure. You cannot move a graph or resize it alone on a regular grid, and the arrow keys do nothing there.
+On a regular grid, the line between two graphs has a handle: drag it, and the graph on one side takes the size the other one gives up, for every graph on that line; the figure keeps its size. A corner shared by several graphs moves all the lines it lies on at once. The four L-shaped corners of the figure scale the whole figure. You cannot resize a graph alone on a regular grid.
+
+To move a graph on a regular grid, drag it from inside, away from the lines and corners. While you drag, nothing moves yet: the cell under the pointer is outlined, and the right and bottom edges of the figure show a strip each. Release on a cell with a graph and the two graphs swap places; release on an empty cell and the graph goes there. Release in the right strip and the graph goes into a new column, in the bottom strip into a new row, beside the cell nearest the pointer. A row or column the graph leaves empty disappears with its size, as when you delete a graph. Release on the graph's own cell, or outside the figure, and nothing happens; a click without moving only selects. The arrow keys do the same one cell at a time: the selected graph moves one cell in that direction, swapping with the graph there, and stays where it is at the edge of the grid. Each move is one step of **Undo**.
+
+The graph keeps its number, so the numbers do not follow the new places. A script that addresses a graph with `panel=(row, column)` reaches whichever graph is now in that cell. Swapping graphs whose axes take different room may change the size of the figure.
 
 In **Free**, drag a graph to move it, drag the handles around it to resize it, or nudge the selected graphs with the arrow keys (**Shift** for ten steps); the magnets and the grid help to line them up. Where two graphs touch, the middle of the line moves both of them, and the strip on each side moves the graph on that side only. The corners of the figure scale the figure and every graph with it. Each gesture is one step of **Undo**.
 
@@ -320,21 +323,21 @@ Drag the legend to move it anywhere on the figure. Right-click it and choose **R
 
 A color bar colors the curves of one or more groups by a **value** instead of by their rank in the group, and shows the scale. It replaces the entries of those groups in the legend. Each layer has at most one bar. It is the way to show, for example, the time of each spectrum of a kinetic: the curves keep the gradient of their group, and the bar says which color is which time.
 
-To put a group on the bar, open the page of the group in the Series window and tick **On the color bar**, or go to the **Color Bar** tab of Graph Properties and tick **Show color bar**, then choose **Add a group…**. A group that had no color gradient gets the first one of the list. Unticking **On the color bar**, or **Remove** in the tab, gives the curves their own colors and legend entries back. While a group is on a visible bar, the line and symbol colors of its curves are greyed out in the Series window: the color comes from the bar.
+To put a group on the bar, open the page of the group in the Series window and tick **On the color bar**, or open the **Legend** tab of Graph Properties, unfold the **Color bar** section at the bottom (it is closed until the layer has a bar, and opens by itself once the bar is shown), tick **Show color bar**, then tick **On the bar** for each group. A group that had no color gradient gets the first one of the list. Unticking **On the bar** gives the curves their own colors and legend entries back: a group left off the bar, like a reference spectrum, keeps its color and its legend entry. While a group is on a visible bar, the line and symbol colors of its curves are greyed out in the Series window: the color comes from the bar.
 
-<img src="../images/graphs-properties-color-bar.png" alt="The Graph Properties window on its Color Bar tab, with one group on the bar." width="640">
+<img src="../images/graphs-properties-color-bar.png" alt="The Graph Properties window on its Legend tab, with the Color bar section open: the series group Kinetics on the bar, its folded Ranges, Chain the segments, then the value, placement and title rows." width="640">
 
-The **Color Bar** tab has:
+The **Color bar** section has:
 
 - **Show color bar**. Cleared, the curves get their own colors and legend entries back; the settings are kept.
-- **Groups on the bar**. One block per group, in the order of the bar: **Move Up**, **Move Down**, **Remove**, then **From** and **to** (empty means **Auto**: the smallest and the largest value of the curves of the group), and a **Break label**. The break label is Typst text written above the break at the end of the segment, with a small triangle; the last segment has no break. **Chain the segments** makes each segment start where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change, only the scale.
+- **Series groups**. Every group of the layer is listed, in the order of the graph (the same order as in the Object Manager), each with an **On the bar** box. The order of the bar always follows this order; there is nothing to move. Between two groups that are on the bar, a line **Break label** holds the Typst text written under the bar, right of the value of the break between them; there is none after the last group. The label stays with the group above it, so it comes back when you tick again a group you had cleared below it. Under each group on the bar, **Ranges…** is folded (it opens by itself when a range is set): **From** and **to**, where empty means **Auto**, the smallest and the largest value of the curves of the group. **Chain the segments** makes each segment start where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change, only the scale.
 - **Value from**. The header row that gives the value of each curve: **x'** (the default), **Comments**, **Long Name**, **Short Name** or **Units**. For a row series, **Row series** chooses **No value** or **Value of column…** with the column to read. A cell that holds text or a unit (`57 min`) has no value. The value is read each time the figure is drawn: change the x' of a column and the color follows. A line such as **1 curve has no value** lists the curves of the bar that have none; they keep their own color and are left off the bar.
 - **Scale**: **Linear** or **Log**. On a log scale a value of zero or less has no color.
-- **Position**: the four corners of the plot area, **Below the frame** or **Right of the frame**. Outside the frame the figure grows to make room; the plot area keeps its size. **Orientation** (**Horizontal** or **Vertical**) is greyed out for those two places, which force it. Drag the bar to move it anywhere on the figure. A bar inside the plot area keeps its size when moved and is not stretched: click it, then pull one of the small squares around it, as for a rectangle drawn on the graph, to make it longer, shorter, thicker or thinner. The texts of the bar keep their font size and are placed again around the strip. Below or right of the frame the length follows the frame and only the thickness can be pulled. Choosing another **Position** keeps the size; a drag of the bar is undone in one step.
+- **Position**: the four corners of the plot area, **Below the frame** or **Right of the frame**. Outside the frame the figure grows to make room; the plot area keeps its size. **Orientation** (**Horizontal** or **Vertical**) is greyed out for those two places, which force it. Drag the bar to move it anywhere on the figure; **Position** then reads **Dragged**, and choosing any place in the list, even **Below the frame**, brings the bar back there. A bar inside the plot area keeps its size when moved and is not stretched: click it, then pull one of the small squares around it, as for a rectangle drawn on the graph, to make it longer, shorter, thicker or thinner. The texts of the bar keep their font size and are placed again around the strip. Below or right of the frame the length follows the frame and only the thickness can be pulled. Choosing another **Position** keeps the size; a drag of the bar is undone in one step.
 - **Ticks**: **Ends and breaks** (the default) or **Automatic**.
 - **Title**: Typst text written under the bar.
 
-A value outside the range of a segment takes the color of the nearer end. Double-click the bar to open the tab. In a script, `pyst.color_bar(…)` does the same, with `length=` and `thickness=` for the size of the strip.
+A value outside the range of a segment takes the color of the nearer end. Double-click the bar to open the Legend tab with the section unfolded. In a script, `pyst.color_bar(…)` does the same, with `length=` and `thickness=` for the size of the strip; the order of its `groups` list does not matter, the bar follows the graph.
 
 ## Titles and formulas
 

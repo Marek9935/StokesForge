@@ -863,6 +863,26 @@ fn color_bar_sets_and_keeps_its_size() {
     );
 }
 
+/// #499: the groups of `pyst.color_bar` land in the graph's order whatever the
+/// order of the list, and each label stays with its group. Witness: keeping
+/// the order of the list reverses the segments.
+#[test]
+fn color_bar_follows_the_graph_order_of_the_groups() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y, y], x, name='Graph1')\npyst.group_series(g, [0, 1])\npyst.group_series(g, [2, 3])\nids = [d['id'] for d in pyst.series_groups(g)]\npyst.color_bar(g, [ids[1], ids[0]], labels=['second', 'first'])\n"),
+    );
+    let spec = graph_spec(&b);
+    let panel = &spec.panels[0];
+    let bar = panel.color_bar.as_ref().expect("a bar");
+    let order = panel.group_ids();
+    let groups: Vec<u32> = bar.segments.iter().map(|s| s.group).collect();
+    assert_eq!(groups, order);
+    assert_eq!(bar.segment_of(order[0]).unwrap().label, "first");
+    assert_eq!(bar.segment_of(order[1]).unwrap().label, "second");
+}
+
 /// #499: `pyst.color_bar` builds the bar of a layer in one undo step, gives a
 /// group without a retained gradient the first palette, keeps the range and
 /// label of a group already on the bar, and refuses an unknown option

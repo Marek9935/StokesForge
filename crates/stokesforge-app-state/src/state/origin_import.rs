@@ -4,11 +4,11 @@
 //!
 //! The routing is by extension only ([`stokesforge_importer::is_origin_path`],
 //! no I/O on the interface thread): an `.opj` reached by a drop, by the
-//! Import Wizard or by a menu import is read on the background import thread
+//! Import window or by a menu import is read on the background import thread
 //! (`start_import`), and its parsed project (shared by `Arc`) comes back to
 //! [`AppState::add_origin_reads`]. The chooser holds one entry per file, with
 //! its ticks. It is open as soon as one file was read, but it is painted
-//! ([`AppState::origin_import_open`]) only while the Import Wizard is closed:
+//! ([`AppState::origin_import_open`]) only while the Import window is closed:
 //! two modal dialogs never show together, and an Origin project that arrives
 //! while the wizard is open waits for it to close.
 //!
@@ -131,7 +131,7 @@ pub struct OriginFileView {
 
 impl AppState {
     /// The Origin chooser is open and must be painted: it holds files and the
-    /// Import Wizard is not on screen.
+    /// Import window is not on screen.
     #[must_use]
     pub fn origin_import_open(&self) -> bool {
         self.origin_import.is_some() && self.import_state.is_none()
@@ -262,7 +262,7 @@ impl AppState {
         }
     }
 
-    /// Takes the Origin projects out of `paths` meant for the Import Wizard:
+    /// Takes the Origin projects out of `paths` meant for the Import window:
     /// they are read in the background and go to the chooser, with a message.
     /// Returns the other paths and whether an Origin project was taken.
     pub(super) fn take_origin_paths_out_of_wizard(
@@ -309,7 +309,7 @@ impl AppState {
         let recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
         self.start_import(
             ImportDestination::NewBookForAll,
-            ImportSource::Menu(recipe),
+            ImportSource::Menu(Box::new(recipe)),
             paths,
         );
     }

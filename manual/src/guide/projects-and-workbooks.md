@@ -126,6 +126,8 @@ The same commands are in **Workbook ▸ Sheet**.
 
 <img src="../images/workbooks-workbook-menu.png" alt="The Workbook menu of the menu bar: Sheet and Columns (submenus), Plot (greyed out), and the check boxes Show Metadata Row (checked) and Show x' Row." width="156">
 
+A sheet that comes from an import into **One Workbook per File** is called **Raw Data** until you change a value of an imported column; it then becomes **Sheet1** (see [Importing data](import.md)).
+
 A sheet name cannot be empty and must be unique inside the workbook. A workbook always keeps at least one sheet: **Delete** is greyed out on the last one.
 
 Deleting a sheet can be undone. If a graph plotted columns of that sheet, the status bar names it.
@@ -424,9 +426,9 @@ Some sheets are created for you from another sheet.
 
 When you analyse the rows of a sheet (see [Analysis](analysis.md)), StokesForge creates a transposed sheet named after its source, for example `Sheet1ᵀ`. It holds the x' values and one column per row analysed.
 
-A band at the top of this sheet tells you where it comes from. It is a snapshot of the source, not a live link:
+A band at the top of this sheet tells you where it comes from, and holds the box **Recalculate automatically**, checked by default: the sheet then follows its source by itself. Uncheck it to keep a snapshot of the source:
 
-- **Out of date** appears when the source has changed since.
+- **Out of date** appears when the source has changed since (or, with the box checked, when a column of the source cannot be followed, because it has no x' value, has text, or has a formula that reads this sheet: the band names it in full on a second line, in orange, under the first one; the line goes away once the column is fixed).
 - **Values edited** appears when you changed a value of the linked columns.
 - **Recalculate** rewrites the linked columns from the source. If you have edited values, the button is **Relink** and asks for confirmation, because it erases your edits. Undo brings them back.
 

@@ -437,6 +437,13 @@ impl PanelSpec {
         ids
     }
 
+    /// The colour bar with its segments in the graph's group order (#499): the
+    /// one reading the drawing, the colours and the tab use.
+    pub fn color_bar_in_order(&self) -> Option<std::borrow::Cow<'_, crate::ColorBarSpec>> {
+        let bar = self.color_bar.as_ref()?;
+        Some(bar.in_graph_order(&self.group_ids()))
+    }
+
     /// The name given to the group `group` (#197), if it exists and is not empty.
     /// `None`: the group has its automatic name, or does not exist.
     pub fn group_label(&self, group: u32) -> Option<&str> {

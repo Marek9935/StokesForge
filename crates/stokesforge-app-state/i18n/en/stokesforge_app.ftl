@@ -77,6 +77,15 @@ alert-session-lost-no-recovery = No recovery copy could be written: { $detail }
 
 alert-low-r2-title = Low R²
 alert-low-r2 = Some results follow the data poorly (R² below 0.6). Check the model and the starting values.
+alert-no-x-prime-title = No x' Values
+alert-no-x-prime =
+    { $count ->
+        [one] { $sheets } has no x' values. The analysis uses the column numbers 1, 2, 3… as x'.
+       *[other] { $sheets } have no x' values. The analysis uses the column numbers 1, 2, 3… as x'.
+    }
+alert-no-x-prime-recalculated = { $source } has no x' values any more. { $transposed } now uses the column numbers 1, 2, 3… as x'.
+alert-no-x-prime-cancel = Cancel Analysis
+    .hint = Closes the analysis and removes the transposed sheet
 low-r2-summary-head = R² < 0.6 for:
 low-r2-summary-see-results = See the Results pane for the values.
 low-r2-count-baseline =
@@ -129,7 +138,7 @@ action-import = Import…
 action-refresh-from-source = Refresh from Source
     .hint = Re-reads the source files of the active sheet's columns
 action-reopen-last-import = Reopen Last Import…
-    .hint = Reopens the Import Wizard with the last files and template
+    .hint = Reopens the Import window with the last files and template
 action-open = Open…
 action-save = Save
 action-save-as = Save As…
@@ -146,8 +155,6 @@ menu-graph-series = Series…
     .hint = Edits the plot type, line and symbol of each series
 menu-graph-legend = Legend…
     .hint = Edits legend visibility and position
-menu-graph-color-bar = Color Bar…
-    .hint = Edits the color bar of the layer
 menu-graph-theme = Theme…
     .hint = Edits global colors and applies predefined themes
 menu-graph-png-resolution = PNG Resolution
@@ -389,20 +396,14 @@ status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }
 
-## Assistant d'import (#44)
-## Texts of the Import Wizard: six steps, templates, metadata and preview.
+## Import window (#44)
+## Texts of the Import window: the one-screen import, templates, points to check.
 ## Template names and file contents are data and are never translated.
 
-import-window-title = Import Wizard
-import-button-back = Back
-import-button-next = Next
+import-window-title = Import
 import-button-finish = Finish
     .hint = Imports with the current settings (Enter)
 
-import-step-files-title = Files and Template
-import-step-format-title = Format
-import-step-header-title = Header and Data End
-import-step-columns-title = Columns
 
 # Values shared by several lists.
 common-auto = Auto
@@ -418,133 +419,32 @@ import-option-other = Other
 # Column types, shared by the "Read As" and "Type" columns.
 column-type = Type
 column-type-numeric = Numeric
-column-type-text = Text
 column-type-mixed = Mixed
 column-type-datetime = Date/Time
 
 # Step 1: files and template.
 import-template-untitled = Untitled
-import-files-template = Template
-import-files-template-modified = { $name } (modified)
-import-files-reset = Reset
-    .hint = Restarts from the default settings
-import-files-delete = Delete…
-    .hint = Deletes this saved template
-import-files-delete-title = Delete Template
-import-files-delete-confirm = Delete the template “{ $name }”? This cannot be undone.
-import-files-delete-yes = Delete
-    .hint = Deletes the saved template; this cannot be undone
-import-files-export = Export Template…
-    .hint = Saves this template to a JSON file
 import-files-export-title = Export Template
-import-files-import = Import Template…
-    .hint = Loads a template from a JSON file
 import-files-import-title = Import Template
 import-files-template-filter = Import template
-import-files-unsaved = Unsaved changes. Save the template in the Destination step
-import-files-add = Add Files…
-    .hint = Picks the files to import
 import-files-add-title = Choose Files to Import
-import-files-drop = or drop files in the window
-import-files-section = Files
-import-files-recent = Recent Files…
-import-files-none = No files chosen
-import-files-row-count =
-    { $count ->
-        [one] { $count } row
-       *[other] { $count } rows
-    }
 import-files-remove = Remove
 
 # Step 2: format.
-import-format-delimiter = Delimiter
-    .hint = Character that separates the values on a line
 import-delimiter-semicolon = Semicolon
 import-delimiter-tab = Tab
 import-delimiter-whitespace = Whitespace
 import-delimiter-fixed = Fixed width
-import-format-widths-hint = Width of each column but the last, e.g. 10,8,8
-import-format-decimal = Decimal separator
-import-format-thousands = Thousands separator
-import-format-date-order = Date order
-import-date-day-first = Day, then month
-import-date-month-first = Month, then day
-import-format-missing = Missing values
-    .hint = Comma-separated. Read as empty cells: --, n/a, *, NaN…
-import-format-comment-prefix = Comment prefix
-    .hint = Data lines starting with it are skipped (#, ;, //…)
-import-format-blocks = Blocks
-    .hint = How a file holding several data blocks is split
-import-blocks-single = Single block
-import-blocks-line-start = Line starting with
-import-blocks-blank = Blank lines
-import-format-encoding = Encoding
-import-format-skip-chars = Remove leading characters
-    .hint = Removed at the start of every data line
-import-format-skip-lines = Skip data lines
-    .hint = Ignored at the start of the data
 
 # Step 3: header and data end.
-import-header-mode = Header
-import-header-mode-lines = Line count
-import-header-mode-marker = Until marker
-import-header-marker = Marker
-    .hint = The header ends at the line equal to this text
-import-header-lines = Header lines
-import-header-subheader-lines = Subheader lines
-    .hint = Counted in the header lines
-import-header-detect = Detect Header
-    .hint = Recounts the header and subheader lines from the file
-import-header-combined = Combined line
-    .hint = Long name and units share the same subheader line
-import-header-role-long-name = Long Name
-    .hint = Subheader lines that give the long names
-import-header-role-units = Units
-    .hint = Subheader lines that give the units
-import-header-role-comments = Comments
-    .hint = Subheader lines that give the comments
-import-header-role-x-prime = x'
-    .hint = Subheader line that gives the x' value of each column (e.g. its time)
-import-header-range-from = from
-import-header-range-to = to
-import-header-names-first-line = Names in first line
-    .hint = The first data line gives the column names
-import-dataend = Data end
-import-dataend-auto = Auto
-    .hint = Stops at the first non-numeric X
-import-dataend-blank = First blank line
-import-dataend-marker = End marker
-import-dataend-after-header = Lines after header
-import-dataend-before-end = Lines before end
-import-header-skip-footer = Skip footer lines
-    .hint = Ignored at the end of the file
 import-column-names = Column names
-import-header-name-file = File name
-import-header-name-key = Header key
-import-header-key = Key
 
 # Step 4: columns.
-import-columns-name = Name
-import-columns-read-as = Read As
-import-columns-type = Type
 import-columns-values = Values
-import-columns-choose-file = Choose a file in step 1
 
 # Step 5: metadata.
-import-metadata-keep-header = Keep header
-    .hint = Stores the file header as metadata
-import-metadata-keep-footer = Keep footer
-    .hint = Stores the file footer as metadata
-import-metadata-uncheck = Uncheck a key or section to drop it
-import-metadata-lines-section = File metadata
-import-metadata-none = No metadata with the current settings
 
 # Step 6: destination and template.
-import-destination = Destination
-import-destination-active = Active workbook (one sheet per file)
-import-destination-active-none = Active workbook (none)
-import-destination-new-per-file = New workbook per file
-import-destination-new-all = New workbook for all files
 import-destination-mode = In active workbook
 import-mode-new-sheet = New sheet
 import-mode-replace = Replace active sheet
@@ -554,38 +454,79 @@ import-destination-multiple = Multiple files
 import-layout-per-file = One sheet per file
 import-layout-side-by-side = One sheet, side by side (X Y X Y…)
 import-layout-shared-x = One sheet, X of first file shared
-import-destination-template-name = Template name
-import-destination-template-section = Save as template
-import-destination-save = Save Template
-import-destination-saved-note = Saved templates are offered at the next import
-import-destination-auto = Auto-select
-    .hint = Picks this template for a file that matches every filled criterion
-import-auto-extensions = Extensions
-    .hint = csv, txt, asc…
-import-auto-name = Name contains
-import-auto-content = File start contains
-    .hint = A signature, such as ORIGIN;JASCO
 
 # Preview pane.
 import-preview-title = Preview
-import-preview-encoding = Encoding { $encoding }
-import-preview-blocks = { $count } blocks, showing the first
-import-preview-tip = Right-click a line to set the import there
 import-preview-empty = Choose a file to see a preview
-import-preview-showing =
-    { $total ->
-        [one] Showing { $shown } of { $total } data line
-       *[other] Showing { $shown } of { $total } data lines
+import-result-count = { $count } columns after import
+import-role-data-start = Data starts here
+import-role-data-end = Data ends here
+import-role-clear = Clear role
+import-role-note-select-first = Select a line in the preview first.
+import-role-note-one-line = { $role } uses one line: line { $line }
+import-role-note-span = { $role } uses the span of lines { $from } to { $to }
+import-role-note-end-after-start = The data cannot end before it starts.
+
+## Import screen: automatic configuration (#488)
+import-auto-pill = auto
+import-auto-recipe-name = Auto · { $family }
+import-auto-family-jasco = JASCO
+import-auto-family-jcamp = JCAMP-like
+import-auto-family-table = Plain table
+import-auto-family-text = Text table
+import-auto-sep-semicolon = semicolons
+import-auto-sep-tab = tabs
+import-auto-sep-comma = commas
+import-auto-sep-space = spaces
+import-auto-sep-none = nothing (one column)
+import-auto-target-all = all the columns
+import-auto-prop-long-name-y = Long Name of Y
+import-auto-prop-units-x = Units of X
+import-auto-prop-units-y = Units of Y
+import-auto-prop-comment-y = Comments of Y
+import-auto-prop-sheet-name = Sheet name
+import-auto-prop-nothing = Nothing
+import-auto-prop-suffix = → { $target } · { $field }: { $result }
+import-mark-kind-tip = { $family } · { $sep } · decimal { $decimal } · { $columns } columns
+import-mark-refused-binary = Not a text file
+import-mark-refused-empty = Empty file
+import-mark-refused-numbers = No numbers found
+import-refused-binary = This file is not text (the format of the device software). Export it as CSV or TXT from that software, then import that file.
+import-refused-empty = This file is empty.
+import-refused-numbers = No line of numbers was found in this file.
+import-mark-refused-nmr = NMR not supported
+import-refused-nmr = This file holds NMR data (JCAMP-DX). StokesForge does not read NMR spectra.
+status-import-skipped =
+    { $count ->
+        [one] { $count } file left out (not readable as a table).
+       *[other] { $count } files left out (not readable as a table).
     }
-import-legend-header = Header
-import-legend-data = Data
-import-legend-footer = Footer
-import-legend-comment-line = Comment line
-import-legend-skipped = Skipped line
-import-line-data-start = Start Data Here
-import-line-units = Use as Units Line
-import-line-data-end = End Data Here
-import-line-no-auto-end = Disable Auto Data End
+import-check-points-ok = { $count } points announced, { $count } read
+import-check-points-bad = The file announces { $declared } points, { $read } read
+import-why-encoding = The file is not UTF-8: it is read as { $name }.
+import-why-separator = The numbers of line { $line } are separated by { $sep }: { $columns } columns.
+import-why-decimal-comma = Line { $line } writes decimals with a comma (like 14,98).
+import-why-decimal-dot = Line { $line } writes decimals with a point (like 14.98).
+import-why-data-start = Line { $line } is the first line of numbers: { $rows } rows of { $columns } columns.
+import-why-marker = Line { $line } says { $text }: the header stops there, however long it is.
+import-why-xprime = Line { $line } has only numbers, with an empty box at the start: these are the times of each spectrum (x').
+import-why-name-xprime = Line { $line } starts with a word, then numbers: the word is the name, the numbers are x'.
+import-why-names = Line { $line } is text just above the numbers: these are the column names.
+import-why-long-name = Line { $line } is text above the numbers: these are the long names.
+import-why-units = Line { $line } is text under the long names: these are the units.
+import-why-same-line = The names of line { $line } carry their unit in brackets: Name (unit).
+import-why-end-blank = The data stop at the empty line { $line }.
+import-why-end-section = Line { $line } opens a section that is no longer measurement: the data stop before it.
+import-why-end-text = Line { $line } is no longer a number: the data stop before it.
+import-why-footer = { $count } “key; value” lines follow the data: they are kept as metadata.
+import-why-sheet-name = Line { $line } says { $key }: it names the new workbook, or the sheet when the data go into an existing workbook.
+# The sheet of a new workbook per file, until a value of an imported column changes (#488).
+import-sheet-raw-data = Raw Data
+# Base of its name at the first change: Sheet1, Sheet2…
+import-sheet-modified-base = Sheet
+import-why-prop-units = Line { $line } says { $source }: the unit of { $target } is { $result }.
+import-why-prop-long-name = Line { $line } says { $source }: the long name of { $target } is { $result }.
+import-why-prop-comment = Line { $line } says { $source }: the comment of { $target } is { $result }.
 
 ## History entries (issue #46)
 ## One key per `HistoryLabel` variant (`stokesforge-commands/src/label.rs`). Commands:
@@ -631,6 +572,8 @@ history-remove-node = Delete
 history-remove-node-named = Delete “{ $name }”
 history-set-window-meta = Edit Window Properties
 history-set-window-meta-named = Edit Properties of “{ $name }”
+history-set-sheet-raw-mark = Mark Sheet as Raw Data
+history-set-sheet-raw-mark-named = Mark Sheet “{ $name }” as Raw Data
 history-set-note-text = Edit Note
 history-set-note-text-named = Edit Note “{ $name }”
 history-set-column-meta = Edit Column Properties
@@ -657,6 +600,8 @@ history-macro-move-columns = Move Columns
 history-macro-analyze-rows = Analyze Rows
 history-transpose-rows = Transpose Rows
 history-recalculate-transpose = Recalculate Transposed Sheet
+history-transpose-auto-on = Check Recalculate Automatically
+history-transpose-auto-off = Uncheck Recalculate Automatically
 
 ## Undo and Redo
 
@@ -730,6 +675,7 @@ error-formula-unknown-column = Column { $letter } does not exist in this sheet
 error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
 error-formula-deleted-column = Column deleted. Replace #REF with a column letter
 error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
+error-formula-reads-following-sheet = { $sheet } follows { $source }, so { $source } cannot calculate from it. Uncheck Recalculate automatically on { $sheet } first
 error-formula-too-deep = The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)
 error-formula-unknown-function = Unknown function { $name }. Check its spelling
 error-formula-unknown-function-suggestion = Unknown function { $name }. Did you mean { $suggestion }?
@@ -826,7 +772,6 @@ plot-tab-plot-area = Plot Area
 plot-tab-axes = Axes
 plot-tab-series = Series
 plot-tab-legend = Legend
-plot-tab-color-bar = Color Bar
 plot-tab-theme = Theme
 
 # The three axes of a layer
@@ -1105,19 +1050,16 @@ plot-legend-row-column = Column
 
 # Color Bar tab (#499)
 
+plot-color-bar-section = Color bar
 plot-color-bar-show =
     Show color bar
     .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
-plot-color-bar-groups-section = Groups on the bar
+plot-color-bar-groups-section = Series groups
 plot-color-bar-group-break = Break label
-    .hint = Typst text written at the end of this segment, above its break. Leave empty for none.
-plot-color-bar-move-up = Move Up
-plot-color-bar-move-down = Move Down
-plot-color-bar-remove = Remove
-    .hint = Takes this group off the bar. Its curves get their own colors back.
-plot-color-bar-add-group = Add a group…
-    .disabled = Every group of this layer is already on the bar
-plot-color-bar-no-groups = No group on the bar yet. Add a group, or tick « On the color bar » on its page in the Series window.
+    .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
+plot-color-bar-group-on = On the bar
+    .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
+plot-color-bar-ranges = Ranges…
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
 plot-color-bar-chain =
     Chain the segments
@@ -1137,6 +1079,7 @@ plot-color-bar-no-value =
     }
 plot-color-bar-layout-section = Placement
 plot-color-bar-position = Position
+plot-color-bar-position-dragged = Dragged
 plot-color-bar-position-below = Below the frame
 plot-color-bar-position-right = Right of the frame
 plot-color-bar-orientation = Orientation
@@ -1596,6 +1539,8 @@ analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Direct Deconvolution
 error-model-calculated-column-read-only = This column is produced by a calculation. Detach it from the calculation to edit its values
 error-model-transpose-no-x-prime = Column { $letter } ({ $name }) has no x' value. Set one to analyze a row
+error-model-transpose-source-reads-it = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to follow
+error-model-calculation-reads-following-sheet = { $sheet } follows { $source }, so { $source } cannot calculate from it. Uncheck Recalculate automatically on { $sheet } first
 error-model-transpose-not-numeric = Column { $letter } ({ $name }) contains text. Only numeric columns allow a row to be analyzed
 
 ## Analysis — names of the columns an operation produces (#181)
@@ -1992,7 +1937,6 @@ error-refresh-partial = { $count ->
 error-import-nothing-to-reopen = There is no import to reopen
 status-import-reopened-undone = Last import undone. Adjust its settings, then run it again
 status-import-reopened-kept = Adjust the last import settings, then run it again. The previous import stays in place
-status-template-chosen = Template “{ $name }” chosen from the file
 status-template-exported = Template exported to { $path }
 error-template-export = Could not export the template: { $cause }
 status-template-imported = Template “{ $name }” imported
@@ -2000,7 +1944,6 @@ error-template-import-not-saved = Template imported but not saved: { $cause }
 error-template-name-required = Give the template a name to save it
 error-template-save = Could not save the template: { $cause }
 status-template-saved = Template “{ $name }” saved
-error-template-delete = Could not delete the template: { $cause }
 status-template-deleted = Template “{ $name }” deleted
 error-import-choose-file-first = Choose a file before detecting the header
 error-export-unknown-format = Unknown export format for { $path }. Choose .svg, .pdf or .png
@@ -2058,7 +2001,7 @@ status-import-origin-done = Imported { $sheets ->
 status-import-origin-left-wizard = { $count ->
     [one] The Origin file was
    *[other] { $count } Origin files were
-} moved from the Import Wizard to the Import from Origin window
+} moved from the Import window to the Import from Origin window
 status-origin-drop-refused = Only Origin files can be added here. The other dropped files were not imported
 origin-import-title = Import from Origin
 origin-import-summary = To create: { $sheets ->
@@ -2130,13 +2073,9 @@ disabled-origin-sheet-empty = This sheet has no column to import
 disabled-no-last-import = No finished import to reopen
 disabled-needs-sheet = Bring a workbook sheet to the front first
 disabled-no-window = No window to maximize
-disabled-import-not-data-line = Only a data or footer line can end the data
-disabled-import-auto-end-off = Automatic data end is already off
-disabled-import-unsaved-template = Only a template you saved can be deleted
 disabled-add-file-first = Add a file first
+disabled-no-readable-file = None of these files can be read
 disabled-import-no-active-book = Bring a workbook to the front first
-disabled-import-last-step = This is the last step
-disabled-import-first-step = This is the first step
 disabled-script-running = Wait for the script to finish
 disabled-script-unavailable = Python is not available in this build
 disabled-script-not-running = No script is running
@@ -2297,7 +2236,7 @@ help-move-series-up = Move the selected series up
 help-move-series-down = Move the selected series down
 help-zoom = Zoom
 help-layout-snap = Turn Snap on or off (Page Layout Mode)
-help-layout-nudge = Nudge the selected graphs (Page Layout Mode)
+help-layout-nudge = Nudge the selected graphs, or on a Regular Grid move the selected graph one cell (Page Layout Mode)
 help-layout-nudge-ten = Nudge ten steps (Page Layout Mode)
 help-layout-leave = Leave the Page Layout Mode
 help-rename = Rename
@@ -2386,6 +2325,12 @@ transpose-relink = Relink
 transpose-relink-hint = Rewrites the linked columns from { $source } and erases the values edited in them
 transpose-relink-title = Relink transposed sheet
 transpose-relink-confirm = Values edited in the linked columns of { $sheet } will be erased. Undo brings them back
+transpose-auto = Recalculate automatically
+    .hint = Updates { $sheet } whenever { $source } changes. A value typed in it stops the updates until Relink
+    .disabled = Column { $letter } of { $source } calculates from { $sheet }. Remove that formula to check this box
+transpose-state-stuck = Out of date: { $reason }
+transpose-stuck-lost-x-prime = { $source } has no x' values any more. Recalculate to use the column numbers 1, 2, 3… as x'
+row-plot-needs-x-prime = Set x' values to plot a row
 
 # Lissage (#324)
 analysis-kind-smooth = Smoothing
@@ -2429,11 +2374,6 @@ window-resize-bottom-left = Resize from the bottom left corner
 window-resize-bottom-right = Resize from the bottom right corner
 
 # Settings groups of the import format (#170)
-import-format-delimiter-section = Delimiter
-import-format-numbers-section = Numbers and Dates
-import-format-comments-section = Comment Lines
-import-format-file-section = Blocks and Encoding
-import-format-skipped-section = Skipped Lines
 
 # Why a gesture made outside the main window is refused (#471).
 dialog-name-graph-properties = Graph Properties
@@ -2448,3 +2388,443 @@ refused-quit-in-main = Quit is in the main window
 # the main window (#472).
 opened-dialog-in-main = { $name } is open in the main window
 opened-question-in-main = A question is waiting in the main window
+
+# Import screen: the file cut into a grid that is marked directly (#488)
+import-grid-view-file = File
+import-grid-view-result = Result
+import-grid-fold = Fold
+import-grid-unfold = Unfold
+import-grid-fold-row = ⋯ { $count } data lines ⋯  (click to show all)
+import-grid-zone-info = File info
+import-grid-zone-marker = Marker
+import-grid-zone-data = Data
+import-grid-zone-footer = End of file
+import-grid-zone-ignored = Ignored
+import-grid-sel-line = Line { $line }:
+import-grid-sel-lines = { $count } lines ({ $from } – { $to }):
+import-grid-sel-col = Column { $col }:
+import-grid-sel-cols = Columns { $from } – { $to }:
+import-grid-sel-value = { $key } = “{ $value }”:
+import-grid-units-line = Units (line { $line })
+import-grid-xprime-line = x' (line { $line })
+import-grid-btn-text = Text
+import-grid-btn-ignore = Ignore
+import-grid-handle-tip = Data: lines { $from } – { $to }
+import-grid-sheet-tag = → sheet name
+import-grid-strip-error = The sheet cannot be made with this cut
+import-grid-import = Import
+import-grid-exclude = Do not keep this info
+import-grid-include = Keep this info
+import-grid-cell-number = Number: { $value }
+import-grid-cell-text = Text, not a number: "{ $text }"
+import-grid-mini-lines = { $count } lines
+import-grid-other-char = Other character
+import-grid-no-file = No file yet. Use + to add one.
+import-grid-ignore-todo = Not yet: the engine cannot skip a single line (only a comment prefix or a count of lines to skip)
+
+# Import screen: what is sure, what to check, the instrument remembered (#488)
+import-check-encoding = Text read as { $c0 }
+import-check-separator = Columns are split by { $c0 }
+import-check-separator-irregular = The rows do not all have the same number of columns.
+import-check-decimal = Numbers use a { $c0 }, as in { $sample }
+import-check-decimal-plain = Numbers use a { $c0 }
+import-check-decimal-comma = comma
+import-check-decimal-point = point
+import-sepname-semicolon = ; semicolon
+import-sepname-tab = tab
+import-sepname-comma = , comma
+import-sepname-space = · spaces
+import-sepname-none = no separator
+import-check-data = Data: lines { $c0 } to { $c1 }
+import-check-data-detail = { $rows } rows, { $columns } columns
+import-check-names = Line { $line } gives the column names
+import-check-xprime = Line { $line } is x′ (the times)
+import-check-xprime-detail = { $count } values: { $first } – { $last }
+import-check-namexp = Line { $line } gives the names and x′
+import-check-support-grow = The values grow: { $first } – { $last }
+import-check-support-count = The notes say “{ $key }” = { $value }: the same count
+import-check-support-last = Last data line I read: { $line }
+import-check-npoints = { $count } points, as the file says (line { $line })
+import-check-npoints-kept = { $read } rows kept (the file says { $declared })
+import-check-npoints-bad = The file says { $declared } points, I read { $read }
+import-check-yname = Curve name: { $c0 }, from { $key } (line { $line })
+import-check-yname-many = All { $count } curves are called { $c0 }
+import-check-yname-detail = From { $key } (line { $line })
+import-check-yname-line = Curve names: line { $line }
+import-check-sheetname-key = Sheet named { $c0 }, from { $key }
+import-check-sheetname-file = Sheet named after the file
+import-check-xunit = X unit: { $c0 } from { $key } (line { $line })
+import-check-yunit = Y unit: { $c0 } from { $key } (line { $line })
+import-check-xunit-line = X unit: { $c0 } from line { $line }
+import-check-yunit-line = Y unit: { $c0 } from line { $line }
+import-check-unit-unused = Unit of { $axis }: the file gives { $text } ({ $key }, line { $line }), but this template does not use it
+import-check-missing-xunit = Unit of X: not in the file
+import-check-missing-yunit = Unit of Y: not in the file
+import-check-missing-xpunit = Unit of x′: not in the file
+import-check-footer-kept = { $count } lines of notes at the end, kept
+import-check-footer-dropped = { $count } lines of notes at the end, left out
+import-check-note-template-xprime = Your template says times, but this line looks like data.
+import-datatype-uv = UV spectrum
+import-datatype-fluo = fluorescence
+import-datatype-ir = IR
+import-kinetic = kinetic ({ $count } curves)
+import-template-name-kinetic = kinetic
+import-fingerprint-columns = { $count } columns
+import-shape-plain = plain table, { $count } columns, no header
+import-shape-named = named columns, { $count } columns
+import-shape-matrix = matrix, { $count } curves
+import-receipt =
+    You get: { $sheets ->
+        [one] 1 sheet
+       *[other] { $sheets } sheets
+    } · { $columns } columns · { $rows } rows
+import-check-q-xprime-title = Line { $line }: times or data?
+import-check-q-xprime-explain = The first cell is empty and the { $count } next ones are numbers. They look like the times of { $count } curves.
+import-check-q-xprime-a1 = Line { $line } is the times (x′)
+import-check-q-xprime-a2 = Line { $line } is data
+import-check-q-xprime-a3 = Pick another line
+import-check-q-namexp-title = Line { $line }: names or data?
+import-check-q-namexp-explain = A word, then { $count } numbers. They could be names and times, or just a row of data.
+import-check-q-namexp-a1 = Line { $line } gives names and x′
+import-check-q-namexp-a2 = Names only
+import-check-q-namexp-a3 = Line { $line } is data
+import-check-q-yname-title = One name for every curve?
+import-check-q-yname-explain = { $key } says “{ $name }”. There are { $count } curves: they cannot all have the same name.
+import-check-q-yname-a1 = All { $count } curves are called { $name }
+import-check-q-yname-a2 = Only the sheet takes this name
+import-check-q-yname-a3 = No name
+import-check-q-points-title = The file says { $declared } points, I read { $read }
+import-check-q-points-explain = The header announces { $declared } points but the data stop after { $read } rows. Is the end of the data in the right place?
+import-check-q-points-a1 = Keep the { $read } rows I read
+import-check-q-points-a2 = Pick the last data line
+import-check-q-decimal-title = Is { $sample } 12.5 or 12500?
+import-check-q-decimal-explain = Every number with a comma has three digits after it, as in { $sample }. A comma can also separate thousands.
+import-check-q-decimal-a1 = The comma is the decimal: { $sample } is a fraction
+import-check-q-decimal-a2 = The comma groups thousands
+import-template-rule-xprime = After { $marker }: 1 line of times (x′), then the data
+import-template-rule-xprime-plain = 1 line of times (x′), then the data
+import-template-rule-data-after = The data start after { $marker }
+import-template-rule-units = X unit from { $x }, Y unit from { $y }
+import-template-rule-name-sheet = Name from { $key }, for the sheet only
+import-template-rule-name-all = Name from { $key }, for every curve
+import-template-rule-numbers = { $decimal } decimal, { $sep }
+import-template-rule-marker = The header may be longer or shorter: I look for { $marker }.
+import-recognised = Recognised:
+import-check-not-recognised = Not recognised:
+import-template-note-badge = your template “{ $name }”
+import-check-missing-tip = You can mark a line of the file to fill this in.
+import-fingerprint-title = How I recognised it
+import-check-review-of = { $n } of { $total }
+import-check-key-enter = Enter
+import-check-skip = Skip
+import-check-stop = Stop
+import-check-back = Previous
+import-check-keys-hint = Enter: recommended · 1 2 3: answer · Backspace: previous · Esc: leave
+import-check-support-title = WHAT I FOUND IN THE FILE
+import-check-done-title = All checked
+import-check-done-left = { $count } still to check
+import-check-done-close = Close
+import-template-offer-note-tip = What I will keep:
+import-check-loupe = Line { $line }: the first cells
+import-check-loupe-empty = empty
+import-check-pick-times = Click the line of the times — Esc: cancel
+import-check-pick-last = Click the last data line — Esc: cancel
+import-check-log-xprime = Line { $line } is the times (x′)
+import-check-log-last = The data end at line { $line }
+import-chip-keys = Take the value from
+import-chip-nothing = Nothing
+import-chip-line = line { $line }
+import-check-data-first = First data line
+import-check-data-last = Last data line
+# Import screen: templates, conditions, file strip (#488)
+import-condition-auto-origin = come from { $name } (ORIGIN, SPECTROMETER/DATA SYSTEM)
+import-condition-auto-type = are a { $name } (DATA TYPE)
+import-condition-auto-marker = have their data after the line { $marker }
+import-condition-auto-numbers-comma = use { $sep } and a decimal comma
+import-condition-auto-numbers-point = use { $sep } and a decimal point
+import-sepsymbol-space = space
+import-sepsymbol-tab = tab
+import-found-label-data = Data
+import-found-value-lines = Lines { $first } to { $last }
+import-found-label-names = Column Names
+import-found-value-line = Line { $line }
+import-found-label-xprime = x'
+import-found-label-points = Points
+import-found-source-points-ok = from { $key }, line { $line } · same as the data read
+import-found-source-points-bad = from { $key }, line { $line } · the file says { $declared }
+import-found-label-longname = Long Name
+import-found-source-key-all = from { $key }, line { $line } · same for { $count } curves
+import-found-source-key = from { $key }, line { $line }
+import-found-source-line-names = from the line of names
+import-found-label-sheet = Sheet Name
+import-found-value-filename = The file name
+import-found-source-filename-setting = set in the Advanced settings
+import-found-source-filename-no-title = the file has no title
+import-found-label-xunits = X Units
+import-found-label-yunits = Y Units
+import-found-source-key-differs = from { $key }, line { $line } · { $other } says { $text }
+import-found-source-key-agrees = from { $key }, line { $line } · { $other } agrees
+import-found-source-line = from line { $line }
+import-check-q-units-title = { $axis } Units: two different answers
+import-check-q-units-explain = { $key } says “{ $text }” but { $other } says “{ $other_text }”. They should be the same.
+import-check-support-key = { $key } says “{ $value }”
+import-check-q-units-a1 = Use { $text } (from { $key })
+import-check-q-units-a2 = Use { $text } (from { $key })
+import-found-label-comments = Comments
+import-found-label-footer = Footer
+import-found-value-n-lines = { $count } lines
+import-found-source-footer-kept = kept as file info
+import-found-source-footer-dropped = not kept
+import-files-add-files = Add Files…
+    .hint = Adds files to this import
+import-destination-new = New Workbook
+import-destination-each = One Workbook per File
+import-destination-active = Active Workbook
+import-format-delimiter = Delimiter
+import-format-decimal = Decimal separator
+import-format-thousands = Thousands separator
+import-format-encoding = Encoding
+import-format-short-delimiter = Delimiter
+import-format-short-decimal = Decimal
+import-format-short-thousands = Thousands
+import-format-short-encoding = Encoding
+import-footer-to = To: { $value }
+import-footer-template = Template: { $value }
+import-footer-template-auto = Auto · { $name }
+import-footer-template-yours = { $name }
+import-footer-unchecked = 
+    { $count ->
+        [one] 1 point not checked
+       *[other] { $count } points not checked
+    }
+import-template-forget-title = Forget Template
+import-template-forget-button = Forget Template…
+    .hint = Removes this template from the list, after a confirmation
+import-template-forget-yes = Forget Template
+    .hint = Removes the template. This cannot be undone
+import-template-forget-confirm = Forget the template “{ $name }”? The files it recognised go back to Auto. This cannot be undone.
+import-found-group-data = Data
+import-found-group-columns = Columns
+import-found-group-sheet = Sheet
+import-guide-1 = Click a line number to say what the line is: Long Name, Units, x', data start.
+import-guide-2 = Click a value to use it, for example NANOMETERS as the X Units.
+import-guide-3 = Hover a sentence on the left to see where it comes from.
+import-guide-done = Done
+import-guide-next = Next
+import-guide-dont = Don't show again
+import-guide-step = { $n } / { $total }
+import-help-title = How each one was found
+import-help-sep = { $sep } cuts all { $rows } data lines into { $cols } cells
+import-help-decimal = Decimal: { $sample }. “{ $sep }” is the delimiter, so the comma can only be decimal.
+import-help-decimal-point = Decimal: { $sample }
+import-help-encoding = “{ $ch }” on line { $line } is not UTF-8, so the text is read as { $name }.
+import-help-encoding-plain = Plain text: read as { $name }.
+import-template-manage-danger = Remove
+import-template-manage-empty = No template yet. Save one from the Template button of the import.
+import-template-manage-title = Import Templates
+import-template-menu-manage = Manage Templates…
+import-template-menu-save = Save as Template…
+import-template-offer-later = Not Now
+import-template-offer-manage = Manage Templates…
+import-template-offer-name = Name: { $name }
+import-template-offer-save = Save as Template…
+import-template-offer-title = Save these settings for { $name } files?
+import-template-save-button = Save
+    .hint = Saves the template (Enter)
+import-template-save-name = Name
+import-template-save-note = The number of header lines does not matter.
+import-template-save-reason-name = Type a name
+import-template-save-reason-trigger = Keep at least one condition
+import-template-save-replaces = Replaces the template of the same name
+import-template-save-unchecked =
+    { $count ->
+        [one] 1 point is still to check. It will be saved as it is now.
+       *[other] { $count } points are still to check. They will be saved as they are now.
+    }
+import-template-save-sets = What it sets
+import-template-save-title = Save as Template
+import-template-save-used = Used for files that
+import-template-warn-data-count =
+    { $count ->
+        [one] Data: only the first line is read. A longer file will be cut.
+       *[other] Data: only the first { $count } lines are read. A longer file will be cut.
+    }
+import-template-warn-data-tail =
+    { $count ->
+        [one] Data: the last line of each file is left out. A file with a longer footer will read some of it as data.
+       *[other] Data: the last { $count } lines of each file are left out. A file with a longer footer will read some of it as data.
+    }
+import-template-warn-header =
+    { $count ->
+        [one] Header: always 1 line. A file with a longer header will be misread.
+       *[other] Header: always { $count } lines. A file with a longer header will be misread.
+    }
+import-template-warn-skip-rows =
+    { $count ->
+        [one] Data: the first line is always skipped. If the data start elsewhere in another file, it will be misread.
+       *[other] Data: the first { $count } lines are always skipped. If the data start elsewhere in another file, it will be misread.
+    }
+import-template-warn-footer =
+    { $count ->
+        [one] Footer: the last line of each file is left out. A file with a longer footer will read some of it as data.
+       *[other] Footer: the last { $count } lines of each file are left out. A file with a longer footer will read some of it as data.
+    }
+import-template-warn-role-line = { $role }: line { $line } of the file. If the header changes length, this line moves.
+import-template-not-automatic = Not automatic
+import-template-not-automatic-note = Kept from an earlier version. This template is never applied by itself; its conditions below are not active. You can still choose it from the Template menu.
+import-template-use-automatically = Use Automatically
+    .hint = Makes the conditions below active: a file that meets them is read with this template
+import-status-check = 
+    { $count ->
+        [one] 1 point to check
+       *[other] { $count } points to check
+    }
+import-status-ready = Ready
+import-status-refused = Refused
+import-check-tag-check = To check
+import-check-warn-check-now = Check Now
+import-check-warn-title = 
+    { $count ->
+        [one] 1 point to check
+       *[other] { $count } points to check
+    }
+
+# Import screen: added conditions, Mark as Checked, the reason of an automatic choice, many files (#488)
+import-condition-auto-kinetic = have a line of times before the data: several spectra (kinetic)
+import-condition-columns-eq = have exactly { $n } columns
+import-condition-columns-min = have at least { $n } columns
+import-condition-key-eq = have the line { $key } equal to { $value }
+import-condition-key-has = have the line { $key } containing { $value }
+import-condition-name = have a file name containing { $text }
+import-condition-ext = have the extension .{ $ext }
+import-condition-add = Add condition
+import-condition-add-columns = Number of columns
+import-condition-add-name = File name contains
+import-condition-add-ext = Extension
+import-condition-pick-key = Pick a header line
+import-condition-equals = equals
+import-condition-atleast = at least
+import-condition-contains = contains
+import-condition-columns-unit = columns
+import-condition-key-is = Line
+import-condition-name-is = File name contains
+import-condition-ext-is = Extension
+import-condition-remove = Remove this condition
+import-condition-yours = Your conditions
+import-answers-title = Answers remembered
+import-answers-note = When you answered a point to check, StokesForge kept the answer for that kind of file and does not ask again.
+import-answers-empty = No answer remembered yet.
+import-answers-forget = Forget
+    .hint = Ask this question again the next time a file of this kind comes
+import-check-mark-checked = Mark as Checked
+    .hint = Settle this one without the review
+import-check-tag-check-go = Show where it comes from in the file
+import-tie-use = Use { $name }
+    .hint = Read this file with that template instead
+import-auto-pick-why-title = Chosen automatically
+import-auto-pick-keep = Keep
+import-auto-pick-change = Change…
+import-auto-pick-drop = Don't use
+import-files-more = + { $count } more
+    .hint = All the files, with their status
+import-files-prev = Previous file
+import-files-next = Next file
+import-files-filter = Filter by name
+import-files-same = Same kind as the file shown
+import-files-other = Different kind
+import-files-refused = Refused
+import-files-none = No file matches.
+
+# --- The import screen: to check, templates, advanced settings, guide (#488) ---
+import-condition-start = start with the text { $text }
+import-guide-show = Show Guide
+    .hint = Shows the short guide of this window again
+import-advanced-title = Advanced
+    .hint = The rare settings: date order, characters to remove, blocks, missing values, comment lines, skipped lines, sheet name
+import-advanced-set-title = Advanced settings in use
+import-advanced-date-order = Date order
+import-advanced-date-day-first = Day, then month
+import-advanced-date-month-first = Month, then day
+import-advanced-skip-chars = Remove leading characters
+    .hint = Removed at the start of every data line
+import-advanced-blocks = Blocks
+    .hint = How a file holding several data blocks is split
+import-advanced-blocks-single = Single block
+import-advanced-blocks-line-start = Line starting with
+import-advanced-blocks-blank = Blank lines
+import-advanced-missing = Missing values
+    .hint = Comma-separated. Read as empty cells: --, n/a, *, NaN…
+import-advanced-comment-prefix = Comment prefix
+    .hint = Data lines starting with it are skipped (#, ;, //…)
+import-advanced-skip-lines = Skip data lines
+    .hint = Ignored at the start of the data
+import-advanced-sheet-name = Sheet name
+    .hint = What names the new workbook (or the sheet, in an existing workbook): the title of the file when it has one, or always the name of the file
+import-advanced-sheet-name-title = Title from the file
+import-advanced-sheet-name-file = File name
+import-advanced-sentence-sheet-name = The new workbook (or the sheet, in an existing workbook) is named after the file, even when the file has a title.
+import-advanced-sentence-date-month-first = Dates are read month first: 03/04 is March 4.
+import-advanced-sentence-skip-chars = { $count } characters are removed at the start of every data line.
+import-advanced-sentence-blocks-line = A new block starts at each line beginning with { $text }.
+import-advanced-sentence-blocks-blank = Blocks are separated by empty lines.
+import-advanced-sentence-missing = { $tokens } are read as empty cells.
+import-advanced-sentence-comment = Lines starting with { $prefix } are skipped.
+import-advanced-sentence-skip-lines = The first { $count } data lines are skipped.
+import-kind-summary = { $what } files · { $sep } · decimal { $decimal }
+import-kind-other = Other files
+import-instrument-jasco = JASCO
+import-instrument-jcamp = JCAMP-DX
+import-instrument-jcamp-ocean = JCAMP-DX (Ocean Optics)
+import-instrument-ocean-optics = Ocean Optics
+import-instrument-avantes = Avantes
+import-instrument-netzsch = Netzsch
+import-instrument-perkinelmer-pyris = PerkinElmer Pyris
+import-instrument-ta-instruments = TA Instruments
+import-instrument-specs = SPECS
+import-instrument-craic = CRAIC
+import-instrument-plate-reader = Plate reader
+import-doubt-text-rows-in-data = { $count } lines of text sit inside the data, from line { $first }. They are skipped and the rest is read as one table.
+import-doubt-several-blocks = The file holds { $count } blocks of numbers ({ $rows } rows). Only the longest is read.
+import-doubt-several-blocks-split = The file holds { $count } blocks of numbers ({ $rows } rows). Each one becomes its own table.
+import-doubt-decimal-or-separator = Line { $line } may write decimals with a comma, but the comma also separates the columns. Check the numbers.
+import-doubt-jcamp-npoints = Block { $block }: the file says { $declared } points, { $decoded } were read.
+import-doubt-jcamp-ntuples-not-read = Block { $block }: this table of NTUPLES is not read.
+import-doubt-jcamp-unreadable-table = Block { $block }: the data table has a form that is not read.
+import-doubt-jcamp-bad-lines = Block { $block }: { $count } data lines could not be read and are skipped.
+import-doubt-jcamp-dup-capped = Block { $block }: a repeat count was too large and was cut.
+import-doubt-jcamp-points-capped = Block { $block }: the file has more points than are read; the rest is left out.
+import-doubt-jcamp-nmr-left-out = { $count } NMR blocks of this file are left out (NMR is not supported).
+import-doubt-template-tie = { $chosen } is used, but { $others } fit this file as well.
+import-doubt-name-check-separator = The delimiter
+import-doubt-name-check-decimal = The decimal separator
+import-doubt-name-check-encoding = The text encoding
+import-doubt-name-check-data = The lines of data
+import-doubt-name-check-points = The number of points
+import-doubt-name-check-x-prime = The line of times (x′)
+import-doubt-name-check-names = The column names
+import-doubt-name-check-names-x-prime = The names and times on one line
+import-doubt-name-check-x-unit = The units of X
+import-doubt-name-check-y-unit = The units of Y
+import-doubt-name-check-x-prime-unit = The units of x′
+import-doubt-name-check-y-name = The name of the curves
+import-doubt-name-check-sheet-name = The name of the sheet
+import-doubt-name-check-footer = The lines after the data
+import-doubt-name-check-comment = The comments
+import-doubt-name-text-rows-in-data = Text lines inside the data
+import-doubt-name-several-blocks = Several blocks of numbers
+import-doubt-name-several-blocks-split = Several blocks, read as separate tables
+import-doubt-name-decimal-or-separator = A comma that may be a decimal
+import-doubt-name-jcamp-npoints = A number of points that differs from the file
+import-doubt-name-jcamp-ntuples-not-read = A table of NTUPLES that is not read
+import-doubt-name-jcamp-unreadable-table = A table in a form that is not read
+import-doubt-name-jcamp-bad-lines = Data lines that could not be read
+import-doubt-name-jcamp-dup-capped = A repeat count that was cut
+import-doubt-name-jcamp-points-capped = Points left out
+import-doubt-name-jcamp-nmr-left-out = NMR blocks left out
+import-doubt-name-template-tie = Two templates fit: { $names }
+import-doubt-name-template-pick = Two templates fit: { $names }. You chose { $chosen }
+error-choose-unknown-template = There is no template named “{ $name }”
+error-choose-unreadable = The file could not be read: { $detail }
+error-choose-no-numbers = No line of numbers was found in the file
+error-choose-nmr = This file holds NMR data, which StokesForge does not read
+error-template-save-no-condition = Keep at least one condition: a template without one would never be chosen

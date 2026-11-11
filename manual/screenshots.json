@@ -30,21 +30,6 @@
     "shows": "The Formula Functions window opened by the ? of the F(x)= cell, on the Column values family: the families as vertical tabs at the left, the table Function, Example, What it does at the right."
   },
   {
-    "image": "import-wizard-format.png",
-    "page": "guide/import.md",
-    "shows": "Import Wizard, step 2 Format: delimiter, decimal separator, thousands separator, comments, blocks and encoding, with the file preview."
-  },
-  {
-    "image": "import-wizard-header.png",
-    "page": "guide/import.md",
-    "shows": "Import Wizard, step 3 Header and Data End: header and sub-header lines, the Long Name and Units roles, and the colored line roles of the preview."
-  },
-  {
-    "image": "import-wizard-columns.png",
-    "page": "guide/import.md",
-    "shows": "Import Wizard, step 4 Columns: name, long name, units, read-as, type and role of each column found in the file."
-  },
-  {
     "image": "graphs-properties-series.png",
     "page": "guide/graphs.md",
     "shows": "The Series Properties window of Graph1: series list, group, name, plot type, Y axis, Y error and X error, line and symbol settings."
@@ -67,7 +52,7 @@
   {
     "image": "graphs-properties-color-bar.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window on its Color Bar tab: Show color bar ticked, one group (Kinetics) on the bar with its From and to range and Break label, Chain the segments, the value, scale, placement, ticks and title settings."
+    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the series group Kinetics with its On the bar box ticked and its folded Ranges, Chain the segments, the value, scale, placement, ticks and title settings."
   },
   {
     "image": "graphs-formula-title.png",
@@ -140,19 +125,34 @@
     "shows": "The Correction analysis window on Graph1: polynomial baseline on two background zones."
   },
   {
-    "image": "import-wizard-files.png",
+    "image": "import-overview.png",
     "page": "guide/import.md",
-    "shows": "Import Wizard, step 1 Files and Template."
+    "shows": "A JASCO UV file (test/import) in the Import window: the file tab, the recognised line, the format, the offer to save the settings, What was found at the left; the file as a grid with line numbers, key;value roles, auto tags, data handles and the minimap at the right; the You get line and the footer menus."
   },
   {
-    "image": "import-wizard-metadata.png",
+    "image": "import-to-check.png",
     "page": "guide/import.md",
-    "shows": "Import Wizard, step 5 Metadata."
+    "shows": "A synthetic JASCO kinetic in the Import window: the orange frame with 2 points to check, a Mark as Checked button beside each sentence, Check Now, and the To check tags with their check marks in the rows of What was found."
   },
   {
-    "image": "import-wizard-destination.png",
+    "image": "import-correction.png",
     "page": "guide/import.md",
-    "shows": "Import Wizard, step 6 Destination."
+    "shows": "The Import window on the kinetic with the correction window of the Data row open (First data line, Last data line) under the row."
+  },
+  {
+    "image": "import-save-template.png",
+    "page": "guide/import.md",
+    "shows": "The Save as Template window over the import: the name, Used for files that with the conditions found in the file and their check boxes, Your conditions with Add condition, and What it sets."
+  },
+  {
+    "image": "import-manage-templates.png",
+    "page": "guide/import.md",
+    "shows": "The Import Templates window: a saved template with its conditions, what it sets and Forget Template, and Answers remembered with the answers given for a kind of file, each with Forget."
+  },
+  {
+    "image": "import-advanced.png",
+    "page": "guide/import.md",
+    "shows": "A plain two-column CSV in the Import window with the Advanced fold open: date order, leading characters, blocks, missing values, comment prefix and skipped data lines."
   },
   {
     "image": "interface-object-manager-series.png",
@@ -163,6 +163,11 @@
     "image": "analysis-peaks.png",
     "page": "guide/analysis.md",
     "shows": "The Peak Decomposition window on Graph1: Gaussian peaks with a constant background detected on the spectrum, the preview with the fitted curve and the values of each peak."
+  },
+  {
+    "image": "analysis-transposed-sheet.png",
+    "page": "guide/analysis.md",
+    "shows": "The transposed sheet of Kinetics in Book1: the banner Transposed from Kinetics with the box Recalculate automatically checked, the x' column and one column per row analysed."
   },
   {
     "image": "workbooks-workbook-menu.png",
