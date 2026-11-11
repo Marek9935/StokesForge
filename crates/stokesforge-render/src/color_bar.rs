@@ -53,7 +53,7 @@ use crate::paint;
 use crate::scale;
 
 /// Gap between the frame (its axis areas) and the band of the bar.
-const GAP: i32 = 6;
+const GAP: i32 = 12;
 /// Thickness of the gradient strip.
 const THICK: i32 = 12;
 /// Height of the row of break markers above a horizontal bar (width of the
@@ -90,6 +90,17 @@ const DASH: i32 = 2;
 const DASH_GAP: i32 = 1;
 /// Length of a tick mark, from the strip's edge outwards.
 const TICK_LEN: i32 = 6;
+
+/// Where a tick label sits against its tick, along the strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Anchor {
+    /// Centred on the tick.
+    Centre,
+    /// Ends at the tick (the end of the segment before a gap).
+    Before,
+    /// Starts at the tick (the start of the segment after a gap).
+    After,
+}
 
 /// One drawn segment of the bar.
 #[derive(Debug, Clone, PartialEq)]
@@ -580,7 +591,7 @@ pub fn draw<DB: DrawingBackend>(
     let ticks = tick_marks(bar, segments, &starts, &lens);
     let label_v = strip_v + THICK + TICK_GAP;
     let mut widths = Vec::with_capacity(ticks.len());
-    for (u, text) in &ticks {
+    for (u, text, anchor) in &ticks {
         let end = strip_v + THICK + TICK_LEN;
         let mut v = strip_v + THICK;
         while v < end {
@@ -589,10 +600,14 @@ pub fn draw<DB: DrawingBackend>(
             v += DASH + DASH_GAP;
         }
         let (x, y) = at(*u, label_v);
-        let pos = if along_x {
-            Pos::new(HPos::Center, VPos::Top)
-        } else {
-            Pos::new(HPos::Left, VPos::Center)
+        // Along the strip, `Before` is toward its start (left, or below).
+        let pos = match (along_x, anchor) {
+            (true, Anchor::Centre) => Pos::new(HPos::Center, VPos::Top),
+            (true, Anchor::Before) => Pos::new(HPos::Right, VPos::Top),
+            (true, Anchor::After) => Pos::new(HPos::Left, VPos::Top),
+            (false, Anchor::Centre) => Pos::new(HPos::Left, VPos::Center),
+            (false, Anchor::Before) => Pos::new(HPos::Left, VPos::Top),
+            (false, Anchor::After) => Pos::new(HPos::Left, VPos::Bottom),
         };
         area.draw(&Text::new(text.as_str(), (x, y), styles.tick.pos(pos)))?;
         let (w, _) = area.estimate_text_size(text, &styles.tick)?;
@@ -609,10 +624,16 @@ pub fn draw<DB: DrawingBackend>(
         let reach = ticks
             .iter()
             .zip(&widths)
-            .filter(|((other, _), _)| (other - u).abs() <= SEG_GAP)
-            .map(|((other, _), w)| if along_x { other - u + w / 2 } else { *w })
+            .filter(|((other, _, _), _)| (other - u).abs() <= SEG_GAP)
+            .map(|((other, _, anchor), w)| match (along_x, anchor) {
+                (false, _) => *w,
+                (true, Anchor::Centre) => other - u + w / 2,
+                (true, Anchor::After) => other - u + w,
+                (true, Anchor::Before) => 0,
+            })
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(0);
         if along_x {
             area.draw(&Polygon::new(
                 vec![
@@ -707,18 +728,19 @@ fn position(scale: &ColorBarScale, (from, to): (f64, f64), value: f64) -> Option
     (t.is_finite() && (-1e-9..=1.0 + 1e-9).contains(&t)).then_some(t.clamp(0.0, 1.0))
 }
 
-/// The tick marks `(position along the strip in pixels, label)`.
+/// The tick marks `(position along the strip in pixels, label, anchor)`.
 ///
 /// A position is an edge coordinate: 0 is the strip's start, the strip's
-/// length its end. With a chain the value that ends a segment is the break,
-/// put at the centre of the gap (the next segment's start is the same value
-/// and has no tick of its own); otherwise every segment has its own ends.
+/// length its end. When a segment ends on the value the next one starts on
+/// (a chain, or data that meet) that value is the break, put at the centre of
+/// the gap (the next start has no tick of its own); otherwise each edge of the
+/// gap has its own tick and its label hugs it, away from the gap.
 fn tick_marks(
     bar: &ColorBarSpec,
     segments: &[BarSegment],
     starts: &[i32],
     lens: &[i32],
-) -> Vec<(i32, String)> {
+) -> Vec<(i32, String, Anchor)> {
     let scale = bar.scale.effective();
     let last = segments.len() - 1;
     let mut values: Vec<(usize, f64)> = Vec::new();
@@ -736,32 +758,54 @@ fn tick_marks(
             // The ends and the breaks.
             _ => vec![from, to],
         };
-        if bar.chain && index > 0 {
+        if index > 0 && meets(segments, index - 1) {
             points.retain(|value| *value != from);
         }
         for value in points {
             values.push((index, value));
         }
     }
-    let mut out: Vec<(i32, String)> = Vec::new();
+    let mut out: Vec<(i32, String, Anchor)> = Vec::new();
     for (index, value) in values {
         let Some(t) = position(&scale, segments[index].drawn, value) else {
             continue;
         };
-        let pixel = if bar.chain && index < last && value == segments[index].drawn.1 {
-            starts[index] + lens[index] + SEG_GAP / 2
+        let ends = index < last && value == segments[index].drawn.1;
+        let (pixel, anchor) = if ends && meets(segments, index) {
+            (starts[index] + lens[index] + SEG_GAP / 2, Anchor::Centre)
         } else {
-            starts[index] + (t * f64::from(lens[index])).round() as i32
+            let pixel = starts[index] + (t * f64::from(lens[index])).round() as i32;
+            let anchor = if ends {
+                Anchor::Before
+            } else if index > 0 && value == segments[index].drawn.0 && !meets(segments, index - 1) {
+                Anchor::After
+            } else {
+                Anchor::Centre
+            };
+            (pixel, anchor)
         };
-        if out.iter().any(|(other, _)| (other - pixel).abs() < 3) {
+        // Labels hugging the two edges of a gap are kept apart by their
+        // anchors, never merged.
+        let hugging = |a: Anchor| matches!(a, Anchor::Before | Anchor::After);
+        if out.iter().any(|(other, _, other_anchor)| {
+            (other - pixel).abs() < 3 && !(hugging(anchor) && hugging(*other_anchor))
+        }) {
             continue;
         }
         out.push((
             pixel,
             scale::format_tick(stokesforge_plot::AxisScale::Linear, value),
+            anchor,
         ));
     }
     out
+}
+
+/// Whether the end of segment `index` and the start of the next are the same
+/// value (a chain, or data that happens to meet): the break then carries one
+/// tick and one label, centred on the gap.
+fn meets(segments: &[BarSegment], index: usize) -> bool {
+    segments[index].drawn.1 == segments[index + 1].drawn.0
 }
 
 /// Powers of ten inside `[from, to]`.

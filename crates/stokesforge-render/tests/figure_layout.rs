@@ -1591,8 +1591,9 @@ fn a_colour_bar_under_an_untitled_axis_starts_right_after_the_tick_labels() {
     let frame_bottom = (panel.pixel_origin.1 + panel.pixel_size.1 as i32) as f64;
     let top = text.center.1 - text.size.1 as f64 / 2.0;
     let bottom = text.center.1 + text.size.1 as f64 / 2.0;
-    // Past the tick labels (about 30 px), well before the 52 px axis area.
-    assert!(top < frame_bottom + 40.0, "{top} vs {frame_bottom}");
+    // Past the tick labels (about 30 px, plus the clear margin), well before
+    // the 52 px axis area.
+    assert!(top < frame_bottom + 46.0, "{top} vs {frame_bottom}");
     assert!(bottom <= layout.size.1 as f64);
 }
 

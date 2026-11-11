@@ -391,3 +391,58 @@ fn the_break_is_centred_on_a_clean_gap() {
         .expect("x");
     assert!((x as i32 - centre).abs() <= 1, "label {x} gap {centre}");
 }
+
+/// `(x, anchor, content)` of every text of the document.
+fn texts(document: &str) -> Vec<(f64, String, String)> {
+    document
+        .split("<TEXT")
+        .skip(1)
+        .filter_map(|text| {
+            let (head, rest) = text.split_once('>')?;
+            let attr = |name: &str| -> Option<String> {
+                let key = format!(" {name}=\"");
+                Some(head.split(&key).nth(1)?.split('"').next()?.to_string())
+            };
+            Some((
+                attr("X")?.parse().ok()?,
+                attr("TEXT-ANCHOR").unwrap_or_else(|| "start".to_string()),
+                rest.split('<').next()?.trim().to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// A break between values that differ (no chain, 20 then 40) has two ticks,
+/// one on each edge of the gap, the first label ending at its tick and the
+/// second starting at its own, so the boxes never overlap; a chain (or data
+/// that meet) keeps one label centred on the gap. Witness: both labels
+/// centred (the old look) put the "20" and the "40" boxes on each other.
+#[test]
+fn a_break_between_different_values_has_two_labels_apart() {
+    let mut project = Project::new("Bar").expect("project");
+    let spec = two_group_spec(&mut project, false);
+    let plot = resolve_spec(project.tree(), &spec);
+    let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+        .expect("export")
+        .to_uppercase();
+    let all = texts(&document);
+    let find = |content: &str| {
+        all.iter()
+            .find(|text| text.2 == content)
+            .unwrap_or_else(|| panic!("no label {content}: {all:?}"))
+    };
+    let (before, after) = (find("20"), find("40"));
+    assert_eq!(before.1, "END", "end label right-aligned: {before:?}");
+    assert_eq!(after.1, "START", "start label left-aligned: {after:?}");
+    assert!(after.0 - before.0 >= 6.0, "{before:?} {after:?}");
+
+    let mut other = Project::new("Chain").expect("project");
+    let chained = two_group_spec(&mut other, true);
+    let plot = resolve_spec(other.tree(), &chained);
+    let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+        .expect("export")
+        .to_uppercase();
+    let all = texts(&document);
+    assert_eq!(all.iter().filter(|text| text.2 == "20").count(), 1);
+    assert!(!all.iter().any(|text| text.2 == "40"), "{all:?}");
+}
