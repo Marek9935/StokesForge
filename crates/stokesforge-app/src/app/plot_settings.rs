@@ -4938,7 +4938,7 @@ mod tests {
         let (painted, _) = open_list(
             &context,
             &mut harness.state,
-            &tr!("plot-color-bar-position-below"),
+            &tr!("plot-color-bar-position-dragged"),
         );
         let pos = text_exact(&painted, &tr!("plot-legend-top-left")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
@@ -4947,6 +4947,41 @@ mod tests {
         let model = harness.model();
         let bar = model.panels[0].color_bar.as_ref().unwrap();
         assert_eq!(bar.position, ColorBarPosition::TopLeft);
+        assert!(bar.anchor.is_none());
+    }
+
+    /// #499: a dragged bar shows « Dragged » in Position, and choosing the
+    /// place it already names (Below the frame) brings it back. Witness: the
+    /// list showed « Below the frame » and picking it changed nothing.
+    #[test]
+    fn choosing_the_same_color_bar_position_after_a_drag_brings_it_back() {
+        use stokesforge_plot::{ColorBarPosition, ColorBarSpec, TextAnchor};
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            segments: Vec::new(),
+            position: ColorBarPosition::Below,
+            anchor: Some(TextAnchor::new(1.0, 2.0)),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let (painted, _) = open_list(
+            &context,
+            &mut harness.state,
+            &tr!("plot-color-bar-position-dragged"),
+        );
+        let pos = text_exact(&painted, &tr!("plot-color-bar-position-below")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let model = harness.model();
+        let bar = model.panels[0].color_bar.as_ref().unwrap();
+        assert_eq!(bar.position, ColorBarPosition::Below);
         assert!(bar.anchor.is_none());
     }
 

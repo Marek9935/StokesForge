@@ -1107,7 +1107,7 @@ plot-color-bar-show =
     .hint = Colore les courbes des groupes de la barre selon leur valeur, et remplace leurs entrées dans la légende. Masquée, la barre rend aux courbes leurs couleurs et leurs entrées de légende.
 plot-color-bar-groups-section = Groupes de séries
 plot-color-bar-group-break = Étiquette de rupture
-    .hint = Texte Typst écrit au-dessus de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
+    .hint = Texte Typst écrit sous la barre, à droite de la valeur de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
 plot-color-bar-group-on = Sur la barre
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
 plot-color-bar-ranges = Plages…
@@ -1130,6 +1130,7 @@ plot-color-bar-no-value =
     }
 plot-color-bar-layout-section = Emplacement
 plot-color-bar-position = Position
+plot-color-bar-position-dragged = Déplacée
 plot-color-bar-position-below = Sous le cadre
 plot-color-bar-position-right = À droite du cadre
 plot-color-bar-orientation = Orientation

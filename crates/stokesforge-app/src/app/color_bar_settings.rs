@@ -420,21 +420,38 @@ fn value_section(
 /// Position, orientation, ticks and title.
 fn layout_section(form: &mut Form<'_>, bar: &mut ColorBarSpec, commit: &mut bool) {
     form.section(tr!("plot-color-bar-layout-section"));
-    let unknown = unknown_of!(bar.position, ColorBarPosition);
-    let before = bar.position.clone();
-    *commit |= form.row(tr!("plot-color-bar-position"), |ui| {
-        keyed_choice(
-            ui,
-            "color_bar_position",
-            &mut bar.position,
-            ColorBarPosition::CHOICES,
-            position_label,
-            unknown.as_ref(),
-        )
+    // A dragged bar's anchor wins over the position: the list then shows
+    // « Dragged », and choosing any place (even the one it names) drops it.
+    let mut shown: Option<ColorBarPosition> = if bar.anchor.is_some() {
+        None
+    } else {
+        Some(bar.position.clone())
+    };
+    let mut options: Vec<ChoiceOption<Option<ColorBarPosition>>> = ColorBarPosition::CHOICES
+        .iter()
+        .map(|place| ChoiceOption::new(Some(place.clone()), position_label(place)))
+        .collect();
+    if bar.anchor.is_some() {
+        options.insert(
+            0,
+            ChoiceOption::new(None, tr!("plot-color-bar-position-dragged")),
+        );
+    }
+    if matches!(bar.position, ColorBarPosition::Unknown(_)) && bar.anchor.is_none() {
+        options.push(ChoiceOption::new(
+            Some(bar.position.clone()),
+            tr!("plot-color-bar-unknown"),
+        ));
+    }
+    let picked = form.row(tr!("plot-color-bar-position"), |ui| {
+        choice(ui, "color_bar_position", &mut shown, &options)
     });
-    // A dragged bar's anchor wins over the position: choosing a place drops it.
-    if bar.position != before {
-        bar.anchor = None;
+    if picked {
+        if let Some(place) = shown {
+            bar.position = place;
+            bar.anchor = None;
+            *commit = true;
+        }
     }
     // Below / Right force the orientation (unless the bar was dragged):
     // the choice shows what is drawn, greyed with its reason.

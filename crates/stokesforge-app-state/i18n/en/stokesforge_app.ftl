@@ -1108,7 +1108,7 @@ plot-color-bar-show =
     .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
 plot-color-bar-groups-section = Series groups
 plot-color-bar-group-break = Break label
-    .hint = Typst text written above the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
+    .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
 plot-color-bar-group-on = On the bar
     .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
 plot-color-bar-ranges = Ranges…
@@ -1131,6 +1131,7 @@ plot-color-bar-no-value =
     }
 plot-color-bar-layout-section = Placement
 plot-color-bar-position = Position
+plot-color-bar-position-dragged = Dragged
 plot-color-bar-position-below = Below the frame
 plot-color-bar-position-right = Right of the frame
 plot-color-bar-orientation = Orientation
