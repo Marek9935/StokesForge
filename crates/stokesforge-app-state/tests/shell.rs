@@ -16607,18 +16607,24 @@ mod origin_import {
         let (_session, mut state) = start_demo(dir.path());
         let tree_before = state.tree().clone();
         let csv = dir.path().join("measure.csv");
-        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        // A file the detector is sure about (#488): a bare "1,10" table would
+        // open the Import window instead of importing straight away.
+        std::fs::write(
+            &csv,
+            "TITLE;S13\nORIGIN;JASCO\nSPECTROMETER/DATA SYSTEM;JASCO Corp., V-770, Rev. 1.00\nDATA TYPE;ULTRAVIOLET SPECTRUM\nXUNITS;NANOMETERS\nYUNITS;ABSORBANCE\nXYDATA\n800;1,5;2,5\n799;2,5;3,5\n798;3,5;4,5\n797;4,5;5,5\n",
+        )
+        .unwrap();
         let opj = standard_opj(dir.path(), "kinetics.opj");
 
         drop_paths(&mut state, vec![csv, opj]);
 
-        sheet_named(state.tree(), "measure");
+        sheet_named(state.tree(), "Raw Data");
         assert!(state.origin_import_open());
         assert!(state.import_state().is_none());
         state.dispatch(Action::ImportOrigin);
-        // Two history entries: the Origin import, then the CSV one.
+        // Two history entries: the Origin import, then the CSV one (its sheet is the "Raw Data" one, #488).
         state.dispatch(Action::Undo);
-        sheet_named(state.tree(), "measure");
+        sheet_named(state.tree(), "Raw Data");
         assert_eq!(root_names(&state).len(), 2);
         state.dispatch(Action::Undo);
         assert!(same_tree(&state, &tree_before));
