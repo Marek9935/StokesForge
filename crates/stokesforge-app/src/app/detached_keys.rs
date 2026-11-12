@@ -770,3 +770,327 @@ fn enter_tab_and_shift_enter_in_a_detached_cell_move_the_cursor_like_the_main_wi
     assert_eq!(state.entry_row(sheet), entry + 1, "the row was added");
     bench.finish();
 }
+
+// -- #518: the routine Ctrl+Z / Ctrl+Y / Ctrl+S trial steps, played docked and detached --
+
+/// Where the workbook of a test lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Place {
+    Docked,
+    Detached,
+}
+
+impl Place {
+    const BOTH: [Place; 2] = [Place::Docked, Place::Detached];
+}
+
+/// A saved project with its workbook docked or detached, painted.
+fn bench_at(place: Place) -> Bench {
+    match place {
+        Place::Docked => {
+            let mut bench = Bench::with_docked_workbook();
+            bench.start_docked();
+            bench
+        }
+        Place::Detached => bench(),
+    }
+}
+
+/// One pass of the workbook's window carrying `events`; returns what it painted.
+fn pass_at(bench: &mut Bench, place: Place, events: Vec<egui::Event>) -> egui::FullOutput {
+    match place {
+        Place::Docked => bench.root(Pass::root().focused(true).events(events)),
+        Place::Detached => bench.child_in(bench.id_of(Window::Book), Pass::child().events(events)),
+    }
+}
+
+/// The windows see what the others sent up.
+fn settle_at(bench: &mut Bench, place: Place) {
+    match place {
+        Place::Docked => {
+            for _ in 0..2 {
+                bench.root(Pass::root().focused(true));
+            }
+        }
+        Place::Detached => settle(bench),
+    }
+}
+
+/// `events` pressed in the workbook for one frame, then everything settles.
+fn play(bench: &mut Bench, place: Place, events: Vec<egui::Event>) {
+    pass_at(bench, place, events);
+    settle_at(bench, place);
+}
+
+fn at_cell(bench: &mut Bench, place: Place, sheet: stokesforge_core::NodeId, row: usize) {
+    let column = bench.app.state.tree().children(sheet).unwrap()[0];
+    match place {
+        Place::Docked => bench.app.state.select_cell(sheet, column, row),
+        Place::Detached => with_view(bench, |view| view.select_cell(sheet, column, row)),
+    }
+    pass_at(bench, place, Vec::new());
+}
+
+fn buffer_at(bench: &mut Bench, place: Place) -> Option<String> {
+    match place {
+        Place::Docked => bench.app.state.editing().map(|edit| edit.buffer.clone()),
+        Place::Detached => typed_cell(bench),
+    }
+}
+
+/// Types `digits` in the selected cell the way the keyboard does: the first
+/// character opens the entry, the next ones go into it. The entry stays open.
+fn type_digits(bench: &mut Bench, place: Place, digits: &str) {
+    let mut typed = String::new();
+    for digit in digits.chars() {
+        typed.push(digit);
+        pass_at(
+            bench,
+            place,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                egui::Event::Text(digit.to_string()),
+            ],
+        );
+        for _ in 0..3 {
+            pass_at(bench, place, Vec::new());
+        }
+        assert!(
+            buffer_at(bench, place).is_some_and(|text| text.ends_with(&typed)),
+            "{place:?}: the entry holds {:?}",
+            buffer_at(bench, place)
+        );
+    }
+}
+
+/// Every cell of every sheet: `(sheet, column index, column cells)`.
+type Dump = Vec<(String, usize, Vec<String>)>;
+
+fn dump(state: &AppState) -> Dump {
+    let mut cells = Vec::new();
+    for (book, _) in state.books() {
+        for (sheet, name) in state.worksheets_of(book) {
+            let columns = state.tree().children(sheet).unwrap();
+            for (index, column) in columns.iter().enumerate() {
+                let rows = (0..state.row_count(sheet))
+                    .map(|row| state.cell_text(*column, row))
+                    .collect();
+                cells.push((name.clone(), index, rows));
+            }
+        }
+    }
+    cells
+}
+
+/// The saved file reopened in the state (clean project, no question): what the
+/// file holds.
+fn reopened(bench: &mut Bench) -> Dump {
+    let path = bench.path().display().to_string();
+    bench.app.state.dispatch(Action::OpenProject {
+        path,
+        pending_edits: false,
+    });
+    assert!(
+        bench.app.state.unsaved_pending().is_none(),
+        "reopened without a question"
+    );
+    dump(&bench.app.state)
+}
+
+/// The cell `(sheet name, column 0, row)` of a dump.
+fn cell_of<'a>(dump: &'a mut Dump, sheet: &str, row: usize) -> &'a mut String {
+    let (_, _, rows) = dump
+        .iter_mut()
+        .find(|(name, index, _)| name == sheet && *index == 0)
+        .expect("the column");
+    &mut rows[row]
+}
+
+fn first_sheet(bench: &Bench) -> stokesforge_core::NodeId {
+    let state = &bench.app.state;
+    state.selected_sheet_in(bench.book()).unwrap()
+}
+
+/// #518 (a): a value still being typed in A1 when Ctrl+S is pressed is in the
+/// saved file, in A1 and nowhere else, docked as detached. Witnesses: remove
+/// `commit_view_entries` from the shell's save (detached fails); remove
+/// `commit_open_entries` in `AppState::save` (docked fails).
+#[test]
+fn ctrl_s_with_a_pending_cell_entry_saves_it_in_its_cell_and_nowhere_else() {
+    for place in Place::BOTH {
+        let mut bench = bench_at(place);
+        let sheet = first_sheet(&bench);
+        let before = dump(&bench.app.state);
+        assert_ne!(before[0].2[0], "77", "the witness starts elsewhere");
+        at_cell(&mut bench, place, sheet, 0);
+        type_digits(&mut bench, place, "77");
+        play(&mut bench, place, vec![ctrl(egui::Key::S)]);
+        assert!(bench.path().exists(), "{place:?}: the file was written");
+        let mut expected = before;
+        *cell_of(&mut expected, "Sheet1", 0) = "77".into();
+        assert_eq!(
+            reopened(&mut bench),
+            expected,
+            "{place:?}: the file holds A1 = 77 and the rest unchanged"
+        );
+        bench.finish();
+    }
+}
+
+/// A click at `pos` in the workbook's window (hover, press, release).
+fn click_at(bench: &mut Bench, place: Place, pos: egui::Pos2) {
+    pass_at(bench, place, vec![egui::Event::PointerMoved(pos)]);
+    for pressed in [true, false] {
+        pass_at(
+            bench,
+            place,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    settle_at(bench, place);
+}
+
+/// The workbook gets a second sheet holding the value 5, through the actions
+/// of the menu. Returns it.
+fn add_second_sheet(bench: &mut Bench, place: Place) -> stokesforge_core::NodeId {
+    let book = bench.book();
+    let state = &mut bench.app.state;
+    state.dispatch(Action::AddWorksheet { book });
+    let sheet = state.worksheets_of(book)[1].0;
+    state.dispatch(Action::AddColumn { sheet });
+    let column = state.tree().children(sheet).unwrap()[0];
+    state.dispatch(Action::CommitCell {
+        column,
+        row: 0,
+        text: "5".into(),
+    });
+    settle_at(bench, place);
+    sheet
+}
+
+/// #518 (a'): a value still being typed in Sheet1 A1 when the Sheet2 tab is
+/// clicked lands in Sheet1 A1; Sheet2 is untouched and shown.
+fn tab_switch_commits_the_pending_entry(place: Place) {
+    let mut bench = bench_at(place);
+    let sheet2 = add_second_sheet(&mut bench, place);
+    let sheet1 = first_sheet(&bench);
+    let mut expected = dump(&bench.app.state);
+    *cell_of(&mut expected, "Sheet1", 0) = "77".into();
+    at_cell(&mut bench, place, sheet1, 0);
+    type_digits(&mut bench, place, "77");
+    let name = bench.app.state.worksheets_of(bench.book())[1].1.clone();
+    let output = pass_at(&mut bench, place, Vec::new());
+    let tab = texts(&output.shapes)
+        .into_iter()
+        .filter(|text| text.text == name)
+        .max_by(|a, b| a.center.y.total_cmp(&b.center.y))
+        .unwrap_or_else(|| panic!("{place:?}: the tab {name:?} is painted"));
+    click_at(&mut bench, place, tab.center);
+    assert_eq!(
+        bench.app.state.selected_sheet_in(bench.book()),
+        Some(sheet2),
+        "{place:?}: the click chose Sheet2"
+    );
+    assert_eq!(
+        dump(&bench.app.state),
+        expected,
+        "{place:?}: A1 of Sheet1 = 77, Sheet2 unchanged"
+    );
+    bench.finish();
+}
+
+/// Docked: see [`tab_switch_commits_the_pending_entry`]. Witness: drop the
+/// commit the grid does on a click elsewhere (the entry is lost).
+#[test]
+fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_docked() {
+    tab_switch_commits_the_pending_entry(Place::Docked);
+}
+
+/// Detached: see [`tab_switch_commits_the_pending_entry`]. Today the entry is
+/// lost: `AppState::select_sheet` sets `editing = None` in the window's fork
+/// and nothing commits it first (A1 stays 0).
+#[test]
+#[ignore = "#518: a pending cell entry typed in a detached workbook is lost when a sheet tab is clicked (select_sheet drops it; docked commits it)"]
+fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_detached() {
+    tab_switch_commits_the_pending_entry(Place::Detached);
+}
+
+/// The two cells the key sequence of [`the_same_keys_give_the_same_result_docked_and_detached`]
+/// moves, read in the root state.
+fn a1_a2(bench: &Bench) -> (String, String) {
+    let sheet = bench.app.state.selected_sheet_in(bench.book()).unwrap();
+    let column = bench.app.state.tree().children(sheet).unwrap()[0];
+    (
+        bench.app.state.cell_text(column, 0),
+        bench.app.state.cell_text(column, 1),
+    )
+}
+
+/// The trial routine played in one place: 5 Enter in A1, 6 Enter in A2, two
+/// Ctrl+Z, one Ctrl+Y, then `8`, Enter and Ctrl+Z in one pass, Ctrl+S, reopen.
+/// Each step checks the absolute values; returns the reopened file.
+fn play_history_and_save(place: Place) -> Dump {
+    let mut bench = bench_at(place);
+    let sheet = first_sheet(&bench);
+    let (a1, a2) = a1_a2(&bench);
+    assert_eq!(
+        (a1.as_str(), a2.as_str()),
+        ("0", "1"),
+        "the starting values"
+    );
+    let expect = |bench: &Bench, step: &str, want: (&str, &str)| {
+        let got = a1_a2(bench);
+        assert_eq!(
+            (got.0.as_str(), got.1.as_str()),
+            want,
+            "{place:?}: after {step}"
+        );
+    };
+    at_cell(&mut bench, place, sheet, 0);
+    type_digits(&mut bench, place, "5");
+    play(&mut bench, place, vec![key(egui::Key::Enter)]);
+    expect(&bench, "5 Enter", ("5", "1"));
+    type_digits(&mut bench, place, "6");
+    play(&mut bench, place, vec![key(egui::Key::Enter)]);
+    expect(&bench, "6 Enter", ("5", "6"));
+    play(&mut bench, place, vec![ctrl(egui::Key::Z)]);
+    expect(&bench, "Ctrl+Z", ("5", "1"));
+    play(&mut bench, place, vec![ctrl(egui::Key::Z)]);
+    expect(&bench, "Ctrl+Z twice", ("0", "1"));
+    play(&mut bench, place, vec![ctrl(egui::Key::Y)]);
+    expect(&bench, "Ctrl+Y", ("5", "1"));
+    at_cell(&mut bench, place, sheet, 1);
+    type_digits(&mut bench, place, "8");
+    play(
+        &mut bench,
+        place,
+        vec![key(egui::Key::Enter), ctrl(egui::Key::Z)],
+    );
+    expect(&bench, "8 Enter Ctrl+Z in one pass", ("5", "1"));
+    play(&mut bench, place, vec![ctrl(egui::Key::S)]);
+    let saved = reopened(&mut bench);
+    let mut expected = dump(&bench.app.state);
+    assert_eq!(saved, expected);
+    *cell_of(&mut expected, "Sheet1", 0) = "5".into();
+    assert_eq!(saved, expected, "{place:?}: the file holds A1 = 5 only");
+    bench.finish();
+    saved
+}
+
+/// #518 (b): the key sequence undo, redo, save gives the right absolute values
+/// at each step and the same file docked and detached; one press is one
+/// history step and the window's own commit comes before the key's undo.
+/// Witnesses: drop `collect_undo_redo_shortcuts` from the detached reader
+/// (detached fails); queue the keys before the window's own actions (the last
+/// step differs); drop Save from the detached reader (detached fails).
+#[test]
+fn the_same_keys_give_the_same_result_docked_and_detached() {
+    let docked = play_history_and_save(Place::Docked);
+    let detached = play_history_and_save(Place::Detached);
+    assert_eq!(docked, detached, "docked and detached files differ");
+}
