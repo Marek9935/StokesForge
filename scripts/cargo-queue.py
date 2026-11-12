@@ -52,11 +52,14 @@ MODES = {
 # 0 = typed by the user or SF_CARGO_QUEUE=first, then the rank of the class. Lower rank starts first, ties by arrival.
 # small_lane: may use the extra slot of the small lane (background mode only, see `small_lane_free`).
 # ages: a waiter of the class counts as rank 1 once it has waited SF_CARGO_QUEUE_AGE seconds (default 300).
-# jobs: None = the mode's jobs. Rank 3 is kept free for the `low` class of #523 (no lane, never ages, jobs 2).
+# jobs: None = the mode's jobs. `low` (#523, the template refresh, SF_CARGO_QUEUE_CLASS=low only): rank 3, always
+# behind every other waiter even typed at a tty, never in `background` mode (LOW_NEVER_MODES), -j2.
 CLASSES = {
     "small": {"rank": 1, "small_lane": True, "ages": False, "jobs": None},
     "big": {"rank": 2, "small_lane": False, "ages": True, "jobs": None},
+    "low": {"rank": 3, "small_lane": False, "ages": True, "jobs": 2},
 }
+LOW_NEVER_MODES = ("background",)   # a low build stays queued there, even with a free slot and nobody waiting
 LANE_MODES = ("background",)    # the small lane exists only here: 1 slot + 1 small lane (#476 ruled out a third build)
 LANE_MIN_MEM_KB = 4 * 1024 * 1024
 WAIT_LOG_MAX = 1024 * 1024
@@ -648,7 +651,7 @@ class Ticket:
         self.t0 = time.time()
         self.ahead_at_entry = 0
         self.logged = False
-        rank = 0 if human_prio() == 0 else CLASSES[cls]["rank"]
+        rank = 0 if human_prio() == 0 and cls != "low" else CLASSES[cls]["rank"]
         with QueueLock():
             self.name = "w-%d-%020d-%d.json" % (rank, time.time_ns(), os.getpid())
             self.path = os.path.join(queue_dir(), self.name)
@@ -732,7 +735,7 @@ def small_lane_free(root, running, mem_kb):
 def wait_turn(ticket):
     """Block until this ticket may run. Prints who is ahead. A command typed by the user skips the wait."""
     last_key, last_print, last_auto = None, 0.0, 0.0
-    if typed_by_user():     # the user's own terminal starts at once; the ticket still counts as running
+    if typed_by_user() and ticket.cls != "low":     # the user's own terminal starts at once; the ticket still counts as running
         with QueueLock():
             list_tickets(purge=True, own=ticket.name)
             ticket.promote("typed")
@@ -757,7 +760,9 @@ def wait_turn(ticket):
             waiting = [x for x in items if x[0].startswith("w-")]
             order = sorted(waiting, key=lambda x: effective_key(x[0], x[1], now, age))
             normal_running = [x for x in running if x[1].get("lane") != "extra"]
-            if len(normal_running) < slots and order and order[0][0] == ticket.name:
+            if ticket.cls == "low" and mode in LOW_NEVER_MODES:
+                pass
+            elif len(normal_running) < slots and order and order[0][0] == ticket.name:
                 lane = "normal"
             elif lane_cls:
                 small = [x for x in order if CLASSES.get(x[1].get("class"), {}).get("small_lane")]
@@ -835,12 +840,12 @@ BOOL_FLAGS = {"--lib", "--bins", "--tests", "--examples", "--benches", "--doc", 
 
 
 def classify(args):
-    """'small' or 'big' for a heavy cargo call (see CLASSES). SF_CARGO_QUEUE_CLASS=small|big overrides it."""
+    """'small' or 'big' for a heavy cargo call (see CLASSES). SF_CARGO_QUEUE_CLASS=small|big|low overrides it."""
     ov = os.environ.get("SF_CARGO_QUEUE_CLASS")
     if ov in CLASSES:
         return ov
     if ov:
-        print("cargo-queue: warning: SF_CARGO_QUEUE_CLASS=%r ignored (small or big)" % ov, file=sys.stderr, flush=True)
+        print("cargo-queue: warning: SF_CARGO_QUEUE_CLASS=%r ignored (small, big or low)" % ov, file=sys.stderr, flush=True)
     idx, sub = parse_args(args)
     if sub not in BUILD_SUBS and sub not in TEST_SUBS:
         return "big"
@@ -950,13 +955,13 @@ def die_by(signum):
     sys.exit(128 + signum)
 
 
-def run_in_scope(real, args, mode, use_scope):
+def run_in_scope(real, args, mode, use_scope, cls=None):
     """Run the real cargo as a child and return its exit status (negative: killed by that signal)."""
     cpus = mode_cpus(mode)
     nice = MODES[mode]["fallback_nice"]
     env = dict(os.environ)
     env[MARKER] = "1"
-    jobs = MODES[mode].get("jobs")
+    jobs = CLASSES.get(cls, {}).get("jobs") or MODES[mode].get("jobs")
     if jobs:       # the caller's own value wins; a -j on the command line wins over the variable
         for k in ("CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS", "RUST_TEST_THREADS"):
             env.setdefault(k, str(jobs))
@@ -1013,7 +1018,7 @@ def shim(argv):
     if is_run:      # build in the queue; the application itself runs outside it
         end = args.index("--") if "--" in args else len(args)
         run_args = args[:idx] + ["build"] + args[idx + 1:end]
-    rc = run_in_scope(real, run_args, mode, use_scope)
+    rc = run_in_scope(real, run_args, mode, use_scope, ticket.cls)
     if rc < 0:
         die_by(-rc)
     ticket.release()
