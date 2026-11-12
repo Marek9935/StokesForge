@@ -18,8 +18,8 @@
 # Main is an ancestor of the branch before the merge, so the tree of M equals the tree of the
 # branch head: the head's stamp covers M.
 #
-# MANUAL SCREENSHOTS (#515). Before the lock, if the branch changed anything under crates/,
-# assets/, manual/screenshots.json or Cargo.lock (against its merge base), deliver regenerates
+# MANUAL SCREENSHOTS (#515). Before the lock, if the branch changed interface code under crates/
+# or assets/, manual/screenshots.json or Cargo.lock (against its merge base; SHOT_PATHS), deliver regenerates
 # ALL the manual screenshots in the branch worktree (scripts/manual-screenshots.sh --no-python:
 # the Python console shot is left out), commits the changed images ("manual: regenerate
 # screenshots (#n)") and stamps that commit itself (it only adds images, which no test reads),
@@ -121,6 +121,15 @@ if [ -n "$branch" ]; then
     fi
 fi
 
+# Paths whose change can alter a manual screenshot. Crates with no interface (guards, robustness,
+# CLI, Python bridge, logo generator), tests, benches and Markdown do not trigger the release
+# rebuild: a test-only branch delivered in 5+ minutes for nothing (#516).
+SHOT_PATHS=(crates assets manual/screenshots.json Cargo.lock
+    ':(exclude)crates/stokesforge-arch-guard' ':(exclude)crates/stokesforge-robustness'
+    ':(exclude)crates/stokesforge-cli' ':(exclude)crates/stokesforge-python'
+    ':(exclude)crates/stokesforge-logo-gen' ':(exclude,glob)crates/*/tests/**'
+    ':(exclude,glob)crates/*/benches/**' ':(exclude,glob)**/*.md')
+
 # Tested commit and manual screenshots (#515), before the lock. Skipped when the branch is already
 # in the line (an earlier run merged it: this run only pushes or records).
 common="$(git rev-parse --path-format=absolute --git-common-dir)"
@@ -128,7 +137,7 @@ stamp_ok() { [ -e "$common/sf-tested/$(git rev-parse "$branch")" ]; }
 stamp_refuse() { die "$branch (commit $(git rev-parse --short "$branch")) has no test stamp: run scripts/test-all.sh in ${wt:-its worktree}, then rerun"; }
 if [ -n "$branch" ] && ! git merge-base --is-ancestor "$branch" "$line"; then
     stamp_ok || stamp_refuse
-    if [ -n "$(git diff --name-only "$(git merge-base "$line" "$branch")" "$branch" -- crates assets manual/screenshots.json Cargo.lock)" ]; then
+    if [ -n "$(git diff --name-only "$(git merge-base "$line" "$branch")" "$branch" -- "${SHOT_PATHS[@]}")" ]; then
         [ -n "$wt" ] || die "$branch changes the interface and has no worktree to regenerate the manual screenshots in"
         echo "deliver: regenerating the manual screenshots (without the Python console shot)" >&2
         if [ -n "${SF_MANUAL_SHOTS:-}" ]; then

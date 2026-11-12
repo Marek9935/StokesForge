@@ -9,7 +9,11 @@ Subcommands (each call is independent; state lives in $SF_RUN_DIR):
                         `sf-<n>`, nothing appears on the desktop. Visible mode otherwise:
                         Xwayland opens a window in the current Wayland session.
   where                 prints the display, the run folder and the mode; reserves nothing
-  ss FILE.png           captures the X screen (the whole root window)
+  ss FILE.png [--crop WxH+X+Y] [--max-width N]
+                        captures the X screen (the whole root window); --crop keeps that
+                        rectangle (inside the screen), --max-width shrinks a wider image to N
+                        pixels (never enlarges). Both only after the capture: the picture
+                        is smaller to read (#517)
   click X Y [MODS+]left|right|double   moves the pointer and clicks (MODS: ctrl, shift, alt)
   drag X1 Y1 X2 Y2 [MODS]   hover, press, move in steps, release
   move X Y              moves the pointer
@@ -18,7 +22,7 @@ Subcommands (each call is independent; state lives in $SF_RUN_DIR):
   stop [app]            kills the app, Xwayland and the compositor (process groups);
                         `stop app` kills only the app
 """
-import os, subprocess, sys, time, signal, pathlib, shutil, fcntl
+import os, re, subprocess, sys, time, signal, pathlib, shutil, fcntl
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 # One run folder per checkout (worktree): two sessions never share a display.
@@ -400,14 +404,80 @@ def flush_frames():
         d.sync(); time.sleep(0.6)
 
 
-def ss(path):
+def parse_geom(text):
+    """'WxH' -> (w, h)."""
+    m = re.fullmatch(r"(\d+)x(\d+)", text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def parse_ss(argv, geom=None):
+    """Arguments after `ss` -> (path, crop, maxw); crop is (w, h, x, y) or None. Exit 2 with a message when bad."""
+    sw, sh = parse_geom(geom or GEOM) or (1400, 900)
+
+    def bad(msg):
+        print("ss: " + msg, file=sys.stderr)
+        raise SystemExit(2)
+
+    path, crop, maxw, i = None, None, None, 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--crop" or a == "--max-width":
+            if i + 1 >= len(argv):
+                bad(a + " needs a value")
+            v = argv[i + 1]
+            i += 2
+            if a == "--crop":
+                m = re.fullmatch(r"(\d+)x(\d+)\+(\d+)\+(\d+)", v)
+                if not m:
+                    bad("--crop needs WxH+X+Y with an offset, got %r" % v)
+                w, h, x, y = (int(g) for g in m.groups())
+                if w <= 0 or h <= 0 or x + w > sw or y + h > sh:
+                    bad("--crop %s is outside the %dx%d screen" % (v, sw, sh))
+                crop = (w, h, x, y)
+            else:
+                if not re.fullmatch(r"\d+", v) or int(v) <= 0:
+                    bad("--max-width needs a positive number, got %r" % v)
+                maxw = int(v)
+        elif a.startswith("-"):
+            bad("unknown option %r" % a)
+        elif path is None:
+            path = a
+            i += 1
+        else:
+            bad("one file only, got %r too" % a)
+    if path is None:
+        bad("usage: ss FILE.png [--crop WxH+X+Y] [--max-width N]")
+    return path, crop, maxw
+
+
+def post_argv(path, crop, maxw):
+    """The ImageMagick command that crops and shrinks the capture in place, or None when neither is asked."""
+    if crop is None and maxw is None:
+        return None
+    argv = ["magick", path]
+    if crop is not None:
+        argv += ["-crop", "%dx%d+%d+%d" % crop, "+repage"]
+    if maxw is not None:
+        argv += ["-resize", "%dx>" % maxw]
+    return argv + [path]
+
+
+def ss(argv):
+    path, crop, maxw = parse_ss(argv)
     # Empirical: the 1st capture after an action still shows the previous state;
     # the 2nd (after a new flush) shows the current state.
     flush_frames()
     subprocess.run(["import", "-display", DISPLAY, "-window", "root", path], check=True)
     flush_frames()
     subprocess.run(["import", "-display", DISPLAY, "-window", "root", path], check=True)
-    print(path)
+    post = post_argv(path, crop, maxw)
+    if post:
+        subprocess.run(post, check=True)
+        size = subprocess.run(["magick", "identify", "-format", "%wx%h", path], check=True,
+                              capture_output=True, text=True).stdout
+        print("%s %s" % (path, size))
+    else:
+        print(path)
 
 
 if __name__ == "__main__":
@@ -415,7 +485,7 @@ if __name__ == "__main__":
     if cmd == "start": start(a)
     elif cmd == "stop": stop(a)
     elif cmd == "where": where()
-    elif cmd == "ss": ss(a[0])
+    elif cmd == "ss": ss(a)
     elif cmd == "click": click(a[0], a[1], a[2] if len(a) > 2 else "left")
     elif cmd == "drag": drag(*a[:4], a[4].split("+") if len(a) > 4 else ())
     elif cmd == "move": move(a[0], a[1])
