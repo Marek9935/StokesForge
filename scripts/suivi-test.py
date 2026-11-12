@@ -4490,16 +4490,19 @@ class TestPage(unittest.TestCase):
     def test_a_settled_retour_moves_to_its_own_section(self):
         st = {"at": "2026-11-09T10:00:00", "by": "agent"}
         tests = [{"id": "1-1", "status": "todo"}, {"id": "1-2", "status": "retour"},
-                 {"id": "1-3", "status": "retour", "settled": st}, {"id": "1-4", "status": "ok"}]
+                 {"id": "1-3", "status": "retour", "settled": st}, {"id": "1-4", "status": "ok"},
+                 {"id": "1-5", "status": "ok", "idea": "i"}, {"id": "1-6", "status": "ok", "idea": "j", "settled": st}]
         got = self.split_node("(()=>{const s=splitTests(%s);return Object.fromEntries(Object.entries(s).map(([k,v])=>[k,v.map(x=>x.id)]));})()" % json.dumps(tests))
-        self.assertEqual(got, {"todo": ["1-1"], "back": ["1-2"], "settled": ["1-3"], "done": ["1-4"]})
+        self.assertEqual(got, {"todo": ["1-1"], "back": ["1-2", "1-5"], "settled": ["1-3", "1-6"], "done": ["1-4"]})
         html = self.page()
         self.assertIn('id="n-settled"', html)
         self.assertLess(html.index('id="back"'), html.index('id="settled-wrap"'))
         self.assertLess(html.index('id="settled-wrap"'), html.index('id="done-wrap"'))
         self.assertIn("$('n-settled').textContent=settled.length", html)
         # lang: fr begin
-        self.assertIn("Retours traités", html)
+        self.assertIn("En traitement", html)
+        self.assertIn("Traités (", html)
+        self.assertNotIn("C’est bon", html)
         text = self.split_node("[settledText({settled:{by:'user',at:'x'}},'9 nov.'),"
                                "settledText({settled:{by:'agent',commit:'0123456789abcdef',note:'#12'}},'9 nov.')]")
         self.assertEqual(text, ["classé par toi le 9 nov.", "traité le 9 nov. · commit 01234567 · #12"])

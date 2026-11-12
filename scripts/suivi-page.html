@@ -176,10 +176,10 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
       <div id="todo" class="rows"></div>
     </section>
     <section aria-labelledby="h-back">
-      <h2 id="h-back">Retours envoyés <span class="count" id="n-back">–</span></h2>
+      <h2 id="h-back">En traitement <span class="count" id="n-back">–</span></h2>
       <div id="back" class="rows"></div>
     </section>
-    <details id="settled-wrap"><summary>Retours traités (<span id="n-settled">0</span>)</summary><div id="settled" class="rows"></div></details>
+    <details id="settled-wrap"><summary>Traités (<span id="n-settled">0</span>)</summary><div id="settled" class="rows"></div></details>
     <details id="done-wrap"><summary>Testé et OK (<span id="n-done">0</span>)</summary><div id="done" class="rows"></div></details>
   </div>
 
@@ -192,7 +192,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     <details id="finished-wrap"><summary>Terminés, les 10 derniers (<span id="n-finished">0</span>)</summary><div id="finished" class="rows"></div></details>
     <div id="foot" class="note"></div>
   </div>
-  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « C’est bon », tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
+  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « OK » (ou « OK + idée »), tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
 </div>
 <script>
 const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
@@ -399,13 +399,15 @@ function withdrawUi(q,asking){
 function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
 /*CARDLINE-END*/
 /*SPLIT-START*/
-/* Where each trial entry is listed (#496): a settled retour leaves « Retours envoyés » for « Retours traités ». */
+/* Where each trial entry is listed (#496, #518): a retour or an OK + idée the agent has not settled is « En traitement »;
+   once settled it moves to « Traités »; a plain OK is « Testé et OK ». */
 function splitTests(tests){
   const stamp=x=>String(x.reviewed||x.date||'');
   const by=f=>tests.filter(f).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
   const st=x=>x.status||'todo';
-  return {todo:by(x=>st(x)==='todo'),back:by(x=>st(x)==='retour'&&!isSettled(x)),
-          settled:by(x=>st(x)==='retour'&&isSettled(x)),done:by(x=>st(x)==='ok')};
+  const handled=x=>st(x)==='retour'||(st(x)==='ok'&&String(x.idea||'').trim()!=='');
+  return {todo:by(x=>st(x)==='todo'),back:by(x=>handled(x)&&!isSettled(x)),
+          settled:by(x=>handled(x)&&isSettled(x)),done:by(x=>st(x)==='ok'&&!handled(x))};
 }
 /* The two framing lines of a trial entry (#518): « On teste : … » above the route, « Essaie autour : … » below
    what to see. '' when the entry carries none. */
@@ -697,10 +699,10 @@ function testBox(x){
   if(sent.length&&!editing){b.appendChild(el('div','lbl','Tes captures'));
     const sn=el('div','sent');sent.forEach(n=>sn.appendChild(thumb(x.id,n)));b.appendChild(sn);}
   const a=el('div','acts');
-  const ok=el('button','ok'+(x.status==='ok'?' on':''),x.status==='ok'?'✓ OK':'✓ C’est bon');ok.type='button';ok.id='ok-'+x.id;
+  const ok=el('button','ok'+(x.status==='ok'?' on':''),'✓ OK');ok.type='button';ok.id='ok-'+x.id;
   ok.onclick=()=>{if(openBack&&openBack.id===x.id)boxSend(x,'ok');else send(x,{status:x.status==='ok'?'todo':'ok'});};
   const oi=el('button','oi'+(x.status==='ok'&&x.idea?' on':''),'✓ OK + idée');oi.type='button';oi.id='oi-'+x.id;
-  oi.title='C’est bon et j’ai une idée : ça ne bloque pas la fusion';
+  oi.title='OK, et j’ai une idée : ça ne bloque pas la fusion';
   oi.onclick=()=>{openBack=editing&&openBack.mode==='idea'?null:{id:x.id,mode:'idea'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   const bk=el('button','back'+(x.status==='retour'?' on':''),'Retour');bk.type='button';bk.id='bk-'+x.id;
   bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
@@ -708,7 +710,7 @@ function testBox(x){
   cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   a.appendChild(ok);a.appendChild(oi);a.appendChild(bk);
   if(canSettle(x)){
-    const cl=el('button','','Classer');cl.type='button';cl.id='cl-'+x.id;cl.title='Ce retour est traité : le ranger sous « Retours traités »';
+    const cl=el('button','','Classer');cl.type='button';cl.id='cl-'+x.id;cl.title='Ce retour est traité : le ranger sous « Traités »';
     cl.onclick=()=>settleTest(x);a.appendChild(cl);
   }
   a.appendChild(cm);b.appendChild(a);
@@ -760,7 +762,7 @@ function renderTests(){
     if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(mk(x)));};
   fill('qcm',qcms,qcmBox,F?'Aucun questionnaire pour ce chantier.':'Aucun questionnaire ne t’attend.');
   fill('todo',todo,testBox,F?'Rien à tester pour ce chantier.':'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
-  fill('back',back,testBox,F?'Aucun retour pour ce chantier.':'Aucun retour en attente.');
+  fill('back',back,testBox,F?'Rien en traitement pour ce chantier.':'Rien en traitement.');
   fill('settled',settled,testBox,'');
   fill('done',done,testBox,'');
   const bn=$('banner');
