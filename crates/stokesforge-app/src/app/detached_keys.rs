@@ -1015,7 +1015,7 @@ fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_docked() {
 /// lost: `AppState::select_sheet` sets `editing = None` in the window's fork
 /// and nothing commits it first (A1 stays 0).
 #[test]
-#[ignore = "#518: a pending cell entry typed in a detached workbook is lost when a sheet tab is clicked (select_sheet drops it; docked commits it)"]
+#[ignore = "#524: a pending cell entry typed in a detached workbook is lost when a sheet tab is clicked (select_sheet drops it; docked commits it)"]
 fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_detached() {
     tab_switch_commits_the_pending_entry(Place::Detached);
 }
