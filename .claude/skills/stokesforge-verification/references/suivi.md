@@ -73,7 +73,7 @@ Before `test add`, only when a gesture or a drawing changes (prompt template: [`
 3. The detailed list and the captures live outside the worktree (`../_stokesforge/<n>-pre-trial.md`): `chantier.sh --release` refuses untracked files.
 4. The message to the user names what the driver cannot show: native Wayland, `rfd` file chooser, detached OS window, OS drag and drop, multi-screen, scale other than 1, real GPU look, and « is it what I wanted ».
 
-**Agent screenshots are the agent's own internal check** (#455): never shown to the user on a card, as proof or as a comparison bank. The user always opens the app themselves; prototype variants open in the app through `scripts/try.sh`.
+**Agent screenshots are the agent's own internal check** (#455): never shown to the user on a card, as proof or as a comparison bank. The user always opens the app themselves.
 
 The user's trial stays mandatory for a visible change; the pre-trial replaces none of it, and the orchestrator's own re-verification before the merge is not weakened. The limit of 5 entries is unchanged.
 

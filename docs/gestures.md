@@ -10,6 +10,8 @@ This page describes the **real state of the code** (surveyed on 2026-10-20, then
 in the real application: see "Verification"). The analysis preview is
 aligned with the graph since #270 (D3 of #299).
 
+Before changing a family of gestures, and for the feedback checklist: `.claude/skills/stokesforge-feature/references/ui-exploration.md`.
+
 ## The model
 
 - **The object first**: you click or drag the object itself (a curve,

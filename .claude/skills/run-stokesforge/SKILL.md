@@ -31,7 +31,7 @@ Traps (lost clicks, capture lag, focus, killing the right process) and troublesh
 
 Images for the user manual (#365) are not taken with this driver: `scripts/manual-screenshots.sh` renders them headless and reproducibly (`docs/tests.md`, "Manual screenshots"); this skill stays for exploring and checking the real app.
 
-Screenshots taken with this driver are the agent's own internal check (#455): never shown to the user on a card, as proof or as a comparison bank. The user always opens the app themselves; prototype variants open in the app through `scripts/try.sh`.
+Screenshots taken with this driver are the agent's own internal check (#455): never shown to the user on a card, as proof or as a comparison bank. The user always opens the app themselves.
 
 Parallel agents: only for independent routes (no shared file, language or sequence), one `SF_RUN_DIR` each; corrections one at a time.
 

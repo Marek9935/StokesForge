@@ -21,4 +21,5 @@ You set the **scope** of a task in the StokesForge repository (Rust workspace, d
 4. **Pitfalls**: invariants involved (by number), known pitfalls of the domain, order of the steps if it matters.
 5. **Docs and skills** to update ("Cohérence" line of the issue, completed if needed).
 6. **Edge cases**: the cases the request leaves open (last column, empty selection, detached window, mixed column...), one per line, each tagged `stated by the issue`, `obvious default` (say which) or `changes behaviour` (becomes a card of the start form).
-7. **To decide**: only what changes a visible behaviour and what the issue does not decide. Do not decide in place of the user.
+7. **Interface package**: the open sibling issues touching the same mechanism (`glab issue list`), and a draft gesture table (gesture × modifier × object) to settle in one form.
+8. **To decide**: only what changes a visible behaviour and what the issue does not decide. Do not decide in place of the user.
