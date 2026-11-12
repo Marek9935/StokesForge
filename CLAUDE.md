@@ -34,7 +34,7 @@ python3 scripts/cargo-queue-test.py          # the local cargo queue and build m
 
 Boundaries held by the compiler or a guard: `stokesforge-app-state` has **no** egui/eframe/winit dependency (`tests/no_ui_dependency.rs`); `stokesforge-analysis` and `stokesforge-import` depend on no workspace crate; `stokesforge-cli import` builds a `Project` without a session. The exact graph is in `docs/architecture.md`; rendering details in `docs/rendering.md`.
 
-`stokesforge-robustness`: no production code, depends on the whole workspace. Twenty-three batteries of tests (`b1`…`b23`, see its `src/lib.rs`) that test the base at its limits.
+`stokesforge-robustness`: no production code, depends on the whole workspace. Twenty-four batteries of tests (`b1`…`b24`, see its `src/lib.rs`) that test the base at its limits.
 
 Feature outside `default`: `python` (PyO3 bridge, requires `PYO3_CONFIG_FILE`; see `scripts/python-test.sh`), the only one in the repository. `cargo build --workspace` does not compile it. `scripts/python-test.sh` tests the bridge, scripts, robustness, application and CLI; the CI job `test-python` is automatic and blocking. Typst (scientific notation) is a firm dependency of the three rendering crates: `cargo build/test --workspace` compile and test it.
 

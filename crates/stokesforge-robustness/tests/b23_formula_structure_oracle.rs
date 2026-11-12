@@ -16,14 +16,14 @@
 //!    the live one. This catches an error common to both live modes that the
 //!    twin oracle cannot see (a stale value kept by both).
 //!
-//! The draw is deterministic like `b22`. `B23_CASES` raises the number of
-//! sequences (default 64).
+//! The draw is deterministic like `b22`. `SF_PROPTEST_SEED` replaces the seed and
+//! `SF_PROPTEST_SCALE` multiplies the number of sequences (96 at scale 1).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::TestRunner;
 use stokesforge_commands::Command;
 use stokesforge_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, CopyInsertion, NodeCopy, NodeId, NodeKind,
@@ -263,14 +263,7 @@ fn step_name(step: &Step) -> &'static str {
 }
 
 fn runner(cases: u32) -> TestRunner {
-    TestRunner::new_with_rng(
-        Config {
-            cases,
-            failure_persistence: None,
-            ..Config::default()
-        },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    )
+    common::env_runner(cases)
 }
 
 // -- the world --------------------------------------------------------------
@@ -1021,10 +1014,7 @@ fn run_sequence(draw: &[Step]) -> Result<Coverage, TestCaseError> {
 
 #[test]
 fn b23_formulas_stay_exact_across_structural_gestures() {
-    let cases = std::env::var("B23_CASES")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(96);
+    let cases = 96 * common::env_scale();
     let total = std::cell::RefCell::new(Coverage::default());
     let started = std::time::Instant::now();
     runner(cases)
@@ -1033,7 +1023,12 @@ fn b23_formulas_stay_exact_across_structural_gestures() {
             total.borrow_mut().add(c);
             Ok(())
         })
-        .expect("targeted == full == fresh evaluation at every step");
+        .unwrap_or_else(|e| {
+            panic!(
+                "targeted == full == fresh evaluation at every step: {e}; {}",
+                common::seed_note()
+            )
+        });
     let total = total.into_inner();
     eprintln!("b23: {cases} cases in {:?}: {total:?}", started.elapsed());
     assert!(total.computed > 500, "{total:?}");

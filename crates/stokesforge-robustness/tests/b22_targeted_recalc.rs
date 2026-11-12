@@ -53,11 +53,13 @@
 //! hash table with a random seed): worksheets are taken in the order of the
 //! walk from the root.
 
+mod common;
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::TestRunner;
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::fit::FitSpec;
@@ -511,16 +513,9 @@ fn step_name(step: &Step) -> &'static str {
     }
 }
 
-/// Runner with a fixed seed, without a regression file on the repository disk.
+/// Runner with a fixed seed (or `SF_PROPTEST_SEED`), scaled by `SF_PROPTEST_SCALE`.
 fn runner(cases: u32) -> TestRunner {
-    TestRunner::new_with_rng(
-        Config {
-            cases,
-            failure_persistence: None,
-            ..Config::default()
-        },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    )
+    common::env_runner(cases)
 }
 
 // -- the world played -----------------------------------------------------
@@ -1544,7 +1539,12 @@ fn b22_the_targeted_recalculation_returns_exactly_the_full_recalculation() {
             total.borrow_mut().add(coverage);
             Ok(())
         })
-        .expect("the targeted recalculation follows the oracle at every step");
+        .unwrap_or_else(|e| {
+            panic!(
+                "the targeted recalculation follows the oracle at every step: {e}; {}",
+                common::seed_note()
+            )
+        });
     let total = total.into_inner();
     eprintln!("b22: {total:?}");
     assert!(total.computed > 1000, "{total:?}");

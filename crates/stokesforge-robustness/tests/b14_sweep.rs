@@ -20,10 +20,12 @@
 //! This sweep found A7 and A8 without being told where to look; it stays here
 //! as a safety net, not only as proof.
 
+mod common;
+
 use std::collections::HashMap;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::TestRunner;
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
 use stokesforge_analysis::ops::Operation;
 use stokesforge_commands::{Command, History};
@@ -165,16 +167,9 @@ fn correction_command(tree: &Tree, columns: &[NodeId], rank: usize) -> Option<Co
     })
 }
 
-/// Runner with a fixed seed, without a regression file on the repository disk.
+/// Runner with a fixed seed (or `SF_PROPTEST_SEED`), scaled by `SF_PROPTEST_SCALE`.
 fn runner(cases: u32) -> TestRunner {
-    TestRunner::new_with_rng(
-        Config {
-            cases,
-            failure_persistence: None,
-            ..Config::default()
-        },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    )
+    common::env_runner(cases)
 }
 
 // -- the world played ------------------------------------------------------
@@ -362,7 +357,7 @@ fn b14_the_disk_round_trip_holds_at_every_step() {
             }
             Ok(())
         })
-        .expect("disk round trip checked");
+        .unwrap_or_else(|e| panic!("disk round trip checked: {e}; {}", common::seed_note()));
 }
 
 // -- reproductions --------------------------------------------------------
@@ -390,7 +385,7 @@ fn b14_a_version_never_designates_two_contents() {
             }
             Ok(())
         })
-        .expect("version ↔ content checked");
+        .unwrap_or_else(|e| panic!("version ↔ content checked: {e}; {}", common::seed_note()));
 }
 
 #[test]
@@ -415,5 +410,67 @@ fn b14_the_canonical_path_always_designates_its_node_again() {
             }
             Ok(())
         })
-        .expect("path_of ∘ resolve_path checked");
+        .unwrap_or_else(|e| {
+            panic!(
+                "path_of ∘ resolve_path checked: {e}; {}",
+                common::seed_note()
+            )
+        });
+}
+
+// -- shared seed and scale variables (#522) ----------------------------------
+
+fn first_draws(seed: Option<u64>) -> Vec<u32> {
+    use proptest::prelude::RngCore;
+    let mut rng = common::rng_for(seed);
+    (0..4).map(|_| rng.next_u32()).collect()
+}
+
+#[test]
+fn b14_without_variables_the_draw_is_the_fixed_one() {
+    use proptest::prelude::RngCore;
+    assert_eq!(common::parse_seed(None), None);
+    assert_eq!(common::parse_scale(None), 1);
+    let mut fixed = proptest::test_runner::TestRng::deterministic_rng(
+        proptest::test_runner::RngAlgorithm::ChaCha,
+    );
+    let expected: Vec<u32> = (0..4).map(|_| fixed.next_u32()).collect();
+    assert_eq!(first_draws(None), expected);
+}
+
+#[test]
+fn b14_a_seed_replays_and_differs_from_the_fixed_one() {
+    let seed = common::parse_seed(Some("42"));
+    assert_eq!(seed, Some(42));
+    assert_eq!(first_draws(seed), first_draws(seed));
+    assert_ne!(first_draws(seed), first_draws(None));
+    assert_ne!(first_draws(seed), first_draws(Some(43)));
+}
+
+#[test]
+fn b14_the_scale_multiplies_the_case_count() {
+    assert_eq!(common::parse_scale(Some("4")), 4);
+    assert_eq!(8u32.saturating_mul(common::parse_scale(Some("4"))), 32);
+}
+
+#[test]
+fn b14_an_unreadable_variable_fails_naming_it() {
+    for (name, run) in [
+        (
+            "SF_PROPTEST_SEED",
+            (|| {
+                let _ = common::parse_seed(Some("abc"));
+            }) as fn(),
+        ),
+        ("SF_PROPTEST_SCALE", || {
+            let _ = common::parse_scale(Some("0"));
+        }),
+        ("SF_PROPTEST_SCALE", || {
+            let _ = common::parse_scale(Some("x"));
+        }),
+    ] {
+        let err = std::panic::catch_unwind(run).expect_err("must refuse");
+        let text = err.downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(text.contains(name), "{text}");
+    }
 }
