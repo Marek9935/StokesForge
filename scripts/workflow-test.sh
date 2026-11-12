@@ -916,7 +916,7 @@ EOF
     clog() { cat "$FAKE_LOG" 2> /dev/null || true; }
     calls() { grep -vc ' clean$' "$FAKE_LOG" || true; }
 
-    # Refresh, cold: exactly the four commands, each in the low class, no cargo clean, a stamp.
+    # Refresh with no target yet (cold): exactly the four commands, each in the low class, no cargo clean, a stamp.
     tt refresh > "$sb/out" 2>&1 || fail "template refresh: $(cat "$sb/out")"
     eq "$(clog)" "low nextest run --workspace --no-run --cargo-message-format json
 low clippy --workspace --all-targets --message-format json
@@ -930,6 +930,8 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     : > "$d/deps/libstale-cccccccccccccccc.rlib"; : > "$d/deps/libstale-cccccccccccccccc.d"
     : > "$FAKE_LOG"
     tt refresh > "$sb/out" 2>&1 || fail "template refresh 2: $(cat "$sb/out")"
+    # Warm refresh (target and toolchain unchanged): every call in the normal class big (#527).
+    eq "$(awk '{print $1}' "$FAKE_LOG" | sort -u)" big "warm refresh: every cargo call carries SF_CARGO_QUEUE_CLASS=big"
     [ ! -e "$d/deps/libstale-cccccccccccccccc.rlib" ] && [ ! -e "$d/deps/libstale-cccccccccccccccc.d" ] || fail "sweep: a stale deps file survived"
     [ ! -e "$d/.fingerprint/stale-cccccccccccccccc" ] && [ ! -e "$d/build/old-bbbbbbbbbbbbbbbb" ] || fail "sweep: a stale fingerprint or build dir survived"
     [ ! -e "$d/incremental" ] || fail "sweep: incremental/ survived"
@@ -949,10 +951,12 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     tt refresh > "$sb/out" 2>&1 || fail "toolchain refresh: $(cat "$sb/out")"
     eq "$(head -n 1 "$FAKE_LOG")" "none clean" "toolchain changed: clean comes first"
     eq "$(calls)" 4 "toolchain changed: one rebuild"
+    eq "$(grep -v ' clean$' "$FAKE_LOG" | awk '{print $1}' | sort -u)" low "toolchain changed: the cold rebuild runs in class low"
     : > "$FAKE_LOG"
     SF_TEMPLATE_MAX_KB=1 tt refresh > "$sb/out" 2>&1 || fail "oversize refresh: $(cat "$sb/out")"
     eq "$(grep -c ' clean$' "$FAKE_LOG")" 1 "oversize target: exactly one clean"
     eq "$(calls)" 8 "oversize target: sweep, clean, one more build"
+    eq "$(grep -v ' clean$' "$FAKE_LOG" | awk '{print $1}' | uniq -c | tr -s ' ' | tr '\n' ';')" " 4 big; 4 low;" "oversize target: warm build in big, the rebuild after the clean in low"
     grep -q 'WARNING: still above' "$sb/out" || fail "oversize after a clean build is not reported"
     : > "$FAKE_LOG"
     SF_TEMPLATE_CARGO="$sb/none" tt refresh > "$sb/out" 2>&1 && fail "refresh without the shim accepted"
@@ -984,15 +988,35 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     # Free space: less than 50 GB would remain.
     mkdir -p "$sb/wt3"; SF_DF_AVAIL_KB=1000 tt copy "$sb/wt3" > "$sb/out" 2>&1 || fail "copy low space: $(cat "$sb/out")"
     [ ! -e "$sb/wt3/target" ] && grep -q 'would stay free' "$sb/out" || fail "copy low space: $(cat "$sb/out")"
-    # Template lock held exclusive (a refresh runs): no copy, one line, no wait.
-    mkdir -p "$sb/wt4"; rm -f "$sb/held"
-    flock -x "$T/lock" bash -c "echo held > '$sb/held'; cat '$sb/gate' > /dev/null" &
-    bg=$!
-    "$here/wait-for.sh" "$sb/held" held 30 > /dev/null || fail "lock holder never started"
-    set +e; timeout 5 "$here/template-target.sh" copy "$sb/wt4" > "$sb/out" 2>&1; rc=$?; set -e
-    echo go > "$sb/gate"; wait "$bg"
-    eq "$rc" 0 "copy with the lock held: exit code (124 = it waited)"
-    [ ! -e "$sb/wt4/target" ] && grep -q 'refresh holds' "$sb/out" || fail "copy with the lock held: $(cat "$sb/out")"
+    # A refresh runs (lock held exclusive, state marker). holder <state> <hold_s>: hold the lock, then release
+    # when the gate is fed (hold_s empty) or after hold_s seconds (timeout on the gate read, no sleep).
+    holder() {
+        rm -f "$sb/held"; printf '%s\nabcdef123456\n' "$1" > "$T/state"
+        flock -x "$T/lock" bash -c "echo held > '$sb/held'; timeout ${2:-60} cat '$sb/gate' > /dev/null" &
+        bg=$!
+        "$here/wait-for.sh" "$sb/held" held 30 > /dev/null || fail "lock holder never started"
+    }
+    # Warm refresh that ends in about 2 s: the copy waits, then copies the fresh template.
+    mkdir -p "$sb/wt4"
+    holder warm 2
+    SF_TEMPLATE_WAIT_S=30 tt copy "$sb/wt4" > "$sb/out" 2>&1 || fail "copy during a warm refresh: $(cat "$sb/out")"
+    wait "$bg" || true; rm -f "$T/state"
+    grep -q 'waiting for the template refresh of abcdef12, at most 1 min' "$sb/out" || fail "copy during a warm refresh: no waiting line: $(cat "$sb/out")"
+    [ -f "$sb/wt4/target/debug/deps/libfoo-0123456789abcdef.rlib" ] && tail -n 1 "$sb/out" | grep -q 'after waiting' || fail "copy during a warm refresh did not copy after waiting: $(cat "$sb/out")"
+    # Warm refresh that outlasts the wait: no copy, the reason in the line.
+    mkdir -p "$sb/wt6"
+    holder warm 60
+    set +e; SF_TEMPLATE_WAIT_S=1 timeout 20 "$here/template-target.sh" copy "$sb/wt6" > "$sb/out" 2>&1; rc=$?; set -e
+    echo go > "$sb/gate"; wait "$bg" || true; rm -f "$T/state"
+    eq "$rc" 0 "copy outlasted by a warm refresh: exit code (124 = it did not honour SF_TEMPLATE_WAIT_S)"
+    [ ! -e "$sb/wt6/target" ] && tail -n 1 "$sb/out" | grep -q 'still running after 1 s' || fail "copy outlasted by a warm refresh: $(cat "$sb/out")"
+    # Cold rebuild: no wait at all, skipped with the reason.
+    mkdir -p "$sb/wt7"
+    holder cold 60
+    set +e; SF_TEMPLATE_WAIT_S=600 timeout 5 "$here/template-target.sh" copy "$sb/wt7" > "$sb/out" 2>&1; rc=$?; set -e
+    echo go > "$sb/gate"; wait "$bg" || true; rm -f "$T/state"
+    eq "$rc" 0 "copy during a cold rebuild: exit code (124 = it waited)"
+    [ ! -e "$sb/wt7/target" ] && grep -q 'cold rebuild of the template is running' "$sb/out" && ! grep -q waiting "$sb/out" || fail "copy during a cold rebuild: $(cat "$sb/out")"
     # No template: no error.
     mkdir -p "$sb/wt5"; SF_TEMPLATE_DIR="$sb/nothing" tt copy "$sb/wt5" > "$sb/out" 2>&1 || fail "no template: $(cat "$sb/out")"
     grep -q 'none yet' "$sb/out" && [ ! -e "$sb/wt5/target" ] || fail "no template message: $(cat "$sb/out")"

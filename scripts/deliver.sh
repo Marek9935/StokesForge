@@ -61,7 +61,7 @@
 #
 # TEMPLATE TARGET (#523). After a successful push to main (not a line), if a template exists
 # (../_stokesforge/.template) `scripts/template-target.sh refresh` starts detached (setsid, log in
-# .template/refresh.log): a warm low-priority rebuild of main plus a sweep. Never waited for.
+# .template/refresh.log): a warm rebuild of main (class big; low only when cold) plus a sweep. Never waited for.
 #
 # Exit: 0 delivered, 1 refused or failed (main unchanged unless M was already merged
 # locally), 2 usage, 3 main moved: it was merged into the branch, retest and rerun.
@@ -241,8 +241,8 @@ if push_main; then pushed=1; else
 fi
 [ "$pushed" = 1 ] || die "push failed after retries; the merge $m is local only, rerun to push it"
 
-# #523: after a push to MAIN (not a line) the template target is refreshed, detached and at the lowest
-# priority; never waited for, never a failure. Only when a template exists (the first one is built by hand).
+# #523: after a push to MAIN (not a line) the template target is refreshed, detached, warm in class big (low only when cold)
+# never waited for, never a failure. Only when a template exists (the first one is built by hand).
 # Test seam: SF_TEMPLATE_REFRESH, a command run in place of the detached refresh.
 if [ "$line" = main ] && { [ -n "${SF_TEMPLATE_REFRESH:-}" ] || [ -d "$(sf_template_dir)" ]; }; then
     if [ -n "${SF_TEMPLATE_REFRESH:-}" ]; then
