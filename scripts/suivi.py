@@ -11,7 +11,9 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
                            done_at, line (absent = main; #480, see below)
     ended/<session_id>     empty files touched by the SessionEnd hook
     qcm/<id>/data.js       the decisions (injected into the form template when served)
-    qcm/<id>/meta.json     {issue, title, created, cards, finished, finished_at}
+    qcm/<id>/meta.json     {issue, title, created, created_ts (epoch), cards, finished, finished_at}
+    qcm-log.tsv            append-only log of the forms (#520): refused / forced / posed / first-answer; no title text,
+                           rotated at 1 MiB, a write failure never fails a command
     qcm/<id>/answers/<code>.json   one record per card (written by the page's POST)
     removed-qcm/<id>/      a form withdrawn by `qcm withdraw` or the page's « Retirer » (#479): the whole
                            folder moved, meta carries withdrawn_at/_ts/_by; its number is never reused
@@ -1355,6 +1357,8 @@ TEST_FIELDS = {"title": str, "intro": str, "where": list, "steps": list, "expect
 TEST_KINDS = ("measure",)    # `kind`: an action only the user's hands can do, before any code (#483)
 TEST_STATUSES = ("todo", "ok", "retour")
 MAX_UNMERGED = 5      # E2: trial entries with `try` per issue, unless `test add --force`
+MAX_CARDS = 8         # #520: cards per decision form (a list card counts as one), unless `qcm pose --force`
+QCM_LOG_MAX = 1024 * 1024
 
 
 def safe_id(s):
@@ -1867,7 +1871,8 @@ def node_run(code, label):
 
 
 def check_form(data):
-    """Syntax-check the page script built with `data`, evaluate the data, return the cards [{c, t}]."""
+    """Syntax-check the page script built with `data`, evaluate the data, return the cards
+    [{c, t, k, lines, hasO, ctx, avpts, o}] (texts only, no sketches)."""
     page = inject_qcm(data, "")
     m = re.search(r"<script>(.*)</script>", page, re.S)
     if not m:
@@ -1883,7 +1888,10 @@ def check_form(data):
             raise Fail("the form script has a syntax error:\n%s" % r.stderr.strip())
     head = read_template()
     head = head[head.index("<script>") + len("<script>"):head.index(DATA_START)]
-    out = node_run(head + "\n" + data + "\nprocess.stdout.write(JSON.stringify(D.map(x=>({c:x.c,t:x.t}))));", "data.js")
+    # sketches (`m`) are never read: only the sentences a card shows
+    probe = ("process.stdout.write(JSON.stringify(D.map(x=>({c:x.c,t:x.t,k:x.k,lines:x.lines,hasO:x.o!==undefined,ctx:x.ctx,"
+             "avpts:x.av&&x.av.pts,o:Array.isArray(x.o)?x.o.map(y=>({t:y.t,pts:y.pts,plus:y.plus,moins:y.moins})):null}))));")
+    out = node_run(head + "\n" + data + "\n" + probe, "data.js")
     try:
         cards = json.loads(out)
     except ValueError:
@@ -1895,6 +1903,73 @@ def check_form(data):
 
 def removed_qcm_dir():
     return os.path.join(suivi_dir(), "removed-qcm")
+
+
+def qcm_log(event, issue, qid="", detail=""):
+    """One line in <suivi>/qcm-log.tsv (#520): time, event, issue, form id, detail. Never a title; never fails the command."""
+    clean = lambda x: re.sub(r"[\t\r\n]", " ", str(x))
+    try:
+        path = os.path.join(suivi_dir(), "qcm-log.tsv")
+        os.makedirs(suivi_dir(), exist_ok=True)
+        try:
+            if os.path.getsize(path) > QCM_LOG_MAX:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass
+        fields = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), event, issue, qid, detail]
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, ("\t".join(clean(f) for f in fields) + "\n").encode())
+        finally:
+            os.close(fd)
+    except Exception:
+        pass
+
+
+CODE_WORD = re.compile(r"`|::|\.rs\b|\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+CAMEL_WORD = re.compile(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b")
+CAMEL_OK = {"StokesForge", "GitLab", "GitHub", "OpenGL", "PyO3", "JavaScript", "PowerPoint"}
+MAX_BULLET_WORDS = 20
+
+
+def card_texts(c):
+    """[(where, text)] of every sentence a card shows (never a sketch)."""
+    out = [("title", c.get("t"))]
+    for key, name in (("ctx", "ctx"), ("avpts", "av.pts"), ("lines", "lines")):
+        out += [("%s" % name, x) for x in (c.get(key) or [])]
+    for o in c.get("o") or []:
+        out += [("option title", o.get("t")), ("option plus", o.get("plus")), ("option moins", o.get("moins"))]
+        out += [("option pts", x) for x in (o.get("pts") or [])]
+    return [(w, x) for w, x in out if isinstance(x, str) and x]
+
+
+def form_problems(cards):
+    """[(code, message)] of the pose checks that `--force` overrides (#520); the first one refuses."""
+    out = []
+    if len(cards) > MAX_CARDS:
+        out.append(("cap", "the form has %d cards; the limit is %d (a list card counts as one). Pose it in two steps: the "
+                           "essentials first, the rest after it is finished" % (len(cards), MAX_CARDS)))
+    for c in cards:
+        if c.get("k") == "list" and (not isinstance(c.get("lines"), list) or not c["lines"] or c.get("hasO")):
+            out.append(("shape", "card %s: a list card (k:'list') needs a non-empty `lines` array and no `o`" % c.get("c")))
+        for where, text in card_texts(c):
+            m = CODE_WORD.search(text)
+            if m:
+                out.append(("jargon", "card %s: code word %r in %s; say it in plain words (the window or the gesture, "
+                                      "not the function or file name)" % (c.get("c"), m.group(0), where)))
+    return out
+
+
+def form_warnings(cards):
+    out = []
+    for c in cards:
+        for where, text in card_texts(c):
+            if where != "title" and len(text.split()) > MAX_BULLET_WORDS:
+                out.append("card %s: a bullet in %s has %d words (aim for 12)" % (c.get("c"), where, len(text.split())))
+            camel = [w for w in CAMEL_WORD.findall(text) if w not in CAMEL_OK]
+            if camel:
+                out.append("card %s: %s looks like a code name in %s" % (c.get("c"), camel[0], where))
+    return out
 
 
 def norm_title(t):
@@ -1921,10 +1996,25 @@ def cmd_qcm_pose(a):
             data = f.read()
     except OSError as e:
         raise Fail("cannot read %s: %s" % (a.data, e))
-    cards = check_form(data)
+    try:
+        cards = check_form(data)
+    except Fail:
+        qcm_log("refused", a.issue, "", "syntax")
+        raise
+    forced = []
+    for code, msg in form_problems(cards):
+        if not a.force:
+            qcm_log("refused", a.issue, "", code)
+            raise Fail("%s (to pose anyway and justify it in the report: add --force after the data file)" % msg)
+        sys.stderr.write("suivi: --force: %s; the report must justify it\n" % msg)
+        if code not in forced:
+            forced.append(code)
+    for w in form_warnings(cards):
+        sys.stderr.write("suivi: warning: %s\n" % w)
     with Lock():
         open_ids = qcm_open_ids(a.issue)
         if open_ids and not a.force:
+            qcm_log("refused", a.issue, "", "open")
             raise Fail("#%d already has an open form: %s. A new batch is posed after the first one is finished; "
                        "to drop the open one: suivi.py qcm withdraw %s; to pose anyway (justify it in your "
                        "report): suivi.py qcm pose %d %s --force (after the data file)"
@@ -1932,7 +2022,12 @@ def cmd_qcm_pose(a):
         old = withdrawn_answered(a.issue)
         asked = {norm_title(r.get("question")): (qid, r.get("question")) for qid, rs in old for r in rs}
         repeats = [(c.get("t"), asked[norm_title(c.get("t"))]) for c in cards if norm_title(c.get("t")) in asked]
+        if open_ids and "open" not in forced:
+            forced.append("open")
+        if repeats and a.force:
+            forced.append("repeat")
         if repeats and not a.force:
+            qcm_log("refused", a.issue, "", "repeat")
             raise Fail("the new form asks again what a withdrawn form already had answered: %s. Reuse those "
                        "answers instead (suivi.py qcm answers <id>), or pose anyway with --force after the "
                        "data file" % "; ".join("%r (answered in %s as %r)" % (t, qid, q) for t, (qid, q) in repeats))
@@ -1949,7 +2044,10 @@ def cmd_qcm_pose(a):
         with open(os.path.join(d, "data.js"), "w", encoding="utf-8") as f:
             f.write(data)
         write_json(os.path.join(d, "meta.json"), {"issue": a.issue, "title": a.title or "", "created": today().isoformat(),
-                                                  "cards": len(cards), "finished": False})
+                                                  "created_ts": time.time(), "cards": len(cards), "finished": False})
+    if forced:
+        qcm_log("forced", a.issue, qid, ",".join(forced))
+    qcm_log("posed", a.issue, qid, len(cards))
     print(qid)
     print("http://127.0.0.1:%d/qcm/%s" % (int(os.environ.get("SF_SUIVI_PORT", "8441")), qid))
     hint_not_listening(a.issue)
@@ -2013,6 +2111,8 @@ def answer_line(code, r):
     line = "%s [%s] %s -> %s" % (code, status, r.get("question", ""), r.get("choix", ""))
     if r.get("commentaire"):
         line += " -- " + r["commentaire"]
+    if isinstance(r.get("discuter"), str):         # list card (#520): the lines the user marked
+        line += "".join("\n  to discuss: " + x for x in r["discuter"].split("\n") if x)
     return line
 
 
@@ -3167,6 +3267,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     write_json(mp, meta)
                 else:
                     ap = os.path.join(qcm_dir(qid), "answers", body["code"] + ".json")
+                    first = not glob.glob(os.path.join(qcm_dir(qid), "answers", "*.json"))
                     if "images" in body:
                         names, err = check_image_names(body["images"], qcm_images_dir(qid, body["code"]), listed_images(read_json(ap)))
                         if err:
@@ -3176,6 +3277,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             del body["images"]
                     write_json(ap, body)
                     prune_images(qcm_images_dir(qid, body["code"]), body.get("images", []))      # the record is the truth
+                    if first:
+                        ts = meta.get("created_ts")
+                        qcm_log("first-answer", meta.get("issue", ""), qid,
+                                "%.0f" % max(0.0, time.time() - ts) if isinstance(ts, (int, float)) else "")
         except Fail as e:
             return self.fail(503, str(e))
         self.send(200, json.dumps({"ok": True}), "application/json")
@@ -3387,7 +3492,8 @@ def parser():
             x.add_argument("data")
             x.add_argument("--title", default="")
             x.add_argument("--force", action="store_true",
-                           help="pose although the issue has an open form or the card repeats an answered question")
+                           help="pose although the issue has an open form, the card repeats an answered question, "
+                                "the form has more than %d cards, a list card is malformed or a card holds a code word" % MAX_CARDS)
         elif name == "withdraw":
             x.add_argument("id")
             x.add_argument("--answered", action="store_true", help="also withdraw a form that holds answers")

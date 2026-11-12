@@ -33,11 +33,13 @@ use super::test_support::bench::{Bench, Pass};
 const KNOWN_FAILURES: &[(&str, &str, &str)] = &[
     (
         "graph properties Axes",
+        // lang: fr
         "Afficher les étiquettes de graduation",
         "#525: fr Axes page, the tick labels checkbox text runs past the dialog edge",
     ),
     (
         "graph properties Axes",
+        // lang: fr
         "Trait de l'axe, graduations et étiquettes",
         "#525: fr Axes page, the axis line hint runs past the dialog edge",
     ),
