@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests of scripts/cargo-queue.py (#476): stdlib unittest, no user bus, no real cargo.
 
-A fake `cargo`, `systemd-run`, `systemctl`, `gdbus` and `busctl` sit on PATH behind a copy of the shim
+A fake `cargo`, `systemd-run`, `systemctl`, `gdbus` (default: user present, idle 0) and `busctl` sit on PATH behind a copy of the shim
 named `cargo`. The flocks are real. NOTHING here may reach the real power profile (#477): every test has a
 canary `busctl` whose log must stay empty unless the test opts in (`enable_bus`), and the state folder is
 always a temporary one. Run: python3 scripts/cargo-queue-test.py
@@ -117,6 +117,7 @@ class Base(unittest.TestCase):
         script(os.path.join(self.fakedir, "cargo"), FAKE_CARGO)
         script(os.path.join(self.fakedir, "systemd-run"), FAKE_SYSTEMD_RUN)
         script(os.path.join(self.fakedir, "systemctl"), FAKE_SYSTEMCTL)
+        script(os.path.join(self.fakedir, "gdbus"), '#!/bin/sh\necho "(uint64 0,)"\n')   # default: user present (#482)
         script(os.path.join(self.fakedir, "busctl"), FAKE_BUSCTL)      # the canary: first on PATH, logs every call
         self.log, self.sdlog, self.ctllog = (os.path.join(t, x) for x in ("fake.log", "sd.log", "ctl.log"))
         self.buslog, self.busstate = os.path.join(t, "bus.log"), os.path.join(t, "bus.state")
@@ -962,6 +963,15 @@ class TestProfile(Base):
         cq.auto_tick()
         self.assertEqual(self.bus_calls(), [])
         self.assertIsNone(self.record())
+
+    def test_fake_gdbus_shadows_the_real_one(self):
+        self.assertTrue(shutil.which("gdbus", path=self.env["PATH"]).startswith(self.fakedir))
+
+    def test_auto_with_dev_selected_stays_dev_and_calls_no_busctl(self):
+        cq.set_mode(selected="dev", auto=True)
+        cq.auto_tick()
+        self.assertEqual(cq.read_state()["effective"], "dev")
+        self.assertEqual(self.bus_calls(), [])
 
     def test_repeating_full_and_ticking_writes_once(self):
         for _ in range(3):
