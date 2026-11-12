@@ -5,7 +5,7 @@ paths:
 
 ## Rendering: silent pitfalls
 
-- Rendering: **a screen marker** (red frame, handles, selection highlight) is painted over the cached figure, in the application: it enters neither the cache key nor the pipeline, so never the SVG/PDF/PNG export (`docs/rendering.md`, § Visibility and selection (#81–85), selection handles).
+- Rendering: **a screen marker** (red frame, handles, selection highlight) is painted over the cached figure, in the application: it enters neither the cache key nor the pipeline, so never the SVG/PDF/PNG export (see `docs/rendering.md` § Visibility and selection (#81–85))
 
 - Rendering: `plotters` is taken **without its fonts** (`default-features = false`). A `DrawingBackend` that does not override `draw_text` **panics** at the first tick, and one that does not override `estimate_text_size` measures the text by the number of UTF-8 bytes — silently. Every measurement goes through `stokesforge_render::text` and nowhere else (`architecture-choisie.md` §4.3/§4.4).
 - Rendering: **a plotting feature never goes into a single backend** — it goes into `stokesforge-render`, which is generic over the backend. Corollary of the same pitfall: the Plotters elements that measure text themselves (`configure_series_labels`, `MultiLineText`) go through `FontData::estimate_layout`, hence through the naive heuristic, **not** through `estimate_text_size` — the legend is written by hand for this reason (`stokesforge_render::legend`).

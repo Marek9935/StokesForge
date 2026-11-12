@@ -1922,6 +1922,39 @@ class TestSettingsHooks(unittest.TestCase):
             self.assertNotEqual(self.problems(json.loads(text.replace(old, new))), [], old)
 
 
+class TestSettingsPermissions(unittest.TestCase):
+    """.claude/settings.json (#516): hard bans and approvals by settings, not by prose."""
+    PATH = TestSettingsHooks.PATH
+    WANT = {"deny": ("Bash(git stash)", "Bash(git stash *)"),
+            "ask": ("Bash(git tag *)", "Bash(git push * --tags*)", "Bash(git push origin v*)"),
+            "allow": ("Bash(scripts/deliver.sh *)",)}
+
+    def problems(self, d):
+        perm = d.get("permissions", {})
+        out = []
+        for kind, rules in self.WANT.items():
+            for rule in rules:
+                if rule not in perm.get(kind, []):
+                    out.append("permissions.%s lacks %s" % (kind, rule))
+        for rule in perm.get("deny", []):
+            if "git tag" in rule:
+                out.append("git tag must ask, not be denied: " + rule)
+        return out
+
+    def test_the_committed_permissions_are_as_pinned(self):
+        with open(self.PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertEqual(self.problems(d), [])
+
+    def test_a_dropped_or_renamed_rule_is_caught(self):
+        with open(self.PATH, encoding="utf-8") as f:
+            text = f.read()
+        for old, new in (("Bash(git stash *)", "Bash(git stach *)"), ("Bash(git tag *)", "Bash(git tags *)"),
+                         ("Bash(scripts/deliver.sh *)", "Bash(scripts/deliver.sh)"),
+                         ('"ask"', '"deny"'), ('"deny"', '"ask"')):
+            self.assertNotEqual(self.problems(json.loads(text.replace(old, new))), [], old)
+
+
 class TestMergeRequest(WaitBase):
     """The page's « Fusionner » button (#454): a recorded request, never a merge."""
 

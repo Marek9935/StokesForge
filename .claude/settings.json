@@ -1,4 +1,18 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(scripts/deliver.sh *)"
+    ],
+    "ask": [
+      "Bash(git tag *)",
+      "Bash(git push * --tags*)",
+      "Bash(git push origin v*)"
+    ],
+    "deny": [
+      "Bash(git stash)",
+      "Bash(git stash *)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
