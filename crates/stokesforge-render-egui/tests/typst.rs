@@ -560,7 +560,10 @@ fn every_text_of_a_figure_keeps_a_live_texture_at_every_scale() {
     .expect("export");
     let expected = export_origins(&document).len();
     assert_eq!(screen_origins(&shapes).len(), expected, "unscaled count");
-    assert_eq!(expected, 8, "title, two axis titles, three entries, two notes");
+    assert_eq!(
+        expected, 8,
+        "title, two axis titles, three entries, two notes"
+    );
 
     fn meshes<'a>(shapes: &'a [Shape], out: &mut Vec<&'a egui::epaint::Mesh>) {
         for shape in shapes {
