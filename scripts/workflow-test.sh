@@ -12,6 +12,8 @@ trap '[ -n "${KEEP:-}" ] || rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 eq() { [ "$1" = "$2" ] || fail "$3: expected [$2], got [$1]"; }
 
+real_common="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
+stamps_before="$( (ls "$real_common/sf-tested" 2> /dev/null || true) | sort | md5sum)"   # #515: the real repo gets no stamp from here
 main="$tmp/StokesForge"
 mkdir -p "$main"
 git -C "$main" init -q -b main
@@ -360,6 +362,11 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
         echo 'Merge #7: add x' > "$sb/msg"
         printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 7"}' > "$sb/e.json"
         sbsuivi test add 7 "$sb/e.json" > /dev/null
+        stamp
+    }
+    stamp() {   # the test stamp (#515) of the head of feature/7-x, as test-all.sh would write it
+        mkdir -p "$sb/StokesForge/.git/sf-tested"
+        : > "$sb/StokesForge/.git/sf-tested/$(git -C "$wt" rev-parse "${1:-HEAD}")"
     }
     deliver() { ( cd "${DCWD:-$sb/StokesForge}" && "$here/deliver.sh" "${DN:-7}" "${DMSG:-$sb/msg}" ) > "$sb/out" 2>&1; }
     main_head() { git -C "$sb/StokesForge" rev-parse main; }
@@ -373,6 +380,7 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
         git -C "$sb/StokesForge" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "$1: MERGE_HEAD left" || true
         lock_free "$1"
     }
+    refused_nostamp() { if deliver; then fail "$1: accepted: $(cat "$sb/out")"; fi; grep -q 'no test stamp' "$sb/out" || fail "$1: message: $(cat "$sb/out")"; }
     refused() { if deliver; then fail "$1: accepted: $(cat "$sb/out")"; fi; untouched "$1" "$base"; }
 
     # Happy path: one --no-ff merge with the message, pushed, recorded, no tag pushed.
@@ -389,7 +397,7 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     eq "$(git -C "$sb/remote.git" tag | wc -l)" 0 "a local tag was pushed"
     # Follow-up delivery, no new entries: succeeds, the old commit stays.
     git -C "$wt" merge -q --no-edit main
-    git -C "$wt" commit -q --allow-empty -m more
+    git -C "$wt" commit -q --allow-empty -m more; stamp
     echo 'Merge #7: more' > "$sb/msg2"
     DMSG="$sb/msg2" deliver || fail "follow-up delivery: $(cat "$sb/out")"
     eq "$(entry_field 7-1 commit)" "$m" "follow-up kept the old commit"
@@ -459,6 +467,61 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     refused "merge failure"
     rm "$sb/StokesForge/.git/hooks/pre-merge-commit"
 
+    # Tested commit (#515): the head of the branch needs the stamp test-all.sh writes.
+    dsb; base="$(main_head)"
+    rm -rf "$sb/StokesForge/.git/sf-tested"
+    refused_nostamp "no stamp"; untouched "no stamp" "$base"
+    grep -q 'test-all.sh' "$sb/out" || fail "no stamp: the message does not name test-all.sh"
+    stamp "HEAD~1"   # the stamp of the parent commit does not cover the head
+    refused_nostamp "stamp of the parent commit"; untouched "stamp of the parent commit" "$base"
+    stamp
+    deliver || fail "stamped head: $(cat "$sb/out")"
+    # A rerun that only pushes needs no stamp: the merge is done.
+    dsb; base="$(main_head)"
+    printf '#!/bin/sh\nexit 1\n' > "$sb/remote.git/hooks/pre-receive"; chmod +x "$sb/remote.git/hooks/pre-receive"
+    if deliver; then fail "push refused: accepted"; fi
+    rm "$sb/remote.git/hooks/pre-receive"; rm -rf "$sb/StokesForge/.git/sf-tested"
+    deliver || fail "rerun to push without a stamp: $(cat "$sb/out")"
+    eq "$(remote_head)" "$(main_head)" "rerun to push without a stamp: pushed"
+
+    # Manual screenshots (#515): SF_MANUAL_SHOTS stands for manual-screenshots.sh and logs its calls.
+    shots="$tmp/shots.sh"
+    printf '#!/usr/bin/env bash\necho called >> "%s/shots.log"\nmkdir -p manual/src/images\nprintf PNG%%s "$SHOTS_CONTENT" > manual/src/images/a.png\n' "$tmp" > "$shots"; chmod +x "$shots"
+    ui_change() { mkdir -p "$wt/crates/x"; echo ui > "$wt/crates/x/lib.rs"; git -C "$wt" add crates; git -C "$wt" commit -q -m "ui"; stamp; }
+    # UI change, the fake renders an image: an image commit inside M, stamped.
+    dsb; ui_change; rm -f "$tmp/shots.log"
+    SHOTS_CONTENT=1 SF_MANUAL_SHOTS="$shots" deliver || fail "screenshots: $(cat "$sb/out")"
+    eq "$(grep -c called "$tmp/shots.log")" 1 "screenshots: the fake ran once"
+    eq "$(git -C "$wt" log -1 --format=%s)" "manual: regenerate screenshots (#7)" "screenshots: image commit on the branch"
+    git -C "$sb/StokesForge" cat-file -e main:manual/src/images/a.png || fail "screenshots: the image is not in M"
+    git -C "$sb/StokesForge" merge-base --is-ancestor "$(git -C "$wt" rev-parse HEAD)" main || fail "screenshots: the image commit is not inside M"
+    eq "$(remote_head)" "$(main_head)" "screenshots: pushed"
+    # UI change, the fake renders nothing new (image already committed and identical): no extra commit.
+    dsb; ui_change
+    mkdir -p "$wt/manual/src/images"; printf PNG1 > "$wt/manual/src/images/a.png"
+    git -C "$wt" add manual; git -C "$wt" commit -q -m "image"; stamp
+    n0="$(git -C "$wt" rev-list --count HEAD)"
+    SHOTS_CONTENT=1 SF_MANUAL_SHOTS="$shots" deliver || fail "screenshots unchanged: $(cat "$sb/out")"
+    eq "$(git -C "$wt" rev-list --count HEAD)" "$n0" "screenshots unchanged: an extra commit was made"
+    # The fake fails: exit 1, main unchanged.
+    dsb; ui_change; base="$(main_head)"
+    SF_MANUAL_SHOTS="exit 1" refused "screenshots failure"
+    grep -q 'screenshots failed' "$sb/out" || fail "screenshots failure message: $(cat "$sb/out")"
+    # Only docs/ changed: the fake is not called.
+    dsb; rm -f "$tmp/shots.log"
+    mkdir -p "$wt/docs"; echo d > "$wt/docs/d.md"; git -C "$wt" add docs; git -C "$wt" commit -q -m "docs"; stamp
+    SHOTS_CONTENT=1 SF_MANUAL_SHOTS="$shots" deliver || fail "docs only: $(cat "$sb/out")"
+    [ ! -e "$tmp/shots.log" ] || fail "docs only: the screenshots were regenerated"
+    # The head moves after the first check (here a commit made while the screenshots run): the check
+    # inside the lock refuses it.
+    dsb; ui_change; base="$(main_head)"
+    SF_MANUAL_SHOTS='git commit -q --allow-empty -m sneaky' refused_nostamp "head moved after the first check"
+    untouched "head moved after the first check" "$base"
+    # An unstamped branch is refused BEFORE the screenshots run.
+    dsb; ui_change; rm -rf "$sb/StokesForge/.git/sf-tested"; rm -f "$tmp/shots.log"
+    SHOTS_CONTENT=1 SF_MANUAL_SHOTS="$shots" refused_nostamp "unstamped before the screenshots"
+    [ ! -e "$tmp/shots.log" ] || fail "unstamped: the screenshots ran anyway"
+
     # Push: 4 refusals then success; always refused; fixed and rerun; a foreign commit on top.
     dsb; base="$(main_head)"
     hook="$sb/remote.git/hooks/pre-receive"
@@ -501,6 +564,12 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     git -C "$sb/StokesForge" merge-base --is-ancestor main feature/7-x || fail "main moved: the branch lacks main"
     eq "$(entry_field 7-1 commit)" "-" "main moved: entry recorded"
     lock_free "main moved"
+    grep -q 'Rerun scripts/test-all.sh' "$sb/out" || fail "exit 3 message: $(cat "$sb/out")"
+    # The head changed: the old stamp does not cover it; a rerun without a new stamp is refused.
+    refused_nostamp "rerun after exit 3 without a new stamp"
+    eq "$(entry_field 7-1 commit)" "-" "refused rerun after exit 3 recorded"
+    lock_free "refused rerun after exit 3"
+    stamp
     deliver || fail "rerun after exit 3: $(cat "$sb/out")"
     eq "$(entry_field 7-1 commit)" "$(main_head)" "rerun after exit 3 records M"
     # Conflict while merging main into the branch.
@@ -591,8 +660,16 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     git -C "$sb/StokesForge" merge-base --is-ancestor "origin/$L" feature/7-x || fail "line moved: the branch lacks the line"
     eq "$(entry_field 7-1 commit)" "-" "line moved: entry recorded"
     lock_free "line moved"
+    stamp
     deliver || fail "rerun after exit 3 on the line: $(cat "$sb/out")"
     eq "$(git -C "$lwt" log --first-parent --merges --format=%s | grep -c '^Merge #7:')" 1 "one merge on the line"
+
+    # The test stamp rule holds on a line too.
+    lsetup; rm -rf "$sb/StokesForge/.git/sf-tested"
+    refused_nostamp "line delivery without a stamp"
+    eq "$(lhead)" "$(rhead)" "line delivery without a stamp: line moved"
+    stamp
+    deliver || fail "line delivery with a stamp: $(cat "$sb/out")"
 
     # A closing keyword or --wait-tag on a line: refused before the lock.
     lsetup; lbase="$(lhead)"
@@ -607,11 +684,11 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     # Main refuses a branch holding a line-only commit; a landed line is fine.
     dsb; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"; base="$(main_head)"
     lcommit "line only"
-    git -C "$wt" merge -q --no-edit $L
+    git -C "$wt" merge -q --no-edit $L; stamp
     refused "branch with a line-only commit"
     grep -q 'not on main' "$sb/out" || fail "line-only message: $(cat "$sb/out")"
     git -C "$sb/StokesForge" merge -q --no-ff -m "Merge line" $L; git -C "$sb/StokesForge" push -q origin main   # the line lands
-    git -C "$wt" merge -q --no-edit main
+    git -C "$wt" merge -q --no-edit main; stamp
     deliver || fail "branch based on a landed line refused: $(cat "$sb/out")"
 
     # sync: main reaches the line by a merge; a conflict aborts and leaves the line alone.
@@ -695,11 +772,13 @@ GL
         wt8="$sb/_stokesforge/feature8"
         git worktree add -q "$wt8" -b feature/8-y --no-track main
         git -C "$wt8" commit -q --allow-empty -m work8
+        : > "$sb/StokesForge/.git/sf-tested/$(git -C "$wt8" rev-parse HEAD)"
         sbsuivi claim 8 --line $L > /dev/null
         printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 8"}' > "$sb/e8.json"
         sbsuivi test add 8 "$sb/e8.json" > /dev/null
         deliver || fail "land setup, #7: $(cat "$sb/out")"
         git -C "$wt8" merge -q --no-edit $L
+        : > "$sb/StokesForge/.git/sf-tested/$(git -C "$wt8" rev-parse HEAD)"
         echo 'Merge #8: add y' > "$sb/msg8"
         DN=8 DMSG="$sb/msg8" deliver || fail "land setup, #8: $(cat "$sb/out")"
         printf '{"title":"whole line","steps":["s"],"expect":"e","try":"scripts/try.sh PostV1.1"}' > "$sb/eline.json"
@@ -809,7 +888,12 @@ esac
 exit 0
 EOF
 chmod +x "$fc/cargo"
-ta() { : > "$tmp/fake.log"; PATH="$fc:$PATH" FAKE_LOG="$tmp/fake.log" "$here/test-all.sh" "$@" > /dev/null 2>&1; }
+# Runs a copy of test-all.sh inside a sandbox git repo: the real repo never gets a stamp (#515).
+tas="$tmp/tasb"; mkdir -p "$tas/scripts"
+cp "$here/test-all.sh" "$tas/scripts/test-all.sh"
+git init -q -b main "$tas"; git -C "$tas" config user.name t; git -C "$tas" config user.email t@t
+git -C "$tas" add scripts; git -C "$tas" commit -q -m init
+ta() { : > "$tmp/fake.log"; PATH="$fc:$PATH" FAKE_LOG="$tmp/fake.log" "$tas/scripts/test-all.sh" "$@" > /dev/null 2>&1; }
 ta || fail "test-all: nextest present, exit code"
 eq "$(grep -v -- '--version' "$tmp/fake.log")" "nextest run --workspace --no-fail-fast
 test --workspace --doc" "test-all: nextest then doc tests, in order"
@@ -822,5 +906,33 @@ set +e; FAKE_RED=doc ta; rc=$?; set -e
 set +e; ta some_filter; rc=$?; set -e
 [ "$rc" -ne 0 ] || fail "test-all: an argument must be refused"
 eq "$(grep -c . "$tmp/fake.log")" 0 "test-all: a refused argument runs no cargo"
+
+# The stamp (#515): written for HEAD after a green run on a clean tree, in the common dir.
+tstamp="$tas/.git/sf-tested/$(git -C "$tas" rev-parse HEAD)"
+rm -rf "$tas/.git/sf-tested"
+ta || fail "test-all: clean tree, exit code"
+[ -e "$tstamp" ] || fail "test-all: no stamp after a green run on a clean tree"
+rm -rf "$tas/.git/sf-tested"
+set +e; FAKE_RED=nextest ta; set -e
+[ ! -e "$tstamp" ] || fail "test-all: a red run left a stamp"
+set +e; FAKE_RED=doc ta; set -e
+[ ! -e "$tstamp" ] || fail "test-all: red doc tests left a stamp"
+echo x > "$tas/tracked"; git -C "$tas" add tracked; git -C "$tas" commit -q -m t
+tstamp="$tas/.git/sf-tested/$(git -C "$tas" rev-parse HEAD)"
+echo y >> "$tas/tracked"   # a modified tracked file
+ta || fail "test-all: dirty tree, exit code"
+[ ! -e "$tstamp" ] || fail "test-all: a dirty tree got a stamp"
+git -C "$tas" checkout -q tracked
+touch "$tas/untracked"
+ta || fail "test-all: untracked file, exit code"
+[ ! -e "$tstamp" ] || fail "test-all: a tree with an untracked file got a stamp"
+rm "$tas/untracked"
+# Old stamps are pruned, recent ones kept.
+mkdir -p "$tas/.git/sf-tested"; : > "$tas/.git/sf-tested/old"; : > "$tas/.git/sf-tested/recent"
+touch -d '40 days ago' "$tas/.git/sf-tested/old"
+ta || fail "test-all: prune run"
+[ ! -e "$tas/.git/sf-tested/old" ] && [ -e "$tas/.git/sf-tested/recent" ] || fail "test-all: pruning"
+# None of the above touched the real repository.
+eq "$( (ls "$real_common/sf-tested" 2> /dev/null || true) | sort | md5sum)" "$stamps_before" "workflow-test changed the stamps of the real repository"
 
 echo "workflow-test: all passed"

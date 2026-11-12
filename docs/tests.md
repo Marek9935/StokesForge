@@ -525,7 +525,7 @@ scripts/python-test.sh                        # Python bridge, scripts, robustne
 scripts/python-test.sh -- --ignored           # + the reproductions of the Python boundary
 ```
 
-`scripts/test-all.sh` uses cargo-nextest when `cargo nextest --version` works (install: `cargo install cargo-nextest --locked`), then runs the doc tests, which nextest skips. Under nextest each test is its own process, so an in-process lock no longer excludes anything: `manual_screenshots.rs`, `preferences_proto.rs` and `memory_pinning.rs` hold such locks; if one flakes, give it a nextest test group rather than a retry. Filters stay `cargo test -p <crate> <name>`. The dev profile keeps line tables only (`[profile.dev] debug = "line-tables-only"` in `Cargo.toml`): a panic still prints `file:line`; to inspect variables, build with `CARGO_PROFILE_DEV_DEBUG=true`.
+`scripts/test-all.sh` uses cargo-nextest when `cargo nextest --version` works (install: `cargo install cargo-nextest --locked`), then runs the doc tests, which nextest skips. Under nextest each test is its own process, so an in-process lock no longer excludes anything: `manual_screenshots.rs`, `preferences_proto.rs` and `memory_pinning.rs` hold such locks; if one flakes, give it a nextest test group rather than a retry. After a green run on a clean tree (untracked files included) whose HEAD did not move, it writes the stamp `<git common dir>/sf-tested/<HEAD sha>` (empty file; stamps older than 30 days are pruned); `scripts/deliver.sh` refuses a branch head without that stamp (#515). Filters stay `cargo test -p <crate> <name>`. The dev profile keeps line tables only (`[profile.dev] debug = "line-tables-only"` in `Cargo.toml`): a panic still prints `file:line`; to inspect variables, build with `CARGO_PROFILE_DEV_DEBUG=true`.
 
 The console tests `script_panel` and the lazy-start tests
 `script_bridge_lazy` (in `stokesforge-app-state/tests/`) also require the Python feature of `stokesforge-app-state`.
@@ -1291,6 +1291,8 @@ is missing or different in the manual, when a copy is no longer referenced, or w
 `additional-css` in `manual/book.toml`.
 
 ## Manual screenshots (#365)
+
+**When**: at the merge, by `scripts/deliver.sh` (#515), never during work or retour rounds. If the branch touches `crates/`, `assets/`, `manual/screenshots.json` or `Cargo.lock`, deliver runs `scripts/manual-screenshots.sh --no-python` (all shots except the Python console one) in the branch worktree before taking the main lock, commits the changed images and stamps that commit. A failure refuses the delivery. A NEW shot is the exception: render it on the branch with its name filter to look at it.
 
 The images of the user manual (`manual/src/images/*.png`) are not taken by hand:
 `scripts/manual-screenshots.sh` renders the real application headless on the demo
