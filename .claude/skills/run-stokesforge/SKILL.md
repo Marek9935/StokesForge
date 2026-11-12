@@ -31,6 +31,8 @@ Traps (lost clicks, capture lag, focus, killing the right process) and troublesh
 
 Images for the user manual (#365) are not taken with this driver: `scripts/manual-screenshots.sh` renders them headless and reproducibly (`docs/tests.md`, "Manual screenshots"); this skill stays for exploring and checking the real app.
 
+Screenshots taken with this driver are the agent's own internal check (#455): never shown to the user on a card, as proof or as a comparison bank. The user always opens the app themselves; prototype variants open in the app through `scripts/try.sh`.
+
 Parallel agents: only for independent routes (no shared file, language or sequence), one `SF_RUN_DIR` each; corrections one at a time.
 
 Limits to state in the report: X11 under Xwayland only — no native Wayland, no `rfd` file chooser, no OS drag and drop (drags inside the window work), no detached OS window, scale 1.0 only, software rendering (not the real GPU look). For those, ask the user for a screenshot. A file drop on Windows (cursor read with `GetCursorPos`, #383) can only be checked by hand (confirmed by the user on 2026-10-29).

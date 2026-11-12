@@ -3,7 +3,7 @@
 # chantier.sh, try.sh, main-lock.sh, deliver.sh, workflow-test.sh.
 #
 # Layout: the main checkout is the repository root; the worktrees of the work
-# packages live in ../_stokesforge/feature<n> (CLAUDE.md, "Worktrees"). A work
+# packages live in ../_stokesforge/feature<n> (CLAUDE.md, "Conventions"; suivi.md, "Work packages and worktrees"). A work
 # package's colour lives in ../_stokesforge/.suivi (scripts/suivi.py, #441), not
 # in these helpers.
 

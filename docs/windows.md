@@ -371,3 +371,7 @@ comparing it to the twin. English is the reference language: switch back to Engl
 after a trial in French (the language is saved in the preferences).
 For a layout alone, the test benches (`egui_kittest`, see
 `preferences_proto.rs`) render the window without launching the application.
+
+## Platforms
+
+Requirements stay GNOME (Wayland) and Windows. X11 is not supported: say "it works, but is untested" (user decision, #475). No card, trial entry or probe is written for X11.
