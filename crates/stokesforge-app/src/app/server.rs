@@ -923,4 +923,237 @@ mod tests {
         // A running thread says nothing.
         drop(thread);
     }
+
+    // -- Randomised stress (#475) --
+
+    /// A small seeded generator (xorshift64*): the same seed replays the same
+    /// run.
+    struct Dice(u64);
+
+    impl Dice {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            usize::try_from(self.next() % u64::try_from(bound.max(1)).unwrap_or(1)).unwrap_or(0)
+        }
+    }
+
+    /// The tree as the session has it now.
+    fn session_tree(session: &Session) -> Arc<stokesforge_core::Tree> {
+        Arc::clone(&session.handle().snapshot().expect("snapshot").tree)
+    }
+
+    /// One run of the stress: the real thread ticks (its clock jumps a whole
+    /// period at each pass, so every pass makes an autosave due) while the main
+    /// side plays `steps` passes of random actions through the app path.
+    /// Checks: no deadlock (the caller's watchdog), no panic of the thread, the
+    /// last recovery copy reloads equal to the project, the history comes back
+    /// where it was after undo then redo, no slot file is left over.
+    fn stress_run(seed: u64, steps: usize) {
+        isolate_config();
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut slot) = free_slot(demo(), dir.path());
+        let shared = slot.shared();
+        let files = csv_files(dir.path(), 2, 3);
+        let t0 = Instant::now();
+        let offset = Arc::new(AtomicU64::new(0));
+        let clock_offset = Arc::clone(&offset);
+        let clock: Arc<Clock> =
+            Arc::new(move || t0 + Duration::from_secs(clock_offset.load(Ordering::SeqCst)));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let counted_writes = Arc::clone(&writes);
+        let run: Arc<RunJob> = Arc::new(move |job: &AutosaveJob| {
+            counted_writes.fetch_add(1, Ordering::SeqCst);
+            job.run()
+        });
+        let recorded = Arc::new(AtomicUsize::new(0));
+        let counted_records = Arc::clone(&recorded);
+        let mut thread = ServerThread::spawn_with(
+            Arc::clone(&shared),
+            Counter::default(),
+            run,
+            clock,
+            Arc::new(move |paths: &[PathBuf]| {
+                counted_records.fetch_add(paths.len(), Ordering::SeqCst);
+            }),
+        );
+        let mut dice = Dice(seed | 1);
+        let sheet = shared
+            .lock()
+            .tree()
+            .resolve("[Book1]Sheet1")
+            .expect("Sheet1");
+        for step in 0..steps {
+            slot.acquire();
+            for _ in 0..=dice.below(3) {
+                let columns: Vec<_> = slot
+                    .visible_columns(sheet)
+                    .into_iter()
+                    .map(|(id, ..)| id)
+                    .collect();
+                let action = match dice.below(14) {
+                    0..=3 if !columns.is_empty() => Some(Action::CommitCell {
+                        column: columns[dice.below(columns.len())],
+                        row: dice.below(30),
+                        text: dice.below(1000).to_string(),
+                    }),
+                    4 | 5 => Some(Action::Undo),
+                    6 | 7 => Some(Action::Redo),
+                    8 => Some(Action::AddColumn { sheet }),
+                    9 if columns.len() > 1 => Some(Action::DeleteObjects(vec![
+                        columns[dice.below(columns.len())],
+                    ])),
+                    10 => Some(Action::InsertRows {
+                        sheet,
+                        at: dice.below(10),
+                        count: 1 + dice.below(3),
+                    }),
+                    11 => Some(Action::AddWorkbook),
+                    12 => Some(Action::Save),
+                    13 if step % 3 == 0 => {
+                        slot.dispatch(Action::StartImport {
+                            destination:
+                                stokesforge_app_state::state::ImportDestination::NewBookPerFile,
+                            recipe: stokesforge_import::ImportRecipe::new("Serie"),
+                            paths: files.clone(),
+                        });
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    slot.dispatch(action);
+                }
+            }
+            slot.release();
+            offset.fetch_add(PERIOD.as_secs() + 1, Ordering::SeqCst);
+            thread.unpark();
+            match dice.below(4) {
+                0 => std::thread::yield_now(),
+                1 => std::thread::sleep(Duration::from_micros(dice.below(1500) as u64)),
+                _ => {}
+            }
+        }
+        // A last change, so that a recovery copy of the final state must exist.
+        slot.acquire();
+        slot.dispatch(Action::AddColumn { sheet });
+        slot.release();
+        // The work in progress ends (analysis, application, recalculation).
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            thread.unpark();
+            let busy = {
+                let state = shared.lock();
+                state.import_progress().is_some()
+                    || state.import_is_applying()
+                    || state.recalc_work().is_some()
+            };
+            if !busy {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the work did not end (seed {seed})"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // History: undo a few entries, redo them: the project is as it was.
+        slot.acquire();
+        let final_tree = session_tree(&session);
+        let mut undone = 0;
+        while undone < 20 && slot.can_undo() {
+            slot.dispatch(Action::Undo);
+            undone += 1;
+        }
+        for _ in 0..undone {
+            slot.dispatch(Action::Redo);
+        }
+        let again = session_tree(&session);
+        assert!(
+            *again == *final_tree,
+            "undo x{undone} then redo changed the project (seed {seed})"
+        );
+        // Quit the way the application does: the guard is released, then the
+        // thread is joined.
+        assert!(
+            thread.shut_down(&mut slot, Duration::from_secs(30)),
+            "the thread ended (seed {seed})"
+        );
+        assert!(!thread.status().panicked(), "no panic (seed {seed})");
+        // The last pass of the thread is gone: write the copy of the final state.
+        let far = t0 + Duration::from_secs(offset.load(Ordering::SeqCst) + 2 * PERIOD.as_secs());
+        serve_once(&shared, far, &Counter::default(), real_run(), &no_record);
+        serve_once(
+            &shared,
+            far + PERIOD + Duration::from_secs(1),
+            &Counter::default(),
+            real_run(),
+            &no_record,
+        );
+        let written: Vec<PathBuf> = std::fs::read_dir(dir.path().join("recovery"))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|x| x == "stf"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            written.len(),
+            1,
+            "one recovery copy (seed {seed}): {written:?}"
+        );
+        let other = Session::spawn(Project::new("Other").expect("project"), None).expect("session");
+        other.handle().load(&written[0]).expect("the copy reloads");
+        let reloaded = session_tree(&other);
+        assert!(
+            *reloaded == *session_tree(&session),
+            "the recovery copy reloads equal to the project (seed {seed})"
+        );
+        other.shutdown().expect("shutdown");
+    }
+
+    /// Runs `body` on a thread with a watchdog: a deadlock fails the test
+    /// instead of hanging it, a panic is passed on.
+    fn with_watchdog(limit: Duration, body: impl FnOnce() + Send + 'static) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+            let _ = tx.send(result);
+        });
+        match rx.recv_timeout(limit) {
+            Ok(Ok(())) => {}
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => panic!("deadlock: the run did not end within {limit:?}"),
+        }
+    }
+
+    /// Short variant, in every run: the seed can be replaced with
+    /// `SF_STRESS_SEED`.
+    #[test]
+    fn the_server_thread_survives_random_passes() {
+        let seed = std::env::var("SF_STRESS_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0x5EED_475);
+        with_watchdog(Duration::from_secs(180), move || stress_run(seed, 250));
+    }
+
+    /// Long variant: many seeds, many passes (`cargo test -p stokesforge-app
+    /// --lib server:: -- --ignored`).
+    #[test]
+    #[ignore = "long: 12 seeds x 1500 passes"]
+    fn the_server_thread_survives_many_random_passes() {
+        with_watchdog(Duration::from_secs(1800), || {
+            for seed in 1..=12u64 {
+                stress_run(seed * 0x9E37_79B9, 1500);
+            }
+        });
+    }
 }
