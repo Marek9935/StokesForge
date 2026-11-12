@@ -14474,6 +14474,129 @@ mod autosave {
             )));
     }
 
+    fn warnings(state: &AppState) -> usize {
+        state
+            .status_history()
+            .filter(|m| m.level == StatusLevel::Warning)
+            .map(|m| m.count as usize)
+            .sum()
+    }
+
+    /// #511: a macro opened by another client that the root snapshot does not
+    /// show yet: the actor refuses the save, the copy waits silently and is
+    /// retried soon. Witnesses: dropping the `MacroOpen` = busy branch shows a
+    /// warning; setting the deadline before the write gives retry == PERIOD.
+    #[test]
+    fn a_macro_unseen_by_the_snapshot_makes_the_copy_wait_silently() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::Import).unwrap();
+        assert!(!state.snapshot().history.in_macro, "stale snapshot");
+        let due = t0 + PERIOD;
+        let messages = state.recorded_count();
+        let warned = warnings(&state);
+        let retry = state.poll_autosave(due).expect("re-armed");
+        assert!(retry < PERIOD, "closer new attempt: {retry:?}");
+        assert!(copies(&recovery).is_empty());
+        assert_eq!(state.recorded_count(), messages, "no message");
+        assert_eq!(warnings(&state), warned);
+        handle.end_macro().unwrap();
+        state.poll_autosave(due + retry);
+        assert_eq!(copies(&recovery).len(), 1);
+    }
+
+    /// #511: a refused save leaves no `.json` record behind. Witness: writing
+    /// the sidecar before the save.
+    #[test]
+    fn a_refused_copy_leaves_no_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::Import).unwrap();
+        state.poll_autosave(t0 + PERIOD);
+        let json = std::fs::read_dir(&recovery)
+            .map(|d| {
+                d.filter_map(Result::ok)
+                    .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(json, 0, "no record without a copy");
+        handle.end_macro().unwrap();
+    }
+
+    /// #511: a busy refusal does not hide the next real failure. Witness:
+    /// setting `failed` in the busy branch.
+    #[test]
+    fn a_busy_refusal_does_not_hide_a_real_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::Import).unwrap();
+        let retry = state.poll_autosave(t0 + PERIOD).expect("re-armed");
+        handle.end_macro().unwrap();
+        // The slot is taken: replace its folder by a file so the write fails.
+        std::fs::remove_dir_all(&recovery).unwrap();
+        std::fs::write(&recovery, b"x").unwrap();
+        let before = warnings(&state);
+        state.poll_autosave(t0 + PERIOD + retry);
+        assert_eq!(warnings(&state), before + 1, "exactly one warning");
+    }
+
+    /// #511: Graph Properties open with no edit yet: the snapshot already
+    /// shows the macro, the copy waits, and is written when the window closes.
+    /// Witness: dropping `refresh()` after `begin_macro` in `begin_plot_macro`.
+    #[test]
+    fn graph_properties_open_makes_the_copy_wait_until_it_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        let graph = plotted_graph(&mut state);
+        state.dispatch(PlotTarget::Axis(PlotAxis::Left).open_settings(graph));
+        assert!(state.snapshot().history.in_macro);
+        let messages = state.recorded_count();
+        let retry = state.poll_autosave(t0 + PERIOD).expect("re-armed");
+        assert!(retry < PERIOD);
+        assert!(copies(&recovery).is_empty());
+        assert_eq!(state.recorded_count(), messages, "no message");
+        state.close_plot_settings();
+        state.poll_autosave(t0 + PERIOD + retry);
+        let copies = copies(&recovery);
+        assert_eq!(copies.len(), 1);
+        let back = stokesforge_persistence::load(&copies[0]).expect("reads back");
+        assert_eq!(back.tree(), state.tree());
+    }
+
+    /// #511: Cancel closes the window; the copy then holds the state from
+    /// before the dialog (pins the result).
+    #[test]
+    fn cancelling_graph_properties_lets_the_copy_be_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        let graph = plotted_graph(&mut state);
+        state.dispatch(PlotTarget::Axis(PlotAxis::Left).open_settings(graph));
+        let retry = state.poll_autosave(t0 + PERIOD).expect("re-armed");
+        state.cancel_plot_settings();
+        state.poll_autosave(t0 + PERIOD + retry);
+        let copies = copies(&recovery);
+        assert_eq!(copies.len(), 1);
+        let back = stokesforge_persistence::load(&copies[0]).expect("reads back");
+        assert_eq!(back.tree(), state.tree());
+    }
+
     /// #453 (F4): an orange said with no gesture (the autosave) still takes the
     /// line over a red, and both stay in the history; only a plain message
     /// with no gesture keeps out of the way. Witness: `takes_the_line` letting

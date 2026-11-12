@@ -776,7 +776,10 @@ The format does not change: a backup copy is an ordinary `.stf`, written by
 data folder (or `<STOKESFORGE_CONFIG_DIR>/recovery` when the variable is set,
 #332), next to a `.json` card (original path, time) and a `.lock` lock
 that do not belong to the format. It never goes through the "saved" marker:
-neither `saved_revision` nor working path. Offered at the next startup
+neither `saved_revision` nor working path. While an undoable action is open
+(Graph Properties, a shape drag, a macro of another client) the copy waits
+silently and is retried every 5 s; a session refusal `MacroOpen` counts as
+busy, the `.json` card is written only after a successful save. Offered at the next startup
 only if it is newer than its `.stf`. Details:
 `docs/application/project-and-import.md`, `stokesforge-app-state/src/recovery.rs`.
 

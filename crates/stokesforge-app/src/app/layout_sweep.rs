@@ -30,20 +30,7 @@ use super::test_support::bench::{Bench, Pass};
 /// A case matches when its name starts with the first field and the text with
 /// the second. Each entry names a defect, so that nobody mistakes it for a
 /// rule.
-const KNOWN_FAILURES: &[(&str, &str, &str)] = &[
-    (
-        "graph properties Axes",
-        // lang: fr
-        "Afficher les étiquettes de graduation",
-        "#525: fr Axes page, the tick labels checkbox text runs past the dialog edge",
-    ),
-    (
-        "graph properties Axes",
-        // lang: fr
-        "Trait de l'axe, graduations et étiquettes",
-        "#525: fr Axes page, the axis line hint runs past the dialog edge",
-    ),
-];
+const KNOWN_FAILURES: &[(&str, &str, &str)] = &[];
 
 /// The dialogs: a name and the action that opens each of them on the bench
 /// project.

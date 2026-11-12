@@ -106,10 +106,16 @@ impl Form<'_> {
 
     /// A row without a label: `field` in the fields column (checkbox,
     /// button, group of radios under its label).
+    ///
+    /// Its texts wrap within the column (#525): a horizontal row extends
+    /// them by default, and a long checkbox label (the French tick labels
+    /// checkbox of the Axes page) then ran past the dialog edge and widened
+    /// the `Ui`, so that the notes below wrapped past it too.
     pub(super) fn field<R>(&mut self, field: impl FnOnce(&mut egui::Ui) -> R) -> R {
         let indent = self.indent();
         self.ui
             .horizontal(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.add_space(indent);
                 field(ui)
             })

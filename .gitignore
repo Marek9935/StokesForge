@@ -1,5 +1,6 @@
 # Rust
 /target/
+/.target-copying/
 crates/*/target/
 
 # Assembled distributions (scripts/pyhello-dist.sh, see crates/stokesforge-python/README.md)
