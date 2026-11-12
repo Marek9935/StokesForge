@@ -128,7 +128,12 @@ fn main() -> anyhow::Result<()> {
             app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
             // The remembered layout of the panels, once, before the first frame (#148).
             app.apply_startup_panels(cc.winit_window().map(|w| w.available_monitors().count()));
-            Ok(Box::new(app))
+            // The server thread (#475): autosave and the follow-up of scripts,
+            // recalculations and imports, over the same state.
+            Ok(Box::new(stokesforge_app::app::ServedApp::new(
+                app,
+                cc.egui_ctx.clone(),
+            )))
         }),
     );
 

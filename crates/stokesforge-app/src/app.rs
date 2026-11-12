@@ -47,6 +47,14 @@
 //! dialog and deferred application phases to private methods. These
 //! extractions add neither a sub-Ui nor an egui id.
 //!
+//! # The server thread (#475)
+//!
+//! The follow-up of autosave, scripts, recalculations and the progress of an
+//! import runs in a background thread (`server.rs`) over the same `AppState`,
+//! behind one lock that this struct holds during a pass. `logic` keeps only the
+//! close request; applying a finished import and the busy-indicator repaints stay
+//! in the paint pass.
+//!
 //! # Where the rest lives
 //!
 //! The complete module → role table is in
@@ -190,6 +198,7 @@ mod recovery;
 mod reorder_list;
 mod results_pane;
 mod script_console;
+mod server;
 pub(crate) mod shortcuts;
 mod stale_export;
 mod state_toggle;
@@ -209,6 +218,9 @@ mod workbook;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+pub use server::ServedApp;
+use server::StateSlot;
 
 use about_window::about_window;
 use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
@@ -279,7 +291,10 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 8;
 /// floating windows, and the strict minimum for rendering.
 pub struct StokesForgeApp {
     /// The state, sole holder of the logic.
-    state: AppState,
+    state: StateSlot,
+    /// The server thread's status (#475), once attached by [`ServedApp`];
+    /// `None`: no thread, the paint pass polls.
+    server: Option<Arc<server::ServerStatus>>,
     /// Native file picker in progress, on a separate thread (#192).
     file_picker: FilePicker,
     /// Opens a folder in the system's file manager (Preferences › Folders);
@@ -539,7 +554,8 @@ impl StokesForgeApp {
 
         let window_title = state.window_title();
         Self {
-            state,
+            state: StateSlot::new(state),
+            server: None,
             file_picker: FilePicker::default(),
             folder_opener: open_folder_in_file_manager,
             window_title,
@@ -1049,12 +1065,9 @@ impl eframe::App for StokesForgeApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_requested = true;
         }
-        // Autosave (#317): here and not in `ui()`, which does not run
-        // with the window minimized; the wake-up is scheduled for the next
-        // deadline, no periodic redraw at rest.
-        if let Some(delay) = self.state.poll_autosave(Instant::now()) {
-            ctx.request_repaint_after(delay);
-        }
+        // The autosave (#317) is the server thread's (#475); `logic` polls it
+        // only when no thread runs (a bench, a test, a thread that ended).
+        self.poll_autosave_without_server(ctx);
     }
 
     /// The sizes and positions the detached panels reported since the last
@@ -1193,14 +1206,13 @@ impl StokesForgeApp {
         // without a push notification from the actor, this is the only place
         // that refreshes the snapshot after a script (see the top doc of
         // `stokesforge_app_state::state`). Never blocks, even without a running script.
-        self.state.poll_script();
+        self.poll_jobs_without_server();
         // The work also continues when its console is hidden or collapsed.
         if self.state.script_running() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         // Formula recalculation that the command did not wait for (#239): we
         // take over again at its end; meanwhile, the next frame comes.
-        self.state.poll_recalc();
         if self.state.recalc_work().is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
@@ -2539,6 +2551,9 @@ mod tests {
                 .textures_delta
                 .clear();
         }
+        // A server thread is running (#475): `logic` asks for no wake of its own.
+        app.server = Some(Arc::new(server::ServerStatus::default()));
+        app.logic(&ctx, &mut frame);
         let mut idle = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
         idle.textures_delta.clear();
         assert_eq!(
