@@ -201,6 +201,9 @@ const ISSUES={};
 // Présentation du lot (HTML : paragraphes, flow(...), listes) ; vide = pas de bloc d’introduction.
 const INTRO='';
 const D=[
+// Carte « liste » (k:'list') : pas d’options `o`, des lignes `lines` ; chaque ligne a un bouton « À discuter ». Voir decision-form.md.
+{c:'R0',p:1,t:'Je fais ceci sauf objection',is:'',k:'list',
+ lines:['Je comprends que tu veux un seul réglage pour toutes les fenêtres.','Le réglage s’appelle « Largeur » partout.','Les anciens projets s’ouvrent comme avant.']},
 // ---------- P1
 {c:'R1',p:1,t:'La molette change-t-elle un champ numérique ?',l:'X1, N1, N2',
  ctx:['Tu règles une valeur dans Graph Properties.','Puis tu fais défiler la fenêtre avec la molette.','Le curseur passe sur d’autres champs pendant le défilement.'],
@@ -386,7 +389,31 @@ function dragKind(types){
   return t.includes('Files')?'files':t.length===0?'empty':'other';
 }
 /*QIMG-END*/
-function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
+/*LIST-START*/
+/* List card (k:'list'): « I do this unless you object ». The answer is {i:0, marks:[line indexes], note, images}; the record
+   stays plain strings: choix « OK » or « À discuter (n) », recommande = no line marked, discuter = marked lines joined by \n. */
+const isList=d=>d.k==='list';
+const listMarks=(d,a)=>a&&Array.isArray(a.marks)?Array.from(new Set(a.marks)).filter(n=>Number.isInteger(n)&&n>=0&&n<(d.lines||[]).length).sort((x,y)=>x-y):[];
+const listLabel=(d,a)=>{const n=listMarks(d,a).length;return n?'À discuter ('+n+')':'OK';};
+/* A marked line carries its own comment (#520 trial: « À discuter » opens a box under the line): recorded as
+   « line — comment », restored by the line text. */
+const SEP=' — ';
+const lnote=(a,i)=>String((a&&a.lnotes&&a.lnotes[i])||'').trim();
+const listRecord=(d,a)=>{const m=listMarks(d,a);return {choix:listLabel(d,a),recommande:m.length===0,discuter:m.map(i=>d.lines[i]+(lnote(a,i)?SEP+lnote(a,i):'')).join('\n')};};
+const listToggle=(d,a,i)=>{const m=listMarks(d,a);return m.includes(i)?m.filter(n=>n!==i):m.concat([i]).sort((x,y)=>x-y);};
+/* Marks are restored by line text, not by position. */
+const listFind=(d,x,l)=>String((x&&x.discuter)||'').split('\n').find(t=>t===l||t.startsWith(l+SEP));
+const listRestore=(d,x)=>(d.lines||[]).map((l,i)=>listFind(d,x,l)!==undefined?i:-1).filter(i=>i>=0);
+const listRestoreNotes=(d,x)=>{const n={};(d.lines||[]).forEach((l,i)=>{const t=listFind(d,x,l);if(t&&t.length>l.length)n[i]=t.slice(l.length+SEP.length);});return n;};
+/* An answer rebuilt from a saved record (server or shared base); null when the record matches nothing. */
+function fromRecord(d,x,imgs){
+  if(x.statut==='plus_tard')return mkAns(null,{skip:true,note:x.commentaire||'',images:imgs});
+  if(isList(d))return mkAns(null,{i:0,marks:listRestore(d,x),lnotes:listRestoreNotes(d,x),note:x.commentaire||'',images:imgs});
+  const i=d.o.findIndex(o=>o.t===x.choix);
+  return (i>=0||x.choix==='Autre')?mkAns(null,{i:i<0?-1:i,note:x.commentaire||'',images:imgs}):null;
+}
+/*LIST-END*/
+function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(isList(d))return listLabel(d,a); if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
 // Uploads and saves go one after the other: a save that lands while an upload is unlisted would delete the file,
 // and the save after it would be refused for an unknown name. The record is built when its turn comes.
 let chain=Promise.resolve();
@@ -407,7 +434,7 @@ function save(d){
   } else if(store&&a){ store.doc('decisions/'+d.c).set(record(d,a))
     .then(()=>{sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()}); }
 }
-const record=(d,a)=>({code:d.c,priorite:d.p,question:d.t,issue:(ISSUES[d.is]||{}).n||null,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString()});
+const record=(d,a)=>({code:d.c,priorite:d.p,question:d.t,issue:(ISSUES[d.is]||{}).n||null,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString(),...(isList(d)&&!a.skip?listRecord(d,a):null)});
 function paintSync(){const e=document.querySelector('.sync'); if(e)e.textContent=sync;}
 function stat(d){const a=ans[d.c]; return !a?'':a.skip?'skip':'done';}
 function paintTop(){
@@ -438,11 +465,21 @@ function card(){
   h+='<h2>'+esc(d.t)+'</h2>';
   if(d.ctx&&d.ctx.length)h+='<div class="block"><div class="lbl">Contexte</div>'+pts(d.ctx)+(d.l?'<div class="links">Décisions liées : '+esc(d.l)+'</div>':'')+'</div>';
   if(d.av)h+='<div class="block avant"><div class="lbl">Aujourd’hui (avant)</div>'+pts(d.av.pts)+(d.av.m?'<div class="schema" aria-label="Avant">'+d.av.m+'</div>':'')+'</div>';
+  if(isList(d)){
+    const mk=listMarks(d,a);
+    h+='<div><div class="lbl">Je fais tout ça, sauf ce que tu marques « à discuter »</div><div class="opts">';
+    (d.lines||[]).forEach((l,i)=>{const on=mk.includes(i);
+      h+='<div class="opt'+(on?' sel':'')+'"><div class="body"><span class="name">'+esc(l)+'</span></div><button type="button" class="sec lmark" data-l="'+i+'" aria-pressed="'+on+'">'+(on?'À discuter ✓':'À discuter')+'</button></div>';
+      if(on)h+='<textarea class="note lnote" data-l="'+i+'" aria-label="Ton commentaire sur cette ligne" placeholder="Qu’est-ce qui ne va pas, ou que veux-tu à la place ?">'+esc((a.lnotes||{})[i]||'')+'</textarea>';});
+    h+='</div></div>';
+    h+='<button class="primary" id="acc">'+(mk.length?'Continuer : '+mk.length+' à discuter':'OK pour tout, continuer')+'</button>';
+  } else {
   h+='<button class="primary" id="acc">Prendre la recommandation et continuer</button>';
   h+='<div><div class="lbl">Les choix (après)</div><div class="opts" role="radiogroup">';
   d.o.forEach((o,i)=>{h+=opt(o,i,a);});
   h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
   h+='</div></div>';
+  }
   h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
   if(LOCAL)h+='<div><div class="lbl">Captures (facultatif)</div><div class="qwarn" id="qadv" role="status" hidden></div><div class="qstrip" id="qstrip"></div><div class="row2"><button class="sec" id="qpick" type="button">Ajouter une capture</button><input type="file" id="qfile" accept="'+QI_TYPES.join(',')+'" multiple hidden><span class="mdim">ou colle-la (Ctrl+V), ou glisse-la ici</span></div></div>';
   else h+='<div class="mdim">Les captures ne sont possibles que sur la page locale du suivi.</div>';
@@ -475,13 +512,18 @@ function render(){
   $('next').textContent=cur===ORDER.length-1?'Résumé →':'Suivant →';
   if(view==='card'){
     const d=ORDER[cur];
-    $('acc').onclick=()=>{ans[d.c]=mkAns(ans[d.c],{i:0});save(d);cur<ORDER.length-1?go(cur+1):(view='sum',render());};
-    $('main').querySelectorAll('.opt').forEach(x=>{
+    $('acc').onclick=()=>{ans[d.c]=mkAns(ans[d.c],isList(d)?{i:0,marks:listMarks(d,ans[d.c]),lnotes:(ans[d.c]||{}).lnotes||{}}:{i:0});save(d);cur<ORDER.length-1?go(cur+1):(view='sum',render());};
+    $('main').querySelectorAll('.lmark').forEach(x=>x.onclick=()=>{const a=ans[d.c],l=+x.dataset.l;ans[d.c]=mkAns(a,{i:0,marks:listToggle(d,a,l),lnotes:(a&&a.lnotes)||{}});save(d);render();
+      const box=$('main').querySelector('.lnote[data-l="'+l+'"]');if(box)box.focus();});
+    let lt;$('main').querySelectorAll('.lnote').forEach(x=>x.oninput=e=>{const a=ans[d.c];a.lnotes=Object.assign({},a.lnotes,{[+x.dataset.l]:e.target.value});clearTimeout(lt);lt=setTimeout(()=>save(d),500);});
+    /* Only real options carry data-i: a list card's lines are .opt too, and a click on their « À discuter » button
+       bubbling to the line would choose(d,NaN) and wipe the marks (#520 trial). */
+    $('main').querySelectorAll('.opt[data-i]').forEach(x=>{
       x.onclick=()=>choose(d,+x.dataset.i);
       x.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(d,+x.dataset.i);}};
     });
     qWire(d);
-    let t;$('note').oninput=e=>{const a=ans[d.c]||mkAns(null,{i:-1});a.note=e.target.value;ans[d.c]=a;clearTimeout(t);t=setTimeout(()=>{save(d);paintTop();},500);};
+    let t;$('note').oninput=e=>{const a=ans[d.c]||mkAns(null,{i:isList(d)?0:-1});a.note=e.target.value;ans[d.c]=a;clearTimeout(t);t=setTimeout(()=>{save(d);paintTop();},500);};
   } else {
     $('main').querySelectorAll('.srow').forEach(x=>x.onclick=()=>go(+x.dataset.i));
     const g=id=>$(id);
@@ -536,7 +578,7 @@ function qAttach(d,files){
         if(!r.ok)qLines[d.c].push(qUploadLine(r.status));
         else{const j=await r.json();
           if(typeof j.name==='string'&&QI_NAME.test(j.name)){
-            const a=ans[d.c]||mkAns(null,{i:-1});      // a screenshot on an unanswered card acts like a comment: « Autre »
+            const a=ans[d.c]||mkAns(null,{i:isList(d)?0:-1});      // a screenshot on an unanswered card acts like a comment: « Autre »
             const cur0=qNames(a);
             if(!cur0.includes(j.name))cur0.push(j.name);
             a.images=cur0; ans[d.c]=a; ok=true;}}
@@ -584,8 +626,7 @@ if(LOCAL)(async()=>{ try{
   Object.keys(j.answers||{}).forEach(code=>{const x=j.answers[code]; const d=D.find(q=>q.c===code); if(!x||!d)return;
     const imgs=qNames(x);
     if(ans[d.c]){ if(ans[d.c].images===undefined&&imgs.length)ans[d.c].images=imgs; return; }   // the device wins, but a stale one adopts the server's images
-    if(x.statut==='plus_tard')ans[d.c]=mkAns(null,{skip:true,note:x.commentaire||'',images:imgs});
-    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]=mkAns(null,{i,note:x.commentaire||'',images:imgs}); } });
+    const r=fromRecord(d,x,imgs); if(r)ans[d.c]=r; });
   render();
 }catch(e){} })();
 // Base partagée (capacité db) : lue après coup, jamais bloquante ; Claude relit la collection « decisions ».
@@ -593,8 +634,7 @@ if(!LOCAL)(async()=>{ try{
   const db=await (window.claude&&window.claude.use?window.claude.use('db'):null); if(!db)return; store=db;
   const snap=await db.collection('decisions').get();
   snap.docs.forEach(s=>{const x=s.data(); const d=D.find(q=>q.c===s.id); if(!x||!d||ans[d.c])return;
-    if(x.statut==='plus_tard')ans[d.c]=mkAns(null,{skip:true,note:x.commentaire||''});
-    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]=mkAns(null,{i,note:x.commentaire||''}); } });
+    const r=fromRecord(d,x,[]); if(r)ans[d.c]=r; });
   render();
 }catch(e){} })();
 </script>
