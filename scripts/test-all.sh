@@ -4,6 +4,7 @@
 # run; otherwise plain `cargo test --workspace`. Takes no argument: to filter,
 # use `cargo test -p <crate> <name>`.
 #
+# It first runs `cargo fmt --all -- --check` and scripts/french-guard.py (the CI job `fmt`).
 # After a green run it writes the stamp `<git common dir>/sf-tested/<HEAD sha>` (#515), which
 # scripts/deliver.sh requires before merging. The stamp is written only if the tree was
 # clean (untracked files included) when the run started and HEAD did not move during it;
@@ -18,6 +19,10 @@ fi
 cd "$(dirname "$0")/.."
 start_head="$(git rev-parse HEAD 2> /dev/null || true)"
 start_dirty="$(git status --porcelain 2> /dev/null || echo unknown)"
+# The fast checks of the CI job `fmt` first, so the stamp also means they pass (#523: #521
+# reached main with a French-guard failure because nothing local ran it before delivery).
+cargo fmt --all -- --check
+if [ -f scripts/french-guard.py ]; then python3 scripts/french-guard.py; fi
 if cargo nextest --version > /dev/null 2>&1; then
     cargo nextest run --workspace --no-fail-fast
     cargo test --workspace --doc

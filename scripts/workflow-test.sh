@@ -1065,6 +1065,7 @@ echo "$*" >> "$FAKE_LOG"
 case "$1 $2" in
     "nextest --version") [ "${FAKE_NEXTEST:-1}" = 1 ] || exit 1 ;;
     "nextest run") [ "${FAKE_RED:-}" != nextest ] || exit 1 ;;
+    "fmt --all") [ "${FAKE_RED:-}" != fmt ] || exit 1 ;;
     "test --workspace") [ "${FAKE_RED:-}" != doc ] || { [[ " $* " == *" --doc "* ]] && exit 1; } ;;
 esac
 exit 0
@@ -1073,14 +1074,17 @@ chmod +x "$fc/cargo"
 # Runs a copy of test-all.sh inside a sandbox git repo: the real repo never gets a stamp (#515).
 tas="$tmp/tasb"; mkdir -p "$tas/scripts"
 cp "$here/test-all.sh" "$tas/scripts/test-all.sh"
+printf 'import os, sys\nsys.exit(1 if os.environ.get("FAKE_RED") == "french" else 0)\n' > "$tas/scripts/french-guard.py"
 git init -q -b main "$tas"; git -C "$tas" config user.name t; git -C "$tas" config user.email t@t
 git -C "$tas" add scripts; git -C "$tas" commit -q -m init
 ta() { : > "$tmp/fake.log"; PATH="$fc:$PATH" FAKE_LOG="$tmp/fake.log" "$tas/scripts/test-all.sh" "$@" > /dev/null 2>&1; }
 ta || fail "test-all: nextest present, exit code"
-eq "$(grep -v -- '--version' "$tmp/fake.log")" "nextest run --workspace --no-fail-fast
-test --workspace --doc" "test-all: nextest then doc tests, in order"
+eq "$(grep -v -- '--version' "$tmp/fake.log")" "fmt --all -- --check
+nextest run --workspace --no-fail-fast
+test --workspace --doc" "test-all: fmt check, then nextest, then doc tests, in order"
 FAKE_NEXTEST=0 ta || fail "test-all: nextest absent, exit code"
-eq "$(grep -v -- '--version' "$tmp/fake.log")" "test --workspace" "test-all: nextest absent runs cargo test --workspace only"
+eq "$(grep -v -- '--version' "$tmp/fake.log")" "fmt --all -- --check
+test --workspace" "test-all: nextest absent runs the fmt check and cargo test --workspace only"
 set +e; FAKE_RED=nextest ta; rc=$?; set -e
 [ "$rc" -ne 0 ] || fail "test-all: red nextest must fail"
 set +e; FAKE_RED=doc ta; rc=$?; set -e
@@ -1099,6 +1103,10 @@ set +e; FAKE_RED=nextest ta; set -e
 [ ! -e "$tstamp" ] || fail "test-all: a red run left a stamp"
 set +e; FAKE_RED=doc ta; set -e
 [ ! -e "$tstamp" ] || fail "test-all: red doc tests left a stamp"
+set +e; FAKE_RED=fmt ta; rc=$?; set -e
+[ "$rc" -ne 0 ] && [ ! -e "$tstamp" ] || fail "test-all: a fmt failure must fail and leave no stamp"
+set +e; FAKE_RED=french ta; rc=$?; set -e
+[ "$rc" -ne 0 ] && [ ! -e "$tstamp" ] || fail "test-all: a French-guard failure must fail and leave no stamp"
 echo x > "$tas/tracked"; git -C "$tas" add tracked; git -C "$tas" commit -q -m t
 tstamp="$tas/.git/sf-tested/$(git -C "$tas" rev-parse HEAD)"
 echo y >> "$tas/tracked"   # a modified tracked file
