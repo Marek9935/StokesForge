@@ -1011,11 +1011,12 @@ fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_docked() {
     tab_switch_commits_the_pending_entry(Place::Docked);
 }
 
-/// Detached: see [`tab_switch_commits_the_pending_entry`]. Today the entry is
-/// lost: `AppState::select_sheet` sets `editing = None` in the window's fork
-/// and nothing commits it first (A1 stays 0).
+/// Detached: see [`tab_switch_commits_the_pending_entry`]. The click elsewhere
+/// commits in the window's own view, which writes under its own session
+/// identity: the root must pull that write, else it pushes its stale snapshot
+/// back over the view and A1 stays 0. Witness: drop the root `refresh` before
+/// publishing when a view is ahead (detached fails, docked still passes).
 #[test]
-#[ignore = "#524: a pending cell entry typed in a detached workbook is lost when a sheet tab is clicked (select_sheet drops it; docked commits it)"]
 fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_detached() {
     tab_switch_commits_the_pending_entry(Place::Detached);
 }

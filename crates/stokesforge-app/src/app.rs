@@ -1324,6 +1324,24 @@ impl StokesForgeApp {
     /// The detached requests stay drained before the workspace.
     pub(super) fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if !self.detached_tabs.is_empty() {
+            // A workbook view that wrote on its own session identity (a cell
+            // entry closed by a click elsewhere) is ahead of the root: the
+            // root pulls the write before publishing, else it would push its
+            // stale snapshot back over the view (#524).
+            let root_revision = self.state.snapshot().revision;
+            let view_ahead = self.detached_tabs.values().any(|detached| {
+                let model = detached
+                    .view_model
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner());
+                model
+                    .view_state
+                    .as_ref()
+                    .is_some_and(|view| view.snapshot().revision > root_revision)
+            });
+            if view_ahead {
+                self.state.refresh();
+            }
             self.show_detached_tabs(ctx);
             // Same draining as for the Project Manager, generalized to
             // several tabs: each may have accumulated actions and/or
