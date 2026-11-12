@@ -263,7 +263,7 @@ class TestWaitYouNeedsACard(Base):
         os.makedirs(self.state, exist_ok=True)
         for kind, rc in (("measure", 0), ("trial", 1)):
             with open(f, "w") as fh:
-                json.dump({"title": "t", "try": "echo hi", "kind": kind}, fh)
+                json.dump({"title": "t", "try": "echo hi", "kind": kind, "goal": "g", "around": "a"}, fh)
             r = self.run_cli("test", "add", "1", f)
             self.assertEqual(r.returncode, rc, r.stderr)
         self.assertIn("kind", r.stderr)
@@ -556,7 +556,8 @@ class TestTestCommands(Base):
             json.dump(data, f)
         return p
 
-    ONE = {"title": "A", "where": ["File", "Open"], "steps": ["Do"], "expect": "See", "try": "scripts/try.sh 7"}
+    ONE = {"title": "A", "where": ["File", "Open"], "steps": ["Do"], "expect": "See", "try": "scripts/try.sh 7",
+           "goal": "g", "around": "a"}
 
     def gout(self, *a):
         return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=self.repo,
@@ -595,7 +596,7 @@ class TestTestCommands(Base):
 
     def test_add_merged_list(self):
         self.claim(7, "--name", "Seven")
-        r = self.add(7, [self.ONE, {"title": "B", "try": "scripts/try.sh 7"}])
+        r = self.add(7, [self.ONE, {"title": "B", "try": "scripts/try.sh 7", "goal": "g"}])
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "7-1 7-2"), r.stderr)
         self.assertEqual(self.add(7, self.ONE).stdout.strip(), "7-3")
         t = jload(self.tfile("7-1"))
@@ -908,6 +909,43 @@ class TestTestCommands(Base):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("already settled", r.stderr)
         self.assertEqual(slurp(self.tfile("7-3")), before)
+
+    def test_settle_an_ok_with_an_idea_but_not_a_plain_ok(self):
+        self.put_test("7-1", status="ok", idea="more", **{"try": "x"})
+        self.put_test("7-2", status="ok", **{"try": "x"})
+        self.assertEqual(self.run_cli("test", "unsettled", "7", "--ideas").stdout.split(), ["7-1"])
+        self.assertIn("(idea)", self.run_cli("test", "list", "--issue", "7").stdout)
+        self.assertEqual(self.run_cli("test", "unsettled", "7").returncode, 0)                 # an idea never blocks
+        self.assertNotEqual(self.settle("7-2").returncode, 0)
+        self.assertEqual(self.settle("7-1", "--note", "#12").returncode, 0)
+        self.assertEqual(jload(self.tfile("7-1"))["settled"]["note"], "#12")
+        self.assertEqual(self.run_cli("test", "unsettled", "7", "--ideas").stdout.split(), [])
+        self.assertNotIn("(idea)", self.run_cli("test", "list", "--issue", "7").stdout)
+
+    def test_check_lists_an_unsettled_idea_of_a_done_issue(self):
+        self.put(5, colour=None, done_at="2026-11-01")
+        self.put_test("5-1", status="ok", idea="more")
+        self.put_test("5-2", status="ok", idea="more", settled={"at": "t", "by": "agent"})
+        out = self.run_cli("check").stdout
+        self.assertIn("5-1", out)
+        self.assertNotIn("5-2", out)
+
+    def test_add_needs_a_goal_on_a_routed_entry_and_an_around_in_the_batch(self):
+        full = dict(self.ONE)
+        no_goal = {k: v for k, v in full.items() if k != "goal"}
+        r = self.add(7, [no_goal])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("goal", r.stderr)
+        r = self.add(7, [dict(full, goal="  ")])
+        self.assertNotEqual(r.returncode, 0)
+        no_around = {k: v for k, v in full.items() if k != "around"}
+        r = self.add(7, [no_around, dict(no_around, title="B")])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("around", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+        self.assertEqual(self.add(7, [no_around, dict(full, title="B")]).returncode, 0)   # around on one entry is enough
+        self.assertEqual(self.add(7, [{"title": "m", "try": "x", "kind": "measure"}]).returncode, 0)   # a measure needs neither
+        self.assertEqual(self.add(7, [{"title": "n"}]).returncode, 0)                    # nor an entry without `try`
 
     def test_settle_commit_must_exist_but_need_not_cite_the_issue(self):
         self.put_test("7-1", status="retour", commit="m" * 40)
@@ -1347,6 +1385,16 @@ class TestWaitEvents(WaitBase):
         rc, out, _ = self.finish(p)
         self.assertIn("1-1 retour", out)
 
+    def test_an_ok_with_an_idea_wakes_after_the_delay_and_carries_the_idea(self):
+        self.owned(1)
+        self.entry("1-1")
+        self.entry("1-2")
+        self.entry("1-1", "ok", idea="add a zoom")
+        t0 = time.time()
+        rc, out, _ = self.run_wait(1, timeout="5", env={"SF_SUIVI_WAIT_SETTLE": "1.0"})
+        self.assertIn("1-1 ok + idea: add a zoom", out)
+        self.assertGreaterEqual(time.time() - t0, 0.9)
+
     def test_plain_ok_with_entries_left_wakes_nothing(self):
         self.owned(1)
         self.entry("1-1")
@@ -1705,7 +1753,7 @@ class TestWaitExits(WaitBase):
     def test_hint_when_nobody_listens(self):
         self.owned(1)
         with open(os.path.join(self.tmp.name, "e.json"), "w") as f:
-            json.dump({"title": "T", "try": "x"}, f)
+            json.dump({"title": "T", "try": "x", "goal": "g", "around": "a"}, f)
         r = self.run_cli("test", "add", "1", os.path.join(self.tmp.name, "e.json"))
         self.assertEqual(r.stdout.strip(), "1-1")
         self.assertIn("nobody is listening for #1", r.stderr)
@@ -2164,6 +2212,36 @@ class TestServer(ServerBase):
         self.assertEqual(self.post(body={"status": "ok"})[0], 200)
         e = json.loads(self.entry_text())
         self.assertEqual((e["status"], "settled" in e), ("ok", False))
+
+    def test_an_idea_goes_with_ok_and_is_dropped_by_a_later_status(self):
+        self.ok_entry()
+        self.assertEqual(self.post(body={"status": "retour", "idea": "x"})[0], 400)
+        self.assertEqual(self.post(body={"idea": "x"})[0], 400)
+        self.assertEqual(self.post(body={"status": "ok", "idea": "  "})[0], 400)
+        self.assertEqual(json.loads(self.entry_text()).get("idea"), None)
+        self.assertEqual(self.post(body={"status": "ok", "idea": " more "})[0], 200)
+        e = json.loads(self.entry_text())
+        self.assertEqual((e["status"], e["idea"]), ("ok", "more"))
+        st = json.loads(self.req("GET", "/api/state")[2])
+        self.assertEqual([t["idea"] for t in st["tests"] if t["id"] == "1-1"], ["more"])
+        self.assertEqual(self.post(body={"comment": "note"})[0], 200)                    # a note keeps it
+        self.assertEqual(json.loads(self.entry_text())["idea"], "more")
+        self.assertEqual(self.post(body={"status": "todo"})[0], 200)
+        self.assertNotIn("idea", json.loads(self.entry_text()))
+        self.assertEqual(self.post(body={"status": "ok", "idea": "again"})[0], 200)
+        self.assertEqual(self.post(body={"status": "ok"})[0], 200)
+        self.assertNotIn("idea", json.loads(self.entry_text()))
+
+    def test_an_ok_with_an_idea_is_ready_to_merge(self):
+        self.ok_entry()
+        self.assertEqual(self.post(body={"status": "ok", "idea": "more"})[0], 200)
+        e = json.loads(self.req("GET", "/api/state")[2])["colours"][0]
+        self.assertTrue(e["merge_ready"])
+        self.assertEqual(self.run_cli("test", "unsettled", "1").returncode, 0)
+
+    def ok_entry(self):
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": "todo", "try": "x"}, f)
 
     def test_the_page_settles_a_retour_as_the_user_and_only_a_retour_once(self):
         S = {"settle": True}
@@ -4198,6 +4276,13 @@ class TestPage(unittest.TestCase):
         self.assertEqual(P("note", "", []), {"comment": "", "images": []})                       # removing the last one is sent
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_idea_tick_sends_ok_with_its_text_and_refuses_an_empty_box(self):
+        P = lambda text, names: self.img_js("imgPatch('idea',%s,%s)" % (json.dumps(text), json.dumps(names)))
+        self.assertIsNone(P("", []))
+        self.assertIsNone(P("  ", ["a.png"]))
+        self.assertEqual(P(" more ", ["a.png"]), {"status": "ok", "idea": "more", "images": ["a.png"]})
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_a_failed_send_from_the_box_keeps_the_box_its_text_and_its_images(self):
         st = '{openBack:{id:"7-1",mode:"retour"},drafts:{"7-1":"vu","7-2":"x"},imgDrafts:{"7-1":{names:["a.png"]},"7-2":{names:[]}}}'
         kept = self.img_js("boxAfterSend(false,%s,'7-1')" % st)
@@ -4405,20 +4490,36 @@ class TestPage(unittest.TestCase):
     def test_a_settled_retour_moves_to_its_own_section(self):
         st = {"at": "2026-11-09T10:00:00", "by": "agent"}
         tests = [{"id": "1-1", "status": "todo"}, {"id": "1-2", "status": "retour"},
-                 {"id": "1-3", "status": "retour", "settled": st}, {"id": "1-4", "status": "ok"}]
+                 {"id": "1-3", "status": "retour", "settled": st}, {"id": "1-4", "status": "ok"},
+                 {"id": "1-5", "status": "ok", "idea": "i"}, {"id": "1-6", "status": "ok", "idea": "j", "settled": st}]
         got = self.split_node("(()=>{const s=splitTests(%s);return Object.fromEntries(Object.entries(s).map(([k,v])=>[k,v.map(x=>x.id)]));})()" % json.dumps(tests))
-        self.assertEqual(got, {"todo": ["1-1"], "back": ["1-2"], "settled": ["1-3"], "done": ["1-4"]})
+        self.assertEqual(got, {"todo": ["1-1"], "back": ["1-2", "1-5"], "settled": ["1-3", "1-6"], "done": ["1-4"]})
         html = self.page()
         self.assertIn('id="n-settled"', html)
         self.assertLess(html.index('id="back"'), html.index('id="settled-wrap"'))
         self.assertLess(html.index('id="settled-wrap"'), html.index('id="done-wrap"'))
         self.assertIn("$('n-settled').textContent=settled.length", html)
         # lang: fr begin
-        self.assertIn("Retours traités", html)
+        self.assertIn("En traitement", html)
+        self.assertIn("Traités (", html)
+        self.assertNotIn("C’est bon", html)
         text = self.split_node("[settledText({settled:{by:'user',at:'x'}},'9 nov.'),"
                                "settledText({settled:{by:'agent',commit:'0123456789abcdef',note:'#12'}},'9 nov.')]")
         self.assertEqual(text, ["classé par toi le 9 nov.", "traité le 9 nov. · commit 01234567 · #12"])
         # lang: fr end
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_trial_frame_and_the_idea_tick(self):
+        got = self.split_node("[trialFrame({goal:' g ',around:'a'}),trialFrame({}),trialFrame({goal:'',around:'  '})]")
+        # lang: fr begin
+        self.assertEqual(got, [{"goal": "On teste : g", "around": "Essaie autour : a"}] + [{"goal": "", "around": ""}] * 2)
+        page = self.page()
+        self.assertIn("OK + idée", page)
+        self.assertIn("Envoyer l’idée", page)
+        self.assertIn("Ton idée", page)
+        # lang: fr end
+        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        self.assertTrue(self.card_line(c, [{"n": 7, "status": "ok", "idea": "more", "try": "x"}])["mergeReady"])
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_the_classer_button_is_for_an_unsettled_retour_only(self):

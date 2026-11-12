@@ -29,8 +29,8 @@ Report: at most <12> lines: what changed, tests and witnesses (which failed when
 ## Pre-trial (invisible screen)
 
 ```
-Walk the detailed checks of #<n> in the real application on the invisible screen (skill run-stokesforge), in the worktree <path>. Fix what you find on the branch, rerun the tests, then re-verify each fix in the real app.
-Checks to walk: <each edge case of the start form, refusals and their messages, save and reopen, STOKESFORGE_LANG=en-XA when texts changed>.
+Walk the detailed checks of #<n> (a pre-trial agent exists only when a gesture or a drawing changes) in the real application on the invisible screen (skill run-stokesforge), in the worktree <path>. Fix what you find on the branch, rerun the tests, then re-verify each fix in the real app.
+Checks to walk: <each edge case of the start form, refusals and their messages, STOKESFORGE_LANG=en-XA when texts changed>. Play every sheet of the trial literally, step by step, before `test add`; for a drag or resize play the gesture and its reverse with no modifier, then Shift, Ctrl, Alt.
 Capture budget: the screenshots are your own check, never shown to the user. One full frame per checkpoint (`driver.py ss f.png`), then only crops and shrinks: `ss f.png --crop WxH+X+Y --max-width 800`. Do not re-read an unchanged image. Stop the stack (`driver.py stop`) at the end.
 Bans: <paste the Bans block>
 Report: at most <15> lines: each check with ok / fixed / cannot (and why), the fixes with their commit, the tests rerun, what the user must still try by hand.

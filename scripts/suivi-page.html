@@ -69,6 +69,8 @@ a.st:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .lbl{font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
 .intro{font-weight:600}
+.goal{font-weight:700}
+.around{font-style:italic}
 .expect{border-left:4px solid var(--ok);padding-left:12px}
 .meta{color:var(--muted);font-size:.85rem}
 button.wd{padding:8px 14px}
@@ -76,8 +78,8 @@ button.wd{padding:8px 14px}
 .acts{display:flex;flex-wrap:wrap;gap:10px}
 button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font-weight:700}
 button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
-button.ok{border-color:var(--ok);color:var(--ok)}
-button.ok.on{background:var(--ok);color:var(--panel)}
+button.ok,button.oi{border-color:var(--ok);color:var(--ok)}
+button.ok.on,button.oi.on{background:var(--ok);color:var(--panel)}
 button.back{border-color:var(--bad);color:var(--bad)}
 button.back.on{background:var(--bad);color:var(--panel)}
 button.save{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -174,10 +176,10 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
       <div id="todo" class="rows"></div>
     </section>
     <section aria-labelledby="h-back">
-      <h2 id="h-back">Retours envoyés <span class="count" id="n-back">–</span></h2>
+      <h2 id="h-back">En traitement <span class="count" id="n-back">–</span></h2>
       <div id="back" class="rows"></div>
     </section>
-    <details id="settled-wrap"><summary>Retours traités (<span id="n-settled">0</span>)</summary><div id="settled" class="rows"></div></details>
+    <details id="settled-wrap"><summary>Traités (<span id="n-settled">0</span>)</summary><div id="settled" class="rows"></div></details>
     <details id="done-wrap"><summary>Testé et OK (<span id="n-done">0</span>)</summary><div id="done" class="rows"></div></details>
   </div>
 
@@ -190,7 +192,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     <details id="finished-wrap"><summary>Terminés, les 10 derniers (<span id="n-finished">0</span>)</summary><div id="finished" class="rows"></div></details>
     <div id="foot" class="note"></div>
   </div>
-  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « C’est bon », tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
+  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « OK » (ou « OK + idée »), tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
 </div>
 <script>
 const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
@@ -397,13 +399,21 @@ function withdrawUi(q,asking){
 function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
 /*CARDLINE-END*/
 /*SPLIT-START*/
-/* Where each trial entry is listed (#496): a settled retour leaves « Retours envoyés » for « Retours traités ». */
+/* Where each trial entry is listed (#496, #518): a retour or an OK + idée the agent has not settled is « En traitement »;
+   once settled it moves to « Traités »; a plain OK is « Testé et OK ». */
 function splitTests(tests){
   const stamp=x=>String(x.reviewed||x.date||'');
   const by=f=>tests.filter(f).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
   const st=x=>x.status||'todo';
-  return {todo:by(x=>st(x)==='todo'),back:by(x=>st(x)==='retour'&&!isSettled(x)),
-          settled:by(x=>st(x)==='retour'&&isSettled(x)),done:by(x=>st(x)==='ok')};
+  const handled=x=>st(x)==='retour'||(st(x)==='ok'&&String(x.idea||'').trim()!=='');
+  return {todo:by(x=>st(x)==='todo'),back:by(x=>handled(x)&&!isSettled(x)),
+          settled:by(x=>handled(x)&&isSettled(x)),done:by(x=>st(x)==='ok'&&!handled(x))};
+}
+/* The two framing lines of a trial entry (#518): « On teste : … » above the route, « Essaie autour : … » below
+   what to see. '' when the entry carries none. */
+function trialFrame(x){
+  const g=String((x&&x.goal)||'').trim(),a=String((x&&x.around)||'').trim();
+  return {goal:g?'On teste : '+g:'',around:a?'Essaie autour : '+a:''};
 }
 const canSettle=x=>x.status==='retour'&&!isSettled(x);
 function settledText(x,dateText){
@@ -449,11 +459,12 @@ function imgFromItems(items){
   for(const it of Array.from(items||[])){if(it&&it.kind==='file'&&IMG_TYPES.includes(it.type)){const f=it.getAsFile();if(f)out.push(f);}}
   return out;
 }
-/* What a click on a box button sends. kind: 'retour' | 'note' | 'ok'. text = the box; names = the box's
+/* What a click on a box button sends. kind: 'retour' | 'note' | 'ok' | 'idea' (OK + idée, #518: text required). text = the box; names = the box's
    images. Retour needs text or a screenshot (an empty box refuses). null = refused. */
 function imgPatch(kind,text,names){
   const v=String(text||'').trim();
   if(kind==='retour'){if(!v&&!names.length)return null;return {status:'retour',comment:v,images:names.slice()};}
+  if(kind==='idea'){if(!v)return null;return {status:'ok',idea:v,images:names.slice()};}
   if(kind==='ok')return {status:'ok',comment:v,images:names.slice()};
   return {comment:v,images:names.slice()};
 }
@@ -623,7 +634,7 @@ async function boxSend(x,kind){
   const d=imgDrafts[x.id]||imgDraft(x);
   const sv=$('sv-'+x.id);if(sv)sv.disabled=true;
   await imgIdle(d);                                   // the list goes out once the uploads are done
-  const text=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
+  const text=drafts[x.id]!=null?drafts[x.id]:(kind==='idea'?(x.idea||''):(x.comment||''));
   const patch=imgPatch(kind,text,d.names);
   if(!patch){if(sv)sv.disabled=false;const t=$('tx-'+x.id);if(t)t.focus();return;}
   const ok=await send(x,patch,()=>{const st=boxAfterSend(true,{openBack,drafts,imgDrafts},x.id);openBack=st.openBack;});
@@ -664,6 +675,8 @@ document.addEventListener('drop',e=>{
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'&&!isSettled(x)?' isback':''));
   b.appendChild(head(x,x.title||''));
+  const fr=trialFrame(x);
+  if(fr.goal)b.appendChild(el('div','goal',fr.goal));
   if(x.intro)b.appendChild(el('div','intro',x.intro));
   if(Array.isArray(x.where)&&x.where.length){
     b.appendChild(el('div','lbl','Où'));
@@ -673,6 +686,7 @@ function testBox(x){
     b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(el('li','',s)));b.appendChild(o);
   }
   if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
+  if(fr.around)b.appendChild(el('div','around',fr.around));
   if(x.try){b.appendChild(el('div','lbl',x.kind==='measure'?"Lance d'abord":'Avant, lance (pas encore fusionné)'));b.appendChild(el('code','',x.try));}
   const m=[];if(x.date)m.push(String(x.date).slice(0,10));
   if(x.status==='ok'||x.status==='retour'){const v=dayText(x.reviewed||'','', x.status==='ok'?'validé le ':'retour envoyé le ');if(v)m.push(v);}if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
@@ -681,25 +695,29 @@ function testBox(x){
   const editing=openBack&&openBack.id===x.id;
   const sent=imgListed(x);
   if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
+  if(x.idea&&x.status==='ok'&&!(editing&&openBack.mode==='idea')){b.appendChild(el('div','lbl','Ton idée'));b.appendChild(el('div','',x.idea));}
   if(sent.length&&!editing){b.appendChild(el('div','lbl','Tes captures'));
     const sn=el('div','sent');sent.forEach(n=>sn.appendChild(thumb(x.id,n)));b.appendChild(sn);}
   const a=el('div','acts');
-  const ok=el('button','ok'+(x.status==='ok'?' on':''),x.status==='ok'?'✓ OK':'✓ C’est bon');ok.type='button';ok.id='ok-'+x.id;
+  const ok=el('button','ok'+(x.status==='ok'?' on':''),'✓ OK');ok.type='button';ok.id='ok-'+x.id;
   ok.onclick=()=>{if(openBack&&openBack.id===x.id)boxSend(x,'ok');else send(x,{status:x.status==='ok'?'todo':'ok'});};
+  const oi=el('button','oi'+(x.status==='ok'&&x.idea?' on':''),'✓ OK + idée');oi.type='button';oi.id='oi-'+x.id;
+  oi.title='OK, et j’ai une idée : ça ne bloque pas la fusion';
+  oi.onclick=()=>{openBack=editing&&openBack.mode==='idea'?null:{id:x.id,mode:'idea'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   const bk=el('button','back'+(x.status==='retour'?' on':''),'Retour');bk.type='button';bk.id='bk-'+x.id;
   bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   const cm=el('button','',(x.comment||sent.length)?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
   cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
-  a.appendChild(ok);a.appendChild(bk);
+  a.appendChild(ok);a.appendChild(oi);a.appendChild(bk);
   if(canSettle(x)){
-    const cl=el('button','','Classer');cl.type='button';cl.id='cl-'+x.id;cl.title='Ce retour est traité : le ranger sous « Retours traités »';
+    const cl=el('button','','Classer');cl.type='button';cl.id='cl-'+x.id;cl.title='Ce retour est traité : le ranger sous « Traités »';
     cl.onclick=()=>settleTest(x);a.appendChild(cl);
   }
   a.appendChild(cm);b.appendChild(a);
   if(editing){
-    const retour=openBack.mode==='retour';
-    const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
-    t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':'Une remarque, une idée, une précision';
+    const retour=openBack.mode==='retour',idea=openBack.mode==='idea';
+    const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(idea?(x.idea||''):(x.comment||''));
+    t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':idea?'Ton idée : ce que tu ajouterais ou changerais':'Une remarque, une précision';
     t.oninput=()=>{drafts[x.id]=t.value;};
     b.appendChild(t);
     imgDraft(x);
@@ -715,8 +733,8 @@ function testBox(x){
     const adv=el('div','imgline warn');adv.id='adv-'+x.id;adv.hidden=true;adv.setAttribute('role','status');
     b.appendChild(adv);b.appendChild(st);
     const r=el('div','acts');
-    const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;
-    sv.onclick=()=>boxSend(x,retour?'retour':'note');
+    const sv=el('button','save',retour?'Envoyer le retour':idea?'Envoyer l’idée':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;
+    sv.onclick=()=>boxSend(x,retour?'retour':idea?'idea':'note');
     const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];delete imgDrafts[x.id];renderTests();};
     r.appendChild(sv);r.appendChild(cn);b.appendChild(r);
     renderStrip(x.id,st);   // the new strip is not in the document yet: pass it, or the old one gets drawn
@@ -744,7 +762,7 @@ function renderTests(){
     if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(mk(x)));};
   fill('qcm',qcms,qcmBox,F?'Aucun questionnaire pour ce chantier.':'Aucun questionnaire ne t’attend.');
   fill('todo',todo,testBox,F?'Rien à tester pour ce chantier.':'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
-  fill('back',back,testBox,F?'Aucun retour pour ce chantier.':'Aucun retour en attente.');
+  fill('back',back,testBox,F?'Rien en traitement pour ce chantier.':'Rien en traitement.');
   fill('settled',settled,testBox,'');
   fill('done',done,testBox,'');
   const bn=$('banner');
@@ -806,12 +824,12 @@ async function load(){
 }
 async function send(x,patch,onOk){
   let ok=true;
-  Object.assign(x,patch);if('status' in patch)delete x.settled;renderTests();
+  Object.assign(x,patch);if('status' in patch){delete x.settled;if(!('idea' in patch))delete x.idea;}renderTests();
   try{
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
     if(onOk)onOk();
-  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';ok=false;}
+  }catch(e){$('sub').textContent=(patch.idea&&String(e.message)==='400')?'Ce serveur ne connaît pas encore « OK + idée » : relance le serveur (systemctl --user restart stokesforge-suivi).':'Pas enregistré : réessaie dans un instant.';ok=false;}
   etag=null;load();
   return ok;
 }

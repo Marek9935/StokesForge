@@ -820,6 +820,9 @@ def cmd_check(a):
         if t.get("status") == "retour" and not t.get("settled") and (r is None or r.get("done_at")):
             problems.append("entry %s is an unsettled retour of issue #%s (%s): suivi.py test settle %s --note ..."
                             % (t["id"], n, "done" if r else "no record", t["id"]))
+        if t.get("status") == "ok" and str(t.get("idea") or "").strip() and not t.get("settled") and r is not None and r.get("done_at"):
+            problems.append("entry %s carries an unsettled idea on done issue #%s: suivi.py test settle %s --note \"#N\" (later) or --commit (done)"
+                            % (t["id"], n, t["id"]))
     owner = os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
     write_json(os.path.join(suivi_dir(), "control.json"),
                {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": owner, "problems": problems})
@@ -927,7 +930,7 @@ def should_wake(events, todos, last_change, now, settle):
         return False
     if any(e["kind"] in ("form", "merge", "withdrawn") for e in events) or todos == 0:
         return True
-    if any(e["status"] == "retour" or e["comment"] or e.get("images") for e in events):
+    if any(e["status"] == "retour" or e["comment"] or e.get("images") or e.get("idea") for e in events):
         return now - last_change >= settle
     return False
 
@@ -1005,11 +1008,15 @@ def scan_group(members, root=None):
             except OSError:
                 mns = 0
             imgs = listed_images(t)
+            idea = str(t.get("idea") or "").strip() if status == "ok" else ""
             items[tid] = {"id": tid, "kind": "test", "status": status, "comment": comment, "mtime": mtime, "mns": mns,
+                          "idea": idea,
                           "images": imgs, "settled": bool(t.get("settled")),
                           # no images: BASE_FP stays valid. A settle by the user is an answer (#496); an agent's is silent.
-                          "fp": "%s|%s" % (status, comment) + ("|" + ",".join(imgs) if imgs else "") + ("|settled-by-user" if by_user else ""),
-                          "line": "\n".join(["%s %s%s%s" % (tid, status, ": " + comment if comment else "",
+                          "fp": "%s|%s" % (status, comment) + ("|" + ",".join(imgs) if imgs else "") + ("|settled-by-user" if by_user else "")
+                          + ("|idea:" + idea if idea else ""),
+                          "line": "\n".join(["%s %s%s%s" % (tid, "ok + idea" if idea else status,
+                                                           ": " + (idea if idea else comment) if (idea or comment) else "",
                                                            " (settled by the user on the page)" if by_user else "")]
                                             + image_lines(test_images_dir(tid), imgs))}
         for p in glob.glob(os.path.join(suivi_dir(), "qcm", "%s-*" % m, "meta.json")):
@@ -1344,7 +1351,7 @@ def cmd_hook_news(a):
 # ------------------------------------------------------------ trial entries
 ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
 TEST_FIELDS = {"title": str, "intro": str, "where": list, "steps": list, "expect": str, "try": str, "commit": str,
-               "date": str, "colour": str, "name": str, "kind": str}
+               "date": str, "colour": str, "name": str, "kind": str, "goal": str, "around": str, "idea": str}
 TEST_KINDS = ("measure",)    # `kind`: an action only the user's hands can do, before any code (#483)
 TEST_STATUSES = ("todo", "ok", "retour")
 MAX_UNMERGED = 5      # E2: trial entries with `try` per issue, unless `test add --force`
@@ -1525,6 +1532,16 @@ def check_entry(e):
             raise Fail("field %r must be a list of strings" % k)
         if k == "kind" and v not in TEST_KINDS:
             raise Fail("field 'kind' must be one of: %s (got %r)" % (", ".join(TEST_KINDS), v))
+    if "try" in e and e.get("kind") != "measure" and not str(e.get("goal") or "").strip():
+        raise Fail("field 'goal' is required on an entry with `try`: one line, what this series tests (#518)")
+
+
+def check_batch(entries):
+    """#518: a batch of routes ends with « Essaie autour » on at least one entry (the series' last route)."""
+    routes = [e for e in entries if "try" in e and e.get("kind") != "measure"]
+    if routes and not any(str(e.get("around") or "").strip() for e in routes):
+        raise Fail("no entry of the batch has `around`: put « Essaie autour : … » (what to try beside the route) "
+                   "on the last entry (#518)")
 
 
 def removed_dir():
@@ -1550,6 +1567,7 @@ def cmd_test_add(a):
     entries = data if isinstance(data, list) else [data]
     for e in entries:
         check_entry(e)
+    check_batch(entries)
     rec = load_all().get(a.issue) or {}
     ids = []
     with Lock():
@@ -1716,8 +1734,9 @@ def cmd_test_settle(a):
         t = read_json(test_path(a.id))
         if not isinstance(t, dict):
             raise Fail("no entry %s" % a.id)
-        if t.get("status", "todo") != "retour":
-            raise Fail("%s is %s: only a retour can be settled" % (a.id, t.get("status", "todo")))
+        idea_ok = t.get("status") == "ok" and str(t.get("idea") or "").strip()
+        if t.get("status", "todo") != "retour" and not idea_ok:
+            raise Fail("%s is %s: only a retour or an OK with an idea can be settled" % (a.id, t.get("status", "todo")))
         if t.get("settled"):
             raise Fail("%s is already settled" % a.id)
         s = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "by": "agent"}
@@ -1736,8 +1755,19 @@ def unsettled_retours(n):
             if t.get("status") == "retour" and not t.get("settled")]
 
 
+def unsettled_ideas(n):
+    """#518: the `OK + idea` entries of issue n the agent has not settled (they never block a merge)."""
+    return [t["id"] for t in sorted(load_tests(n), key=lambda t: natural(t["id"]))
+            if t.get("status") == "ok" and str(t.get("idea") or "").strip() and not t.get("settled")]
+
+
 def cmd_test_unsettled(a):
-    """Read-only (#496): the retours of issue n nobody settled. Exit 1 and one id per line if any."""
+    """Read-only (#496): the retours of issue n nobody settled. Exit 1 and one id per line if any.
+    `--ideas` (#518) lists the unsettled `OK + idea` entries instead; they never block (exit 0)."""
+    if getattr(a, "ideas", False):
+        for tid in unsettled_ideas(a.issue):
+            print(tid)
+        return 0
     ids = unsettled_retours(a.issue)
     for tid in ids:
         print(tid)
@@ -1746,8 +1776,9 @@ def cmd_test_unsettled(a):
 
 def cmd_test_list(a):
     for t in sorted(load_tests(a.issue), key=lambda t: natural(t["id"])):
-        print("%s\t%s\t%s%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
-                                  "\t(try)" if t.get("try") else "", "\t(settled)" if t.get("settled") else ""))
+        print("%s\t%s\t%s%s%s%s" % (t["id"], t.get("status", "todo"), t.get("title", ""),
+                                  "\t(try)" if t.get("try") else "", "\t(settled)" if t.get("settled") else "",
+                                  "\t(idea)" if str(t.get("idea") or "").strip() and not t.get("settled") else ""))
         for line in image_lines(test_images_dir(t["id"]), listed_images(t)):
             print(line)
     return 0
@@ -3155,7 +3186,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.read_body()
         if body is None:
             return
-        if not isinstance(body, dict) or not ({"status", "comment", "images", "settle"} & set(body)):
+        if not isinstance(body, dict) or not ({"status", "comment", "images", "settle", "idea"} & set(body)):
             return self.fail(400, "expected an object with status, comment, images and/or settle")
         if "settle" in body and (body["settle"] is not True or set(body) != {"settle"}):
             return self.fail(400, "settle is {\"settle\": true} alone")
@@ -3163,6 +3194,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.fail(400, "status must be one of %s" % ", ".join(TEST_STATUSES))
         if "comment" in body and not isinstance(body["comment"], str):
             return self.fail(400, "comment must be a string")
+        if "idea" in body:
+            if not isinstance(body["idea"], str) or not body["idea"].strip():
+                return self.fail(400, "idea must be a non-empty string")
+            if body.get("status") != "ok":
+                return self.fail(400, "an idea goes with status ok")
         if "settle" in body:      # #496: the user files a retour as handled; no `reviewed`, the retour date stays
             try:
                 with Lock():
@@ -3189,9 +3225,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 t["images"] = names
             else:
                 t.pop("images", None)
-        for k in ("status", "comment"):
+        if "status" in body:
+            t.pop("idea", None)         # #518: an idea belongs to the answer that carried it
+        for k in ("status", "comment", "idea"):
             if k in body:
-                t[k] = body[k]
+                t[k] = body[k].strip() if k == "idea" else body[k]
         if "status" in body:
             t.pop("settled", None)      # a new answer reopens: a retour sent again is a new retour (#496)
         t["reviewed"] = datetime.datetime.now().isoformat(timespec="seconds")
@@ -3311,7 +3349,7 @@ def parser():
     for name, fn, h in (("add", cmd_test_add, "add entries from a JSON file (one object or a list)"),
                         ("merged", cmd_test_merged, "set the merge commit and drop `try` on the issue's entries"),
                         ("remove", cmd_test_remove, "withdraw the session's own unmerged entries (archived)"),
-                        ("settle", cmd_test_settle, "mark a handled retour as settled (status stays retour, #496)"),
+                        ("settle", cmd_test_settle, "mark a handled retour (or an OK + idea, #518) as settled (#496)"),
                         ("unsettled", cmd_test_unsettled, "read-only: the unsettled retours of an issue (exit 1 if any)"),
                         ("list", cmd_test_list, "list the entries")):
         q = t.add_parser(name, help=h, allow_abbrev=False)
@@ -3330,6 +3368,7 @@ def parser():
             q.add_argument("--answered", action="store_true", help="also remove entries ticked or commented")
         elif name == "unsettled":
             q.add_argument("issue", type=int)
+            q.add_argument("--ideas", action="store_true", help="list the unsettled OK + idea entries instead (exit 0, #518)")
         elif name == "settle":
             q.add_argument("id")
             q.add_argument("--commit", help="the commit that handled it (any commit of this repository)")

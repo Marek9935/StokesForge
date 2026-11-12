@@ -101,6 +101,9 @@ set -e
 if [ "$unsettled_rc" -eq 1 ] && [ -n "$unsettled" ]; then
     die "#$n has unsettled retours: $(echo $unsettled). Settle each one first: scripts/suivi.py test settle <id> --commit <fix> --note \"...\""
 fi
+# #518: an OK + idea never blocks; say which ones the agent has not settled yet (one line).
+ideas="$(python3 -I "$here/suivi.py" test unsettled "$n" --ideas 2> /dev/null || true)"
+[ -z "$ideas" ] || echo "note: #$n has unsettled ideas (they do not block): $(echo $ideas). Settle each: scripts/suivi.py test settle <id> --commit <fix> | --note \"#N\""
 
 main="$(sf_main_dir)"
 top="$(realpath "$(git rev-parse --show-toplevel)")"

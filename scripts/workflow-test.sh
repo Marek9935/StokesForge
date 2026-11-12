@@ -149,6 +149,12 @@ out="$("$here/try.sh" --dry-run 2)"
 echo "$out" | grep -q "CARGO_TARGET_DIR=$tmp/_stokesforge/feature2/target" || fail "try target: $out"
 grep -q 'STOKESFORGE_DEMO=1' "$here/try.sh" || fail "try.sh opens the demo"
 echo "$out" | grep -q -- "--manifest-path $tmp/_stokesforge/feature2/Cargo.toml" || fail "try manifest"
+# #518: a .stf argument is opened as a copy; a missing file or another extension is refused.
+: > "$tmp/proj.stf"; : > "$tmp/data.csv"
+out="$("$here/try.sh" --dry-run 2 "$tmp/proj.stf")" || fail "try.sh with a .stf failed"
+echo "$out" | grep -q 'would run:.*stokesforge-app .*stokesforge-try\..*/proj.stf' || fail "try.sh does not run the copy: $out"
+if "$here/try.sh" --dry-run 2 "$tmp/none.stf" > /dev/null 2>&1; then fail "try.sh accepted a missing file"; fi
+if "$here/try.sh" --dry-run 2 "$tmp/data.csv" > /dev/null 2>&1; then fail "try.sh accepted a .csv"; fi
 # The trial skips the cargo queue (#476), in debug and in release, on the build command only.
 echo "$out" | grep -q 'would build: env SF_CARGO_QUEUE=off cargo build -p stokesforge-app' || fail "try queue bypass: $out"
 echo "$out" | grep -q 'would run: .*SF_CARGO_QUEUE' && fail "try run carries the bypass"
@@ -360,7 +366,7 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
         git worktree add -q "$wt" -b feature/7-x --no-track main
         git -C "$wt" commit -q --allow-empty -m work
         echo 'Merge #7: add x' > "$sb/msg"
-        printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 7"}' > "$sb/e.json"
+        printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 7","goal":"g","around":"a"}' > "$sb/e.json"
         sbsuivi test add 7 "$sb/e.json" > /dev/null
         stamp
     }
@@ -441,6 +447,11 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     grep -q '7-1' "$sb/out" && grep -q 'test settle' "$sb/out" || fail "unsettled retour: message names the entry and the command: $(cat "$sb/out")"
     sbsuivi test settle 7-1 --note "fixed" > /dev/null || fail "settle in the sandbox"
     deliver || fail "settled retour: refused: $(cat "$sb/out")"
+    dsb; base="$(main_head)"
+    # #518: an OK + idea never blocks the delivery; one line names the unsettled idea.
+    python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]="ok"; d["idea"]="more"; d.pop("settled",None); json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/7-1.json"
+    deliver || fail "OK + idea blocked the delivery: $(cat "$sb/out")"
+    grep -q 'unsettled ideas.*7-1' "$sb/out" || fail "OK + idea: the delivery does not name the idea: $(cat "$sb/out")"
     dsb; base="$(main_head)"
     echo 'Merge #77: x' > "$sb/bad"; DMSG="$sb/bad" refused "bad message"
     DMSG="$sb/none" refused "missing file"
@@ -781,14 +792,14 @@ GL
         git -C "$wt8" commit -q --allow-empty -m work8
         : > "$sb/StokesForge/.git/sf-tested/$(git -C "$wt8" rev-parse HEAD)"
         sbsuivi claim 8 --line $L > /dev/null
-        printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 8"}' > "$sb/e8.json"
+        printf '{"title":"t","steps":["s"],"expect":"e","try":"scripts/try.sh 8","goal":"g","around":"a"}' > "$sb/e8.json"
         sbsuivi test add 8 "$sb/e8.json" > /dev/null
         deliver || fail "land setup, #7: $(cat "$sb/out")"
         git -C "$wt8" merge -q --no-edit $L
         : > "$sb/StokesForge/.git/sf-tested/$(git -C "$wt8" rev-parse HEAD)"
         echo 'Merge #8: add y' > "$sb/msg8"
         DN=8 DMSG="$sb/msg8" deliver || fail "land setup, #8: $(cat "$sb/out")"
-        printf '{"title":"whole line","steps":["s"],"expect":"e","try":"scripts/try.sh PostV1.1"}' > "$sb/eline.json"
+        printf '{"title":"whole line","steps":["s"],"expect":"e","try":"scripts/try.sh PostV1.1","goal":"g","around":"a"}' > "$sb/eline.json"
         sbsuivi test add 480 "$sb/eline.json" > /dev/null
         git -C "$sb/StokesForge" tag v1.1.0 main
     }
