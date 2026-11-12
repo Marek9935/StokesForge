@@ -64,6 +64,9 @@
 # by main. `--release` of a line issue tests the merge against the line and deletes the branch from
 # the line worktree (../_stokesforge/line-<line>, scripts/line.sh create).
 #
+# Template target (#523): a worktree created here gets a copy of the template target of main
+# (scripts/template-target.sh copy; one briefing line says copied or why not; it never fails the run).
+#
 # Test seams: SF_ISSUE_LINE_<n> (the declared line of issue <n>), SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
 # `glab issue view` lookup; SF_ISSUES_JSON (a file with the JSON of `glab issue
 # list`) replaces the sub-issue search, SF_ISSUE_BODY_<n> the parent's description;
@@ -429,14 +432,17 @@ ensure_wt() {
             colour="$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")" || exit 1
             reserved="$reserved $colour"
         fi
-        echo "would run: git worktree add $wt -b $branch --no-track $wbase"
+        echo "would run: git worktree add $wt -b $branch --no-track $wbase; then would copy the template target (template-target.sh copy)"
     else
         suivi claim --dry-run "$n" "${args[@]}" > /dev/null || exit 1   # refuse before creating anything
         mkdir -p "$root"
         git -C "$main" worktree add "$wt" -b "$branch" --no-track "$wbase"
         colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+        # #523: a fresh worktree starts from the template target (one line, never an error).
+        tnotes+=("#$n: $("$(dirname "$0")/template-target.sh" copy "$wt" 2>&1 | tail -n 1 || true)")
     fi
 }
+tnotes=()
 
 # Sub-issues of each given issue (one lookup per issue).
 declare -A kids=()
@@ -514,6 +520,7 @@ echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the tr
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
+for x in "${tnotes[@]:-}"; do [ -z "$x" ] || echo "Build cache $x"; done
 [ -z "$used_lines" ] || echo "Line $used_lines: deliver with scripts/deliver.sh (merges into the line, never main); write Refs #<n>, not Closes: the issue stays open until the line lands."
 for x in "${pkgnotes[@]:-}"; do [ -z "$x" ] || printf '%s\n' "$x"; done
 tags=""

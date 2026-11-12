@@ -353,6 +353,7 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
 (
     sb="$tmp/dsb"
     export SF_SUIVI_DIR="$sb/_stokesforge/.suivi" SF_DELIVER_DELAYS="0 0 0 0"
+    export SF_TEMPLATE_REFRESH="echo refresh >> '$tmp/refresh.log'"     # #523: the detached refresh, replaced by a log line
     sbsuivi() { python3 -I "$here/suivi.py" "$@"; }
     dsb() {   # a fresh sandbox: main + remote, feature/7-x with one commit, one entry to try
         cd /; rm -rf "$sb"; mkdir -p "$sb/_stokesforge"
@@ -401,6 +402,7 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     eq "$(entry_field 7-1 try)" "-" "entry lost try"
     lock_free "happy"
     eq "$(git -C "$sb/remote.git" tag | wc -l)" 0 "a local tag was pushed"
+    eq "$(wc -l < "$tmp/refresh.log")" 1 "a delivery to main starts the template refresh"
     # Follow-up delivery, no new entries: succeeds, the old commit stays.
     git -C "$wt" merge -q --no-edit main
     git -C "$wt" commit -q --allow-empty -m more; stamp
@@ -643,7 +645,9 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     # even dirty and on another branch; the message path is relative.
     lsetup; base="$(main_head)"
     git -C "$sb/StokesForge" checkout -q -b other; echo dirt > "$sb/StokesForge/dirt"
+    rlines="$(wc -l < "$tmp/refresh.log")"
     DMSG=../msg deliver || fail "deliver to the line: $(cat "$sb/out")"
+    eq "$(wc -l < "$tmp/refresh.log")" "$rlines" "a delivery to a line started a template refresh"
     m="$(lhead)"
     eq "$(git -C "$lwt" log -1 --format=%s)" "Merge #7: add x" "line merge message"
     eq "$(git -C "$lwt" rev-list --parents -n 1 HEAD | wc -w)" 3 "line merge has two parents"
@@ -877,6 +881,166 @@ GL
     sbsuivi claim 7 --line $L > /dev/null
     out="$( cd "$sb/StokesForge" && "$here/try.sh" --dry-run 7 )" || fail "try.sh on a line issue"
     grep -q "== last merges on $L" <<< "$out" && grep -q "not yet on $L" <<< "$out" && grep -q 'Merge #99: marker' <<< "$out" || fail "try.sh issue log against the line: $out"
+)
+
+# Template target (#523): refresh, sweep, copy, prune, with a fake cargo (it logs its calls and prints
+# fake JSON artifacts) and a fake rustc; its own sandbox.
+(
+    sb="$tmp/tsb"; rm -rf "$sb"; mkdir -p "$sb/_stokesforge" "$sb/fake" "$sb/home"
+    export SF_SUIVI_DIR="$sb/_stokesforge/.suivi" HOME="$sb/home"
+    git init -q -b main "$sb/StokesForge"; cd "$sb/StokesForge"
+    git config user.name t; git config user.email t@t
+    echo base > f; git add f; git commit -q -m init
+    mkfifo "$sb/gate"
+    export SF_DF_AVAIL_KB=999999999     # plenty of room unless a case lowers it
+    T="$sb/_stokesforge/.template"
+    export SF_TEMPLATE_DIR="$T" SF_TEMPLATE_REF=main SF_TEMPLATE_CARGO="$sb/fake/cargo" FAKE_LOG="$sb/cargo.log" FAKE_GATE="$sb/gate"
+    printf '#!/usr/bin/env bash\ncat "%s/rustc.txt"\n' "$sb" > "$sb/fake/rustc"
+    cat > "$sb/fake/cargo" <<'EOF'
+#!/usr/bin/env bash
+echo "${SF_CARGO_QUEUE_CLASS:-none} $*" >> "$FAKE_LOG"
+[ "$1" != clean ] || { rm -rf "${CARGO_TARGET_DIR:?}"/*; exit 0; }
+if [ -n "${FAKE_BLOCK:-}" ] && [ ! -e "$FAKE_BLOCK.done" ]; then : > "$FAKE_BLOCK.done"; echo blocked >> "$FAKE_BLOCK"; cat "$FAKE_GATE" > /dev/null; fi
+[ -z "${FAKE_FAIL:-}" ] || exit 1
+d="$CARGO_TARGET_DIR/debug"; r="$CARGO_TARGET_DIR/release"
+mkdir -p "$d/deps" "$r/deps" "$d/.fingerprint/foo-0123456789abcdef" "$d/build/bs-aaaaaaaaaaaaaaaa/out"
+head -c 65536 /dev/zero > "$d/deps/libfoo-0123456789abcdef.rlib"; : > "$d/deps/libfoo-0123456789abcdef.d"; : > "$r/deps/libbar-fedcba9876543210.rlib"
+: > "$d/build/bs-aaaaaaaaaaaaaaaa/out/gen.rs"; mkdir -p "$d/.fingerprint/bs-aaaaaaaaaaaaaaaa"
+printf '{"reason":"compiler-artifact","filenames":["%s","%s"],"fresh":true}\n' "$d/deps/libfoo-0123456789abcdef.rlib" "$r/deps/libbar-fedcba9876543210.rlib"
+printf '{"reason":"build-script-executed","out_dir":"%s"}\nnot json\n' "$d/build/bs-aaaaaaaaaaaaaaaa/out"
+EOF
+    chmod +x "$sb/fake/cargo" "$sb/fake/rustc"
+    export PATH="$sb/fake:$PATH"
+    echo "rustc 1.98.1" > "$sb/rustc.txt"
+    tt() { "$here/template-target.sh" "$@"; }
+    clog() { cat "$FAKE_LOG" 2> /dev/null || true; }
+    calls() { grep -vc ' clean$' "$FAKE_LOG" || true; }
+
+    # Refresh, cold: exactly the five commands, each in the low class, no cargo clean, a stamp.
+    tt refresh > "$sb/out" 2>&1 || fail "template refresh: $(cat "$sb/out")"
+    eq "$(clog)" "low nextest run --workspace --no-run --cargo-message-format json
+low test --workspace --doc --no-run --message-format json
+low clippy --workspace --all-targets --message-format json
+low build -p stokesforge-app --message-format json
+low test -p stokesforge-app --release --lib --no-run --message-format json" "template refresh: the command list (all in the low class)"
+    [ -f "$T/stamp" ] && [ -f "$T/src/f" ] && [ -f "$T/target/debug/deps/libfoo-0123456789abcdef.rlib" ] || fail "template refresh: stamp, source or target missing"
+
+    # Sweep: stale files go, listed files and their .d stay, incremental/ is removed.
+    d="$T/target/debug"
+    mkdir -p "$d/incremental/x" "$d/build/old-bbbbbbbbbbbbbbbb" "$d/.fingerprint/stale-cccccccccccccccc"
+    : > "$d/deps/libstale-cccccccccccccccc.rlib"; : > "$d/deps/libstale-cccccccccccccccc.d"
+    : > "$FAKE_LOG"
+    tt refresh > "$sb/out" 2>&1 || fail "template refresh 2: $(cat "$sb/out")"
+    [ ! -e "$d/deps/libstale-cccccccccccccccc.rlib" ] && [ ! -e "$d/deps/libstale-cccccccccccccccc.d" ] || fail "sweep: a stale deps file survived"
+    [ ! -e "$d/.fingerprint/stale-cccccccccccccccc" ] && [ ! -e "$d/build/old-bbbbbbbbbbbbbbbb" ] || fail "sweep: a stale fingerprint or build dir survived"
+    [ ! -e "$d/incremental" ] || fail "sweep: incremental/ survived"
+    [ -f "$d/deps/libfoo-0123456789abcdef.rlib" ] && [ -f "$d/deps/libfoo-0123456789abcdef.d" ] || fail "sweep: a listed file or its .d was deleted"
+    [ -d "$d/.fingerprint/foo-0123456789abcdef" ] && [ -f "$d/build/bs-aaaaaaaaaaaaaaaa/out/gen.rs" ] && [ -f "$T/target/release/deps/libbar-fedcba9876543210.rlib" ] || fail "sweep: a kept unit lost its fingerprint, build dir or release file"
+    eq "$(grep -c ' clean$' "$FAKE_LOG")" 0 "same toolchain, small target: no cargo clean"
+
+    # A failed command sweeps nothing and leaves the stamp alone.
+    : > "$d/deps/libkeep-dddddddddddddddd.rlib"; : > "$FAKE_LOG"; before="$(cat "$T/stamp")"
+    if FAKE_FAIL=1 tt refresh > "$sb/out" 2>&1; then fail "a failing build was accepted"; fi
+    [ -f "$d/deps/libkeep-dddddddddddddddd.rlib" ] || fail "a failed refresh swept the target"
+    eq "$(cat "$T/stamp")" "$before" "a failed refresh rewrote the stamp"
+    rm -f "$d/deps/libkeep-dddddddddddddddd.rlib"
+
+    # A toolchain change cleans first; a target above the threshold after the sweep cleans and rebuilds once.
+    echo "rustc 1.99.0" > "$sb/rustc.txt"; : > "$FAKE_LOG"
+    tt refresh > "$sb/out" 2>&1 || fail "toolchain refresh: $(cat "$sb/out")"
+    eq "$(head -n 1 "$FAKE_LOG")" "none clean" "toolchain changed: clean comes first"
+    eq "$(calls)" 5 "toolchain changed: one rebuild"
+    : > "$FAKE_LOG"
+    SF_TEMPLATE_MAX_KB=1 tt refresh > "$sb/out" 2>&1 || fail "oversize refresh: $(cat "$sb/out")"
+    eq "$(grep -c ' clean$' "$FAKE_LOG")" 1 "oversize target: exactly one clean"
+    eq "$(calls)" 10 "oversize target: sweep, clean, one more build"
+    grep -q 'WARNING: still above' "$sb/out" || fail "oversize after a clean build is not reported"
+    : > "$FAKE_LOG"
+    SF_TEMPLATE_CARGO="$sb/none" tt refresh > "$sb/out" 2>&1 && fail "refresh without the shim accepted"
+    grep -q 'not installed' "$sb/out" || fail "missing shim message: $(cat "$sb/out")"
+
+    # A refresh asked while one runs: pending, exit 0, and the running one does one more pass.
+    : > "$FAKE_LOG"; rm -f "$sb/blocked" "$sb/blocked.done"
+    FAKE_BLOCK="$sb/blocked" tt refresh > "$sb/out1" 2>&1 &
+    bg=$!
+    "$here/wait-for.sh" "$sb/blocked" blocked 30 > /dev/null || fail "pending: the first refresh never started"
+    tt refresh > "$sb/out2" 2>&1 || fail "pending: the second refresh failed: $(cat "$sb/out2")"
+    [ -e "$T/pending" ] || fail "pending: not written"
+    echo go > "$sb/gate"
+    wait "$bg" || fail "pending: the first refresh failed: $(cat "$sb/out1")"
+    eq "$(calls)" 10 "pending: a second pass ran"
+    [ ! -e "$T/pending" ] || fail "pending: left behind"
+    unset bg
+
+    # Copy into a new worktree: both profiles, no incremental, real copies (inodes differ).
+    mkdir -p "$sb/wt1"; tt copy "$sb/wt1" > "$sb/out" 2>&1 || fail "copy: $(cat "$sb/out")"
+    grep -q 'copied' "$sb/out" || fail "copy message: $(cat "$sb/out")"
+    [ -f "$sb/wt1/target/debug/deps/libfoo-0123456789abcdef.rlib" ] && [ -f "$sb/wt1/target/release/deps/libbar-fedcba9876543210.rlib" ] || fail "copy: debug or release missing"
+    [ ! -e "$sb/wt1/target/debug/incremental" ] || fail "copy: incremental copied"
+    [ "$(stat -c %i "$sb/wt1/target/debug/deps/libfoo-0123456789abcdef.rlib")" != "$(stat -c %i "$d/deps/libfoo-0123456789abcdef.rlib")" ] || fail "copy: hard link"
+    # A worktree that already has a target is left alone.
+    mkdir -p "$sb/wt2/target"; echo mine > "$sb/wt2/target/planted"
+    tt copy "$sb/wt2" > "$sb/out" 2>&1 || fail "copy onto an existing target: $(cat "$sb/out")"
+    eq "$(ls -A "$sb/wt2/target")" planted "copy onto an existing target changed it"
+    # Free space: less than 50 GB would remain.
+    mkdir -p "$sb/wt3"; SF_DF_AVAIL_KB=1000 tt copy "$sb/wt3" > "$sb/out" 2>&1 || fail "copy low space: $(cat "$sb/out")"
+    [ ! -e "$sb/wt3/target" ] && grep -q 'would stay free' "$sb/out" || fail "copy low space: $(cat "$sb/out")"
+    # Template lock held exclusive (a refresh runs): no copy, one line, no wait.
+    mkdir -p "$sb/wt4"; rm -f "$sb/held"
+    flock -x "$T/lock" bash -c "echo held > '$sb/held'; cat '$sb/gate' > /dev/null" &
+    bg=$!
+    "$here/wait-for.sh" "$sb/held" held 30 > /dev/null || fail "lock holder never started"
+    set +e; timeout 5 "$here/template-target.sh" copy "$sb/wt4" > "$sb/out" 2>&1; rc=$?; set -e
+    echo go > "$sb/gate"; wait "$bg"
+    eq "$rc" 0 "copy with the lock held: exit code (124 = it waited)"
+    [ ! -e "$sb/wt4/target" ] && grep -q 'refresh holds' "$sb/out" || fail "copy with the lock held: $(cat "$sb/out")"
+    # No template: no error.
+    mkdir -p "$sb/wt5"; SF_TEMPLATE_DIR="$sb/nothing" tt copy "$sb/wt5" > "$sb/out" 2>&1 || fail "no template: $(cat "$sb/out")"
+    grep -q 'none yet' "$sb/out" && [ ! -e "$sb/wt5/target" ] || fail "no template message: $(cat "$sb/out")"
+
+    # chantier.sh: the briefing says it; a rerun on an existing worktree copies nothing; --dry-run copies nothing.
+    chant() { ( cd "$sb/StokesForge" && "$here/chantier.sh" "$@" ); }
+    export SF_ISSUE_TITLE="Template copy"
+    chant --dry-run 21 > "$sb/out" 2>&1 || fail "chantier dry run: $(cat "$sb/out")"
+    grep -q 'would copy' "$sb/out" && [ ! -e "$sb/_stokesforge/feature21" ] || fail "dry run: $(cat "$sb/out")"
+    chant 21 > "$sb/out" 2>&1 || fail "chantier: $(cat "$sb/out")"
+    grep -q '^Build cache #21: template: copied' "$sb/out" || fail "briefing line: $(cat "$sb/out")"
+    [ -f "$sb/_stokesforge/feature21/target/debug/deps/libfoo-0123456789abcdef.rlib" ] || fail "chantier did not copy"
+    rm -rf "$sb/_stokesforge/feature21/target"
+    chant 21 > "$sb/out" 2>&1 || fail "chantier rerun: $(cat "$sb/out")"
+    [ ! -e "$sb/_stokesforge/feature21/target" ] || fail "chantier rerun copied into an existing worktree"
+    [ "$(wc -l < "$sb/out")" -le 30 ] || fail "briefing too long with the build cache line"
+    unset SF_ISSUE_TITLE
+
+    # Prune: paused 3 days or more lose incremental and release; deps stay; held, line, recordless and
+    # build-locked worktrees are untouched.
+    for w in 31 32 33 34 35 line-PostV1.1; do
+        mkdir -p "$sb/_stokesforge/feature$w/target/debug/incremental" "$sb/_stokesforge/feature$w/target/debug/deps" "$sb/_stokesforge/feature$w/target/release"
+        [ "$w" != line-PostV1.1 ] || mv "$sb/_stokesforge/feature$w" "$sb/_stokesforge/$w"
+    done
+    for w in feature31 feature32 feature33 feature34 feature35 line-PostV1.1; do
+        : > "$sb/_stokesforge/$w/target/debug/deps/keep"; : > "$sb/_stokesforge/$w/target/release/r"; : > "$sb/_stokesforge/$w/target/debug/incremental/i"
+        : > "$sb/_stokesforge/$w/target/debug/.cargo-build-lock"
+    done
+    cat > "$sb/status.json" <<'JSON'
+{"colours": [{"free": false, "issue": 33, "days": 9, "worktrees": ["feature33"]}],
+ "paused": [{"issue": 31, "days": 5, "worktrees": ["feature31"]}, {"issue": 32, "days": 1, "worktrees": ["feature32"]},
+            {"issue": 34, "days": 5, "worktrees": ["feature34"]}, {"issue": 36, "days": 8, "worktrees": ["line-PostV1.1"]}],
+ "colourless": ["feature35"], "done": []}
+JSON
+    rm -f "$sb/held2"
+    flock -x "$sb/_stokesforge/feature34/target/debug/.cargo-build-lock" bash -c "echo held > '$sb/held2'; cat '$sb/gate' > /dev/null" &
+    bg=$!
+    "$here/wait-for.sh" "$sb/held2" held 30 > /dev/null || fail "build lock holder never started"
+    SF_TEMPLATE_STATUS_JSON="$sb/status.json" tt prune > "$sb/out" 2>&1 || fail "prune: $(cat "$sb/out")"
+    echo go > "$sb/gate"; wait "$bg"
+    w="$sb/_stokesforge"
+    [ ! -e "$w/feature31/target/debug/incremental" ] && [ ! -e "$w/feature31/target/release" ] && [ -f "$w/feature31/target/debug/deps/keep" ] || fail "prune: a worktree paused 5 days was not pruned (or lost deps)"
+    for k in feature32 feature33 feature34 feature35 line-PostV1.1; do
+        [ -f "$w/$k/target/release/r" ] && [ -f "$w/$k/target/debug/incremental/i" ] || fail "prune touched $k"
+    done
+    grep -q 'kept feature34' "$sb/out" || fail "prune: the busy worktree is not reported: $(cat "$sb/out")"
+    unset bg
 )
 
 # No inconsistency left (duplicate colour, record without worktree, worktree without record).
