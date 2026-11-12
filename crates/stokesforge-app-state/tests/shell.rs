@@ -14891,6 +14891,137 @@ mod autosave {
         change(&mut state);
         state.poll_autosave(t0 + PERIOD);
     }
+
+    // -- The server thread's three steps (#475) --
+
+    /// Deadline reached: a job. Finished with Ok: the next tick has none (the
+    /// copy is marked as covering the project).
+    #[test]
+    fn the_server_tick_hands_back_a_job_at_the_deadline_and_finishing_marks_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        assert!(state.server_tick(t0).autosave.is_none());
+        change(&mut state);
+        let almost = t0 + PERIOD - Duration::from_secs(1);
+        assert!(state.server_tick(almost).autosave.is_none());
+        let due = t0 + PERIOD;
+        let job = state.server_tick(due).autosave.expect("a copy is due");
+        assert!(
+            copies(&recovery).is_empty(),
+            "nothing written by the decision"
+        );
+        // A job in flight: no second one.
+        assert!(state.server_tick(due).autosave.is_none());
+        let result = job.run();
+        assert!(result.is_ok());
+        state.finish_autosave(&job, result);
+        assert_eq!(copies(&recovery).len(), 1);
+        assert!(state.server_tick(due + 2 * PERIOD).autosave.is_none());
+    }
+
+    /// New project while the copy is being written: the late result is dropped,
+    /// the mark of the new project stays, no warning for a failure.
+    #[test]
+    fn a_result_arriving_after_new_project_is_discarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.server_tick(t0);
+        change(&mut state);
+        let due = t0 + PERIOD;
+        let job = state.server_tick(due).autosave.expect("job");
+        state.dispatch(Action::NewProject {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        let result = job.run();
+        let messages = state.recorded_count();
+        assert!(!state.finish_autosave(&job, result));
+        assert!(
+            copies(&recovery).is_empty(),
+            "the old copy goes with its project: {:?}",
+            copies(&recovery)
+        );
+        // The new project is clean: the old job's revisions must not re-arm it.
+        assert!(state.server_tick(due + 2 * PERIOD).autosave.is_none());
+        assert_eq!(state.recorded_count(), messages);
+        // A failure of a stale job says nothing.
+        change(&mut state);
+        let job = state.server_tick(due + 4 * PERIOD).autosave.expect("job");
+        state.dispatch(Action::NewProject {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        let failure = Err(stokesforge_session::SessionError::Disconnected);
+        let messages = state.recorded_count();
+        state.finish_autosave(&job, failure);
+        assert_eq!(
+            state.recorded_count(),
+            messages,
+            "no warning for a stale job"
+        );
+    }
+
+    /// Quit while the copy is being written: the write ends silently, then the
+    /// slot goes away like at a clean close.
+    #[test]
+    fn quitting_during_a_job_leaves_no_slot_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.server_tick(t0);
+        change(&mut state);
+        let job = state.server_tick(t0 + PERIOD).autosave.expect("job");
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        assert!(state.take_quit_ready());
+        // The write ends after the quit gesture: it brings the file back.
+        let result = job.run();
+        assert_eq!(copies(&recovery).len(), 1, "the write recreated the file");
+        state.finish_autosave(&job, result);
+        assert!(copies(&recovery).is_empty(), "{:?}", copies(&recovery));
+    }
+
+    /// Nothing changed: the tick says so and gives the time left (a constant
+    /// would be a poll); `None` with the autosave off.
+    #[test]
+    fn an_idle_tick_changes_nothing_and_gives_the_time_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        let first = state.server_tick(t0);
+        assert!(!first.changed);
+        assert_eq!(first.next, Some(PERIOD));
+        let later = state.server_tick(t0 + Duration::from_secs(100));
+        assert!(!later.changed);
+        assert_eq!(later.next, Some(PERIOD - Duration::from_secs(100)));
+        state.dispatch(Action::SetAutosave(false));
+        let off = state.server_tick(t0 + Duration::from_secs(101));
+        assert!(!off.changed);
+        assert_eq!(off.next, None);
+    }
+
+    /// A recalculation is followed every 100 ms by the thread, and its end
+    /// is reported as one change.
+    #[test]
+    fn a_recalculation_ending_is_collected_by_the_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start(heavy_formula_project(), &dir.path().join("l.stf"));
+        state.dispatch(Action::AddGraph);
+        assert!(state.recalc_work().is_some());
+        let tick = state.server_tick(Instant::now());
+        assert_eq!(tick.next, Some(Duration::from_millis(100)));
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while state.recalc_work().is_some() {
+            assert!(Instant::now() < deadline, "recalculation too long");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(state.server_tick(Instant::now()).changed, "the end shows");
+        assert!(!state.server_tick(Instant::now()).changed);
+    }
 }
 
 // -- Issue #382: Help > About StokesForge --

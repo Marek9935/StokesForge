@@ -8,9 +8,16 @@
 //! nor the "modified" title, and never writes the user's `.stf` (invariant 1:
 //! nothing of the model moves).
 //!
-//! The clock is **injected** (`poll_autosave(now)`): the application calls it
-//! once per frame from `logic()` and schedules its wake-up on the returned
-//! delay; a test advances `now` without waiting. A deadline that falls during
+//! The clock is **injected**. Since #475 the autosave is followed by the server
+//! thread of the application, in three steps: `autosave_decide(now)` under the
+//! lock (called by `server_tick`), the blocking write (`AutosaveJob::run`) with
+//! the lock RELEASED, then `finish_autosave` under the lock. The slot never
+//! leaves `AppState`; the job carries the path and the generation of the slot
+//! (`epoch`), and a result that arrives after the slot was removed (save, Save
+//! As, New, Open, quit) is discarded; a slot removed during a write is deleted
+//! when the write ends. `poll_autosave(now)` does the three steps on the calling
+//! thread: it is the fallback of the paint pass when no thread runs, and what
+//! the tests use. A deadline that falls during
 //! a macro, a script, an import or a recalculation is pushed back by a few
 //! seconds, without error: `handle.save` refuses during a macro (a refusal
 //! `MacroOpen` counts as busy even when the root snapshot does not show the
@@ -56,8 +63,17 @@ pub(super) struct AutosaveState {
     /// The revisions already covered (saved, loaded or copied);
     /// `None`: the project is to be copied anyway.
     mark: Option<(u64, u64)>,
-    /// The slot of this process, once taken.
+    /// The slot of this process, once taken. It never leaves `AppState`: a job
+    /// in flight carries only the path (#475).
     slot: Option<Slot>,
+    /// Generation of the slot: bumped when the slot is removed (save, Save As,
+    /// New, Open, quit). A job result from an older generation is discarded.
+    epoch: u64,
+    /// A job is being written by the server thread, with the lock released.
+    in_flight: bool,
+    /// The slot removed while a job was in flight: its file is deleted when
+    /// the write ends, never before (the write would bring it back).
+    orphan: Option<Slot>,
     /// The last write failed (the warning has already been given).
     failed: bool,
     /// The copies offered at startup, as long as the window is open.
@@ -89,6 +105,46 @@ enum AutosaveError {
     Busy,
     Dir(std::io::Error),
     Session(stokesforge_session::SessionError),
+}
+
+/// What the first third of an autosave decided.
+pub(super) enum AutosaveStep {
+    /// Nothing to write now; the delay until the next deadline (`None`: off).
+    Wait(Option<Duration>),
+    /// A copy is due: write it with the lock released.
+    Job(AutosaveJob),
+}
+
+/// One copy to write (#475). It carries the path of the slot, never the slot:
+/// the slot stays in [`AppState`]. `epoch` is the generation of the slot when
+/// the job was taken (see [`AppState::finish_autosave`]).
+#[derive(Debug)]
+pub struct AutosaveJob {
+    handle: stokesforge_session::SessionHandle,
+    path: PathBuf,
+    epoch: u64,
+    revisions: (u64, u64),
+    at: Instant,
+    period: Duration,
+}
+
+impl AutosaveJob {
+    /// The blocking write (`handle.save`): creates no history entry and never
+    /// commits (invariant 1). To be called with the lock RELEASED.
+    pub fn run(&self) -> Result<(), SessionError> {
+        self.handle.save(&self.path)
+    }
+}
+
+/// What one pass of the server thread found (#475).
+#[derive(Debug)]
+pub struct ServerTick {
+    /// Something the windows show changed during this tick: they must be woken.
+    pub changed: bool,
+    /// How long the thread may sleep; `None`: until something wakes it.
+    pub next: Option<Duration>,
+    /// A copy to write, with the lock released, then `finish_autosave`.
+    pub autosave: Option<AutosaveJob>,
 }
 
 impl AppState {
@@ -145,68 +201,95 @@ impl AppState {
     /// Deletes the copy of this process: the project is saved, or closed
     /// cleanly.
     pub(super) fn autosave_remove_slot(&mut self) {
+        self.autosave.epoch += 1;
         if let Some(slot) = self.autosave.slot.take() {
-            slot.remove();
+            if self.autosave.in_flight {
+                // The server thread is writing this file right now: it is
+                // removed by `finish_autosave`, once the write ended.
+                self.autosave.orphan = Some(slot);
+            } else {
+                slot.remove();
+            }
         }
     }
 
-    /// To call at every frame (`logic()` of the root window) with the current
-    /// time. Writes the copy if the deadline has fallen and the project has
-    /// changed; returns the delay until the next deadline (to schedule the
-    /// wake-up), `None` if the save is off.
+    /// The fallback of the server thread (#475): polls the autosave from the
+    /// paint pass, with the current time, when no server thread runs (tests,
+    /// a thread that ended). Writes the copy if the deadline has fallen and the
+    /// project has changed, on the calling thread; returns the delay until the
+    /// next deadline, `None` if the save is off.
     pub fn poll_autosave(&mut self, now: Instant) -> Option<Duration> {
-        self.background(|state| state.poll_autosave_pass(now))
+        self.background(|state| match state.autosave_decide(now) {
+            AutosaveStep::Wait(next) => next,
+            AutosaveStep::Job(job) => {
+                let result = job.run();
+                state.finish_autosave_pass(&job, result);
+                state
+                    .autosave
+                    .deadline
+                    .map(|deadline| deadline.saturating_duration_since(job.at))
+            }
+        })
     }
 
-    fn poll_autosave_pass(&mut self, now: Instant) -> Option<Duration> {
+    /// First third of an autosave (#475), under the lock: decides whether a
+    /// copy is due. Pure with respect to the clock (`now` is injected).
+    pub(super) fn autosave_decide(&mut self, now: Instant) -> AutosaveStep {
         if !self.autosave_enabled() || self.session_lost {
             self.autosave.deadline = None;
-            return None;
+            return AutosaveStep::Wait(None);
         }
         let period = Duration::from_secs(u64::from(self.autosave_minutes()) * 60);
         let deadline = *self.autosave.deadline.get_or_insert(now + period);
         if now < deadline {
-            return Some(deadline - now);
+            return AutosaveStep::Wait(Some(deadline - now));
         }
         let busy = self.snapshot.history.in_macro
             || self.script_running()
             || self.import_job.is_some()
-            || self.recalc_since.is_some();
+            || self.recalc_since.is_some()
+            || self.autosave.in_flight;
         if busy {
             self.autosave.deadline = Some(now + AUTOSAVE_RETRY);
-            return Some(AUTOSAVE_RETRY);
+            return AutosaveStep::Wait(Some(AUTOSAVE_RETRY));
         }
         if self.autosave.mark != Some(self.autosave_revisions()) {
-            match self.write_autosave() {
-                Ok(()) => self.autosave.failed = false,
-                Err(AutosaveError::Busy) => {
-                    // An action is still open (the root snapshot may not
-                    // show it yet): wait silently, `failed` untouched.
-                    self.autosave.deadline = Some(now + AUTOSAVE_RETRY);
-                    return Some(AUTOSAVE_RETRY);
+            match self.prepare_autosave(now, period) {
+                Ok(Some(job)) => {
+                    self.autosave.in_flight = true;
+                    return AutosaveStep::Job(job);
                 }
-                Err(error) => {
-                    if !self.autosave.failed {
-                        let cause = match &error {
-                            AutosaveError::Dir(io) => errors::io::error_message(io),
-                            AutosaveError::Session(err) => errors::session::error_message(err),
-                            AutosaveError::Busy => unreachable!("handled above"),
-                        };
-                        self.warn(tr!("status-autosave-failed", cause = cause));
-                    }
-                    self.autosave.failed = true;
-                }
+                // No backup folder (tests): nothing to write.
+                Ok(None) => self.autosave.failed = false,
+                Err(error) => self.autosave_failure(&error),
             }
         }
         self.autosave.deadline = Some(now + period);
-        Some(period)
+        AutosaveStep::Wait(Some(period))
     }
 
-    /// Writes the project into the slot of this process (renamed if the
-    /// project changed path). Without a backup folder (tests): nothing.
-    fn write_autosave(&mut self) -> Result<(), AutosaveError> {
+    /// Reports a write failure: a single warning as long as it lasts.
+    fn autosave_failure(&mut self, error: &AutosaveError) {
+        if !self.autosave.failed {
+            let cause = match error {
+                AutosaveError::Dir(io) => errors::io::error_message(io),
+                AutosaveError::Session(err) => errors::session::error_message(err),
+                AutosaveError::Busy => unreachable!("a retry, not a failure"),
+            };
+            self.warn(tr!("status-autosave-failed", cause = cause));
+        }
+        self.autosave.failed = true;
+    }
+
+    /// Takes (or renames) the slot and describes the write. Without a backup
+    /// folder (tests): nothing.
+    fn prepare_autosave(
+        &mut self,
+        now: Instant,
+        period: Duration,
+    ) -> Result<Option<AutosaveJob>, AutosaveError> {
         let Some(dir) = self.recovery_dir.clone() else {
-            return Ok(());
+            return Ok(None);
         };
         let stem = recovery::stem_of(&self.path);
         if self
@@ -217,23 +300,91 @@ impl AppState {
         {
             self.autosave_remove_slot();
         }
-        let slot = match self.autosave.slot.take() {
-            Some(slot) => slot,
-            None => Slot::acquire(&dir, &stem, std::process::id()).map_err(AutosaveError::Dir)?,
+        if self.autosave.slot.is_none() {
+            self.autosave.slot =
+                Some(Slot::acquire(&dir, &stem, std::process::id()).map_err(AutosaveError::Dir)?);
+        }
+        let path = self
+            .autosave
+            .slot
+            .as_ref()
+            .map(|slot| slot.path().to_path_buf())
+            .expect("the slot was just taken");
+        Ok(Some(AutosaveJob {
+            handle: self.handle.clone(),
+            path,
+            epoch: self.autosave.epoch,
+            revisions: self.autosave_revisions(),
+            at: now,
+            period,
+        }))
+    }
+
+    /// Last third of an autosave (#475), under the lock: records the outcome
+    /// of the write that the server thread did with the lock released. A job
+    /// whose slot was removed meanwhile (save, Save As, New, Open, quit) is
+    /// discarded: nothing marked, no warning, the new slot untouched.
+    /// Returns true if something visible changed (a message).
+    pub fn finish_autosave(&mut self, job: &AutosaveJob, result: Result<(), SessionError>) -> bool {
+        let before = self.recorded_count();
+        self.background(|state| state.finish_autosave_pass(job, result));
+        self.recorded_count() != before
+    }
+
+    fn finish_autosave_pass(&mut self, job: &AutosaveJob, result: Result<(), SessionError>) {
+        self.autosave.in_flight = false;
+        if let Some(orphan) = self.autosave.orphan.take() {
+            orphan.remove();
+        }
+        if job.epoch != self.autosave.epoch {
+            return;
+        }
+        let outcome = match result {
+            Err(SessionError::Command(CommandError::MacroOpen(_))) => Err(AutosaveError::Busy),
+            Err(error) => Err(AutosaveError::Session(error)),
+            Ok(()) => Ok(()),
         };
-        let result = self.handle.save(slot.path());
-        if result.is_ok() {
-            slot.write_sidecar(&self.path);
-        }
-        self.autosave.slot = Some(slot);
-        match result {
-            Err(SessionError::Command(CommandError::MacroOpen(_))) => {
-                return Err(AutosaveError::Busy);
+        match outcome {
+            Ok(()) => {
+                if let Some(slot) = &self.autosave.slot {
+                    slot.write_sidecar(&self.path);
+                }
+                self.autosave.mark = Some(job.revisions);
+                self.autosave.failed = false;
             }
-            other => other.map_err(AutosaveError::Session)?,
+            Err(AutosaveError::Busy) => {
+                // An action is still open (the root snapshot may not show it
+                // yet): wait silently, `failed` untouched.
+                self.autosave.deadline = Some(job.at + AUTOSAVE_RETRY);
+                return;
+            }
+            Err(error) => self.autosave_failure(&error),
         }
-        self.autosave_mark_clean();
-        Ok(())
+        self.autosave.deadline = Some(job.at + job.period);
+    }
+
+    /// A synchronous write (recovery open): decide, write, finish.
+    fn write_autosave(&mut self) -> Result<(), AutosaveError> {
+        if self.autosave.in_flight {
+            return Err(AutosaveError::Busy);
+        }
+        let Some(job) = self.prepare_autosave(Instant::now(), Duration::ZERO)? else {
+            return Ok(());
+        };
+        let result = job.run();
+        if let Some(slot) = &self.autosave.slot {
+            if result.is_ok() {
+                slot.write_sidecar(&self.path);
+            }
+        }
+        match result {
+            Err(SessionError::Command(CommandError::MacroOpen(_))) => Err(AutosaveError::Busy),
+            Err(error) => Err(AutosaveError::Session(error)),
+            Ok(()) => {
+                self.autosave_mark_clean();
+                Ok(())
+            }
+        }
     }
 
     /// Lists the copies to offer (backup folder known).

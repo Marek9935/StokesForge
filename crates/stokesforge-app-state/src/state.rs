@@ -91,6 +91,7 @@ mod import_check;
 mod import_grid;
 mod import_template;
 mod import_tocheck;
+mod server;
 pub use import_advanced::{
     apply_advanced, AdvancedChange, AdvancedRow, AdvancedSetting, ADVANCED_SETTINGS,
 };
@@ -117,7 +118,7 @@ pub mod open_dialog;
 mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
-pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
+pub use autosave::{AutosaveJob, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
@@ -7364,6 +7365,23 @@ impl AppState {
     /// the analysis is done, creates the sheets. Returns true if the import has just
     /// been applied. Never blocks.
     pub fn poll_import(&mut self) -> bool {
+        if !self.poll_import_progress() {
+            return false;
+        }
+        // The graph properties hold the root's history macro:
+        // we keep the work and apply it when they close.
+        if self.plot_settings.is_some() {
+            return false;
+        }
+        // Applying the result is a gesture of its own (#453).
+        self.gesture(Self::apply_ready_import)
+    }
+
+    /// The first half of [`AppState::poll_import`], which creates nothing
+    /// (#475, the server thread calls it): collects the answer of the analysis
+    /// thread if it came, else says the progress. Returns true if the analysis
+    /// is done (its result waits to be applied by the paint pass).
+    pub(crate) fn poll_import_progress(&mut self) -> bool {
         let Some(job) = &mut self.import_job else {
             return false;
         };
@@ -7385,13 +7403,7 @@ impl AppState {
                 }
             }
         }
-        // The graph properties hold the root's history macro:
-        // we keep the work and apply it when they close.
-        if self.plot_settings.is_some() {
-            return false;
-        }
-        // Applying the result is a gesture of its own (#453).
-        self.gesture(Self::apply_ready_import)
+        true
     }
 
     /// The second half of [`AppState::poll_import`]: the analysis is done,
