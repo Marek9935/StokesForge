@@ -64,7 +64,7 @@ After `qcm pose` or `test add` the agent launches nothing and ends its turn; it 
 
 ## Pre-trial (#452)
 
-Before `test add`, for a visible change, a Sonnet agent (the pre-trial agent) works in the branch's worktree on the invisible screen (`run-stokesforge`):
+Before `test add`, for a visible change (prompt template: [`stokesforge-feature/references/agent-prompts.md`](../../stokesforge-feature/references/agent-prompts.md)), a Sonnet agent (the pre-trial agent) works in the branch's worktree on the invisible screen (`run-stokesforge`):
 
 1. It walks the detailed checks: each edge case of the start form, refusals and their messages, save and reopen, `STOKESFORGE_LANG=en-XA` when texts changed.
 2. It fixes what it finds on the branch, reruns the tests, then **re-verifies the fix in the real app**. Only then the orchestrator writes the entries (`test add`) and asks for `scripts/try.sh <n>`: the user tests only what works.
