@@ -209,7 +209,8 @@ function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localSto
 function head(x,extra){
   const h=el('div','head');
   const sq=el('span','sq '+(COL[x.colour]||''));sq.setAttribute('aria-hidden','true');h.appendChild(sq);
-  const t=el('div','t');t.appendChild(el('span','num','#'+(x.n??x.issue??'?')+' '));t.appendChild(document.createTextNode(x.name||''));
+  const num=x.n??x.issue??'?';
+  const t=el('div','t');t.appendChild(el('span','num','#'+num+' '));t.appendChild(document.createTextNode(plainName(x.name,num)));
   if(extra){t.appendChild(el('div','what',extra));}
   h.appendChild(t);return h;
 }
@@ -340,19 +341,24 @@ const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
    qcms = S.tests and S.qcms. Members: the issue, its package's sub-issues, the colour's issues. */
 function cardLine(c,tests,qcms){
   const members=new Set([c.issue].concat(c.issues||[],((c.package&&c.package.subs)||c.subs||[]).map(s=>s.n)).filter(n=>n!=null).map(Number));
-  const qcmOpen=(qcms||[]).some(q=>members.has(Number(q.issue)));
+  const open=(qcms||[]).filter(q=>members.has(Number(q.issue)));
+  const qcmOpen=open.length>0;
   const mine=(tests||[]).filter(t=>members.has(Number(t.n!=null?t.n:t.issue)));
   const todo=mine.filter(t=>(t.status||'todo')==='todo').length;
   const tried=mine.filter(t=>t.try);      // merged entries (no `try`) do not count
   const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok'||(t.status==='retour'&&isSettled(t)));
   const held=c.held_by||[];
   const note=typeof c.waiting==='string'?c.waiting.trim():'';
-  const noteYou=note!==''&&c.wait_kind==='you';
   const parts=[];
   if(qcmOpen)parts.push('répondre au questionnaire');
   if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
   const requested=readyToMerge&&c.merge_requested===true;      // a request voided by the server arrives false
   if(readyToMerge&&!requested)parts.push('lancer la fusion');
+  /* A `you` note only completes a card the user has on the page (#483): once the form is finished,
+     the entries ticked and the merge launched, it is stale and dropped, not shown as the user's turn (#530). */
+  const youKind=note!==''&&c.wait_kind==='you';
+  const namesOpenForm=youKind&&open.some(q=>q.id&&note.includes(String(q.id)));   // « start form 528-1 » repeats the form
+  const noteYou=youKind&&parts.length>0&&!namesOpenForm;
   if(noteYou)parts.push(note);
   const you=parts.length>0;
   const agent=held.includes('agent');
@@ -376,10 +382,15 @@ function cardLine(c,tests,qcms){
       'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
   }
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
-  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:noteYou?'':note,mergeReady:readyToMerge,mergeRequested:requested,mergeNote:''};
+  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,mergeNote:''};
   else text='En pause';
-  return {user:you,text:text,also:also,note:noteYou?'':note,mergeReady:readyToMerge,mergeRequested:requested,
+  return {user:you,text:text,also:also,note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,
           mergeNote:requested?'Fusion demandée'+(c.listening===true?'':' · l’agent la lira à sa reprise'):''};
+}
+/* The step the strip highlights: the stored state, except « questions » with a form answered and none open,
+   which the agent is already turning into code (#530). */
+function shownStep(c,qcmOpen){
+  return c.state==='questions'&&!qcmOpen&&c.qcm_answered===true?'code':c.state;
 }
 /* What the merge area shows, from cardLine's fields: the button before the click, the grey note after. */
 function mergeUi(l){
@@ -397,6 +408,8 @@ function withdrawUi(q,asking){
 }
 /* The merge button names where the merge goes: an issue with an integration line merges into it (#480). */
 function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
+/* A form title often starts with its own « #n »: the head already shows it (#530). */
+function plainName(name,n){return String(name||'').replace(new RegExp('^#'+n+'(?!\\d)\\s*[:·—-]?\\s*'),'');}
 /*CARDLINE-END*/
 /*SPLIT-START*/
 /* Where each trial entry is listed (#496, #518): a retour or an OK + idée the agent has not settled is « En traitement »;
@@ -514,7 +527,8 @@ function colourBox(c){
   }
   const h=c.held_by||[];
   const ln=lineEl(c);
-  const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===c.state);   // legacy: the state is unknown, highlight no step
+  const step=cardLine(c,S.tests||[],S.qcms||[]).step;
+  const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===step);   // legacy: the state is unknown, highlight no step
   STATES.forEach(([k,l],j)=>{
     const cls='st'+(i<0?'':j<i?' done':j===i?(ln.user?' cur you':' cur'):'');
     if(k==='questions'||k==='essai'){
@@ -564,7 +578,7 @@ function renderSuivi(){
     b.appendChild(el('div','since',dayText(d.done_at,0,'terminé le ')||''));fb.appendChild(b);
   });
   const c=S.control;const foot=$('foot');foot.replaceChildren();
-  foot.appendChild(el('div','',c&&c.at?'Vérifié '+agoText(c.at)+(c.by?' par '+c.by:''):'Pas encore vérifié'));
+  foot.appendChild(el('div','',c&&c.at?'Vérifié '+agoText(c.at):'Pas encore vérifié'));   // `by` is a session id: noise for the user (#530)
   (c&&c.problems||[]).forEach(p=>foot.appendChild(el('div','problem',p)));
 }
 
