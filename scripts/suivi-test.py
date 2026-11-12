@@ -3190,6 +3190,14 @@ class TestQcm(ServerBase):
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestFormTemplate(unittest.TestCase):
+    def test_option_clicks_are_bound_to_real_options_only(self):
+        # #520 trial: a list card's lines are .opt too; binding choose() to every .opt made a click on
+        # « À discuter » bubble to its line and wipe the marks (reproduced in Chromium, then fixed).
+        with open(TEMPLATE, encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("querySelectorAll('.opt[data-i]').forEach", src)
+        self.assertNotIn("querySelectorAll('.opt').forEach", src)
+
     def script(self, html):
         return re.search(r"<script>(.*)</script>", html, re.S).group(1)
 

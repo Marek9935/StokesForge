@@ -507,7 +507,9 @@ function render(){
     const d=ORDER[cur];
     $('acc').onclick=()=>{ans[d.c]=mkAns(ans[d.c],isList(d)?{i:0,marks:listMarks(d,ans[d.c])}:{i:0});save(d);cur<ORDER.length-1?go(cur+1):(view='sum',render());};
     $('main').querySelectorAll('.lmark').forEach(x=>x.onclick=()=>{const a=ans[d.c];ans[d.c]=mkAns(a,{i:0,marks:listToggle(d,a,+x.dataset.l)});save(d);render();});
-    $('main').querySelectorAll('.opt').forEach(x=>{
+    /* Only real options carry data-i: a list card's lines are .opt too, and a click on their « À discuter » button
+       bubbling to the line would choose(d,NaN) and wipe the marks (#520 trial). */
+    $('main').querySelectorAll('.opt[data-i]').forEach(x=>{
       x.onclick=()=>choose(d,+x.dataset.i);
       x.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(d,+x.dataset.i);}};
     });
