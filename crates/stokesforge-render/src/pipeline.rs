@@ -951,6 +951,9 @@ struct ExplicitGrid {
     min_left: u32,
     /// Smallest Top the axes of the first row and the graph title allow.
     min_top: u32,
+    /// Empty space kept outside the outer cells (#505), `[left, top, right,
+    /// bottom]`, already part of the outer gutters.
+    slack: [u32; 4],
 }
 
 /// How the figure is placed around its frames (#405): the "Fixed" figure size
@@ -1024,6 +1027,16 @@ impl ExplicitGrid {
             overflow |= place.fixed && (slot.0 > left_floor || slot.1 > right_floor);
             *slot = (slot.0.max(left_floor), slot.1.max(right_floor));
         }
+        // #505: the empty space the page keeps around the grid is part of the
+        // outer gutters, after the floors: the frames do not move for it.
+        let slack = spec.sanitized_grid_slack().unwrap_or_default();
+        let slack = [slack.left, slack.top, slack.right, slack.bottom].map(|v| v.round() as u32);
+        if let Some(first) = column_gutters.first_mut() {
+            first.0 += slack[0];
+        }
+        if let Some(last) = column_gutters.last_mut() {
+            last.1 += slack[2];
+        }
         let width = width.unwrap_or_else(|| {
             frame_widths
                 .iter()
@@ -1079,6 +1092,12 @@ impl ExplicitGrid {
             }
         }
         let min_top = title_band + natural_top.first().copied().unwrap_or(MARGIN);
+        if let Some(first) = row_gutters.first_mut() {
+            first.0 += slack[1];
+        }
+        if let Some(last) = row_gutters.last_mut() {
+            last.1 += slack[3];
+        }
         Ok(Self {
             frame_widths,
             frame_heights,
@@ -1090,6 +1109,7 @@ impl ExplicitGrid {
             overflow,
             min_left,
             min_top,
+            slack,
         })
     }
 
@@ -1413,6 +1433,13 @@ pub struct FigureLayout {
     /// title band, in points (free placement; `(0, 0)` on the grid). A stored
     /// `left` is `left - free_origin.0` from the image edge.
     pub free_origin: (f64, f64),
+    /// Empty space between the outer cells of a regular grid and the edge of
+    /// the image (#505), in points `[left, top, right, bottom]`; all zero
+    /// without any, in free placement and for a legacy graph. It is **part of**
+    /// `column_gutters` / `row_gutters` and of the outer cells of
+    /// [`FigureLayout::cell_rect`]: [`FigureLayout::grid_outline`] is the grid
+    /// without it.
+    pub grid_slack: [u32; 4],
 }
 
 /// A cell of a free figure (#398) in figure coordinates, in pixels.
@@ -1490,6 +1517,24 @@ impl FigureLayout {
         );
         let (y0, y1) = (*self.row_breaks.get(row)?, *self.row_breaks.get(row + 1)?);
         Some((x0, y0 + self.title_band, x1 - x0, y1 - y0))
+    }
+
+    /// The rectangle the grid occupies without its [`FigureLayout::grid_slack`]:
+    /// `(left, top, right, bottom)` in figure coordinates, the title band
+    /// included in `top` and `bottom` (#505). The whole image when there is no
+    /// slack. `None` for a layout without a grid.
+    pub fn grid_outline(&self) -> Option<(u32, u32, u32, u32)> {
+        let band = self.title_band;
+        let [left, top, right, bottom] = self.grid_slack;
+        Some((
+            self.column_breaks.first()? + left,
+            self.row_breaks.first()? + band + top,
+            self.column_breaks.last()?.saturating_sub(right),
+            self.row_breaks
+                .last()?
+                .saturating_add(band)
+                .saturating_sub(bottom),
+        ))
     }
 
     /// The frame (plot area) shared by the cells of `(row, column)`, in figure
@@ -1577,6 +1622,7 @@ pub fn figure_layout<DB: DrawingBackend>(
             placement: LayerPlacement::Free,
             free_cells,
             free_origin: free.origin,
+            grid_slack: [0; 4],
         });
     }
     let layout = grid_of(spec, spec.panels.len());
@@ -1603,6 +1649,7 @@ pub fn figure_layout<DB: DrawingBackend>(
             placement: LayerPlacement::Grid,
             free_cells: Vec::new(),
             free_origin: (0.0, 0.0),
+            grid_slack: [0; 4],
         });
     };
     let (plans, _, _) = cell_plans(spec, &layout, probe)?;
@@ -1632,6 +1679,7 @@ pub fn figure_layout<DB: DrawingBackend>(
         placement: LayerPlacement::Grid,
         free_cells: Vec::new(),
         free_origin: (0.0, 0.0),
+        grid_slack: grid.slack,
     })
 }
 
@@ -2188,6 +2236,10 @@ pub enum BesideSide {
     Right,
     /// Below: same left, same frame size.
     Below,
+    /// To the left: same top, same frame size.
+    Left,
+    /// Above: same left, same frame size.
+    Above,
 }
 
 /// The frame of a layer added beside the cell of `panel` in a **free** graph
@@ -2247,6 +2299,8 @@ pub fn place_beside<DB: DrawingBackend>(
     let mut candidate = match side {
         BesideSide::Right => (base_outer.2, frame.top - new_top),
         BesideSide::Below => (frame.left - new_left, base_outer.3),
+        BesideSide::Left => (base_outer.0 - width, frame.top - new_top),
+        BesideSide::Above => (frame.left - new_left, base_outer.1 - height),
     };
     for _ in 0..=outers.len() {
         let taken = outers.iter().find(|(_, _, o)| {
@@ -2259,6 +2313,8 @@ pub fn place_beside<DB: DrawingBackend>(
         match side {
             BesideSide::Right => candidate.0 = o.2,
             BesideSide::Below => candidate.1 = o.3,
+            BesideSide::Left => candidate.0 = o.0 - width,
+            BesideSide::Above => candidate.1 = o.1 - height,
         }
     }
     Ok(Some(FreeFrame {

@@ -165,3 +165,50 @@ fn fitting_the_height_after_the_width_measures_the_title_at_the_new_width() {
     assert_eq!(size.1, 400);
     assert_eq!(size.0, 260);
 }
+
+/// #505: the empty space around a grid is part of the figure the exports use
+/// (what you see is what you export), and going to free placement keeps the
+/// image: nothing moves. Witness: the page not set on the conversion (the free
+/// image shrinks to the bounding box of the graphs).
+#[test]
+fn a_grid_slack_is_exported_and_survives_the_switch_to_free_placement() {
+    let mut sample = sample::minimal().expect("minimal graph");
+    sample.spec.title.clear();
+    sample.spec.frame_widths = vec![600.0];
+    sample.spec.frame_heights = vec![150.0];
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let plain = figure_size(&sample.spec, &measurer, &choice);
+    sample.spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        bottom: 50.0,
+        left: 10.0,
+        ..Default::default()
+    });
+    let size = figure_size(&sample.spec, &measurer, &choice);
+    assert_eq!(size, (plain.0 + 10, plain.1 + 50));
+    let plot = resolve_spec(sample.project.tree(), &sample.spec);
+    let svg = export_bytes(
+        &plot,
+        size,
+        &measurer,
+        &choice,
+        ExportFormat::Svg {
+            text: SvgTextMode::Text,
+        },
+    )
+    .expect("svg");
+    let svg = String::from_utf8(svg).expect("utf-8");
+    assert!(
+        svg.contains(&format!("width=\"{}\"", size.0)),
+        "{}",
+        &svg[..200]
+    );
+    // The switch to free placement keeps the image.
+    let mut spec = sample.spec.clone();
+    assert!(stokesforge_render_svg::set_layer_placement(
+        &mut spec, true, &measurer, &choice
+    ));
+    assert_eq!(figure_size(&spec, &measurer, &choice), size);
+    assert_eq!(spec.grid_slack, None);
+    assert!(spec.free_page.is_some());
+}

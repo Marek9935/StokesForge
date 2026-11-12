@@ -687,12 +687,16 @@ fn total_row(
                 ui.ctx().request_repaint();
             }
         }
-        let (icon, tooltip) = if size_lock.is_some() {
-            (Icon::LockClosed, tr!("plot-size-lock-closed"))
+        let (icon, role, tooltip) = if size_lock.is_some() {
+            (
+                Icon::LockClosed,
+                IconRole::Accent,
+                tr!("plot-size-lock-closed"),
+            )
         } else {
-            (Icon::LockOpen, tr!("plot-size-lock-open"))
+            (Icon::LockOpen, IconRole::Muted, tr!("plot-size-lock-open"))
         };
-        if icon_button(ui, icon, IconRole::Neutral, tooltip).clicked() {
+        if icon_button(ui, icon, role, tooltip).clicked() {
             *size_lock = match size_lock {
                 Some(_) => None,
                 None => SizeLock::close(image),

@@ -50,9 +50,9 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::compose::{
-    current_plot_spec, free_role_layer, insert_cell, overlay_base, overlays_full, panel_plot_type,
-    remove_cell, role_layer_of, row_series, series_from_columns, spec_has_x, x_prime_columns,
-    CellSide, OVERLAY_ROLES,
+    current_plot_spec, free_role_layer, insert_cell_at_with, insert_cell_with, overlay_base,
+    overlays_full, panel_plot_type, remove_cell, role_layer_of, row_series, series_from_columns,
+    spec_has_x, x_prime_columns, CellSide, OVERLAY_ROLES,
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -144,6 +144,14 @@ pub enum LayerArrange {
     Match(stokesforge_core::compose::Dimension),
     /// Spread the cells with equal gaps between their outer rectangles.
     Distribute(stokesforge_render::pipeline::DistributeAxis),
+}
+
+/// What a new cell is placed beside: a layer (the menu, free placement) or a
+/// grid position (a drop zone, #503).
+#[derive(Debug, Clone, Copy)]
+enum CellAnchor {
+    Layer(usize),
+    Position(usize, usize),
 }
 
 /// What the user can ask for. The window layer only produces these values; it
@@ -870,6 +878,22 @@ pub enum Action {
         /// Dragged columns; empty for the menu.
         columns: Vec<NodeId>,
     },
+    /// [`Action::AddCell`] by **grid position** (#503): the new column (row)
+    /// opens beside the cell `(row, column)` of a regular grid, whether a graph
+    /// or a hole is there. What a drop on an edge band or a line sends: the
+    /// zone is a position, not a graph. One undo step.
+    AddCellAt {
+        /// Target graph.
+        graph: NodeId,
+        /// Row of the reference position.
+        row: usize,
+        /// Column of the reference position.
+        column: usize,
+        /// Which side of it the new cell goes.
+        side: CellSide,
+        /// Dragged columns; empty for none.
+        columns: Vec<NodeId>,
+    },
     /// Sets the frame (plot area) width of grid column `index` or the frame
     /// height of grid row `index` of the graph, in points (#394). The one path
     /// of the size fields of Graph Properties and of a drag handle on the outer
@@ -904,6 +928,34 @@ pub enum Action {
         /// The whole figure was scaled (history kind `ResizeFigure`), else a
         /// boundary or a corner was pulled (`ResizeCell`).
         figure: bool,
+        /// The empty space around the grid after an outer edge was pulled
+        /// (#505); `None` leaves it as it is.
+        slack: Option<stokesforge_plot::GridSlack>,
+    },
+    /// An outer edge or an Alt-dragged line is pulled past the page edge
+    /// (#505, F3): the status bar says how to enlarge the page. Changes no
+    /// model.
+    PageEdgeReached,
+    /// Fits the page of a graph to its layers (#505): on a Regular Grid the
+    /// empty space around the grid is cleared, in Free the page becomes the
+    /// bounding box of the graphs (margins included). One undo step
+    /// ([`PlotEditKind::FitPage`]); nothing sent, no undo step, when there is
+    /// nothing to fit. The size lock follows the new figure.
+    FitPageToLayout {
+        /// Target graph.
+        graph: NodeId,
+    },
+    /// Fits the layout of a graph to its page (#505, K1), the inverse of
+    /// [`Action::FitPageToLayout`]: the graphs scale to fill the page, which
+    /// keeps its size. Regular Grid: one factor per axis, bands frozen, the
+    /// empty space around the grid goes to zero; Free: the graph boxes are
+    /// scaled from their bounding box to the page. The padlock of Figure size
+    /// plays no part: always one factor per axis. One undo step
+    /// ([`PlotEditKind::FitLayout`]); nothing sent, no undo step, when there is
+    /// nothing to do.
+    FitLayoutToPage {
+        /// Target graph.
+        graph: NodeId,
     },
     /// Moves a graph (the cell of layer `panel`, overlays included) on a
     /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
@@ -6022,7 +6074,11 @@ impl AppState {
                 widths,
                 heights,
                 figure,
-            } => self.set_grid_frames(graph, &widths, &heights, figure),
+                slack,
+            } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
+            Action::PageEdgeReached => self.notice(tr!("status-page-edge-reached")),
+            Action::FitPageToLayout { graph } => self.fit_page_to_layout(graph),
+            Action::FitLayoutToPage { graph } => self.fit_layout_to_page(graph),
             Action::MoveGridCell {
                 graph,
                 panel,
@@ -6302,7 +6358,14 @@ impl AppState {
                 panel,
                 side,
                 columns,
-            } => self.add_cell(graph, panel, side, columns),
+            } => self.add_cell(graph, CellAnchor::Layer(panel), side, columns),
+            Action::AddCellAt {
+                graph,
+                row,
+                column,
+                side,
+                columns,
+            } => self.add_cell(graph, CellAnchor::Position(row, column), side, columns),
             Action::AddRowsToGraph {
                 graph,
                 panel,
@@ -11651,23 +11714,53 @@ impl AppState {
     /// reference layer, like a drop on the graph). One `EditPlotSpec`, one undo
     /// step; nothing sent, and a message, if the grid is full, the layer is gone
     /// or the columns have no Y.
-    fn add_cell(&mut self, graph: NodeId, panel: usize, side: CellSide, columns: Vec<NodeId>) {
+    fn add_cell(
+        &mut self,
+        graph: NodeId,
+        anchor: CellAnchor,
+        side: CellSide,
+        columns: Vec<NodeId>,
+    ) {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
             return;
         };
-        let Some(reference) = spec.panels.get(panel) else {
+        // The layer whose plot type the new cell takes: the anchor itself, or
+        // for a grid position the graph there, else one of its row or column.
+        let reference = match anchor {
+            CellAnchor::Layer(panel) => Some(panel),
+            CellAnchor::Position(row, column) => spec
+                .cell_bases()
+                .into_iter()
+                .filter_map(|base| spec.panels.get(base).map(|p| (base, p.row, p.column)))
+                .min_by_key(|(_, r, c)| {
+                    (
+                        (*r, *c) != (row, column),
+                        *r != row && *c != column,
+                        r.abs_diff(row) + c.abs_diff(column),
+                    )
+                })
+                .map(|(base, _, _)| base),
+        };
+        let Some(panel) = reference.filter(|panel| spec.panels.get(*panel).is_some()) else {
             self.fail(tr!("error-layer-gone"));
             return;
         };
-        let plot_type = panel_plot_type(reference);
+        let plot_type = panel_plot_type(&spec.panels[panel]);
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
         crate::frame_sizes::fix_new(&mut spec);
         // Free placement (#398, L8): the new layer is placed beside the
         // reference, never over another one, in the same command.
         let beside = crate::frame_sizes::place_beside(&spec, panel, side);
-        let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
+        let gutters = crate::frame_sizes::grid_gutters(&spec);
+        let inserted = match anchor {
+            CellAnchor::Layer(panel) => insert_cell_with(&mut spec, panel, side, &gutters),
+            CellAnchor::Position(row, column) => {
+                insert_cell_at_with(&mut spec, (row, column), side, &gutters)
+            }
+        };
+        let Some(new_cell) = inserted else {
             self.fail(tr!("error-layer-grid-full"));
             return;
         };
@@ -11802,7 +11895,14 @@ impl AppState {
     /// [`Action::SetGridFrames`]: both vectors written into one spec and
     /// committed as one step. A legacy graph is first given the frames it is
     /// drawn with, so the vectors always have the grid's lengths.
-    fn set_grid_frames(&mut self, graph: NodeId, widths: &[f64], heights: &[f64], figure: bool) {
+    fn set_grid_frames(
+        &mut self,
+        graph: NodeId,
+        widths: &[f64],
+        heights: &[f64],
+        figure: bool,
+        slack: Option<stokesforge_plot::GridSlack>,
+    ) {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
@@ -11824,6 +11924,10 @@ impl AppState {
         }
         spec.frame_widths = widths.iter().map(bounds).collect();
         spec.frame_heights = heights.iter().map(bounds).collect();
+        if let Some(slack) = slack {
+            // Stored sanitized: a hostile number never reaches the model.
+            spec.grid_slack = Some(slack.sanitized()).filter(|slack| !slack.is_zero());
+        }
         if self.plot_spec(graph).is_some_and(|before| before == spec) {
             return;
         }
@@ -11838,6 +11942,39 @@ impl AppState {
             } else {
                 PlotEditKind::ResizeCell
             },
+        });
+    }
+
+    /// [`Action::FitPageToLayout`]: the fitted spec committed as one step, or
+    /// nothing when the page already fits.
+    fn fit_page_to_layout(&mut self, graph: NodeId) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(spec) = crate::frame_sizes::spec_fitted_to_layers(&before) else {
+            return;
+        };
+        self.adopt_size_lock(graph);
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::FitPage,
+        });
+    }
+
+    /// [`Action::FitLayoutToPage`]: the fitted spec committed as one step, or
+    /// nothing when the graphs already fill the page.
+    fn fit_layout_to_page(&mut self, graph: NodeId) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(spec) = crate::frame_sizes::spec_layout_fitted_to_page(&before) else {
+            return;
+        };
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::FitLayout,
         });
     }
 
@@ -11858,7 +11995,8 @@ impl AppState {
         }
         let mut spec = before.clone();
         crate::frame_sizes::fix_new(&mut spec);
-        if !stokesforge_core::compose::move_cell(&mut spec, panel, target) {
+        let gutters = crate::frame_sizes::grid_gutters(&spec);
+        if !stokesforge_core::compose::move_cell_with(&mut spec, panel, target, &gutters) {
             return;
         }
         self.execute(Command::EditPlotSpec {

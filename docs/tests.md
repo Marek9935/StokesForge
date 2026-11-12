@@ -597,6 +597,13 @@ in CI; only the protection of the `v*` tags of GitLab holds it.
   or run on GitHub); GitLab may ask to validate the account first (#362);
 - GitLab, Deploy, Pages: "Use unique domain" unchecked, so that the URL is
   `https://askrzypczak.gitlab.io/stokesforge/`; Pages visibility "Everyone".
+- GitLab, Settings, CI/CD, Variables: "Minimum role to use pipeline variables" at
+  **Developer** (API field `ci_pipeline_variables_minimum_override_role`). `publier` starts
+  the `pages` pipeline with the variable `STOKESFORGE_PUBLISH_MANUAL=1`, and
+  `GITLAB_RELEASE_TOKEN` has the Developer role. With the GitLab default "No one allowed",
+  the release is created, then `publier` fails with curl exit 22 and the manual is not
+  published (v1.1.0): set the role, then start the pipeline by hand on the tag
+  (`POST projects/:id/pipeline`, `ref` = the tag, same variable).
 
 **What a green pipeline does not prove**, and it is written at the top of the CI file:
 `fmt`, `clippy` and `test` **never** enable the `python` feature. Everything that

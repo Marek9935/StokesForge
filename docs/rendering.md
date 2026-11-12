@@ -1167,8 +1167,8 @@ The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometr
   rectangle, they never change the figure's own layout (invariant 5).
 - **The padlock is the application's** (`AppState::size_lock`, `Action::SetSizeLock`,
   published to the graph windows each frame, copied by `fork_for_detached_view`):
-  Graph Properties and the strip share it, and `GraphView::set_figure_ratio_lock`
-  makes the L corners keep its ratio. A committed scale of the figure adopts the next
+  Graph Properties and the strip share it (the Figure size fields read it; Fit Layout to Page does not, it always scales one factor per axis; the L corners, which
+  only add or remove empty space since K1, do not). A committed scale of the figure adopts the next
   image (`SizeLock::adopt_next`), so a rounding never drifts the ratio.
 - **A window is maximised while the mode lasts, and the keys are read first.**
   `app/layout_window.rs` maximises a floating window on entering and a detached one

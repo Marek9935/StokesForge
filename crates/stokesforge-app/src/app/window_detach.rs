@@ -3095,15 +3095,16 @@ mod tests {
         }
         let (before, scale_before) = (figure().expect("published"), scale(&app));
 
-        let add_cell = |app: &mut StokesForgeApp| {
+        let add_cell = |app: &mut StokesForgeApp, side| {
             app.state.dispatch(Action::AddCell {
                 graph,
                 panel: 0,
-                side: stokesforge_core::compose::CellSide::Right,
+                side,
                 columns: Vec::new(),
             })
         };
-        add_cell(&mut app);
+        // A cell on the left (#503) grows the figure like one on the right.
+        add_cell(&mut app, stokesforge_core::compose::CellSide::Left);
         publish(&mut app);
         let command = paint().expect("the viewport follows the figure");
         let grown = figure().expect("published").0 - before.0;
@@ -3121,7 +3122,7 @@ mod tests {
             paint();
         }
         monitor.set(Some(command + egui::vec2(10.0, 0.0)));
-        add_cell(&mut app);
+        add_cell(&mut app, stokesforge_core::compose::CellSide::Right);
         publish(&mut app);
         let clamped = paint().expect("clamped growth");
         assert_eq!(clamped.x, command.x + 10.0, "stops at the monitor");
