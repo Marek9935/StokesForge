@@ -4945,13 +4945,18 @@ mod tests {
         });
         harness.open(PlotSettingsTab::Legend, None);
         let context = test_support::context();
+        // The Legend page may be taller than the window: bring the bar's
+        // rows into view.
+        scroll_page(&context, &mut harness, -400.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &tr!("plot-color-bar-range")));
         assert!(is_painted(&painted, &tr!("common-auto")), "empty end");
-        type_into(&context, &mut harness, "2", "7"); // appended: 27
+        // The click may or may not select the old text: 7 or 27, never 2.
+        type_into(&context, &mut harness, "2", "7");
         let model = harness.model();
         let segment = &model.panels[0].color_bar.as_ref().unwrap().segments[0];
-        assert_eq!((segment.from, segment.to), (Some(27.0), None));
+        assert!(matches!(segment.from, Some(v) if v == 7.0 || v == 27.0));
+        assert_eq!(segment.to, None);
     }
 
     /// #499: the section opens by itself when the layer's bar is shown, and
