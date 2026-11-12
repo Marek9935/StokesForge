@@ -907,6 +907,7 @@ mod tests {
                 .sum::<usize>()
         };
         // The fallback runs a recalculation to its end, as before #475.
+        let before = app.state.tree().len();
         app.state.dispatch(Action::AddGraph);
         assert!(app.state.recalc_work().is_some(), "still running");
         let deadline = Instant::now() + Duration::from_secs(120);
@@ -915,6 +916,7 @@ mod tests {
             app.poll_background_jobs(&ctx);
             std::thread::sleep(Duration::from_millis(5));
         }
+        assert_eq!(app.state.tree().len(), before + 1, "the snapshot is fresh");
         for _ in 0..5 {
             app.poll_background_jobs(&ctx);
         }
