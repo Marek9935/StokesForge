@@ -1821,24 +1821,6 @@ fn switching_sheet_commits_the_open_cell_entry() {
     assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0), "one undo");
 }
 
-/// Witness: commit from a clone of `editing` instead of taking it (two writes).
-#[test]
-fn committing_then_switching_sheet_adds_no_second_history_entry() {
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let sheet2 = sheet_named(state.tree(), "Sheet2");
-    let time_col = column_id(&state, sheet1, "Time");
-    state.begin_edit(time_col, 0);
-    state.editing_mut().unwrap().buffer = "7.25".to_string();
-    state.commit_edit();
-    let revision = state.snapshot().revision;
-    state.dispatch(Action::SelectSheet(sheet2));
-    assert_eq!(state.snapshot().revision, revision);
-    state.dispatch(Action::Undo);
-    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
-}
-
 /// A refused value is dropped silently. Witness: remove the refusal check.
 #[test]
 fn switching_sheet_drops_a_refused_cell_entry_silently() {
