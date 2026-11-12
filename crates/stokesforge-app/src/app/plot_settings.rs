@@ -1641,6 +1641,9 @@ fn axis_editor(
         // widened the page, so the texts below it wrapped past the edge too.
         form.row(tr!("plot-axes-from"), |ui| {
             ui.horizontal_wrapped(|ui| {
+                // English fits with a fraction of a point to spare or short:
+                // a one point tolerance keeps Auto on the row there.
+                ui.set_max_width(ui.available_width() + 1.0);
                 let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
                 ui.label(tr!("analysis-field-to"));
                 let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
