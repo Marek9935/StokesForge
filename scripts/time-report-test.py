@@ -40,6 +40,13 @@ def notif(t, task):
             "message": {"content": "<task-notification><task-id>%s</task-id></task-notification>" % task}}
 
 
+def hook_notif(t, body="form 488-2 finished, 9/9 answered, read with: suivi.py qcm answers 488-2"):
+    return {"type": "user", "timestamp": iso(t), "origin": {"kind": "task-notification"},
+            "message": {"content": "<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>"
+                        "\n<system-reminder>\nStop hook blocking error from command \"PostToolUse:Bash\": %s\n"
+                        "</system-reminder>" % body}}
+
+
 def enqueue(t, task):
     return {"type": "queue-operation", "operation": "enqueue", "timestamp": iso(t),
             "content": "<task-notification><task-id>%s</task-id></task-notification>" % task}
@@ -121,6 +128,23 @@ class Defects(Logs):
         r = self.run_report()
         self.assertAlmostEqual(self.h(r, "agent_stuck"), 1.9, delta=0.02)
         self.assertEqual(sum(v for k, v in r["main_h"].items() if k.startswith("wait:")), 0)
+
+    def test_stop_hook_feedback_wake_is_user_wait(self):
+        self.session([human(0), asst(10, "see the form"), hook_notif(3610), asst(3620, "read")])
+        r = self.run_report()
+        self.assertAlmostEqual(self.h(r, "wait:nothing") + self.h(r, "wait:form"), 1.0, delta=0.02)
+        self.assertEqual(self.h(r, "agent_stuck"), 0)
+
+    def test_stop_hook_feedback_keeps_its_reason(self):
+        self.session([human(0), asst(10, "see the form"), hook_notif(3610), asst(3620, "read")])
+        self.assertGreater(self.h(self.run_report(), "wait:form"), 0.9)
+
+    def test_new_style_driver_start_is_counted(self):
+        for cmd in ("D=.claude/skills/run-stokesforge/driver.py && python3 $D start 2>&1 | tail -3",
+                    "python3 $S/driver_dbg.py start"):
+            self.assertTrue(tr.is_driver_start(cmd), cmd)
+        self.assertFalse(tr.is_driver_start("python3 $D start"))
+        self.assertFalse(tr.is_driver_start("systemctl start x"))
 
     def test_session_without_cost_state_is_counted_apart(self):
         self.session([human(0), asst(10, "a", stop="tool_use"), human(300)])
