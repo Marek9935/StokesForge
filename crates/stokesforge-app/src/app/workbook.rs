@@ -322,7 +322,12 @@ pub(super) fn book_contents(
     }
     ui.advance_cursor_after_rect(area);
     if let Some(id) = chosen_sheet {
-        state.dispatch(Action::SelectSheet(id));
+        // A dialog is open in the main window: the open entry could not be
+        // written, so the sheet stays and the entry with it (#471, #524).
+        let pending = state.editing().is_some() || state.header_editing().is_some();
+        if !(pending && super::window_band::refuse_entry(ui.ctx())) {
+            state.dispatch(Action::SelectSheet(id));
+        }
     }
     if add_sheet {
         actions.push(Action::AddWorksheet { book });

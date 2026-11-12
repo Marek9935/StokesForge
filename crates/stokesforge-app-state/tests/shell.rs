@@ -1801,6 +1801,89 @@ fn the_cell_buffer_only_reaches_the_model_on_commit() {
     assert!(state.snapshot().revision > revision);
 }
 
+/// #524: switching sheet commits the open cell entry (one history entry).
+/// Witness: put `editing = None` back in `select_sheet`.
+#[test]
+fn switching_sheet_commits_the_open_cell_entry() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    let time_col = column_id(&state, sheet1, "Time");
+    let book = state.tree().node(sheet1).and_then(|n| n.parent()).unwrap();
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "7.25".to_string();
+    state.dispatch(Action::SelectSheet(sheet2));
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(7.25));
+    assert!(state.editing().is_none());
+    assert_eq!(state.selected_sheet_in(book), Some(sheet2));
+    state.dispatch(Action::Undo);
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0), "one undo");
+}
+
+/// A refused value is dropped silently. Witness: remove the refusal check.
+#[test]
+fn switching_sheet_drops_a_refused_cell_entry_silently() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    let time_col = column_id(&state, sheet1, "Time");
+    let revision = state.snapshot().revision;
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "1e400".to_string();
+    state.dispatch(Action::SelectSheet(sheet2));
+    assert!(state.editing().is_none());
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    assert_eq!(state.snapshot().revision, revision);
+    assert!(state.status().is_none_or(|m| m.level != StatusLevel::Error));
+}
+
+/// An entry opened and not typed in writes nothing. Witness: remove the early
+/// return of `commit_cell` for an unchanged text.
+#[test]
+fn switching_sheet_with_an_untouched_entry_writes_nothing() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    let time_col = column_id(&state, sheet1, "Time");
+    let revision = state.snapshot().revision;
+    state.begin_edit(time_col, 0);
+    state.dispatch(Action::SelectSheet(sheet2));
+    assert_eq!(state.snapshot().revision, revision);
+}
+
+/// R2: an open header field is written when the sheet changes. Witness: drop
+/// `commit_header_edit_in_gesture` from `select_sheet`.
+#[test]
+fn switching_sheet_writes_the_open_header_field() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.begin_header_edit(time_col, HeaderField::LongName);
+    state.header_editing_mut().unwrap().buffer = "Elapsed".to_string();
+    state.dispatch(Action::SelectSheet(sheet2));
+    assert_eq!(state.column_meta(time_col).long_name, "Elapsed");
+    assert!(state.header_editing_mut().is_none());
+}
+
+/// Choosing the sheet already shown commits too. Witness: return early when
+/// the sheet is already selected.
+#[test]
+fn selecting_the_current_sheet_commits_the_open_entry() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "7.25".to_string();
+    state.dispatch(Action::SelectSheet(sheet1));
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(7.25));
+}
+
 #[test]
 fn cancelling_an_edit_discards_the_buffer() {
     let dir = tempfile::tempdir().expect("temporary directory");

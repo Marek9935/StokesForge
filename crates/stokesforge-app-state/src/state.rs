@@ -9210,8 +9210,20 @@ impl AppState {
             self.fail(tr!("error-sheet-no-workbook"));
             return;
         };
+        // The open entries are written before the sheet changes, whoever asks
+        // (tab, menu, script): leaving them to be dropped lost what was typed
+        // in a detached workbook, whose grid only commits on a click elsewhere
+        // (#524). A cell value the column refuses is dropped silently, as a
+        // click elsewhere does; a header field always writes (#433).
+        self.gesture(|state| {
+            if state.cell_edit_refusal().is_some() {
+                state.cancel_edit();
+            } else {
+                state.commit_edit_in_gesture();
+            }
+            state.commit_header_edit_in_gesture();
+        });
         self.selected_sheets.insert(book, id);
-        self.editing = None;
     }
 
     /// Transport to publish by the viewport that receives the copy gesture.
