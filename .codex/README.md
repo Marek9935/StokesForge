@@ -13,7 +13,7 @@ loaded automatically: see the
 2. Read `docs/README.md`, then the page of the domain below. Consult
    `docs/invariants.md` before changing the contracts of the model, history,
    the session, rendering or the Python bridge.
-   Also read the useful section of [`.claude/conventions.md`](../.claude/conventions.md)
+   Also read the useful section of [`.claude/rules/`](../.claude/rules/)
    before writing in the domain; the table "Before touching… | Read the section" of
    [`CLAUDE.md`](../CLAUDE.md) points to the right section. [`.claude/rules.md`](../.claude/rules.md)
    sets the reading scope for each task.
@@ -44,7 +44,7 @@ and only its useful references, after the reading path
 above; do not load all eleven systematically.
 
 The links share the whole folder, including `references/` and the scripts.
-The skills point to sections of `docs/` or of `.claude/conventions.md`
+The skills point to sections of `docs/` or of `.claude/rules/<domain>.md`
 instead of copying the rules; the topic sheets of
 `stokesforge-feature` (#301) hold only these pointers: read only
 those of the topic touched, then the cited sources. Maintain the rules in

@@ -1,6 +1,6 @@
 //! The project skills (`.claude/skills/stokesforge-*` and `run-stokesforge`)
 //! do not copy the rules: they point to them with "`file.md` § Title"
-//! into `docs/` or `.claude/conventions.md`. This guard checks that every
+//! into `docs/` or `.claude/rules/*.md`. This guard checks that every
 //! reference, in every `SKILL.md` and every `references/*.md`, names a file and
 //! a heading that still exist. It also guards the `](references/x.md)` links of
 //! each `SKILL.md`: they must point to an existing file, and no sheet

@@ -1,6 +1,6 @@
 # Project skills
 
-Each folder holds a `SKILL.md`: its `description` is the trigger, its body the steps, its `references/` the detail read on demand. Codex reads the same folders through the links of `.agents/skills/`; `.claude/skills/` is the source. Skills use the docs, they never copy them: `docs/README.md` routes, `.claude/rules.md` says what to load, `.claude/conventions.md` holds the rules by domain.
+Each folder holds a `SKILL.md`: its `description` is the trigger, its body the steps, its `references/` the detail read on demand. Skills use the docs, they never copy them: `docs/README.md` routes, `.claude/rules.md` says what to load, `.claude/rules/` holds the rules by domain (path-scoped files).
 
 | Skill | For | Triggers on |
 |---|---|---|

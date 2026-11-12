@@ -88,6 +88,6 @@ done, not work to come.
 
 The detailed rules by domain (building blocks of `stokesforge-app`, menus,
 series, copy, analysis, `pyst`, rendering pitfalls) are in
-[`conventions.md`](conventions.md); the table in `CLAUDE.md` says which section
+[`rules/`](rules/) (one file per domain); the "Rules file" column of Routing says which
 to read. A large search (a lot of reading) goes to the `recherche` agent
 (`agents/recherche.md`, Haiku): see `CLAUDE.md`, "Delegation and model choice".
