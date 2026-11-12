@@ -2792,6 +2792,126 @@ class TestQcm(ServerBase):
         self.assertEqual(r.returncode, 1)
         self.assertFalse(os.path.exists(os.path.join(self.state, "qcm")))
 
+    # ---- #520: card cap, list card, code words, qcm-log.tsv
+    def cards_file(self, name, cards, issues="const ISSUES={a:{n:1,name:'One',colour:'x'}};"):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("const TITRE='T';const SEC={};%s const INTRO='';\nconst D=[\n%s\n];\n" % (issues, ",\n".join(cards)))
+        return path
+
+    def plain(self, n):
+        return ["{c:'R%d',p:1,t:'Q%d',is:'a',o:[O('A'),O('B')]}" % (i, i) for i in range(1, n + 1)]
+
+    def log_lines(self):
+        p = os.path.join(self.state, "qcm-log.tsv")
+        if not os.path.isfile(p):
+            return []
+        with open(p, encoding="utf-8") as f:
+            return [l.rstrip("\n").split("\t") for l in f if l.strip()]
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pose_refuses_more_than_eight_cards_and_force_overrides(self):
+        r = self.run_cli("qcm", "pose", "1", self.cards_file("c9.js", self.plain(9)))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("9 cards", r.stderr)
+        self.assertIn("limit is 8", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "qcm")))
+        self.assertEqual([l[1:] for l in self.log_lines()], [["refused", "1", "", "cap"]])
+        self.assertEqual(self.pose(1, self.cards_file("c8.js", self.plain(8))), "1-1")
+        self.finish_form("1-1")
+        r = self.run_cli("qcm", "pose", "1", self.cards_file("c9b.js", self.plain(9)), "--force")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--force", r.stderr)
+        forced = [l for l in self.log_lines() if l[1] == "forced"]
+        self.assertEqual([(l[2], l[3], l[4]) for l in forced], [("1", "1-2", "cap")])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_list_card_counts_as_one_whatever_its_lines(self):
+        lines = ",".join("'Line %d.'" % i for i in range(12))
+        cards = self.plain(7) + ["{c:'L1',p:1,t:'Unless you object',k:'list',lines:[%s]}" % lines]
+        self.assertEqual(self.pose(1, self.cards_file("l.js", cards)), "1-1")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_malformed_list_card_is_refused(self):
+        for card in ("{c:'L1',p:1,t:'T',k:'list'}", "{c:'L1',p:1,t:'T',k:'list',lines:[]}",
+                     "{c:'L1',p:1,t:'T',k:'list',lines:['x'],o:[O('A')]}"):
+            r = self.run_cli("qcm", "pose", "1", self.cards_file("bad.js", [card]))
+            self.assertEqual(r.returncode, 1, card)
+            self.assertIn("card L1", r.stderr)
+            self.assertIn("list card", r.stderr)
+        self.assertEqual({l[4] for l in self.log_lines()}, {"shape"})
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_code_words_are_refused_in_card_text_but_not_in_sketches(self):
+        r = self.run_cli("qcm", "pose", "1", self.cards_file("j.js", [
+            "{c:'R1',p:1,t:'Q',is:'a',ctx:['The command commit_edit runs.'],o:[O('A'),O('B')]}"]))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("card R1", r.stderr)
+        self.assertIn("commit_edit", r.stderr)
+        for bad in ("t:'See `foo` now'", "t:'The crate::module'", "t:'Edit main.rs'"):
+            r = self.run_cli("qcm", "pose", "1", self.cards_file("j2.js", ["{c:'R1',p:1,%s,o:[O('A')]}" % bad]))
+            self.assertEqual(r.returncode, 1, bad)
+        r = self.run_cli("qcm", "pose", "1", self.cards_file("j3.js", [
+            "{c:'R1',p:1,t:'Q',o:[O('A',['x'],'foo_bar'),{t:'B',pts:[],m:'foo_bar',plus:'',moins:'uses do_it'}]}"]))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("do_it", r.stderr)
+        self.assertEqual(self.pose(1, self.cards_file("j4.js", [
+            "{c:'R1',p:1,t:'Q',av:{pts:['Today it is fine.'],m:'foo_bar'},o:[O('A',['x'],'foo_bar'),O('B')]}"])), "1-1")
+        self.assertIn("jargon", {l[4] for l in self.log_lines()})
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_long_bullet_only_warns(self):
+        long = " ".join(["word"] * 25)
+        qid = self.pose(1, self.cards_file("w.js", ["{c:'R1',p:1,t:'Q',ctx:['%s'],o:[O('A'),O('B')]}" % long]))
+        self.assertEqual(qid, "1-1")
+        r = self.run_cli("qcm", "pose", "1", self.cards_file("w2.js", ["{c:'R7',p:1,t:'Q',ctx:['%s'],o:[O('A')]}" % long]), "--force")
+        self.assertIn("card R7", r.stderr)
+        self.assertIn("25 words", r.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_log_records_the_first_answer_only_and_meta_has_created_ts(self):
+        qid = self.pose()
+        meta = jload(os.path.join(self.state, "qcm", qid, "meta.json"))
+        self.assertGreater(meta["created_ts"], time.time() - 120)
+        self.assertEqual([(l[1], l[4]) for l in self.log_lines()], [("posed", "2")])
+        self.assertEqual(self.answer(qid)[0], 200)
+        self.assertEqual(self.answer(qid, "R2", {"code": "R2", "choix": "A"})[0], 200)
+        self.assertEqual(self.answer(qid)[0], 200)
+        first = [l for l in self.log_lines() if l[1] == "first-answer"]
+        self.assertEqual(len(first), 1)
+        self.assertGreaterEqual(int(first[0][4]), 0)
+        self.assertEqual(first[0][3], qid)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_first_answer_on_a_form_without_created_ts_logs_a_blank(self):
+        qid = self.pose()
+        mp = os.path.join(self.state, "qcm", qid, "meta.json")
+        meta = jload(mp)
+        del meta["created_ts"]
+        with open(mp, "w") as f:
+            json.dump(meta, f)
+        self.assertEqual(self.answer(qid)[0], 200)
+        first = [l for l in self.log_lines() if l[1] == "first-answer"]
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0][4], "")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_an_unwritable_log_never_fails_a_pose(self):
+        os.makedirs(os.path.join(self.state, "qcm-log.tsv"))
+        r = self.run_cli("qcm", "pose", "1", self.data)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_answers_print_the_lines_to_discuss(self):
+        qid = self.pose()
+        body = {"code": "R1", "question": "Q1", "statut": "tranche", "choix": "À discuter (2)", "recommande": False,
+                "discuter": "First line.\nSecond line.", "commentaire": ""}
+        self.assertEqual(self.answer(qid, body=body)[0], 200)
+        out = self.run_cli("qcm", "answers", qid).stdout
+        self.assertIn("  to discuss: First line.\n  to discuss: Second line.", out)
+        j = json.loads(self.run_cli("qcm", "answers", qid, "--json").stdout)
+        self.assertEqual(j["answers"]["R1"]["discuter"], "First line.\nSecond line.")
+
     def test_answer_is_written_and_read_back_by_answers(self):
         qid = self.pose()
         self.assertEqual(self.answer(qid)[0], 200)
@@ -3105,6 +3225,46 @@ class TestFormTemplate(unittest.TestCase):
             self.assertEqual((got["note"], got["images"]), ("n", [a]), fields)            # junk names are not carried
         self.assertEqual(self.q_js("mkAns(null,{i:0})"), {"note": "", "images": [], "i": 0})
         self.assertEqual(self.q_js("mkAns({i:2,note:'x'},{skip:true})"), {"note": "x", "images": [], "skip": True})   # the old choice is not carried
+
+    def list_js(self, expr):
+        html = self.form_html()
+        src = "".join(re.search(r"/\*%s-START\*/(.*)/\*%s-END\*/" % (k, k), html, re.S).group(1) for k in ("QIMG", "LIST"))
+        r = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(JSON.stringify(%s));" % expr], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    # lang: fr begin
+    def test_list_card_record_follows_the_marked_lines(self):
+        d = "{k:'list',lines:['One.','Two.','Three.']}"
+        rec = self.list_js("listRecord(%s,{i:0,marks:[]})" % d)
+        self.assertEqual(rec, {"choix": "OK", "recommande": True, "discuter": ""})
+        rec = self.list_js("listRecord(%s,{i:0,marks:[1]})" % d)
+        self.assertEqual(rec, {"choix": "À discuter (1)", "recommande": False, "discuter": "Two."})
+        rec = self.list_js("listRecord(%s,{i:0,marks:[2,0,2,9]})" % d)
+        self.assertEqual((rec["choix"], rec["discuter"]), ("À discuter (2)", "One.\nThree."))
+        self.assertEqual(self.list_js("listLabel(%s,null)" % d), "OK")
+
+    def test_list_card_reload_marks_the_same_lines_by_text(self):
+        d = "{k:'list',lines:['One.','Two.','Three.']}"
+        self.assertEqual(self.list_js("listRestore(%s,{discuter:'Three.\\nOne.'})" % d), [0, 2])
+        self.assertEqual(self.list_js("listRestore(%s,{discuter:'Gone.'})" % d), [])
+        got = self.list_js("fromRecord(%s,{statut:'tranche',choix:'À discuter (1)',discuter:'Two.',commentaire:'n'},[])" % d)
+        self.assertEqual((got["i"], got["marks"], got["note"]), (0, [1], "n"))
+        self.assertEqual(self.list_js("fromRecord(%s,{statut:'tranche',choix:'OK'},[]).marks" % d), [])
+        # a lines list that was reordered since: the text still matches
+        self.assertEqual(self.list_js("listRestore({lines:['Two.','One.']},{discuter:'Two.'})"), [0])
+        self.assertEqual(self.list_js("fromRecord({o:[{t:'A'},{t:'B'}]},{statut:'tranche',choix:'B'},[]).i"), 1)
+        self.assertIsNone(self.list_js("fromRecord({o:[{t:'A'}]},{statut:'tranche',choix:'Z'},[])"))
+
+    def test_list_card_label_does_not_read_options(self):
+        html = self.form_html()
+        src = "".join(re.search(r"/\*%s-START\*/(.*)/\*%s-END\*/" % (k, k), html, re.S).group(1) for k in ("QIMG", "LIST"))
+        fn = re.search(r"(function label\(d,a\).*)", html).group(1)
+        r = subprocess.run(["node", "-e", src + "\n" + fn + "\nprocess.stdout.write(JSON.stringify([label({k:'list',lines:['a','b']},{i:0,marks:[1]}),label({k:'list',lines:['a']},{i:0,marks:[]})]));"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), ["À discuter (1)", "OK"])
+    # lang: fr end
 
     # lang: fr begin
     def test_form_attach_filter_and_lines_follow_the_page(self):
