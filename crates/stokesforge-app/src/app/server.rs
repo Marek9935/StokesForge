@@ -844,28 +844,36 @@ mod tests {
     fn the_import_commands_run_with_the_lock_released() {
         isolate_config();
         let dir = tempfile::tempdir().unwrap();
-        let (_session, slot) = free_slot(demo(), dir.path());
+        let (session, slot) = free_slot(demo(), dir.path());
         let shared = slot.shared();
         start_new_book_import(&shared, csv_files(dir.path(), 1, 400));
         let over = Arc::new(AtomicBool::new(false));
         let observer = {
             let (shared, over) = (Arc::clone(&shared), Arc::clone(&over));
+            let handle = session.handle();
             std::thread::spawn(move || {
-                let mut free_while_applying = false;
+                // The session revisions seen while the lock was free and the
+                // import being applied: the commands progress under our eyes.
+                let mut seen = std::collections::BTreeSet::new();
                 while !over.load(Ordering::Acquire) {
                     if let Some(state) = shared.try_lock() {
-                        free_while_applying |= state.import_is_applying();
+                        if state.import_is_applying() {
+                            if let Ok(snapshot) = handle.snapshot() {
+                                seen.insert(snapshot.revision);
+                            }
+                        }
                     }
                     std::thread::yield_now();
                 }
-                free_while_applying
+                seen.len()
             })
         };
         serve_until_import_done(&shared, &Counter::default());
         over.store(true, Ordering::Release);
+        let seen = observer.join().unwrap();
         assert!(
-            observer.join().unwrap(),
-            "the lock was taken while the commands ran"
+            seen >= 5,
+            "the lock was free while the commands ran ({seen} revisions seen)"
         );
     }
 
