@@ -4,6 +4,7 @@
 #
 #   scripts/template-target.sh refresh        warm incremental build of origin/main, then sweep
 #   scripts/template-target.sh copy <worktree> copy the template target into a NEW worktree
+#   scripts/template-target.sh clear-stale <wt> remove the leftover of an interrupted copy (chantier.sh rerun)
 #   scripts/template-target.sh prune           empty the incremental/release of paused worktrees
 #   scripts/template-target.sh weekly          prune, then a refresh if the template is oversize
 #   scripts/template-target.sh status
@@ -32,6 +33,12 @@
 # it does not wait: skipped at once. Skipped, with one line saying why, also when there is no
 # template, or less than 50 GB would remain free (SF_DF_AVAIL_KB fixes the free space in tests).
 #
+# interrupted copy (#528). The copy goes to <wt>/.target-copying (ignored by git), holding flock -x on that
+# folder, and is renamed to target/ at the end; INT/TERM/HUP remove the half-done folder at once. After a
+# SIGKILL or a Bash timeout the leftover stays: the next copy, a rerun of chantier.sh on the worktree, and
+# prune/weekly (every worktree, paused ones too) remove it, unless flock -n -x on the folder fails (a copy
+# is still running: kept). status lists leftovers. The removal never happens while holding $T/lock.
+#
 # prune. Worktrees paused for SF_TEMPLATE_PRUNE_DAYS (default 3) days or more lose
 # target/debug/incremental and target/release (deps kept). Never a held issue, a line-* worktree,
 # a worktree without a record, or one whose cargo lock files are held. The list comes from
@@ -44,7 +51,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/workflow-lib.sh"
 
 T="$(sf_template_dir)"
-usage="usage: template-target.sh refresh | copy <worktree> | prune | weekly | status"
+usage="usage: template-target.sh refresh | copy <worktree> | clear-stale <worktree> | prune | weekly | status"
 say() { echo "template: $*"; }
 max_kb="${SF_TEMPLATE_MAX_KB:-83886080}"        # 80 GB
 min_free_kb="${SF_TEMPLATE_MIN_FREE_KB:-52428800}"   # 50 GB
@@ -145,10 +152,34 @@ cmd_refresh() {
     return "$rc"
 }
 
+# A copy interrupted by SIGKILL (or a Bash timeout) leaves .target-copying. Remove it unless a copy still
+# runs there: the running copy holds flock -x on the folder itself, so removing needs that same lock.
+clear_stale_copy() {
+    local d="$1/.target-copying"
+    [ -e "$d" ] || return 0
+    if flock -n -x "$d" rm -rf "$d"; then
+        say "removed the leftover of an interrupted copy: $d"
+    else
+        say "kept $d: a copy is still running there"
+    fi
+}
+
+# Leftover copy folders of every worktree (paused ones included, line-* excluded).
+stale_dirs() {
+    local d
+    for d in "$(realpath -m "$(sf_wt_root)")"/*/.target-copying; do
+        [ -e "$d" ] || continue
+        case "$(basename "$(dirname "$d")")" in line-*) continue ;; esac
+        echo "$d"
+    done
+}
+
 cmd_copy() {
     local wt="${1:-}" tsize avail remain wait_s waited=""
     SECONDS=0
     [ -n "$wt" ] && [ -d "$wt" ] || { echo "$usage" >&2; return 2; }
+    clear_stale_copy "$wt"      # outside $T/lock: removing 19 GB must never block a refresh
+    if [ -e "$wt/.target-copying" ]; then return 0; fi
     if [ ! -d "$T/target" ] || [ ! -f "$T/stamp" ]; then
         say "none yet (scripts/template-target.sh refresh builds it): the first build in $wt is cold"; return 0
     fi
@@ -178,17 +209,29 @@ cmd_copy() {
         say "skipped: only $((remain / 1024 / 1024)) GB would stay free (minimum $((min_free_kb / 1024 / 1024)) GB), the first build in $wt is cold"
         return 0
     fi
-    rm -rf "$wt/.target-copying"
-    if cp -a "$T/target" "$wt/.target-copying" && mv "$wt/.target-copying" "$wt/target"; then
+    mkdir "$wt/.target-copying"
+    exec 8< "$wt/.target-copying"
+    flock -n -x 8      # the lock on the folder itself says "a copy is running here" (clear_stale_copy)
+    trap 'kill "${cpid:-}" 2> /dev/null || true; wait 2> /dev/null || true; rm -rf "$wt/.target-copying"; exit 143' INT TERM HUP
+    cp -a "$T/target/." "$wt/.target-copying/" &      # background + wait: a signal is handled at once
+    cpid=$!
+    if wait "$cpid" && mv "$wt/.target-copying" "$wt/target"; then
+        trap - INT TERM HUP
         say "copied the target of $(head -n 1 "$T/stamp" | cut -c1-8) ($((tsize / 1024 / 1024)) GB, debug and release) into $wt/target$waited"
     else
+        trap - INT TERM HUP
         rm -rf "$wt/.target-copying"
         say "the copy into $wt failed; the first build there is cold"
     fi
+    exec 8<&-
 }
 
 cmd_prune() {
-    local json days name wt p held lock status_json
+    local json days name wt p held lock status_json d
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        clear_stale_copy "$(dirname "$d")"
+    done < <(stale_dirs)
     days="${SF_TEMPLATE_PRUNE_DAYS:-3}"
     if [ -n "${SF_TEMPLATE_STATUS_JSON:-}" ]; then status_json="$(cat "$SF_TEMPLATE_STATUS_JSON")"
     else status_json="$(cd "$(sf_main_dir)" && "$here/chantier.sh" --status --json)"; fi
@@ -231,6 +274,12 @@ cmd_weekly() {
 }
 
 cmd_status() {
+    local d
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        if flock -n -x "$d" true; then say "leftover of an interrupted copy: $d (weekly or the next copy removes it)"
+        else say "copy running: $d"; fi
+    done < <(stale_dirs)
     if [ ! -d "$T" ]; then say "none ($T)"; return 0; fi
     say "dir $T"
     [ -f "$T/stamp" ] && say "commit $(head -n 1 "$T/stamp"), $(sed -n 's/^release: //p' "$T/stamp"), $(( $(size_kb "$T/target") / 1024 / 1024 )) GB (threshold $((max_kb / 1024 / 1024)) GB)" \
@@ -242,6 +291,7 @@ cmd_status() {
 case "${1:-}" in
 refresh) cmd_refresh ;;
 copy) shift; cmd_copy "${1:-}" ;;
+clear-stale) shift; [ -d "${1:-}" ] || { echo "$usage" >&2; exit 2; }; clear_stale_copy "$1" ;;
 prune) cmd_prune ;;
 weekly) cmd_weekly ;;
 status) cmd_status ;;
