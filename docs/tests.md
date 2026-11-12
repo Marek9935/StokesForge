@@ -37,7 +37,7 @@ licenses. Policy and commands:
 |---|---|---|
 | **unit tests** | `#[cfg(test)]` in `src/` | a local behavior, as close as possible to its code |
 | **integration tests** | `crates/*/tests/` | a crate property: public contract, boundary, agreement between paths |
-| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 23 batteries `b1`…`b23` |
+| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 24 batteries `b1`…`b24` |
 
 ## Guards not to break
 
@@ -117,7 +117,7 @@ first.
 `stokesforge-robustness` contains **no production code**. It depends on the
 whole workspace and carries two things:
 
-- **23 batteries** (`tests/b1…b23`) that test the foundation at its limits:
+- **24 batteries** (`tests/b1…b24`) that test the foundation at its limits:
   extreme numeric values (`b1`), persistence (`b2`), malformed then
   semantically hostile `.stf` files (`b3`), identifier allocator
   (`b4`), macros (`b5`), concurrency between clients (`b6`), Rust ↔ Python
@@ -134,7 +134,11 @@ whole workspace and carries two things:
   (`b22`, see "Targeted recalculation (#193) — and what to test when relying on it" below),
   then the same oracle for structural gestures (renames, moves, removals,
   pastes, transposes, column type changes) plus an independent re-evaluation
-  of every formula from a saved and reloaded copy (`b23`, #412);
+  of every formula from a saved and reloaded copy (`b23`, #412), then every
+  analysis operation on hostile series (`b24`, #522: `NaN`, infinities, `1e300`,
+  subnormals, X offset by `1e6`, duplicate or unsorted X, zero to two points;
+  `run` never panics, and a ready and valid operation is not refused as an
+  invalid parameter on clean data);
 - **two out-of-process probes**, `alloc_probe` and `stack_probe`, because the
   cases they test end with an `abort()` that nothing catches:
   a Rust allocation failure is not a catchable panic, and a stack
@@ -513,6 +517,24 @@ formulas, new step): rerun `b22` with more cases
 its fingerprint is seen by the "unrelated" property of `b22` and by
 `a_recalculated_chain_is_stable_at_the_next_command`.
 
+## Randomised sweeps (#522)
+
+The proptest batteries (`b14`, `b22`, `b23`, `b24`, and `undo_random` in
+`stokesforge-commands`) draw from a fixed ChaCha seed, so `test-all` is
+reproducible. Two environment variables change that, nothing else does:
+
+- `SF_PROPTEST_SEED` (an unsigned integer) replaces the seed;
+- `SF_PROPTEST_SCALE` (an integer from 1) multiplies the number of cases. `b2`
+  also reads it: under a scale above 1 its sweep over the witness `.stf` hits
+  every byte (both ends of the byte flipped) instead of about 300 positions.
+
+Neither set: the draws are exactly the fixed ones. An unreadable value fails
+the test naming the variable. A failing case prints `replay with
+SF_PROPTEST_SEED=… SF_PROPTEST_SCALE=…`; rerun with the same two values. The
+weekly workflow runs all of it at scale 8 with a new seed each week. `B23_CASES`
+is gone: the scale replaces it. The parsing is tested in `b14_sweep.rs`; the
+helpers are in `stokesforge-robustness/tests/common/mod.rs`.
+
 ## Running
 
 ```sh
@@ -520,6 +542,7 @@ scripts/test-all.sh                           # everything, except #[ignore]: ne
 cargo test --workspace                        # everything, except #[ignore]
 cargo test -p <crate> --test <file>          # one test file
 cargo test -p stokesforge-robustness -- --ignored  # reproductions and costly benches
+SF_PROPTEST_SEED=7 SF_PROPTEST_SCALE=8 cargo test -p stokesforge-robustness --test b24_analysis_sweep  # randomised sweeps, see below
 # (Typst is compiled and tested by `cargo test --workspace`; `--all-features` now only enables Python: see .codex/README.md)
 scripts/python-test.sh                        # Python bridge, scripts, robustness, application and CLI
 scripts/python-test.sh -- --ignored           # + the reproductions of the Python boundary
@@ -562,7 +585,7 @@ Linux runner is registered; Windows is not affected by this choice.
 | `release-manual` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` | same tag guards as `release-linux`; builds the manual with the version in its title and uploads `StokesForge-X.Y.Z-manual.tar.gz` to the GitLab package registry (`scripts/release-upload.sh manual`, #362) |
 | `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333); published to GitLab like the Linux jobs (`JOBS` of `scripts/gitlab-status.py`, #452) | same checks on a clean machine; `dist-windows` sets `STOKESFORGE_DIST_LOGO=1` (#388, one line to change): the `.exe` icon (`STOKESFORGE_EXE_ICON`, `build.rs`), the setup icon and the `.stf` icon, checked in the installation and the registry, and the installer script is compiled once more with no logo define (`/O-`); on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
 | `test-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking; GitHub only, not in `.gitlab-ci.yml`, but published to GitLab through `JOBS` of `scripts/gitlab-status.py` (#412, #452) | `cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands`: the formula engine on Windows (float formatting, paths, stack depth); the first errors go in a `::error` annotation |
-| Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta. Read with `scripts/toolchain-weekly-status.sh` (public GitHub API, no `gh`) |
+| Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta; a second job `sweeps` (#522) runs `b14`, `b22`, `b23`, `b2`, `b24` and `undo_random` at `SF_PROPTEST_SCALE=8` with `SF_PROPTEST_SEED` = the run number (debug profile, overflow checks on), then `memory_pinning` and `perf_write_under_snapshot` with `--ignored` in release. Read with `scripts/toolchain-weekly-status.sh` (public GitHub API, no `gh`) |
 | `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md); the notes end with a line "Built with rustc … (Linux) and rustc … (Windows)" (outputs `rustc` of `release-linux` and `dist-windows`, `scripts/rustc-note.sh`), and `release-publish.sh` refuses to publish if one is missing (#412) |
 | `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, check that the protection rule of the tags `v*` still allows the token's role to create tags (see "Settings outside the repository" below) |
 
@@ -1014,7 +1037,7 @@ The study was a baseline: re-measure around 2026-11-18 to see what #452 changed.
   isolation, a test that saves a user color would write to
   the real `couleurs.json`.
 - `stokesforge-clipboard` (#149): the decision of X11 answers (`x11::answer`) and the Windows/macOS format names are tested without a server; the X11 offer is tested against a **real server** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` required, XWayland is enough: `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Windows is tested likewise against the **real clipboard** (`tests/windows.rs`, `#[ignore]`, interactive desktop required: `cargo test -p stokesforge-clipboard --test windows -- --ignored`; witness: a `windows_format_name` that returns the MIME for PNG fails the read-back of the "PNG" format). Wayland and macOS have no automatic test: Wayland requires a compositor and a real input (serial), macOS is only compiled (`cargo check --target …`). An X11 test of a recipient does not test `response_type` of a `SelectionNotify`: an event coming from `SendEvent` carries the bit 0x80.
-- Tests and their comments are in French, like the rest.
+- Tests and their comments are in English, like the rest of the repository.
 
 **To read**: `stokesforge-robustness/src/lib.rs` (the index of the batteries), then the
 head of the targeted `b*` file.
