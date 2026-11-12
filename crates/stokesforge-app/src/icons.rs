@@ -35,6 +35,10 @@ pub enum IconRole {
     Note,
     Folder,
     Danger,
+    /// State to spot, in the accent (the closed size padlock, #505).
+    Accent,
+    /// Inactive state, muted (the open size padlock, #505).
+    Muted,
 }
 
 /// Available icons — a closed enum: adding an icon means adding a
@@ -106,6 +110,8 @@ pub enum Icon {
     Redo,
     /// The handle of a row that is reordered by dragging.
     Grip,
+    /// A check mark: what is sure (Import window, #488).
+    Check,
 }
 
 macro_rules! svg {
@@ -338,13 +344,13 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     ),
     (
         Icon::LockClosed,
-        IconRole::Neutral,
-        svg!("lock-simple.neutral.svg"),
+        IconRole::Accent,
+        svg!("lock-simple-fill-modify.accent.svg"),
     ),
     (
         Icon::LockOpen,
-        IconRole::Neutral,
-        svg!("lock-simple-open.neutral.svg"),
+        IconRole::Muted,
+        svg!("lock-simple-open-outline-modify.muted.svg"),
     ),
     (
         Icon::Undo,
@@ -361,6 +367,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         IconRole::Neutral,
         svg!("dots-six-vertical.neutral.svg"),
     ),
+    (Icon::Check, IconRole::Neutral, svg!("check.neutral.svg")),
 ];
 
 /// Unreachable as long as every icon has a variant (test `the_variants_table_…`).

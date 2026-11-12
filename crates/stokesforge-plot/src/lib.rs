@@ -84,6 +84,7 @@
 
 pub mod annotation;
 pub mod axis;
+pub mod color_bar;
 pub mod gradient;
 pub mod legend;
 pub mod length_unit;
@@ -101,8 +102,15 @@ pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
 pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection};
-pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
-pub use legend::{LegendPosition, LegendSpec};
+pub use color_bar::{
+    value_color, ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment,
+    ColorBarSpec, ColorBarTicks, ColorBarValue,
+};
+pub use gradient::{gradient_at, gradient_colors, GradientPreset, GRADIENT_PRESETS};
+pub use legend::{
+    template_source, typst_literal, typst_string, LegendField, LegendPosition, LegendSpec,
+    LegendText, LegendTextFrom, VARIABLES,
+};
 pub use length_unit::LengthUnit;
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
 pub use panel::{FreeFrame, FreePage, OverlaySpec, PanelSpec, SeriesSlot};
@@ -113,7 +121,7 @@ pub use series::{
 };
 pub use shape::{ShapeKind, ShapeRef, ShapeSpec};
 pub use spec::{
-    LayerPlacement, Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE,
+    GridSlack, LayerPlacement, Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE,
     FALLBACK_FRAME, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_CELL, MIN_FRAME_SIZE, TRANSPARENT,
 };
 pub use style::{

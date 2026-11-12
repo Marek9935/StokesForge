@@ -132,6 +132,7 @@ Selection ▸ remains only in Edit.
 |---|---|
 | Cell, row, header field | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (Formula field holding a formula, #236; also Workbook › Columns) · Clear · Delete and Shift Up |
 | Column header | Plot ▸ · Add Column ─ clipboard ─ Move ▸ · Type ▸ (Numeric, Mixed: greyed with their reason on a formula column or a calculation output when no selected column can change type, otherwise only the others change, #431) · Role ▸ · Reset Width (default width of the selection, disabled with no stored width, #330) ─ Clear · Delete (removes the columns; a single Undo restores them); Move ▸ = Move to First · Move Left · Move Right · Move to Last, disabled with their reason when the gesture would change nothing (#319); same entries in Workbook › Columns |
+| Row numbers (gutter), whole rows | Plot ▸ · Send to ▸ · Analysis ▸ ─ clipboard ─ Clear · Delete. With no x' on the sheet (#493) Plot and Send to are grayed out ("Set x' values to plot a row") and only Analysis acts; no Move ▸ nor Type/Role (rows are not columns) |
 | Empty grid, blank area | Add Column |
 | Entry row (cells) | the cell menu above; its gutter `*` has none (#440) |
 | Sheet tab, empty strip | Add Sheet ─ Rename · Duplicate · Reset Column Widths (the whole sheet, disabled with no stored width, #330) ─ Delete |
@@ -175,9 +176,12 @@ Workbook › Sheet (including Reset Column Widths) / Columns (including Reset Wi
 right-click's `Layout ▸`). Sections, create before organize: **Page Layout Mode**
 (#426, first entry, one check mark through `menu_choice` while the mode is on; it is a
 view state: no action, no undo step, no shortcut to enter; a toolbar button beside
-Properties, icon `Icon::PageLayout`, does the same) ─ **Layer Placement ▸**
+Properties, icon `Icon::PageLayout`, does the same) ─ **Fit Page to Layout** (#505,
+`Action::FitPageToLayout`, one undo step; greyed out with the `.disabled` reason
+when the page already fits; the same button is in the Page Layout Mode strip), then **Fit Layout to Page** (K1, `Action::FitLayoutToPage`, one undo step; the inverse, the graphs scale to fill the page; greyed out when the graphs already fill it; same button in the strip) ─
+**Layer Placement ▸**
 (Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
-(Right / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
+(Left / Right / Above / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
 **Align ▸** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center) · Same
 Width · Same Height · Distribute Horizontally · Distribute Vertically ─ Bring to
 Front · Send to Back ─ **Delete Layer** (the active layer; disabled with the

@@ -3,7 +3,7 @@
 # is for a branch (feature/<n>); for `main`, `cargo run -p stokesforge-app` is the
 # same. The orchestrator runs it itself at the trial of a visible change.
 #
-#   scripts/try.sh [--dry-run] [--release] <issue-number>|main|<line>
+#   scripts/try.sh [--dry-run] [--release] <issue-number>|main|<line> [<file.stf>]
 #
 # Finds the worktree of branch feature/<n>-*, prints what is new (the last merges
 # on main, then the commits of the branch), builds `stokesforge-app` with the
@@ -12,6 +12,8 @@
 # folder) with the demo project open (STOKESFORGE_DEMO=1, as the run-stokesforge
 # driver does). `main` tries the main checkout itself. The user's OK on this
 # trial is the go-ahead to merge a visible change.
+# <file.stf> (#518) opens that project instead of the demo: a fresh copy in a scratch folder at every run
+# (the original is never written); a missing file or another extension is refused.
 # --dry-run prints the build and run commands without running them.
 # --release (#474) builds with `cargo build --release` and runs the release binary of the
 # same worktree (debug stays the default, for its build time; debug is much slower to draw).
@@ -29,15 +31,20 @@ set -euo pipefail
 dry=0
 release=0
 target=""
+file=""
 for a in "$@"; do
     case "$a" in
     --dry-run) dry=1 ;;
     --release) release=1 ;;
     -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
-    *) target="$a" ;;
+    *) if [ -z "$target" ]; then target="$a"; elif [ -z "$file" ]; then file="$a"; else echo "try.sh: too many arguments" >&2; exit 2; fi ;;
     esac
 done
-[ -n "$target" ] || { echo "usage: try.sh [--dry-run] [--release] <issue-number>|main  (opens a branch on the screen; for main, cargo run -p stokesforge-app is the same)" >&2; exit 2; }
+[ -n "$target" ] || { echo "usage: try.sh [--dry-run] [--release] <issue-number>|main [<file.stf>]  (opens a branch on the screen; for main, cargo run -p stokesforge-app is the same)" >&2; exit 2; }
+if [ -n "$file" ]; then
+    [ -f "$file" ] || { echo "try.sh: no such file: $file" >&2; exit 1; }
+    case "$file" in *.stf) ;; *) echo "try.sh: not a .stf file: $file" >&2; exit 1 ;; esac
+fi
 
 main="$(sf_main_dir)"
 line=main
@@ -54,9 +61,9 @@ elif [[ "$target" =~ ^[A-Za-z][A-Za-z0-9._-]*$ ]]; then
 else
     wt=""
     cur=""
-    while read -r line; do
-        case "$line" in
-        "worktree "*) cur="${line#worktree }" ;;
+    while read -r entry; do
+        case "$entry" in
+        "worktree "*) cur="${entry#worktree }" ;;
         "branch refs/heads/feature/$target-"*) wt="$cur" ;;
         esac
     done < <(git -C "$main" worktree list --porcelain)
@@ -66,8 +73,11 @@ else
     fi
 fi
 
-[[ "$target" =~ ^[0-9]+$ ]] && line="$(sf_line_of "$target")"
-if [ "$line" != main ] && [[ "$target" =~ ^[0-9]+$ ]] && ! git -C "$main" rev-parse --verify -q "refs/heads/$line" > /dev/null; then
+# A plain number or a suffixed sibling (488b): the line of its issue number.
+issue=""
+[[ "$target" =~ ^[0-9]+[A-Za-z]*$ ]] && issue="${target%%[!0-9]*}"
+[ -z "$issue" ] || line="$(sf_line_of "$issue")"
+if [ "$line" != main ] && [ -n "$issue" ] && ! git -C "$main" rev-parse --verify -q "refs/heads/$line" > /dev/null; then
     echo "#$target is on the line $line, but the branch $line does not exist here (scripts/line.sh create $line)" >&2
     exit 1
 fi
@@ -87,6 +97,16 @@ if [ "$release" = 1 ]; then
 else
     build=(env SF_CARGO_QUEUE=off cargo build -p stokesforge-app --manifest-path "$wt/Cargo.toml")
     run=("$wt/target/debug/stokesforge-app")
+fi
+copy=""
+if [ -n "$file" ]; then
+    if [ "$dry" = 1 ]; then
+        copy="${TMPDIR:-/tmp}/stokesforge-try.XXXXXX/$(basename "$file")"
+    else
+        copy="$(mktemp -d "${TMPDIR:-/tmp}/stokesforge-try.XXXXXX")/$(basename "$file")"
+        cp -- "$file" "$copy"
+    fi
+    run+=("$copy")
 fi
 if [ "$dry" = 1 ]; then
     echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"

@@ -70,7 +70,9 @@ BASH_RE = [(c, re.compile(r)) for c, r in BASH_CATS]
 POLL = re.compile(r'(^|[;&(\s"\'])(until|while)\s.*\b(sleep|do)\b|\bsleep\s+\d+\s*(;|&&)\s*(tail|cat|rg|grep)|timeout\s+\d+\s+bash\s+-c', re.S)
 REAL_CARGO = re.compile(r'(^|[;&|(\s])cargo\s+(\+\S+\s+)?(test|nextest|build|clippy|check|run)\b')
 HEREDOC = re.compile(r'(?<!<)<<(?!<)-?\s*[\'"]?(\w+)[\'"]?[^\n]*\n.*?(?:\n\s*\1\b|\Z)', re.S)
-DRIVER_START = re.compile(r'driver\.py\s+start\b')
+DRIVER_START = re.compile(r'driver\w*\.py\s+start\b')
+DRIVER_VAR_START = re.compile(r'\$\{?\w+\}?\s+start\b')  # D=.../driver.py && python3 $D start
+HOOK_FEEDBACK = re.compile(r'<summary>\s*Stop hook feedback\s*</summary>', re.I)
 LONG_CATS = ('bash:test', 'bash:build', 'bash:clippy', 'bash:test_python', 'bash:manual_shots', 'bash:ci', 'bash:other',
              'bash:script', 'bash:deliver')
 
@@ -162,6 +164,19 @@ def human_kind(o):
     return 'human'
 
 
+def is_driver_start(cmd):
+    """The screen driver is started: `driver.py start`, a renamed copy, or `$D start` with D set to a driver."""
+    return bool(DRIVER_START.search(cmd) or (re.search(r'driver\w*\.py', cmd) and DRIVER_VAR_START.search(cmd)))
+
+
+def hook_feedback_text(tx):
+    """The wake-up text of a `Stop hook feedback` notification (the hook says what the developer did), else None."""
+    if not HOOK_FEEDBACK.search(tx):
+        return None
+    return re.sub(r'(?s)<task-notification>.*?</task-notification>|</?system-reminder>', '', tx)\
+        .split('":', 1)[-1].strip()
+
+
 def note_commands(state, cmd):
     """Track what the developer is asked to do: a trial entry or a decision form stays pending across turns."""
     c = strip_heredocs(cmd)
@@ -169,7 +184,7 @@ def note_commands(state, cmd):
         state['pend_trial'] = False
     elif re.search(r'suivi\.py\s+test\s+add\b|\btry\.sh\b', c):
         state['pend_trial'] = True
-    if re.search(r'suivi\.py\s+qcm\s+answers\b', c):
+    if re.search(r'suivi\.py\s+qcm\s+(answers|withdraw)\b', c):
         state['pend_form'] = False
     elif re.search(r'suivi\.py\s+qcm\s+pose\b', c):
         state['pend_form'] = True
@@ -325,7 +340,7 @@ def process(rows, session, agent, ctx):
                 st['fg'][b['id']] = cat
                 if cmd:
                     note_commands(st, cmd)
-                    if DRIVER_START.search(strip_heredocs(cmd)):
+                    if is_driver_start(strip_heredocs(cmd)):
                         facts['driver_start'] = True
                     c = CHANTIER.search(strip_heredocs(cmd))
                     if c:
@@ -383,7 +398,12 @@ def process(rows, session, agent, ctx):
             st['fg'].clear()
         elif k in ('notification', 'peer'):
             req = None
-            if segs and segs[-1]['cat'] == 'idle' and segs[-1]['t1'] >= t - 1:
+            fb = hook_feedback_text(text_of(m)) if k == 'notification' else None
+            if fb is not None and segs and segs[-1]['cat'] == 'idle' and segs[-1]['t1'] >= t - 1:
+                # #454: the hook that carries the developer's trial or form answer wakes the agent.
+                segs[-1]['cat'] = 'wait_user'
+                segs[-1]['sub'] = wait_reason(st, fb) if st['started'] else 'session_open'
+            elif segs and segs[-1]['cat'] == 'idle' and segs[-1]['t1'] >= t - 1:
                 # The agent had stopped, nobody was asked, and something outside woke it: not a user wait.
                 segs[-1]['cat'] = 'agent_stuck'
             if t - st['last_end'] >= 1.0:

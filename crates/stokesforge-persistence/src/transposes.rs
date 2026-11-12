@@ -46,6 +46,10 @@ pub(crate) struct TransposeRecord {
     pub(crate) rows: Vec<TransposedRowRecord>,
     #[serde(default)]
     pub(crate) inputs: Vec<TransposeInputRecord>,
+    /// "Recalculate automatically" (#463). Absent in a file written before the
+    /// box existed: unchecked, the sheet stays the snapshot it was.
+    #[serde(default)]
+    pub(crate) auto_recalc: bool,
 }
 
 /// The links of the tree, in the order of their sheet (two saves of the same
@@ -92,6 +96,7 @@ fn links_to_records<'a>(
                     x_prime_bits: i.x_prime_bits,
                 })
                 .collect(),
+            auto_recalc: link.auto_recalc,
         })
         .collect()
 }
@@ -137,6 +142,7 @@ pub(crate) fn records_to_transposes(
                     x_prime_bits: i.x_prime_bits,
                 })
                 .collect(),
+            auto_recalc: record.auto_recalc,
         };
         out.insert(sheet, Arc::new(link));
     }
@@ -156,6 +162,7 @@ mod tests {
             x_stamp: 0,
             rows: Vec::new(),
             inputs: Vec::new(),
+            auto_recalc: false,
         }
     }
 
@@ -184,5 +191,33 @@ mod tests {
             1_000_000_000_000,
         );
         assert_eq!(kept.keys().copied().collect::<Vec<_>>(), vec![b]);
+    }
+
+    /// A record written before the box existed has no `auto_recalc` field: it
+    /// reads back unchecked, so the sheet stays the snapshot it was (#463,
+    /// invariant 12: the field is additive). Witness: a default of `true`.
+    #[test]
+    fn a_record_without_the_box_field_reads_back_unchecked() {
+        #[derive(Serialize)]
+        struct Old {
+            sheet: u64,
+            source: u64,
+            x_column: u64,
+            x_stamp: u64,
+        }
+        let bytes = rmp_serde::to_vec_named(&Old {
+            sheet: 2,
+            source: 1,
+            x_column: 3,
+            x_stamp: 7,
+        })
+        .unwrap();
+        let record: TransposeRecord = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(!record.auto_recalc);
+        let mut with = record.clone();
+        with.auto_recalc = true;
+        let back: TransposeRecord =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&with).unwrap()).unwrap();
+        assert!(back.auto_recalc);
     }
 }

@@ -95,6 +95,24 @@ pub mod model {
                 letter = letter.as_str(),
                 name = name.as_str()
             ),
+            CoreError::TransposeSourceReadsIt {
+                letter,
+                source_sheet,
+                transposed,
+            } => tr!(
+                "error-model-transpose-source-reads-it",
+                letter = letter.as_str(),
+                source = source_sheet.as_str(),
+                sheet = transposed.as_str()
+            ),
+            CoreError::CalculationReadsFollowingSheet {
+                transposed,
+                source_sheet,
+            } => tr!(
+                "error-model-calculation-reads-following-sheet",
+                source = source_sheet.as_str(),
+                sheet = transposed.as_str()
+            ),
         }
     }
 
@@ -135,8 +153,17 @@ pub mod model {
                     letter: "B".into(),
                     name: "Notes".into(),
                 },
+                CoreError::TransposeSourceReadsIt {
+                    letter: "C".into(),
+                    source_sheet: "Sheet1".into(),
+                    transposed: "Sheet1ᵀ".into(),
+                },
+                CoreError::CalculationReadsFollowingSheet {
+                    transposed: "Sheet1ᵀ".into(),
+                    source_sheet: "Sheet1".into(),
+                },
             ];
-            let mut seen = [false; 13];
+            let mut seen = [false; 15];
             for sample in &samples {
                 let index = match sample {
                     CoreError::InvalidName(_) => 0,
@@ -152,6 +179,8 @@ pub mod model {
                     CoreError::CalculatedColumnReadOnly { .. } => 10,
                     CoreError::TransposeNoXPrime { .. } => 11,
                     CoreError::TransposeNotNumeric { .. } => 12,
+                    CoreError::TransposeSourceReadsIt { .. } => 13,
+                    CoreError::CalculationReadsFollowingSheet { .. } => 14,
                 };
                 seen[index] = true;
             }
@@ -495,7 +524,7 @@ pub mod file {
 /// Parse errors of an instrument file (`stokesforge-import`,
 /// `stokesforge-importer`).
 pub mod import {
-    use stokesforge_import::ImportError;
+    use stokesforge_import::{ChooseError, ImportError, SaveIssue};
     use stokesforge_importer::{ImportFailure, ImportFailureCause};
 
     use crate::state::ImportReadError;
@@ -512,7 +541,31 @@ pub mod import {
         }
     }
 
-    /// The sentence of an [`ImportReadError`] of the import wizard.
+    /// The sentence of a [`ChooseError`]: why no recipe could be chosen for a file.
+    pub fn choose_message(error: &ChooseError) -> String {
+        match error {
+            ChooseError::UnknownTemplate { name } => {
+                tr!("error-choose-unknown-template", name = name.as_str())
+            }
+            ChooseError::Unreadable { message } => {
+                tr!("error-choose-unreadable", detail = super::fallback(message))
+            }
+            ChooseError::Binary => tr!("error-import-binary"),
+            ChooseError::Empty => tr!("error-import-empty"),
+            ChooseError::NoNumbers => tr!("error-choose-no-numbers"),
+            ChooseError::Nmr => tr!("error-choose-nmr"),
+        }
+    }
+
+    /// The sentence of a [`SaveIssue`]: why a template cannot be saved.
+    pub fn save_issue_message(issue: SaveIssue) -> String {
+        match issue {
+            SaveIssue::NoName => tr!("error-template-name-required"),
+            SaveIssue::NoCondition => tr!("error-template-save-no-condition"),
+        }
+    }
+
+    /// The sentence of an [`ImportReadError`] of the import window.
     pub fn read_message(error: &ImportReadError) -> String {
         match error {
             ImportReadError::NoImport => tr!("error-import-not-open"),
@@ -530,6 +583,7 @@ pub mod import {
         let detail = match &failure.cause {
             ImportFailureCause::Read(message) => super::fallback(message),
             ImportFailureCause::Parse(error) => error_message(error),
+            ImportFailureCause::Origin(error) => super::origin::error_message(error),
         };
         tr!(
             "error-import-file",
@@ -571,6 +625,32 @@ pub mod import {
         }
 
         #[test]
+        fn a_refused_choice_and_a_refused_save_have_their_sentence() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let every_choose = [
+                ChooseError::UnknownTemplate { name: "T".into() },
+                ChooseError::Unreadable {
+                    message: "denied".into(),
+                },
+                ChooseError::Binary,
+                ChooseError::Empty,
+                ChooseError::NoNumbers,
+                ChooseError::Nmr,
+            ];
+            for error in &every_choose {
+                crate::errors::tests_support::check(error, &choose_message(error));
+            }
+            assert_eq!(
+                choose_message(&ChooseError::Nmr),
+                "This file holds NMR data, which StokesForge does not read"
+            );
+            for issue in [SaveIssue::NoName, SaveIssue::NoCondition] {
+                let text = save_issue_message(issue);
+                assert!(!text.is_empty() && !text.contains("NoCondition"), "{text}");
+            }
+        }
+
+        #[test]
         fn a_failed_file_names_the_file_and_the_cause() {
             // These sentences are compared in English: the language does not depend on the
             // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
@@ -587,6 +667,89 @@ pub mod import {
             assert_eq!(
                 failure_message(&failure),
                 "/data/a.csv: No such file or directory"
+            );
+        }
+    }
+}
+
+/// Errors of an Origin project file (`stokesforge-import::origin`). Offsets
+/// and sizes of the raw `Display` are not shown to the user.
+pub mod origin {
+    use stokesforge_import::origin::OriginError;
+
+    use crate::tr;
+
+    /// The sentence of an [`OriginError`].
+    pub fn error_message(error: &OriginError) -> String {
+        match error {
+            OriginError::NotOrigin => tr!("error-import-origin-not-origin"),
+            OriginError::OpjuNotSupported => tr!("error-import-origin-opju"),
+            OriginError::UnsupportedVersion { .. } => tr!("error-import-origin-version"),
+            OriginError::Truncated { .. } => tr!("error-import-origin-truncated"),
+            OriginError::BadDelimiter { .. } => tr!("error-import-origin-bad-structure"),
+            OriginError::SizeOutOfRange { .. } => tr!("error-import-origin-item-too-large"),
+            OriginError::TooDeep => tr!("error-import-origin-too-deep"),
+            OriginError::ShortRecord { .. } => tr!("error-import-origin-short-item"),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn every_variant() -> Vec<OriginError> {
+            let samples = vec![
+                OriginError::NotOrigin,
+                OriginError::OpjuNotSupported,
+                OriginError::UnsupportedVersion { version: 1.0 },
+                OriginError::Truncated { offset: 16 },
+                OriginError::BadDelimiter { offset: 16 },
+                OriginError::SizeOutOfRange {
+                    offset: 16,
+                    size: 99,
+                },
+                OriginError::TooDeep,
+                OriginError::ShortRecord { what: "a header" },
+            ];
+            let mut seen = [false; 8];
+            for sample in &samples {
+                let index = match sample {
+                    OriginError::NotOrigin => 0,
+                    OriginError::OpjuNotSupported => 1,
+                    OriginError::UnsupportedVersion { .. } => 2,
+                    OriginError::Truncated { .. } => 3,
+                    OriginError::BadDelimiter { .. } => 4,
+                    OriginError::SizeOutOfRange { .. } => 5,
+                    OriginError::TooDeep => 6,
+                    OriginError::ShortRecord { .. } => 7,
+                };
+                seen[index] = true;
+            }
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
+            samples
+        }
+
+        #[test]
+        fn every_variant_has_its_sentence_and_no_jargon() {
+            for error in every_variant() {
+                crate::errors::tests_support::check(&error, &error_message(&error));
+            }
+        }
+
+        #[test]
+        fn offsets_are_not_shown_and_each_variant_has_its_own_sentence() {
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
+            let sentences: Vec<String> = every_variant().iter().map(error_message).collect();
+            for sentence in &sentences {
+                assert!(!sentence.contains("0x") && !sentence.contains("offset"));
+            }
+            let mut sorted = sentences.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(
+                sorted.len(),
+                sentences.len(),
+                "two variants share a sentence"
             );
         }
     }
@@ -718,6 +881,11 @@ pub mod formula {
             }
             FormulaError::DeletedColumn => tr!("error-formula-deleted-column"),
             FormulaError::Cycle => tr!("error-formula-cycle"),
+            FormulaError::ReadsFollowingSheet { transposed, source } => tr!(
+                "error-formula-reads-following-sheet",
+                source = source.as_str(),
+                sheet = transposed.as_str()
+            ),
             FormulaError::TooDeep => tr!("error-formula-too-deep"),
             FormulaError::UnknownFunction { name, suggestion } => match suggestion {
                 Some(nearest) => tr!(
@@ -862,8 +1030,12 @@ pub mod formula {
                 },
                 FormulaError::RemoteOutsideColumnFunction,
                 FormulaError::RemoteXColumn,
+                FormulaError::ReadsFollowingSheet {
+                    transposed: "Sheet1ᵀ".into(),
+                    source: "Sheet1".into(),
+                },
             ];
-            let mut seen = [false; 22];
+            let mut seen = [false; 23];
             let mut ranges = [false; 2];
             let mut suggested = [false; 2];
             for sample in &samples {
@@ -899,6 +1071,7 @@ pub mod formula {
                     FormulaError::UnknownColumnIn { .. } => 19,
                     FormulaError::RemoteOutsideColumnFunction => 20,
                     FormulaError::RemoteXColumn => 21,
+                    FormulaError::ReadsFollowingSheet { .. } => 22,
                 };
                 seen[index] = true;
             }

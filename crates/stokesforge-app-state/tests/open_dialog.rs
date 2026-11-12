@@ -76,7 +76,12 @@ fn open(s: &mut Setup, which: OpenDialog) {
         }
         // Opened by a gesture that needs a scenario of its own (low R² fits,
         // recovery copies, column in use): covered by the exhaustive `kind`.
-        OpenDialog::LowR2List | OpenDialog::ColumnUse | OpenDialog::Recovery => unreachable!(),
+        // The Origin chooser needs a file read on the background thread:
+        // `shell.rs` (`dropping_an_opj_opens_the_chooser_and_runs_no_command`).
+        OpenDialog::LowR2List
+        | OpenDialog::ColumnUse
+        | OpenDialog::Recovery
+        | OpenDialog::OriginImport => unreachable!(),
     }
 }
 

@@ -414,7 +414,12 @@ fn build_spec(
                 "parent must be a folder handle".into(),
             ));
         }
-        PlotSpec::default()
+        // A new graph has no legend frame (#507, D6), like the application's.
+        let mut fresh = PlotSpec::default();
+        for panel in fresh.panels.iter_mut() {
+            panel.legend.frame = false;
+        }
+        fresh
     };
     if let Some(title) = &request.title {
         spec.title.clone_from(title);

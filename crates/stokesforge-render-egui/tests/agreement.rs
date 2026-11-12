@@ -1285,3 +1285,251 @@ fn a_free_page_is_the_same_figure_on_screen_and_in_the_export() {
         "the document has the size of the page"
     );
 }
+
+// -- #499: the legend « Text from » setting --
+
+/// The minimal graph with its first series unnamed and a comment on its Y
+/// column, and the legend reading `text`.
+fn legend_text_fixture(text: stokesforge_plot::LegendText) -> Sample {
+    let mut fixture = minimal();
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    let y = panel.series[0].y;
+    panel.series[0].name.clear();
+    panel.legend.text = text;
+    let mut meta = fixture
+        .project
+        .tree()
+        .node(y)
+        .and_then(|node| node.as_column())
+        .map(|column| column.meta().clone())
+        .expect("column");
+    meta.comment = "scan comment 42".to_string();
+    meta.long_name = "the long name".to_string();
+    fixture.project.set_column_meta(y, meta).expect("meta");
+    fixture
+}
+
+/// The screen and the export draw the same text, and it is the chosen one.
+/// Witness: one path ignoring the setting makes the two disagree, or the
+/// default text come back.
+#[test]
+fn the_screen_and_the_svg_export_draw_the_chosen_legend_text() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let fixture = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Comments,
+        ..LegendText::default()
+    });
+    let (primitives, _) = agree(fixture.project.tree(), &fixture.spec, SIZE, "comments");
+    let has = |needle: &str| {
+        primitives
+            .iter()
+            .any(|p| matches!(p, Primitive::Text(text) if text == needle))
+    };
+    assert!(has("scan comment 42"), "the comment is not in the legend");
+    assert!(!has("the long name"), "the long name is still drawn");
+}
+
+/// A custom template is drawn the same on both backends, and the column text
+/// it inserts is not read as Typst (`*` stays a star).
+#[test]
+fn a_custom_template_agrees_and_leaves_the_column_text_literal() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let literal = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Custom,
+        template: "#comments".to_string(),
+        ..LegendText::default()
+    });
+    agree(
+        literal.project.tree(),
+        &literal.spec,
+        SIZE,
+        "custom template",
+    );
+    let mut starred = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Custom,
+        template: "#comments".to_string(),
+        ..LegendText::default()
+    });
+    let y = starred.spec.panels[0].series[0].y;
+    let mut meta = starred
+        .project
+        .tree()
+        .node(y)
+        .and_then(|node| node.as_column())
+        .map(|column| column.meta().clone())
+        .expect("column");
+    meta.comment = "*not bold* #panic()".to_string();
+    starred.project.set_column_meta(y, meta).expect("meta");
+    // Compiles without a Typst error and agrees: the markup in the column
+    // text did not run.
+    agree(
+        starred.project.tree(),
+        &starred.spec,
+        SIZE,
+        "markup in the column text",
+    );
+}
+
+/// An empty chosen row gives an empty entry; the figure still agrees.
+#[test]
+fn an_empty_legend_entry_agrees_between_the_backends() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let fixture = legend_text_fixture(LegendText {
+        from: LegendTextFrom::Units,
+        ..LegendText::default()
+    });
+    agree(fixture.project.tree(), &fixture.spec, SIZE, "empty entry");
+}
+
+// -- #499 step C: the colour bar --
+
+/// The minimal graph with two groups on a chained colour bar under the frame
+/// (typed ranges 0-57 and 0-16, drawn 0-57 and 57-73), stored frames.
+fn colour_bar_fixture() -> (Sample, (u32, u32)) {
+    use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+    let mut fixture = minimal();
+    fixture.spec.title.clear();
+    fixture.spec.frame_widths = vec![600.0];
+    fixture.spec.frame_heights = vec![300.0];
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    let mut second = panel.series[0].clone();
+    panel.series[0].group = Some(1);
+    second.group = Some(2);
+    panel.series.push(second);
+    panel.color_bar = Some(ColorBarSpec {
+        segments: vec![
+            ColorBarSegment {
+                from: Some(0.0),
+                to: Some(57.0),
+                label: "switch".to_string(),
+                ..ColorBarSegment::new(1)
+            },
+            ColorBarSegment {
+                from: Some(0.0),
+                to: Some(16.0),
+                ..ColorBarSegment::new(2)
+            },
+        ],
+        chain: true,
+        title: "t (min)".to_string(),
+        ..ColorBarSpec::default()
+    });
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let size = stokesforge_render_svg::figure_size(&fixture.spec, &measurer, &choice);
+    (fixture, size)
+}
+
+/// The screen and the export draw the same bar: the same stripes, the same
+/// dashed ticks, tick labels, break label and title, in a figure that grew by
+/// the band. Witness: a stripe of another width in one backend (or a tick
+/// written by one path only) makes `agree` fail; the bar drawn in the figure
+/// of the same spec without it (`without`) shows the band is the bar's.
+///
+/// Every stripe of the body is at least 3 points wide: egui's tessellator
+/// turns a rectangle of two points or less into a faint line, and a figure
+/// shown at a fraction of its size then has light seams between the stripes
+/// (#499). Witness: the 1-pixel stripes of before are refused here.
+#[test]
+fn the_screen_and_the_export_draw_the_same_colour_bar() {
+    let (fixture, size) = colour_bar_fixture();
+    let (primitives, drawn) = agree(fixture.project.tree(), &fixture.spec, size, "colour bar");
+    let thickness =
+        |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 12);
+    let stripes: Vec<_> = primitives.iter().filter(thickness).collect();
+    assert!(
+        stripes.len() >= 100,
+        "the bar is painted in stripes, found {}",
+        stripes.len()
+    );
+    for stripe in &stripes {
+        let Primitive::Rect((x0, _), (x1, _)) = stripe else {
+            continue;
+        };
+        assert!(x1 - x0 >= 3, "a stripe {} points wide", x1 - x0);
+    }
+    let has = |needle: &str| {
+        primitives
+            .iter()
+            .any(|p| matches!(p, Primitive::Text(text) if text == needle))
+    };
+    for text in ["0", "57", "73", "t (min)", "switch"] {
+        assert!(has(text), "{text:?} is not drawn");
+    }
+    assert!(drawn
+        .panel(0)
+        .expect("panel")
+        .texts
+        .iter()
+        .any(|text| text.target == stokesforge_plot::TextTarget::ColorBar { panel: 0 }));
+
+    let mut without = fixture.spec.clone();
+    without.panels.get_mut(0).expect("panel").color_bar = None;
+    let (bare, _) = agree(fixture.project.tree(), &without, size, "without the bar");
+    assert!(
+        bare.iter().filter(thickness).count() < 50,
+        "the stripes come from the bar"
+    );
+}
+
+/// A bar in a corner with a custom length and thickness is drawn the same on
+/// screen and in the export, and the strip really has the asked thickness.
+/// Witness: a size read by one backend only, or a thickness left at 12,
+/// fails `agree` or the count.
+#[test]
+fn the_screen_and_the_export_agree_on_a_custom_bar_size() {
+    let (mut fixture, size) = colour_bar_fixture();
+    let bar = fixture
+        .spec
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .color_bar
+        .as_mut()
+        .expect("bar");
+    bar.position = stokesforge_plot::ColorBarPosition::TopRight;
+    bar.orientation = stokesforge_plot::ColorBarOrientation::Horizontal;
+    bar.length = Some(240.0);
+    bar.thickness = Some(22.0);
+    let (primitives, _) = agree(fixture.project.tree(), &fixture.spec, size, "custom bar");
+    let thick = |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 22);
+    assert!(
+        primitives.iter().filter(thick).count() >= 50,
+        "the strip is 22 points thick"
+    );
+    let default = |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 12);
+    assert!(primitives.iter().filter(default).count() < 20);
+}
+
+// -- #507: the legend box --
+
+/// Every box setting non-default (hidden frame colour and thickness aside,
+/// the frame shown thick and red, a translucent background, two columns,
+/// other gaps and a long thumbnail): the screen and the export draw the same
+/// figure, and it is not the default one. Witness: a setting read by one
+/// backend only breaks `agree`; one read by neither leaves the figure equal to
+/// the default one.
+#[test]
+fn the_screen_and_the_export_agree_on_a_non_default_legend_box() {
+    let default = realistic();
+    let (plain, _) = agree(
+        default.project.tree(),
+        &default.spec,
+        LARGE,
+        "default legend",
+    );
+    let mut boxed = realistic();
+    for panel in boxed.spec.panels.iter_mut() {
+        let legend = &mut panel.legend;
+        legend.frame = true;
+        legend.frame_color = "#cc0000".to_string();
+        legend.frame_width = Some(3.0);
+        legend.background = "#ffee0080".to_string();
+        legend.columns = 2;
+        legend.row_gap = Some(9.0);
+        legend.column_gap = Some(25.0);
+        legend.swatch_length = Some(44.0);
+    }
+    let (changed, _) = agree(boxed.project.tree(), &boxed.spec, LARGE, "boxed legend");
+    assert_ne!(plain, changed, "the settings change nothing");
+}

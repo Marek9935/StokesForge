@@ -42,6 +42,9 @@ pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
         return decode_utf16(rest, u16::from_be_bytes);
     }
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    if let Cow::Owned(clean) = without_sparse_nuls(bytes) {
+        return decode_text(&clean).map(|text| Cow::Owned(text.into_owned()));
+    }
     let text = match std::str::from_utf8(bytes) {
         Ok(text) => Cow::Borrowed(text),
         Err(_) => Cow::Owned(decode_mixed(bytes)),
@@ -50,6 +53,38 @@ pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
         return Err(ImportError::NotText);
     }
     Ok(text)
+}
+
+/// Does `bytes` (not UTF-16) hold NUL bytes as padding in a text file, as the
+/// Avantes exports do (one header line padded with ~55 NULs)? True when the
+/// NULs sit in at most 2 lines of the first 4096 bytes and make under 5 % of
+/// that head and of the whole file. UTF-16 without a mark (a NUL every other
+/// byte) and real binary files are not sparse.
+pub(crate) fn has_sparse_nuls(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(4096)];
+    let in_head = head.iter().filter(|&&b| b == 0).count();
+    if in_head == 0 || in_head * 100 >= head.len() * 5 {
+        return false;
+    }
+    let lines = head
+        .split(|&b| b == b'\n')
+        .filter(|line| line.contains(&0))
+        .count();
+    let total = bytes.iter().filter(|&&b| b == 0).count();
+    lines <= 2 && total * 100 < bytes.len() * 5
+}
+
+/// `bytes` with the padding NULs removed when they are sparse (see
+/// [`has_sparse_nuls`]), borrowed otherwise. The NULs are removed rather than
+/// turned into spaces: they carry no content, and a space would show as a
+/// trailing blank in a value. Once stripped there is no NUL left, so a second
+/// pass borrows.
+pub(crate) fn without_sparse_nuls(bytes: &[u8]) -> Cow<'_, [u8]> {
+    if has_sparse_nuls(bytes) {
+        Cow::Owned(bytes.iter().copied().filter(|&b| b != 0).collect())
+    } else {
+        Cow::Borrowed(bytes)
+    }
 }
 
 /// Mixed decoding: valid UTF-8 sequences are kept, each invalid byte is read
@@ -72,6 +107,11 @@ pub fn decode_with(
     encoding: crate::recipe::Encoding,
 ) -> Result<Cow<'_, str>, ImportError> {
     use crate::recipe::Encoding;
+    if !matches!(encoding, Encoding::Utf16Le | Encoding::Utf16Be) {
+        if let Cow::Owned(clean) = without_sparse_nuls(bytes) {
+            return decode_with(&clean, encoding).map(|text| Cow::Owned(text.into_owned()));
+        }
+    }
     let text: Cow<'_, str> = match encoding {
         Encoding::Auto => return decode_text(bytes),
         Encoding::Utf8 => {
@@ -108,7 +148,7 @@ pub fn decode_with(
 }
 
 /// Name of the encoding [`decode_text`] would pick for `bytes`, to show it in
-/// the import wizard; `None` for a binary file.
+/// the import window; `None` for a binary file.
 pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
     decode_text(bytes).ok()?;
     Some(if bytes.starts_with(&[0xFF, 0xFE]) {
@@ -157,7 +197,7 @@ fn is_binary_control(c: char) -> bool {
 /// A Windows-1252 byte to its character. Identical to Latin-1 outside
 /// `0x80..=0x9F`, where Windows-1252 places typographic characters; the five
 /// unassigned positions fall back to Latin-1's C1 control.
-fn windows_1252(b: u8) -> char {
+pub(crate) fn windows_1252(b: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž',
         '\u{8F}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}',

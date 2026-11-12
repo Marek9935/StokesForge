@@ -76,6 +76,7 @@ cp LICENSE "$PACKAGE_DIR/"
 mkdir -p "$PACKAGE_DIR/licenses/fonts" "$PACKAGE_DIR/licenses/epaint-default-fonts" \
     "$PACKAGE_DIR/licenses/phosphor" \
     "$PACKAGE_DIR/licenses/winit" "$PACKAGE_DIR/licenses/smithay-clipboard" \
+    "$PACKAGE_DIR/licenses/liborigin" \
     "$PACKAGE_DIR/licenses/python" "$PACKAGE_DIR/licenses/numpy" "$PACKAGE_DIR/licenses/scipy"
 for notice in vendor/fonts/*/OFL.txt; do
     family="$(basename "$(dirname "$notice")")"
@@ -86,6 +87,7 @@ cp crates/stokesforge-app/assets/icons/LICENSE "$PACKAGE_DIR/licenses/phosphor/L
 cp -a vendor/epaint-default-fonts/. "$PACKAGE_DIR/licenses/epaint-default-fonts/"
 cp vendor/winit/LICENSE vendor/winit/STOKESFORGE.md "$PACKAGE_DIR/licenses/winit/"
 cp vendor/smithay-clipboard/LICENSE "$PACKAGE_DIR/licenses/smithay-clipboard/"
+cp vendor/liborigin/NOTICE "$PACKAGE_DIR/licenses/liborigin/"
 cp -a "$NOTICES_DIR/." "$PACKAGE_DIR/licenses/python/"
 cp "$PYTHON_RUNTIME_LICENSE" "$PACKAGE_DIR/licenses/python/LICENSE-runtime.txt"
 cp -a "$NUMPY_LICENSES/." "$PACKAGE_DIR/licenses/numpy/"

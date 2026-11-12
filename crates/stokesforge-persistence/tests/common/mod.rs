@@ -257,6 +257,21 @@ pub fn non_trivial_spec(
                 ..Default::default()
             },
             color: "#118899".to_string(),
+            // #499: a custom template and a column for the row series.
+            text: stokesforge_plot::LegendText {
+                from: stokesforge_plot::LegendTextFrom::Custom,
+                template: "%(LL) (%(LU))".to_string(),
+                row_column: Some(y1),
+            },
+            // #507: every box setting non-default.
+            frame: false,
+            frame_color: "#cc2244".to_string(),
+            frame_width: Some(2.5),
+            background: "#ffee0080".to_string(),
+            columns: 3,
+            row_gap: Some(7.0),
+            column_gap: Some(20.5),
+            swatch_length: Some(41.0),
         },
         title_color: "#aa8811".to_string(),
         // Issue #35: free texts, all fields non-default.
@@ -311,6 +326,31 @@ pub fn non_trivial_spec(
         group_names: [(3, "Séries d'été".to_string())].into(),
         // Color gradient kept by group 3 (#213).
         group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),
+        // #499: a colour bar, two segments in a chain, a break label, a
+        // choice that only a newer version knows.
+        color_bar: Some(stokesforge_plot::ColorBarSpec {
+            segments: vec![
+                stokesforge_plot::ColorBarSegment {
+                    group: 3,
+                    from: Some(0.0),
+                    to: Some(57.0),
+                    label: "57 min".to_string(),
+                },
+                stokesforge_plot::ColorBarSegment::new(4),
+            ],
+            chain: true,
+            value: stokesforge_plot::ColorBarValue::Comments,
+            row_column: None,
+            scale: stokesforge_plot::ColorBarScale::Log,
+            orientation: stokesforge_plot::ColorBarOrientation::Horizontal,
+            position: stokesforge_plot::ColorBarPosition::Below,
+            anchor: None,
+            ticks: stokesforge_plot::ColorBarTicks::Auto,
+            title: "Time".to_string(),
+            length: Some(180.0),
+            thickness: Some(10.0),
+            visible: true,
+        }),
         // #398: a free frame, negative left.
         free_frame: Some(stokesforge_plot::FreeFrame {
             left: -120.5,
@@ -331,6 +371,13 @@ pub fn non_trivial_spec(
             font: stokesforge_plot::TextFont::default(),
             // Issue #90: color of the legend and of the title of the panel.
             color: "#228833".to_string(),
+            // #499: a list choice.
+            text: stokesforge_plot::LegendText {
+                from: stokesforge_plot::LegendTextFrom::LongNameComments,
+                ..Default::default()
+            },
+            // #507: the default box (frame shown) next to the custom one.
+            ..LegendSpec::default()
         },
         title_font: stokesforge_plot::TextFont {
             family: "Noto Sans".to_string(),
@@ -403,6 +450,7 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
             comment: Some(SubheaderLineRange { from: 4, to: 5 }),
             x_prime: Some(SubheaderLineRange::single(6)),
             same_line_name_unit: true,
+            join_lines: true,
         },
         skip_chars: 5,
         preview_lines: 33,
@@ -426,5 +474,25 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
         import_mode: ImportMode::AddRows,
         files_layout: FilesLayout::SharedX,
         block_split: BlockSplit::BeforeLine("XYDATA".into()),
+        main_until_marker: Some("XYDATA".into()),
+        header_props: vec![
+            HeaderProp {
+                key: "XUNITS".into(),
+                field: PropField::Units,
+                target: PropTarget::X,
+                short_unit: true,
+            },
+            HeaderProp {
+                key: "TITLE".into(),
+                field: PropField::LongName,
+                target: PropTarget::All,
+                short_unit: false,
+            },
+        ],
+        skip_text_rows: true,
+        format: FileFormat::Jcamp,
+        name_unit_slash: true,
+        strip_unit_brackets: true,
+        sheet_name_from_file: true,
     }
 }

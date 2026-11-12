@@ -887,7 +887,7 @@ Known limits of this surface:
 /// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
 /// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
 /// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
-pub const PYST_API_VERSION: &str = "0.5";
+pub const PYST_API_VERSION: &str = "0.6";
 
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///
@@ -928,6 +928,7 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
         wrap_pyfunction!(crate::groups::remove_group, &module)?,
         wrap_pyfunction!(crate::groups::set_group_style, &module)?,
         wrap_pyfunction!(crate::groups::apply_gradient, &module)?,
+        wrap_pyfunction!(crate::groups::color_bar, &module)?,
     ] {
         module.add_function(function)?;
     }

@@ -76,6 +76,15 @@ pub(crate) const KEY_LAYOUT_SNAP: egui::KeyboardShortcut =
 pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
 
+/// 1, 2, 3 — the first, second and third answer of a question of the Import
+/// Wizard review (Enter takes the first).
+pub(crate) const KEY_ANSWER_1: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num1);
+pub(crate) const KEY_ANSWER_2: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num2);
+pub(crate) const KEY_ANSWER_3: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num3);
+
 /// Ctrl+Z — undo.
 pub(super) const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -173,7 +182,7 @@ pub(super) const SHORTCUT_NEW_PROJECT: egui::KeyboardShortcut =
 /// when the active tab is not a graph.
 pub(super) const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
-/// Ctrl+" — open the import wizard. On an AZERTY keyboard, `"` is the digit 3
+/// Ctrl+" — open the import window. On an AZERTY keyboard, `"` is the digit 3
 /// key **without** Shift: egui has no `"` key and falls back to the physical
 /// key, so the shortcut is consumed as Ctrl+3. On a QWERTY keyboard, `"` is
 /// Shift+apostrophe ([`SHORTCUT_IMPORT_QWERTY`]).

@@ -1,6 +1,6 @@
 # Project skills
 
-Each folder holds a `SKILL.md`: its `description` is the trigger, its body the steps, its `references/` the detail read on demand. Codex reads the same folders through the links of `.agents/skills/`; `.claude/skills/` is the source. Skills use the docs, they never copy them: `docs/README.md` routes, `.claude/rules.md` says what to load, `.claude/conventions.md` holds the rules by domain.
+Each folder holds a `SKILL.md`: its `description` is the trigger, its body the steps, its `references/` the detail read on demand. Skills use the docs, they never copy them: `docs/README.md` routes, `.claude/rules.md` says what to load, `.claude/rules/` holds the rules by domain (path-scoped files).
 
 | Skill | For | Triggers on |
 |---|---|---|
@@ -21,10 +21,10 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 ```text
 question ──► stokesforge-explain
 symptom  ──► stokesforge-bug-report ──(explicit request)──► stokesforge-bug-fix ──┐
-request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► pre-trial if visible ──► merge (green, or the user's word after a trial all OK)
+request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► pre-trial if a gesture or drawing changes ──► merge (green, or the user's word after a trial all OK)
 ```
 
-`run-stokesforge` sits beside verification for any change to see or handle in the real app; its screen is invisible, so agents run in parallel, and a visible change gets a pre-trial by an agent in the real app before the user's trial (`stokesforge-verification/references/suivi.md` § Pre-trial). Several orchestrators may work at once: `scripts/chantier.sh <n>…`, run by the orchestrator in the current session, creates or finds the worktrees, assigns the colours and prints the briefing, `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the local tracking page (`http://127.0.0.1:8441/`, `scripts/suivi.py serve`) lists what to answer and test (the agent wakes on the answers and merges on the user's go-ahead: button or word), who holds which colour, and carries the one CI watcher (nobody polls the CI) (`stokesforge-verification/references/suivi.md`). Asking the user to decide (one start form, one follow-up form, always the form even for one question, posed locally with `scripts/suivi.py qcm pose`, the published Artifact as fallback): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
+`run-stokesforge` sits beside verification for any change to see or handle in the real app; its screen is invisible, so agents run in parallel, and a change of gesture or drawing gets a pre-trial by an agent in the real app before the user's trial (`stokesforge-verification/references/suivi.md` § Pre-trial). Several orchestrators may work at once: `scripts/chantier.sh <n>…`, run by the orchestrator in the current session, creates or finds the worktrees, assigns the colours and prints the briefing, `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the local tracking page (`http://127.0.0.1:8441/`, `scripts/suivi.py serve`) lists what to answer and test (the agent wakes on the answers, stores the merge message, and the page's « Fusionner » button runs the merge itself (or the user's word in the terminal)), who holds which colour, and carries the one CI watcher (nobody polls the CI) (`stokesforge-verification/references/suivi.md`). Asking the user to decide (one start form, one follow-up form, always the form even for one question, posed locally with `scripts/suivi.py qcm pose`, the published Artifact as fallback): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
 
 ## Keeping them true
 

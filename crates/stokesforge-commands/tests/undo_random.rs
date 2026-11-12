@@ -181,15 +181,43 @@ fn script() -> impl Strategy<Value = Script> {
     ]
 }
 
-/// Runner with a fixed seed: reproducible, and no regression file on the
-/// disk of the repository.
+/// Runner with a fixed seed, or `SF_PROPTEST_SEED`; `SF_PROPTEST_SCALE`
+/// multiplies the case count (#522).
 fn deterministic_runner() -> TestRunner {
+    let var = |name: &str| std::env::var(name).ok();
+    let scale = var("SF_PROPTEST_SCALE").map_or(1, |v| {
+        v.trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|s| *s >= 1)
+            .unwrap_or_else(|| panic!("SF_PROPTEST_SCALE must be an integer >= 1, got {v:?}"))
+    });
+    let rng = match var("SF_PROPTEST_SEED") {
+        None => TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        Some(v) => {
+            let seed: u64 = v.trim().parse().unwrap_or_else(|_| {
+                panic!("SF_PROPTEST_SEED must be an unsigned integer, got {v:?}")
+            });
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&seed.to_le_bytes());
+            TestRng::from_seed(RngAlgorithm::ChaCha, &bytes)
+        }
+    };
     let config = Config {
-        cases: 32,
+        cases: 32 * scale,
         failure_persistence: None,
         ..Config::default()
     };
-    TestRunner::new_with_rng(config, TestRng::deterministic_rng(RngAlgorithm::ChaCha))
+    TestRunner::new_with_rng(config, rng)
+}
+
+/// What a failure message carries to be replayed.
+fn replay_note() -> String {
+    format!(
+        "replay with SF_PROPTEST_SEED={} SF_PROPTEST_SCALE={}",
+        std::env::var("SF_PROPTEST_SEED").unwrap_or_else(|_| "(unset)".into()),
+        std::env::var("SF_PROPTEST_SCALE").unwrap_or_else(|_| "1".into())
+    )
 }
 
 // -- interpretation -------------------------------------------------------
@@ -570,7 +598,7 @@ fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
             );
             Ok(())
         })
-        .expect("round-trip property verified");
+        .unwrap_or_else(|e| panic!("round-trip property verified: {e}; {}", replay_note()));
     // The formula steps must really reach the history, or the property above
     // would say nothing about them.
     assert!(
@@ -605,7 +633,7 @@ fn replaying_the_same_draw_yields_the_same_history_labels() {
             prop_assert_eq!(labels(&scripts), labels(&scripts));
             Ok(())
         })
-        .expect("deterministic labels");
+        .unwrap_or_else(|e| panic!("deterministic labels: {e}; {}", replay_note()));
 }
 
 // -- 24. under a limit -----------------------------------------------------
@@ -638,5 +666,5 @@ fn a_bounded_history_still_round_trips_within_its_window() {
             );
             Ok(())
         })
-        .expect("under-limit property verified");
+        .unwrap_or_else(|e| panic!("under-limit property verified: {e}; {}", replay_note()));
 }

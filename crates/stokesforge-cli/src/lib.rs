@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x]
-//!                   [--out project.stf] FILE...
+//!                   [--out project.stf] FILE...   # FILE: text, or Origin .opj
 //! stokesforge-cli recipes            # lists the saved templates
 //! stokesforge-cli run [--project input.stf] [--out output.stf] script.pyst
 //! ```
@@ -13,7 +13,10 @@
 //! For `import`, the project is built directly (fresh `Project`, `stokesforge-core`
 //! primitives): no session and no history, it is the construction of a
 //! project before any edit (see `docs/invariants.md` §1). The conversion of
-//! files into columns is the application's, `stokesforge-importer`.
+//! files into columns is the application's, `stokesforge-importer`. An Origin
+//! project (`.opj`) is recognised by its extension or its content: one
+//! workbook per book, one sheet per `Data` sheet, `--recipe` and `--layout`
+//! do not apply to it.
 //! `run` (python feature) starts a session without a window: pyst keeps
 //! the same actor, commands and undo as in the console. The
 //! output file is saved only after a successful run.
@@ -22,10 +25,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use stokesforge_core::Project;
-use stokesforge_import::{choose_recipe, FilesLayout, ImportRecipe, RecipeStore};
+use stokesforge_import::{recipe_for_file, FilesLayout, RecipeStore};
 
 const USAGE: &str = "usage:
   stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.stf] FILE...
+      (an Origin .opj file is imported book by book, Data sheets only; --recipe and --layout do not apply to it)
   stokesforge-cli recipes
   stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst\n  stokesforge-cli --version";
 
@@ -146,44 +150,92 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         ),
         None => None,
     };
-    // One template per file: the one named, otherwise the automatic choice,
-    // otherwise the permissive recipe.
+    // One template per file: the one named, otherwise the template whose
+    // conditions the file meets, otherwise the detector (the same choice as
+    // the application and `pyst.import_file`). An Origin project has no template.
     let mut items = Vec::new();
+    let mut origin_files = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
     for path in &args.files {
+        let bytes = std::fs::read(path).ok();
+        let is_origin = stokesforge_importer::is_origin_path(path)
+            || bytes
+                .as_deref()
+                .is_some_and(stokesforge_importer::is_origin_bytes);
+        if is_origin {
+            match stokesforge_importer::read_origin_file(path) {
+                Ok(project) => origin_files.push((path, project)),
+                Err(failure) => refused.push(failure.to_string()),
+            }
+            continue;
+        }
         let mut recipe = match &named {
             Some(recipe) => recipe.clone(),
-            None => std::fs::read(path)
-                .ok()
-                .and_then(|bytes| choose_recipe(store.recipes(), path, &bytes).cloned())
-                .unwrap_or_else(|| ImportRecipe::new("Untitled")),
+            None => {
+                let chosen = std::fs::read(path)
+                    .map_err(|err| err.to_string())
+                    .and_then(|bytes| {
+                        recipe_for_file(&store, path, &bytes, None).map_err(|err| err.to_string())
+                    });
+                match chosen {
+                    Ok(chosen) => chosen.recipe,
+                    // A file nobody can read (missing, NMR, binary) is skipped
+                    // and reported; the others go on.
+                    Err(message) => {
+                        refused.push(format!("{}: {message}", path.display()));
+                        continue;
+                    }
+                }
+            }
         };
         if let Some(layout) = args.layout {
             recipe.files_layout = layout;
         }
         items.extend(stokesforge_importer::import_items(path, &recipe));
     }
-    let failures: Vec<String> = items
-        .iter()
-        .filter_map(|item| item.table.as_ref().err())
-        .map(ToString::to_string)
+    let failures: Vec<String> = refused
+        .into_iter()
+        .chain(
+            items
+                .iter()
+                .filter_map(|item| item.table.as_ref().err())
+                .map(ToString::to_string),
+        )
         .collect();
     let layout = items
         .iter()
         .find(|item| item.table.is_ok())
         .map_or(FilesLayout::SheetPerFile, |item| item.recipe.files_layout);
     let plans = stokesforge_importer::plan_import(&items, layout);
-    if plans.is_empty() {
+    let origin_plans: Vec<_> = origin_files
+        .iter()
+        .map(|(_, project)| {
+            stokesforge_importer::plan_origin_import(
+                project,
+                &stokesforge_importer::default_origin_selection(project),
+            )
+        })
+        .collect();
+    if plans.is_empty() && origin_plans.iter().all(Vec::is_empty) {
         let reasons: Vec<&str> = failures.iter().map(String::as_str).collect();
         return Err(format!("nothing to import: {}", reasons.join(" ; ")));
     }
 
     let mut project = Project::new("Import").map_err(|err| err.to_string())?;
     let root = project.root();
-    let book = project
-        .add_empty_workbook(root, Some("Import"))
-        .map_err(|err| err.to_string())?;
     let mut column_count = 0usize;
+    let mut sheet_count = plans.len();
+    let text_book = if plans.is_empty() {
+        None
+    } else {
+        Some(
+            project
+                .add_empty_workbook(root, Some("Import"))
+                .map_err(|err| err.to_string())?,
+        )
+    };
     for plan in &plans {
+        let book = text_book.expect("a book exists when there is a plan");
         let sheet = project
             .add_worksheet(book, Some(&plan.name))
             .or_else(|_| project.add_worksheet(book, None))
@@ -205,13 +257,46 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         )
         .map_err(|err| err.to_string())?;
     }
+    for ((_, origin), book_plans) in origin_files.iter().zip(&origin_plans) {
+        for book_plan in book_plans {
+            // Like the sheets: a name the project refuses keeps an automatic one.
+            let book = project
+                .add_empty_workbook(root, Some(&book_plan.name))
+                .or_else(|_| project.add_empty_workbook(root, None))
+                .map_err(|err| err.to_string())?;
+            let origin_book = &origin.books[book_plan.book];
+            for sheet_plan in &book_plan.sheets {
+                let origin_sheet = &origin_book.sheets[sheet_plan.sheet];
+                let sheet = project
+                    .add_worksheet(book, Some(&sheet_plan.name))
+                    .or_else(|_| project.add_worksheet(book, None))
+                    .map_err(|err| err.to_string())?;
+                for column in &origin_sheet.columns {
+                    let column = stokesforge_importer::make_origin_column(origin_book, column);
+                    project
+                        .add_column(sheet, None, None, column)
+                        .map_err(|err| err.to_string())?;
+                    column_count += 1;
+                }
+                sheet_count += 1;
+                writeln!(
+                    out,
+                    "worksheet \"{}\" of Origin book \"{}\": {}",
+                    sheet_plan.name,
+                    book_plan.name,
+                    counted(origin_sheet.columns.len(), "column")
+                )
+                .map_err(|err| err.to_string())?;
+            }
+        }
+    }
     for failure in &failures {
         writeln!(out, "skipped: {failure}").map_err(|err| err.to_string())?;
     }
     writeln!(
         out,
         "{}, {}",
-        counted(plans.len(), "worksheet"),
+        counted(sheet_count, "worksheet"),
         counted(column_count, "column")
     )
     .map_err(|err| err.to_string())?;

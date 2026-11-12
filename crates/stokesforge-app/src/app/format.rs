@@ -163,7 +163,9 @@ impl StokesForgeApp {
                     TextTarget::Title => stokesforge_render_egui::TITLE_SIZE,
                     TextTarget::PanelTitle { .. } => stokesforge_render_egui::PANEL_TITLE_SIZE,
                     TextTarget::AxisTitle { .. } => stokesforge_render_egui::AXIS_DESC_SIZE,
-                    TextTarget::Legend { .. } => stokesforge_render_egui::LABEL_SIZE,
+                    TextTarget::Legend { .. } | TextTarget::ColorBar { .. } => {
+                        stokesforge_render_egui::LABEL_SIZE
+                    }
                 };
                 let text = editor
                     .as_ref()
@@ -226,14 +228,16 @@ impl StokesForgeApp {
             let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)?;
             let series = spec.series_at(target)?;
             return Some(crate::toolbar::ObjectFormatState {
+                target: (0, target.panel, target.index),
                 closed: false,
                 line_color: series.line.color.clone(),
                 fill_color: String::new(),
                 line_width: series.line.width,
             });
         }
-        let (_, _, shape) = self.selected_object(active_tab)?;
+        let (_, target, shape) = self.selected_object(active_tab)?;
         Some(crate::toolbar::ObjectFormatState {
+            target: (1, target.panel, target.index),
             closed: shape.kind.is_closed(),
             line_color: shape.line_color,
             fill_color: shape.fill_color,

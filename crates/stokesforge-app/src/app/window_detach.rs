@@ -3095,15 +3095,16 @@ mod tests {
         }
         let (before, scale_before) = (figure().expect("published"), scale(&app));
 
-        let add_cell = |app: &mut StokesForgeApp| {
+        let add_cell = |app: &mut StokesForgeApp, side| {
             app.state.dispatch(Action::AddCell {
                 graph,
                 panel: 0,
-                side: stokesforge_core::compose::CellSide::Right,
+                side,
                 columns: Vec::new(),
             })
         };
-        add_cell(&mut app);
+        // A cell on the left (#503) grows the figure like one on the right.
+        add_cell(&mut app, stokesforge_core::compose::CellSide::Left);
         publish(&mut app);
         let command = paint().expect("the viewport follows the figure");
         let grown = figure().expect("published").0 - before.0;
@@ -3121,7 +3122,7 @@ mod tests {
             paint();
         }
         monitor.set(Some(command + egui::vec2(10.0, 0.0)));
-        add_cell(&mut app);
+        add_cell(&mut app, stokesforge_core::compose::CellSide::Right);
         publish(&mut app);
         let clamped = paint().expect("clamped growth");
         assert_eq!(clamped.x, command.x + 10.0, "stops at the monitor");
@@ -3448,6 +3449,80 @@ mod tests {
         assert_eq!(drain(&mut app, &ctx).len(), 1);
         assert_eq!(
             super::super::window_band::text_at(&ctx, viewport, now),
+            None
+        );
+        session.shutdown().unwrap();
+    }
+
+    /// #484: Recalculate pressed in a detached workbook, on a followed sheet
+    /// whose source keeps a formula reading it, is refused and says why in that
+    /// window's band (red), not in the root's. Witness: dropping
+    /// `action_origins` (the band would be empty).
+    #[test]
+    fn a_refused_recalculate_is_told_in_the_band_of_the_detached_workbook() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let source = project.tree().children(book).unwrap()[0];
+        let mut ids = Vec::new();
+        for (name, x) in [("A", 0.0), ("B", 10.0), ("C", 20.0)] {
+            let mut column = Column::from_f64(&[1.0, 2.0]);
+            column.set_meta(stokesforge_core::ColumnMeta {
+                x_prime: Some(x),
+                ..Default::default()
+            });
+            ids.push(
+                project
+                    .add_column(source, None, Some(name), column)
+                    .unwrap(),
+            );
+        }
+        let sheet = project.transpose_rows(source, &[0]).unwrap();
+        let sheet_name = project.tree().node(sheet).unwrap().name().to_string();
+        let (kept, _) = project
+            .tree()
+            .formula_keeping(ids[2], &format!("max('{sheet_name}'!B)"));
+        project
+            .set_column_meta(
+                ids[2],
+                stokesforge_core::ColumnMeta {
+                    x_prime: Some(20.0),
+                    formula: Some(kept),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // A column added after the link makes the sheet out of date.
+        let mut late = Column::from_f64(&[5.0, 6.0]);
+        late.set_meta(stokesforge_core::ColumnMeta {
+            x_prime: Some(30.0),
+            ..Default::default()
+        });
+        project.add_column(source, None, Some("D"), late).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Book(book));
+        let viewport = egui::ViewportId::from_hash_of(Tab::Book(book));
+        let ctx = egui::Context::default();
+        let expected = app
+            .state
+            .transpose_info(sheet)
+            .and_then(|info| info.stuck)
+            .expect("the sheet is stuck on the reader");
+        send(&app, vec![Action::RecalculateTranspose { sheet }]);
+        let actions = drain(&mut app, &ctx);
+        assert_eq!(actions.len(), 1);
+        app.dispatch_actions(&ctx, actions);
+        let now = std::time::Instant::now();
+        let (text, level) = super::super::window_band::text_at(&ctx, viewport, now)
+            .expect("the band of the detached workbook");
+        assert_eq!(text, expected);
+        assert_eq!(level, super::super::window_band::BandLevel::Error);
+        assert_eq!(
+            super::super::window_band::text_at(&ctx, egui::ViewportId::ROOT, now),
             None
         );
         session.shutdown().unwrap();

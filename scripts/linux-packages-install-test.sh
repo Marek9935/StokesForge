@@ -49,6 +49,11 @@ fi
 
 step "install with the package dependencies only"
 pm_install "$PKG"
+# Every user reads and runs the program and its notices (#486): a file at 600
+# (the third-party notices once were) or a closed folder is a defect.
+unreadable="$(find /opt/stokesforge \( -type f ! -perm -004 \) -o \( -type d ! -perm -005 \))"
+[ -z "$unreadable" ] || die "not readable by every user: $(printf '%s' "$unreadable" | head)"
+ok "everything under /opt/stokesforge is readable by every user"
 [ -x /usr/bin/stokesforge ] || die "/usr/bin/stokesforge missing"
 [ "$(stokesforge --version)" = "stokesforge-app $version" ] || die "version answer: $(stokesforge --version)"
 ok "stokesforge --version"

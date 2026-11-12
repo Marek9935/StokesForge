@@ -106,6 +106,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Long Name | Nom long | Description of a column, shown in the header | Libellé, Description | O |
 | Units | Unités | Unit of the values of a column, shown in the header | Unité (singulier) | O (Q13) |
 | Comments | Commentaires | Free text of a column | Remarques, Notes | O |
+| Short Name | Nom court | Name of a column, the letter or the name in the header (#499) | Étiquette | O |
+| Text from | Texte issu de | Legend setting: the header row that gives the text of each legend entry (#499) | Source du texte | O |
 | Metadata | Métadonnées | Key-value pairs read from the imported file | Infos, En-tête du fichier | O |
 | Role | Rôle | Function of a column in a plot | Désignation, Type | O (Q8) |
 | X / Y / Z | X / Y / Z | Roles: abscissa, ordinate, third axis | — | O |
@@ -136,7 +138,9 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 <!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
-| Import Wizard | Assistant d'import | Six-step window that sets up the import | Importateur | O |
+| Import (window) | Importer | Title of the one-screen window that sets up the import (#488: file tabs, left panel, file grid; no steps). Was « Import Wizard » / « Assistant d'import ». In sentences: « the Import window » / « la fenêtre d'import » | Import Wizard, Assistant d'import, Importateur | O |
+| Not automatic / Use Automatically | Pas automatique / Utiliser automatiquement | An import template kept from an older version with its conditions, never applied by itself; the button in Manage Templates makes the conditions active (F1 of #488) | Disabled, Enable | O |
+| Sheet name (import) | Nom de la feuille | Advanced setting of the import: the sheet takes **Title from the file** (« Titre du fichier ») when the file has one, or always the **File name** (« Nom du fichier ») (F2 of #488) | Worksheet name | O |
 | Delimiter | Séparateur | Character that separates the values of a line | Délimiteur | O |
 | Decimal separator | Séparateur décimal | Character between the integer and decimal parts | Virgule (pour le nom) | O |
 | Thousands separator | Séparateur de milliers | Character that groups digits | Milliers | O |
@@ -155,6 +159,15 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Source file | Fichier source | File a column comes from | Origine | O |
 | Header key | Clé d'en-tête | Name of a header metadata item | — | — |
 | Destination | Destination | Where the import writes its columns | Cible | O |
+| To check | À vérifier | Tag and block of the import screen: what the detector is not sure of, listed as sentences (« Check Now » walks through them). Never « Warnings » | Avertissements, Alertes | O |
+| Mark as Checked | Marquer comme vérifié | Button beside a point to check: the user looked and accepts it; the answer is remembered for that kind of file, the recipe is not touched | Valider, Ignorer, OK | O |
+| Check Now | Vérifier maintenant | Button of the To check block: reviews the points one at a time | Revoir, Lancer | O |
+| Template (import) | Modèle | Saved settings with the **conditions** a file must meet to be read with them (« Used for files that »). Never « recipe » or « preset » on screen | Recette, Préréglage | O |
+| Save as Template / Manage Templates | Enregistrer comme modèle / Gérer les modèles | Footer Template menu and the offer « Save these settings for JASCO files? » | Sauvegarder le modèle | O |
+| Condition | Condition | What triggers a template: instrument, data type, number of columns, a header line, file name, extension | Critère, Déclencheur | O |
+| Answers remembered | Réponses mémorisées | List in Manage Templates of the points already answered per kind of file, each with **Forget** | Historique | O |
+| Advanced (import) | Avancé | Fold, closed by default, at the bottom of the left panel: date order, leading characters removed, blocks, missing values, comment prefix, skipped data lines | Options, Expert | O |
+| Show Guide / Don't show again | Afficher le guide / Ne plus afficher | The three-step first-use guide over the grid; shown every time until « Don't show again » is ticked | Tutoriel, Aide | O |
 
 ### 2.5 Graph
 
@@ -171,6 +184,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Bring to Front / Send to Back (layer) | Amener devant / Envoyer derrière | Entries of a layer in Free (#398; keys `action-layer-bring-to-front`, `action-layer-send-to-back`, distinct from the object ones): the layer under the right-click or its Object Manager node; grayed out « The layer is already in front » / « The layer is already at the back ». History: « Bring Layer to Front » / « Mettre le calque au premier plan », « Send Layer to Back » / « Mettre le calque à l'arrière-plan » | Move Up, Forward | O |
 | Layer Background | Fond du calque | Color field of General › Size in Free (#398), **Auto** by default: « Auto (only over another layer) » / « Auto (seulement sur un autre calque) ». Distinct from the graph's « Background »: two color fields with the same label share one widget id (the picker of the first opens with the second). History « Change Layer Background » / « Modifier le fond du calque » | Fill | O |
 | Move Layer / Resize Layer | Déplacer le calque / Redimensionner le calque | History entries of the layer gestures of the Page Layout Mode (#398, #426; keys `history-plot-move-layer`, `history-plot-resize-layer`): a graph moved, or resized by an edge or a corner | Drag | O |
+| Fit Layout to Page | Ajuster la disposition à la page | Layout menu entry and button after Fit Page to Layout in the strip of the Page Layout Mode (#505, K1, keys `action-layout-fit-layout`, `history-plot-fit-layout`): the inverse of Fit Page to Layout, scales the layers to fill the page; the page does not change. Greyed out « The layers already fill the page » / « Les calques remplissent déjà la page ». History label: `Fit Layout to Page` | Fit Layout to Page Size, Stretch to Page | O |
+| Fit Page to Layout | Ajuster la page à la disposition | Layout menu entry and button beside the Figure size of the Page Layout Mode strip (#505, keys `action-layout-fit-page`, `history-plot-fit-page`): resizes the page to the space the layers use (Regular Grid: clears the empty space around the grid; Free: the page becomes the bounding box of the layers), margins included, layers unmoved. Greyed out « The page already fits the layout » / « La page est déjà ajustée à la disposition ». Origin: Fit Page to Layers | Fit to Content, Resize Page | O |
 | Layout | Disposition | Menu-bar menu after Graph (#398, key `menu-layout`): where the layers sit on the page. Entries: **Page Layout Mode** (#426, first, check mark while on), **Layer Placement ▸** (« Regular Grid » / « Grille régulière », « Free » / « Libre »), **New Layer Beside ▸**, **Align ▸** (« Bottom » / « Bas », « Top » / « Haut », « Vertical Center » / « Centre vertical », « Left » / « Gauche », « Right » / « Droite », « Horizontal Center » / « Centre horizontal »), « Same Width » / « Même largeur », « Same Height » / « Même hauteur », « Distribute Horizontally » / « Répartir horizontalement », « Distribute Vertically » / « Répartir verticalement », Bring to Front, Send to Back, « Delete Layer » / « Supprimer le calque » (keys `menu-layout-*`, `action-layout-*`, `action-delete-layer`). Greyed out « Needs at least two layers » / « Il faut au moins deux calques » and « Needs at least three layers » / « Il faut au moins trois calques » | Arrange, Format, Position | O |
 | Layer Placement | Placement des calques | Choice in Graph Properties › General › Size and in the Layout menu (#398); the Page Layout Mode strip shows it as the **Grid mode** toggle (#426): **Regular grid** / **Grille régulière** (layers in columns and rows that share their sizes, default) or **Free** / **Libre** (each layer has its own plot area: « Position, left » / « Position, gauche », « Position, top » / « Position, haut » are page coordinates, kept when another layer moves and possibly negative, then Plot area width and height). « Frame » / « Cell » / « Case » stay off the interface | Layout mode (the Page Layout Mode is a view, not this choice), Custom, Perso | O |
 | Length unit | Unité de longueur | Preference: Centimeters (default), Millimeters, Points, Inches; the file keeps points (#394) | Unit of measure | O |

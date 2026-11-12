@@ -52,6 +52,7 @@ arrow-counter-clockwise	neutral
 arrow-clockwise	neutral
 dots-six-vertical	neutral
 pencil-simple	neutral
-lock-simple	neutral
-lock-simple-open	neutral
+lock-simple-fill-modify	accent
+lock-simple-open-outline-modify	muted
 layout	neutral
+check	neutral

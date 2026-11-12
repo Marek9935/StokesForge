@@ -70,6 +70,7 @@
 
 pub mod clip;
 pub mod color;
+pub mod color_bar;
 pub mod decimate;
 pub mod fonts;
 pub mod formula;
@@ -123,15 +124,17 @@ pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use free_gesture::{
-    boundary_group, figure_to_stored, graph_boxes, layout_handle_at, moved_boundary, moved_box,
-    nudged_box, resized_page, scaled_to_page, stored_to_figure, BoundaryGroup, FreeHandle,
-    GraphBox, Guide, LayoutHandle, LayoutReach, Snap, BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX,
-    EDGE_REACH_PX, INNER_REACH_SHARE, MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT,
-    TOUCH_TOLERANCE_POINTS,
+    boundary_group, boxes_fitted_to_page, figure_to_stored, graph_boxes, layout_handle_at,
+    moved_boundary, moved_box, moved_page_corner, nudged_box, page_fitted_to_layers,
+    scaled_to_page, stored_to_figure, BoundaryGroup, FreeHandle, GraphBox, Guide, LayoutHandle,
+    LayoutReach, Snap, BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX, EDGE_REACH_PX, FIT_PAGE_EXTRA_MARGIN,
+    INNER_REACH_SHARE, MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
-    grid_corners, grid_handle_at, locked_corner_delta, resized_frames, scaled_axis, scaled_frames,
-    splitter, GridCorner, GridHandle,
+    grid_cell_at, grid_corners, grid_handle_at, grid_line_at, layout_fitted_to_page,
+    page_corner_slack, page_corner_slack_keeping_ratio, page_edge_bumped, resized_edge,
+    resized_frames, resized_line_alone, scaled_axis, splitter, EdgeSide, GridCorner, GridHandle,
+    GridLine, LineAxis, OuterEdge,
 };
 pub use hit::{
     component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,

@@ -406,7 +406,7 @@ impl StokesForgeApp {
             })
             .unwrap_or_default();
         let row_pairs: Vec<(NodeId, usize)> = sheet
-            .and_then(|sheet| self.state.row_drag_payload(sheet))
+            .and_then(|sheet| self.state.analysis_rows_target(sheet))
             .map(|payload| {
                 payload
                     .rows
@@ -432,8 +432,8 @@ impl StokesForgeApp {
                     spec,
                 }),
                 None if graph.is_some() => None,
-                // Whole rows of a sheet at x' (#253): we analyze
-                // rows, not the columns they cross.
+                // Whole rows of a sheet (#253, #493: x' or not): we
+                // analyze rows, not the columns they cross.
                 None if !row_pairs.is_empty() => {
                     Some(super::analysis_menu::AnalysisTarget::Rows { rows: &row_pairs })
                 }
@@ -1065,6 +1065,31 @@ pub(super) fn layout_menu_contents(
             ui.close();
         }
     });
+    // #505: fit the page to the layers, greyed out when it already does.
+    sections.section(ui, true, |ui| {
+        let available = fit_page_available(ui.ctx(), graph, spec);
+        if ui
+            .add_enabled(available, egui::Button::new(tr!("action-layout-fit-page")))
+            .on_hover_text(tr!("action-layout-fit-page", "hint"))
+            .on_disabled_hover_text(tr!("action-layout-fit-page", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::FitPageToLayout { graph });
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                available,
+                egui::Button::new(tr!("action-layout-fit-layout")),
+            )
+            .on_hover_text(tr!("action-layout-fit-layout", "hint"))
+            .on_disabled_hover_text(tr!("action-layout-fit-layout", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::FitLayoutToPage { graph });
+            ui.close();
+        }
+    });
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-layer-placement"), |ui| {
             for (label, hint, to_free) in [
@@ -1101,9 +1126,19 @@ pub(super) fn layout_menu_contents(
         ui.menu_button(tr!("menu-new-layer-beside"), |ui| {
             for (label, hint, side) in [
                 (
+                    tr!("action-new-layer-beside-left"),
+                    tr!("action-new-layer-beside-left", "hint"),
+                    CellSide::Left,
+                ),
+                (
                     tr!("action-new-layer-beside-right"),
                     tr!("action-new-layer-beside-right", "hint"),
                     CellSide::Right,
+                ),
+                (
+                    tr!("action-new-layer-beside-above"),
+                    tr!("action-new-layer-beside-above", "hint"),
+                    CellSide::Above,
                 ),
                 (
                     tr!("action-new-layer-beside-below"),
@@ -1163,6 +1198,30 @@ pub(super) fn layout_menu_contents(
             ui.close();
         }
     });
+}
+
+/// Whether the page of `graph` has something to fit to its layers (#505). In
+/// Free it measures the figure, so the answer is kept for the spec it was
+/// computed for while the menu stays open.
+fn fit_page_available(
+    ctx: &egui::Context,
+    graph: NodeId,
+    spec: &stokesforge_plot::PlotSpec,
+) -> bool {
+    let id = egui::Id::new(("fit_page_available", graph));
+    if spec.layer_placement != stokesforge_plot::LayerPlacement::Free {
+        return spec.sanitized_grid_slack().is_some();
+    }
+    if let Some((cached, answer)) =
+        ctx.data(|data| data.get_temp::<(stokesforge_plot::PlotSpec, bool)>(id))
+    {
+        if &cached == spec {
+            return answer;
+        }
+    }
+    let answer = stokesforge_app_state::frame_sizes::spec_fitted_to_layers(spec).is_some();
+    ctx.data_mut(|data| data.insert_temp(id, (spec.clone(), answer)));
+    answer
 }
 
 fn arrange(
@@ -2025,6 +2084,33 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #493: the top Analysis menu on whole rows of a sheet with no x' analyzes
+    /// the rows (through the transposed sheet), not the columns they cross.
+    /// Witness: with `row_drag_payload` as the target the click opens
+    /// `OpenAnalysis` on the columns.
+    #[test]
+    fn the_analysis_menu_takes_whole_rows_of_a_sheet_without_x_prime() {
+        use stokesforge_app_state::analysis::Preset;
+        let (session, mut app, _) = bench();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let tab = Some(Tab::Book(book));
+        app.state.select_row(sheet, 1);
+        assert!(app.state.row_drag_payload(sheet).is_none(), "no x'");
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
+        let integrate = active(&menu, &tr!("action-analysis-integrate"));
+        assert!(integrate.enabled);
+        assert_eq!(
+            click_at(&mut app, &ctx, tab, integrate.center),
+            vec![Action::OpenRowAnalysis {
+                preset: Preset::Integrate,
+                rows: vec![(sheet, 1)],
+            }]
+        );
+        session.shutdown().unwrap();
+    }
+
     /// #248: the Analysis menu has one entry per category, and the methods of
     /// each category are in its submenu — "Reference Correction" belongs to
     /// Data Manipulation, not to Fitting.
@@ -2623,7 +2709,9 @@ mod tests {
         });
         let tab = Some(Tab::Graph(graph));
         for (label, side) in [
+            (tr!("action-new-layer-beside-left"), CellSide::Left),
             (tr!("action-new-layer-beside-right"), CellSide::Right),
+            (tr!("action-new-layer-beside-above"), CellSide::Above),
             (tr!("action-new-layer-beside-below"), CellSide::Below),
         ] {
             let ctx = context();

@@ -126,10 +126,10 @@ egui selectable button outside a menu, a `show_ui` or a
 Bold is **always** `theme::bold` (`wght` axis of Noto Sans Variable,
 weight 600): egui's `RichText::strong` makes nothing bold, it is forbidden
 (`no_egui_strong_outside_the_theme`). A form section title
-(graph properties, import wizard) goes through `theme::section_title`
+(graph properties, import window) goes through `theme::section_title`
 (6 pt space then bold) and alone separates its groups, without a `ui.separator()`
 right before (`no_separator_before_a_section_title`); the current step
-of the import wizard and the selected item of a list are also in
+of the import window and the selected item of a list are also in
 bold. A font without a `wght` axis (Fira or Libertinus pair, system font)
 stays at normal weight, without error.
 
@@ -145,7 +145,7 @@ list row (`list_row`) and any composed row (checkbox, swatch,
 label) have the same height, `list_row::LIST_ROW_HEIGHT` (S-L7): the
 `ui.horizontal` row receives it through `with_list_row_height` (interaction
 height raised for the duration of the row), so the checkbox there measures 24 pt on a side.
-The separator of the step trail of the import wizard is the muted `CaretRight`
+The separator of the step trail of the import window is the muted `CaretRight`
 icon, without a tooltip (decorative, no gesture). Every state or chrome color
 comes from `theme.rs` (`accent`, `tab_rule_color`, `tab_hover_mark_color`,
 `list_row_selected_fill`, `list_row_hover_fill`, `drop_target_stroke`…)

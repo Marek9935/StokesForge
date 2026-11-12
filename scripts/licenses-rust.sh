@@ -30,4 +30,7 @@ if command -v cygpath >/dev/null 2>&1; then ABOUT_OUT="$(cygpath -m "$TEMP_FILE"
 cargo about generate --workspace --all-features --locked --fail \
     scripts/licenses.hbs -o "$ABOUT_OUT"
 cat vendor/crate-license-notices/NOTICE.txt >> "$TEMP_FILE"
+# mktemp creates the file at 600 and the mv keeps it: the notices must be
+# readable by every user of the installed program (#486).
+chmod 644 "$TEMP_FILE"
 mv "$TEMP_FILE" "$OUTPUT_FILE"

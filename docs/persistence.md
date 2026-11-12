@@ -222,6 +222,48 @@ and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
 (literal values); changing it would make every calculation of the files already
 written stale on reading.
 
+## Import recipe: `join_lines` (#488)
+
+`SubheaderRolesRecord` (the recipe stored with the source of an imported
+column) gained `join_lines` (`bool`, `#[serde(default)]`): Long Name and
+Comments ranges of several sub-header lines are joined with a space. **Absent
+means false, the reading from before: the first line of the range only**, so a
+stored range `1` to `2` keeps its meaning in an older file and `FORMAT_VERSION`
+stays 1 (changing the meaning of the range would have raised it). Refresh from
+Source keeps the stored value; a recipe opened in the import window is switched
+to true. Witness `tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens
+and saves the file again loses the field (CHANGELOG).
+
+## Import recipe: the detector fields (#488)
+
+`ImportRecipeRecord` stores six more fields, all `#[serde(default)]`:
+`main_until_marker` (`Option<String>`), `header_props` (`Vec<HeaderPropRecord>`,
+with `PropFieldRecord` and `PropTargetRecord`), `skip_text_rows`, `format`
+(`FileFormatRecord`: `Table` or `Jcamp`), `name_unit_slash`,
+`strip_unit_brackets`. A record without them reads the reading from before
+(plain table, no header property, no marker), so **`FORMAT_VERSION` stays 1**
+and every existing `.stf` loads. Witness `tests/witnesses/v1/project.stf`
+regenerated with non-default values. A 1.0 that opens and saves the file again
+loses the six fields (CHANGELOG).
+
+**Limitation (user decision, 2026-11-09).** Refresh from Source re-reads the
+source file with the **stored recipe as it is**, without running the detector.
+It is not promised to reproduce an import from one version to the next: a
+newer reader may interpret the same recipe differently (a recipe stored by an
+older version has no detector fields, a newer detector may know more).
+
+## Import recipe: `sheet_name_from_file` (#488)
+
+`ImportRecipeRecord` gained `sheet_name_from_file` (`bool`, `#[serde(default)]`):
+the worksheet takes the file name even when the file has a title. Absent means
+false, the reading from before (the title names the sheet when the recipe
+reads one), so **`FORMAT_VERSION` stays 1**. Witness
+`tests/witnesses/v1/project.stf` regenerated. A 1.0 that opens and saves the
+file again loses the field (CHANGELOG). The same field is in
+`import_recipes.json` (preferences, not the `.stf`); the same file also holds
+`not_automatic`, the names of the old templates kept but not applied by
+themselves (F1 of #488), absent in an older file and ignored by an older app.
+
 ## Frame sizes: additive fields (#394)
 
 `PlotSpecRecord` gained `frame_widths` and `frame_heights` (`Vec<f64>`, points;
@@ -285,6 +327,22 @@ version that re-saves the file drops it without a message (the figure goes back
 to the bounding box). Witness `tests/witnesses/v1/project.stf` regenerated with
 a page; the old-record case is in `schema.rs`, the hostile case in
 `b13_hostile_free_frames...`.
+
+## Regular Grid: the empty space around the grid (#505)
+
+`PlotSpecRecord` gained `grid_slack` (`Option<GridSlackRecord>`: `left`, `top`,
+`right`, `bottom` in points), `#[serde(default, skip_serializing_if =
+"Option::is_none")]`: the empty space the page keeps outside the outer cells of a
+Regular Grid after an outer edge was pulled inward. A file without it reads no
+space, which is today's layout, and a graph without space writes the same bytes as
+before, so **`FORMAT_VERSION` did not move** and `tests/witnesses` are unchanged.
+It is written as the spec holds it; `PlotSpec::sanitized_grid_slack()` reads it
+(non-finite or negative reads 0, each side at most `MAX_FRAME_SIZE`, the two sides
+of an axis together at most `MAX_FRAME_SIZE`). Read only on the grid: leaving the
+grid (`compose::set_free_placement`) and returning to it (`set_grid_placement`)
+clear it, and a graph that goes Free keeps its image as its `free_page`. An older
+version that re-saves the file drops it without a message (the figure shrinks to
+the grid). The hostile case is in `b13_spec_bounds`.
 
 ### Stacking and layer background (#398, batch 2a)
 
@@ -352,6 +410,18 @@ it in `Targeted` and `Full`, and compares the literal formula texts and the
 literal values (computed by hand, `==`): a renamed function, a changed
 associativity or a changed text of the witness fails it. Regenerating the
 witness with other formulas means editing that table by hand.
+
+## Sheet of an untouched import: additive field (#488)
+
+The `Worksheet` record gained `raw_modified_base` (`Option<String>`,
+`#[serde(default)]`): the base of the name the sheet takes at the first change
+to an imported column ("Sheet", « Feuille »), present only while the sheet is
+the untouched "Raw Data" of a new workbook per file. It is **not written** on a
+sheet without the mark, so every file that has none is byte-identical to before
+(the `v1` witness did not change) and a file without the field reads no mark.
+**`FORMAT_VERSION` did not move.** A 1.0 reader keeps the sheet and ignores the
+field; if it saves the file again, the field is dropped without a message and
+the sheet keeps its name for good. Tests: `tests/raw_sheet_mark.rs`.
 
 ## Mixed-type columns: additive change, no migration
 
@@ -706,7 +776,10 @@ The format does not change: a backup copy is an ordinary `.stf`, written by
 data folder (or `<STOKESFORGE_CONFIG_DIR>/recovery` when the variable is set,
 #332), next to a `.json` card (original path, time) and a `.lock` lock
 that do not belong to the format. It never goes through the "saved" marker:
-neither `saved_revision` nor working path. Offered at the next startup
+neither `saved_revision` nor working path. While an undoable action is open
+(Graph Properties, a shape drag, a macro of another client) the copy waits
+silently and is retried every 5 s; a session refusal `MacroOpen` counts as
+busy, the `.json` card is written only after a successful save. Offered at the next startup
 only if it is newer than its `.stf`. Details:
 `docs/application/project-and-import.md`, `stokesforge-app-state/src/recovery.rs`.
 
@@ -739,6 +812,13 @@ written: they are derived on reading, hence the importance of the column version
 (written by the file) and of the content fingerprints (FNV-1a written in hard code, stable
 from one Rust version to another).
 
+`TransposeRecord::auto_recalc` (#463, the "Recalculate automatically" box) is an
+additive `#[serde(default)]` field: **absent means unchecked**, so a file written
+before the box opens with its sheets as the snapshots they were, and
+`FORMAT_VERSION` stays 1. A 1.0 that opens and saves such a file again loses the
+field: the box is unchecked when reopened later, no number is lost
+(CHANGELOG).
+
 On load, the first recalculation pass recomputes the formula columns, and a
 column that gets the same type and values keeps its version (#439: the pass
 writes nothing then). A link that was up to date in the file therefore stays so
@@ -753,3 +833,61 @@ the sheet stays, ordinary. A column identifier that no longer exists is accepted
 clipboard carries a link only when both its ends are inside the copied roots
 (#391, `docs/data-model.md`); otherwise the copy is ordinary. Additive field: it
 does not change the version number of the format.
+
+## Legend text source: additive fields (#499)
+
+`LegendSpecRecord` gained `text_from` (the key of a `LegendTextFrom`, `String`),
+`text_template` (`String`) and `text_row_column` (`Option<u64>`), all
+`#[serde(default)]`. **`FORMAT_VERSION` did not move**: a file without the
+fields reads as today's text (long name, then short name), and the default
+source is written as an empty `text_from`, so a graph that never touched the
+setting is byte-identical to before. A key written by a newer version becomes
+`LegendTextFrom::Unknown(key)`: read as the long name, written back as it was
+(invariant 10). An older reader that saves the file again drops the three
+fields without a message. Witness `tests/witnesses/v1/project.stf`
+regenerated with a custom template and a row column on one legend and a
+list choice on the other; unit tests in `schema.rs`
+(`a_legend_without_text_settings_reads_as_the_default`).
+
+## Legend box: additive fields (#507)
+
+`LegendSpecRecord` gained, all `#[serde(default)]` and **not written when
+default** (a file that never touched them stays byte-identical):
+`frame_hidden` (stored as « hidden » because a `#[serde(default)]` bool reads
+`false` on an older file, whose legend has its frame), `frame_color` (empty =
+automatic ink), `frame_width` (`Option<f64>` points, `None` = 1),
+`background` (empty = automatic, else `#RRGGBB[AA]`), `columns` (absent = 1,
+default fn, 0 from a damaged file reads as 1), `row_gap`, `column_gap` and
+`swatch_length` (`Option<f64>` points, `None` = 4 / 12 / 26). The reader of
+the model clamps every length (`LegendSpec::*_pt`), so a hand-edited file
+cannot ask for an absurd box. **A new graph is created without a frame**
+(`LegendSpec::frame = false` in every creation path); `LegendSpec::default()`
+keeps the frame, which is what an older record reads as. The colour bar has no
+font of its own: it shares the legend's (`TextTarget::ColorBar` reads and
+writes `legend.font`), and a `font` key a pre-release build wrote in a bar
+record is ignored on reading. Witness `tests/witnesses/v1/project.stf`
+regenerated with every box setting non-default; unit tests in `schema.rs`
+(`a_legend_without_box_settings_reads_as_the_default`,
+`the_legend_box_round_trips_and_a_default_one_writes_nothing`).
+
+## Colour bar: additive field (#499, step C)
+
+`PanelSpecRecord` gained `color_bar` (`Option<ColorBarRecord>`),
+`#[serde(default)]`: segments (group, optional typed ends, break label),
+`chain`, the value source, scale, orientation, position, anchor, ticks, title
+`visible` and the strip
+`length` / `thickness` in points (`Option<f64>`, `None` = automatic, not
+written, set by pulling a resize handle of a bar inside the frame; the witness
+holds both). **`FORMAT_VERSION` did not move**: a file without it has no bar
+and its curves keep their stored colors. Every choice is a stored key; a
+default is written as an empty string and an unknown key (newer version)
+becomes `Unknown(key)`, read as the default and written back as it was
+(invariant 10). The colour of a curve on a bar is never stored: it is computed
+at each draw (`stokesforge-render::color_bar`). An older reader that saves the
+file again drops the bar without a message. Witness
+`tests/witnesses/v1/project.stf` regenerated with a two-segment chained bar;
+unit test `a_color_bar_round_trips_and_keeps_unknown_choices` in `convert.rs`.
+
+## Accepted limits (2026-10-20, after #302-#305)
+
+Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).

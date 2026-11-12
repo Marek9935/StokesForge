@@ -21,8 +21,12 @@
 //! [`decode`] turns bytes into text before any splitting: UTF-8, UTF-16 with a
 //! byte order mark, and as a fallback Windows-1252, the code page of device
 //! software on Windows.
+//!
+//! [`origin`] reads the workbooks of an Origin project (`.opj`), the binary
+//! format Horiba's software writes: books, sheets, columns with their long
+//! names, units and values. It is not a text format and goes through no
+//! recipe.
 
-pub mod choose;
 pub mod config_dir;
 mod data_end;
 mod datetime;
@@ -30,16 +34,22 @@ mod datetime;
 #[doc(hidden)]
 pub use datetime::parse_datetime as parse_datetime_for_agreement;
 pub mod decode;
+pub mod instrument;
+pub mod jcamp;
 mod layout;
 pub mod metadata;
 mod numbers;
+pub mod origin;
 pub mod parse;
 pub mod preview;
+pub mod props;
 pub mod recent;
 pub mod recipe;
+pub mod sniff;
 pub mod store;
+pub mod templates;
+mod thousands;
 
-pub use choose::choose_recipe;
 pub use decode::*;
 pub use metadata::MetadataLine;
 pub use parse::*;
@@ -47,3 +57,8 @@ pub use preview::*;
 pub use recent::{RecentFiles, MAX_RECENT_FILES};
 pub use recipe::*;
 pub use store::*;
+pub use templates::tie_id_of;
+pub use templates::{
+    kind_id, kind_summary, recipe_for_file, ChooseError, ChosenRecipe, Condition, FileFacts,
+    KindSummary, RecipeOrigin, SaveIssue, TemplateMatch, TIE_PICK_SEPARATOR, TIE_PREFIX,
+};

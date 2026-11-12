@@ -69,13 +69,17 @@ a.st:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .lbl{font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
 .intro{font-weight:600}
+.goal{font-weight:700}
+.around{font-style:italic}
 .expect{border-left:4px solid var(--ok);padding-left:12px}
 .meta{color:var(--muted);font-size:.85rem}
+button.wd{padding:8px 14px}
+.wdq{flex:1 0 100%;font-weight:700}
 .acts{display:flex;flex-wrap:wrap;gap:10px}
 button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font-weight:700}
 button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
-button.ok{border-color:var(--ok);color:var(--ok)}
-button.ok.on{background:var(--ok);color:var(--panel)}
+button.ok,button.oi{border-color:var(--ok);color:var(--ok)}
+button.ok.on,button.oi.on{background:var(--ok);color:var(--panel)}
 button.back{border-color:var(--bad);color:var(--bad)}
 button.back.on{background:var(--bad);color:var(--panel)}
 button.save{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -102,6 +106,17 @@ textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;
 .empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
 details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
 .note{color:var(--muted);font-size:.9rem}
+.strip{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.thumb{position:relative;display:inline-flex;flex-direction:column;gap:4px;max-width:160px}
+.thumb img{display:block;max-width:160px;max-height:120px;border:2px solid var(--line);border-radius:8px;background:var(--bg)}
+.thumb .gone{border:2px dashed var(--line);border-radius:8px;padding:8px;color:var(--muted);font-size:.85rem}
+.thumb button{padding:2px 8px;font-size:.85rem}
+.imgline{color:var(--muted);font-size:.9rem}
+.imgline.bad{color:var(--bad);font-weight:700}
+.imgline.warn{color:var(--warn);font-weight:700}
+.sent{display:flex;flex-wrap:wrap;gap:8px}
+.sent .thumb img{max-width:200px;max-height:150px}
+#imgnote{position:sticky;top:56px;z-index:2}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .tabs{display:flex;gap:8px;border-bottom:2px solid var(--line);position:sticky;top:0;background:var(--bg);padding-top:8px;z-index:2}
@@ -150,6 +165,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
 
   <div class="panel" id="p-attente" role="tabpanel" aria-labelledby="tab-attente">
     <div class="banner" id="banner" hidden></div>
+    <div class="banner" id="imgnote" role="status" hidden></div>
     <div class="filter" id="filter" hidden></div>
     <section aria-labelledby="h-qcm">
       <h2 id="h-qcm">Questionnaires <span class="count" id="n-qcm">–</span></h2>
@@ -160,9 +176,10 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
       <div id="todo" class="rows"></div>
     </section>
     <section aria-labelledby="h-back">
-      <h2 id="h-back">Retours envoyés <span class="count" id="n-back">–</span></h2>
+      <h2 id="h-back">En traitement <span class="count" id="n-back">–</span></h2>
       <div id="back" class="rows"></div>
     </section>
+    <details id="settled-wrap"><summary>Traités (<span id="n-settled">0</span>)</summary><div id="settled" class="rows"></div></details>
     <details id="done-wrap"><summary>Testé et OK (<span id="n-done">0</span>)</summary><div id="done" class="rows"></div></details>
   </div>
 
@@ -175,7 +192,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
     <details id="finished-wrap"><summary>Terminés, les 10 derniers (<span id="n-finished">0</span>)</summary><div id="finished" class="rows"></div></details>
     <div id="foot" class="note"></div>
   </div>
-  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « C’est bon », tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
+  <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « OK » (ou « OK + idée »), tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
 </div>
 <script>
 const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
@@ -183,15 +200,17 @@ const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
 const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
 const $=id=>document.getElementById(id);
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
-let S=null,etag=null,timer=null,openBack=null,failed=false;
+let S=null,etag=null,timer=null,openBack=null,askWithdraw=null,failed=false;
 const drafts={};
+const imgDrafts={};   // per trial entry: {names:[sent or uploaded], busy:n uploads in flight, lines:[refusals]}; survives the re-render
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
 
 /* ---- shared pieces ---- */
 function head(x,extra){
   const h=el('div','head');
   const sq=el('span','sq '+(COL[x.colour]||''));sq.setAttribute('aria-hidden','true');h.appendChild(sq);
-  const t=el('div','t');t.appendChild(el('span','num','#'+(x.n??x.issue??'?')+' '));t.appendChild(document.createTextNode(x.name||''));
+  const num=x.n??x.issue??'?';
+  const t=el('div','t');t.appendChild(el('span','num','#'+num+' '));t.appendChild(document.createTextNode(plainName(x.name,num)));
   if(extra){t.appendChild(el('div','what',extra));}
   h.appendChild(t);return h;
 }
@@ -316,24 +335,35 @@ async function sendBuild(patch){
   etag=null;load();
 }
 /*CARDLINE-START*/
+const isSettled=x=>!!(x&&x.settled&&typeof x.settled==='object');   // a retour the agent or the user filed as handled (#496)
 const IDLE_MIN=5;   // minutes without activity before an agent reads as stopped
 /* One line per card, computed: whose turn it is. c = a colour entry or a paused entry; tests and
    qcms = S.tests and S.qcms. Members: the issue, its package's sub-issues, the colour's issues. */
 function cardLine(c,tests,qcms){
   const members=new Set([c.issue].concat(c.issues||[],((c.package&&c.package.subs)||c.subs||[]).map(s=>s.n)).filter(n=>n!=null).map(Number));
-  const qcmOpen=(qcms||[]).some(q=>members.has(Number(q.issue)));
+  const open=(qcms||[]).filter(q=>members.has(Number(q.issue)));
+  const qcmOpen=open.length>0;
   const mine=(tests||[]).filter(t=>members.has(Number(t.n!=null?t.n:t.issue)));
   const todo=mine.filter(t=>(t.status||'todo')==='todo').length;
   const tried=mine.filter(t=>t.try);      // merged entries (no `try`) do not count
-  const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok');
+  const readyToMerge=tried.length>0&&tried.every(t=>t.status==='ok'||(t.status==='retour'&&isSettled(t)));
   const held=c.held_by||[];
   const note=typeof c.waiting==='string'?c.waiting.trim():'';
-  const noteYou=note!==''&&c.wait_kind==='you';
   const parts=[];
   if(qcmOpen)parts.push('répondre au questionnaire');
   if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
   const requested=readyToMerge&&c.merge_requested===true;      // a request voided by the server arrives false
-  if(readyToMerge&&!requested)parts.push('lancer la fusion');
+  /* The button needs a message the agent stored (#531); a run in progress or ended (failed: until a new store) hides it. */
+  const prepared=c.merge_prepared===true;
+  const run=c.merge_run&&typeof c.merge_run==='object'?c.merge_run:null;
+  const canClick=readyToMerge&&prepared&&!run&&!requested;
+  const preparing=readyToMerge&&!prepared&&!run;
+  if(canClick)parts.push('lancer la fusion');
+  /* A `you` note only completes a card the user has on the page (#483): once the form is finished,
+     the entries ticked and the merge launched, it is stale and dropped, not shown as the user's turn (#530). */
+  const youKind=note!==''&&c.wait_kind==='you';
+  const namesOpenForm=youKind&&open.some(q=>q.id&&note.includes(String(q.id)));   // « start form 528-1 » repeats the form
+  const noteYou=youKind&&parts.length>0&&!namesOpenForm;
   if(noteYou)parts.push(note);
   const you=parts.length>0;
   const agent=held.includes('agent');
@@ -345,7 +375,7 @@ function cardLine(c,tests,qcms){
   let text,also='';
   if(you){
     text='À toi : '+parts.join(' · ');
-    if(parts.length===1&&readyToMerge&&!requested)also='';
+    if(parts.length===1&&canClick)also='';
     else if(agent){
       if(hearing&&away)also='l’agent écoute, il repart à ta réponse';
       else if(known&&stopped)also='agent à l’arrêt, écris-lui après ta réponse';
@@ -357,20 +387,130 @@ function cardLine(c,tests,qcms){
       'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
   }
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
-  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:noteYou?'':note,mergeReady:readyToMerge,mergeRequested:requested,mergeNote:''};
+  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,mergeButton:canClick,mergeNote:mergeNoteOf(run,preparing,requested,false)};
   else text='En pause';
-  return {user:you,text:text,also:also,note:noteYou?'':note,mergeReady:readyToMerge,mergeRequested:requested,
-          mergeNote:requested?'Fusion demandée'+(c.listening===true?'':' · l’agent la lira à sa reprise'):''};
+  const mergeNote=mergeNoteOf(run,preparing,requested,c.listening===true);
+  return {user:you,text:text,also:also,note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,
+          mergeButton:canClick,mergeNote:mergeNote};
 }
-/* What the merge area shows, from cardLine's fields: the button before the click, the grey note after. */
+/* The step the strip highlights: the stored state, except « questions » with a form answered and none open,
+   which the agent is already turning into code (#530). */
+function shownStep(c,qcmOpen){
+  return c.state==='questions'&&!qcmOpen&&c.qcm_answered===true?'code':c.state;
+}
+/* The grey merge note (#531): the agent still preparing, the run's state, or the failure with its reason. */
+function mergeNoteOf(run,preparing,requested,listening){
+  if(run){
+    if(run.state==='running')return 'Fusion en cours';
+    if(run.state==='retesting')return 'Tests relancés, puis fusion';
+    if(run.state==='ok')return 'Fusionnée';
+    return 'Échec : '+(run.reason||'la fusion a échoué');
+  }
+  if(preparing)return 'L’agent prépare la fusion';
+  if(requested)return 'Fusion demandée'+(listening?'':' · l’agent la lira à sa reprise');
+  return '';
+}
+/* What the merge area shows, from cardLine's fields: the button only when allowed, the grey note otherwise. */
 function mergeUi(l){
-  if(l.mergeRequested)return {button:false,note:l.mergeNote};
-  if(l.mergeReady)return {button:true,note:''};
-  return {button:false,note:''};
+  return {button:l.mergeButton===true,note:l.mergeButton===true?'':(l.mergeNote||'')};
+}
+/* The « Retirer » control of a form's box (#479): `asking` = the box is in its confirmation step.
+   the answers already given = q.progress.answered, the figure « Avancement » shows (« Plus tard » is not one). */
+function withdrawUi(q,asking){
+  if(!asking)return {asking:false,button:'Retirer',question:'',yes:'',no:''};
+  const n=Number(q.progress&&q.progress.answered)||0;
+  const given=n===0?'Aucune réponse donnée.':n===1?'1 réponse déjà donnée.':n+' réponses déjà données.';
+  return {asking:true,button:'',question:'Retirer ce formulaire ? '+given,yes:'Oui, retirer',no:'Annuler'};
 }
 /* The merge button names where the merge goes: an issue with an integration line merges into it (#480). */
 function mergeLabel(c){return c&&c.line&&c.line!=='main'?'Fusionner dans '+c.line:'Fusionner';}
+/* A form title often starts with its own « #n »: the head already shows it (#530). */
+function plainName(name,n){return String(name||'').replace(new RegExp('^#'+n+'(?!\\d)\\s*[:·—-]?\\s*'),'');}
 /*CARDLINE-END*/
+/*SPLIT-START*/
+/* Where each trial entry is listed (#496, #518): a retour or an OK + idée the agent has not settled is « En traitement »;
+   once settled it moves to « Traités »; a plain OK is « Testé et OK ». */
+function splitTests(tests){
+  const stamp=x=>String(x.reviewed||x.date||'');
+  const by=f=>tests.filter(f).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
+  const st=x=>x.status||'todo';
+  const handled=x=>st(x)==='retour'||(st(x)==='ok'&&String(x.idea||'').trim()!=='');
+  return {todo:by(x=>st(x)==='todo'),back:by(x=>handled(x)&&!isSettled(x)),
+          settled:by(x=>handled(x)&&isSettled(x)),done:by(x=>st(x)==='ok'&&!handled(x))};
+}
+/* The two framing lines of a trial entry (#518): « On teste : … » above the route, « Essaie autour : … » below
+   what to see. '' when the entry carries none. */
+function trialFrame(x){
+  const g=String((x&&x.goal)||'').trim(),a=String((x&&x.around)||'').trim();
+  return {goal:g?'On teste : '+g:'',around:a?'Essaie autour : '+a:''};
+}
+const canSettle=x=>x.status==='retour'&&!isSettled(x);
+function settledText(x,dateText){
+  const s=x.settled||{};const m=[];
+  m.push((s.by==='user'?'classé par toi':'traité')+(dateText?' le '+dateText:''));
+  if(s.commit)m.push('commit '+String(s.commit).slice(0,8));
+  if(s.note)m.push(String(s.note));
+  return m.join(' · ');
+}
+/*SPLIT-END*/
+/*IMAGES-START*/
+/* Screenshots on a trial entry (#456). Pure functions, no DOM: the limits mirror the server's
+   (MAX_IMAGE 10 Mo), which stays the judge. No count cap: past IMG_WARN_COUNT an advice line above the thumbnails, all kept. */
+const IMG_MAX_BYTES=10*1024*1024, IMG_WARN_COUNT=5, IMG_TYPES=['image/png','image/jpeg','image/gif','image/webp'];
+const IMG_NAME=/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
+const IMG_GONE='Capture supprimée (limite de 512 Mo)';
+function imgListed(x){return x&&Array.isArray(x.images)?x.images.filter(n=>typeof n==='string'&&IMG_NAME.test(n)):[];}
+function imgUrl(id,name){return IMG_NAME.test(String(name))?'/api/tests/'+encodeURIComponent(id)+'/images/'+encodeURIComponent(name):null;}
+/* files: [{name,type,size}]; have: images already in the box or uploading. -> {accept, lines}. A mixed
+   drop keeps its images; each refusal gets a line. */
+function imgFilter(files,have){
+  const accept=[],lines=[];let n=have;
+  for(const f of files){
+    const nm=f.name||'image';
+    if(!IMG_TYPES.includes(f.type)){lines.push(nm+' : ce n’est pas une image PNG, JPEG, GIF ou WebP.');continue;}
+    if(f.size>IMG_MAX_BYTES){lines.push(nm+' : plus de 10 Mo, trop lourd.');continue;}
+    if(!(f.size>0)){lines.push(nm+' : fichier vide.');continue;}
+    accept.push(f);n++;
+  }
+  return {accept:accept,lines:lines};
+}
+/* The advice shown above the strip while the box holds more than IMG_WARN_COUNT screenshots ('' otherwise). */
+function imgAdvice(n){return n>IMG_WARN_COUNT?'⚠ Plus de '+IMG_WARN_COUNT+' captures dans ce retour':'';}
+function imgUploadLine(status){
+  if(status===400||status===404)return 'Ce serveur ne sait pas encore recevoir des captures : relance-le (systemctl --user restart stokesforge-suivi).';
+  if(status===413)return 'Capture refusée : plus de 10 Mo.';
+  if(status===415)return 'Capture refusée : format non reconnu (PNG, JPEG, GIF ou WebP).';
+  return 'Capture non envoyée : réessaie dans un instant.';
+}
+/* The files of a paste: items = [{kind,type,getAsFile()}]. */
+function imgFromItems(items){
+  const out=[];
+  for(const it of Array.from(items||[])){if(it&&it.kind==='file'&&IMG_TYPES.includes(it.type)){const f=it.getAsFile();if(f)out.push(f);}}
+  return out;
+}
+/* What a click on a box button sends. kind: 'retour' | 'note' | 'ok' | 'idea' (OK + idée, #518: text required). text = the box; names = the box's
+   images. Retour needs text or a screenshot (an empty box refuses). null = refused. */
+function imgPatch(kind,text,names){
+  const v=String(text||'').trim();
+  if(kind==='retour'){if(!v&&!names.length)return null;return {status:'retour',comment:v,images:names.slice()};}
+  if(kind==='idea'){if(!v)return null;return {status:'ok',idea:v,images:names.slice()};}
+  if(kind==='ok')return {status:'ok',comment:v,images:names.slice()};
+  return {comment:v,images:names.slice()};
+}
+/* After a send from the box: st = {openBack, drafts, imgDrafts}. Only a successful send closes the box and
+   drops its drafts; a failed one leaves all three, so the text and thumbnails can be sent again. */
+function boxAfterSend(ok,st,id){
+  if(!ok)return st;
+  if(st.openBack&&st.openBack.id===id)st.openBack=null;
+  delete st.drafts[id];delete st.imgDrafts[id];
+  return st;
+}
+/* Kind of an OS drag from its types: 'files', 'empty' (the browser passed nothing at all, seen with a real drag from Files, #483) or 'other' (text drags stay untouched). */
+function dragKind(types){
+  const t=Array.from(types||[]);
+  return t.includes('Files')?'files':t.length===0?'empty':'other';
+}
+/*IMAGES-END*/
 function lineEl(c){
   const l=cardLine(c,S.tests||[],S.qcms||[]);
   const mg=mergeUi(l);
@@ -403,7 +543,8 @@ function colourBox(c){
   }
   const h=c.held_by||[];
   const ln=lineEl(c);
-  const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===c.state);   // legacy: the state is unknown, highlight no step
+  const step=cardLine(c,S.tests||[],S.qcms||[]).step;
+  const s=el('div','steps');const i=h.includes('legacy')?-1:STATES.findIndex(([k])=>k===step);   // legacy: the state is unknown, highlight no step
   STATES.forEach(([k,l],j)=>{
     const cls='st'+(i<0?'':j<i?' done':j===i?(ln.user?' cur you':' cur'):'');
     if(k==='questions'||k==='essai'){
@@ -453,7 +594,7 @@ function renderSuivi(){
     b.appendChild(el('div','since',dayText(d.done_at,0,'terminé le ')||''));fb.appendChild(b);
   });
   const c=S.control;const foot=$('foot');foot.replaceChildren();
-  foot.appendChild(el('div','',c&&c.at?'Vérifié '+agoText(c.at)+(c.by?' par '+c.by:''):'Pas encore vérifié'));
+  foot.appendChild(el('div','',c&&c.at?'Vérifié '+agoText(c.at):'Pas encore vérifié'));   // `by` is a session id: noise for the user (#530)
   (c&&c.problems||[]).forEach(p=>foot.appendChild(el('div','problem',p)));
 }
 
@@ -462,6 +603,16 @@ function qcmBox(q){
   const b=el('div','box');b.appendChild(head({n:q.issue,name:q.title||('Questionnaire '+q.id),colour:colourOf(q.issue)},null));
   if(q.progress)b.appendChild(el('div','meta','Avancement : '+(typeof q.progress==='object'?(q.progress.answered||0)+' / '+(q.progress.total||'?'):q.progress)));
   const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
+  const u=withdrawUi(q,askWithdraw===q.id);
+  if(!u.asking){
+    const w=el('button','wd',u.button);w.type='button';w.id='wd-'+q.id;
+    w.onclick=()=>{askWithdraw=q.id;renderTests();};b.appendChild(w);
+  }else{
+    const r=el('div','acts');r.appendChild(el('div','wdq',u.question));
+    const y=el('button','back wd',u.yes);y.type='button';y.id='wdy-'+q.id;y.onclick=()=>withdrawForm(q);
+    const n=el('button','wd',u.no);n.type='button';n.id='wdn-'+q.id;n.onclick=()=>{askWithdraw=null;renderTests();};
+    r.appendChild(y);r.appendChild(n);b.appendChild(r);
+  }
   return b;
 }
 function colourSq(n){const c=colourOf(n);return c?Object.keys(COL).find(k=>COL[k]===COL[c])+' ':'';}
@@ -469,9 +620,93 @@ function colourOf(n){
   const c=S.colours.find(x=>!x.free&&(x.issues||[]).includes(n));if(c)return c.colour;
   const p=S.paused.find(x=>x.issue===n);return p?p.last_colour:'';
 }
+function imgDraft(x){
+  if(!imgDrafts[x.id])imgDrafts[x.id]={names:imgListed(x),busy:0,lines:[],waiters:[]};
+  return imgDrafts[x.id];
+}
+function thumb(id,name,onremove){
+  const w=el('div','thumb');
+  const u=imgUrl(id,name);
+  const gone=()=>{const g=el('div','gone',IMG_GONE);w.replaceChild(g,w.firstChild);};
+  if(u){const a=el('a');a.href=u;a.target='_blank';a.rel='noopener';
+    const im=el('img');im.loading='lazy';im.alt='Capture jointe';im.src=u;im.onerror=gone;a.appendChild(im);w.appendChild(a);}
+  else w.appendChild(el('div','gone',IMG_GONE));
+  if(onremove){const rm=el('button','','Retirer');rm.type='button';rm.setAttribute('aria-label','Retirer cette capture');rm.onclick=onremove;w.appendChild(rm);}
+  return w;
+}
+/* The strip is rebuilt in place from the page-level draft, so a poll re-render or an upload that ends
+   never loses a thumbnail. */
+function renderStrip(id,strip){
+  const st=strip||$('st-'+id),d=imgDrafts[id];if(!st||!d)return;
+  st.replaceChildren();
+  const adv=st.previousElementSibling&&st.previousElementSibling.id==='adv-'+id?st.previousElementSibling:$('adv-'+id);if(adv){const t=imgAdvice(d.names.length+d.busy);adv.textContent=t;adv.hidden=!t;}
+  d.names.forEach(n=>st.appendChild(thumb(id,n,()=>{d.names=d.names.filter(m=>m!==n);renderStrip(id,st);})));
+  if(d.busy>0)st.appendChild(el('span','imgline','Envoi de '+d.busy+' capture'+(d.busy>1?'s':'')+'…'));
+  d.lines.forEach(l=>st.appendChild(el('div','imgline bad',l)));
+}
+function imgIdle(d){return d.busy===0?Promise.resolve():new Promise(res=>d.waiters.push(res));}
+async function attach(id,files){
+  const d=imgDrafts[id];if(!d)return;
+  const f=imgFilter(files,d.names.length+d.busy);
+  d.lines=f.lines.slice();renderStrip(id);
+  await Promise.all(f.accept.map(async file=>{
+    d.busy++;renderStrip(id);
+    try{
+      const r=await fetch('/api/tests/'+encodeURIComponent(id)+'/images',{method:'POST',headers:{'X-Suivi':'1','Content-Type':file.type},body:file});
+      if(!r.ok)d.lines.push(imgUploadLine(r.status));
+      else{const j=await r.json();if(typeof j.name==='string'&&IMG_NAME.test(j.name)&&!d.names.includes(j.name))d.names.push(j.name);}
+    }catch(e){d.lines.push(imgUploadLine(0));}
+    d.busy--;renderStrip(id);
+    if(d.busy===0){const w=d.waiters;d.waiters=[];w.forEach(f=>f());}
+  }));
+}
+async function boxSend(x,kind){
+  const d=imgDrafts[x.id]||imgDraft(x);
+  const sv=$('sv-'+x.id);if(sv)sv.disabled=true;
+  await imgIdle(d);                                   // the list goes out once the uploads are done
+  const text=drafts[x.id]!=null?drafts[x.id]:(kind==='idea'?(x.idea||''):(x.comment||''));
+  const patch=imgPatch(kind,text,d.names);
+  if(!patch){if(sv)sv.disabled=false;const t=$('tx-'+x.id);if(t)t.focus();return;}
+  const ok=await send(x,patch,()=>{const st=boxAfterSend(true,{openBack,drafts,imgDrafts},x.id);openBack=st.openBack;});
+  if(!ok){imgNote('Pas enregistré : ton texte et tes captures sont gardés, réessaie dans un instant.');const b=$('sv-'+x.id);if(b)b.disabled=false;}   // the box is still there
+}
+let noteTimer=null;
+function imgNote(text){
+  const n=$('imgnote');n.textContent=text;n.hidden=false;
+  clearTimeout(noteTimer);noteTimer=setTimeout(()=>{n.hidden=true;},7000);
+}
+/* Paste and drop go to the open box; with none open, a line says to open one. */
+function dropToBox(files){
+  if(!files.length)return false;
+  if(!openBack||!imgDrafts[openBack.id]){imgNote('Ouvre d’abord la boîte d’une carte (Retour ou commentaire), puis colle ou glisse la capture.');return true;}
+  attach(openBack.id,files);return true;
+}
+document.addEventListener('paste',e=>{
+  const cd=e.clipboardData;if(!cd)return;
+  const files=imgFromItems(cd.items);
+  if(!files.length)return;
+  if(cd.getData&&cd.getData('text/plain'))return;       // a paste that carries text stays text
+  if(dropToBox(files))e.preventDefault();
+});
+/* An OS drag may reach the page with no type at all (seen with a real drag from Files, #483): accept it too,
+   and say on release that nothing came through. Text drags (no Files, some type) are left alone. */
+const dragOf=e=>e.dataTransfer?dragKind(e.dataTransfer.types):'other';
+const noDrag=()=>imgNote('Le navigateur n’a rien transmis : glisse à nouveau, ou colle avec Ctrl+V.');
+document.addEventListener('dragenter',e=>{if(dragOf(e)!=='other')e.preventDefault();});
+document.addEventListener('dragover',e=>{if(dragOf(e)!=='other')e.preventDefault();});
+document.addEventListener('drop',e=>{
+  const k=dragOf(e);
+  if(k==='other')return;
+  e.preventDefault();
+  const all=Array.from(e.dataTransfer.files||[]);
+  if(all.length)dropToBox(all);
+  else if(k==='empty')noDrag();
+});
 function testBox(x){
-  const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
+  const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'&&!isSettled(x)?' isback':''));
   b.appendChild(head(x,x.title||''));
+  const fr=trialFrame(x);
+  if(fr.goal)b.appendChild(el('div','goal',fr.goal));
   if(x.intro)b.appendChild(el('div','intro',x.intro));
   if(Array.isArray(x.where)&&x.where.length){
     b.appendChild(el('div','lbl','Où'));
@@ -481,45 +716,72 @@ function testBox(x){
     b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(el('li','',s)));b.appendChild(o);
   }
   if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
-  if(x.try){b.appendChild(el('div','lbl','Avant, lance (pas encore fusionné)'));b.appendChild(el('code','',x.try));}
+  if(fr.around)b.appendChild(el('div','around',fr.around));
+  if(x.try){b.appendChild(el('div','lbl',x.kind==='measure'?"Lance d'abord":'Avant, lance (pas encore fusionné)'));b.appendChild(el('code','',x.try));}
   const m=[];if(x.date)m.push(String(x.date).slice(0,10));
   if(x.status==='ok'||x.status==='retour'){const v=dayText(x.reviewed||'','', x.status==='ok'?'validé le ':'retour envoyé le ');if(v)m.push(v);}if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
   if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
+  if(isSettled(x)){const d=dayText(x.settled.at||'','','');b.appendChild(el('div','meta',settledText(x,d?d.trim():'')));}
   const editing=openBack&&openBack.id===x.id;
+  const sent=imgListed(x);
   if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
+  if(x.idea&&x.status==='ok'&&!(editing&&openBack.mode==='idea')){b.appendChild(el('div','lbl','Ton idée'));b.appendChild(el('div','',x.idea));}
+  if(sent.length&&!editing){b.appendChild(el('div','lbl','Tes captures'));
+    const sn=el('div','sent');sent.forEach(n=>sn.appendChild(thumb(x.id,n)));b.appendChild(sn);}
   const a=el('div','acts');
-  const ok=el('button','ok'+(x.status==='ok'?' on':''),x.status==='ok'?'✓ OK':'✓ C’est bon');ok.type='button';ok.id='ok-'+x.id;
-  ok.onclick=()=>send(x,{status:x.status==='ok'?'todo':'ok'});
+  const ok=el('button','ok'+(x.status==='ok'?' on':''),'✓ OK');ok.type='button';ok.id='ok-'+x.id;
+  ok.onclick=()=>{if(openBack&&openBack.id===x.id)boxSend(x,'ok');else send(x,{status:x.status==='ok'?'todo':'ok'});};
+  const oi=el('button','oi'+(x.status==='ok'&&x.idea?' on':''),'✓ OK + idée');oi.type='button';oi.id='oi-'+x.id;
+  oi.title='OK, et j’ai une idée : ça ne bloque pas la fusion';
+  oi.onclick=()=>{openBack=editing&&openBack.mode==='idea'?null:{id:x.id,mode:'idea'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
   const bk=el('button','back'+(x.status==='retour'?' on':''),'Retour');bk.type='button';bk.id='bk-'+x.id;
   bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
-  const cm=el('button','',x.comment?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
+  const cm=el('button','',(x.comment||sent.length)?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
   cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};renderTests();const t=$('tx-'+x.id);if(t)t.focus();};
-  a.appendChild(ok);a.appendChild(bk);a.appendChild(cm);b.appendChild(a);
+  a.appendChild(ok);a.appendChild(oi);a.appendChild(bk);
+  if(canSettle(x)){
+    const cl=el('button','','Classer');cl.type='button';cl.id='cl-'+x.id;cl.title='Ce retour est traité : le ranger sous « Traités »';
+    cl.onclick=()=>settleTest(x);a.appendChild(cl);
+  }
+  a.appendChild(cm);b.appendChild(a);
   if(editing){
-    const retour=openBack.mode==='retour';
-    const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(x.comment||'');
-    t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':'Une remarque, une idée, une précision';
+    const retour=openBack.mode==='retour',idea=openBack.mode==='idea';
+    const t=el('textarea');t.id='tx-'+x.id;t.value=drafts[x.id]!=null?drafts[x.id]:(idea?(x.idea||''):(x.comment||''));
+    t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':idea?'Ton idée : ce que tu ajouterais ou changerais':'Une remarque, une précision';
     t.oninput=()=>{drafts[x.id]=t.value;};
+    b.appendChild(t);
+    imgDraft(x);
+    const st=el('div','strip');st.id='st-'+x.id;
+    const ad=el('div','acts');
+    const pick=el('button','','Ajouter une capture');pick.type='button';pick.id='pk-'+x.id;
+    const fi=el('input');fi.type='file';fi.accept=IMG_TYPES.join(',');fi.multiple=true;fi.hidden=true;
+    fi.onchange=()=>{attach(x.id,Array.from(fi.files));fi.value='';};
+    pick.onclick=()=>fi.click();
+    ad.appendChild(pick);ad.appendChild(fi);
+    ad.appendChild(el('span','imgline','ou colle-la (Ctrl+V), ou glisse-la ici'));
+    b.appendChild(ad);
+    const adv=el('div','imgline warn');adv.id='adv-'+x.id;adv.hidden=true;adv.setAttribute('role','status');
+    b.appendChild(adv);b.appendChild(st);
     const r=el('div','acts');
-    const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';
-    sv.onclick=()=>{const v=t.value.trim();if(retour&&!v){t.focus();return;}openBack=null;delete drafts[x.id];send(x,retour?{status:'retour',comment:v}:{comment:v});};
-    const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];renderTests();};
-    r.appendChild(sv);r.appendChild(cn);b.appendChild(t);b.appendChild(r);
+    const sv=el('button','save',retour?'Envoyer le retour':idea?'Envoyer l’idée':'Enregistrer le commentaire');sv.type='button';sv.id='sv-'+x.id;
+    sv.onclick=()=>boxSend(x,retour?'retour':idea?'idea':'note');
+    const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;delete drafts[x.id];delete imgDrafts[x.id];renderTests();};
+    r.appendChild(sv);r.appendChild(cn);b.appendChild(r);
+    renderStrip(x.id,st);   // the new strip is not in the document yet: pass it, or the old one gets drawn
   }
   return b;
 }
 function renderTests(){
   if(!S)return;
-  const stamp=x=>String(x.reviewed||x.date||'');
-  const by=s=>S.tests.filter(x=>(x.status||'todo')===s).sort((a,z)=>stamp(z).localeCompare(stamp(a)));
-  const todoAll=by('todo'),backAll=by('retour'),doneAll=by('ok');
+  const sp=splitTests(S.tests);
+  const todoAll=sp.todo,backAll=sp.back,settledAll=sp.settled,doneAll=sp.done;
   $('n-todo').textContent=todoAll.length;$('n-back').textContent=backAll.length;$('n-done').textContent=doneAll.length;
   $('n-qcm').textContent=S.qcms.length;
   const F=filt,mine=x=>!F||String(x.n??x.issue)===String(F.issue);
   const qcms=F&&F.what==='essai'?[]:S.qcms.filter(mine);
   const showT=!(F&&F.what==='qcm');
-  const todo=showT?todoAll.filter(mine):[],back=showT?backAll.filter(mine):[],done=showT?doneAll.filter(mine):[];
-  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;$('n-qcm').textContent=qcms.length;
+  const todo=showT?todoAll.filter(mine):[],back=showT?backAll.filter(mine):[],settled=showT?settledAll.filter(mine):[],done=showT?doneAll.filter(mine):[];
+  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;$('n-settled').textContent=settled.length;$('n-qcm').textContent=qcms.length;
   const fe=$('filter');fe.replaceChildren();fe.hidden=!F;
   if(F){
     fe.appendChild(el('span','chip','Filtré : '+(colourSq(F.issue)||'')+'#'+F.issue+' · '+(F.what==='essai'?'essais':'questionnaires')));
@@ -530,7 +792,8 @@ function renderTests(){
     if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(mk(x)));};
   fill('qcm',qcms,qcmBox,F?'Aucun questionnaire pour ce chantier.':'Aucun questionnaire ne t’attend.');
   fill('todo',todo,testBox,F?'Rien à tester pour ce chantier.':'Rien à tester pour l’instant. Chaque essai d’un chantier ajoute ici la liste de ce qu’il faut essayer.');
-  fill('back',back,testBox,F?'Aucun retour pour ce chantier.':'Aucun retour en attente.');
+  fill('back',back,testBox,F?'Rien en traitement pour ce chantier.':'Rien en traitement.');
+  fill('settled',settled,testBox,'');
   fill('done',done,testBox,'');
   const bn=$('banner');
   if(todoAll.length>=5){bn.hidden=false;bn.textContent=todoAll.length+' choses attendent ton essai. Tester maintenant aide les prochaines décisions.';}else bn.hidden=true;
@@ -589,19 +852,43 @@ async function load(){
     render();
   }catch(e){failed=true;$('sub').textContent='Le serveur ne répond pas. Il tourne ? systemctl --user status stokesforge-suivi';}
 }
-async function send(x,patch){
-  Object.assign(x,patch);renderTests();
+async function send(x,patch,onOk){
+  let ok=true;
+  Object.assign(x,patch);if('status' in patch){delete x.settled;if(!('idea' in patch))delete x.idea;}renderTests();
   try{
     const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error(r.status);
-  }catch(e){$('sub').textContent='Pas enregistré : réessaie dans un instant.';}
+    if(onOk)onOk();
+  }catch(e){$('sub').textContent=(patch.idea&&String(e.message)==='400')?'Ce serveur ne connaît pas encore « OK + idée » : relance le serveur (systemctl --user restart stokesforge-suivi).':'Pas enregistré : réessaie dans un instant.';ok=false;}
   etag=null;load();
+  return ok;
+}
+async function settleTest(x){
+  try{
+    const r=await fetch('/api/tests/'+encodeURIComponent(x.id),{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:JSON.stringify({settle:true})});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Pas classé : le retour a peut-être changé, réessaie dans un instant.';}
+  etag=null;load();
+}
+async function withdrawForm(q){
+  askWithdraw=null;
+  try{
+    const r=await fetch('/api/qcm/'+encodeURIComponent(q.id)+'/withdraw',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'});
+    if(!r.ok)throw new Error(r.status);
+  }catch(e){$('sub').textContent='Formulaire non retiré : il est peut-être déjà fini ou retiré, ou le serveur ne répond pas.';}
+  etag=null;load();
+}
+function mergeRefusal(status,text){
+  if(status===409&&/not prepared|no stored message/.test(text||''))return 'Fusion non lancée : l’agent n’a pas encore préparé la fusion.';
+  if(status===409&&/store the message again/.test(text||''))return 'Fusion non lancée : la dernière tentative a échoué, l’agent doit préparer la fusion à nouveau.';
+  if(status===409)return 'Fusion non lancée : les essais ne sont plus tous OK.';
+  return 'Fusion non lancée : le serveur ne répond pas.';
 }
 async function askMerge(n){
   try{
     const r=await fetch('/api/issue/'+encodeURIComponent(n)+'/merge',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'});
-    if(!r.ok)throw new Error(r.status);
-  }catch(e){$('sub').textContent='Fusion non demandée : les essais ne sont plus tous OK, ou le serveur ne répond pas.';}
+    if(!r.ok){$('sub').textContent=mergeRefusal(r.status,await r.text());}
+  }catch(e){$('sub').textContent=mergeRefusal(0,'');}
   etag=null;load();
 }
 function startPolling(){if(timer==null)timer=setInterval(load,2000);}

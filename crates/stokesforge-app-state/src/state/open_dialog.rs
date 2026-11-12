@@ -30,8 +30,10 @@ pub enum DialogKind {
 /// until it is named here and in [`OpenDialog::kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenDialog {
-    /// The import wizard.
+    /// The import window.
     ImportWizard,
+    /// The Origin chooser: sheets of `.opj` projects to import (#490).
+    OriginImport,
     /// The graph properties window (and the series properties).
     GraphProperties,
     /// The analysis window.
@@ -63,7 +65,9 @@ impl OpenDialog {
     #[must_use]
     pub fn kind(self) -> DialogKind {
         match self {
-            Self::ImportWizard | Self::GraphProperties | Self::Analysis => DialogKind::Editing,
+            Self::ImportWizard | Self::OriginImport | Self::GraphProperties | Self::Analysis => {
+                DialogKind::Editing
+            }
             Self::ColumnMetadata
             | Self::StatusHistory
             | Self::LowR2List
@@ -82,6 +86,7 @@ impl OpenDialog {
     fn name(self) -> String {
         match self {
             Self::ImportWizard => tr!("import-window-title"),
+            Self::OriginImport => tr!("origin-import-title"),
             Self::GraphProperties => tr!("dialog-name-graph-properties"),
             Self::Analysis => tr!("dialog-name-analysis"),
             Self::ColumnMetadata => tr!("workbook-metadata-title"),
@@ -139,6 +144,7 @@ impl AppState {
         }
         let open = [
             (self.import_state().is_some(), OpenDialog::ImportWizard),
+            (self.origin_import_open(), OpenDialog::OriginImport),
             (self.plot_settings().is_some(), OpenDialog::GraphProperties),
             (self.analysis_form().is_some(), OpenDialog::Analysis),
             (

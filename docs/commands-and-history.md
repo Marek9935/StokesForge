@@ -37,6 +37,7 @@ Authoritative list: `stokesforge-commands/src/command.rs` (`Command`,
 | `AddNote { parent, name, text }` | structure |
 | `RemoveNode { id }` | structure |
 | `SetWindowMeta { id, meta }` | data |
+| `SetSheetRawMark { sheet, mark }` | data (#488: the mark of an untouched import on a sheet, `DataDelta::RawMark`; label `SetSheetRawMark`) |
 | `SetNoteText { id, text }` | data |
 | `SetColumnMeta { column, meta }` | data |
 | `SetPlotSpec { graph, spec }` | data |
@@ -55,6 +56,31 @@ head doc of `command.rs`); `RemoveNode` stays generic, like `Project::remove`.
 The four content-editing commands
 (`SetWindowMeta`/`SetNoteText`/`SetColumnMeta`/`SetPlotSpec`) replace their
 target **as a whole**, like `SetCells` — no per-subfield editing.
+
+### The sheet of an untouched import renames itself (#488)
+
+A new workbook per file holds one sheet, "Raw Data" (« Données brutes »), that
+carries a mark (`NodeKind::Worksheet.raw: Option<RawSheetMark>`, the base of
+the name to take later: "Sheet" / « Feuille », in the language of the import).
+The first change to the **value** of an imported column renames it to the first
+free `<base>N` from 1 (`Project::first_free_sheet_name`, not `next_child_name`).
+The rule lives in the session actor (`actor.rs`, `RawWatch`), not in a command:
+before each `Execute` it lists, for each marked sheet (`Tree::raw_sheets`, a walk
+of workbooks and sheets only, never a column), the imported columns with their
+`version()`, x' and formula, as owned data (no `Arc<Tree>` kept, D3). After the
+command, if one of them changed or is gone, `absorb_into_last(Rename)` folds the
+rename into the entry of the command, **before** `bind_kept_formulas` (a kept
+formula waiting for `[Book]Sheet1` binds in the same gesture) and before the
+recalculation pass, which never counts: a column's version covers type and
+values, so headers, role, display format, order, hidden state and a calculated
+column beside are not changes. Inside an open user macro the rename is a plain
+`execute` in the macro (invariant 8), so `abort_macro` and an interrupted Stop
+give "Raw Data" back; inside an `Import` or `RefreshFromSource` macro nothing is
+watched. `Project::rename` clears the mark, so a sheet renamed by hand is never
+renamed again, and the undo of that rename (a tree snapshot, `Rename` is
+structural) puts the mark back with the name. A duplicated or pasted sheet loses
+the mark; a pasted whole workbook keeps it. `SetSheetRawMark` is sent by
+`apply_import` after the `AddColumn`s, inside the `Import` macro.
 
 ### Two cell writes, strict and tolerant
 
@@ -272,7 +298,7 @@ same command**, never in a separate step and never at load: any
 `SetPlotSpec` / `EditPlotSpec` / `AddGraph` that goes through `AppState::execute`
 (or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
 legacy file as it was. The mouse gestures of #394, #405 and #398 (cell boundary, figure edge, layer move) are gone (#426): `Action::SetFrameSizes`, `SetFigureOffsets`, `SetFreeFrame` and `PlotEditKind::PlaceFigure` no longer exist.
-`Action::SetGridFrames` (#426) = the whole grid's frame sizes in ONE `EditPlotSpec` (`ResizeCell`, or `ResizeFigure` for an L corner).
+`Action::SetGridFrames` (#426) = the whole grid's frame sizes in ONE `EditPlotSpec` (`ResizeCell`, or `ResizeFigure` for an L corner, which adds or removes empty space, K1; `Action::FitLayoutToPage` is `FitLayout`).
 `Action::SetFreeLayout` (#426) = several frames of a free graph and its page in ONE `EditPlotSpec`: `PlotEditKind::ResizeFigure` ("Resize Figure") when the page size changes (against the stored page, or the figure as drawn when there is none), `ResizeLayer` when a frame size changes, else `MoveLayer`; nothing sent on the grid, for a missing layer or when nothing changes; one Undo gives back every frame and the page.
 "Figure size",
 Left and Top typed in Graph Properties are part of the window's draft and macro.
@@ -374,9 +400,22 @@ sheet (sheet, x' column, "Row N" columns, link) and
 `RecalculateTranspose { sheet }` rewrites its linked columns from the source.
 Both are **structural**
 (tree snapshot: nodes appear, the link is carried by the tree) and atomic — a
-refusal (column without x', text column) restores the tree and pushes nothing.
-Labels: `HistoryLabel::TransposeRows`, `RecalculateTranspose`; group
-`MacroKind::AnalyzeRows`.
+refusal (text column, partial x'; no x' at all is the index mode, #493, not a
+refusal) restores the tree and pushes nothing.
+`SetTransposeAuto { sheet, auto }` (#463) checks or unchecks the box
+"Recalculate automatically": structural, one entry, refused when checking
+while the source calculates from the sheet (nothing pushed). Likewise
+`RecalculateTranspose`, and `TransposeRows` on an existing sheet, are refused
+with the same error while the box is checked and the source calculates from the
+sheet (#484, `Tree::transpose_loop_refusal`; nothing pushed, an open
+`AnalyzeRows` group is aborted by the caller). Following itself
+is **not** a command: the session pass writes the linked columns outside the
+history, like an analysis pass, so one Ctrl+Z undoes a source edit and the
+sheet follows the restored source. A linked column of a followed sheet is
+*derived* for a macro replay (`is_derived`, #448): a delta that no longer fits
+it is made to fit and the next pass rewrites it.
+Labels: `HistoryLabel::TransposeRows`, `RecalculateTranspose`,
+`SetTransposeAuto`; group `MacroKind::AnalyzeRows`.
 
 - **A single undoable group**: the analysis gesture on a row opens the
   `AnalyzeRows` group (`state/transpose.rs`), executes `TransposeRows`, then

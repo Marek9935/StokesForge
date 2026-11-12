@@ -6,6 +6,12 @@
 # smaller, so the stack overflows later than in the debug `cargo test` of `ci.yml`)
 # on stable and beta, and the whole workspace plus clippy on beta.
 #
+# The `sweeps` job (#522) runs the randomised batteries at scale 8 with a new seed
+# each week (`SF_PROPTEST_SEED` = the run number, `SF_PROPTEST_SCALE` = 8), in the
+# debug profile so overflow checks stay on, plus two costly `#[ignore]` tests in
+# release. A red run names the seed in its annotation: replay it locally with
+# the same two variables (docs/tests.md, "Randomised sweeps").
+#
 # Kept out of `ci.yml` on purpose: `gitlab-status.yml` listens to the workflow
 # `CI` on push and would post these jobs as GitLab statuses. Nothing here blocks
 # a merge or a release. A failure shows as a red run, a GitHub email to the
@@ -88,5 +94,50 @@ jobs:
           code=$?
           if [ "$code" -ne 0 ]; then
             echo "::error title=clippy beta::$( (grep -m6 -E '^(error|warning)' beta-clippy.log; echo ...; tail -n 12 beta-clippy.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+
+  # #522: the randomised batteries at scale 8, a new seed each week. Informative
+  # like the rest of this workflow.
+  sweeps:
+    name: sweeps (scale 8)
+    runs-on: ubuntu-latest
+    env:
+      SF_PROPTEST_SEED: ${{ github.run_number }}
+      SF_PROPTEST_SCALE: 8
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: toolchain-weekly-sweeps
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev
+      # Debug profile on purpose: it keeps the overflow checks.
+      - name: Randomised batteries (seed = run number, scale 8)
+        run: |
+          set +e
+          echo "SF_PROPTEST_SEED=$SF_PROPTEST_SEED SF_PROPTEST_SCALE=$SF_PROPTEST_SCALE"
+          {
+            cargo test -p stokesforge-robustness --test b14_sweep --test b22_targeted_recalc --test b23_formula_structure_oracle --test b2_persistence --test b24_analysis_sweep &&
+            cargo test -p stokesforge-commands --test undo_random
+          } > sweeps.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=sweeps seed $SF_PROPTEST_SEED::$( (grep -m6 -E '^error|panicked|FAILED|replay with' sweeps.log; echo ...; tail -n 12 sweeps.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+      # The two costly measurements that `cargo test` ignores, in release.
+      - name: Costly ignored tests (release)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          {
+            cargo test --release -p stokesforge-commands --test memory_pinning -- --ignored &&
+            cargo test --release -p stokesforge-app-state --test perf_write_under_snapshot -- --ignored
+          } > ignored.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=ignored tests::$( (grep -m6 -E '^error|panicked|FAILED' ignored.log; echo ...; tail -n 12 ignored.log) | tr '\n' '|' | cut -c1-1500)"
           fi
           exit "$code"

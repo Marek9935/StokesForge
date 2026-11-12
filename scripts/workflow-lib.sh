@@ -3,7 +3,7 @@
 # chantier.sh, try.sh, main-lock.sh, deliver.sh, workflow-test.sh.
 #
 # Layout: the main checkout is the repository root; the worktrees of the work
-# packages live in ../_stokesforge/feature<n> (CLAUDE.md, "Worktrees"). A work
+# packages live in ../_stokesforge/feature<n> (CLAUDE.md, "Conventions"; suivi.md, "Work packages and worktrees"). A work
 # package's colour lives in ../_stokesforge/.suivi (scripts/suivi.py, #441), not
 # in these helpers.
 
@@ -29,6 +29,10 @@ sf_worktrees() {
             [ "$path" = "$main" ] || printf '%s\n' "$path"
         done
 }
+
+# Template target (#523): built from main, copied into every new worktree (scripts/template-target.sh).
+# SF_TEMPLATE_DIR moves it (tests).
+sf_template_dir() { printf '%s\n' "${SF_TEMPLATE_DIR:-$(realpath -m "$(sf_wt_root)")/.template}"; }
 
 # Integration line of issue $1 (#480): `main` unless its record declares one (a sub-issue
 # inherits its parent's). Reads the records through suivi.py: no git, no glab. A declared line

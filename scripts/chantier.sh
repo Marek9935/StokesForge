@@ -64,6 +64,12 @@
 # by main. `--release` of a line issue tests the merge against the line and deletes the branch from
 # the line worktree (../_stokesforge/line-<line>, scripts/line.sh create).
 #
+# Template target (#523): a worktree created here gets a copy of the template target of main
+# (scripts/template-target.sh copy; one briefing line says copied or why not; it never fails the run).
+# A rerun on an existing worktree removes the leftover of an interrupted copy (#528; kept while a copy still
+# runs there); only if one was removed and there is no target/, the copy is redone. Other reruns never copy.
+# The copy can wait up to 900 s for a template refresh: run this in the background while one runs.
+#
 # Test seams: SF_ISSUE_LINE_<n> (the declared line of issue <n>), SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
 # `glab issue view` lookup; SF_ISSUES_JSON (a file with the JSON of `glab issue
 # list`) replaces the sub-issue search, SF_ISSUE_BODY_<n> the parent's description;
@@ -416,6 +422,18 @@ ensure_wt() {
         branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || echo '?')"
         if [ "$dry" = 0 ]; then
             colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+            # #528: a rerun removes the leftover of an interrupted template copy (kept while a copy runs there)
+            # and, only then, redoes the copy when the worktree has no target/.
+            local tt stale
+            tt="$(dirname "$0")/template-target.sh"
+            stale="$("$tt" clear-stale "$wt" 2>&1 | tail -n 1 || true)"
+            if [ -n "$stale" ]; then
+                case "$stale" in
+                *removed*) if [ -e "$wt/target" ]; then tnotes+=("#$n: $stale")
+                    else tnotes+=("#$n: leftover of an interrupted copy removed; $("$tt" copy "$wt" 2>&1 | tail -n 1 | sed 's/^template: //' || true)"); fi ;;
+                *) tnotes+=("#$n: $stale") ;;
+                esac
+            fi
         else
             colour="${pcolour:-$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")}" || exit 1
         fi
@@ -429,14 +447,17 @@ ensure_wt() {
             colour="$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")" || exit 1
             reserved="$reserved $colour"
         fi
-        echo "would run: git worktree add $wt -b $branch --no-track $wbase"
+        echo "would run: git worktree add $wt -b $branch --no-track $wbase; then would copy the template target (template-target.sh copy)"
     else
         suivi claim --dry-run "$n" "${args[@]}" > /dev/null || exit 1   # refuse before creating anything
         mkdir -p "$root"
         git -C "$main" worktree add "$wt" -b "$branch" --no-track "$wbase"
         colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+        # #523: a fresh worktree starts from the template target (one line, never an error).
+        tnotes+=("#$n: $("$(dirname "$0")/template-target.sh" copy "$wt" 2>&1 | tail -n 1 || true)")
     fi
 }
+tnotes=()
 
 # Sub-issues of each given issue (one lookup per issue).
 declare -A kids=()
@@ -514,6 +535,7 @@ echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the tr
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
+for x in "${tnotes[@]:-}"; do [ -z "$x" ] || echo "Build cache $x"; done
 [ -z "$used_lines" ] || echo "Line $used_lines: deliver with scripts/deliver.sh (merges into the line, never main); write Refs #<n>, not Closes: the issue stays open until the line lands."
 for x in "${pkgnotes[@]:-}"; do [ -z "$x" ] || printf '%s\n' "$x"; done
 tags=""
@@ -532,11 +554,11 @@ Steps, in order:
     (stokesforge-feature, section 1); `scripts/suivi.py status`; never edit .suivi.
  2. Agent `perimetre` first: scope; edge cases tagged stated / default / changes behaviour (last = card).
  3. One start form (stokesforge-bug-report/references/decision-form.md): `scripts/suivi.py qcm
-    pose <n> data.js --title "..."`, read with `suivi.py qcm answers <id>`; Artifact only as
+    pose <n> data.js --title "..."`, read with `suivi.py qcm answers <id>` (one open form per issue; withdraw one with `qcm withdraw <id>`); Artifact only as
     fallback. First card: one-line understanding; a package: second card = sub-issue list and
     order. Lots no answer can change start at pose; name them in the report and in `set --what`.
  4. Each change of state: `scripts/suivi.py set <n> --state questions|code|essai|fusion
-    --what "..." [--wait you|dep|ag --waiting "..."]` (a note is erased by the next `set`).
+    --what "..." [--wait you|dep|ag --waiting "..."]` (a note is erased by the next `set`; `--wait you` needs a card: test add or qcm pose).
  5. Sonnet implements in the worktree (CLAUDE.md, "Delegation"). Visible change: a pre-trial
     agent walks the checks in the real app, fixes, re-verifies, then `suivi.py test add`
     (stokesforge-verification/references/suivi.md); then `scripts/try.sh <n>` opens the branch.

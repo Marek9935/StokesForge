@@ -154,7 +154,7 @@ The `detail` fields (cause described by the originating crate) and the system
 messages stay in English in the sentence. `stokesforge-importer` returns a structured
 `ImportFailure` (file + cause) for the same reason.
 
-Rule of conduct (full chain, turned into a sentence): `.claude/conventions.md`, section "Errors: raw English below, catalog sentence in the application".
+Rule of conduct (full chain, turned into a sentence): `.claude/rules/errors.md`, section "Errors: raw English below, catalog sentence in the application".
 
 ### Native file picker
 
@@ -183,7 +183,7 @@ Browse… answer that is not valid UTF-8 changes nothing and says so
 too.
 
 **Separate thread (#192).** All the pickers (Open, Save As, graph export,
-import wizard, Browse… of the default folders) go through `Action::PickFile(PickRequest)` and
+import window, Browse… of the default folders) go through `Action::PickFile(PickRequest)` and
 `file_picker.rs` (in `stokesforge-app-state`): `rfd` runs on a dedicated thread, the answer comes back through a
 channel polled at every frame (`StokesForgeApp::poll_file_picker`). Before, the
 synchronous call on the egui thread froze the application when the picker closed

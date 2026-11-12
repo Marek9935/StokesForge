@@ -59,6 +59,18 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     // The targeted panel's legend.
     "legend_visible",
     "legend_position",
+    // Which header row gives the legend entries (#499), and its template.
+    "legend_text_from",
+    "legend_template",
+    // The legend's box (#507), lengths in points.
+    "legend_frame",
+    "legend_frame_color",
+    "legend_frame_width",
+    "legend_background",
+    "legend_columns",
+    "legend_row_gap",
+    "legend_column_gap",
+    "legend_swatch_length",
     // The size (#399): plot area of the panel's column / row, Left / Top of the
     // first plot area (None = Auto), Figure size = Fixed. In `unit`.
     "plot_width",
@@ -153,6 +165,16 @@ struct Changes {
     y: AxisChange,
     legend_visible: Option<bool>,
     legend_position: Option<LegendPosition>,
+    legend_text_from: Option<stokesforge_plot::LegendTextFrom>,
+    legend_template: Option<String>,
+    legend_frame: Option<bool>,
+    legend_frame_color: Option<String>,
+    legend_frame_width: Option<f64>,
+    legend_background: Option<String>,
+    legend_columns: Option<u32>,
+    legend_row_gap: Option<f64>,
+    legend_column_gap: Option<f64>,
+    legend_swatch_length: Option<f64>,
     /// Sizes in points (already converted and checked). Left / Top: the inner
     /// `None` is Auto.
     plot_width: Option<f64>,
@@ -250,6 +272,23 @@ impl Changes {
                 }
                 Ok(points.clamp(low, high))
             };
+            // A legend length in points (D4: never `unit`), refused outside
+            // `[low, high]`.
+            let points = |low: f64, high: f64| {
+                let number = value
+                    .extract::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .ok_or_else(|| invalid(format!("{key} must be a finite number")))?;
+                if number < low || number > high {
+                    return Err(invalid(format!(
+                        "{key} must be between {} and {} pt",
+                        short_number(low),
+                        short_number(high)
+                    )));
+                }
+                Ok(number)
+            };
             // Left / Top: a length from the image edge, or `None` = Auto.
             let offset = || {
                 if value.is_none() {
@@ -318,6 +357,49 @@ impl Changes {
                             ))
                         }
                     })
+                }
+                "legend_text_from" => {
+                    let text = string()?;
+                    let from = stokesforge_plot::LegendTextFrom::from_key(&text);
+                    if matches!(from, stokesforge_plot::LegendTextFrom::Unknown(_)) {
+                        return Err(invalid(
+                            "unknown legend text source: use long_name, comments, x_prime, units, short_name, long_name_units, long_name_comments or custom",
+                        ));
+                    }
+                    changes.legend_text_from = Some(from);
+                }
+                "legend_template" => changes.legend_template = Some(string()?),
+                "legend_frame" => changes.legend_frame = Some(boolean()?),
+                "legend_frame_color" => changes.legend_frame_color = Some(color()?),
+                "legend_frame_width" => {
+                    changes.legend_frame_width =
+                        Some(points(0.25, stokesforge_plot::LegendSpec::MAX_LENGTH)?)
+                }
+                "legend_background" => changes.legend_background = Some(color()?),
+                "legend_columns" => {
+                    changes.legend_columns = Some(
+                        value
+                            .extract::<u32>()
+                            .ok()
+                            .filter(|n| (1..=1000).contains(n))
+                            .ok_or_else(|| {
+                                invalid(format!("{key} must be an integer between 1 and 1000"))
+                            })?,
+                    )
+                }
+                "legend_row_gap" => {
+                    changes.legend_row_gap =
+                        Some(points(0.0, stokesforge_plot::LegendSpec::MAX_LENGTH)?)
+                }
+                "legend_column_gap" => {
+                    changes.legend_column_gap =
+                        Some(points(0.0, stokesforge_plot::LegendSpec::MAX_LENGTH)?)
+                }
+                "legend_swatch_length" => {
+                    changes.legend_swatch_length = Some(points(
+                        stokesforge_plot::LegendSpec::MIN_SWATCH_LENGTH,
+                        stokesforge_plot::LegendSpec::MAX_LENGTH,
+                    )?)
                 }
                 _ => {
                     return Err(invalid(format!(
@@ -441,6 +523,37 @@ impl Changes {
         }
         if let Some(position) = self.legend_position {
             panel.legend.position = position;
+        }
+        if let Some(from) = &self.legend_text_from {
+            panel.legend.text.from = from.clone();
+        }
+        if let Some(template) = &self.legend_template {
+            panel.legend.text.template.clone_from(template);
+        }
+        let legend = &mut panel.legend;
+        if let Some(frame) = self.legend_frame {
+            legend.frame = frame;
+        }
+        if let Some(color) = &self.legend_frame_color {
+            legend.frame_color.clone_from(color);
+        }
+        if let Some(width) = self.legend_frame_width {
+            legend.frame_width = Some(width);
+        }
+        if let Some(background) = &self.legend_background {
+            legend.background.clone_from(background);
+        }
+        if let Some(columns) = self.legend_columns {
+            legend.columns = columns;
+        }
+        if let Some(gap) = self.legend_row_gap {
+            legend.row_gap = Some(gap);
+        }
+        if let Some(gap) = self.legend_column_gap {
+            legend.column_gap = Some(gap);
+        }
+        if let Some(length) = self.legend_swatch_length {
+            legend.swatch_length = Some(length);
         }
         // The size, through the setters of the interface (#399). They only
         // refuse a graph that stores no plot area and could not be given any
@@ -568,7 +681,17 @@ fn set_graph_native(
 /// automatic), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
 /// `decimal_comma` (booleans). The panel `panel=(row, column)`: `panel_title`,
 /// `legend_visible`, `legend_position` (`'top_left'`, `'top_right'`,
-/// `'bottom_left'`, `'bottom_right'`). The X axis (bottom) and the Y axis
+/// `'bottom_left'`, `'bottom_right'`), `legend_text_from` (`'long_name'`,
+/// `'comments'`, `'x_prime'`, `'units'`, `'short_name'`, `'long_name_units'`,
+/// `'long_name_comments'`, `'custom'`) and `legend_template` (Typst markup of
+/// `'custom'`, which reads the string variables `long-name`/`ln`,
+/// `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp`: for example
+/// `'*#ln* #if u != "" [(#u)]'`). The legend box, lengths in points (never
+/// `unit`): `legend_frame` (boolean), `legend_frame_color` (`'#RRGGBB'`, `''` =
+/// automatic), `legend_frame_width` (0.25 to 400), `legend_background`
+/// (`'#RRGGBB[AA]'`, `''` = automatic), `legend_columns` (1 to 1000, entries
+/// fill down first), `legend_row_gap` and `legend_column_gap` (0 to 400) and
+/// `legend_swatch_length` (4 to 400). The X axis (bottom) and the Y axis
 /// (`axis='left'` or `'right'`): `x_title`/`y_title`, `x_unit`/`y_unit`,
 /// `x_scale`/`y_scale` (`'linear'`, `'log'`), `x_from` and `x_to` (given
 /// together and different; `from > to` draws the axis reversed) and

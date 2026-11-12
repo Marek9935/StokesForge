@@ -40,6 +40,8 @@ fi
 
 # shellcheck source=linux-packages.env
 source "$REPO_ROOT/scripts/linux-packages.env"
+# shellcheck source=glibc-floor.env
+source "$REPO_ROOT/scripts/glibc-floor.env"
 DIST="${STOKESFORGE_DIST:-$REPO_ROOT/dist/stokesforge-app}"
 OUT="${STOKESFORGE_PKG_OUT:-$REPO_ROOT/dist}"
 NFPM="${NFPM:-nfpm}"
@@ -73,9 +75,11 @@ rm -f "$stage/opt/stokesforge/install.sh"
 "$REPO_ROOT/scripts/install-linux.sh" --stage-integration "$stage/usr/share" \
     /opt/stokesforge/stokesforge-app "$stage/opt/stokesforge"
 
-# nfpm.yaml plus one entry per icon file (a glob would flatten the folders).
+# nfpm.yaml (placeholders filled, the C library at the floor of
+# scripts/glibc-floor.env) plus one entry per icon file (a glob would flatten the folders).
 config="$stage/nfpm.yaml"
 sed -e "s|@STAGE@|$stage|g" -e "s|@SCRIPTS@|$REPO_ROOT/scripts/linux-packages|g" \
+    -e "s|@GLIBC_FLOOR@|$GLIBC_FLOOR|g" \
     "$REPO_ROOT/scripts/nfpm.yaml" > "$config"
 while IFS= read -r icon; do
     rel="${icon#"$stage"/}"

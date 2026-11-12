@@ -373,6 +373,30 @@ pub(super) mod bench {
             bench
         }
 
+        /// The same saved project as [`Self::with_every_window`], but the
+        /// workbook stays docked in the root (a floating window of the main
+        /// window) and nothing is detached (#518): the twin to play the same
+        /// keys docked and detached.
+        pub(in crate::app) fn with_docked_workbook() -> Self {
+            let mut bench = Self::new();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("keys.stf").to_string_lossy().into_owned();
+            let state = AppState::new(bench.session.handle(), path).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let book = app.state.books()[0].0;
+            app.open_tab(Tab::Book(book));
+            bench.app = app;
+            bench.dir = Some(dir);
+            bench
+        }
+
+        /// A few root passes: the workbook is painted docked.
+        pub(in crate::app) fn start_docked(&mut self) {
+            for _ in 0..4 {
+                self.root(Pass::root().focused(true));
+            }
+        }
+
         pub(in crate::app) fn path(&self) -> std::path::PathBuf {
             self.dir.as_ref().unwrap().path().join("keys.stf")
         }
