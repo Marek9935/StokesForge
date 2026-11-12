@@ -30,6 +30,10 @@ sf_worktrees() {
         done
 }
 
+# Template target (#523): built from main, copied into every new worktree (scripts/template-target.sh).
+# SF_TEMPLATE_DIR moves it (tests).
+sf_template_dir() { printf '%s\n' "${SF_TEMPLATE_DIR:-$(realpath -m "$(sf_wt_root)")/.template}"; }
+
 # Integration line of issue $1 (#480): `main` unless its record declares one (a sub-issue
 # inherits its parent's). Reads the records through suivi.py: no git, no glab. A declared line
 # whose branch is missing is the caller's refusal, never a fallback to `main`.

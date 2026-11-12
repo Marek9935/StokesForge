@@ -134,3 +134,15 @@ A row under the CI line sets how builds behave on this PC: « FullIA » (user aw
 - Several orchestrators may run at once. The colour tag `<square> #<n> <short name>` that `chantier.sh` prints (first free of 🟦🟩🟧🟪🟥🟨) starts **every message** of an orchestrator working on a package (every tag when it holds several issues), so the user tells parallel terminals apart without reading (#418); it is also used in decision forms, the tracking page and notifications. One colour per **issue**, shared by all its worktrees (`feature426`, `feature426b`…), kept in one record per issue in `../_stokesforge/.suivi` (never edit it by hand; rule: "The colour rule" above).
 - The colour is freed for good by `scripts/chantier.sh --release <n>` (refuses an issue with no trial entry unless `--no-trial`, removes the merged, clean worktree and its branch, prints one line to copy in the report); `--pause <n>` pauses any issue or package, `--done <parent>` ends a package. `scripts/suivi.py status` (or `chantier.sh --status [--json]`) lists the six colours, who holds them and why; `suivi.py set` records the state at each change; `suivi.py check` lists inconsistencies. The `SessionEnd` hook of `.claude/settings.json` only speeds up pausing; `SessionStart` and `UserPromptSubmit` (`suivi.py hook-news`, always exit 0) hand an owning session the answers it has not read, or tell a new session which issues hold a colour (#454).
 - Merges happen only in the main checkout, under the `main` lock, through `scripts/deliver.sh` (`stokesforge-verification` step 6); `scripts/try.sh <n>` opens a branch on the user's screen (for `main`, `cargo run -p stokesforge-app` is the same).
+
+## Template target (#523)
+
+New worktrees start from a copy of a build of `main` (`scripts/template-target.sh`, section Local build queue of docs/tests.md). Machine step, for the user to run once (add it as a trial entry with `suivi.py test add`, never only a terminal message):
+
+```sh
+scripts/cargo-queue-install.sh                       # the shim must know the `low` class
+scripts/template-target.sh refresh                   # first template, about 50 min at 2 jobs; the log goes to the terminal
+scripts/template-timer-install.sh                    # weekly prune of paused worktrees and size check
+```
+
+After that `deliver.sh` refreshes the template by itself at every merge to `main`. `scripts/template-target.sh status` shows commit, size and whether a refresh runs.

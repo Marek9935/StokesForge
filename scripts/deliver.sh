@@ -59,6 +59,10 @@
 # is not on main yet (a branch must not drag the line into main); a branch based on a line
 # already landed is fine.
 #
+# TEMPLATE TARGET (#523). After a successful push to main (not a line), if a template exists
+# (../_stokesforge/.template) `scripts/template-target.sh refresh` starts detached (setsid, log in
+# .template/refresh.log): a warm low-priority rebuild of main plus a sweep. Never waited for.
+#
 # Exit: 0 delivered, 1 refused or failed (main unchanged unless M was already merged
 # locally), 2 usage, 3 main moved: it was merged into the branch, retest and rerun.
 set -euo pipefail
@@ -236,6 +240,19 @@ if push_main; then pushed=1; else
     done
 fi
 [ "$pushed" = 1 ] || die "push failed after retries; the merge $m is local only, rerun to push it"
+
+# #523: after a push to MAIN (not a line) the template target is refreshed, detached and at the lowest
+# priority; never waited for, never a failure. Only when a template exists (the first one is built by hand).
+# Test seam: SF_TEMPLATE_REFRESH, a command run in place of the detached refresh.
+if [ "$line" = main ] && { [ -n "${SF_TEMPLATE_REFRESH:-}" ] || [ -d "$(sf_template_dir)" ]; }; then
+    if [ -n "${SF_TEMPLATE_REFRESH:-}" ]; then
+        bash -c "$SF_TEMPLATE_REFRESH" > /dev/null 2>&1 || true
+    else
+        mkdir -p "$(sf_template_dir)"
+        setsid -f "$here/template-target.sh" refresh >> "$(sf_template_dir)/refresh.log" 2>&1 < /dev/null || true
+    fi
+    echo "deliver: template target refresh started (log $(sf_template_dir)/refresh.log)"
+fi
 
 if [ -n "$wait_tag" ]; then
     suivi tag-wait "$n" "$wait_tag" || die "pushed $m, but declaring the wait failed; run: scripts/suivi.py tag-wait $n $wait_tag"

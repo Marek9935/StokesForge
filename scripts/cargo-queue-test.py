@@ -510,6 +510,11 @@ class TestQueue(Base):
         self.assertEqual(len([e for e in self.events() if e["ev"] == "end"]), 0)
 
 
+def effective_background(case):
+    with mock.patch.dict(os.environ, case.env):
+        return cq.effective_mode()
+
+
 class TestPriority(Base):
     """Classes, the small lane, ageing, waits.tsv and the waiting messages (#517)."""
     SMALL = ("build", "-p", "x")
@@ -564,6 +569,8 @@ class TestPriority(Base):
             self.assertEqual(cq.classify(self.SMALL), "big")
             os.environ["SF_CARGO_QUEUE_CLASS"] = "small"
             self.assertEqual(cq.classify(["test"]), "small")
+            os.environ["SF_CARGO_QUEUE_CLASS"] = "low"
+            self.assertEqual(cq.classify(["test"]), "low")
             os.environ["SF_CARGO_QUEUE_CLASS"] = "huge"
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 self.assertEqual(cq.classify(["test"]), "big")
@@ -638,6 +645,89 @@ class TestPriority(Base):
         self.assertTrue(self.until(lambda: self.started("b")))
         self.idle(0.3)
         self.assertFalse(self.started("c"), "the aged big build should go first")
+
+    def set_mode_file(self, mode):
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": mode, "effective": mode}, f)
+
+    LOW = {"SF_CARGO_QUEUE_CLASS": "low"}
+
+    def test_low_ticket_name_and_class_in_the_ticket(self):
+        self.set_mode_file("dev")
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go("test", tag="l", root="l", extra=self.LOW)
+        self.assertTrue(self.until(lambda: any(n.startswith("w-3-") for n in self.tickets())), self.tickets())
+        with mock.patch.dict(os.environ, self.env):
+            run, wait = cq.snapshot()
+        self.assertEqual([w["class"] for w in wait], ["low"])
+        self.assertEqual(wait[0]["prio"], 3)
+
+    def test_low_waits_behind_every_other_waiter(self):
+        self.set_mode_file("dev")
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go("test", tag="l", root="l", extra=self.LOW)
+        self.idle(0.2)
+        self.go("test", tag="b", root="b")
+        self.idle(0.2)
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("b")))
+        self.idle(0.4)
+        self.assertFalse(self.started("l"), "a low build started although a big one was still running or waiting")
+        self.open_gate("gb")
+        self.open_gate("ga2")
+        self.assertTrue(self.until(lambda: self.started("l")))
+
+    def test_aged_low_waiter_still_starts_after_a_later_big(self):
+        self.set_mode_file("dev")
+        ageing = {"SF_CARGO_QUEUE_AGE": "0.5"}
+        self.go("test", tag="a", root="a", extra=ageing)
+        self.go("test", tag="a2", root="a2", extra=ageing)
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go("test", tag="l", root="l", extra=dict(ageing, **self.LOW))
+        self.idle(0.9)
+        self.go("test", tag="b", root="b", extra=ageing)
+        self.idle(0.3)
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("l") or self.started("b")))
+        self.idle(0.3)
+        self.assertTrue(self.started("l"), "the aged low waiter should go first (earlier arrival, same rank)")
+        self.assertFalse(self.started("b"))
+
+    def test_low_runs_with_two_jobs_in_full_mode(self):
+        self.set_mode_file("full")
+        self.assertIsNone(cq.MODES["full"]["jobs"])
+        self.assertEqual(self.start("test", tag="l", extra=self.LOW).wait(10), 0)
+        self.assertEqual(self.jobs_env("l"), ["2", "2", "2"])
+        self.assertEqual(self.start("test", tag="k", extra=dict(self.LOW, CARGO_BUILD_JOBS="5")).wait(10), 0)
+        self.assertEqual(self.jobs_env("k"), ["5", "2", "2"])
+
+    def jobs_env(self, tag):
+        return self.seen("start", tag)[0]["jobs"]
+
+    def test_low_typed_at_a_tty_is_still_rank_three_and_waits(self):
+        self.set_mode_file("dev")
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.go("test", tag="l", root="l", extra=self.LOW, stderr=slave)
+        os.close(slave)
+        self.assertTrue(self.until(lambda: any(n.startswith("w-3-") for n in self.tickets())), self.tickets())
+        self.idle(0.3)
+        self.assertFalse(self.started("l"), "a low build typed at a tty skipped the wait")
+
+    def test_low_never_starts_in_background_mode(self):
+        self.assertEqual(effective_background(self), "background")
+        self.go("test", tag="l", root="l", extra=self.LOW)
+        self.idle(0.8)
+        self.assertFalse(self.started("l"), "a low build started in background mode with a free slot")
+        self.set_mode_file("dev")
+        self.assertTrue(self.until(lambda: self.started("l")), "should start once the mode leaves background")
 
     def test_waits_tsv_lines(self):
         self.assertEqual(self.start("test", tag="z", gate="gz", extra={"CARGO_TARGET_DIR": self.tmp + "/tz"}).poll(), None)
