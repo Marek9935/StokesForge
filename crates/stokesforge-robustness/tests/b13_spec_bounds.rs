@@ -643,3 +643,60 @@ fn b13_a_hostile_total_size_is_refused_or_bounded() {
         }
     }
 }
+
+/// #505: the empty space around a grid crosses the disk as written, however
+/// hostile (NaN, negative, 1e12, infinite), and the figure stays bounded: no
+/// panic, an image within the same bound as the frames. Witness:
+/// `sanitized_grid_slack` removed (1e12 reaches the layout and the image).
+#[test]
+fn b13_a_hostile_grid_slack_is_sanitized_and_the_figure_stays_bounded() {
+    use stokesforge_plot::{GridSlack, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE};
+    let dir = TempDir::new().expect("temporary directory");
+    let path = dir.path().join("hostile-slack.stf");
+    let mut project = Project::new("HostileSlack").expect("valid project");
+    let root = project.root();
+    let hostile = [f64::NAN, f64::INFINITY, -5.0, 1e12, 0.0, 250.0];
+    let measurer = stokesforge_render::TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let bound = (MAX_FIGURE_EXTENT + 2.0 * MAX_FRAME_SIZE + 1000.0) as u32;
+    let mut graphs = Vec::new();
+    for (index, &value) in hostile.iter().enumerate() {
+        let spec = PlotSpec {
+            frame_widths: vec![300.0],
+            frame_heights: vec![200.0],
+            grid_slack: Some(GridSlack {
+                left: value,
+                top: hostile[(index + 1) % hostile.len()],
+                right: value,
+                bottom: hostile[(index + 2) % hostile.len()],
+            }),
+            ..PlotSpec::empty("T")
+        };
+        let graph = project
+            .add_graph(root, Some(&format!("G{index}")), spec)
+            .expect("graph");
+        graphs.push(graph);
+    }
+    stokesforge_persistence::save(&project, &path).expect("save");
+    let reloaded = stokesforge_persistence::load(&path).expect("reload");
+    for graph in graphs {
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            reloaded.tree().node(graph).expect("graph").kind()
+        else {
+            panic!("a graph expected");
+        };
+        assert!(spec.grid_slack.is_some(), "kept as written");
+        let usable = spec.sanitized_grid_slack().unwrap_or_default();
+        for side in [usable.left, usable.top, usable.right, usable.bottom] {
+            assert!(side.is_finite() && (0.0..=MAX_FRAME_SIZE).contains(&side));
+        }
+        assert!(usable.left + usable.right <= MAX_FRAME_SIZE + 1e-6);
+        let layout =
+            stokesforge_render_svg::figure_layout(spec, &measurer, &choice).expect("a layout");
+        assert!(
+            layout.size.0 <= bound && layout.size.1 <= bound && layout.size.0 > 0,
+            "bounded image, got {:?}",
+            layout.size
+        );
+    }
+}

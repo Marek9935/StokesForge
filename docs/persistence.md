@@ -328,6 +328,22 @@ to the bounding box). Witness `tests/witnesses/v1/project.stf` regenerated with
 a page; the old-record case is in `schema.rs`, the hostile case in
 `b13_hostile_free_frames...`.
 
+## Regular Grid: the empty space around the grid (#505)
+
+`PlotSpecRecord` gained `grid_slack` (`Option<GridSlackRecord>`: `left`, `top`,
+`right`, `bottom` in points), `#[serde(default, skip_serializing_if =
+"Option::is_none")]`: the empty space the page keeps outside the outer cells of a
+Regular Grid after an outer edge was pulled inward. A file without it reads no
+space, which is today's layout, and a graph without space writes the same bytes as
+before, so **`FORMAT_VERSION` did not move** and `tests/witnesses` are unchanged.
+It is written as the spec holds it; `PlotSpec::sanitized_grid_slack()` reads it
+(non-finite or negative reads 0, each side at most `MAX_FRAME_SIZE`, the two sides
+of an axis together at most `MAX_FRAME_SIZE`). Read only on the grid: leaving the
+grid (`compose::set_free_placement`) and returning to it (`set_grid_placement`)
+clear it, and a graph that goes Free keeps its image as its `free_page`. An older
+version that re-saves the file drops it without a message (the figure shrinks to
+the grid). The hostile case is in `b13_spec_bounds`.
+
 ### Stacking and layer background (#398, batch 2a)
 
 `FreeFrameRecord` gained `stack` (`i32`, the stacking key) and `PanelSpecRecord`

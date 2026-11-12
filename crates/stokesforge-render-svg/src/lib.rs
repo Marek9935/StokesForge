@@ -213,8 +213,25 @@ pub fn set_layer_placement(
         let Ok(Some(frames)) = free_frames_from_grid(&candidate, measurer, choice) else {
             return false;
         };
+        // #505: a grid with empty space around it keeps its image as the
+        // page of the free graph, so nothing moves.
+        let page = if candidate.sanitized_grid_slack().is_some() {
+            figure_layout(&candidate, measurer, choice)
+                .ok()
+                .map(|layout| stokesforge_plot::FreePage {
+                    left: 0.0,
+                    top: 0.0,
+                    width: f64::from(layout.size.0),
+                    height: f64::from(layout.size.1.saturating_sub(layout.title_band)),
+                })
+        } else {
+            None
+        };
         if !stokesforge_core::compose::set_free_placement(&mut candidate, &frames) {
             return false;
+        }
+        if page.is_some() {
+            candidate.free_page = page;
         }
     } else if !stokesforge_core::compose::set_grid_placement(&mut candidate) {
         return false;

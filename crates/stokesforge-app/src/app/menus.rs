@@ -1065,6 +1065,31 @@ pub(super) fn layout_menu_contents(
             ui.close();
         }
     });
+    // #505: fit the page to the layers, greyed out when it already does.
+    sections.section(ui, true, |ui| {
+        let available = fit_page_available(ui.ctx(), graph, spec);
+        if ui
+            .add_enabled(available, egui::Button::new(tr!("action-layout-fit-page")))
+            .on_hover_text(tr!("action-layout-fit-page", "hint"))
+            .on_disabled_hover_text(tr!("action-layout-fit-page", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::FitPageToLayout { graph });
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                available,
+                egui::Button::new(tr!("action-layout-fit-layout")),
+            )
+            .on_hover_text(tr!("action-layout-fit-layout", "hint"))
+            .on_disabled_hover_text(tr!("action-layout-fit-layout", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::FitLayoutToPage { graph });
+            ui.close();
+        }
+    });
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-layer-placement"), |ui| {
             for (label, hint, to_free) in [
@@ -1101,9 +1126,19 @@ pub(super) fn layout_menu_contents(
         ui.menu_button(tr!("menu-new-layer-beside"), |ui| {
             for (label, hint, side) in [
                 (
+                    tr!("action-new-layer-beside-left"),
+                    tr!("action-new-layer-beside-left", "hint"),
+                    CellSide::Left,
+                ),
+                (
                     tr!("action-new-layer-beside-right"),
                     tr!("action-new-layer-beside-right", "hint"),
                     CellSide::Right,
+                ),
+                (
+                    tr!("action-new-layer-beside-above"),
+                    tr!("action-new-layer-beside-above", "hint"),
+                    CellSide::Above,
                 ),
                 (
                     tr!("action-new-layer-beside-below"),
@@ -1163,6 +1198,30 @@ pub(super) fn layout_menu_contents(
             ui.close();
         }
     });
+}
+
+/// Whether the page of `graph` has something to fit to its layers (#505). In
+/// Free it measures the figure, so the answer is kept for the spec it was
+/// computed for while the menu stays open.
+fn fit_page_available(
+    ctx: &egui::Context,
+    graph: NodeId,
+    spec: &stokesforge_plot::PlotSpec,
+) -> bool {
+    let id = egui::Id::new(("fit_page_available", graph));
+    if spec.layer_placement != stokesforge_plot::LayerPlacement::Free {
+        return spec.sanitized_grid_slack().is_some();
+    }
+    if let Some((cached, answer)) =
+        ctx.data(|data| data.get_temp::<(stokesforge_plot::PlotSpec, bool)>(id))
+    {
+        if &cached == spec {
+            return answer;
+        }
+    }
+    let answer = stokesforge_app_state::frame_sizes::spec_fitted_to_layers(spec).is_some();
+    ctx.data_mut(|data| data.insert_temp(id, (spec.clone(), answer)));
+    answer
 }
 
 fn arrange(
@@ -2650,7 +2709,9 @@ mod tests {
         });
         let tab = Some(Tab::Graph(graph));
         for (label, side) in [
+            (tr!("action-new-layer-beside-left"), CellSide::Left),
             (tr!("action-new-layer-beside-right"), CellSide::Right),
+            (tr!("action-new-layer-beside-above"), CellSide::Above),
             (tr!("action-new-layer-beside-below"), CellSide::Below),
         ] {
             let ctx = context();

@@ -17,6 +17,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | English | French |
 |---|---|
 | About StokesForge | À propos de StokesForge |
+| Above | Au-dessus |
 | Add Folder | Ajouter un dossier |
 | Add Graph | Ajouter un graphique |
 | Add Text | Ajouter un texte |
@@ -66,6 +67,8 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Export Template | Exporter le modèle |
 | File | Fichier |
 | File Metadata | Métadonnées du fichier |
+| Fit Layout to Page | Ajuster la disposition à la page |
+| Fit Page to Layout | Ajuster la page à la disposition |
 | Fitting | Ajustement |
 | Fitting… | Ajustement… |
 | Forget Template | Oublier le modèle |
@@ -93,6 +96,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Layer Placement | Placement des calques |
 | Layout | Disposition |
 | Left | Gauche |
+| Left | À gauche |
 | Legend | Légende |
 | Legend… | Légende… |
 | Low R² | R² faible |
