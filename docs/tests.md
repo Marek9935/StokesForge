@@ -921,6 +921,10 @@ What it changes for tests and for reading times:
 - `scripts/try.sh` builds with `SF_CARGO_QUEUE=off`: a trial is for the user at the PC and must not wait behind agent builds.
 - The build runs at the slice weight, not `nice`: an unprivileged process cannot lower its nice value again, so a build could not return to full speed when the mode changes.
 
+## Server thread (#475)
+
+`stokesforge-app-state/tests/shell.rs`, mod `autosave`: `the_server_tick_hands_back_a_job_at_the_deadline_and_finishing_marks_clean`, `a_result_arriving_after_new_project_is_discarded`, `quitting_during_a_job_leaves_no_slot_file`, `an_idle_tick_changes_nothing_and_gives_the_time_left`, `a_recalculation_ending_is_collected_by_the_tick`. `stokesforge-app/src/app/server.rs` (tests, injected clock, counting waker): the autosave written with no root pass, the thread never waiting for the UI, idle ticks waking nobody, a recalculation collected with no root pass and exactly one wake, a pass with a detached graph ending while the thread ticks (embedded viewports; fails if a window callback takes the shared lock), exit releasing the guard before joining. Guards (`stokesforge-app/tests/guards.rs`): `the_background_polls_and_the_wake_live_only_in_the_server_module`, `the_server_thread_never_blocks_on_the_lock`. Each was proved by mutation; the lists of witnesses are in the commit message of #475.
+
 ## Time report (#452)
 
 `python3 scripts/time-report.py [--since DATE] [--until DATE] [--logs DIR] [--power FILE] [--json]` says where the working time of the Claude sessions goes: per activity (model, tool, cargo test, wait for the user, wait for CI, ...) and per issue. Dates are UTC (`2026-10-31` or `2026-10-31T20:00`). `--logs` defaults to the session logs of this repository's main checkout. Privacy: the logs are private, the tool prints aggregates only (hours, counts, issue numbers), never a prompt, reply, command, title or description; a malformed line is skipped silently.
