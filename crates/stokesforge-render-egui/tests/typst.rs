@@ -503,3 +503,97 @@ fn a_text_that_typst_refuses_is_framed_in_red_on_screen() {
     assert_eq!(red_frames("$x, x_, *bold"), 1);
     assert_eq!(red_frames("$lambda$ (nm)"), 0);
 }
+
+/// #508 point 1, #521: every text of a figure that goes through Typst is
+/// painted with a live texture at every display scale, through the same
+/// `ScaledShapes` the application uses. The figure repeats on purpose what
+/// shares a cached texture: one legend text three times, a graph title equal
+/// to an axis title, the same annotation twice (#500). Scales 1, 0.5, 1.37 and
+/// 2, then once more (the second pass reuses the textures of the first). The
+/// number of meshes is the number of Typst groups of the SVG export in text
+/// mode, so a text the screen forgets or invents shows up as a count.
+///
+/// Witnesses: `ScaledShapes::get` replacing the texture at every mesh (the
+/// pre-#500 code) frees the shared one, and the liveness check fails at a
+/// scale other than 1; an export with one entry fewer breaks the count.
+#[test]
+fn every_text_of_a_figure_keeps_a_live_texture_at_every_scale() {
+    use egui::emath::TSTransform;
+    use stokesforge_plot::AnnotationSpec;
+    use stokesforge_render_egui::cache::CacheKey;
+    use stokesforge_render_egui::scaled::{ScaledKey, ScaledShapes};
+
+    let (project, mut spec) = project_with_legend(["Same", "Same"]);
+    spec.title = "Absorbance".to_owned();
+    let panel = spec.panels.get_mut(0).unwrap();
+    let third = panel.series[0].clone();
+    panel.series.push(third);
+    panel
+        .annotations
+        .push(AnnotationSpec::new("Note", 5.0, 5.0));
+    panel
+        .annotations
+        .push(AnnotationSpec::new("Note", 5.0, 5.0));
+
+    let ctx = egui::Context::default();
+    ctx.set_fonts(stokesforge_render::font_definitions());
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let cache: FormulaCache<_> = FormulaCache::new();
+    let plot = resolve_spec(project.tree(), &spec);
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(480.0, 360.0));
+    let mut shapes = Vec::new();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| {
+        let text = ScreenText::new(&ctx, &measurer);
+        let typst = TypstScreen::new(&ctx, &cache, &choice).expect("fonts");
+        collect_shapes_with_typst(&mut shapes, rect, &text, typst, &plot).expect("drawing");
+    });
+    output.textures_delta.clear();
+
+    let document = stokesforge_render_svg::render_to_string_with_typst(
+        &plot,
+        (480, 360),
+        &measurer,
+        &choice,
+        stokesforge_render_svg::SvgTextMode::Text,
+    )
+    .expect("export");
+    let expected = export_origins(&document).len();
+    assert_eq!(screen_origins(&shapes).len(), expected, "unscaled count");
+    assert_eq!(expected, 8, "title, two axis titles, three entries, two notes");
+
+    fn meshes<'a>(shapes: &'a [Shape], out: &mut Vec<&'a egui::epaint::Mesh>) {
+        for shape in shapes {
+            match shape {
+                Shape::Mesh(mesh) => out.push(mesh),
+                Shape::Vec(inner) => meshes(inner, out),
+                _ => {}
+            }
+        }
+    }
+
+    let mut scaled = ScaledShapes::default();
+    for scale in [1.0_f32, 0.5, 1.37, 2.0, 1.0, 0.5, 1.37, 2.0] {
+        let key = ScaledKey {
+            source: CacheKey {
+                revision: Default::default(),
+                rect,
+                pixels_per_point: ctx.pixels_per_point(),
+                view_generation: 0,
+            },
+            display: Rect::from_min_size(Pos2::ZERO, rect.size() * scale),
+        };
+        let transform = TSTransform::new(egui::Vec2::ZERO, scale);
+        let drawn = scaled.get(&ctx, key, &shapes, transform, &cache);
+        let mut found = Vec::new();
+        meshes(drawn, &mut found);
+        assert_eq!(found.len(), expected, "scale {scale}: texts on screen");
+        for mesh in found {
+            assert!(
+                ctx.tex_manager().read().meta(mesh.texture_id).is_some(),
+                "scale {scale}: a text points to a freed texture {:?}",
+                mesh.texture_id
+            );
+        }
+    }
+}
