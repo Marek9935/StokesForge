@@ -12,8 +12,11 @@
 //! once per frame from `logic()` and schedules its wake-up on the returned
 //! delay; a test advances `now` without waiting. A deadline that falls during
 //! a macro, a script, an import or a recalculation is pushed back by a few
-//! seconds, without error: `handle.save` refuses during a macro, and a
-//! recalculation makes the actor wait.
+//! seconds, without error: `handle.save` refuses during a macro (a refusal
+//! `MacroOpen` counts as busy even when the root snapshot does not show the
+//! macro yet, e.g. a dialog just opened), and a recalculation makes the
+//! actor wait. The period restarts only after a write that succeeded or
+//! really failed; the sidecar is written only after a successful save.
 //!
 //! A write failure (impossible folder) gives **a single** warning as long as it
 //! lasts; the next successful copy re-arms it.
@@ -33,6 +36,9 @@
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+use stokesforge_commands::CommandError;
+use stokesforge_session::SessionError;
 
 use super::AppState;
 use crate::errors;
@@ -79,6 +85,8 @@ pub struct RecoveryRow {
 }
 
 enum AutosaveError {
+    /// The actor refused the save because a macro is open.
+    Busy,
     Dir(std::io::Error),
     Session(stokesforge_session::SessionError),
 }
@@ -168,15 +176,21 @@ impl AppState {
             self.autosave.deadline = Some(now + AUTOSAVE_RETRY);
             return Some(AUTOSAVE_RETRY);
         }
-        self.autosave.deadline = Some(now + period);
         if self.autosave.mark != Some(self.autosave_revisions()) {
             match self.write_autosave() {
                 Ok(()) => self.autosave.failed = false,
+                Err(AutosaveError::Busy) => {
+                    // An action is still open (the root snapshot may not
+                    // show it yet): wait silently, `failed` untouched.
+                    self.autosave.deadline = Some(now + AUTOSAVE_RETRY);
+                    return Some(AUTOSAVE_RETRY);
+                }
                 Err(error) => {
                     if !self.autosave.failed {
                         let cause = match &error {
                             AutosaveError::Dir(io) => errors::io::error_message(io),
                             AutosaveError::Session(err) => errors::session::error_message(err),
+                            AutosaveError::Busy => unreachable!("handled above"),
                         };
                         self.warn(tr!("status-autosave-failed", cause = cause));
                     }
@@ -184,6 +198,7 @@ impl AppState {
                 }
             }
         }
+        self.autosave.deadline = Some(now + period);
         Some(period)
     }
 
@@ -206,10 +221,17 @@ impl AppState {
             Some(slot) => slot,
             None => Slot::acquire(&dir, &stem, std::process::id()).map_err(AutosaveError::Dir)?,
         };
-        slot.write_sidecar(&self.path);
         let result = self.handle.save(slot.path());
+        if result.is_ok() {
+            slot.write_sidecar(&self.path);
+        }
         self.autosave.slot = Some(slot);
-        result.map_err(AutosaveError::Session)?;
+        match result {
+            Err(SessionError::Command(CommandError::MacroOpen(_))) => {
+                return Err(AutosaveError::Busy);
+            }
+            other => other.map_err(AutosaveError::Session)?,
+        }
         self.autosave_mark_clean();
         Ok(())
     }

@@ -5685,7 +5685,10 @@ impl AppState {
             return;
         }
         match self.handle.begin_macro(MacroKind::GraphProperties) {
-            Ok(_) => self.plot_macro_open = true,
+            Ok(_) => {
+                self.plot_macro_open = true;
+                self.refresh();
+            }
             Err(err) => self.fail(tr!(
                 "error-plot-settings-undo-group",
                 cause = errors::session::error_message(&err)
