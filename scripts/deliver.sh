@@ -10,13 +10,32 @@
 #
 # Before anything else it refuses while a trial entry of the issue is a retour nobody settled (#496).
 #
-# Order: checks, take the main lock (main-lock.sh), then a trap that releases it on
-# every exit; clean main and clean branch worktree; fetch origin main (SF_NO_FETCH is
+# TESTED COMMIT (#515). The branch head must carry the stamp `<git common dir>/sf-tested/<sha>`
+# that scripts/test-all.sh writes after a green run on a clean tree. Missing stamp: refusal
+# ("run scripts/test-all.sh in <worktree>, then rerun"). It is checked twice: before the lock
+# (fast refusal) and inside the lock just before `git merge --no-ff`, after the exit-3 check
+# and only when the merge is still to be made (a rerun that only pushes or records needs none).
+# Main is an ancestor of the branch before the merge, so the tree of M equals the tree of the
+# branch head: the head's stamp covers M.
+#
+# MANUAL SCREENSHOTS (#515). Before the lock, if the branch changed anything under crates/,
+# assets/, manual/screenshots.json or Cargo.lock (against its merge base), deliver regenerates
+# ALL the manual screenshots in the branch worktree (scripts/manual-screenshots.sh --no-python:
+# the Python console shot is left out), commits the changed images ("manual: regenerate
+# screenshots (#n)") and stamps that commit itself (it only adds images, which no test reads),
+# provided the previous head was stamped. A failure is a refusal, main unchanged. A branch
+# without a worktree that needs the shots is refused. Test seam: SF_MANUAL_SHOTS, a command run
+# in the worktree instead of the script.
+#
+# Order: checks, the read-only discovery of branch and worktree, the stamp check and the
+# screenshots, take the main lock (main-lock.sh), then a trap that releases it on
+# every exit; clean main; fetch origin main (SF_NO_FETCH is
 # ignored: this is the one fetch that matters), fast-forward if behind, stop if
 # diverged (never a force). If main already holds a `Merge #<n>:` first-parent commit
 # that contains the branch (an earlier run got that far), that commit is M and the run
 # goes straight to the push. Otherwise, if main is not in the branch yet, main is merged
-# INTO the branch (in its worktree) and the run stops with exit 3: recheck, then rerun.
+# INTO the branch (in its worktree) and the run stops with exit 3: rerun scripts/test-all.sh
+# there (the head changed), then rerun deliver.sh.
 # Else `git merge --no-ff -F` gives M. Push main (`--no-follow-tags`, 4 retries after
 # 2, 4, 8, 16 s; test seam SF_DELIVER_DELAYS="2 4 8 16"). Last, if the issue still has
 # trial entries with `try`, `suivi.py test merged <n> M` writes M on them. No tag is
@@ -41,7 +60,7 @@
 # already landed is fine.
 #
 # Exit: 0 delivered, 1 refused or failed (main unchanged unless M was already merged
-# locally), 2 usage, 3 main moved: it was merged into the branch, recheck and rerun.
+# locally), 2 usage, 3 main moved: it was merged into the branch, retest and rerun.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/workflow-lib.sh"
@@ -90,6 +109,42 @@ if [ "$line" = main ]; then
     [ "$(git symbolic-ref --short HEAD 2> /dev/null || true)" = main ] || die "the main checkout is not on the branch main"
 fi
 
+branches="$(git for-each-ref --format='%(refname:short)' "refs/heads/feature/$n-*")"
+nb="$(printf '%s' "$branches" | grep -c . || true)"
+[ "$nb" -le 1 ] || die "several branches feature/$n-*: $(echo $branches)"
+branch="$branches"
+wt=""
+if [ -n "$branch" ]; then
+    wt="$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '/^worktree /{p=substr($0,10)} $1=="branch" && $2==b {print p}' | head -n 1)"
+    if [ -n "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
+        die "the worktree $wt has modified or untracked files"
+    fi
+fi
+
+# Tested commit and manual screenshots (#515), before the lock. Skipped when the branch is already
+# in the line (an earlier run merged it: this run only pushes or records).
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+stamp_ok() { [ -e "$common/sf-tested/$(git rev-parse "$branch")" ]; }
+stamp_refuse() { die "$branch (commit $(git rev-parse --short "$branch")) has no test stamp: run scripts/test-all.sh in ${wt:-its worktree}, then rerun"; }
+if [ -n "$branch" ] && ! git merge-base --is-ancestor "$branch" "$line"; then
+    stamp_ok || stamp_refuse
+    if [ -n "$(git diff --name-only "$(git merge-base "$line" "$branch")" "$branch" -- crates assets manual/screenshots.json Cargo.lock)" ]; then
+        [ -n "$wt" ] || die "$branch changes the interface and has no worktree to regenerate the manual screenshots in"
+        echo "deliver: regenerating the manual screenshots (without the Python console shot)" >&2
+        if [ -n "${SF_MANUAL_SHOTS:-}" ]; then
+            ( cd "$wt" && bash -c "$SF_MANUAL_SHOTS" ) > /dev/null || die "regenerating the manual screenshots failed; nothing merged"
+        else
+            ( cd "$wt" && ./scripts/manual-screenshots.sh --no-python ) > /dev/null || die "regenerating the manual screenshots failed; nothing merged"
+        fi
+        if [ -n "$(git -C "$wt" status --porcelain manual/src/images)" ]; then
+            git -C "$wt" add manual/src/images
+            git -C "$wt" commit -q -m "manual: regenerate screenshots (#$n)" || die "committing the regenerated screenshots failed"
+            mkdir -p "$common/sf-tested"
+            : > "$common/sf-tested/$(git rev-parse "$branch")"
+        fi
+    fi
+fi
+
 "$here/main-lock.sh" take "deliver #$n" > /dev/null || exit 1
 trap '"$here/main-lock.sh" release > /dev/null 2>&1 || true' EXIT
 
@@ -103,18 +158,6 @@ else
         || die "the line $line has no worktree $lwt on that branch (scripts/line.sh create $line); never a fallback to main"
     [ -z "$(git -C "$lwt" status --porcelain)" ] || die "the line worktree $lwt has modified or untracked files"
     cd "$lwt"   # from here on the checkout is the line's; the main checkout stays as it is
-fi
-
-branches="$(git for-each-ref --format='%(refname:short)' "refs/heads/feature/$n-*")"
-nb="$(printf '%s' "$branches" | grep -c . || true)"
-[ "$nb" -le 1 ] || die "several branches feature/$n-*: $(echo $branches)"
-branch="$branches"
-wt=""
-if [ -n "$branch" ]; then
-    wt="$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '/^worktree /{p=substr($0,10)} $1=="branch" && $2==b {print p}' | head -n 1)"
-    if [ -n "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
-        die "the worktree $wt has modified or untracked files"
-    fi
 fi
 
 git fetch -q origin "$line" || die "git fetch origin $line failed"
@@ -159,9 +202,10 @@ if [ -z "$m" ]; then
             git -C "$wt" merge --abort > /dev/null 2>&1 || true
             die "merging $line into $branch conflicts; resolve it in $wt, then rerun"
         fi
-        echo "deliver: $line had moved; it is now merged into $branch. Recheck the branch (stokesforge-verification), then rerun deliver.sh $n $msgfile" >&2
+        echo "deliver: $line had moved; it is now merged into $branch. Rerun scripts/test-all.sh in $wt (the head changed), then rerun deliver.sh $n $msgfile" >&2
         exit 3
     fi
+    stamp_ok || stamp_refuse
     if ! git merge --no-ff -q -F "$msgfile" "$branch" > /dev/null; then
         if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then git merge --abort > /dev/null 2>&1 || true; fi
         die "the merge of $branch failed; $line is unchanged"
