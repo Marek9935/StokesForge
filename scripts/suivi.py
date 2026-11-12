@@ -33,6 +33,10 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     deleted after an upload; the JSON is never rewritten, a name left without its file is shown
     as "removed by the size limit".
     control.json           result of the last `check`
+    merge/<root>.json      the live click {at, key} (see MERGE REQUEST)
+    deliver/<root>.json    the stored merge (`merge-message`, #531): {issue, msg, wait_tag, head, branch, stored_at, run};
+                           run = {state running|retesting|ok|failed|interrupted, reason, rc, merge, pid, pid_start, launched}
+    deliver/<root>.msg     the stored merge message (a copy); deliver/<root>.log the output of the run
 
 THE RULE. An issue holds its colour if, and only if, (a) the Claude session that
 owns it is alive, or (b) one of its QCMs is open, or (c) one of its trial entries
@@ -81,11 +85,24 @@ was reported (only suivi.py writes it, just before printing; another session sta
 `.suivi/waits/<root>.json` {pid, pid_start, session, started} registers the wait (stale = pid_start
 mismatch), `waits/log` records SIGTERM/SIGHUP. When to wake is ONE function, `should_wake`. A wait never
 holds a colour and never writes issues/ or tests/. `news <n>` prints and records the unseen events.
-MERGE REQUEST. The page's « Fusionner » button POSTs /api/issue/<n>/merge (refused 409 unless every `try`
-entry of the group is OK now); that writes merge/<root>.json {at, key}. The request is live only while the
-condition holds and no entry changed since (key), and it is an event that wakes the wait at once. A merge
-ready and not delivered keeps the wait open (no `nothing open`); `test merged` deletes the file.
-Seams: SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or comment, default 180 s).
+MERGE REQUEST (#531). The page merges by itself; Claude's permissions are never involved. Beforehand the agent runs
+`merge-message <n> <file> [--wait-tag rc|final]` (the checks of deliver.sh: first line `Merge #<n>:`, nothing closing on a
+line, no --wait-tag on a line); it stores deliver/<root>.json with the branch head. The « Fusionner » button exists only when
+every `try` entry of the group is OK (or a retour settled) AND a message is stored; between the last OK and the stored
+message the card reads « L'agent prepare la fusion ». The click POSTs /api/issue/<n>/merge (409 unless both hold; a second
+click while a run lives is a no-op, 200); that writes merge/<root>.json {at, key} (live only while the condition holds and no
+entry changed since: a retour before the launch means no run) and starts `deliver-run <root>` in a transient
+`systemd-run --user` unit at normal priority (the service itself runs Nice=19 / idle and KillMode=process keeps the
+detached refresh of deliver.sh alive); the server never waits for it. `deliver-run` runs the MAIN checkout's
+scripts/deliver.sh with it as cwd (a push without ssh-agent fails fast: BatchMode). Exit 3 (main moved) reruns
+scripts/test-all.sh in the issue's worktree and delivers again, 3 deliver runs at most. The result (state, reason = the
+last `deliver:` line, merge commit) is written atomically to the record; a live state whose process is gone reads
+`interrupted`. After a failure the button comes back only when the agent stores the message again (a store clears the run).
+The wait wakes the agent on the click (informational: it must NOT run deliver.sh), on `delivered as <M>` (it cleans up)
+and on `delivery failed: <reason> (log <path>)`. `test merged` (run by deliver.sh) deletes the click file. A merge ready and
+not delivered keeps the wait open. /api/state carries merge_prepared and merge_run {state, reason, merge}, no timestamp.
+Seams: SF_SUIVI_DELIVER (fake deliver command), SF_SUIVI_TESTALL (fake test-all), SF_SUIVI_DELIVER_LAUNCH=direct (setsid
+child, no systemd-run), SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (delay for a Retour or comment, default 180 s).
 `hook-wait` (PostToolUse hook, asyncRewake) arms that same wait after a `suivi.py` call on an issue the
 session owns: exit 2 with the text on stderr for an event, exit 0 silent otherwise. `hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
 or tells a new session which issues hold unread answers; it always exits 0.
@@ -103,7 +120,7 @@ A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
 Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
-members, is-package, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
+members, is-package, merge-message, deliver-run, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|settle|unsettled|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
 """
 import argparse
@@ -117,11 +134,13 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 COLOURS = ["🟦", "🟩", "🟧", "🟪", "🟥", "🟨"]
@@ -932,7 +951,7 @@ def should_wake(events, todos, last_change, now, settle):
     each change restarting it). A plain OK with `todo` left wakes nothing and stays unseen."""
     if not events:
         return False
-    if any(e["kind"] in ("form", "merge", "withdrawn") for e in events) or todos == 0:
+    if any(e["kind"] in ("form", "merge", "withdrawn", "deliver") for e in events) or todos == 0:
         return True
     if any(e["status"] == "retour" or e["comment"] or e.get("images") or e.get("idea") for e in events):
         return now - last_change >= settle
@@ -989,6 +1008,269 @@ def merge_request(root, items):
     return None
 
 
+# ------------------------------------------------------------------ deliver (#531)
+# The page's « Fusionner » click makes `serve` start `scripts/deliver.sh` itself, so Claude's permission
+# system is never involved in a merge. The agent only STORES the message beforehand (`merge-message`) and cleans up
+# afterwards. Everything about a merge of a package root lives in deliver/<root>.json:
+#   {issue, msg, wait_tag, head, branch, run}   run = null | {state, reason, rc, merge, pid, pid_start, launched}
+# state: running | retesting (exit 3 loop) | ok | failed | interrupted (a live state whose process is gone).
+RUN_LIVE = ("running", "retesting")
+RUN_STATES = RUN_LIVE + ("ok", "failed", "interrupted")
+LAUNCH_GRACE = 60            # seconds a launched run may take to register its pid before it reads as interrupted
+DELIVER_ATTEMPTS = 3         # deliver.sh runs in one click (exit 3 = main moved: retest, deliver again)
+CLOSING_RE = re.compile(r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#[0-9]+", re.I)
+
+
+def deliver_path(root):
+    return os.path.join(suivi_dir(), "deliver", "%d.json" % root)
+
+
+def deliver_log_path(root):
+    return os.path.join(suivi_dir(), "deliver", "%d.log" % root)
+
+
+def deliver_msg_path(root):
+    return os.path.join(suivi_dir(), "deliver", "%d.msg" % root)
+
+
+def deliver_record(root):
+    """The stored merge preparation of the group, or None."""
+    d = read_json(deliver_path(root))
+    return d if isinstance(d, dict) and isinstance(d.get("issue"), int) and d.get("msg") else None
+
+
+def effective_run(rec):
+    """The run of a record as it reads now: a live state whose process is gone is `interrupted`."""
+    run = rec.get("run") if rec else None
+    if not isinstance(run, dict) or run.get("state") not in RUN_STATES:
+        return None
+    if run["state"] in RUN_LIVE:
+        pid = run.get("pid")
+        if pid is None:
+            dead = time.time() - float(run.get("launched") or 0) > LAUNCH_GRACE
+        else:
+            dead = pid_start(pid) != run.get("pid_start")
+        if dead:
+            return dict(run, state="interrupted", reason="the run stopped before it finished (see the log)")
+    return run
+
+
+def deliver_patch(root, run=None, **top):
+    """Atomic update of the record: merge `run` fields into its run (None leaves it), set top-level fields."""
+    with Lock():
+        rec = deliver_record(root)
+        if rec is None:
+            return None
+        if run is not None:
+            rec["run"] = dict(rec.get("run") or {}, **run)
+        rec.update(top)
+        write_json(deliver_path(root), rec)
+        return rec
+
+
+def issue_branch(n):
+    """(branch, head sha, worktree path or "") of the issue's single branch feature/<n>-*."""
+    m = main_dir()
+    if not m:
+        raise Fail("not inside the StokesForge repository")
+    rc, out = git_rc("-C", m, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/feature/")
+    hits = [l.split() for l in out.splitlines() if re.match(r"feature/%d-" % n, l)]
+    if len(hits) != 1:
+        raise Fail("%s branch feature/%d-*" % ("no" if not hits else "several", n))
+    branch, sha = hits[0]
+    wt = ""
+    rc, out = git_rc("-C", m, "worktree", "list", "--porcelain")
+    cur = ""
+    for l in out.splitlines():
+        if l.startswith("worktree "):
+            cur = l[len("worktree "):]
+        elif l == "branch refs/heads/" + branch:
+            wt = cur
+    return branch, sha, wt
+
+
+def cmd_merge_message(a):
+    """Store the merge message of an issue, once all its trial entries are OK; the page's button then appears (#531).
+    The same checks as deliver.sh, so a refusal comes now and not at the click."""
+    recs = load_all()
+    if a.issue not in recs:
+        raise Fail("no record for #%d" % a.issue)
+    root = group_of(recs[a.issue])
+    try:
+        with open(a.file, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        raise Fail("cannot read the message file %s: %s" % (a.file, e))
+    first = text.split("\n", 1)[0]
+    if not first.startswith("Merge #%d:" % a.issue):
+        raise Fail("the first line of the message must start with 'Merge #%d:' (got: %s)" % (a.issue, first))
+    line = line_of(recs, a.issue)
+    if line != "main":
+        if a.wait_tag:
+            raise Fail("#%d is on the line %s: --wait-tag is for main, a line merge proves nothing yet" % (a.issue, line))
+        if CLOSING_RE.search(text):
+            raise Fail("#%d is on the line %s: the message may not close an issue (Closes/Fixes/Resolves #n); write Refs #n"
+                       % (a.issue, line))
+    if a.wait_tag and re.search(r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#%d\b" % a.issue, text, re.I):
+        raise Fail("the message closes #%d, but --wait-tag keeps it open until the tag: remove that line" % a.issue)
+    branch, head, _ = issue_branch(a.issue)
+    ideas = unsettled_ideas(a.issue)
+    with Lock():
+        os.makedirs(os.path.dirname(deliver_path(root)), exist_ok=True)
+        tmp = deliver_msg_path(root) + ".tmp.%d" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, deliver_msg_path(root))
+        write_json(deliver_path(root), {"issue": a.issue, "msg": deliver_msg_path(root), "wait_tag": a.wait_tag or "",
+                                        "head": head, "branch": branch, "stored_at": time.time(), "run": None})
+        try:
+            os.unlink(merge_path(root))          # a new preparation starts from a clean click
+        except OSError:
+            pass
+    if ideas:
+        print("note: #%d has unsettled ideas (they do not block): %s" % (a.issue, " ".join(ideas)))
+    print("merge message stored for #%d (branch head %s): the page's « Fusionner » appears once every entry is OK" % (a.issue, head[:8]))
+    hint_not_listening(a.issue)
+    return 0
+
+
+def deliver_env():
+    """Environment of the delivery: a push without an agent must fail fast, not wait for a prompt."""
+    e = dict(os.environ)
+    e["GIT_TERMINAL_PROMPT"] = "0"
+    ssh = e.get("GIT_SSH_COMMAND") or "ssh"
+    if "BatchMode" not in ssh:
+        ssh += " -o BatchMode=yes"
+    e["GIT_SSH_COMMAND"] = ssh
+    return e
+
+
+def deliver_launch_argv(root, main, script, python, setenv):
+    """Pure: the command that starts the wrapper OUTSIDE the service's cgroup and priority. The service runs Nice=19 / idle
+    and a plain child would inherit that and die with `systemctl --user restart stokesforge-suivi`; a transient unit
+    starts at normal priority. No Nice and no CPU/IO class on purpose. KillMode=process: deliver.sh starts a detached
+    refresh with `setsid -f`, which must outlive the unit's main process."""
+    argv = ["systemd-run", "--user", "--collect", "--unit=stokesforge-deliver-%d" % root,
+            "--working-directory=" + main, "-p", "KillMode=process"]
+    argv += ["--setenv=%s=%s" % (k, v) for k, v in sorted(setenv.items())]
+    return argv + ["--", python, "-I", script, "deliver-run", str(root)]
+
+
+DELIVER_PASS_ENV = ("SF_SUIVI_DIR", "PATH", "SSH_AUTH_SOCK", "WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR",
+                    "DBUS_SESSION_BUS_ADDRESS")
+
+
+def launch_deliver(root):
+    """Start the wrapper without blocking the single-threaded server; a start that fails is a failed run."""
+    main, script = main_dir(), os.path.abspath(__file__)
+    direct = os.environ.get("SF_SUIVI_DELIVER_LAUNCH") == "direct"
+    if direct:
+        argv = [sys.executable, "-I", script, "deliver-run", str(root)]
+    else:
+        argv = deliver_launch_argv(root, main, script, sys.executable,
+                                   {k: os.environ[k] for k in DELIVER_PASS_ENV if os.environ.get(k)})
+
+    def go():
+        try:
+            p = subprocess.Popen(argv, cwd=main, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                 text=True, start_new_session=direct)
+            err = p.communicate()[1]
+            if p.returncode != 0 and not direct:
+                raise OSError((err or "").strip() or "exit %d" % p.returncode)
+        except Exception as e:
+            cur = effective_run(deliver_record(root))
+            if cur is None or cur.get("pid") is None:
+                deliver_patch(root, {"state": "failed", "reason": "could not start the run: %s" % e})
+    threading.Thread(target=go, daemon=True).start()
+
+
+def logged_run(argv, cwd, log):
+    """Run argv appending to the log; (rc, the output of this run)."""
+    with open(log, "a", encoding="utf-8") as f:
+        f.flush()
+        start = f.tell()
+        f.write("$ %s   (cwd %s)\n" % (" ".join(argv), cwd))
+        f.flush()
+        try:
+            rc = subprocess.run(argv, cwd=cwd, env=deliver_env(), stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT).returncode
+        except OSError as e:
+            f.write("cannot start: %s\n" % e)
+            rc = 127
+    with open(log, encoding="utf-8", errors="replace") as f:
+        f.seek(start)
+        return rc, f.read()
+
+
+def cmd_deliver_run(a):
+    """The run itself (started by launch_deliver in a fresh process, reads everything from disk): deliver.sh from the
+    main checkout, retest and retry on exit 3, the result written atomically to the record."""
+    root, me = a.root, os.getpid()
+    with Lock():
+        rec = deliver_record(root)
+        run = (rec or {}).get("run")
+        if not isinstance(run, dict) or run.get("state") != "running" or run.get("pid") is not None:
+            raise Fail("nothing to run for #%d" % root)
+        run.update(pid=me, pid_start=pid_start(me))
+        write_json(deliver_path(root), rec)
+    try:
+        return deliver_loop(root, rec)
+    except BaseException as e:
+        deliver_patch(root, {"state": "failed", "reason": "the run crashed: %s" % e})
+        raise
+
+
+def deliver_loop(root, rec):
+    n, main = rec["issue"], main_dir()
+    log = deliver_log_path(root)
+    open(log, "w").close()
+    recs = load_all()
+    items, _, _ = scan_group(members_of(recs, root), root) if root in recs else ({}, 0, 0)
+    if not any(it["kind"] == "merge" for it in items.values()):      # a retour (or anything voiding the click) came first
+        with Lock():
+            cur = deliver_record(root)
+            if cur:
+                cur["run"] = None
+                write_json(deliver_path(root), cur)
+        print("deliver-run: the merge request is no longer live; nothing run")
+        return 1
+    fake = os.environ.get("SF_SUIVI_DELIVER")
+    deliver = shlex.split(fake) if fake else [os.path.join(main, "scripts", "deliver.sh")]
+    for attempt in range(1, DELIVER_ATTEMPTS + 1):
+        try:
+            branch, head, wt = issue_branch(n)
+        except Fail as e:
+            return deliver_end(root, "failed", "branch lost: %s" % e)
+        if head != rec["head"]:
+            return deliver_end(root, "failed", "branch changed after the preparation: store the message again")
+        args = (["--wait-tag", rec["wait_tag"]] if rec.get("wait_tag") else []) + [str(n), rec["msg"]]
+        rc, out = logged_run(deliver + args, main, log)
+        lines = [l[len("deliver: "):] for l in out.splitlines() if l.startswith("deliver: ")]
+        if rc == 0:
+            m = re.search(r"merged and pushed as ([0-9a-f]{7,40})", out)
+            return deliver_end(root, "ok", "", rc=0, merge=m.group(1) if m else "")
+        if rc != 3:
+            return deliver_end(root, "failed", lines[-1] if lines else "deliver.sh exited %d" % rc, rc=rc)
+        if attempt == DELIVER_ATTEMPTS:
+            return deliver_end(root, "failed", "main moved again: %d attempts used" % attempt, rc=3)
+        if not wt:
+            return deliver_end(root, "failed", "main moved and the branch has no worktree to retest in", rc=3)
+        deliver_patch(root, {"state": "retesting"})
+        testall = os.environ.get("SF_SUIVI_TESTALL")
+        trc, _ = logged_run(shlex.split(testall) if testall else [os.path.join(wt, "scripts", "test-all.sh")], wt, log)
+        if trc != 0:
+            return deliver_end(root, "failed", "tests are red after main moved (see the log)", rc=trc)
+        try:
+            rec = deliver_patch(root, {"state": "running"}, head=issue_branch(n)[1]) or rec
+        except Fail as e:
+            return deliver_end(root, "failed", "branch lost: %s" % e)
+    return 1
+
+
+def deliver_end(root, state, reason, **extra):
+    deliver_patch(root, dict({"state": state, "reason": reason}, **extra))
+    return 0 if state == "ok" else 1
+
+
 def scan_group(members, root=None):
     """(items, open_forms, open_todos) for the issues in `members`. items: key -> {id, fp, line}.
     With `root`, a live merge request of the group is an item too."""
@@ -1043,7 +1325,18 @@ def scan_group(members, root=None):
     if req:
         items["merge:%d" % root] = {"id": "merge:%d" % root, "kind": "merge", "status": "", "comment": "", "mtime": 0.0,
                                     "fp": "requested|%s" % req.get("at", ""),
-                                    "line": "#%d merge requested on the page by the user: this is the go-ahead" % root}
+                                    "line": "#%d merge requested on the page by the user: the page now runs the merge itself, "
+                                            "do NOT run deliver.sh; wait for « delivered as »" % root}
+    drec = deliver_record(root) if root is not None else None
+    run = effective_run(drec)
+    if run and run["state"] in ("ok", "failed", "interrupted"):
+        if run["state"] == "ok":
+            line = "#%d delivered as %s: clean up (scripts/chantier.sh --release %d) and report" % (root, run.get("merge") or "?", root)
+        else:
+            line = "#%d delivery failed: %s (log %s); fix it, then store the message again (suivi.py merge-message)" % (
+                root, run.get("reason") or "unknown", deliver_log_path(root))
+        items["deliver:%d" % root] = {"id": "deliver:%d" % root, "kind": "deliver", "status": "", "comment": "", "mtime": 0.0,
+                                      "fp": "%s|%s|%s|%s" % (run["state"], run.get("merge", ""), run.get("reason", ""), drec.get("stored_at", "")), "line": line}
     return items, forms, todos
 
 
@@ -1113,12 +1406,21 @@ def listening(recs, root):
     return bool(sid and reg and reg.get("session") == sid)
 
 
+def merge_run_view(root):
+    """What the page needs of the stored merge (#531), no timestamp (ETag): whether the agent prepared it, and its run."""
+    rec = deliver_record(root)
+    run = effective_run(rec)
+    return {"merge_prepared": rec is not None,
+            "merge_run": {"state": run["state"], "reason": run.get("reason", ""), "merge": run.get("merge", "")} if run else None}
+
+
 def wait_view(recs, root):
     """Computed `listening` and `unread` of a group: steady values, no timestamp (ETag)."""
     items, _, _ = scan_group(members_of(recs, root), root)
     sid = owner_session(recs.get(root))
     return {"listening": listening(recs, root), "unread": len([e for e in unseen_events(items, load_heard(root, sid)) if e["kind"] != "withdrawn"]),
-            "merge_ready": merge_ready(items), "merge_requested": any(it["kind"] == "merge" for it in items.values())}
+            "merge_ready": merge_ready(items), "merge_requested": any(it["kind"] == "merge" for it in items.values()),
+            **merge_run_view(root)}
 
 
 def exit_reason(b, sid):
@@ -1241,7 +1543,7 @@ def wait_loop(n, sid, root, timeout, hook):
         time.sleep(min(poll, max(0.01, started + timeout - now)))
 
 
-HOOK_CMD_RE = re.compile(r"suivi\.py\s+(?:(?:qcm\s+(?:pose|answers|withdraw)|test\s+(?:add|remove|merged)|set|news)\s+(\d+)"
+HOOK_CMD_RE = re.compile(r"suivi\.py\s+(?:(?:qcm\s+(?:pose|answers|withdraw)|test\s+(?:add|remove|merged)|set|news|merge-message)\s+(\d+)"
                          r"|test\s+list\s+--issue\s+(\d+))")
 
 
@@ -3224,7 +3526,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send(200, json.dumps({"ok": True, "build_queue": build_queue_view()}), "application/json")
 
     def post_merge(self, n):
-        """Record the user's request to merge (the agent merges). Refused unless the merge condition holds now."""
+        """The user's click: start the merge itself (#531). Never blocks: the run is a separate process."""
         if self.read_body() is None:
             return
         recs = load_all()
@@ -3234,9 +3536,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         items, _, _ = scan_group(members_of(recs, root), root)
         if not merge_ready(items):
             return self.fail(409, "the merge condition does not hold: every trial entry must be OK")
-        if not any(it["kind"] == "merge" for it in items.values()):     # idempotent: a live request stays as it is
+        with Lock():
+            rec = deliver_record(root)
+            if rec is None:
+                return self.fail(409, "the agent has not prepared the merge yet (no stored message)")
+            run = effective_run(rec)
+            if run and run["state"] in RUN_LIVE:                  # a second click: the run in progress stands
+                return self.send(200, json.dumps({"ok": True}), "application/json")
+            if run:
+                return self.fail(409, "the last run ended (%s): the agent must store the message again" % run["state"])
             write_json(merge_path(root), {"at": datetime.datetime.now().isoformat(timespec="microseconds"),
                                           "key": merge_key(items)})
+            rec["run"] = {"state": "running", "launched": time.time()}
+            write_json(deliver_path(root), rec)
+        launch_deliver(root)
         self.send(200, json.dumps({"ok": True}), "application/json")
 
     def post_qcm(self, qid, what):
@@ -3437,6 +3750,12 @@ def parser():
     p.add_argument("--timeout", type=float, metavar="S", help="seconds before giving up (default 72 h)")
     p = add("news", cmd_news, "print and record the events not yet reported to this session")
     p.add_argument("issue", type=int)
+    p = add("merge-message", cmd_merge_message, "store the merge message of an issue; the page's Fusionner button needs it (#531)")
+    p.add_argument("issue", type=int)
+    p.add_argument("file")
+    p.add_argument("--wait-tag", choices=("rc", "final"), help="as deliver.sh --wait-tag: the issue stays open until the tag")
+    p = add("deliver-run", cmd_deliver_run, "internal: the merge run started by the page's click (reads everything from disk)")
+    p.add_argument("root", type=int)
     p = add("tag-wait", cmd_tag_wait, "declare that the issue waits for a tag (the service adds the label)")
     p.add_argument("issue", type=int)
     p.add_argument("kind", choices=sorted(LABEL_WAITS))

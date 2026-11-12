@@ -1119,8 +1119,12 @@ class TestImportOnline(Base):
 class ServerBase(Base):
     EXTRA_ENV = {}
 
+    def prepare_env(self):
+        """Hook for subclasses: adjust self.env / self.EXTRA_ENV before the server starts."""
+
     def setUp(self):
         super().setUp()
+        self.prepare_env()
         self.claim(1, "--name", "One")
         self.run_cli("set", "1", "--state", "code", "--what", "doing", "--wait", "you", "--waiting", "your OK", "--force")
         self.claim(2, "--name", "Two")
@@ -2041,7 +2045,8 @@ class TestMergeRequest(WaitBase):
         self.assertIsNone(p.poll())                           # `nothing open` must not fire
         self.request()
         rc, out, _ = self.finish(p, 5)
-        self.assertIn("#1 merge requested on the page by the user: this is the go-ahead", out)
+        self.assertIn("#1 merge requested on the page by the user: the page now runs the merge itself, do NOT run deliver.sh", out)
+        self.assertNotIn("this is the go-ahead", out)
         rc, out, _ = self.run_wait(1, timeout="1")             # same request: not again
         self.assertTrue(out.startswith("timeout"), out)
 
@@ -2115,53 +2120,379 @@ class TestMergeRequest(WaitBase):
         self.assertFalse(os.path.exists(os.path.join(self.state, "merge", "1.json")))
 
 
-class TestMergePost(ServerBase):
+class MergeRunBase(ServerBase):
+    """The page merges by itself (#531): a fake deliver.sh and a fake test-all, the wrapper started `direct` (no systemd-run)."""
+
+    def prepare_env(self):
+        self.fk = os.path.join(self.tmp.name, "fake")
+        os.makedirs(self.fk)
+        self.fake_script("deliver", '''echo "$(pwd -P)|$*" >> "$D/calls"
+while [ -e "$D/hold" ]; do sleep 0.05; done
+rc=0
+if [ -s "$D/rcs" ]; then rc=$(head -n1 "$D/rcs"); tail -n +2 "$D/rcs" > "$D/rcs.tmp"; mv "$D/rcs.tmp" "$D/rcs"; fi
+case $rc in
+  0) echo "deliver: #1 merged and pushed as abc1234" ;;
+  3) echo "deliver: main had moved" >&2 ;;
+  *) echo "deliver: noise before" >&2; cat "$D/reason" >&2 ;;
+esac
+exit $rc''')
+        self.fake_script("testall", '''pwd -P >> "$D/testall.calls"
+exit $(cat "$D/testall_rc" 2>/dev/null || echo 0)''')
+        self.EXTRA_ENV = {"SF_SUIVI_DELIVER": os.path.join(self.fk, "deliver"), "SF_SUIVI_TESTALL": os.path.join(self.fk, "testall"),
+                          "SF_SUIVI_DELIVER_LAUNCH": "direct", "SF_SUIVI_WAIT_POLL": "0.05", "SF_SUIVI_WAIT_SETTLE": "0"}
+        self.worktree("1")          # branch feature/1-x, worktree <root>/1
+        self.wt = os.path.join(self.root, "1")
+        self.msg = os.path.join(self.tmp.name, "msg.txt")
+        self.write_msg("Merge #1: the thing\n\nCloses #1\n")
+
+    def fake_script(self, name, body):
+        path = os.path.join(self.fk, name)
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\nD=%s\n%s\n" % (self.fk, body))
+        os.chmod(path, 0o755)
+
+    def write_msg(self, text):
+        with open(self.msg, "w") as f:
+            f.write(text)
+
+    def fk_write(self, name, text):
+        with open(os.path.join(self.fk, name), "w") as f:
+            f.write(text)
+
+    def fk_lines(self, name):
+        p = os.path.join(self.fk, name)
+        return slurp(p).splitlines() if os.path.exists(p) else []
+
+    def store(self, *extra, issue="1"):
+        return self.run_cli("merge-message", issue, self.msg, *extra, env=self.as_session("S1"))
+
+    def set_entry(self, status="ok"):
+        with open(self.entry, "w") as f:
+            json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
+
     def merge(self, n=1, **kw):
         return self.post("/api/issue/%d/merge" % n, body={}, **kw)
 
-    def flags(self, n=0):
-        e = json.loads(self.req("GET", "/api/state")[2])["colours"][n]
-        return e["merge_ready"], e["merge_requested"]
+    def state1(self):
+        return json.loads(self.req("GET", "/api/state")[2])["colours"][0]
 
+    def run_of(self):
+        rec = jload(os.path.join(self.state, "deliver", "1.json")) if os.path.exists(os.path.join(self.state, "deliver", "1.json")) else {}
+        return (rec.get("run") or {})
+
+    def until(self, cond, t=15):
+        end = time.time() + t
+        while time.time() < end:
+            if cond():
+                return
+            time.sleep(0.03)
+        self.fail("condition not met; run=%s" % self.run_of())
+
+    def ended(self):
+        self.until(lambda: self.run_of().get("state") in ("ok", "failed", "interrupted"))
+        return self.run_of()
+
+    def wait_out(self, timeout="3"):
+        e = dict(self.env, **self.as_session("S1"), SF_SUIVI_WAIT_POLL="0.05", SF_SUIVI_WAIT_SETTLE="0")
+        r = subprocess.run([sys.executable, "-I", SUIVI, "wait", "1", "--timeout", timeout], cwd=self.repo, env=e,
+                           capture_output=True, text=True, timeout=30)
+        return r.stdout
+
+    def ready(self):
+        """Everything OK and the message stored: the state in which the button exists."""
+        self.set_entry("ok")
+        r = self.store()
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class TestMergePost(MergeRunBase):
     def test_refused_with_409_unless_every_try_entry_is_ok(self):
+        self.assertEqual(self.store().returncode, 0)
         self.assertEqual(self.merge()[0], 409)                      # 1-1 is todo
         for status in ("retour", "todo"):
-            with open(self.entry, "w") as f:
-                json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
+            self.set_entry(status)
             self.assertEqual(self.merge()[0], 409, status)
         with open(self.entry, "w") as f:
             json.dump({"n": 1, "title": "T", "status": "ok"}, f)    # no `try`
         self.assertEqual(self.merge()[0], 409)
         self.assertEqual(self.merge(9)[0], 409)                     # no such issue
         self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+        self.assertEqual(self.fk_lines("calls"), [])
 
     def test_guards(self):
-        self.ok()
+        self.ready()
         self.assertEqual(self.merge(headers={})[0], 403)
         self.assertEqual(self.merge(headers={"X-Suivi": "1", "Origin": "http://evil.example"})[0], 403)
         self.assertEqual(self.merge(host="evil.example")[0], 403)
         self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+        self.assertEqual(self.fk_lines("calls"), [])
 
-    def ok(self, status="ok"):
-        with open(self.entry, "w") as f:
-            json.dump({"n": 1, "title": "T", "status": status, "try": "x"}, f)
-
-    def test_a_click_records_once_and_a_change_voids_it(self):
-        self.ok()
-        self.assertEqual(self.flags(), (True, False))
+    def test_a_click_records_once_and_a_change_voids_the_request(self):
+        self.ready()
+        self.fk_write("hold", "")
+        e = self.state1()
+        self.assertEqual((e["merge_ready"], e["merge_requested"], e["merge_prepared"], e["merge_run"]), (True, False, True, None))
         self.assertEqual(self.merge()[0], 200)
         path = os.path.join(self.state, "merge", "1.json")
         first = slurp(path)
         self.assertEqual(self.merge()[0], 200)
         self.assertEqual(slurp(path), first)                        # idempotent
-        self.assertEqual(self.flags(), (True, True))
-        self.ok("todo")
-        self.assertEqual(self.flags(), (False, False))
-        self.ok("ok")
-        self.assertEqual(self.flags(), (True, False))               # not back on its own
+        e = self.state1()
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (True, True))
+        self.until(lambda: self.fk_lines("calls"))                  # launched: a later change only voids the request
+        self.set_entry("todo")
+        e = self.state1()
+        self.assertEqual((e["merge_ready"], e["merge_requested"]), (False, False))
+        os.unlink(os.path.join(self.fk, "hold"))
+        self.ended()
+
+    def test_all_ok_without_a_stored_message_has_no_button_and_the_click_is_refused(self):
+        self.set_entry("ok")
+        e = self.state1()
+        self.assertEqual((e["merge_ready"], e["merge_prepared"], e["merge_run"]), (True, False, None))
+        code, _, body = self.merge()
+        self.assertEqual(code, 409)
+        self.assertIn(b"no stored message", body)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+        self.assertEqual(self.fk_lines("calls"), [])
+
+    def test_a_click_runs_the_main_checkout_deliver_once_with_the_stored_message(self):
+        self.set_entry("ok")
+        self.write_msg("Merge #1: the thing\n\nRefs #1\n")
+        self.assertEqual(self.store("--wait-tag", "rc").returncode, 0)
         self.assertEqual(self.merge()[0], 200)
-        self.assertEqual(self.flags(), (True, True))
-        self.assertNotEqual(slurp(path), first)
+        run = self.ended()
+        self.assertEqual((run["state"], run["merge"]), ("ok", "abc1234"))
+        stored = os.path.join(self.state, "deliver", "1.msg")
+        self.assertEqual(slurp(stored), slurp(self.msg))
+        self.assertEqual(self.fk_lines("calls"), ["%s|--wait-tag rc 1 %s" % (os.path.realpath(self.repo), stored)])
+        e = self.state1()
+        self.assertEqual(e["merge_run"], {"state": "ok", "reason": "", "merge": "abc1234"})
+        self.assertEqual(self.merge()[0], 409)                      # ended: the agent stores again
+
+    def test_two_clicks_during_a_run_start_one(self):
+        self.ready()
+        self.fk_write("hold", "")
+        self.assertEqual(self.merge()[0], 200)
+        self.until(lambda: self.fk_lines("calls"))
+        self.assertEqual(self.state1()["merge_run"]["state"], "running")
+        self.assertEqual(self.merge()[0], 200)
+        os.unlink(os.path.join(self.fk, "hold"))
+        self.assertEqual(self.ended()["state"], "ok")
+        self.assertEqual(len(self.fk_lines("calls")), 1)
+
+    def test_the_wait_wakes_on_delivered_and_on_failure_with_the_log(self):
+        self.ready()
+        self.assertEqual(self.merge()[0], 200)
+        self.ended()
+        out = self.wait_out()
+        self.assertIn("#1 delivered as abc1234", out)
+        self.assertNotIn("this is the go-ahead", out)
+        self.assertEqual(self.store().returncode, 0)                # a new preparation
+        self.fk_write("rcs", "1\n")
+        self.fk_write("reason", "deliver: has no test stamp\n")
+        self.assertEqual(self.merge()[0], 200)
+        run = self.ended()
+        self.assertEqual((run["state"], run["reason"]), ("failed", "has no test stamp"))
+        log = os.path.join(self.state, "deliver", "1.log")
+        self.assertIn("delivery failed: has no test stamp (log %s)" % log, self.wait_out())
+        self.assertIn("noise before", slurp(log))
+
+    def test_after_a_failure_the_button_returns_only_with_a_new_stored_message(self):
+        self.ready()
+        self.fk_write("rcs", "1\n")
+        self.fk_write("reason", "deliver: boom\n")
+        self.assertEqual(self.merge()[0], 200)
+        self.ended()
+        e = self.state1()
+        self.assertEqual((e["merge_prepared"], e["merge_run"]["state"], e["merge_run"]["reason"]), (True, "failed", "boom"))
+        code, _, body = self.merge()
+        self.assertEqual(code, 409)
+        self.assertIn(b"store the message again", body)
+        self.assertEqual(self.store().returncode, 0)
+        self.assertIsNone(self.state1()["merge_run"])               # cleared: the button is back
+        self.assertEqual(self.merge()[0], 200)
+        self.assertEqual(self.ended()["state"], "ok")
+        self.assertEqual(len(self.fk_lines("calls")), 2)
+
+    def test_exit_3_retests_in_the_worktree_and_delivers_again(self):
+        self.ready()
+        self.fk_write("rcs", "3\n0\n")
+        self.assertEqual(self.merge()[0], 200)
+        self.assertEqual(self.ended()["state"], "ok")
+        self.assertEqual(len(self.fk_lines("calls")), 2)
+        self.assertEqual(self.fk_lines("testall.calls"), [os.path.realpath(self.wt)])
+
+    def test_three_exit_3_fail_and_a_red_test_all_fails(self):
+        self.ready()
+        self.fk_write("rcs", "3\n3\n3\n0\n")
+        self.assertEqual(self.merge()[0], 200)
+        run = self.ended()
+        self.assertEqual(run["state"], "failed")
+        self.assertIn("main moved again", run["reason"])
+        self.assertEqual(len(self.fk_lines("calls")), 3)
+        self.assertEqual(len(self.fk_lines("testall.calls")), 2)
+        self.store()
+        os.unlink(os.path.join(self.fk, "calls"))
+        self.fk_write("rcs", "3\n0\n")
+        self.fk_write("testall_rc", "1\n")
+        self.assertEqual(self.merge()[0], 200)
+        run = self.ended()
+        self.assertEqual(run["state"], "failed")
+        self.assertIn("tests are red", run["reason"])
+        self.assertEqual(len(self.fk_lines("calls")), 1)
+
+    def test_a_branch_that_moved_after_the_preparation_is_not_delivered(self):
+        self.ready()
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "late", cwd=self.wt)
+        self.assertEqual(self.merge()[0], 200)
+        run = self.ended()
+        self.assertEqual(run["state"], "failed")
+        self.assertIn("branch changed after the preparation", run["reason"])
+        self.assertEqual(self.fk_lines("calls"), [])
+        self.assertIn("delivery failed: branch changed", self.wait_out())
+
+    def test_killing_the_server_mid_run_does_not_lose_the_result(self):
+        self.ready()
+        self.fk_write("hold", "")
+        self.assertEqual(self.merge()[0], 200)
+        self.until(lambda: self.fk_lines("calls"))
+        self.proc.kill()
+        os.unlink(os.path.join(self.fk, "hold"))
+        self.assertEqual(self.ended()["state"], "ok")
+
+    def test_a_click_voided_before_the_launch_runs_nothing(self):
+        self.ready()
+        with mock.patch.dict(os.environ, {"SF_SUIVI_DIR": self.state}):
+            items, _, _ = suivi.scan_group([1], 1)
+            key = suivi.merge_key(items)
+        os.makedirs(os.path.join(self.state, "merge"), exist_ok=True)
+        with open(os.path.join(self.state, "merge", "1.json"), "w") as f:
+            json.dump({"at": "t", "key": key}, f)
+        rec = jload(os.path.join(self.state, "deliver", "1.json"))
+        rec["run"] = {"state": "running", "launched": time.time()}
+        with open(os.path.join(self.state, "deliver", "1.json"), "w") as f:
+            json.dump(rec, f)
+        self.set_entry("retour")                                    # the retour lands between the click and the launch
+        self.set_entry("ok")
+        r = self.run_cli("deliver-run", "1", env=dict(self.EXTRA_ENV))
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(self.fk_lines("calls"), [])
+        self.assertEqual(self.run_of(), {})
+
+    def test_a_live_state_whose_process_is_gone_reads_interrupted(self):
+        self.ready()
+        gone = subprocess.run(["true"]).returncode
+        p = subprocess.Popen(["true"])
+        p.wait()
+        rec = jload(os.path.join(self.state, "deliver", "1.json"))
+        start = suivi.pid_start(os.getpid())
+        for run, expected in (({"state": "running", "pid": p.pid, "pid_start": 123}, "interrupted"),
+                              ({"state": "retesting", "pid": os.getpid(), "pid_start": start + 1}, "interrupted"),
+                              ({"state": "running", "pid": os.getpid(), "pid_start": start}, "running"),
+                              ({"state": "running", "launched": time.time() - 3600}, "interrupted"),
+                              ({"state": "running", "launched": time.time()}, "running")):
+            rec["run"] = run
+            with open(os.path.join(self.state, "deliver", "1.json"), "w") as f:
+                json.dump(rec, f)
+            self.assertEqual(self.state1()["merge_run"]["state"], expected, run)
+        self.assertEqual(gone, 0)
+
+
+class TestMergeMessage(Base):
+    """`suivi.py merge-message` (#531): the checks of deliver.sh, now, at store time."""
+
+    def setUp(self):
+        super().setUp()
+        self.worktree("7")
+        self.claim(7, "--name", "Seven")
+        self.msg = os.path.join(self.tmp.name, "m.txt")
+
+    def store(self, text, *extra):
+        with open(self.msg, "w") as f:
+            f.write(text)
+        return self.run_cli("merge-message", "7", self.msg, *extra, env=self.as_session("S1"))
+
+    def record(self):
+        return os.path.join(self.state, "deliver", "7.json")
+
+    def test_a_first_line_that_is_not_merge_n_is_refused_and_nothing_is_stored(self):
+        for first in ("Merge #8: x", "merge #7: x", "Merged #7", ""):
+            r = self.store(first + "\n")
+            self.assertEqual(r.returncode, 1, first)
+            self.assertIn("must start with 'Merge #7:'", r.stderr)
+        self.assertFalse(os.path.exists(self.record()))
+
+    def test_a_stored_message_records_the_branch_head_and_the_flag(self):
+        r = self.store("Merge #7: ok\n\nCloses #7\n", "--wait-tag", "final")
+        self.assertEqual(r.returncode, 1)                                       # --wait-tag keeps it open
+        self.assertIn("--wait-tag keeps it open", r.stderr)
+        r = self.store("Merge #7: ok\n\nRefs #7\n", "--wait-tag", "final")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rec = jload(self.record())
+        head = subprocess.run(["git", "rev-parse", "feature/7-x"], cwd=self.repo, capture_output=True, text=True).stdout.strip()
+        self.assertEqual((rec["issue"], rec["wait_tag"], rec["head"], rec["run"]), (7, "final", head, None))
+        self.assertEqual(slurp(rec["msg"]), "Merge #7: ok\n\nRefs #7\n")
+
+    def test_an_issue_on_a_line_may_not_close_or_wait_for_a_tag(self):
+        self.claim(7, "--name", "Seven", "--line", "PostV1.1")
+        self.assertEqual(self.store("Merge #7: x\n\nCloses #7\n").returncode, 1)
+        self.assertEqual(self.store("Merge #7: x\n\nfixes #99\n").returncode, 1)
+        r = self.store("Merge #7: x\n", "--wait-tag", "rc")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--wait-tag is for main", r.stderr)
+        self.assertFalse(os.path.exists(self.record()))
+        self.assertEqual(self.store("Merge #7: x\n\nRefs #7\n").returncode, 0)
+
+    def test_storing_again_replaces_the_record_and_voids_a_click(self):
+        self.assertEqual(self.store("Merge #7: a\n").returncode, 0)
+        os.makedirs(os.path.join(self.state, "merge"))
+        with open(os.path.join(self.state, "merge", "7.json"), "w") as f:
+            json.dump({"at": "t", "key": "k"}, f)
+        rec = jload(self.record())
+        rec["run"] = {"state": "failed", "reason": "x"}
+        with open(self.record(), "w") as f:
+            json.dump(rec, f)
+        self.assertEqual(self.store("Merge #7: b\n").returncode, 0)
+        self.assertIsNone(jload(self.record())["run"])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge", "7.json")))
+        self.assertTrue(slurp(os.path.join(self.state, "deliver", "7.msg")).startswith("Merge #7: b"))
+
+    def test_an_unsettled_idea_is_a_warning_not_a_refusal(self):
+        os.makedirs(os.path.join(self.state, "tests"))
+        with open(os.path.join(self.state, "tests", "7-1.json"), "w") as f:
+            json.dump({"n": 7, "title": "T", "status": "ok", "try": "x", "idea": "more"}, f)
+        r = self.store("Merge #7: a\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("unsettled ideas", r.stdout)
+        self.assertIn("7-1", r.stdout)
+
+    def test_the_hook_rearms_the_wait_after_a_store(self):
+        self.assertEqual(suivi.hook_issue("python3 scripts/suivi.py merge-message 7 /tmp/m.txt --wait-tag rc"), 7)
+        self.assertEqual(suivi.hook_issue("python3 -I scripts/suivi.py merge-message 12 m"), 12)
+
+
+class TestDeliverLaunchArgv(unittest.TestCase):
+    def test_the_unit_is_transient_normal_priority_and_survives_the_service(self):
+        argv = suivi.deliver_launch_argv(7, "/home/u/StokesForge", "/home/u/StokesForge/scripts/suivi.py", "/usr/bin/python3",
+                                         {"SF_SUIVI_DIR": "/s", "PATH": "/bin"})
+        self.assertEqual(argv[:3], ["systemd-run", "--user", "--collect"])
+        self.assertIn("--unit=stokesforge-deliver-7", argv)
+        self.assertIn("--working-directory=/home/u/StokesForge", argv)
+        self.assertEqual(argv[argv.index("-p") + 1], "KillMode=process")
+        self.assertIn("--setenv=SF_SUIVI_DIR=/s", argv)
+        self.assertEqual(argv[argv.index("--") + 1:], ["/usr/bin/python3", "-I", "/home/u/StokesForge/scripts/suivi.py", "deliver-run", "7"])
+        text = " ".join(argv)
+        for banned in ("Nice", "CPUSchedulingPolicy", "IOSchedulingClass", "idle"):
+            self.assertNotIn(banned, text)
+
+    def test_a_push_without_an_agent_fails_fast(self):
+        with mock.patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh -i k"}):
+            e = suivi.deliver_env()
+        self.assertEqual((e["GIT_TERMINAL_PROMPT"], e["GIT_SSH_COMMAND"]), ("0", "ssh -i k -o BatchMode=yes"))
+        with mock.patch.dict(os.environ, clear=False):
+            os.environ.pop("GIT_SSH_COMMAND", None)
+            self.assertEqual(suivi.deliver_env()["GIT_SSH_COMMAND"], "ssh -o BatchMode=yes")
 
 
 class TestWaitServed(ServerBase):
@@ -4672,19 +5003,20 @@ class TestPage(unittest.TestCase):
         self.assertEqual((l["user"], l["text"]), (True, "Réponse reçue : lance #7"))
         self.assertEqual(L(dict(paused, unread=0))["text"], "En pause")
         # all `try` entries OK: write to the agent to merge
-        l = L(dict(base, agent_idle_min=1, listening=True), [ok, dict(ok)])
+        prep = dict(base, merge_prepared=True)
+        l = L(dict(prep, agent_idle_min=1, listening=True), [ok, dict(ok)])
         self.assertEqual((l["user"], l["text"], l["also"]), (True, "À toi : lancer la fusion", ""))
-        l = L(dict(base, agent_idle_min=1), [ok], [{"issue": 7}])
+        l = L(dict(prep, agent_idle_min=1), [ok], [{"issue": 7}])
         self.assertEqual(l["text"], "À toi : répondre au questionnaire · lancer la fusion")
         self.assertNotIn("fusion", L(base, [ok, todo])["text"])
         self.assertNotIn("fusion", L(base, [{"n": 7, "status": "ok"}])["text"])      # merged entry: no `try`
         self.assertEqual((L(base, [todo])["mergeReady"], L(base, [{"n": 7, "status": "ok"}])["mergeReady"]), (False, False))
         # the request: grey note, button gone; "nothing listens" adds the reading line
-        l = L(dict(base, agent_idle_min=1, listening=False, merge_requested=True), [ok])
+        l = L(dict(prep, agent_idle_min=1, listening=False, merge_requested=True), [ok])
         self.assertEqual((l["mergeReady"], l["mergeRequested"], l["mergeNote"]),
                          (True, True, "Fusion demandée · l’agent la lira à sa reprise"))
         self.assertNotIn("fusion", l["text"].lower())
-        l = L(dict(base, agent_idle_min=9, listening=True, merge_requested=True), [ok])
+        l = L(dict(prep, agent_idle_min=9, listening=True, merge_requested=True), [ok])
         self.assertEqual(l["mergeNote"], "Fusion demandée")
         # a request the server voided (flag false) or an entry not OK any more: no request
         self.assertFalse(L(dict(base, merge_requested=True), [ok, todo])["mergeRequested"])
@@ -4749,6 +5081,7 @@ class TestPage(unittest.TestCase):
         ok = {"n": 7, "status": "ok", "try": "x"}
         done = {"n": 7, "status": "retour", "try": "x", "settled": {"at": "t", "by": "agent"}}
         open_ = {"n": 7, "status": "retour", "try": "x"}
+        c = dict(c, merge_prepared=True)
         self.assertTrue(self.merge_ui(c, [ok, done])["button"])
         self.assertFalse(self.merge_ui(c, [ok, open_])["button"])
         self.assertTrue(self.card_line(c, [ok, done])["mergeReady"])
@@ -4763,7 +5096,7 @@ class TestPage(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_the_merge_button_shows_by_state(self):
-        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1, "merge_prepared": True}
         ok, todo = {"n": 7, "status": "ok", "try": "x"}, {"n": 7, "status": "todo", "try": "x"}
         self.assertIn("'Fusionner'", self.page())
         self.assertTrue(self.merge_ui(c, [ok])["button"])
@@ -4772,6 +5105,27 @@ class TestPage(unittest.TestCase):
         self.assertFalse(self.merge_ui(c, [{"n": 7, "status": "ok"}])["button"])           # merged entry, no `try`
         u = self.merge_ui(dict(c, merge_requested=True, listening=True), [ok])
         self.assertEqual((u["button"], u["note"]), (False, "Fusion demandée"))             # lang: fr
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_merge_area_by_state_of_the_stored_merge(self):
+        """#531: no button before the agent stored the message; the run's state is the note; a failure hides the button."""
+        c = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1}
+        ok = {"n": 7, "status": "ok", "try": "x"}
+        shown = lambda **kw: (lambda u: (u["button"], u["note"]))(self.merge_ui(dict(c, **kw), [ok]))
+        # lang: fr begin
+        self.assertEqual(shown(), (False, "L’agent prépare la fusion"))                    # ready, nothing stored
+        self.assertEqual(shown(merge_prepared=False), (False, "L’agent prépare la fusion"))
+        self.assertEqual(shown(merge_prepared=True), (True, ""))
+        run = lambda state, **kw: dict(merge_prepared=True, merge_run=dict({"state": state, "reason": "", "merge": ""}, **kw))
+        self.assertEqual(shown(**run("running")), (False, "Fusion en cours"))
+        self.assertEqual(shown(**run("retesting")), (False, "Tests relancés, puis fusion"))
+        self.assertEqual(shown(**run("failed", reason="no test stamp")), (False, "Échec : no test stamp"))
+        self.assertEqual(shown(**run("interrupted", reason="stopped")), (False, "Échec : stopped"))
+        # delivered: the entries lost their `try`, the note stays
+        self.assertEqual((lambda u: (u["button"], u["note"]))(self.merge_ui(dict(c, **run("ok", merge="abc")), [])), (False, "Fusionnée"))
+        l = self.card_line(dict(c, merge_prepared=False), [ok])
+        self.assertEqual((l["user"], l["mergeButton"]), (False, False))                      # agent side: not « À toi »
+        # lang: fr end
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_tells_a_working_agent_from_a_stopped_one(self):
