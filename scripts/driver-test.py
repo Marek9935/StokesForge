@@ -5,7 +5,7 @@ Run: python3 scripts/driver-test.py
 Fake compositors and apps are plain `sleep` processes; the X and reservation folders
 are redirected to a temporary folder through the SF_X_*/SF_RESERVE_DIR seams.
 """
-import importlib.util, os, pathlib, signal, subprocess, sys, tempfile, threading, time, unittest, warnings
+import contextlib, importlib.util, io, os, pathlib, signal, subprocess, sys, tempfile, threading, time, unittest, warnings
 warnings.simplefilter("ignore", ResourceWarning)
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -268,6 +268,39 @@ class Gestures(Base):
         self.assertEqual(moves[-1], ("move", 200, 160))
         self.assertEqual(k[-2:], ["btnup", "keyup"])         # release last
         self.assertLess([e[0] for e in ev].index("keydown"), down)
+
+
+class Capture(Base):
+    """`ss` options (#517): pure argument parsing and the ImageMagick command."""
+
+    def setUp(self):
+        super().setUp()
+        self.d = load(dict(self.env, SF_GEOMETRY="1400x900"))
+
+    def test_parse_ss_accepts(self):
+        p = self.d.parse_ss
+        self.assertEqual(p(["a.png"]), ("a.png", None, None))
+        self.assertEqual(p(["a.png", "--crop", "300x200+10+20"]), ("a.png", (300, 200, 10, 20), None))
+        self.assertEqual(p(["--max-width", "800", "a.png"]), ("a.png", None, 800))
+        self.assertEqual(p(["a.png", "--crop", "1400x900+0+0", "--max-width", "5"]), ("a.png", (1400, 900, 0, 0), 5))
+
+    def test_parse_ss_refuses_with_exit_2(self):
+        for argv in (["a.png", "--crop", "300x200"], ["a.png", "--crop", "300x200+1400+0"],
+                     ["a.png", "--crop", "300x200+1200+0"], ["a.png", "--crop", "0x200+0+0"],
+                     ["a.png", "--max-width", "0"], ["a.png", "--max-width", "-3"], ["a.png", "--max-width", "x"],
+                     ["a.png", "--crop"], ["a.png", "--bogus"], [], ["a.png", "b.png"]):
+            with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(io.StringIO()) as err:
+                self.d.parse_ss(argv)
+            self.assertEqual(cm.exception.code, 2, argv)
+            self.assertIn("ss:", err.getvalue())
+
+    def test_post_argv(self):
+        pa = self.d.post_argv
+        self.assertIsNone(pa("a.png", None, None))
+        self.assertEqual(pa("a.png", (300, 200, 10, 20), 800),
+                         ["magick", "a.png", "-crop", "300x200+10+20", "+repage", "-resize", "800x>", "a.png"])
+        self.assertEqual(pa("a.png", None, 800), ["magick", "a.png", "-resize", "800x>", "a.png"])
+        self.assertEqual(pa("a.png", (1, 2, 3, 4), None), ["magick", "a.png", "-crop", "1x2+3+4", "+repage", "a.png"])
 
 
 if __name__ == "__main__":

@@ -48,6 +48,18 @@ MODES = {
     "background": {"slots": 1, "cpu_weight": 10, "cpu_quota_pct": None, "cpus": None, "jobs": 6, "memory_high": "12G", "fallback_nice": 19,
                    "profile": None},
 }
+# Queue classes (#517). A ticket's name carries its rank (`w-<rank>-<ns>-<pid>`; snapshot and suivi.py parse it):
+# 0 = typed by the user or SF_CARGO_QUEUE=first, then the rank of the class. Lower rank starts first, ties by arrival.
+# small_lane: may use the extra slot of the small lane (background mode only, see `small_lane_free`).
+# ages: a waiter of the class counts as rank 1 once it has waited SF_CARGO_QUEUE_AGE seconds (default 300).
+# jobs: None = the mode's jobs. Rank 3 is kept free for the `low` class of #523 (no lane, never ages, jobs 2).
+CLASSES = {
+    "small": {"rank": 1, "small_lane": True, "ages": False, "jobs": None},
+    "big": {"rank": 2, "small_lane": False, "ages": True, "jobs": None},
+}
+LANE_MODES = ("background",)    # the small lane exists only here: 1 slot + 1 small lane (#476 ruled out a third build)
+LANE_MIN_MEM_KB = 4 * 1024 * 1024
+WAIT_LOG_MAX = 1024 * 1024
 DEFAULT_MODE = "dev"
 SLICE = "sfbuild.slice"     # no dash: a dash would nest the slice under another one
 MARKER = "SF_CARGO_QUEUE_HELD"
@@ -577,29 +589,85 @@ def human_prio():
     return 0 if sys.stderr.isatty() and not os.environ.get("CLAUDECODE") else 1
 
 
+def find_root(cwd):
+    """The build root: CARGO_TARGET_DIR, else the nearest ancestor of cwd holding Cargo.lock, else cwd."""
+    t = os.environ.get("CARGO_TARGET_DIR")
+    if t:
+        return os.path.realpath(t)
+    d = os.path.realpath(cwd)
+    while True:
+        if os.path.exists(os.path.join(d, "Cargo.lock")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return os.path.realpath(cwd)
+        d = up
+
+
+def mem_available_kb():
+    """MemAvailable in kB (seam SF_CARGO_QUEUE_MEMINFO), None when unreadable."""
+    try:
+        with open(os.environ.get("SF_CARGO_QUEUE_MEMINFO") or "/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def env_seconds(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return float(default)
+
+
+def ticket_rank(name):
+    return int(name.split("-")[1])
+
+
+def effective_key(name, info, now, age):
+    """Sort key of a waiter: (rank, arrival). A waiter of an ageing class that has waited `age` s counts as rank 1."""
+    rank = ticket_rank(name)
+    if rank > 1 and CLASSES.get(info.get("class"), {}).get("ages") and now - info.get("start", now) >= age:
+        rank = 1
+    return (rank, name.split("-")[2], name)
+
+
 class Ticket:
-    def __init__(self, command):
+    def __init__(self, command, cls="big"):
         self.path = None
         self.fd = None
         self.name = None
         self.command = command
+        self.cls = cls
+        self.cwd = os.getcwd()
+        self.root = find_root(self.cwd)      # outside the lock: it walks the disk
+        self.lane = ""                        # normal | extra | typed, once started
+        self.t0 = time.time()
+        self.ahead_at_entry = 0
+        self.logged = False
+        rank = 0 if human_prio() == 0 else CLASSES[cls]["rank"]
         with QueueLock():
-            self.name = "w-%d-%020d-%d.json" % (human_prio(), time.time_ns(), os.getpid())
+            self.name = "w-%d-%020d-%d.json" % (rank, time.time_ns(), os.getpid())
             self.path = os.path.join(queue_dir(), self.name)
             self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
             fcntl.flock(self.fd, fcntl.LOCK_EX)
             self.write()
 
     def write(self):
-        data = {"pid": os.getpid(), "cwd": os.getcwd(), "command": self.command, "start": time.time(),
-                "target": os.environ.get("CARGO_TARGET_DIR", "")}
+        data = {"pid": os.getpid(), "cwd": self.cwd, "command": self.command, "start": time.time(),
+                "target": os.environ.get("CARGO_TARGET_DIR", ""), "class": self.cls, "root": self.root,
+                "lane": self.lane}
         os.ftruncate(self.fd, 0)
         os.pwrite(self.fd, json.dumps(data).encode(), 0)
 
-    def promote(self):
+    def promote(self, lane="normal"):
         new = "r-" + self.name[2:]
         os.rename(self.path, os.path.join(queue_dir(), new))   # same inode: the flock stays
         self.name, self.path = new, os.path.join(queue_dir(), new)
+        self.lane = lane
         self.write()
 
     def release(self):
@@ -612,12 +680,53 @@ class Ticket:
         os.close(self.fd)
         self.fd = None
 
+    def log_wait(self, outcome):
+        """One line in <state_dir>/waits.tsv, written outside QueueLock. A kill -9 writes nothing."""
+        if self.logged:
+            return
+        self.logged = True
+        clean = lambda x: re.sub(r"[\t\r\n]", " ", str(x))
+        try:
+            path = os.path.join(state_dir(), "waits.tsv")
+            os.makedirs(state_dir(), exist_ok=True)
+            try:
+                if os.path.getsize(path) > WAIT_LOG_MAX:
+                    os.replace(path, path + ".1")
+            except OSError:
+                pass
+            fields = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "%.1f" % (time.time() - self.t0), outcome,
+                      self.lane or "normal", self.cls, effective_mode(), self.ahead_at_entry, os.getpid(), self.cwd,
+                      self.command]
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+            try:
+                os.write(fd, ("\t".join(clean(f) for f in fields) + "\n").encode())
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
+
 
 def describe_ticket(info, running):
     since = ""
     if info.get("start"):
         since = ", %s %d min" % ("running" if running else "waiting", int((time.time() - info["start"]) // 60))
-    return "pid %s%s in %s: %s" % (info.get("pid", "?"), since, info.get("cwd", "?"), info.get("command", "?"))
+    cls = " (%s)" % info["class"] if info.get("class") else ""
+    return "pid %s%s%s in %s: %s" % (info.get("pid", "?"), cls, since, info.get("cwd", "?"), info.get("command", "?"))
+
+
+def span_text(secs):
+    secs = int(secs)
+    return "%dm%02ds" % (secs // 60, secs % 60) if secs >= 60 else "%ds" % secs
+
+
+def small_lane_free(root, running, mem_kb):
+    """May a small waiter start in the extra slot? `running` are the info dicts of running tickets; mem_kb was
+    read beforehand (outside the lock)."""
+    if any(i.get("lane") == "extra" for i in running):
+        return False
+    if mem_kb is None or mem_kb < LANE_MIN_MEM_KB:
+        return False
+    return not any(i.get("root") == root for i in running)
 
 
 def wait_turn(ticket):
@@ -626,29 +735,56 @@ def wait_turn(ticket):
     if typed_by_user():     # the user's own terminal starts at once; the ticket still counts as running
         with QueueLock():
             list_tickets(purge=True, own=ticket.name)
-            ticket.promote()
+            ticket.promote("typed")
+        ticket.log_wait("started")
         return
+    first = True
+    age = env_seconds("SF_CARGO_QUEUE_AGE", 300)
     while True:
         now = time.time()
         if now - last_auto > 10:
             last_auto = now
             if read_state()["auto"]:
                 auto_tick()
+        mode = effective_mode()
+        slots = MODES[mode]["slots"]
+        lane_cls = mode in LANE_MODES and CLASSES[ticket.cls]["small_lane"]
+        mem_kb = mem_available_kb() if lane_cls else None      # read outside the lock
+        lane = None
         with QueueLock():
             items = list_tickets(purge=True, own=ticket.name)
-            slots = MODES[effective_mode()]["slots"]
             running = [x for x in items if x[0].startswith("r-")]
             waiting = [x for x in items if x[0].startswith("w-")]
-            if len(running) < slots and waiting and waiting[0][0] == ticket.name:
-                ticket.promote()
-                return
-            ahead = running + [x for x in waiting if x[0] < ticket.name]
+            order = sorted(waiting, key=lambda x: effective_key(x[0], x[1], now, age))
+            normal_running = [x for x in running if x[1].get("lane") != "extra"]
+            if len(normal_running) < slots and order and order[0][0] == ticket.name:
+                lane = "normal"
+            elif lane_cls:
+                small = [x for x in order if CLASSES.get(x[1].get("class"), {}).get("small_lane")]
+                if (small and small[0][0] == ticket.name and len(running) < slots + 1
+                        and small_lane_free(ticket.root, [i for _, i in running], mem_kb)):
+                    lane = "extra"
+            if lane:
+                ticket.promote(lane)
+            else:
+                ahead = running + order[:[n for n, _ in order].index(ticket.name)]
+        if lane:
+            waited = time.time() - ticket.t0
+            if waited >= 1:
+                print("cargo-queue: started after %d s (lane %s)" % (round(waited), lane), file=sys.stderr, flush=True)
+            ticket.log_wait("started")
+            return
+        if first:
+            first, ticket.ahead_at_entry = False, len(ahead)
         key = tuple(n for n, _ in ahead)
-        if key != last_key or now - last_print >= 60:
+        if key != last_key or now - last_print >= env_seconds("SF_CARGO_QUEUE_PRINT", 30):
+            changed = key != last_key
             last_key, last_print = key, now
-            lines = ["cargo-queue: waiting, %d ahead (mode %s, %d at a time). SF_CARGO_QUEUE=off skips the queue."
-                     % (len(ahead), effective_mode(), slots)]
-            lines += ["  - " + describe_ticket(i, n.startswith("r-")) for n, i in ahead]
+            how = "%d at a time" % slots + (" + 1 small lane" if mode in LANE_MODES else "")
+            lines = ["cargo-queue: waiting %s, %d ahead (position %d, class %s, mode %s, %s). SF_CARGO_QUEUE=off skips the queue."
+                     % (span_text(now - ticket.t0), len(ahead), len(ahead) + 1, ticket.cls, mode, how)]
+            if changed:
+                lines += ["  - " + describe_ticket(i, n.startswith("r-")) for n, i in ahead]
             print("\n".join(lines), file=sys.stderr, flush=True)
         time.sleep(poll_seconds())
 
@@ -682,6 +818,70 @@ def parse_args(args):
         else:
             return i, a
     return None, None
+
+
+BUILD_SUBS = {"build", "b", "check", "c", "clippy", "run", "r"}
+TEST_SUBS = {"test", "t", "nextest"}
+# Flags that take a value (next word or `=`); a flag in neither set, followed by a bare word, makes the call
+# big ("when in doubt: big").
+VALUE_FLAGS = {"-p", "--package", "--test", "--bin", "--example", "--bench", "-j", "--jobs", "--features", "-F",
+               "--target", "--target-dir", "--manifest-path", "--profile", "--cargo-profile", "--message-format",
+               "-E", "--filter-expr", "--color", "--config", "-Z", "-C", "--exclude", "--test-threads",
+               "--cargo-message-format", "--run-ignored", "--partition", "--retries"}
+BOOL_FLAGS = {"--lib", "--bins", "--tests", "--examples", "--benches", "--doc", "--all-targets", "--all-features",
+              "--no-default-features", "--locked", "--offline", "--frozen", "-v", "-vv", "--verbose", "-q",
+              "--quiet", "--no-run", "--no-fail-fast", "--keep-going", "--timings", "--ignore-rust-version",
+              "--no-capture", "--nocapture", "--fail-fast"}
+
+
+def classify(args):
+    """'small' or 'big' for a heavy cargo call (see CLASSES). SF_CARGO_QUEUE_CLASS=small|big overrides it."""
+    ov = os.environ.get("SF_CARGO_QUEUE_CLASS")
+    if ov in CLASSES:
+        return ov
+    if ov:
+        print("cargo-queue: warning: SF_CARGO_QUEUE_CLASS=%r ignored (small or big)" % ov, file=sys.stderr, flush=True)
+    idx, sub = parse_args(args)
+    if sub not in BUILD_SUBS and sub not in TEST_SUBS:
+        return "big"
+    rest = list(args[idx + 1:])
+    after = []
+    if "--" in rest:
+        k = rest.index("--")
+        rest, after = rest[:k], rest[k + 1:]
+    if sub == "nextest":
+        if not rest or rest[0] != "run":
+            return "big"
+        rest = rest[1:]
+    pkgs, narrowing, i = 0, any(a and not a.startswith("-") for a in after), 0
+    while i < len(rest):
+        a, name, inline = rest[i], rest[i], None
+        if a.startswith("--") and "=" in a:
+            name, inline = a.split("=", 1)
+        elif a.startswith("-p") and len(a) > 2 and not a.startswith("--"):
+            name, inline = "-p", a[2:]
+        if name in ("--workspace", "--all", "--exclude", "--release"):
+            return "big"
+        valued = name in VALUE_FLAGS
+        if valued and inline is None:
+            i += 1
+            inline = rest[i] if i < len(rest) else ""
+        if name in ("-p", "--package"):
+            pkgs += 1
+        elif name in ("--profile", "--cargo-profile"):
+            if inline not in ("dev", "test"):
+                return "big"
+        elif name in ("--test", "-E", "--filter-expr", "--lib"):
+            narrowing = True
+        elif not valued and name.startswith("-"):
+            if name not in BOOL_FLAGS and i + 1 < len(rest) and not rest[i + 1].startswith("-"):
+                return "big"      # unknown flag, may take the next word: in doubt, big
+        elif not name.startswith("-"):
+            narrowing = True      # a positional word: the test-name filter
+        i += 1
+    if sub in BUILD_SUBS:
+        return "small" if 1 <= pkgs <= 2 else "big"
+    return "small" if pkgs == 1 and narrowing else "big"
 
 
 def wants_help(args):
@@ -742,6 +942,8 @@ def on_signal(signum, _frame):
 
 def die_by(signum):
     if Run.ticket is not None:
+        if not Run.ticket.lane:
+            Run.ticket.log_wait("gave-up")
         Run.ticket.release()
     signal.signal(signum, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
@@ -798,7 +1000,7 @@ def shim(argv):
     idx, sub = parse_args(args)
     for s in FORWARDED:
         signal.signal(s, on_signal)
-    ticket = Ticket("cargo " + " ".join(args))
+    ticket = Ticket("cargo " + " ".join(args), classify(args))
     Run.ticket = ticket
     wait_turn(ticket)
     mode = effective_mode()
