@@ -191,6 +191,19 @@ class TestQcmAndTrials(Base):
         self.qcm(1, True)
         self.assertEqual(self.held(), [])
 
+    def test_colour_says_whether_a_form_of_the_issue_was_answered(self):
+        self.put(1, colour=C[0])
+        self.qcm(1, False)                                   # open: holds the colour, none answered yet
+        self.assertFalse(self.status()["colours"][0]["qcm_answered"])
+        d = os.path.join(self.state, "qcm", "q2")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 2, "finished": True}, f)     # another issue's form does not count
+        self.assertFalse(self.status()["colours"][0]["qcm_answered"])
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"issue": 1, "finished": True}, f)
+        self.assertTrue(self.status()["colours"][0]["qcm_answered"])
+
     def test_qcm_of_another_issue_does_not_hold(self):
         self.put(1, colour=C[0])
         self.qcm(2, False)
@@ -4598,14 +4611,39 @@ class TestPage(unittest.TestCase):
         self.assertEqual(L(dict(card, held_by=["legacy"]), [todo(7)])["also"], "")
         l = L(card, [], [{"issue": 7}])
         self.assertEqual((l["text"], l["also"]), ("À toi : répondre au questionnaire", "l’agent travaille"))   # lang: fr
-        # a note of kind `you` is the user's turn, alone or joined; other kinds stay muted text
-        l = L(dict(card, wait_kind="you", waiting="run make"))
-        self.assertEqual((l["user"], l["text"], l["note"]), (True, "À toi : run make", ""))                 # lang: fr
+        # a note of kind `you` joins a card the user has; other kinds stay muted text
         l = L(dict(card, wait_kind="you", waiting="run make"), [], [{"issue": 7}])
         self.assertEqual(l["text"], "À toi : répondre au questionnaire · run make")                         # lang: fr
+        l = L(dict(card, wait_kind="you", waiting="start form 7-1"), [], [{"issue": 7, "id": "7-1"}])
+        self.assertEqual((l["text"], l["note"]), ("À toi : répondre au questionnaire", ""))                  # lang: fr
+        l = L(dict(card, wait_kind="you", waiting="run make"), [todo(7)])
+        self.assertEqual(l["text"], "À toi : cocher 1 essai · run make")                                    # lang: fr
+        # #530: the form finished, the entries ticked: the note is stale, the agent's line shows, nothing muted
+        for tests in ([], [todo(7, "ok")]):
+            l = L(dict(card, wait_kind="you", waiting="formulaire 7-1"), tests)
+            self.assertEqual((l["user"], l["text"], l["note"]), (False, "L’agent travaille", ""))          # lang: fr
         for kind in ("dep", "ag"):
             l = L(dict(card, wait_kind=kind, waiting="my note"))
             self.assertEqual((l["user"], l["text"], l["note"]), (False, "L’agent travaille", "my note"))    # lang: fr
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_head_drops_the_number_a_form_title_repeats(self):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", self.page(), re.S).group(1)
+        code = src + "\nprocess.stdout.write(JSON.stringify([plainName('#528 Copy',528),plainName('#528: Copy',528)," \
+                     "plainName('#5280 Copy',528),plainName('Copy #528',528),plainName(undefined,528)]));"
+        r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), ["Copy", "Copy", "#5280 Copy", "Copy #528", ""])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_card_strip_moves_past_questions_once_a_form_is_answered(self):
+        card = {"issue": 7, "issues": [7], "held_by": ["agent"], "waiting": "", "wait_kind": "", "agent_idle_min": 1,
+                "state": "questions"}
+        L = self.card_line
+        self.assertEqual(L(dict(card, qcm_answered=True))["step"], "code")
+        self.assertEqual(L(dict(card, qcm_answered=True), [], [{"issue": 7}])["step"], "questions")   # a new form is open
+        self.assertEqual(L(dict(card, qcm_answered=False))["step"], "questions")                      # scoping, no form yet
+        self.assertEqual(L(dict(card, state="essai", qcm_answered=True))["step"], "essai")
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_card_line_listening_and_merge_words(self):
