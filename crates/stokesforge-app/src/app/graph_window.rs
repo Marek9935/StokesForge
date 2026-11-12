@@ -1168,6 +1168,14 @@ fn annotation_interactions(
                     actions.push(Action::OpenObjectProperties { graph, target });
                 }
             }
+            stokesforge_render_egui::GraphEvent::OpenColorBarProperties { panel } => {
+                actions.push(Action::OpenObjectProperties {
+                    graph,
+                    target: stokesforge_app_state::object_manager::VisibilityTarget::Text(
+                        stokesforge_plot::TextTarget::ColorBar { panel },
+                    ),
+                });
+            }
             stokesforge_render_egui::GraphEvent::OpenSeriesProperties(series) => {
                 actions.push(Action::OpenObjectProperties {
                     graph,
@@ -1220,6 +1228,20 @@ fn annotation_interactions(
                     graph,
                     frames,
                     page,
+                });
+            }
+            stokesforge_render_egui::GraphEvent::ColorBarResized {
+                panel,
+                length,
+                thickness,
+                anchor,
+            } => {
+                actions.push(Action::SetColorBarSize {
+                    graph,
+                    panel,
+                    length,
+                    thickness,
+                    anchor,
                 });
             }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
@@ -1348,6 +1370,7 @@ fn plot_target(
             TextTarget::Title | TextTarget::PanelTitle { .. } => PlotTarget::Title,
             TextTarget::AxisTitle { panel, side } => PlotTarget::AxisTitle(place(panel, side)),
             TextTarget::Legend { .. } => PlotTarget::Legend,
+            TextTarget::ColorBar { .. } => PlotTarget::ColorBar,
         },
         Some(PlotComponent::LegendEntry { .. }) => PlotTarget::Legend,
     }
@@ -1844,6 +1867,15 @@ pub(super) mod tests {
                 series: 0
             })),
             PlotTarget::Legend
+        );
+        // The colour bar opens the Legend tab (its section).
+        assert_eq!(
+            named(Some(PlotComponent::Text(T::ColorBar { panel: 0 }))),
+            PlotTarget::ColorBar
+        );
+        assert_eq!(
+            PlotTarget::ColorBar.settings_page().0,
+            PlotSettingsTab::Legend
         );
     }
 

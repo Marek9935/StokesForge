@@ -87,7 +87,11 @@ fn the_broken_reference_texts_follow_the_interface_language() {
 
         // The series list and the Object Manager phrase the placeholder.
         assert_eq!(
-            series_list_label(state.tree(), &spec.panels[0].series[0]),
+            series_list_label(
+                state.tree(),
+                &spec.panels[0].series[0],
+                &spec.panels[0].legend.text,
+            ),
             placeholder
         );
         let tree = object_tree(state.tree(), graph, None).expect("object tree");

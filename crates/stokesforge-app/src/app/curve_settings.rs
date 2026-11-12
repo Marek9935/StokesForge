@@ -33,14 +33,15 @@ use crate::icons::ICON_SIZE;
 use crate::theme;
 use stokesforge_app_state::object_drag::{step_panel, DragItem, DropOver};
 use stokesforge_app_state::object_manager::group_title;
-use stokesforge_app_state::state::{series_list_label, Action, SaveTarget};
+use stokesforge_app_state::state::{series_list_entry, Action, SaveTarget};
 use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::form::{choice, form, ChoiceOption, Form};
 use super::hover_help::help_text;
 use super::list_row::{
-    list_row_draggable, raise_to_list_row_height, restore_row_height, with_list_row_height,
+    list_row_draggable, list_row_draggable_dimmed, raise_to_list_row_height, restore_row_height,
+    with_list_row_height,
 };
 use super::object_dnd::{self, Hover};
 use super::plot_settings::series_editor;
@@ -185,7 +186,7 @@ fn series_row(
     commit: &mut bool,
     pick: &mut ListPick,
 ) -> f32 {
-    let label = series_list_label(tree, &panel.series[index]);
+    let (label, fallback) = series_list_entry(tree, &panel.series[index], &panel.legend.text);
     let row = ui
         .push_id(index, |ui| {
             with_list_row_height(ui, |ui| {
@@ -210,7 +211,8 @@ fn series_row(
                                 *commit = true;
                             }
                             // The whole row, outside the box, is clicked and dragged.
-                            let response = list_row_draggable(ui, &label, *selected == index);
+                            let response =
+                                list_row_draggable_dimmed(ui, &label, *selected == index, fallback);
                             clicked = response.clicked();
                             Some(response)
                         },
@@ -461,12 +463,22 @@ fn series_page(
             [series.x_error, series.y_error],
         )
     };
+    // The curves of a group on a visible bar take their color from it (#499).
+    let color_reason = group
+        .filter(|group| {
+            panel
+                .color_bar
+                .as_ref()
+                .is_some_and(|bar| bar.visible && bar.segment_of(*group).is_some())
+        })
+        .map(|_| tr!("curve-color-by-bar"));
     let has_overlay = panel.overlay.is_some();
     commit |= crate::field_state::for_target(ui, (layer, *index), |ui| {
         series_editor(
             ui,
             &mut panel.series[*index],
             env,
+            color_reason,
             whole_group,
             auto_bar_width,
             has_overlay,
@@ -679,6 +691,23 @@ fn group_editor(
             }
         }
     });
+    // On the color bar of the layer (#499): the curves are coloured by value.
+    let mut on_bar = panel
+        .color_bar
+        .as_ref()
+        .is_some_and(|bar| bar.segment_of(group).is_some());
+    if f.checkbox(
+        &mut on_bar,
+        tr!("curve-on-color-bar"),
+        Some(tr!("curve-on-color-bar", "hint")),
+    ) {
+        if on_bar {
+            super::color_bar_settings::put_group_on_bar(panel, group);
+        } else {
+            super::color_bar_settings::take_group_off_bar(panel, group);
+        }
+        commit = true;
+    }
     f.field(|ui| {
         if ui
             .button(tr!("curve-group-ungroup"))
@@ -1252,6 +1281,35 @@ mod tests {
             selected, 0,
             "the selection falls back on an existing series"
         );
+    }
+
+    /// #499: « On the color bar » on the group page puts the group on the
+    /// bar of the layer (creating it, retaining a gradient for the group) and
+    /// takes it off again. Witness: a checkbox that does nothing, or a segment
+    /// left behind, fails the first and last assertions.
+    #[test]
+    fn the_group_page_puts_the_group_on_the_color_bar_and_takes_it_off() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut selected = 1;
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = center_of(&output, &tr!("curve-on-color-bar"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        let bar = panel.color_bar.as_ref().expect("a bar was created");
+        assert!(bar.visible);
+        assert_eq!(bar.segments.len(), 1);
+        assert_eq!(bar.segments[0].group, 1);
+        assert!(
+            panel.group_gradient(1).is_some(),
+            "the group retains a gradient in the same edit"
+        );
+
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = center_of(&output, &tr!("curve-on-color-bar"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert!(panel.color_bar.as_ref().unwrap().segments.is_empty());
     }
 
     /// A line width typed for one series and a click on another series row:

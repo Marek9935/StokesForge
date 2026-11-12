@@ -830,3 +830,57 @@ the sheet stays, ordinary. A column identifier that no longer exists is accepted
 clipboard carries a link only when both its ends are inside the copied roots
 (#391, `docs/data-model.md`); otherwise the copy is ordinary. Additive field: it
 does not change the version number of the format.
+
+## Legend text source: additive fields (#499)
+
+`LegendSpecRecord` gained `text_from` (the key of a `LegendTextFrom`, `String`),
+`text_template` (`String`) and `text_row_column` (`Option<u64>`), all
+`#[serde(default)]`. **`FORMAT_VERSION` did not move**: a file without the
+fields reads as today's text (long name, then short name), and the default
+source is written as an empty `text_from`, so a graph that never touched the
+setting is byte-identical to before. A key written by a newer version becomes
+`LegendTextFrom::Unknown(key)`: read as the long name, written back as it was
+(invariant 10). An older reader that saves the file again drops the three
+fields without a message. Witness `tests/witnesses/v1/project.stf`
+regenerated with a custom template and a row column on one legend and a
+list choice on the other; unit tests in `schema.rs`
+(`a_legend_without_text_settings_reads_as_the_default`).
+
+## Legend box: additive fields (#507)
+
+`LegendSpecRecord` gained, all `#[serde(default)]` and **not written when
+default** (a file that never touched them stays byte-identical):
+`frame_hidden` (stored as « hidden » because a `#[serde(default)]` bool reads
+`false` on an older file, whose legend has its frame), `frame_color` (empty =
+automatic ink), `frame_width` (`Option<f64>` points, `None` = 1),
+`background` (empty = automatic, else `#RRGGBB[AA]`), `columns` (absent = 1,
+default fn, 0 from a damaged file reads as 1), `row_gap`, `column_gap` and
+`swatch_length` (`Option<f64>` points, `None` = 4 / 12 / 26). The reader of
+the model clamps every length (`LegendSpec::*_pt`), so a hand-edited file
+cannot ask for an absurd box. **A new graph is created without a frame**
+(`LegendSpec::frame = false` in every creation path); `LegendSpec::default()`
+keeps the frame, which is what an older record reads as. The colour bar has no
+font of its own: it shares the legend's (`TextTarget::ColorBar` reads and
+writes `legend.font`), and a `font` key a pre-release build wrote in a bar
+record is ignored on reading. Witness `tests/witnesses/v1/project.stf`
+regenerated with every box setting non-default; unit tests in `schema.rs`
+(`a_legend_without_box_settings_reads_as_the_default`,
+`the_legend_box_round_trips_and_a_default_one_writes_nothing`).
+
+## Colour bar: additive field (#499, step C)
+
+`PanelSpecRecord` gained `color_bar` (`Option<ColorBarRecord>`),
+`#[serde(default)]`: segments (group, optional typed ends, break label),
+`chain`, the value source, scale, orientation, position, anchor, ticks, title
+`visible` and the strip
+`length` / `thickness` in points (`Option<f64>`, `None` = automatic, not
+written, set by pulling a resize handle of a bar inside the frame; the witness
+holds both). **`FORMAT_VERSION` did not move**: a file without it has no bar
+and its curves keep their stored colors. Every choice is a stored key; a
+default is written as an empty string and an unknown key (newer version)
+becomes `Unknown(key)`, read as the default and written back as it was
+(invariant 10). The colour of a curve on a bar is never stored: it is computed
+at each draw (`stokesforge-render::color_bar`). An older reader that saves the
+file again drops the bar without a message. Witness
+`tests/witnesses/v1/project.stf` regenerated with a two-segment chained bar;
+unit test `a_color_bar_round_trips_and_keeps_unknown_choices` in `convert.rs`.

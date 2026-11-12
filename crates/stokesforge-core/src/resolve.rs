@@ -59,7 +59,10 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
+use stokesforge_plot::{
+    template_source, ColorBarSpec, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec,
+    SeriesSpec,
+};
 
 use crate::column::Column;
 use crate::id::NodeId;
@@ -157,6 +160,10 @@ pub struct ResolvedSeries<'s> {
     /// (#198). The rendering knows no more: it greys the series out and places its
     /// marker; where the staleness comes from remains the model's business.
     pub stale: bool,
+    /// The value that places the series on its layer's colour bar (#499),
+    /// read from the bar's value source by [`series_value`]. `None` without
+    /// a bar, or when the series has no readable number there.
+    pub value: Option<f64>,
 }
 
 impl<'s> ResolvedSeries<'s> {
@@ -233,6 +240,12 @@ pub fn resolve_column(tree: &Tree, id: NodeId) -> Option<&Column> {
 pub enum SeriesLabel {
     /// A name: the spec's, the long name of the Y column, or its node name.
     Text(String),
+    /// A custom legend template (#499): the Typst source of the entry, the
+    /// variables of the column defined first, then the template as typed.
+    /// Drawn with the rich style, like a typed name. A list (Object Manager,
+    /// series list) shows the plain text the interface layer gets by
+    /// evaluating it (`stokesforge-render`, which core does not depend on).
+    Template { markup: String },
     /// An unnamed "row" series (#166): the 0-based row (the interface shows
     /// `row + 1`, as the grid does).
     Row(usize),
@@ -259,25 +272,112 @@ impl SeriesLabel {
 /// so that a rename or a rule change reaches
 /// both (issue #25). It lives here, in `stokesforge-core`, because it is
 /// the place that knows how to read a column; the interface need not rewrite it.
-pub fn series_label(series: &SeriesSpec, tree: &Tree) -> SeriesLabel {
+///
+/// `text` is the « Text from » setting of the legend that lists the series
+/// (#499): which header row gives the text. A typed name still wins; with
+/// the default setting the result is the one described above. An empty chosen
+/// row gives an **empty** text (no fallback), except for the default source.
+pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> SeriesLabel {
     if !series.name.is_empty() {
         return SeriesLabel::Text(series.name.clone());
     }
     if let Some(row) = series.row {
-        // "Row" series (#166): the row is its name, as in the grid.
-        return SeriesLabel::Row(row);
+        // "Row" series (#166): the row is its name, as in the grid, or the
+        // cell of a chosen column on that row (#499).
+        return match text.row_column.and_then(|id| row_cell_text(tree, id, row)) {
+            Some(cell) => SeriesLabel::Text(cell),
+            None => SeriesLabel::Row(row),
+        };
     }
     let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
         return SeriesLabel::Missing;
     };
-    let long_name = y_node
-        .as_column()
-        .map(|column| column.meta().long_name.as_str())
-        .unwrap_or_default();
-    SeriesLabel::Text(if long_name.is_empty() {
-        y_node.name().to_string()
-    } else {
-        long_name.to_string()
+    let meta = y_node.as_column().map(Column::meta);
+    let long_name = meta.map(|m| m.long_name.as_str()).unwrap_or_default();
+    let field = |field: LegendField| -> String {
+        match field {
+            LegendField::LongName => long_name.to_string(),
+            LegendField::Units => meta.map(|m| m.unit.clone()).unwrap_or_default(),
+            LegendField::Comments => meta.map(|m| m.comment.clone()).unwrap_or_default(),
+            LegendField::ShortName => y_node.name().to_string(),
+            LegendField::XPrime => meta
+                .and_then(|m| m.x_prime)
+                .map(crate::number_format::format_grid)
+                .unwrap_or_default(),
+        }
+    };
+    let joined = |first: LegendField, separator: &str, second: LegendField, wrap: bool| {
+        let (a, b) = (field(first), field(second));
+        match (a.is_empty(), b.is_empty()) {
+            (_, true) => a,
+            (true, false) if wrap => format!("({b})"),
+            (true, false) => b,
+            (false, false) if wrap => format!("{a} ({b})"),
+            (false, false) => format!("{a}{separator}{b}"),
+        }
+    };
+    match &text.from {
+        LegendTextFrom::LongName | LegendTextFrom::Unknown(_) => {
+            SeriesLabel::Text(if long_name.is_empty() {
+                y_node.name().to_string()
+            } else {
+                long_name.to_string()
+            })
+        }
+        LegendTextFrom::Comments => SeriesLabel::Text(field(LegendField::Comments)),
+        LegendTextFrom::XPrime => SeriesLabel::Text(field(LegendField::XPrime)),
+        LegendTextFrom::Units => SeriesLabel::Text(field(LegendField::Units)),
+        LegendTextFrom::ShortName => SeriesLabel::Text(field(LegendField::ShortName)),
+        LegendTextFrom::LongNameUnits => {
+            SeriesLabel::Text(joined(LegendField::LongName, "", LegendField::Units, true))
+        }
+        LegendTextFrom::LongNameComments => SeriesLabel::Text(joined(
+            LegendField::LongName,
+            ", ",
+            LegendField::Comments,
+            false,
+        )),
+        LegendTextFrom::Custom => SeriesLabel::Template {
+            markup: template_source(&text.template, field),
+        },
+    }
+}
+
+/// The value that places `series` on a colour bar (#499, C2), read from the
+/// bar's value source `bar.value`: the x' row by default, or the comments,
+/// long name, short name or units row, whose text must be a single number
+/// (`number_format::parse_input`; « 57 min » is no value). A row series reads
+/// the cell of `bar.row_column` on its row. `None` if there is no readable
+/// finite number: the curve keeps its colour and is reported.
+pub fn series_value(series: &SeriesSpec, tree: &Tree, bar: &ColorBarSpec) -> Option<f64> {
+    if let Some(row) = series.row {
+        let id = bar.row_column?;
+        let column = tree.node(id)?.as_column()?;
+        return match column.cell(row) {
+            crate::column::MixedCell::Number(value) => value.is_finite().then_some(value),
+            crate::column::MixedCell::Text(text) => crate::number_format::parse_input(&text),
+            crate::column::MixedCell::Empty => None,
+        };
+    }
+    let node = tree.node(series.y).filter(|node| node.kind().is_column())?;
+    let meta = node.as_column().map(Column::meta)?;
+    match bar.value.field() {
+        LegendField::XPrime => meta.x_prime.filter(|value| value.is_finite()),
+        LegendField::Comments => crate::number_format::parse_input(&meta.comment),
+        LegendField::Units => crate::number_format::parse_input(&meta.unit),
+        LegendField::LongName => crate::number_format::parse_input(&meta.long_name),
+        LegendField::ShortName => crate::number_format::parse_input(node.name()),
+    }
+}
+
+/// Text of the cell `row` of the column `id` (#499), `None` if the column no
+/// longer exists (the label then falls back to « Row N »).
+fn row_cell_text(tree: &Tree, id: NodeId, row: usize) -> Option<String> {
+    let column = tree.node(id)?.as_column()?;
+    Some(match column.cell(row) {
+        crate::column::MixedCell::Empty => String::new(),
+        crate::column::MixedCell::Number(value) => crate::number_format::format_grid(value),
+        crate::column::MixedCell::Text(text) => text,
     })
 }
 
@@ -298,7 +398,17 @@ fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
 /// Resolves a series. Never raises: a broken reference is a state
 /// (port of `resolve_series`, `resolve.py` line 165).
 pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
-    let mut resolved = resolve_series_data(tree, series);
+    resolve_series_in(tree, series, &LegendText::default())
+}
+
+/// [`resolve_series`] for a series listed by a legend whose « Text from »
+/// setting is `text` (#499).
+pub fn resolve_series_in<'s>(
+    tree: &Tree,
+    series: &'s SeriesSpec,
+    text: &LegendText,
+) -> ResolvedSeries<'s> {
+    let mut resolved = resolve_series_data(tree, series, text);
     resolved.stale = [Some(series.y), series.x, series.x_error, series.y_error]
         .into_iter()
         .flatten()
@@ -313,8 +423,12 @@ fn column_is_stale(tree: &Tree, column: NodeId) -> bool {
         .is_some_and(|calc| calc.stale.is_some())
 }
 
-fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
-    let label = series_label(series, tree);
+fn resolve_series_data<'s>(
+    tree: &Tree,
+    series: &'s SeriesSpec,
+    text: &LegendText,
+) -> ResolvedSeries<'s> {
+    let label = series_label(series, tree, text);
     if let Some(row) = series.row {
         return resolve_row_series(tree, series, row, label);
     }
@@ -362,6 +476,7 @@ fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSerie
             missing,
             truncated: false,
             stale: false,
+            value: None,
         };
     }
 
@@ -404,6 +519,7 @@ fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSerie
         missing,
         truncated,
         stale: false,
+        value: None,
     }
 }
 
@@ -429,6 +545,7 @@ fn resolve_row_series<'s>(
         missing: vec![MissingRole::Y],
         truncated: false,
         stale: false,
+        value: None,
     };
     let Some(sheet) =
         resolve_column(tree, series.y).and_then(|_| tree.parent(series.y).ok().flatten())
@@ -462,6 +579,7 @@ fn resolve_row_series<'s>(
         missing: Vec::new(),
         truncated: false,
         stale: false,
+        value: None,
     }
 }
 
@@ -492,7 +610,14 @@ pub fn resolve_panel<'s>(tree: &Tree, panel: &'s PanelSpec) -> ResolvedPanel<'s>
         series: panel
             .series
             .iter()
-            .map(|series| resolve_series(tree, series))
+            .map(|series| {
+                let mut resolved = resolve_series_in(tree, series, &panel.legend.text);
+                resolved.value = panel
+                    .color_bar
+                    .as_ref()
+                    .and_then(|bar| series_value(series, tree, bar));
+                resolved
+            })
             .collect(),
     }
 }
@@ -730,7 +855,7 @@ mod tests {
         // The displayed name follows the rename: the column is now called
         // "Voltage", and nothing in the spec freezes the old name "Y".
         assert_eq!(
-            series_label(&series, project.tree()),
+            series_label(&series, project.tree(), &LegendText::default()),
             SeriesLabel::Text("Voltage".to_string()),
             "the displayed name must follow the column rename"
         );
@@ -876,7 +1001,7 @@ mod tests {
             ..SeriesSpec::new(ids[0])
         };
         assert_eq!(
-            series_label(&series, project.tree()),
+            series_label(&series, project.tree(), &LegendText::default()),
             SeriesLabel::Row(usize::MAX)
         );
     }
@@ -990,7 +1115,7 @@ mod tests {
             ..SeriesSpec::new(f.y)
         };
         assert_eq!(
-            series_label(&series, f.project.tree()),
+            series_label(&series, f.project.tree(), &LegendText::default()),
             SeriesLabel::Text("My series".to_string())
         );
     }
@@ -1000,7 +1125,7 @@ mod tests {
         let f = Fixture::new();
         let series = SeriesSpec::new(f.y);
         assert_eq!(
-            series_label(&series, f.project.tree()),
+            series_label(&series, f.project.tree(), &LegendText::default()),
             SeriesLabel::Text("Y".to_string())
         );
 
@@ -1015,8 +1140,296 @@ mod tests {
             )
             .expect("valid metadata");
         assert_eq!(
-            series_label(&series, project.tree()),
+            series_label(&series, project.tree(), &LegendText::default()),
             SeriesLabel::Text("Voltage".to_string())
+        );
+    }
+
+    /// A project whose column `Y` carries every header row (#499).
+    fn headers() -> (Project, NodeId, NodeId) {
+        let f = Fixture::new();
+        let mut project = f.project;
+        project
+            .set_column_meta(
+                f.y,
+                ColumnMeta {
+                    long_name: "Abs *max* #1".to_string(),
+                    unit: "u.a.".to_string(),
+                    comment: "scan 3".to_string(),
+                    x_prime: Some(57.0),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+        (project, f.x, f.y)
+    }
+
+    fn from(from: LegendTextFrom) -> LegendText {
+        LegendText {
+            from,
+            ..LegendText::default()
+        }
+    }
+
+    fn label_of(project: &Project, series: &SeriesSpec, text: &LegendText) -> SeriesLabel {
+        series_label(series, project.tree(), text)
+    }
+
+    #[test]
+    fn each_text_source_reads_its_header_row() {
+        let (project, _, y) = headers();
+        let series = SeriesSpec::new(y);
+        let text = |source| label_of(&project, &series, &from(source));
+        let plain = |s: &str| SeriesLabel::Text(s.to_string());
+        assert_eq!(text(LegendTextFrom::LongName), plain("Abs *max* #1"));
+        assert_eq!(text(LegendTextFrom::Comments), plain("scan 3"));
+        assert_eq!(text(LegendTextFrom::Units), plain("u.a."));
+        assert_eq!(text(LegendTextFrom::XPrime), plain("57"));
+        assert_eq!(text(LegendTextFrom::ShortName), plain("Y"));
+        assert_eq!(
+            text(LegendTextFrom::LongNameUnits),
+            plain("Abs *max* #1 (u.a.)")
+        );
+        assert_eq!(
+            text(LegendTextFrom::LongNameComments),
+            plain("Abs *max* #1, scan 3")
+        );
+    }
+
+    /// Witness: a fallback on Long Name / short name for the other sources
+    /// would turn this empty text into « Y ».
+    #[test]
+    fn an_empty_chosen_row_gives_an_empty_text_without_fallback() {
+        let f = Fixture::new();
+        let series = SeriesSpec::new(f.y);
+        for source in [
+            LegendTextFrom::Comments,
+            LegendTextFrom::Units,
+            LegendTextFrom::XPrime,
+        ] {
+            assert_eq!(
+                label_of(&f.project, &series, &from(source)),
+                SeriesLabel::Text(String::new())
+            );
+        }
+        // The default source keeps today's chain: long name, then short name.
+        assert_eq!(
+            label_of(&f.project, &series, &LegendText::default()),
+            SeriesLabel::Text("Y".to_string())
+        );
+    }
+
+    /// Witness: reading the source before the typed name would show the comment.
+    #[test]
+    fn a_typed_name_wins_over_the_text_source() {
+        let (project, _, y) = headers();
+        let series = SeriesSpec {
+            name: "mine".to_string(),
+            ..SeriesSpec::new(y)
+        };
+        assert_eq!(
+            label_of(&project, &series, &from(LegendTextFrom::Comments)),
+            SeriesLabel::Text("mine".to_string())
+        );
+    }
+
+    /// Witness: applying the column source to a row series would read the
+    /// header of its anchor column instead of « Row N ».
+    #[test]
+    fn a_row_series_shows_its_row_or_the_cell_of_a_chosen_column() {
+        let (project, x, y) = headers();
+        let series = SeriesSpec {
+            row: Some(1),
+            ..SeriesSpec::new(y)
+        };
+        let by_comment = from(LegendTextFrom::Comments);
+        assert_eq!(
+            label_of(&project, &series, &by_comment),
+            SeriesLabel::Row(1)
+        );
+        let chosen = LegendText {
+            row_column: Some(x),
+            ..by_comment
+        };
+        assert_eq!(
+            label_of(&project, &series, &chosen),
+            SeriesLabel::Text("1".to_string())
+        );
+        // A row beyond the column gives an empty text, a vanished column the
+        // default « Row N ».
+        let beyond = SeriesSpec {
+            row: Some(40),
+            ..series.clone()
+        };
+        assert_eq!(
+            label_of(&project, &beyond, &chosen),
+            SeriesLabel::Text(String::new())
+        );
+        let gone = LegendText {
+            row_column: Some(NodeId::from_raw(9999)),
+            ..chosen
+        };
+        assert_eq!(label_of(&project, &series, &gone), SeriesLabel::Row(1));
+    }
+
+    fn bar_from(value: stokesforge_plot::ColorBarValue) -> ColorBarSpec {
+        ColorBarSpec {
+            value,
+            ..ColorBarSpec::default()
+        }
+    }
+
+    /// #499 step C: the value of a curve is read from the bar's source;
+    /// a text must be a single number. Witness: reading x' whatever the
+    /// source gives 57 for the comment case.
+    #[test]
+    fn a_curve_reads_its_value_from_the_chosen_header_row() {
+        use stokesforge_plot::ColorBarValue;
+        let (mut project, _, y) = headers();
+        let series = SeriesSpec::new(y);
+        let value =
+            |project: &Project, source| series_value(&series, project.tree(), &bar_from(source));
+        assert_eq!(value(&project, ColorBarValue::XPrime), Some(57.0));
+        // « scan 3 » is no number.
+        assert_eq!(value(&project, ColorBarValue::Comments), None);
+        let meta = |comment: &str| ColumnMeta {
+            comment: comment.to_string(),
+            x_prime: Some(57.0),
+            ..ColumnMeta::default()
+        };
+        project.set_column_meta(y, meta("12,5")).expect("meta");
+        assert_eq!(value(&project, ColorBarValue::Comments), Some(12.5));
+        project.set_column_meta(y, meta("57 min")).expect("meta");
+        assert_eq!(value(&project, ColorBarValue::Comments), None);
+        // An unknown source reads x'.
+        assert_eq!(
+            value(&project, ColorBarValue::Unknown("later".into())),
+            Some(57.0)
+        );
+    }
+
+    /// A row series reads the cell of the chosen column on its row; without
+    /// a column, or past the data, it has no value.
+    #[test]
+    fn a_row_series_reads_the_cell_of_the_bars_column() {
+        let (project, x, y) = headers();
+        let series = SeriesSpec {
+            row: Some(1),
+            ..SeriesSpec::new(y)
+        };
+        let none = ColorBarSpec::default();
+        assert_eq!(series_value(&series, project.tree(), &none), None);
+        let chosen = ColorBarSpec {
+            row_column: Some(x),
+            ..ColorBarSpec::default()
+        };
+        // Column X holds 0, 1, 2: row 1 is 1.
+        assert_eq!(series_value(&series, project.tree(), &chosen), Some(1.0));
+        let beyond = SeriesSpec {
+            row: Some(40),
+            ..series
+        };
+        assert_eq!(series_value(&beyond, project.tree(), &chosen), None);
+    }
+
+    /// The value reaches `ResolvedSeries::value` only through a bar.
+    #[test]
+    fn the_resolved_series_carries_the_value_only_with_a_bar() {
+        let (project, _, y) = headers();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new(y));
+        assert_eq!(resolve_panel(project.tree(), &panel).series[0].value, None);
+        panel.color_bar = Some(ColorBarSpec::default());
+        assert_eq!(
+            resolve_panel(project.tree(), &panel).series[0].value,
+            Some(57.0)
+        );
+    }
+
+    /// F5 (#499): a number inserted in a legend text is shown as the grid
+    /// shows it (6 significant digits), not at full precision. Witness: the
+    /// exact formatter gives `0.19633687222225316`.
+    #[test]
+    fn numbers_in_a_legend_text_read_like_the_grid() {
+        let f = Fixture::new();
+        let mut project = f.project;
+        project
+            .set_column_meta(
+                f.y,
+                ColumnMeta {
+                    x_prime: Some(0.19633687222225316),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+        let shown = SeriesLabel::Text("0.196337".to_string());
+        assert_eq!(
+            label_of(
+                &project,
+                &SeriesSpec::new(f.y),
+                &from(LegendTextFrom::XPrime)
+            ),
+            shown
+        );
+        // The cell of a chosen column on a row series.
+        let sheet = project.tree().parent(f.y).expect("parent").expect("sheet");
+        let values = project
+            .add_column(
+                sheet,
+                None,
+                Some("V"),
+                numeric_column(&[0.19633687222225316]),
+            )
+            .expect("column V");
+        let series = SeriesSpec {
+            row: Some(0),
+            ..SeriesSpec::new(f.y)
+        };
+        let chosen = LegendText {
+            row_column: Some(values),
+            ..LegendText::default()
+        };
+        assert_eq!(label_of(&project, &series, &chosen), shown);
+    }
+
+    /// Witness: a column text with `* # $ " \\` reaches the preamble as a
+    /// string literal, and the template is kept as typed after it.
+    #[test]
+    fn a_custom_template_reads_the_column_text_through_variables() {
+        let (project, _, y) = headers();
+        let series = SeriesSpec::new(y);
+        let custom = LegendText {
+            from: LegendTextFrom::Custom,
+            template: "*#ln* #if u != \"\" [(#u)]".to_string(),
+            row_column: None,
+        };
+        let SeriesLabel::Template { markup } = label_of(&project, &series, &custom) else {
+            panic!("a template label");
+        };
+        assert!(
+            markup.contains("#let long-name = \"Abs *max* #1\"\n"),
+            "{markup}"
+        );
+        assert!(markup.contains("#let units = \"u.a.\"\n"));
+        assert!(markup.contains("#let short-name = \"Y\"\n"));
+        assert!(markup.contains("#let x-prime = \"57\"\n"));
+        assert!(markup.ends_with("*#ln* #if u != \"\" [(#u)]"));
+    }
+
+    #[test]
+    fn the_legend_text_follows_the_panel_in_a_resolved_plot() {
+        let (project, x, y) = headers();
+        let mut panel = PanelSpec::default();
+        panel.legend.text = from(LegendTextFrom::Comments);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        let spec = PlotSpec {
+            panels: vec![panel].into(),
+            ..PlotSpec::default()
+        };
+        let resolved = resolve_spec(project.tree(), &spec);
+        assert_eq!(
+            resolved.panels[0].series[0].label,
+            SeriesLabel::Text("scan 3".to_string())
         );
     }
 

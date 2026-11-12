@@ -34,7 +34,7 @@ use stokesforge_app_state::state::{
     MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, StatusLevel,
     UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN, WARNING_LIFETIME,
 };
-use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
+use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::{
     Cell, Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, FormulaPart, NodeId, Project,
     Tree,
@@ -8213,6 +8213,50 @@ fn plot_rows_and_empty_graph_names() {
     assert!(!name.contains(" plot"), "{name}");
 }
 
+/// #507, D6: a graph created by `AddGraph`, `PlotColumns` or `PlotRows` has no
+/// legend frame, while a graph that is loaded keeps its own (the model
+/// default is the frame). Witness: a creation path that forgets
+/// `with_new_graph_legend` leaves the frame on.
+#[test]
+fn new_graphs_have_no_legend_frame() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    let last = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    let frames = |state: &AppState| {
+        state
+            .plot_spec(last(state))
+            .unwrap()
+            .panels
+            .iter()
+            .map(|panel| panel.legend.frame)
+            .collect::<Vec<_>>()
+    };
+    state.dispatch(Action::AddGraph);
+    assert_eq!(frames(&state), [false]);
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns,
+        plot_type: PlotType::Line,
+    });
+    assert!(frames(&state).iter().all(|frame| !frame));
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert!(frames(&state).iter().all(|frame| !frame));
+    // The model default is still today's look: a spec that did not go
+    // through a creation path keeps its frame.
+    assert!(stokesforge_plot::LegendSpec::default().frame);
+}
+
 /// Plot of a row selection (#166): a fresh graph where each row is
 /// a series, not all the columns crossed; a single undo step.
 #[test]
@@ -8537,6 +8581,482 @@ fn open_plot_settings_opens_the_requested_tab_and_keeps_the_chosen_axis() {
     let settings = state.plot_settings().expect("window open");
     assert_eq!(settings.tab, PlotSettingsTab::Legend);
     assert_eq!(settings.axis, PlotAxis::Left, "the chosen axis is kept");
+}
+
+/// #499: changing the legend « Text from » in Graph Properties is one history
+/// entry (the window's group), and one Undo brings back the previous text.
+/// Witness: a change that is not undoable, or one entry per commit, fails the
+/// last two assertions.
+#[test]
+fn changing_the_legend_text_source_is_one_undo_step() {
+    use stokesforge_plot::LegendTextFrom;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    assert_eq!(before.panels[0].legend.text.from, LegendTextFrom::LongName);
+    let label_before = state.undo_label();
+
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Legend,
+        axis: None,
+    });
+    state
+        .plot_edit_mut()
+        .expect("draft")
+        .spec
+        .panels
+        .get_mut(0)
+        .expect("panel")
+        .legend
+        .text
+        .from = LegendTextFrom::Comments;
+    state.commit_plot_edit();
+    state.close_plot_settings();
+
+    let after = state.plot_spec(graph).expect("spec");
+    assert_eq!(after.panels[0].legend.text.from, LegendTextFrom::Comments);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::Macro(
+            stokesforge_commands::MacroKind::GraphProperties
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
+/// #507: the size set with the format toolbar (`Action::SetTextFont` on the
+/// legend) is what the Legend tab's draft holds when the window opens, and a
+/// size set while the window is open reaches the draft too (an untouched draft
+/// follows the model). Witness: a tab that kept its own copy of the font shows
+/// the old size.
+#[test]
+fn the_toolbar_font_size_of_the_legend_is_the_tab_value() {
+    use stokesforge_plot::{TextFont, TextTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let font = |size| TextFont {
+        family: "Noto Sans".into(),
+        size: Some(size),
+        ..TextFont::default()
+    };
+    state.dispatch(Action::SetTextFont {
+        graph,
+        target: TextTarget::Legend { panel: 0 },
+        font: font(20.0),
+    });
+    state.dispatch(PlotTarget::Legend.open_settings(graph));
+    let shown = |state: &AppState| {
+        state.plot_edit().unwrap().spec.panels[0]
+            .legend
+            .font
+            .clone()
+    };
+    assert_eq!(shown(&state).size, Some(20.0));
+    assert_eq!(shown(&state).family, "Noto Sans");
+
+    state.dispatch(Action::SetTextFont {
+        graph,
+        target: TextTarget::Legend { panel: 0 },
+        font: font(24.0),
+    });
+    state.begin_plot_edit(graph);
+    assert_eq!(shown(&state).size, Some(24.0));
+}
+
+/// #507: several edits of the Legend tab (font, frame, columns, spacing) are
+/// one history entry, and the committed values reach the model. Witness: one
+/// entry per commit (the first Undo leaves the later edits), or a setting the
+/// commit drops.
+#[test]
+fn several_legend_tab_edits_are_one_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    let label_before = state.undo_label();
+
+    state.dispatch(PlotTarget::Legend.open_settings(graph));
+    let edit_legend = |state: &mut AppState, apply: &dyn Fn(&mut stokesforge_plot::LegendSpec)| {
+        let edit = state.plot_edit_mut().expect("draft");
+        apply(&mut edit.spec.panels.get_mut(0).expect("panel").legend);
+        state.commit_plot_edit();
+    };
+    edit_legend(&mut state, &|legend| legend.font.size = Some(20.0));
+    edit_legend(&mut state, &|legend| {
+        legend.frame = false;
+        legend.frame_color = "#ff0000".into();
+        legend.frame_width = Some(2.0);
+        legend.background = "#ffffff80".into();
+    });
+    edit_legend(&mut state, &|legend| {
+        legend.columns = 2;
+        legend.row_gap = Some(6.0);
+        legend.column_gap = Some(20.0);
+        legend.swatch_length = Some(40.0);
+    });
+    state.close_plot_settings();
+
+    let legend = state.plot_spec(graph).expect("spec").panels[0]
+        .legend
+        .clone();
+    assert_eq!(legend.font.size, Some(20.0));
+    assert!(!legend.frame);
+    assert_eq!(legend.frame_color, "#ff0000");
+    assert_eq!(legend.frame_width_pt(), 2.0);
+    assert_eq!(legend.background, "#ffffff80");
+    assert_eq!(legend.column_count(), 2);
+    assert_eq!(legend.row_gap_pt(), 6.0);
+    assert_eq!(legend.column_gap_pt(), 20.0);
+    assert_eq!(legend.swatch_length_pt(), 40.0);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
+/// #499 step C: editing the colour bar in Graph Properties is one history
+/// entry, and one Undo brings back the graph without a bar. Witness: a bar
+/// edit that is not part of the committed draft (or one entry per field)
+/// fails the assertions.
+#[test]
+fn editing_the_color_bar_is_one_undo_step() {
+    use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    assert!(before.panels[0].color_bar.is_none());
+    let label_before = state.undo_label();
+
+    state.dispatch(PlotTarget::ColorBar.open_settings(graph));
+    assert_eq!(
+        state.plot_settings().expect("window").tab,
+        PlotSettingsTab::Legend,
+        "the colour bar is a section of the Legend tab"
+    );
+    assert!(!state.plot_settings().unwrap().color_bar_unfold);
+    {
+        let edit = state.plot_edit_mut().expect("draft");
+        let panel = edit.spec.panels.get_mut(0).expect("panel");
+        panel.color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment::new(1)],
+            position: ColorBarPosition::Right,
+            ..ColorBarSpec::default()
+        });
+    }
+    state.commit_plot_edit();
+    {
+        let edit = state.plot_edit_mut().expect("draft");
+        let bar = edit
+            .spec
+            .panels
+            .get_mut(0)
+            .expect("panel")
+            .color_bar
+            .as_mut();
+        bar.expect("bar").title = "t (min)".to_string();
+    }
+    state.commit_plot_edit();
+    // The bar's double-click: Legend tab, section to unfold (one-shot).
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: stokesforge_app_state::object_manager::VisibilityTarget::Text(
+            stokesforge_plot::TextTarget::ColorBar { panel: 0 },
+        ),
+    });
+    let settings = state.plot_settings().expect("window");
+    assert_eq!(settings.tab, PlotSettingsTab::Legend);
+    assert!(settings.color_bar_unfold);
+    state.spend_color_bar_unfold();
+    assert!(!state.plot_settings().unwrap().color_bar_unfold);
+    assert_eq!(PlotSettingsTab::ALL.len(), 5);
+    state.close_plot_settings();
+
+    let after = state.plot_spec(graph).expect("spec");
+    let bar = after.panels[0].color_bar.as_ref().expect("a bar");
+    assert_eq!(bar.title, "t (min)");
+    assert_eq!(bar.position, ColorBarPosition::Right);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
+/// #499: a released resize handle of the colour bar is one history entry
+/// labelled for the bar; the size is bounded, the font is left alone, a
+/// repeated size stacks nothing and a size left out is kept. Witness: no
+/// bound, a font reset, or a second entry per field fails the assertions.
+#[test]
+fn resizing_the_color_bar_is_one_bounded_undo_step() {
+    use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec, TextFont};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let mut spec = state.plot_spec(graph).expect("spec");
+    let panel = spec.panels.get_mut(0).expect("panel");
+    panel.color_bar = Some(ColorBarSpec {
+        segments: vec![ColorBarSegment::new(1)],
+        position: ColorBarPosition::BottomRight,
+        ..ColorBarSpec::default()
+    });
+    // The bar's font is the legend's (#507): resizing leaves it alone.
+    panel.legend.font = TextFont {
+        size: Some(17.0),
+        ..TextFont::default()
+    };
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    let before = state.plot_spec(graph).expect("spec");
+    let bar = |state: &AppState| {
+        state.plot_spec(graph).expect("spec").panels[0]
+            .color_bar
+            .clone()
+            .expect("a bar")
+    };
+
+    state.dispatch(Action::SetColorBarSize {
+        graph,
+        panel: 0,
+        length: Some(1.0),
+        thickness: Some(30.0),
+        anchor: None,
+    });
+    let resized = bar(&state);
+    assert_eq!(resized.length, Some(ColorBarSpec::MIN_LENGTH), "bounded");
+    assert_eq!(resized.thickness, Some(30.0));
+    assert_eq!(
+        state.plot_spec(graph).expect("spec").panels[0]
+            .legend
+            .font
+            .size,
+        Some(17.0),
+        "the font is not resized"
+    );
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(PlotEditKind::ColorBar))
+    );
+
+    // A size left out is kept; the same sizes stack nothing.
+    state.dispatch(Action::SetColorBarSize {
+        graph,
+        panel: 0,
+        length: None,
+        thickness: Some(2.0),
+        anchor: None,
+    });
+    assert_eq!(bar(&state).thickness, Some(ColorBarSpec::MIN_THICKNESS));
+    assert_eq!(bar(&state).length, Some(ColorBarSpec::MIN_LENGTH));
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetColorBarSize {
+        graph,
+        panel: 0,
+        length: None,
+        thickness: Some(2.0),
+        anchor: None,
+    });
+    assert_eq!(state.snapshot().revision, revision, "nothing stacked");
+
+    state.dispatch(Action::Undo);
+    assert_eq!(bar(&state).thickness, Some(30.0));
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.plot_spec(graph).expect("spec"),
+        before,
+        "one Undo each"
+    );
+}
+
+/// #499 step C: the window keeps its five tabs; the bar is a section of the
+/// Legend tab and opens it.
+#[test]
+fn the_color_bar_is_a_section_of_the_legend_tab() {
+    assert_eq!(PlotSettingsTab::ALL.len(), 5);
+    assert_eq!(
+        PlotTarget::ColorBar.settings_page(),
+        (PlotSettingsTab::Legend, None)
+    );
+}
+
+/// #499: a new graph takes the « Text from » default of the Preferences, a
+/// graph that exists keeps its own. Witness: ignoring the preference leaves
+/// the long name.
+#[test]
+fn new_graphs_take_the_legend_text_preference() {
+    use stokesforge_plot::LegendTextFrom;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, sheet, columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    let root = state.tree().root();
+    let last_graph = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    state.dispatch(Action::AddGraph);
+    let old = last_graph(&state);
+    state.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Units));
+    state.dispatch(Action::AddGraph);
+    let from = |state: &AppState, graph| {
+        state.plot_spec(graph).unwrap().panels[0]
+            .legend
+            .text
+            .from
+            .clone()
+    };
+    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns,
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    assert_eq!(from(&state, old), LegendTextFrom::LongName);
+    // Remembered; a custom template is not a default.
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::Units);
+    next.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Custom));
+    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
+}
+
+/// #499 F2: with « Text from » on an empty header row, the legend entry stays
+/// empty, but the lists name the column in grey. Witness: a fallback in
+/// `series_label` would fill the legend; no fallback leaves the list row blank.
+/// F6: the « Value of column… » picker says « A — Wavelength », the letter
+/// alone without a long name.
+#[test]
+fn an_empty_legend_text_is_empty_in_the_legend_and_named_in_the_lists() {
+    use stokesforge_app_state::state::{
+        column_letter_name, series_legend_label, series_list_entry,
+    };
+    use stokesforge_plot::{LegendText, LegendTextFrom, SeriesSpec};
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let mut project = Project::new("Lists").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("book");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .expect("A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[2.0]))
+        .expect("B");
+    project
+        .set_column_meta(
+            a,
+            ColumnMeta {
+                long_name: "Wavelength".into(),
+                ..ColumnMeta::default()
+            },
+        )
+        .expect("meta");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, state) = start(project, &dir.path().join("projet.stf"));
+    let tree = state.tree();
+    let text = LegendText {
+        from: LegendTextFrom::Comments,
+        ..LegendText::default()
+    };
+    let series = SeriesSpec::new(b);
+    assert_eq!(
+        series_legend_label(tree, &series, &text),
+        "",
+        "legend empty"
+    );
+    let (label, fallback) = series_list_entry(tree, &series, &text);
+    assert!(fallback);
+    assert_eq!(label, "(empty) Sheet1 B");
+    // A typed name or a filled row is not a fallback.
+    let typed = SeriesSpec {
+        name: "mine".into(),
+        ..SeriesSpec::new(b)
+    };
+    assert_eq!(
+        series_list_entry(tree, &typed, &text),
+        ("mine".into(), false)
+    );
+    assert!(!series_list_entry(tree, &series, &LegendText::default()).1);
+    assert_eq!(column_letter_name(tree, a), "A \u{2014} Wavelength");
+    assert_eq!(column_letter_name(tree, b), "B");
+}
+
+/// #499 G3: the lists show the plain text Typst produces for a custom
+/// template (no markup, `\u{394}` stays), and the grey fallback when it does not
+/// compile. Witness: showing the template source would print `*#ln*`; no
+/// fallback would leave the row blank.
+#[test]
+fn a_custom_template_shows_its_plain_text_in_the_lists() {
+    use stokesforge_app_state::state::series_list_entry;
+    use stokesforge_plot::{LegendText, LegendTextFrom, SeriesSpec};
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let mut project = Project::new("Lists").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("book");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .expect("A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[2.0]))
+        .expect("B");
+    for (column, long, unit) in [(a, "\u{394}A *x*", "mM"), (b, "Plain", "")] {
+        project
+            .set_column_meta(
+                column,
+                ColumnMeta {
+                    long_name: long.into(),
+                    unit: unit.into(),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+    }
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, state) = start(project, &dir.path().join("projet.stf"));
+    let tree = state.tree();
+    let custom = |template: &str| LegendText {
+        from: LegendTextFrom::Custom,
+        template: template.to_string(),
+        ..LegendText::default()
+    };
+    let template = "*#ln* #if u != \"\" [(#u)]";
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(a), &custom(template)),
+        ("\u{394}A *x* (mM)".to_string(), false)
+    );
+    // No units: the smart `#if` leaves no empty parentheses.
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(b), &custom(template)),
+        ("Plain".to_string(), false)
+    );
+    // Does not compile: the grey fallback.
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(b), &custom("#nope")),
+        ("(empty) Sheet1 B".to_string(), true)
+    );
+    // A typed name wins.
+    let typed = SeriesSpec {
+        name: "mine".into(),
+        ..SeriesSpec::new(b)
+    };
+    assert_eq!(
+        series_list_entry(tree, &typed, &custom(template)),
+        ("mine".to_string(), false)
+    );
 }
 
 /// A node that is not a graph opens nothing.

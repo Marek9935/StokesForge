@@ -76,6 +76,7 @@
 )]
 
 pub mod backend;
+mod bar_resize;
 pub mod cache;
 pub mod edge_band;
 pub mod feathering;
@@ -244,6 +245,11 @@ pub enum GraphEvent {
         /// Side of the axis.
         side: stokesforge_render::AxisSide,
     },
+    /// Double click on the colour bar: open its tab (#499).
+    OpenColorBarProperties {
+        /// Index of the layer in `PlotSpec::panels`.
+        panel: usize,
+    },
     /// Double click on a curve: open the settings of the series
     /// (issue #113).
     OpenSeriesProperties(stokesforge_plot::SeriesRef),
@@ -258,6 +264,19 @@ pub enum GraphEvent {
         target: TextTarget,
         /// Its new anchor.
         anchor: TextAnchor,
+    },
+    /// A resize handle of the colour bar was pulled then released (#499):
+    /// the new strip size (and, for a dragged bar, its new anchor, so the
+    /// opposite edge stays still), to commit as **one** change of the model.
+    ColorBarResized {
+        /// Index of the layer in `PlotSpec::panels`.
+        panel: usize,
+        /// New strip length in points; `None` = unchanged.
+        length: Option<f64>,
+        /// New strip thickness in points; `None` = unchanged.
+        thickness: Option<f64>,
+        /// New anchor of a dragged bar; `None` = unchanged.
+        anchor: Option<TextAnchor>,
     },
     /// A width handle of a title or an axis title was pulled then released
     /// (#244): its new width, as a fraction of the width of the figure, to
@@ -493,6 +512,7 @@ pub fn series_swatch(tree: &Tree, spec: &stokesforge_plot::SeriesSpec, rect: Rec
         broken,
         bars,
         (0, rect.height() as i32 / 2),
+        stokesforge_render::legend::KEY_WIDTH,
         stokesforge_render::paint::INK,
     );
     drop(area);
@@ -657,6 +677,11 @@ pub struct GraphView {
     /// Preview of the width of a title being resized (#244).
     text_width_preview: Option<(TextTarget, f64)>,
     text_drag: Option<TextDrag>,
+    /// Preview of the colour bar being resized (#499) and the gesture.
+    bar_size_preview: Option<bar_resize::BarSize>,
+    bar_drag: Option<bar_resize::BarDrag>,
+    /// The first frame of the current drag already looked for a bar handle.
+    bar_grab_tried: bool,
     /// Preview of the frame sizes of a cell handle being pulled (#394).
     frame_preview: Option<FramePreview>,
     /// The Page Layout Mode (#426): view state, never saved.
@@ -787,6 +812,9 @@ impl GraphView {
             text_preview: None,
             text_width_preview: None,
             text_drag: None,
+            bar_size_preview: None,
+            bar_drag: None,
+            bar_grab_tried: false,
             frame_preview: None,
             layout: layout_mode::LayoutState::default(),
             selected_annotation: None,
@@ -904,6 +932,8 @@ impl GraphView {
         self.annotation_preview = None;
         self.text_drag = None;
         self.text_preview = None;
+        self.bar_drag = None;
+        self.bar_size_preview = None;
         self.frame_preview = None;
         self.layout.forget_gestures();
         self.shape_drag = None;
@@ -1202,6 +1232,7 @@ impl GraphView {
         self.set_annotation_preview(None);
         self.set_text_preview(None);
         self.set_text_width_preview(None);
+        self.set_bar_size_preview(None);
         self.set_shape_preview(None);
         self.set_frame_preview(None);
     }
@@ -1243,6 +1274,15 @@ impl GraphView {
         }
     }
 
+    /// Sets (or removes) the preview of a resized colour bar (#499).
+    fn set_bar_size_preview(&mut self, preview: Option<bar_resize::BarSize>) {
+        self.preview_until = None;
+        if self.bar_size_preview != preview {
+            self.bar_size_preview = preview;
+            self.preview_generation += 1;
+        }
+    }
+
     /// Sets (or removes) the width preview of a title (#244).
     fn set_text_width_preview(&mut self, preview: Option<(TextTarget, f64)>) {
         self.preview_until = None;
@@ -1278,7 +1318,8 @@ impl GraphView {
 
     /// Where the legend line of series `series` (rank in
     /// `PanelSpec::series`) of layer `panel` is drawn on screen: center and
-    /// size of the line, over the whole width of the frame.
+    /// size of the entry's cell (the whole width of the frame for a lone
+    /// column, one column's share otherwise, #507).
     pub fn legend_entry_screen_box(
         &self,
         panel: usize,
@@ -1290,7 +1331,7 @@ impl GraphView {
             .panels
             .iter()
             .find(|drawn| drawn.index == panel)?;
-        let frame = panel
+        panel
             .texts
             .iter()
             .find(|text| matches!(text.target, TextTarget::Legend { .. }))?;
@@ -1299,8 +1340,8 @@ impl GraphView {
             .iter()
             .find(|line| line.series == series)?;
         self.figure_box_to_screen(
-            (frame.center.0, line.center_y),
-            (frame.size.0, line.height.round() as u32),
+            (line.center_x, line.center_y),
+            (line.width.round() as u32, line.height.round() as u32),
         )
     }
 
@@ -1479,7 +1520,10 @@ impl GraphView {
     /// The width handles of a selected title or axis title; no width for the
     /// legend (#244).
     fn text_width_handles(&self, target: TextTarget) -> Option<[Pos2; 2]> {
-        if matches!(target, TextTarget::Legend { .. }) {
+        if matches!(
+            target,
+            TextTarget::Legend { .. } | TextTarget::ColorBar { .. }
+        ) {
             return None;
         }
         let (center, size, rotation) = self.text_screen_box(target)?;
@@ -1737,6 +1781,7 @@ impl GraphView {
                 || self.drag_box.is_some()
                 || self.shape_drag.is_some()
                 || self.annotation_drag.is_some()
+                || self.bar_drag.is_some()
                 || self.text_drag.is_some());
         feathering::apply(&context, Feathering::during_drag(real_gesture));
 
@@ -1754,6 +1799,7 @@ impl GraphView {
         let preview = &self.annotation_preview;
         let text_preview = &self.text_preview;
         let width_preview = self.text_width_preview;
+        let bar_preview = self.bar_size_preview;
         let shape_preview = &self.shape_preview;
         let frame_preview = &self.frame_preview;
         let formulas = &self.formulas;
@@ -1776,6 +1822,9 @@ impl GraphView {
             }
             if let Some((target, anchor)) = text_preview {
                 target.set_anchor(&mut framed, Some(*anchor));
+            }
+            if let Some(size) = bar_preview {
+                size.apply(&mut framed);
             }
             if let Some((target, width)) = width_preview {
                 if let Some(mut font) = target.font(&framed) {
@@ -2084,6 +2133,10 @@ impl GraphView {
                         // The legend has no text of its own: it is the series
                         // names, one per line.
                         TextTarget::Legend { .. } => return,
+                        // The bar has no text to edit: it opens its tab.
+                        TextTarget::ColorBar { panel } => {
+                            GraphEvent::OpenColorBarProperties { panel }
+                        }
                         _ => GraphEvent::EditText(target),
                     });
                 }
@@ -2122,6 +2175,7 @@ impl GraphView {
             && !pan
             && (self.handle_annotation_drag(response, spec)
                 || self.handle_shape_drag(response, spec)
+                || self.handle_bar_resize(response, spec)
                 || self.handle_text_drag(response, spec))
         {
             return;
@@ -2542,6 +2596,7 @@ impl GraphView {
             ));
         }
 
+        self.paint_bar_handles(painter, spec);
         self.paint_shape_selection(painter);
         self.paint_series_selection(painter, spec);
 

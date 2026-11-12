@@ -442,6 +442,11 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `x_auto_range`, `y_auto_range` | `True` makes the framing automatic (contradictory with bounds given in the same call) |
 | `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booleans; `x_inverted=True` on increasing bounds swaps them (the direction is read from their order, `AxisSpec::orient`, #344); the surface itself does not change |
 | `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
+| `legend_text_from`, `legend_template` | the header row the legend entries read (`long_name`, `comments`, `x_prime`, `units`, `short_name`, `long_name_units`, `long_name_comments`, `custom`); the Typst template of `custom`, which reads the string variables `long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp` (#499) |
+| `legend_frame` | boolean; `False` hides the frame (a new graph is created without one, #507) |
+| `legend_frame_color`, `legend_background` | `'#RRGGBB'` or `'#RRGGBBAA'` (background only: opacity); `''` = automatic (the frame takes the ink, the background the panel's) |
+| `legend_frame_width`, `legend_row_gap`, `legend_column_gap`, `legend_swatch_length` | lengths in **points**, whatever `unit` says (#507): the frame thickness (0.25 to 400), the gap between two rows and between two columns (0 to 400), the length of the line sample (4 to 400); refused outside, never brought back |
+| `legend_columns` | integer from 1 to 1000; entries fill down first, then the next column; capped at the number of entries |
 | `plot_width`, `plot_height` | the plot area of the column (width) and of the row (height) of `panel`, a finite number in `unit`, from 1.27 to 70.56 cm (36 to 2000 pt); refused outside, never brought back (#399) |
 | `plot_left`, `plot_top` | distance from the image edge to the first plot area, `None` = Auto, otherwise from 0 to 70.56 cm; a value below what the axes need is kept and drawn raised to it, as in the application (#399) |
 | `fixed_size` | boolean, "Figure size = Fixed" (#399); works in both placements |
@@ -543,7 +548,8 @@ the list of the API below. Automatic colors follow the palette, series after ser
 | `ungroup(g, group, *, panel)` | dissolves: the series stay, style kept |
 | `remove_group(g, group, *, panel)` | removes the group **and its series** |
 | `set_group_style(g, group, *, panel, line_style, line_width, symbol, symbol_size)` | sets each given option on all members |
-| `apply_gradient(g, group, gradient, *, panel)` | `gradient`: identifier of a provided palette (`blue-red`…), name of a palette saved **in the project**, or list of `#RRGGBB` stops |
+| `apply_gradient(g, group, gradient, *, panel)` | `gradient`: identifier of a provided palette (`blue-red`…), name of a palette saved **in the project**, or list of `#RRGGBB` stops. The group **retains** the stops (a color bar reads them) |
+| `color_bar(g, groups=None, *, value_from, row_column, chain, scale, orientation, position, ticks, title, labels, ranges, length, thickness, visible, panel)` | sets the layer's color bar (#499), creating it when there is none; one undo step. `groups`: group numbers (the order of the list does not matter: the bar always follows the graph's order of the groups; a group already on the bar keeps its range and label); `labels`: Typst label of the break after each group, one per group (the last group on the bar has no break); `ranges`: `(from, to)` per group, `None` = automatic; `value_from`: `x_prime` (default), `comments`, `long_name`, `short_name`, `units`; `row_column`: the column read by row series (`None` clears it, leaving it out keeps it); `scale`: `linear` or `log`; `orientation`: `horizontal` or `vertical` (forced by the places below / right); `position` (also drops a dragged place): `top_left`, `top_right`, `bottom_left`, `bottom_right`, `below`, `right`; `ticks`: `breaks` or `auto`; `length`, `thickness`: size of the strip in points, bounded (4 to 4000; at least 20 for the length), the length applying to a bar inside the frame only (below / right it follows the frame); a left-out value keeps the current one, and a script cannot go back to the automatic size; `visible` keeps its current value when left out (a new bar is shown); `visible=False` hides the bar and gives the curves their own colors back. A group put on the bar without a retained gradient gets the first provided palette. An unknown key, an unknown group or a `labels` / `ranges` list of the wrong length is refused (`InvalidValueError`) and changes nothing |
 
 A group number is the spec's: stable as long as the group exists. The
 gestures replay those of the interface (`PanelSpec::group_series`,
@@ -698,7 +704,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.5"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.6"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -750,6 +756,7 @@ function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', li
 module analysis
 function apply_gradient(graph, group, gradient, *, panel=(0, 0))
 function children(handle=None)
+function color_bar(graph, groups=None, *, value_from=None, row_column=Ellipsis, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, length=None, thickness=None, visible=None, panel=(0, 0))
 function column(handle)
 function create_column(worksheet, name=None, column_type='numeric')
 function create_workbook(name=None, parent=None)
@@ -861,6 +868,16 @@ x_visible
 y_visible
 legend_visible
 legend_position
+legend_text_from
+legend_template
+legend_frame
+legend_frame_color
+legend_frame_width
+legend_background
+legend_columns
+legend_row_gap
+legend_column_gap
+legend_swatch_length
 plot_width
 plot_height
 plot_left
@@ -1081,6 +1098,17 @@ top_left
 top_right
 bottom_left
 bottom_right
+```
+
+```pyst-api enum legend_text_from
+long_name
+comments
+x_prime
+units
+short_name
+long_name_units
+long_name_comments
+custom
 ```
 
 ```pyst-api enum shape_kind

@@ -336,12 +336,23 @@ pub(super) fn list_row_focused(
 /// [`list_row`] that can also be dragged: the whole row grabs (drag and drop
 /// of series, `object_dnd.rs`).
 pub(super) fn list_row_draggable(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    list_row_draggable_dimmed(ui, text, selected, false)
+}
+
+/// [`list_row_draggable`] whose label is muted when `dimmed` (the grey fallback
+/// of a series with an empty legend text, #499).
+pub(super) fn list_row_draggable_dimmed(
+    ui: &mut egui::Ui,
+    text: &str,
+    selected: bool,
+    dimmed: bool,
+) -> egui::Response {
     list_row_sensed(
         ui,
         None,
         text,
         selected,
-        RowFade::None,
+        RowFade::text_if(dimmed),
         false,
         egui::Sense::click_and_drag(),
     )

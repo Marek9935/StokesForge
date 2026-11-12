@@ -154,7 +154,7 @@ menu-graph-axes = Axes…
 menu-graph-series = Series…
     .hint = Edits the plot type, line and symbol of each series
 menu-graph-legend = Legend…
-    .hint = Edits legend visibility and position
+    .hint = Edits legend text, font, frame, background and layout
 menu-graph-theme = Theme…
     .hint = Edits global colors and applies predefined themes
 menu-graph-png-resolution = PNG Resolution
@@ -291,6 +291,7 @@ grid-drag-rows =
 graph-row-series = Row { $number }
 graph-series-broken-reference = (broken reference)
 graph-series-broken-reference-named = { $name } — broken reference
+graph-series-empty-text = (empty) { $column }
 graph-legend-more = … and { $count } more
 status-row-no-x-prime = No column of this sheet has an x' value: nothing to plot
 row-drop-title = Plot Rows
@@ -810,6 +811,7 @@ plot-target-axis-title = { $side ->
 plot-target-text = Text
 plot-target-object = Object
 plot-target-legend = Legend
+plot-target-color-bar = Color Bar
 
 # Automatic values of the color fields
 
@@ -1038,6 +1040,86 @@ plot-legend-top-left = Top left
 plot-legend-top-right = Top right
 plot-legend-bottom-left = Bottom left
 plot-legend-bottom-right = Bottom right
+plot-legend-text-from = Text from
+    .hint = The worksheet header row that gives the text of every legend entry. A series name you typed still wins.
+legend-text-from-long-name = Long Name
+legend-text-from-comments = Comments
+legend-text-from-x-prime = x'
+legend-text-from-units = Units
+legend-text-from-short-name = Short Name
+legend-text-from-long-name-units = Long Name (Units)
+legend-text-from-long-name-comments = Long Name, Comments
+legend-text-from-custom = Custom…
+legend-text-from-unknown = Long Name (setting of a newer version)
+plot-legend-template = Template
+    .hint = Typst text. Variables: #long-name (#ln) the Long Name, #short-name (#sn) the Short Name, #units (#u) the Units, #comments (#c) the Comments, #x-prime (#xp) the x'. Their text is shown as is.
+plot-legend-row-text = Row series
+plot-legend-row-number = Row number
+plot-legend-row-column-value = Value of column…
+plot-legend-row-column = Column
+plot-legend-position-dragged = Dragged
+plot-legend-text-section = Text
+plot-legend-frame-section = Frame
+plot-legend-frame-show = Show frame
+plot-legend-frame-color = Frame color
+    .auto = Auto (text color)
+plot-legend-frame-width = Frame width (pt)
+plot-legend-background-auto = Auto (background of the layer)
+plot-legend-layout-section = Layout
+plot-legend-columns = Columns
+plot-legend-row-gap = Row gap (pt)
+plot-legend-column-gap = Column gap (pt)
+plot-legend-swatch-length = Line sample length (pt)
+
+# Color Bar tab (#499)
+
+plot-color-bar-section = Color bar
+plot-color-bar-show =
+    Show color bar
+    .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
+plot-color-bar-groups-section = Series groups
+plot-color-bar-group-break = Break label
+    .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
+plot-color-bar-group-on = On the bar
+    .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
+plot-color-bar-range = Range
+plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
+plot-color-bar-chain =
+    Chain the segments
+    .hint = Each segment starts where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change.
+plot-color-bar-value-section = Value
+plot-color-bar-value-from = Value from
+    .hint = The worksheet header row that gives the value of every curve. A value with a unit or text (« 57 min ») has no value.
+plot-color-bar-row-none = No value
+plot-color-bar-scale = Scale
+plot-color-bar-scale-linear = Linear
+plot-color-bar-scale-log = Log
+    .hint = A value of zero or less has no color on a log scale.
+plot-color-bar-no-value =
+    { $count ->
+        [one] { $count } curve has no value
+       *[other] { $count } curves have no value
+    }
+plot-color-bar-layout-section = Placement
+plot-color-bar-position = Position
+plot-color-bar-position-dragged = Dragged
+plot-color-bar-position-below = Below the frame
+plot-color-bar-position-right = Right of the frame
+plot-color-bar-orientation = Orientation
+    .disabled = Below the frame, the bar is horizontal; right of the frame, vertical
+plot-color-bar-orientation-horizontal = Horizontal
+plot-color-bar-orientation-vertical = Vertical
+plot-color-bar-ticks = Ticks
+plot-color-bar-ticks-breaks = Ends and breaks
+plot-color-bar-ticks-auto = Automatic
+plot-color-bar-title = Title
+    .hint = Typst text written under the bar. Leave empty for none.
+plot-color-bar-unknown = Default (setting of a newer version)
+disabled-color-bar-off = Turn on « Show color bar » first
+curve-on-color-bar =
+    On the color bar
+    .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
+curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
 
 # Theme tab
 
@@ -1410,6 +1492,8 @@ history-plot-align-layers = Align Layers
 history-plot-match-layer-size = Match Layer Size
 history-plot-distribute-layers = Distribute Layers
 history-plot-layer-placement = Change Layer Placement
+history-plot-legend-text = Change Legend Text
+history-plot-color-bar = Change Color Bar
 history-plot-fit-page = Fit Page to Layout
 history-plot-fit-layout = Fit Layout to Page
 
@@ -2024,6 +2108,7 @@ disabled-color-invalid = Enter a valid color first
 disabled-gradient-min-colors = A gradient needs at least two colors
 disabled-mirror-off = Turn on the mirror axis first
 disabled-ticks-off = Show the ticks first
+disabled-legend-frame-off = Show the frame first
 disabled-minor-ticks-off = Show the minor ticks first
 disabled-analysis-issues = Fix the problem shown in the form first
 
@@ -2062,6 +2147,8 @@ preferences-new-graphs = New graphs
 preferences-new-graphs-note = Starting point of the graphs you create. Each graph then keeps its own setting, in its Graph Properties; graphs that already exist are not changed.
 preferences-new-graph-decimal-comma = Decimal comma on tick labels
     .hint = New graphs write 1,5 instead of 1.5 on every axis, on screen and in exports. Graphs that already exist and graphs made by scripts keep their own setting.
+preferences-new-graph-legend-text = Legend text from
+    .hint = The header row new graphs read for their legend entries. Each graph then keeps its own setting, in Graph Properties > Legend. Graphs that already exist and graphs made by scripts are not changed.
 preferences-analysis-values = Values
 preferences-analysis-values-note = What an analysis window offers the first time you use that analysis. Each analysis then remembers its own last choice.
 preferences-export-graph = Export Graph

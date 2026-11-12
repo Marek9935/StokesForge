@@ -22,6 +22,7 @@ use crate::icons::{icon_button, Icon, IconRole, ICON_SIZE};
 use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
+use stokesforge_app_state::figure_texts::legend_text_from_label;
 use stokesforge_app_state::frame_sizes::{
     free_fields, set_fixed_in_draft, set_free_field_in_draft, set_offset_in_draft,
     set_placement_in_draft, set_size_in_draft, set_total_in_draft, SizeLock, TotalFit,
@@ -245,6 +246,8 @@ fn plot_settings_contents(
     }
 
     let mut commit = false;
+    // The Legend page honoured the request to unfold the colour bar section.
+    let mut unfolded = false;
     let unit = state.length_unit();
     // The ratio lock is session state of the graph, shared with the strip of
     // the Page Layout Mode (#426): the page edits a copy and hands it back.
@@ -252,6 +255,7 @@ fn plot_settings_contents(
     let size_lock_before = size_lock;
     let published = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
     let mut gradient_actions: Vec<Action> = Vec::new();
+    let row_columns = legend_row_columns(state, settings.graph);
     // Saved colors, read before borrowing the draft; the
     // picker requests (save, remove) are translated into actions
     // afterwards.
@@ -361,10 +365,21 @@ fn plot_settings_contents(
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= legend_editor(ui, &mut panel.legend);
+                        commit |= legend_editor(ui, &mut panel.legend, &row_columns, &mut env);
+                        commit |= super::color_bar_settings::color_bar_section(
+                            ui,
+                            panel,
+                            tree,
+                            &row_columns,
+                            settings.color_bar_unfold,
+                        );
+                        unfolded = settings.color_bar_unfold;
                     }
                 });
         }
+    }
+    if unfolded {
+        state.spend_color_bar_unfold();
     }
     if commit {
         state.commit_plot_edit();
@@ -1284,7 +1299,30 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
 /// : the "?" icon alone). The field takes the full width (S-L2), minus the
 /// icon's room. Returns `true` if the draft must be committed — see the
 /// head doc of [`plot_settings_window`].
-fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
+pub(super) fn formula_field(
+    form: &mut Form<'_>,
+    label: &str,
+    hint: &str,
+    value: &mut String,
+) -> bool {
+    formula_field_with(
+        form,
+        label,
+        hint,
+        value,
+        &stokesforge_render_egui::formula::diagnose,
+    )
+}
+
+/// [`formula_field`] whose text is checked by `diagnose` (a template that reads
+/// variables needs them defined first).
+fn formula_field_with(
+    form: &mut Form<'_>,
+    label: &str,
+    hint: &str,
+    value: &mut String,
+    diagnose: &dyn Fn(&str) -> Option<String>,
+) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
@@ -1292,7 +1330,7 @@ fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut Strin
         // on the field; the graph, for its part, falls back to the raw text. No red
         // while typing, where the markup is necessarily unfinished.
         if !response.has_focus() {
-            if let Some(error) = stokesforge_render_egui::formula::diagnose(value) {
+            if let Some(error) = diagnose(value) {
                 field_state::show_issue(ui, &response, &FieldIssue::refused(error));
             }
         }
@@ -1683,10 +1721,12 @@ fn axis_editor(
 /// the legend) are then grayed out, with a tooltip that says why, and the
 /// colors hidden (#213: the group's color gradient provides them); the others (line style, symbol shape and size) stay active and the
 /// page copies them to the whole group.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn series_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
     env: &mut PickerEnv,
+    color_reason: Option<String>,
     locked: bool,
     auto_bar_width: f64,
     overlay: bool,
@@ -1841,13 +1881,19 @@ pub(super) fn series_editor(
 
         form.section(tr!("plot-series-line-section"));
         if !locked {
-            commit |= form.color(
-                &tr!("plot-series-line-color"),
-                &mut series.line.color,
-                ColorUsage::Curves,
-                None,
-                env,
-            );
+            let out = form.enabled(color_reason.is_none(), |form| {
+                form.color(
+                    &tr!("plot-series-line-color"),
+                    &mut series.line.color,
+                    ColorUsage::Curves,
+                    None,
+                    env,
+                )
+            });
+            if let Some(reason) = &color_reason {
+                out.response.on_disabled_hover_text(reason);
+            }
+            commit |= out.inner;
         }
         commit |= form.row(tr!("plot-series-line-style"), |ui| {
             choice(
@@ -1902,13 +1948,19 @@ pub(super) fn series_editor(
             .changed
         });
         if !locked {
-            commit |= form.color(
-                &tr!("plot-series-symbol-color"),
-                &mut series.symbol.color,
-                ColorUsage::Curves,
-                Some(&tr!("plot-color-same-as-line")),
-                env,
-            );
+            let out = form.enabled(color_reason.is_none(), |form| {
+                form.color(
+                    &tr!("plot-series-symbol-color"),
+                    &mut series.symbol.color,
+                    ColorUsage::Curves,
+                    Some(&tr!("plot-color-same-as-line")),
+                    env,
+                )
+            });
+            if let Some(reason) = &color_reason {
+                out.response.on_disabled_hover_text(reason);
+            }
+            commit |= out.inner;
         }
         commit
     })
@@ -1945,28 +1997,323 @@ fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>)
     out.inner
 }
 
-/// Edits a [`stokesforge_plot::LegendSpec`]: visibility, anchor corner. Returns
-/// `true` if the draft must be committed — see the head doc of
-/// [`plot_settings_window`].
-fn legend_editor(ui: &mut egui::Ui, legend: &mut stokesforge_plot::LegendSpec) -> bool {
+/// Edits a [`stokesforge_plot::LegendSpec`]: visibility, place, text, font,
+/// frame, background and layout (#507). Returns `true` if the draft must be
+/// committed — see the head doc of [`plot_settings_window`].
+///
+/// `row_columns` lists the columns a row series of the panel can read
+/// (#499); empty when the panel has no row series.
+///
+/// The controls mirror what the application already has: the font, size and
+/// text color of the format toolbar, the width and the Auto color of the axis
+/// ticks, the Auto background of a layer (#398).
+fn legend_editor(
+    ui: &mut egui::Ui,
+    legend: &mut stokesforge_plot::LegendSpec,
+    row_columns: &[(NodeId, String)],
+    env: &mut PickerEnv,
+) -> bool {
     form(ui, "plot_legend_page", |form| {
         let mut commit = form.checkbox(&mut legend.visible, tr!("plot-legend-show"), None);
-        commit |= form.row(tr!("plot-legend-position"), |ui| {
-            choice(
-                ui,
-                "plot_config_legend_position",
-                &mut legend.position,
-                &[
-                    LegendPosition::TopLeft,
-                    LegendPosition::TopRight,
-                    LegendPosition::BottomLeft,
-                    LegendPosition::BottomRight,
-                ]
-                .map(|candidate| ChoiceOption::new(candidate, legend_position_label(candidate))),
-            )
-        });
+        commit |= legend_position_row(form, legend);
+        commit |= legend_text_editor(form, &mut legend.text, row_columns);
+        commit |= legend_font_section(form, legend, env);
+        commit |= legend_frame_section(form, legend, env);
+        commit |= legend_layout_section(form, legend);
         commit
     })
+}
+
+/// Position: a dragged legend (its anchor wins over the corner) shows
+/// « Dragged »; choosing any corner, even the one it names, drops the anchor.
+fn legend_position_row(form: &mut Form<'_>, legend: &mut stokesforge_plot::LegendSpec) -> bool {
+    let dragged = legend.anchor.is_some();
+    let mut shown = (!dragged).then_some(legend.position);
+    let mut options: Vec<ChoiceOption<Option<LegendPosition>>> = [
+        LegendPosition::TopLeft,
+        LegendPosition::TopRight,
+        LegendPosition::BottomLeft,
+        LegendPosition::BottomRight,
+    ]
+    .map(|place| ChoiceOption::new(Some(place), legend_position_label(place)))
+    .into();
+    if dragged {
+        options.insert(
+            0,
+            ChoiceOption::new(None, tr!("plot-legend-position-dragged")),
+        );
+    }
+    let picked = form.row(tr!("plot-legend-position"), |ui| {
+        choice(ui, "plot_config_legend_position", &mut shown, &options)
+    });
+    if let (true, Some(place)) = (picked, shown) {
+        legend.set_position(place);
+        return true;
+    }
+    false
+}
+
+/// Font, size and color of the entries: the values of the format toolbar,
+/// with its labels and its list (graph font, then embedded, then installed).
+fn legend_font_section(
+    form: &mut Form<'_>,
+    legend: &mut stokesforge_plot::LegendSpec,
+    env: &mut PickerEnv,
+) -> bool {
+    form.section(tr!("plot-legend-text-section"));
+    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
+    options.extend(
+        stokesforge_render_egui::available_families()
+            .iter()
+            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
+    );
+    // A font that is not installed here stays visible, and selected.
+    if !options
+        .iter()
+        .any(|option| option.value == legend.font.family)
+    {
+        options.push(ChoiceOption::new(
+            legend.font.family.clone(),
+            legend.font.family.clone(),
+        ));
+    }
+    let mut commit = form.row(tr!("format-font"), |ui| {
+        choice(ui, "plot_legend_font", &mut legend.font.family, &options)
+    });
+    commit |= form.row(tr!("plot-text-size"), |ui| {
+        auto_number_field(
+            ui,
+            "plot_legend_font_size",
+            &mut legend.font.size,
+            &quantities::TEXT_FORMAT_SIZE,
+            &tr!("common-auto"),
+        )
+        .changed
+    });
+    commit |= form.color(
+        &tr!("format-color"),
+        &mut legend.color,
+        ColorUsage::Text,
+        Some(&tr!("plot-color-auto-contrast")),
+        env,
+    );
+    commit
+}
+
+/// Frame (shown, color, thickness) and background of the legend.
+fn legend_frame_section(
+    form: &mut Form<'_>,
+    legend: &mut stokesforge_plot::LegendSpec,
+    env: &mut PickerEnv,
+) -> bool {
+    form.section(tr!("plot-legend-frame-section"));
+    let mut commit = form.checkbox(&mut legend.frame, tr!("plot-legend-frame-show"), None);
+    let shown = legend.frame;
+    commit |= form
+        .enabled(shown, |form| {
+            form.color(
+                &tr!("plot-legend-frame-color"),
+                &mut legend.frame_color,
+                ColorUsage::Text,
+                Some(&tr!("plot-legend-frame-color", "auto")),
+                env,
+            )
+        })
+        .inner;
+    commit |= auto_value_row(
+        form,
+        tr!("plot-legend-frame-width"),
+        "plot_legend_frame_width",
+        &mut legend.frame_width,
+        &quantities::LEGEND_FRAME_WIDTH,
+        shown,
+        tr!("disabled-legend-frame-off"),
+    );
+    commit |= form.color(
+        &tr!("plot-general-background"),
+        &mut legend.background,
+        ColorUsage::Background,
+        Some(&tr!("plot-legend-background-auto")),
+        env,
+    );
+    commit
+}
+
+/// Columns, gaps and length of the line sample.
+fn legend_layout_section(form: &mut Form<'_>, legend: &mut stokesforge_plot::LegendSpec) -> bool {
+    form.section(tr!("plot-legend-layout-section"));
+    let mut commit = form.row(tr!("plot-legend-columns"), |ui| {
+        number_field(
+            ui,
+            "plot_legend_columns",
+            &mut legend.columns,
+            &quantities::LEGEND_COLUMNS,
+        )
+        .changed
+    });
+    for (label, id_salt, value) in [
+        (
+            tr!("plot-legend-row-gap"),
+            "plot_legend_row_gap",
+            &mut legend.row_gap,
+        ),
+        (
+            tr!("plot-legend-column-gap"),
+            "plot_legend_column_gap",
+            &mut legend.column_gap,
+        ),
+    ] {
+        commit |= form.row(label, |ui| {
+            auto_number_field(
+                ui,
+                id_salt,
+                value,
+                &quantities::LEGEND_GAP,
+                &tr!("common-auto"),
+            )
+            .changed
+        });
+    }
+    commit |= form.row(tr!("plot-legend-swatch-length"), |ui| {
+        auto_number_field(
+            ui,
+            "plot_legend_swatch_length",
+            &mut legend.swatch_length,
+            &quantities::LEGEND_SWATCH_LENGTH,
+            &tr!("common-auto"),
+        )
+        .changed
+    });
+    commit
+}
+
+/// The columns a row series (#166) of the selected layer can read for its
+/// legend entry (#499): those of the sheet of its anchor column. Empty if the
+/// layer has no row series.
+pub(super) fn legend_row_columns(state: &AppState, graph: NodeId) -> Vec<(NodeId, String)> {
+    let Some(edit) = state.plot_edit().filter(|edit| edit.graph == graph) else {
+        return Vec::new();
+    };
+    let tree = state.tree();
+    let Some(anchor) = edit
+        .spec
+        .panels
+        .get(edit.selected_panel)
+        .and_then(|panel| panel.series.iter().find(|series| series.row.is_some()))
+        .map(|series| series.y)
+    else {
+        return Vec::new();
+    };
+    let Some(sheet) = tree.parent(anchor).ok().flatten() else {
+        return Vec::new();
+    };
+    tree.node(sheet)
+        .map(|node| node.children().to_vec())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|id| {
+            tree.node(id)?.as_column()?;
+            Some((
+                id,
+                stokesforge_app_state::state::column_letter_name(tree, id),
+            ))
+        })
+        .collect()
+}
+
+/// The « Text from » setting of a legend (#499): the header row, the custom
+/// template and, for a row series, the column read on that row.
+fn legend_text_editor(
+    form: &mut Form<'_>,
+    text: &mut stokesforge_plot::LegendText,
+    row_columns: &[(NodeId, String)],
+) -> bool {
+    use stokesforge_plot::LegendTextFrom;
+    let mut options: Vec<ChoiceOption<LegendTextFrom>> = LegendTextFrom::CHOICES
+        .iter()
+        .map(|from| ChoiceOption::new(from.clone(), legend_text_from_label(from)))
+        .collect();
+    // A choice written by a newer version stays visible, and selected.
+    if let LegendTextFrom::Unknown(_) = text.from {
+        options.push(ChoiceOption::new(
+            text.from.clone(),
+            legend_text_from_label(&text.from),
+        ));
+    }
+    let previous = text.from.clone();
+    let mut commit = form.row(tr!("plot-legend-text-from"), |ui| {
+        choice(ui, "plot_legend_text_from", &mut text.from, &options)
+    });
+    if commit && text.from == LegendTextFrom::Custom && previous != LegendTextFrom::Custom {
+        // « Custom… » starts from the Typst equivalent of the previous choice
+        // (never over what was typed).
+        text.from = previous;
+        text.choose_custom();
+    }
+    if text.from == LegendTextFrom::Custom {
+        // The template reads variables: it is checked with them defined.
+        let diagnose = |template: &str| {
+            stokesforge_render_egui::formula::diagnose(&stokesforge_plot::template_source(
+                template,
+                |_| String::new(),
+            ))
+        };
+        commit |= formula_field_with(
+            form,
+            &tr!("plot-legend-template"),
+            &tr!("plot-legend-template", "hint"),
+            &mut text.template,
+            &diagnose,
+        );
+    }
+    if !row_columns.is_empty() {
+        #[derive(Clone, Copy, PartialEq)]
+        enum RowText {
+            Number,
+            Column,
+        }
+        let mut mode = if text.row_column.is_some() {
+            RowText::Column
+        } else {
+            RowText::Number
+        };
+        let changed = form.row(tr!("plot-legend-row-text"), |ui| {
+            choice(
+                ui,
+                "plot_legend_row_text",
+                &mut mode,
+                &[
+                    ChoiceOption::new(RowText::Number, tr!("plot-legend-row-number")),
+                    ChoiceOption::new(RowText::Column, tr!("plot-legend-row-column-value")),
+                ],
+            )
+        });
+        if changed {
+            text.row_column = match mode {
+                RowText::Number => None,
+                RowText::Column => text.row_column.or(row_columns.first().map(|(id, _)| *id)),
+            };
+            commit = true;
+        }
+        if let Some(chosen) = text.row_column.as_mut() {
+            let selected = row_columns
+                .iter()
+                .find(|(id, _)| id == chosen)
+                .map_or_else(String::new, |(_, name)| name.clone());
+            commit |= form.row(tr!("plot-legend-row-column"), |ui| {
+                let mut picked = false;
+                egui::ComboBox::from_id_salt("plot_legend_row_column")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        for (id, name) in row_columns {
+                            picked |= ui.selectable_value(chosen, *id, name).clicked();
+                        }
+                    });
+                picked
+            });
+        }
+    }
+    commit
 }
 
 /// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of
@@ -2190,7 +2537,7 @@ mod tests {
                 PlotSettingsTab::PlotArea,
                 tr!("plot-area-gridlines-vertical"),
             ),
-            (PlotSettingsTab::Axes, tr!("plot-axes-scale-section")),
+            (PlotSettingsTab::Axes, tr!("plot-axes-log-scale")),
             (PlotSettingsTab::Series, tr!("plot-series-line-width")),
             (PlotSettingsTab::Legend, tr!("plot-legend-show")),
             (PlotSettingsTab::Theme, tr!("plot-theme-global-colors")),
@@ -2262,7 +2609,11 @@ mod tests {
             // from its columns, numeric values, empty input fields (titles
             // not filled in).
             let tree = harness.state.tree().clone();
-            let series = series_list_label(&tree, &original.panels[0].series[0]);
+            let series = series_list_label(
+                &tree,
+                &original.panels[0].series[0],
+                &original.panels[0].legend.text,
+            );
             let is_data =
                 |text: &str| text.is_empty() || text == series || text.parse::<f64>().is_ok();
             for item in &painted {
@@ -3700,7 +4051,13 @@ mod tests {
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         let spec = harness.draft();
         let tree = harness.state.tree();
-        let label = |index: usize| series_list_label(tree, &spec.panels[0].series[index]);
+        let label = |index: usize| {
+            series_list_label(
+                tree,
+                &spec.panels[0].series[index],
+                &spec.panels[0].legend.text,
+            )
+        };
         let rows = |index: usize| -> Vec<&Text> {
             painted.iter().filter(|t| t.text == label(index)).collect()
         };
@@ -4635,6 +4992,378 @@ mod tests {
         assert_eq!(harness.model().panels[0].legend.visible, before);
         click_label(&context, &mut harness.state, &tr!("plot-legend-show"));
         assert_eq!(harness.model().panels[0].legend.visible, !before);
+    }
+
+    /// A graph whose first layer has `groups` series groups of two series
+    /// each (the columns have no x', no comment).
+    fn grouped(groups: u32) -> Harness {
+        harness(|spec| {
+            let panel = first_panel(spec);
+            let template = panel.series[0].clone();
+            panel.series.clear();
+            for group in 1..=groups {
+                for _ in 0..2 {
+                    let mut series = template.clone();
+                    series.group = Some(group);
+                    panel.series.push(series);
+                }
+            }
+        })
+    }
+
+    /// #499: the « Color bar » section of the Legend tab is folded on a layer
+    /// with no bar and lists EVERY group, each with its « on the bar » box;
+    /// ticking « Show color bar » commits at once, ticking a group puts it on
+    /// the bar with a retained gradient and unticking takes it off.
+    /// Witness: a section that edits nothing fails every step.
+    #[test]
+    fn the_color_bar_section_lists_every_group_and_ticks_them() {
+        let mut harness = grouped(2);
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        scroll_page(&context, &mut harness, -1000.0);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(
+            !is_painted(&painted, &tr!("plot-color-bar-show")),
+            "folded without a bar"
+        );
+        click_label(&context, &mut harness.state, &tr!("plot-color-bar-section"));
+        scroll_page(&context, &mut harness, -1000.0);
+        click_label(&context, &mut harness.state, &tr!("plot-color-bar-show"));
+        let bar = harness.model().panels[0].color_bar.clone().expect("bar");
+        assert!(bar.visible && bar.segments.is_empty());
+
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let boxes: Vec<_> = painted
+            .iter()
+            .filter(|text| text.text == tr!("plot-color-bar-group-on"))
+            .collect();
+        assert_eq!(boxes.len(), 2, "one box per group of the layer");
+        assert!(is_painted(&painted, "Group 1") && is_painted(&painted, "Group 2"));
+        let first = boxes[0].center;
+        click(&context, first, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        paint_window(&context, &mut harness.state, Vec::new());
+        let model = harness.model();
+        let bar = model.panels[0].color_bar.as_ref().expect("bar");
+        assert_eq!(bar.segments.len(), 1);
+        assert_eq!(bar.segments[0].group, 1);
+        assert!(model.panels[0].group_gradient(1).is_some());
+        click(&context, first, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert!(harness.model().panels[0]
+            .color_bar
+            .as_ref()
+            .unwrap()
+            .segments
+            .is_empty());
+    }
+
+    /// #499: the break label sits between two ticked groups only (none after
+    /// the last). Witness: a break on every group fails.
+    #[test]
+    fn breaks_sit_between_ticked_groups() {
+        use super::super::color_bar_settings::groups_with_a_break;
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let bar = |groups: &[u32]| ColorBarSpec {
+            segments: groups.iter().map(|g| ColorBarSegment::new(*g)).collect(),
+            ..ColorBarSpec::default()
+        };
+        assert_eq!(
+            groups_with_a_break(&bar(&[]), &[1, 2, 3]),
+            Vec::<u32>::new()
+        );
+        assert_eq!(
+            groups_with_a_break(&bar(&[2]), &[1, 2, 3]),
+            Vec::<u32>::new()
+        );
+        // A free group in the middle does not break the chain of two.
+        assert_eq!(groups_with_a_break(&bar(&[3, 1]), &[1, 2, 3]), [1]);
+        assert_eq!(groups_with_a_break(&bar(&[1, 2, 3]), &[1, 2, 3]), [1, 2]);
+    }
+
+    /// #499: a ticked group always shows its « Range » row (From and to, no
+    /// fold to open), and a typed end reaches the model on Enter, the other
+    /// end staying Auto. Witness: a row folded away fails the lookup, an edit
+    /// that does not reach the segment, or that touches the other end, fails.
+    #[test]
+    fn the_range_row_is_always_shown_and_its_edits_reach_the_model() {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            let template = panel.series[0].clone();
+            panel.series.clear();
+            let mut series = template;
+            series.group = Some(1);
+            panel.series.push(series);
+            let mut segment = ColorBarSegment::new(1);
+            segment.from = Some(2.0);
+            panel.color_bar = Some(ColorBarSpec {
+                visible: true,
+                segments: vec![segment],
+                ..ColorBarSpec::default()
+            });
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        // The Legend page may be taller than the window: bring the bar's
+        // rows into view.
+        scroll_page(&context, &mut harness, -400.0);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-color-bar-range")));
+        assert!(is_painted(&painted, &tr!("common-auto")), "empty end");
+        // The click may or may not select the old text: 7 or 27, never 2.
+        type_into(&context, &mut harness, "2", "7");
+        let model = harness.model();
+        let segment = &model.panels[0].color_bar.as_ref().unwrap().segments[0];
+        assert!(matches!(segment.from, Some(v) if v == 7.0 || v == 27.0));
+        assert_eq!(segment.to, None);
+    }
+
+    /// #499: the section opens by itself when the layer's bar is shown, and
+    /// the bar's double-click opens the Legend tab with it unfolded. Witness:
+    /// a section folded over a shown bar, or a request that opens another tab
+    /// or stays pending, fails.
+    #[test]
+    fn the_color_bar_section_opens_when_the_bar_is_shown() {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let context = test_support::context();
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment::new(1)],
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        scroll_page(&context, &mut harness, -1000.0);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-color-bar-show")));
+        assert_eq!(PlotSettingsTab::ALL.len(), 5);
+    }
+
+    /// #499: the curves left without a value are reported, in the plural the
+    /// language asks for. Witness: counting nothing hides the line.
+    #[test]
+    fn the_color_bar_tab_counts_the_curves_without_a_value() {
+        let context = test_support::context();
+        let line = tr!("plot-color-bar-no-value", count = 2);
+        for (on_bar, reported) in [(true, true), (false, false)] {
+            let mut harness = grouped(1);
+            let mut spec = harness.model();
+            first_panel(&mut spec).color_bar = Some(stokesforge_plot::ColorBarSpec {
+                segments: if on_bar {
+                    vec![stokesforge_plot::ColorBarSegment::new(1)]
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            });
+            harness.state.dispatch(Action::SetPlotSpec {
+                graph: harness.graph,
+                spec,
+            });
+            harness.open(PlotSettingsTab::Legend, None);
+            scroll_page(&context, &mut harness, -1000.0);
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert_eq!(is_painted(&painted, &line), reported, "{line}");
+        }
+        assert_ne!(
+            tr!("plot-color-bar-no-value", count = 1),
+            line,
+            "the singular reads differently"
+        );
+    }
+
+    /// #499: below the frame the bar is horizontal and the Orientation choice
+    /// is greyed; in a corner it is free. Witness: a choice that stays enabled
+    /// below lets the click through.
+    #[test]
+    fn the_color_bar_orientation_is_greyed_when_the_place_forces_it() {
+        use stokesforge_plot::{ColorBarOrientation, ColorBarPosition, ColorBarSpec};
+        let forced = |position, anchor| {
+            super::super::color_bar_settings::forced_orientation(&ColorBarSpec {
+                position,
+                anchor,
+                ..ColorBarSpec::default()
+            })
+        };
+        assert_eq!(
+            forced(ColorBarPosition::Below, None),
+            Some(ColorBarOrientation::Horizontal)
+        );
+        assert_eq!(
+            forced(ColorBarPosition::Right, None),
+            Some(ColorBarOrientation::Vertical)
+        );
+        assert_eq!(forced(ColorBarPosition::TopLeft, None), None);
+        assert_eq!(
+            forced(
+                ColorBarPosition::Below,
+                Some(stokesforge_plot::TextAnchor::new(0.5, 0.5))
+            ),
+            None,
+            "a dragged bar has its own place"
+        );
+
+        let context = test_support::context();
+        for (position, free) in [
+            (ColorBarPosition::Below, false),
+            (ColorBarPosition::TopLeft, true),
+        ] {
+            let mut harness = grouped(1);
+            let mut spec = harness.model();
+            first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+                // No group block: the Orientation row stays in the window.
+                segments: Vec::new(),
+                position: position.clone(),
+                ..ColorBarSpec::default()
+            });
+            harness.state.dispatch(Action::SetPlotSpec {
+                graph: harness.graph,
+                spec,
+            });
+            harness.open(PlotSettingsTab::Legend, None);
+            scroll_page(&context, &mut harness, -1000.0);
+            click_label(
+                &context,
+                &mut harness.state,
+                &tr!("plot-color-bar-orientation-vertical"),
+            );
+            let orientation = harness.model().panels[0]
+                .color_bar
+                .as_ref()
+                .unwrap()
+                .orientation
+                .clone();
+            assert_eq!(
+                orientation == ColorBarOrientation::Vertical,
+                free,
+                "{position:?}"
+            );
+        }
+    }
+
+    /// #499: choosing a Position after the bar was dragged takes effect (the
+    /// dragged anchor is dropped). Witness: keeping the anchor leaves the bar
+    /// where it was dragged.
+    #[test]
+    fn choosing_a_color_bar_position_drops_the_dragged_anchor() {
+        use stokesforge_plot::{ColorBarPosition, ColorBarSpec, TextAnchor};
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            segments: Vec::new(),
+            position: ColorBarPosition::Below,
+            anchor: Some(TextAnchor::new(1.0, 2.0)),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        scroll_page(&context, &mut harness, -1000.0);
+        let (painted, _) = open_list(
+            &context,
+            &mut harness.state,
+            &tr!("plot-color-bar-position-dragged"),
+        );
+        let pos = text_exact(&painted, &tr!("plot-legend-top-left")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let model = harness.model();
+        let bar = model.panels[0].color_bar.as_ref().unwrap();
+        assert_eq!(bar.position, ColorBarPosition::TopLeft);
+        assert!(bar.anchor.is_none());
+    }
+
+    /// #507: choosing a Position after the legend was dragged takes effect
+    /// (the list shows « Dragged », and the anchor is dropped). Witness: a tab
+    /// that sets the corner without `set_position` leaves the anchor, which
+    /// wins, so the legend stays where it was dragged.
+    #[test]
+    fn choosing_a_legend_position_drops_the_dragged_anchor() {
+        use stokesforge_plot::TextAnchor;
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).legend.anchor = Some(TextAnchor::new(0.3, 0.4));
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let (painted, _) = open_list(
+            &context,
+            &mut harness.state,
+            &tr!("plot-legend-position-dragged"),
+        );
+        let pos = text_exact(&painted, &tr!("plot-legend-bottom-left")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let legend = harness.model().panels[0].legend.clone();
+        assert_eq!(legend.position, LegendPosition::BottomLeft);
+        assert!(legend.anchor.is_none());
+    }
+
+    /// #507: the « Show frame » box of the Legend tab reaches the spec.
+    /// Witness: a box bound to nothing leaves the frame on.
+    #[test]
+    fn unticking_show_frame_hides_the_legend_frame() {
+        let mut harness = grouped(1);
+        assert!(harness.model().panels[0].legend.frame);
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let painted = click_label(&context, &mut harness.state, &tr!("plot-legend-frame-show"));
+        assert!(is_painted(&painted, &tr!("plot-legend-frame-width")));
+        harness.state.close_plot_settings();
+        assert!(!harness.model().panels[0].legend.frame);
+    }
+
+    /// #499: a dragged bar shows « Dragged » in Position, and choosing the
+    /// place it already names (Below the frame) brings it back. Witness: the
+    /// list showed « Below the frame » and picking it changed nothing.
+    #[test]
+    fn choosing_the_same_color_bar_position_after_a_drag_brings_it_back() {
+        use stokesforge_plot::{ColorBarPosition, ColorBarSpec, TextAnchor};
+        let mut harness = grouped(1);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            segments: Vec::new(),
+            position: ColorBarPosition::Below,
+            anchor: Some(TextAnchor::new(1.0, 2.0)),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        scroll_page(&context, &mut harness, -1000.0);
+        let (painted, _) = open_list(
+            &context,
+            &mut harness.state,
+            &tr!("plot-color-bar-position-dragged"),
+        );
+        let pos = text_exact(&painted, &tr!("plot-color-bar-position-below")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let model = harness.model();
+        let bar = model.panels[0].color_bar.as_ref().unwrap();
+        assert_eq!(bar.position, ColorBarPosition::Below);
+        assert!(bar.anchor.is_none());
     }
 
     /// The result of each frame of [`formula_field`] on `value`, and its

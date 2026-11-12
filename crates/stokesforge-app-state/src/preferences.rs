@@ -288,6 +288,11 @@ struct PreferencesFile {
     /// unreadable: decimal point.
     #[serde(default, deserialize_with = "lenient")]
     new_graph_decimal_comma: Option<bool>,
+    /// « Text from » of the legend of **new** graphs (#499), as a
+    /// [`stokesforge_plot::LegendTextFrom`] key; missing or unreadable: the
+    /// long name.
+    #[serde(default, deserialize_with = "lenient")]
+    new_graph_legend_text: Option<String>,
     /// "Keep in Results" remembered per analysis operation (M5, #148), by
     /// [`OperationKind::key`]. Kept raw: an unreadable entry is dropped alone.
     #[serde(default)]
@@ -332,6 +337,16 @@ where
     Ok(serde_json::from_value(value).ok())
 }
 
+/// The stored choice of the legend text of new graphs: one of the list
+/// choices, otherwise (missing, unknown, custom) the long name.
+fn new_graph_legend_choice(key: Option<&str>) -> stokesforge_plot::LegendTextFrom {
+    use stokesforge_plot::LegendTextFrom;
+    match LegendTextFrom::from_key(key.unwrap_or_default()) {
+        LegendTextFrom::Custom | LegendTextFrom::Unknown(_) => LegendTextFrom::LongName,
+        known => known,
+    }
+}
+
 /// The user's preferences, and the file they come from.
 #[derive(Debug, Clone)]
 pub struct Preferences {
@@ -358,6 +373,7 @@ pub struct Preferences {
     show_column_formula_help: bool,
     import_guide_hidden: bool,
     new_graph_decimal_comma: bool,
+    new_graph_legend_text: stokesforge_plot::LegendTextFrom,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
     default_folders: [Option<String>; 3],
@@ -433,6 +449,7 @@ impl Preferences {
             show_column_formula_help: file.show_column_formula_help.unwrap_or(true),
             import_guide_hidden: file.import_guide_hidden.unwrap_or(false),
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
+            new_graph_legend_text: new_graph_legend_choice(file.new_graph_legend_text.as_deref()),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
             default_folders: [
@@ -630,6 +647,23 @@ impl Preferences {
     pub fn save_new_graph_decimal_comma(&mut self, comma: bool) -> std::io::Result<()> {
         self.new_graph_decimal_comma = comma;
         self.save_field("new_graph_decimal_comma", comma.into())
+    }
+
+    /// « Text from » given to the legend of **new** graphs (#499): the long
+    /// name by default. Never [`stokesforge_plot::LegendTextFrom::Custom`]
+    /// (a template has no default).
+    pub fn new_graph_legend_text(&self) -> &stokesforge_plot::LegendTextFrom {
+        &self.new_graph_legend_text
+    }
+
+    /// Remembers the choice without replacing the other preferences.
+    pub fn save_new_graph_legend_text(
+        &mut self,
+        from: stokesforge_plot::LegendTextFrom,
+    ) -> std::io::Result<()> {
+        let from = new_graph_legend_choice(Some(from.key()));
+        self.new_graph_legend_text = from.clone();
+        self.save_field("new_graph_legend_text", from.key().into())
     }
 
     /// Size cap of a `.stf` on open, in MB (A2, #316); 512 by default, always within
