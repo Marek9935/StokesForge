@@ -9,7 +9,7 @@ You set the **scope** of a task in the StokesForge repository (Rust workspace, d
 
 ## Method
 
-1. Read the issue or the request, then `docs/invariants.md`, `docs/tests.md` (the witness principle) and the section of `.claude/conventions.md` for the domain (table in `CLAUDE.md`).
+1. Read the issue or the request, then `docs/invariants.md`, `docs/tests.md` (the witness principle) and the matching `.claude/rules/<domain>.md` for the domain (routing in `.claude/rules.md`, column "Rules file"). **Read it with the Read tool**: path-scoped rules load only through Read, Edit or Write, never through `rg` or `cat` in Bash.
 2. Check in the code every location you cite (`rg -n`, `Read` with `offset`/`limit`). Use Bash **only** to read: `rg`, `ls`, `git log`, `git show`, `cargo metadata`.
 3. A search that needs reading many files is no reason for a long answer: summarize.
 

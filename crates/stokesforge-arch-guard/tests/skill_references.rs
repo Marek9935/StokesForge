@@ -1,8 +1,9 @@
 //! The project skills (`.claude/skills/stokesforge-*` and `run-stokesforge`)
 //! do not copy the rules: they point to them with "`file.md` § Title"
-//! into `docs/` or `.claude/conventions.md`. This guard checks that every
-//! reference, in every `SKILL.md` and every `references/*.md`, names a file and
-//! a heading that still exist. It also guards the `](references/x.md)` links of
+//! into `docs/` or `.claude/rules/*.md`. This guard checks that every
+//! reference, in every `SKILL.md` and every `references/*.md`, and also in
+//! `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules.md` and
+//! `.claude/rules/*.md`, names a file and a heading that still exist. It also guards the `](references/x.md)` links of
 //! each `SKILL.md`: they must point to an existing file, and no sheet
 //! of `references/` may stay unlinked (orphan).
 //!
@@ -104,34 +105,59 @@ fn markdown_files(skill: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Number of references read and errors of all project skills.
+/// The always-loaded and path-scoped rule files that also carry references:
+/// `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules.md`, `.claude/rules/*.md`
+/// (only those that exist).
+fn rule_files(root: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = ["CLAUDE.md", ".claude/rules.md"]
+        .iter()
+        .map(|f| root.join(f))
+        .filter(|p| p.is_file())
+        .collect();
+    for dir in [".claude/agents", ".claude/rules"] {
+        if let Ok(entries) = fs::read_dir(root.join(dir)) {
+            let mut found: Vec<PathBuf> = entries
+                .map(|e| e.expect("entry").path())
+                .filter(|p| p.extension().is_some_and(|e| e == "md"))
+                .collect();
+            found.sort();
+            files.extend(found);
+        }
+    }
+    files
+}
+
+/// Number of references read and errors of all project skills and rule files.
 fn read_references(root: &Path) -> (usize, Vec<String>) {
     let mut total = 0;
     let mut errors = Vec::new();
+    let mut scanned: Vec<PathBuf> = Vec::new();
     for skill in project_skills(root) {
-        for file in markdown_files(&skill) {
-            let text = match fs::read_to_string(&file) {
-                Ok(t) => t,
-                Err(e) => {
-                    errors.push(format!("{}: cannot read: {e}", file.display()));
-                    continue;
-                }
-            };
-            for line in text.lines() {
-                match references(line) {
-                    Err(e) => errors.push(format!("{}: {e}", file.display())),
-                    Ok(list) => {
-                        for (path, title) in list {
-                            total += 1;
-                            let target = root.join(&path);
-                            if !target.is_file() {
-                                errors.push(format!("{}: file missing {path}", file.display()));
-                            } else if !valid_title(&title, &headings(&target)) {
-                                errors.push(format!(
-                                    "{}: no heading \"{title}\" in {path}",
-                                    file.display()
-                                ));
-                            }
+        scanned.extend(markdown_files(&skill));
+    }
+    scanned.extend(rule_files(root));
+    for file in scanned {
+        let text = match fs::read_to_string(&file) {
+            Ok(t) => t,
+            Err(e) => {
+                errors.push(format!("{}: cannot read: {e}", file.display()));
+                continue;
+            }
+        };
+        for line in text.lines() {
+            match references(line) {
+                Err(e) => errors.push(format!("{}: {e}", file.display())),
+                Ok(list) => {
+                    for (path, title) in list {
+                        total += 1;
+                        let target = root.join(&path);
+                        if !target.is_file() {
+                            errors.push(format!("{}: file missing {path}", file.display()));
+                        } else if !valid_title(&title, &headings(&target)) {
+                            errors.push(format!(
+                                "{}: no heading \"{title}\" in {path}",
+                                file.display()
+                            ));
                         }
                     }
                 }
@@ -513,4 +539,48 @@ fn witness_third_party_skill_is_ignored() {
     );
     assert!(!contains_error(&description_errors(&a.0), "apex"));
     assert_eq!(project_skills(&a.0).len(), 3);
+}
+
+#[test]
+fn witness_rule_files_are_scanned() {
+    let a = Tree::correct("rulefiles");
+    a.write("CLAUDE.md", "See `docs/a.md` § Real section\n");
+    a.write(".claude/rules.md", "See `docs/a.md` § Real section\n");
+    a.write(".claude/rules/x.md", "See `docs/a.md` § Real section\n");
+    a.write(".claude/agents/p.md", "See `docs/a.md` § Real section\n");
+    let (total, errors) = read_references(&a.0);
+    assert_eq!(total, 3 + 4);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn witness_renamed_heading_in_a_rule_file_is_reported() {
+    let a = Tree::correct("renamedheading");
+    a.write(
+        ".claude/skills/stokesforge-one/references/f.md",
+        "See `.claude/rules.md` § The colour rule\n",
+    );
+    a.write(".claude/rules.md", "# Rules\n\n## The colour rule\n");
+    assert!(reference_errors(&a.0).is_empty());
+    a.write(".claude/rules.md", "# Rules\n\n## The color rule\n");
+    assert!(contains_error(
+        &reference_errors(&a.0),
+        "no heading \"The colour rule\""
+    ));
+}
+
+#[test]
+fn witness_leftover_conventions_pointer_is_reported() {
+    let a = Tree::correct("leftover");
+    a.write("CLAUDE.md", "See `.claude/conventions.md` § Application\n");
+    assert!(contains_error(
+        &reference_errors(&a.0),
+        "file missing .claude/conventions.md"
+    ));
+    a.write(
+        ".claude/rules/app.md",
+        "---\npaths:\n  - \"x\"\n---\n\n## Application\n",
+    );
+    a.write("CLAUDE.md", "See `.claude/rules/app.md` § Application\n");
+    assert!(reference_errors(&a.0).is_empty());
 }

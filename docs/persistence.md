@@ -884,3 +884,7 @@ at each draw (`stokesforge-render::color_bar`). An older reader that saves the
 file again drops the bar without a message. Witness
 `tests/witnesses/v1/project.stf` regenerated with a two-segment chained bar;
 unit test `a_color_bar_round_trips_and_keeps_unknown_choices` in `convert.rs`.
+
+## Accepted limits (2026-10-20, after #302-#305)
+
+Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).

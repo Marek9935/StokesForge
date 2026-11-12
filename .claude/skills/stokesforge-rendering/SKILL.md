@@ -7,7 +7,7 @@ Rendering is where a bug can be silent: the rules below guard against a wrong fi
 
 ## Read and load
 
-`docs/rendering.md` § What to know before modifying, then load `stokesforge-render` **first** and only then the target backend (`.claude/rules.md` § Routing). The silent traps are written once: `.claude/rules.md` § The most expensive pitfalls ; `.claude/conventions.md` § Rendering: silent pitfalls. Read both before writing.
+`docs/rendering.md` § What to know before modifying, then load `stokesforge-render` **first** and only then the target backend (`.claude/rules.md` § Routing). The silent traps are written once: `.claude/rules.md` § The most expensive pitfalls ; `.claude/rules/rendering.md` § Rendering: silent pitfalls. Read both before writing.
 
 ```text
 stokesforge-render            all rendering, generic over DrawingBackend

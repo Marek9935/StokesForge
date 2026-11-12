@@ -3,7 +3,7 @@
 Describes `stokesforge-app` (the eframe shell) and `stokesforge-app-state` (the
 state without egui). Split by family (F2, #301); the section titles are those of
 the former `docs/application.md`, which the code and the skills cite as "file
-§ Title". Conventions to follow: `.claude/conventions.md`, section "Application".
+§ Title". Conventions to follow: `.claude/rules/app.md`, section "Application".
 
 | I want… | Read | Main sections |
 |---|---|---|
