@@ -1635,21 +1635,26 @@ fn axis_editor(
         let mut changed = false;
         let mut auto_asked = false;
         // "From … to …" on a single row; the order is free, unlike the
-        // analysis ranges (S-N11).
+        // analysis ranges (S-N11). The row wraps (#525): where the labels
+        // column leaves too little room, the Auto button goes under the
+        // fields instead of past the dialog edge, where it was invisible and
+        // widened the page, so the texts below it wrapped past the edge too.
         form.row(tr!("plot-axes-from"), |ui| {
-            let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
-            ui.label(tr!("analysis-field-to"));
-            let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
-            changed |= first.changed || second.changed;
-            auto_asked |= first.auto || second.auto;
-            if ui
-                .add_enabled(!auto, egui::Button::new(tr!("plot-axes-from-auto")))
-                .on_hover_text(tr!("plot-axes-from-auto", "hint"))
-                .on_disabled_hover_text(tr!("plot-axes-from-auto", "disabled"))
-                .clicked()
-            {
-                auto_asked = true;
-            }
+            ui.horizontal_wrapped(|ui| {
+                let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
+                ui.label(tr!("analysis-field-to"));
+                let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
+                changed |= first.changed || second.changed;
+                auto_asked |= first.auto || second.auto;
+                if ui
+                    .add_enabled(!auto, egui::Button::new(tr!("plot-axes-from-auto")))
+                    .on_hover_text(tr!("plot-axes-from-auto", "hint"))
+                    .on_disabled_hover_text(tr!("plot-axes-from-auto", "disabled"))
+                    .clicked()
+                {
+                    auto_asked = true;
+                }
+            });
         });
         if auto_asked {
             axis.auto_range = true;
