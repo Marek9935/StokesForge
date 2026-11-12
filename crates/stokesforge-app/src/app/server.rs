@@ -317,7 +317,8 @@ impl ServerThread {
                     done: done_tx,
                 };
                 while !thread_stop.load(Ordering::Acquire) {
-                    let pass = serve_once(&shared, clock(), &repaint, run.as_ref(), record.as_ref());
+                    let pass =
+                        serve_once(&shared, clock(), &repaint, run.as_ref(), record.as_ref());
                     thread_status.ticks.fetch_add(1, Ordering::Relaxed);
                     match pass {
                         Pass::Busy => std::thread::park_timeout(BUSY_RETRY),
@@ -461,11 +462,12 @@ impl StokesForgeApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::AtomicUsize;
     use std::sync::Mutex as StdMutex;
 
     use stokesforge_app_state::state::Action;
+    use stokesforge_app_state::tr;
     use stokesforge_core::{Column, ColumnFormula, ColumnMeta, FormulaPart, Project};
     use stokesforge_session::Session;
 
@@ -708,8 +710,7 @@ mod tests {
         let clock_offset = Arc::clone(&offset);
         let clock: Arc<Clock> =
             Arc::new(move || t0 + Duration::from_secs(clock_offset.load(Ordering::SeqCst)));
-        let mut thread =
-            ServerThread::spawn_with(
+        let mut thread = ServerThread::spawn_with(
             Arc::clone(&shared),
             Counter::default(),
             run,
@@ -739,5 +740,187 @@ mod tests {
         thread.unpark();
         assert_eq!(thread.status().ticks.load(Ordering::Relaxed), ticks);
         assert_eq!(copies(dir.path()), 1, "the write ended before the exit");
+    }
+
+    /// The configuration folder of the process, redirected once (an import
+    /// reads and may write the recipe store).
+    fn isolate_config() {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let dir = DIR.get_or_init(|| tempfile::tempdir().expect("config dir"));
+        std::env::set_var(
+            stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+            dir.path(),
+        );
+        std::env::set_var("XDG_CONFIG_HOME", dir.path());
+    }
+
+    /// `files` csv files of `columns` columns each, in `dir`.
+    fn csv_files(dir: &Path, files: usize, columns: usize) -> Vec<PathBuf> {
+        (0..files)
+            .map(|index| {
+                let path = dir.join(format!("serie{index}.csv"));
+                let row: Vec<String> = (0..columns).map(|c| c.to_string()).collect();
+                let text = format!("{}\n", row.join(","));
+                std::fs::write(&path, text.repeat(20)).unwrap();
+                path
+            })
+            .collect()
+    }
+
+    /// Children of the root: the workbooks (and graphs) of the project.
+    fn root_children(state: &AppState) -> usize {
+        state
+            .tree()
+            .node(state.tree().root())
+            .map_or(0, |node| node.children().len())
+    }
+
+    fn start_new_book_import(shared: &Mutex<AppState>, files: Vec<PathBuf>) {
+        shared.lock().dispatch(Action::StartImport {
+            destination: stokesforge_app_state::state::ImportDestination::NewBookPerFile,
+            recipe: stokesforge_import::ImportRecipe::new("Serie"),
+            paths: files,
+        });
+    }
+
+    /// Passes of the thread until the import is over (analysis, application).
+    fn serve_until_import_done(shared: &Mutex<AppState>, counter: &Counter) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            serve_once(shared, Instant::now(), counter, real_run(), &no_record);
+            let state = shared.lock();
+            if state.import_progress().is_none() && !state.import_is_applying() {
+                return;
+            }
+            drop(state);
+            assert!(Instant::now() < deadline, "import too long");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Every window hidden: no root pass at all. The thread alone applies a
+    /// finished import (one history entry), and the next root pass opens the
+    /// new workbooks as it does for an immediate import.
+    #[test]
+    fn a_finished_import_is_applied_by_the_thread_and_opened_by_the_next_pass() {
+        isolate_config();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, slot) = free_slot(demo(), dir.path());
+        let shared = slot.shared();
+        let counter = Counter::default();
+        let before = root_children(&shared.lock());
+        start_new_book_import(&shared, csv_files(dir.path(), 2, 3));
+        serve_until_import_done(&shared, &counter);
+        {
+            let state = shared.lock();
+            assert_eq!(root_children(&state), before + 2, "2 workbooks");
+            assert!(counter.count() >= 1, "the windows are woken");
+        }
+        // The history holds one entry.
+        shared.lock().dispatch(Action::Undo);
+        assert_eq!(root_children(&shared.lock()), before);
+        assert!(!shared.lock().can_undo(), "one entry for the import");
+        shared.lock().dispatch(Action::Redo);
+        drop(shared);
+        // The next pass opens them.
+        let mut app = StokesForgeApp::new(slot.into_state());
+        let ctx = egui::Context::default();
+        let initial = app.floating_tabs.len();
+        app.poll_background_jobs(&ctx);
+        assert_eq!(
+            app.floating_tabs.len(),
+            initial + 2,
+            "{:?}",
+            app.floating_tabs
+        );
+        app.poll_background_jobs(&ctx);
+        assert_eq!(app.floating_tabs.len(), initial + 2, "each opened once");
+    }
+
+    /// The commands run with the lock released (no heavy work under the lock,
+    /// #475): a second thread takes the lock while the state says that an
+    /// import is being applied.
+    #[test]
+    fn the_import_commands_run_with_the_lock_released() {
+        isolate_config();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, slot) = free_slot(demo(), dir.path());
+        let shared = slot.shared();
+        start_new_book_import(&shared, csv_files(dir.path(), 1, 400));
+        let over = Arc::new(AtomicBool::new(false));
+        let observer = {
+            let (shared, over) = (Arc::clone(&shared), Arc::clone(&over));
+            std::thread::spawn(move || {
+                let mut free_while_applying = false;
+                while !over.load(Ordering::Acquire) {
+                    if let Some(state) = shared.try_lock() {
+                        free_while_applying |= state.import_is_applying();
+                    }
+                    std::thread::yield_now();
+                }
+                free_while_applying
+            })
+        };
+        serve_until_import_done(&shared, &Counter::default());
+        over.store(true, Ordering::Release);
+        assert!(
+            observer.join().unwrap(),
+            "the lock was taken while the commands ran"
+        );
+    }
+
+    /// The thread dies of an internal error: this window runs the background
+    /// work itself (the fallback polls), and says so once.
+    #[test]
+    fn a_dead_server_thread_is_replaced_by_the_paint_pass_with_one_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Session::spawn(heavy_formula_project(), None).expect("session");
+        let mut state = AppState::new(
+            session.handle(),
+            dir.path().join("a.stf").display().to_string(),
+        )
+        .expect("state");
+        state.set_recovery_dir(None);
+        let mut app = StokesForgeApp::new(state);
+        // Test-only injection: the clock of the thread panics at the first pass.
+        let clock: Arc<Clock> = Arc::new(|| panic!("injected failure of the server thread"));
+        let thread = ServerThread::spawn_with(
+            app.state.shared(),
+            Counter::default(),
+            Arc::new(run_for_real),
+            clock,
+            Arc::new(|_: &[PathBuf]| {}),
+        );
+        app.server = Some(thread.status());
+        thread
+            .done
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the thread ended");
+        assert!(!app.server_running());
+        assert!(thread.status().panicked());
+        let ctx = egui::Context::default();
+        let said = |app: &StokesForgeApp| {
+            app.state
+                .messages_since(0)
+                .filter(|m| m.text == tr!("status-server-stopped"))
+                .map(|m| usize::try_from(m.count).unwrap_or(usize::MAX))
+                .sum::<usize>()
+        };
+        // The fallback runs a recalculation to its end, as before #475.
+        app.state.dispatch(Action::AddGraph);
+        assert!(app.state.recalc_work().is_some(), "still running");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while app.state.recalc_work().is_some() {
+            assert!(Instant::now() < deadline, "recalculation too long");
+            app.poll_background_jobs(&ctx);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for _ in 0..5 {
+            app.poll_background_jobs(&ctx);
+        }
+        assert_eq!(said(&app), 1, "the warning is said once");
+        assert!(app.state.status().is_some());
+        // A running thread says nothing.
+        drop(thread);
     }
 }

@@ -120,8 +120,8 @@ mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{AutosaveJob, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
-pub use import_apply::ImportRun;
 pub use column_use::FullColumnsCopy;
+pub use import_apply::ImportRun;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
 /// How long a command waits for the formula recalculation it started to
