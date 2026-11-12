@@ -160,6 +160,8 @@ pub(crate) mod hover_help;
 mod import_wizard;
 mod inplace_edit;
 mod keyboard_shortcuts_window;
+#[cfg(test)]
+mod layout_sweep;
 mod layout_window;
 mod list_row;
 #[cfg(test)]

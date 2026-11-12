@@ -37,7 +37,7 @@ licenses. Policy and commands:
 |---|---|---|
 | **unit tests** | `#[cfg(test)]` in `src/` | a local behavior, as close as possible to its code |
 | **integration tests** | `crates/*/tests/` | a crate property: public contract, boundary, agreement between paths |
-| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 23 batteries `b1`…`b23` |
+| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 24 batteries `b1`…`b24` |
 
 ## Guards not to break
 
@@ -61,6 +61,7 @@ ones to understand before changing them.
 | `stokesforge-render/tests/measurement.rs` | the single source of text measurement (invariant 4) |
 | `stokesforge-render/src/{view,interact}.rs` (modules `tests`) | interaction without egui (#262): framing of a gesture (zoom, pan, log scale, inverted axis, overlaid layers, axis alone, unknown panel), reset, nearest point (curve, out of range, hidden or right-hand series, layer of the spec); proven mutants (pan sign, box filter, linked layer, radius, hidden series); geometry of the analysis preview (#261): `PanelTransform::new` (fractional origin, inverted log, zoom, rectangle), initial frame (`fit_range`, `axis_frame`), `snap_to_curve` (n, edge, `ys` too short) and `snap_to_curve_zone` (averaged zone: odd and even n, truncated edge, unsorted x values, #334) and `scale::axis_ticks` (same points as the pipeline, decades, comma, bound without an image); proven mutants (rounded origin, `1 - fy`, `> 0` filter in log, half window, `label_count` fixed at 5, forgotten comma, `abs` of the right-click tolerance, `.min(ys.len())`, half window of the zone, zone bounds taken at the extremities); snap circle (#334): `snap_radius` (one point = 6 px, half side, asymmetric zone, inverted X axis, cap, non-finite pixel) and the preview bench (the circle grows with N, text = real number of points at the edge); proven mutants (`abs`, `max` → `min`, floor, cap, hard-coded radius 6.0, N instead of the real number); `app/analysis_preview.rs` (`zone_tests`): zone drag, right-click on an inverted X axis; preview navigation (#270, `Bench` bench frame by frame): wheel alone has no effect, Ctrl + wheel and pinch (data under the pointer kept), zoom per axis, Shift + wheel = average without zoom, Ctrl + drag (frame translated, no zone, inverted X axis, per axis), Ctrl + click without a point, double-click reframes, peaks (click = seed, drag = range); proven mutants (pan sign, wheel alone, `!command` of the click, axis bounds, drag mode, wheel reading under Shift, inverted factor, double-click); `app/form.rs`: surrounded texts (`toggle_texts`: solid background of the current option, toggle, click on the current one); `stokesforge-app-state/tests/analysis.rs`: `tool_choices` (only peaks have the choice) |
 | `stokesforge-render-egui/tests/agreement.rs` | screen and export place the same primitives at the same pixels; ticks inside / on both sides / cut / minor ticks on the four sides (#344), each different from the default figure; proven mutant (`ticks` ignored) |
+| `stokesforge-render-egui/tests/typst.rs` (`every_text_of_a_figure_keeps_a_live_texture_at_every_scale`, #521, #508 point 1) | through `ScaledShapes::get` at scales 1, 0.5, 1.37 and 2 (twice), every Typst text of a figure that repeats a legend text, a title and an annotation keeps a live texture, and the number of meshes equals the Typst groups of the SVG in text mode |
 | `stokesforge-render-svg/tests/mirrors.rs` | "Advanced" settings of the tick marks (#344): major tick mark at 10 against 5 by default, minor Auto = half of the effective major, color of the tick marks only (line and numbers keep theirs), thickness, lengths NaN / negative / 1e30 and thicknesses 0 / NaN / 1e9 bounded without panic; proven mutants (`custom_ticks` without the thickness, half fixed at 3, color ignored, thickness ignored, length not read); mirror axes (#176) and ticks (#344) seen in the export: bare line (line kept, no ticks, no numbers), inside / both sides (outer half = Plotters tick), numbers unchanged without ticks, neighbor left at default; default figure identical to the byte; proven mutants (`ticks` ignored, sign of the direction, asymmetric `Both`, length, gap of the numbers) |
 | `stokesforge-render-egui/tests/{interaction,cache_session}.rs` | graph gestures replayed frame by frame (#318): plain drag has no effect (framing, generation, cache), Ctrl or middle click + drag = pan (background, axis alone, Zoom and shape tools, above a text, title or shape), Ctrl read at the press, Ctrl + click without text or shape, feathering cut only during a real gesture; proven mutants (pan on plain drag, middle button, object guard, rectangle guard, text and plot guard, feathering) |
 | `stokesforge-render-egui/tests/{cell_handles,layout_mode}.rs` (#426) | outside the Page Layout Mode no drag resizes or moves a graph, grid or Free (old cell and figure edges, layer edges and plot area: no event, default cursor, model and layout unchanged: `no_layout_drag_outside_the_mode`), while the drags of a free text, a shape, the title (and its width handle) and the legend still work on a Free graph; Shift + click and click selection; in the mode, the guides of a drag (`the_guides_of_a_box_drag_show_while_the_pointer_is_down`) |
@@ -117,7 +118,7 @@ first.
 `stokesforge-robustness` contains **no production code**. It depends on the
 whole workspace and carries two things:
 
-- **23 batteries** (`tests/b1…b23`) that test the foundation at its limits:
+- **24 batteries** (`tests/b1…b24`) that test the foundation at its limits:
   extreme numeric values (`b1`), persistence (`b2`), malformed then
   semantically hostile `.stf` files (`b3`), identifier allocator
   (`b4`), macros (`b5`), concurrency between clients (`b6`), Rust ↔ Python
@@ -134,7 +135,11 @@ whole workspace and carries two things:
   (`b22`, see "Targeted recalculation (#193) — and what to test when relying on it" below),
   then the same oracle for structural gestures (renames, moves, removals,
   pastes, transposes, column type changes) plus an independent re-evaluation
-  of every formula from a saved and reloaded copy (`b23`, #412);
+  of every formula from a saved and reloaded copy (`b23`, #412), then every
+  analysis operation on hostile series (`b24`, #522: `NaN`, infinities, `1e300`,
+  subnormals, X offset by `1e6`, duplicate or unsorted X, zero to two points;
+  `run` never panics, and a ready and valid operation is not refused as an
+  invalid parameter on clean data);
 - **two out-of-process probes**, `alloc_probe` and `stack_probe`, because the
   cases they test end with an `abort()` that nothing catches:
   a Rust allocation failure is not a catchable panic, and a stack
@@ -513,6 +518,24 @@ formulas, new step): rerun `b22` with more cases
 its fingerprint is seen by the "unrelated" property of `b22` and by
 `a_recalculated_chain_is_stable_at_the_next_command`.
 
+## Randomised sweeps (#522)
+
+The proptest batteries (`b14`, `b22`, `b23`, `b24`, and `undo_random` in
+`stokesforge-commands`) draw from a fixed ChaCha seed, so `test-all` is
+reproducible. Two environment variables change that, nothing else does:
+
+- `SF_PROPTEST_SEED` (an unsigned integer) replaces the seed;
+- `SF_PROPTEST_SCALE` (an integer from 1) multiplies the number of cases. `b2`
+  also reads it: its sweep over the witness `.stf` hits 300 evenly spaced
+  positions per unit of scale (both ends of the byte flipped from scale 2).
+
+Neither set: the draws are exactly the fixed ones. An unreadable value fails
+the test naming the variable. A failing case prints `replay with
+SF_PROPTEST_SEED=… SF_PROPTEST_SCALE=…`; rerun with the same two values. The
+weekly workflow runs all of it at scale 8 with a new seed each week. `B23_CASES`
+is gone: the scale replaces it. The parsing is tested in `b14_sweep.rs`; the
+helpers are in `stokesforge-robustness/tests/common/mod.rs`.
+
 ## Running
 
 ```sh
@@ -520,6 +543,7 @@ scripts/test-all.sh                           # everything, except #[ignore]: ne
 cargo test --workspace                        # everything, except #[ignore]
 cargo test -p <crate> --test <file>          # one test file
 cargo test -p stokesforge-robustness -- --ignored  # reproductions and costly benches
+SF_PROPTEST_SEED=7 SF_PROPTEST_SCALE=8 cargo test -p stokesforge-robustness --test b24_analysis_sweep  # randomised sweeps, see below
 # (Typst is compiled and tested by `cargo test --workspace`; `--all-features` now only enables Python: see .codex/README.md)
 scripts/python-test.sh                        # Python bridge, scripts, robustness, application and CLI
 scripts/python-test.sh -- --ignored           # + the reproductions of the Python boundary
@@ -562,7 +586,7 @@ Linux runner is registered; Windows is not affected by this choice.
 | `release-manual` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` | same tag guards as `release-linux`; builds the manual with the version in its title and uploads `StokesForge-X.Y.Z-manual.tar.gz` to the GitLab package registry (`scripts/release-upload.sh manual`, #362) |
 | `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333); published to GitLab like the Linux jobs (`JOBS` of `scripts/gitlab-status.py`, #452) | same checks on a clean machine; `dist-windows` sets `STOKESFORGE_DIST_LOGO=1` (#388, one line to change): the `.exe` icon (`STOKESFORGE_EXE_ICON`, `build.rs`), the setup icon and the `.stf` icon, checked in the installation and the registry, and the installer script is compiled once more with no logo define (`/O-`); on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
 | `test-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking; GitHub only, not in `.gitlab-ci.yml`, but published to GitLab through `JOBS` of `scripts/gitlab-status.py` (#412, #452) | `cargo test -p stokesforge-core -p stokesforge-analysis -p stokesforge-session -p stokesforge-persistence -p stokesforge-commands`: the formula engine on Windows (float formatting, paths, stack depth); the first errors go in a `::error` annotation |
-| Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta. Read with `scripts/toolchain-weekly-status.sh` (public GitHub API, no `gh`) |
+| Workflow `toolchain-weekly.yml` (GitHub, `ubuntu-latest`) | informative, blocks nothing; Monday 05:17 UTC on `main` and `workflow_dispatch`; separate from `ci.yml` so that `gitlab-status.yml` does not post it (#412) | matrix `stable` / `beta` (`RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml`): the depth-cap tests in release mode (`stokesforge-core` lib `deep depth`, `formula_evaluation deeply_nested`, `recalc_targeted too_deep`, `formula_roundtrip deeper_than_the_cap`), plus `cargo test --workspace` and clippy `-D warnings` on beta; a second job `sweeps` (#522) runs `b14`, `b22`, `b23`, `b2`, `b24` and `undo_random` at `SF_PROPTEST_SCALE=8` with `SF_PROPTEST_SEED` = the run number (debug profile, overflow checks on), then `memory_pinning` and `perf_write_under_snapshot` with `--ignored` in release. Read with `scripts/toolchain-weekly-status.sh` (public GitHub API, no `gh`) |
 | `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md); the notes end with a line "Built with rustc … (Linux) and rustc … (Windows)" (outputs `rustc` of `release-linux` and `dist-windows`, `scripts/rustc-note.sh`), and `release-publish.sh` refuses to publish if one is missing (#412) |
 | `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, check that the protection rule of the tags `v*` still allows the token's role to create tags (see "Settings outside the repository" below) |
 
@@ -945,6 +969,14 @@ The study was a baseline: re-measure around 2026-11-18 to see what #452 changed.
   set, and checks that the child did paint in this language (model:
   `each_tab_draws_in_english_and_in_the_pseudo_locale`,
   `src/app/plot_settings.rs`, #119).
+  Second user of the pattern: `src/app/layout_sweep.rs` (#521) sweeps the
+  dialogs that open with a bare action (Graph Properties tabs, Preferences,
+  Shortcuts, Formula Functions, About, Status history) and the shell in `en`,
+  `fr` and `en-XA`; `en` and `fr` fail on a text that is elided or cut by its
+  clip rectangle (known defects in `KNOWN_FAILURES`), `en-XA` only counts.
+- A number typed for one layer and a pick of another layer in the combo of the
+  Graph Properties window: `a_number_typed_for_one_layer_never_reaches_another_when_the_layer_is_picked`
+  (`src/app/plot_settings.rs`, #521).
 - An egui menu is tested really opened (click on its title), and is read
   in the accessibility tree that egui publishes (`ctx.enable_accesskit()`,
   `platform_output.accesskit_update`): label, disabled state, checked box
@@ -1014,7 +1046,7 @@ The study was a baseline: re-measure around 2026-11-18 to see what #452 changed.
   isolation, a test that saves a user color would write to
   the real `couleurs.json`.
 - `stokesforge-clipboard` (#149): the decision of X11 answers (`x11::answer`) and the Windows/macOS format names are tested without a server; the X11 offer is tested against a **real server** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` required, XWayland is enough: `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Windows is tested likewise against the **real clipboard** (`tests/windows.rs`, `#[ignore]`, interactive desktop required: `cargo test -p stokesforge-clipboard --test windows -- --ignored`; witness: a `windows_format_name` that returns the MIME for PNG fails the read-back of the "PNG" format). Wayland and macOS have no automatic test: Wayland requires a compositor and a real input (serial), macOS is only compiled (`cargo check --target …`). An X11 test of a recipient does not test `response_type` of a `SelectionNotify`: an event coming from `SendEvent` carries the bit 0x80.
-- Tests and their comments are in French, like the rest.
+- Tests and their comments are in English, like the rest of the repository.
 
 **To read**: `stokesforge-robustness/src/lib.rs` (the index of the batteries), then the
 head of the targeted `b*` file.

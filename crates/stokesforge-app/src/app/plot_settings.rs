@@ -4538,6 +4538,48 @@ mod tests {
         );
     }
 
+    /// The layer combo is a target pick outside any `for_target` scope (#521):
+    /// a number typed in the Legend page of layer 1 (no Enter), then layer 2
+    /// picked in the combo. Layer 2 must stay untouched; the typed number is
+    /// committed into layer 1 (opening the combo takes the focus away from the
+    /// field), never lost silently or written into layer 2. No gap found.
+    #[test]
+    fn a_number_typed_for_one_layer_never_reaches_another_when_the_layer_is_picked() {
+        let mut harness = harness(|spec| {
+            two_layers(spec, false);
+            first_panel(spec).legend.frame_width = Some(1.75);
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let original = harness.model();
+        focus_field(&context, &mut harness.state, "1.75");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("12".into())],
+        );
+        let layer_1 = tr!("object-manager-layer", index = 1);
+        let layer_2 = tr!("object-manager-layer", index = 2);
+        click_label(&context, &mut harness.state, &layer_1);
+        click_label(&context, &mut harness.state, &layer_2);
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            harness.state.plot_edit().unwrap().selected_panel,
+            1,
+            "the combo switched to layer 2"
+        );
+        let model = harness.model();
+        assert_eq!(model.panels[1], original.panels[1], "layer 2 is untouched");
+        let draft = harness.draft();
+        assert_eq!(draft.panels[1], original.panels[1], "layer 2 draft");
+        assert_eq!(
+            draft.panels[0].legend.frame_width,
+            Some(12.0),
+            "the combo click commits the typed number into layer 1"
+        );
+        assert_eq!(model.panels[0].legend.frame_width, Some(12.0));
+    }
+
     // -- Bins and bar width (#359) -----------------------------------------
 
     /// The graph of the tests below: one series of type `plot_type`.
