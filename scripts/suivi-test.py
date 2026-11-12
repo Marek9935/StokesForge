@@ -3264,6 +3264,14 @@ class TestFormTemplate(unittest.TestCase):
         self.assertEqual(self.list_js("fromRecord({o:[{t:'A'},{t:'B'}]},{statut:'tranche',choix:'B'},[]).i"), 1)
         self.assertIsNone(self.list_js("fromRecord({o:[{t:'A'}]},{statut:'tranche',choix:'Z'},[])"))
 
+    def test_a_marked_line_carries_its_own_comment_and_gets_it_back(self):
+        # #520 trial: « À discuter » opens a box under the line; the comment travels as « line — comment ».
+        d = "{k:'list',lines:['One.','Two.','Three.']}"
+        rec = self.list_js("listRecord(%s,{i:0,marks:[0,2],lnotes:{0:' plutôt A ',1:'pas marquée'}})" % d)
+        self.assertEqual(rec["discuter"], "One. — plutôt A\nThree.")
+        got = self.list_js("fromRecord(%s,{statut:'tranche',choix:'À discuter (2)',discuter:'One. — plutôt A\\nThree.'},[])" % d)
+        self.assertEqual((got["marks"], got["lnotes"]), ([0, 2], {"0": "plutôt A"}))
+
     def test_list_card_label_does_not_read_options(self):
         html = self.form_html()
         src = "".join(re.search(r"/\*%s-START\*/(.*)/\*%s-END\*/" % (k, k), html, re.S).group(1) for k in ("QIMG", "LIST"))
