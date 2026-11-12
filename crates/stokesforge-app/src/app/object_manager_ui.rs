@@ -200,7 +200,11 @@ pub(super) fn object_node_menu(
     let visibility = target.visibility_shown(spec, shown);
     let editable_text = match target {
         T::Annotation(_) => Some(true),
-        T::Text(text) => Some(!matches!(text, stokesforge_plot::TextTarget::Legend { .. })),
+        T::Text(text) => Some(!matches!(
+            text,
+            stokesforge_plot::TextTarget::Legend { .. }
+                | stokesforge_plot::TextTarget::ColorBar { .. }
+        )),
         _ => None,
     };
     let text_moved = match target {
@@ -1224,8 +1228,9 @@ impl ObjectManagerPaint<'_> {
                                 .sense(egui::Sense::hover());
                                 ui.add(image).on_hover_text(tr!("stale-series-hint"));
                             }
-                            let text = list_row_text(&series.label, series.selected)
-                                .color(list_row_text_color(ui, series.selected, false));
+                            let text = list_row_text(&series.label, series.selected).color(
+                                list_row_text_color(ui, series.selected, series.label_fallback),
+                            );
                             // #151: the legend swatch is part of the target,
                             // like the name. The whole row, checkbox aside, grabs
                             // and clicks: we join the gestures before handling

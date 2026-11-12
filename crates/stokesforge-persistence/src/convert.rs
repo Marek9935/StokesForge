@@ -10,24 +10,26 @@ use stokesforge_core::{
     WindowMeta,
 };
 use stokesforge_plot::{
-    AnnotationSpec, AxisScale, AxisSpec, FreeFrame, FreePage, GridSlack, LayerPlacement,
-    LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec, PlotType, SeriesAxis,
-    SeriesSpec, ShapeKind, ShapeSpec, SymbolShape, SymbolSpec, TickDirection,
+    AnnotationSpec, AxisScale, AxisSpec, ColorBarOrientation, ColorBarPosition, ColorBarScale,
+    ColorBarSegment, ColorBarSpec, ColorBarTicks, ColorBarValue, FreeFrame, FreePage, GridSlack,
+    LayerPlacement, LegendPosition, LegendSpec, LegendText, LegendTextFrom, LineSpec, LineStyle,
+    PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, ShapeKind, ShapeSpec, SymbolShape,
+    SymbolSpec, TickDirection,
 };
 
 use stokesforge_import::recipe::ImportRecipe;
 
 use crate::recipe_record::ImportSourceRecord;
 use crate::schema::{
-    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, FreeFrameRecord,
-    FreePageRecord, GridSlackRecord, GroupGradientRecord, GroupNameRecord, KindRecord,
-    LayerPlacementRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord,
-    NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord,
-    RemoteRefRecord, RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord,
-    SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
-    TextAlignRecord, TextAnchorRecord, TextFontRecord, TickDirectionRecord, TypeRecord,
-    ValuesRecord, WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY,
-    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, ColorBarRecord, ColorBarSegmentRecord,
+    FormulaPartRecord, FreeFrameRecord, FreePageRecord, GridSlackRecord, GroupGradientRecord,
+    GroupNameRecord, KindRecord, LayerPlacementRecord, LegendPositionRecord, LegendSpecRecord,
+    LineSpecRecord, LineStyleRecord, NodeRecord, OverlaySpecRecord, PanelSpecRecord,
+    PlotSpecRecord, PlotTypeRecord, RemoteRefRecord, RoleRecord, SavedColorsRecord,
+    SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord,
+    SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord, TextFontRecord,
+    TickDirectionRecord, TypeRecord, ValuesRecord, WindowGeometryRecord, WindowModeRecord,
+    WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Upper bound of a panel coordinate (`row`/`column`) read from a file
@@ -465,6 +467,15 @@ impl From<&LegendSpec> for LegendSpecRecord {
             anchor: value.anchor.map(anchor_to_record),
             font: font_to_record(&value.font),
             color: value.color.clone(),
+            // The default source is written as nothing: a file with no
+            // setting stays byte-identical to an older one.
+            text_from: if value.text.from == LegendTextFrom::LongName {
+                String::new()
+            } else {
+                value.text.from.key().to_string()
+            },
+            text_template: value.text.template.clone(),
+            text_row_column: value.text.row_column.map(NodeId::raw),
         }
     }
 }
@@ -477,6 +488,11 @@ impl From<LegendSpecRecord> for LegendSpec {
             anchor: value.anchor.map(record_to_anchor),
             font: record_to_font(value.font),
             color: value.color,
+            text: LegendText {
+                from: LegendTextFrom::from_key(&value.text_from),
+                template: value.text_template,
+                row_column: value.text_row_column.map(NodeId::from_raw),
+            },
         }
     }
 }
@@ -561,6 +577,71 @@ fn record_to_anchor(record: TextAnchorRecord) -> stokesforge_plot::TextAnchor {
 }
 
 /// `PanelSpec` → record. Infallible.
+/// The colour bar of a layer → record (#499). A default choice is written as
+/// nothing, an unknown one as it was read.
+fn color_bar_to_record(bar: &ColorBarSpec) -> ColorBarRecord {
+    let key = |key: &str, default: &str| {
+        if key == default {
+            String::new()
+        } else {
+            key.to_string()
+        }
+    };
+    ColorBarRecord {
+        segments: bar
+            .segments
+            .iter()
+            .map(|segment| ColorBarSegmentRecord {
+                group: segment.group,
+                from: segment.from,
+                to: segment.to,
+                label: segment.label.clone(),
+            })
+            .collect(),
+        chain: bar.chain,
+        value: key(bar.value.key(), ColorBarValue::default().key()),
+        row_column: bar.row_column.map(NodeId::raw),
+        scale: key(bar.scale.key(), ColorBarScale::default().key()),
+        orientation: key(bar.orientation.key(), ColorBarOrientation::default().key()),
+        position: key(bar.position.key(), ColorBarPosition::default().key()),
+        anchor: bar.anchor.map(anchor_to_record),
+        ticks: key(bar.ticks.key(), ColorBarTicks::default().key()),
+        title: bar.title.clone(),
+        font: font_to_record(&bar.font),
+        length: bar.length,
+        thickness: bar.thickness,
+        visible: bar.visible,
+    }
+}
+
+fn record_to_color_bar(record: ColorBarRecord) -> ColorBarSpec {
+    ColorBarSpec {
+        segments: record
+            .segments
+            .into_iter()
+            .map(|segment| ColorBarSegment {
+                group: segment.group,
+                from: segment.from,
+                to: segment.to,
+                label: segment.label,
+            })
+            .collect(),
+        chain: record.chain,
+        value: ColorBarValue::from_key(&record.value),
+        row_column: record.row_column.map(NodeId::from_raw),
+        scale: ColorBarScale::from_key(&record.scale),
+        orientation: ColorBarOrientation::from_key(&record.orientation),
+        position: ColorBarPosition::from_key(&record.position),
+        anchor: record.anchor.map(record_to_anchor),
+        ticks: ColorBarTicks::from_key(&record.ticks),
+        title: record.title,
+        font: record_to_font(record.font),
+        length: record.length,
+        thickness: record.thickness,
+        visible: record.visible,
+    }
+}
+
 fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
     PanelSpecRecord {
         title: panel.title.clone(),
@@ -615,6 +696,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 stops: stops.clone(),
             })
             .collect(),
+        color_bar: panel.color_bar.as_ref().map(color_bar_to_record),
         free_frame: panel.free_frame.map(|frame| FreeFrameRecord {
             left: frame.left,
             top: frame.top,
@@ -732,6 +814,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             .filter(|entry| !entry.stops.is_empty())
             .map(|entry| (entry.group, entry.stops))
             .collect(),
+        color_bar: record.color_bar.map(record_to_color_bar),
         free_frame: record.free_frame.map(|frame| FreeFrame {
             left: frame.left,
             top: frame.top,
@@ -1469,5 +1552,84 @@ mod tests {
         let panel = record_to_panel_spec(reloaded).unwrap();
         assert!(panel.group_names.is_empty());
         assert_eq!(groups(&panel), [Some(1), Some(1), Some(2), Some(2)]);
+    }
+
+    /// #499: a colour bar round-trips as written, an unknown choice of a
+    /// newer version is kept, and a layer written before the bar reads none.
+    /// Witness: a key dropped by one direction of the conversion.
+    #[test]
+    fn a_color_bar_round_trips_and_keeps_unknown_choices() {
+        let bar = ColorBarSpec {
+            segments: vec![
+                ColorBarSegment {
+                    group: 1,
+                    from: Some(0.0),
+                    to: Some(57.0),
+                    label: "57 min".to_string(),
+                },
+                ColorBarSegment::new(2),
+            ],
+            chain: true,
+            value: ColorBarValue::Comments,
+            row_column: Some(NodeId::from_raw(9)),
+            scale: ColorBarScale::Log,
+            orientation: ColorBarOrientation::Unknown("diagonal".to_string()),
+            position: ColorBarPosition::Below,
+            anchor: None,
+            ticks: ColorBarTicks::Auto,
+            title: "Time".to_string(),
+            font: stokesforge_plot::TextFont {
+                size: Some(18.0),
+                ..Default::default()
+            },
+            length: Some(140.0),
+            thickness: Some(9.0),
+            visible: false,
+        };
+        let panel = PanelSpec {
+            color_bar: Some(bar.clone()),
+            ..PanelSpec::at(0, 0)
+        };
+        let bytes = rmp_serde::to_vec_named(&panel_spec_to_record(&panel)).unwrap();
+        let back = record_to_panel_spec(rmp_serde::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(back.color_bar, Some(bar));
+
+        // A bar with the default font writes no font key: a file stays
+        // byte-identical to one written before the font existed.
+        let plain = PanelSpec {
+            color_bar: Some(ColorBarSpec::default()),
+            ..PanelSpec::at(0, 0)
+        };
+        let written = rmp_serde::to_vec_named(&panel_spec_to_record(&plain)).unwrap();
+        let value = rmpv::decode::read_value(&mut std::io::Cursor::new(written)).unwrap();
+        let rmpv::Value::Map(fields) = &value else {
+            panic!("a layer is written as a map");
+        };
+        let bar_map = fields
+            .iter()
+            .find(|(key, _)| key.as_str() == Some("color_bar"))
+            .map(|(_, bar)| bar)
+            .expect("bar");
+        let rmpv::Value::Map(bar_fields) = bar_map else {
+            panic!("a bar is a map");
+        };
+        assert!(bar_fields
+            .iter()
+            .all(|(key, _)| !matches!(key.as_str(), Some("font" | "length" | "thickness"))));
+
+        let none = panel_spec_to_record(&PanelSpec::at(0, 0));
+        assert!(none.color_bar.is_none());
+        let mut value = rmpv::decode::read_value(&mut std::io::Cursor::new(
+            rmp_serde::to_vec_named(&none).unwrap(),
+        ))
+        .unwrap();
+        let rmpv::Value::Map(fields) = &mut value else {
+            panic!("a layer is written as a map");
+        };
+        fields.retain(|(key, _)| key.as_str() != Some("color_bar"));
+        let mut old = Vec::new();
+        rmpv::encode::write_value(&mut old, &value).unwrap();
+        let reloaded: PanelSpecRecord = rmp_serde::from_slice(&old).unwrap();
+        assert!(record_to_panel_spec(reloaded).unwrap().color_bar.is_none());
     }
 }

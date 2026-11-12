@@ -70,6 +70,12 @@ pub enum TextTarget {
         /// Index of the layer in [`PlotSpec::panels`].
         panel: usize,
     },
+    /// The colour bar of a panel (the whole bar with its ticks and labels,
+    /// #499).
+    ColorBar {
+        /// Index of the layer in [`PlotSpec::panels`].
+        panel: usize,
+    },
 }
 
 impl TextTarget {
@@ -77,9 +83,10 @@ impl TextTarget {
     pub fn panel_index_of(&self) -> Option<usize> {
         match *self {
             Self::Title => None,
-            Self::PanelTitle { panel } | Self::AxisTitle { panel, .. } | Self::Legend { panel } => {
-                Some(panel)
-            }
+            Self::PanelTitle { panel }
+            | Self::AxisTitle { panel, .. }
+            | Self::Legend { panel }
+            | Self::ColorBar { panel } => Some(panel),
         }
     }
 
@@ -100,6 +107,13 @@ impl TextTarget {
                     .title_visible
             }
             Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.visible,
+            Self::ColorBar { .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .color_bar
+                    .as_ref()?
+                    .visible
+            }
         })
     }
 
@@ -123,6 +137,11 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_visible = visible,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_visible = visible,
             Self::Legend { .. } => panel.legend.visible = visible,
+            Self::ColorBar { .. } => {
+                if let Some(bar) = panel.color_bar.as_mut() {
+                    bar.visible = visible;
+                }
+            }
         }
         true
     }
@@ -139,6 +158,13 @@ impl TextTarget {
                     .title_anchor
             }
             Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.anchor,
+            Self::ColorBar { .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .color_bar
+                    .as_ref()?
+                    .anchor
+            }
         }
     }
 
@@ -180,6 +206,17 @@ impl TextTarget {
                 panel.legend.anchor = anchor;
                 true
             }
+            Self::ColorBar { .. } => {
+                let Some(bar) = self
+                    .panel_index(spec)
+                    .and_then(|index| spec.panels.get_mut(index))
+                    .and_then(|panel| panel.color_bar.as_mut())
+                else {
+                    return false;
+                };
+                bar.anchor = anchor;
+                true
+            }
         }
     }
 
@@ -199,6 +236,14 @@ impl TextTarget {
                 .panels
                 .get(self.panel_index(spec)?)?
                 .legend
+                .font
+                .clone(),
+            // The bar's own texts (title, ticks, break labels).
+            Self::ColorBar { .. } => spec
+                .panels
+                .get(self.panel_index(spec)?)?
+                .color_bar
+                .as_ref()?
                 .font
                 .clone(),
         })
@@ -222,6 +267,10 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_font = font,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_font = font,
             Self::Legend { .. } => panel.legend.font = font,
+            Self::ColorBar { .. } => match panel.color_bar.as_mut() {
+                Some(bar) => bar.font = font,
+                None => return false,
+            },
         }
         true
     }
@@ -248,6 +297,10 @@ impl TextTarget {
                 .legend
                 .color
                 .clone(),
+            Self::ColorBar { .. } => {
+                spec.panels.get(self.panel_index(spec)?)?;
+                String::new()
+            }
         })
     }
 
@@ -269,6 +322,7 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_color = color,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_color = color,
             Self::Legend { .. } => panel.legend.color = color,
+            Self::ColorBar { .. } => return false,
         }
         true
     }
@@ -289,7 +343,7 @@ impl TextTarget {
                     .axis(side)
                     .display_label(),
             ),
-            Self::Legend { .. } => None,
+            Self::Legend { .. } | Self::ColorBar { .. } => None,
         }
     }
 
@@ -335,7 +389,7 @@ impl TextTarget {
                 }
                 true
             }
-            Self::Legend { .. } => false,
+            Self::Legend { .. } | Self::ColorBar { .. } => false,
         }
     }
 }
@@ -403,6 +457,23 @@ mod tests {
         assert_eq!(spec.reset_text_anchors(), 4);
         assert!(!spec.has_text_anchors());
         assert_eq!(spec.reset_text_anchors(), 0);
+    }
+
+    /// #499: the bar's font is set and read like the legend's; without a bar
+    /// there is nothing to set. Witness: `set_font` returning false for the bar.
+    #[test]
+    fn the_color_bar_font_is_set_and_read() {
+        let mut spec = PlotSpec::empty("T");
+        let bar = TextTarget::ColorBar { panel: 0 };
+        let font = crate::TextFont {
+            size: Some(14.0),
+            ..Default::default()
+        };
+        assert!(!bar.set_font(&mut spec, font.clone()));
+        spec.panels.get_mut(0).expect("panel").color_bar = Some(crate::ColorBarSpec::default());
+        assert_eq!(bar.font(&spec), Some(crate::TextFont::default()));
+        assert!(bar.set_font(&mut spec, font.clone()));
+        assert_eq!(bar.font(&spec), Some(font));
     }
 
     #[test]

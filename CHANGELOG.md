@@ -26,6 +26,36 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Legend text source (#499): Graph Properties > Legend has a « Text from »
+  setting that chooses which worksheet header row gives every legend entry
+  (Long Name, Comments, x', Units, Short Name, Long Name (Units), Long Name,
+  Comments, or Custom… with a Typst template that reads the variables
+  `#long-name`/`#ln`, `#short-name`/`#sn`, `#units`/`#u`, `#comments`/`#c`,
+  `#x-prime`/`#xp`). A series name you typed still wins; an empty chosen row
+  gives an empty entry. A row series can show the cell of a chosen column.
+  New graphs take their default from Preferences > Display > New. Additive
+  `.stf` fields (an older version that saves the file again loses them);
+  `pyst` API 0.6: `set_graph(legend_text_from=…, legend_template=…)`.
+
+- Color bar (#499): a layer can color the curves of one or more series
+  groups by a value (x' by default; also Comments, Long Name, Short Name,
+  Units, or the value of a column for a row series) instead of by their rank,
+  on a linear or log scale, and shows the scale as a bar that replaces those
+  groups in the legend. Graph Properties has a new **Color Bar** tab (groups
+  in bar order with a typed range and a Typst break label each, a chain
+  option, position in a corner, below or right of the frame, orientation,
+  ticks, title); the group page has **On the color bar**; the colors of a
+  group on the bar are greyed out in the Series window; the bar is dragged
+  like the legend and a double-click opens its tab. The value color is
+  computed at each draw, never stored. Additive `.stf` field (an older
+  version that saves the file again loses it); `pyst` API 0.6:
+  `pyst.color_bar(…)` (with `length=` / `thickness=`), and `apply_gradient`
+  now retains the stops. A bar inside the plot area shows resize handles when
+  selected, like a drawn rectangle: pulling one changes the length and
+  thickness of the strip, the texts keep their size; below / right of the
+  frame only the thickness handle exists. Additive stored fields, one undo
+  step per pull.
+
 - Origin projects (#490): an `.opj` file dropped on the window, picked in the
   Import window or reached by File > Import opens the "Import from Origin"
   window instead of the wizard. It lists the workbooks and sheets of the

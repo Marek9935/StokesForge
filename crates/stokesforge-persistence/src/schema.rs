@@ -856,6 +856,12 @@ pub(crate) struct TextFontRecord {
     pub(crate) align: TextAlignRecord,
 }
 
+impl TextFontRecord {
+    pub(crate) fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// [`stokesforge_plot::TextAnchor`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TextAnchorRecord {
@@ -931,6 +937,9 @@ pub(crate) struct PanelSpecRecord {
     /// older file, hence no group has a color gradient.
     #[serde(default)]
     pub(crate) group_gradients: Vec<GroupGradientRecord>,
+    /// Colour bar of the layer (#499); absent from an older file = no bar.
+    #[serde(default)]
+    pub(crate) color_bar: Option<ColorBarRecord>,
     /// Frame of the cell in free placement (#398); absent = none.
     #[serde(default)]
     pub(crate) free_frame: Option<FreeFrameRecord>,
@@ -938,6 +947,60 @@ pub(crate) struct PanelSpecRecord {
     /// Auto.
     #[serde(default)]
     pub(crate) layer_background: String,
+}
+
+/// [`stokesforge_plot::ColorBarSpec`], flat (#499). Every choice is a stored
+/// key; an empty or unknown key reads as the default and is kept on save.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ColorBarRecord {
+    #[serde(default)]
+    pub(crate) segments: Vec<ColorBarSegmentRecord>,
+    #[serde(default)]
+    pub(crate) chain: bool,
+    #[serde(default)]
+    pub(crate) value: String,
+    #[serde(default)]
+    pub(crate) row_column: Option<u64>,
+    #[serde(default)]
+    pub(crate) scale: String,
+    #[serde(default)]
+    pub(crate) orientation: String,
+    #[serde(default)]
+    pub(crate) position: String,
+    #[serde(default)]
+    pub(crate) anchor: Option<TextAnchorRecord>,
+    #[serde(default)]
+    pub(crate) ticks: String,
+    #[serde(default)]
+    pub(crate) title: String,
+    /// Font of the bar's texts; a default font is not written, so an older
+    /// file stays byte-identical.
+    #[serde(default, skip_serializing_if = "TextFontRecord::is_default")]
+    pub(crate) font: TextFontRecord,
+    /// Strip length and thickness (#499); absent = automatic, not written, so
+    /// an older file stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) length: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) thickness: Option<f64>,
+    #[serde(default = "default_true")]
+    pub(crate) visible: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// One segment of a colour bar (#499).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ColorBarSegmentRecord {
+    pub(crate) group: u32,
+    #[serde(default)]
+    pub(crate) from: Option<f64>,
+    #[serde(default)]
+    pub(crate) to: Option<f64>,
+    #[serde(default)]
+    pub(crate) label: String,
 }
 
 /// The stops of the color gradient of a series group (#213), flat.
@@ -1045,6 +1108,7 @@ impl Default for PanelSpecRecord {
             shapes: Vec::new(),
             group_names: Vec::new(),
             group_gradients: Vec::new(),
+            color_bar: None,
             free_frame: None,
             layer_background: String::new(),
         }
@@ -1343,6 +1407,17 @@ pub(crate) struct LegendSpecRecord {
     /// file, hence automatic.
     #[serde(default)]
     pub(crate) color: String,
+    /// « Text from » (#499): key of the header row the entries read; absent
+    /// or empty = the long name, like an older file. An unknown key (newer
+    /// version) is kept as is.
+    #[serde(default)]
+    pub(crate) text_from: String,
+    /// Custom template of « Text from » (#499); absent = empty.
+    #[serde(default)]
+    pub(crate) text_template: String,
+    /// Column read by the row series of the legend (#499); absent = « Row N ».
+    #[serde(default)]
+    pub(crate) text_row_column: Option<u64>,
 }
 
 impl Default for LegendSpecRecord {
@@ -1356,6 +1431,9 @@ impl Default for LegendSpecRecord {
             anchor: None,
             font: TextFontRecord::default(),
             color: String::new(),
+            text_from: String::new(),
+            text_template: String::new(),
+            text_row_column: None,
         }
     }
 }
@@ -1399,6 +1477,38 @@ mod tests {
         let known = rmp_serde::to_vec_named(&Future::In).expect("encoding");
         let reloaded: TickDirectionRecord = rmp_serde::from_slice(&known).expect("decoding");
         assert_eq!(reloaded, TickDirectionRecord::In);
+    }
+
+    /// A legend written before « Text from » (#499) reads as today's text
+    /// (long name, then short name). Witness: removing `#[serde(default)]`
+    /// from the three fields makes the decoding fail.
+    #[test]
+    fn a_legend_without_text_settings_reads_as_the_default() {
+        #[derive(Serialize)]
+        struct Before {
+            visible: bool,
+            position: LegendPositionRecord,
+        }
+        let bytes = rmp_serde::to_vec_named(&Before {
+            visible: true,
+            position: LegendPositionRecord::TopLeft,
+        })
+        .expect("encoding");
+        let record: LegendSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        let legend = stokesforge_plot::LegendSpec::from(record);
+        assert_eq!(legend.text, stokesforge_plot::LegendText::default());
+    }
+
+    /// A choice from a newer version survives a save (kept as typed).
+    #[test]
+    fn an_unknown_text_source_is_kept_through_a_round_trip() {
+        let record = LegendSpecRecord {
+            text_from: "from_the_future".to_string(),
+            ..LegendSpecRecord::default()
+        };
+        let legend = stokesforge_plot::LegendSpec::from(record);
+        let back = LegendSpecRecord::from(&legend);
+        assert_eq!(back.text_from, "from_the_future");
     }
 
     /// An unknown placement (newer file) reads as the grid, a known one as

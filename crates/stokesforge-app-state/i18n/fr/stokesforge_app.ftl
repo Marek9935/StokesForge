@@ -290,6 +290,7 @@ grid-drag-rows =
 graph-row-series = Ligne { $number }
 graph-series-broken-reference = (référence rompue)
 graph-series-broken-reference-named = { $name } — référence rompue
+graph-series-empty-text = (vide) { $column }
 graph-legend-more = { $count ->
     [one] … et { $count } autre
    *[other] … et { $count } autres
@@ -809,6 +810,7 @@ plot-target-axis-title = { $side ->
 plot-target-text = Texte
 plot-target-object = Objet
 plot-target-legend = Légende
+plot-target-color-bar = Barre de couleurs
 
 # Valeurs automatiques des champs de couleur
 
@@ -1037,6 +1039,73 @@ plot-legend-top-left = Haut gauche
 plot-legend-top-right = Haut droite
 plot-legend-bottom-left = Bas gauche
 plot-legend-bottom-right = Bas droite
+plot-legend-text-from = Texte issu de
+    .hint = La ligne d'en-tête de la feuille qui donne le texte de chaque entrée de la légende. Un nom de série que vous avez saisi reste prioritaire.
+legend-text-from-long-name = Nom long
+legend-text-from-comments = Commentaires
+legend-text-from-x-prime = x'
+legend-text-from-units = Unités
+legend-text-from-short-name = Nom court
+legend-text-from-long-name-units = Nom long (Unités)
+legend-text-from-long-name-comments = Nom long, Commentaires
+legend-text-from-custom = Personnalisé…
+legend-text-from-unknown = Nom long (réglage d'une version plus récente)
+plot-legend-template = Modèle
+    .hint = Texte Typst. Variables : #long-name (#ln) le Nom long, #short-name (#sn) le Nom court, #units (#u) les Unités, #comments (#c) les Commentaires, #x-prime (#xp) le x'. Leur texte s'affiche tel quel.
+plot-legend-row-text = Série de ligne
+plot-legend-row-number = Numéro de ligne
+plot-legend-row-column-value = Valeur de la colonne…
+plot-legend-row-column = Colonne
+
+# Onglet Barre de couleurs (#499)
+
+plot-color-bar-section = Barre de couleurs
+plot-color-bar-show =
+    Afficher la barre de couleurs
+    .hint = Colore les courbes des groupes de la barre selon leur valeur, et remplace leurs entrées dans la légende. Masquée, la barre rend aux courbes leurs couleurs et leurs entrées de légende.
+plot-color-bar-groups-section = Groupes de séries
+plot-color-bar-group-break = Étiquette de rupture
+    .hint = Texte Typst écrit sous la barre, à droite de la valeur de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
+plot-color-bar-group-on = Sur la barre
+    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
+plot-color-bar-range = Plage
+plot-color-bar-no-series-groups = Cette couche n’a aucun groupe de séries. Groupez d’abord ses courbes, dans la fenêtre Séries.
+plot-color-bar-chain =
+    Enchaîner les segments
+    .hint = Chaque segment commence où le précédent finit : des groupes de 0 à 57 et de 0 à 25 sont tracés de 0 à 57 et de 57 à 82. Les couleurs ne changent pas.
+plot-color-bar-value-section = Valeur
+plot-color-bar-value-from = Valeur depuis
+    .hint = La ligne d’en-tête de la feuille qui donne la valeur de chaque courbe. Une valeur avec une unité ou du texte (« 57 min ») n’a pas de valeur.
+plot-color-bar-row-none = Aucune valeur
+plot-color-bar-scale = Échelle
+plot-color-bar-scale-linear = Linéaire
+plot-color-bar-scale-log = Log
+    .hint = Une valeur nulle ou négative n’a pas de couleur sur une échelle log.
+plot-color-bar-no-value =
+    { $count ->
+        [one] { $count } courbe n’a pas de valeur
+       *[other] { $count } courbes n’ont pas de valeur
+    }
+plot-color-bar-layout-section = Emplacement
+plot-color-bar-position = Position
+plot-color-bar-position-dragged = Déplacée
+plot-color-bar-position-below = Sous le cadre
+plot-color-bar-position-right = À droite du cadre
+plot-color-bar-orientation = Orientation
+    .disabled = Sous le cadre, la barre est horizontale ; à droite du cadre, verticale
+plot-color-bar-orientation-horizontal = Horizontale
+plot-color-bar-orientation-vertical = Verticale
+plot-color-bar-ticks = Graduations
+plot-color-bar-ticks-breaks = Extrémités et ruptures
+plot-color-bar-ticks-auto = Automatiques
+plot-color-bar-title = Titre
+    .hint = Texte Typst écrit sous la barre. Laisser vide pour aucun.
+plot-color-bar-unknown = Par défaut (réglage d’une version plus récente)
+disabled-color-bar-off = Activez d’abord « Afficher la barre de couleurs »
+curve-on-color-bar =
+    Sur la barre de couleurs
+    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
+curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici.
 
 # Onglet Thème
 
@@ -1409,6 +1478,8 @@ history-plot-align-layers = Aligner les calques
 history-plot-match-layer-size = Uniformiser la taille des calques
 history-plot-distribute-layers = Répartir les calques
 history-plot-layer-placement = Changer le placement des calques
+history-plot-legend-text = Changer le texte de la légende
+history-plot-color-bar = Changer la barre de couleurs
 history-plot-fit-page = Ajuster la page à la disposition
 history-plot-fit-layout = Ajuster la disposition à la page
 
@@ -2059,6 +2130,8 @@ preferences-new-graphs = Nouveaux graphiques
 preferences-new-graphs-note = Point de départ des graphiques que vous créez. Chaque graphique garde ensuite son propre réglage, dans ses Propriétés du graphique ; les graphiques existants ne changent pas.
 preferences-new-graph-decimal-comma = Virgule décimale sur les graduations
     .hint = Les nouveaux graphiques écrivent 1,5 au lieu de 1.5 sur tous les axes, à l'écran et dans les exports. Les graphiques existants et ceux créés par des scripts gardent leur réglage.
+preferences-new-graph-legend-text = Texte de légende issu de
+    .hint = La ligne d'en-tête que les nouveaux graphiques lisent pour les entrées de leur légende. Chaque graphique garde ensuite son réglage, dans Propriétés du graphique > Légende. Les graphiques existants et ceux créés par des scripts ne changent pas.
 preferences-analysis-values = Valeurs
 preferences-analysis-values-note = Ce que propose la fenêtre d'une analyse la première fois que vous l'utilisez. Chaque analyse retient ensuite son dernier choix.
 preferences-export-graph = Exporter le graphique

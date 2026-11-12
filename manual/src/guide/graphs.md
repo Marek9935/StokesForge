@@ -102,7 +102,7 @@ Deleting a series never deletes the columns of the workbook.
 
 ## Open the graph settings
 
-The settings of a graph are in the **Graph Properties** window. It has these tabs: **General**, **Plot Area**, **Axes**, **Legend** and **Theme**. The series have their own window, **Series Properties**.
+The settings of a graph are in the **Graph Properties** window. It has these tabs: **General**, **Plot Area**, **Axes**, **Legend** and **Theme**. The color bar is a section of the **Legend** tab. The series have their own window, **Series Properties**.
 
 You can open them in several ways:
 
@@ -122,7 +122,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 | **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
-| **Legend** | **Show legend**, **Position** |
+| **Legend** | **Show legend**, **Position**, **Text from**, and the folded **Color bar** section at the bottom |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
@@ -319,7 +319,33 @@ The **Legend** tab has **Show legend** and **Position**: **Top left**, **Top rig
 
 Each entry shows the name of its series. To rename a series, double-click its entry in the legend and type the new name. An empty name goes back to the column name.
 
+**Text from** chooses which header row of the worksheet gives the text of every entry: **Long Name** (the default; an empty long name shows the short name), **Comments**, **x'**, **Units**, **Short Name**, **Long Name (Units)**, **Long Name, Comments**, or **Custom…**. The choice applies to all the series of the layer. A name you typed for a series still wins. If the chosen row is empty for a column, its entry is empty (its line or symbol stays). The lists (Object Manager, series list of Graph Properties) then show the column in grey, as `(empty) Sheet1 B`, so the row stays recognisable. A number taken from a column (x', or the value of a column on a row series) is written as the worksheet grid shows it (6 significant digits). The column picker of **Value of column…** lists each column as its letter and Long Name, for example `A — Wavelength`. With **Custom…** a **Template** field appears, filled with the Typst equivalent of the previous choice (what you already typed is never replaced). The template is Typst text that reads these variables, each with a long and a short name: `#long-name` (`#ln`), `#short-name` (`#sn`), `#units` (`#u`), `#comments` (`#c`) and `#x-prime` (`#xp`). Their text is shown exactly as it is written in the column, whatever characters it holds. For example `*#ln* #if u != "" [(#u)]` writes the Long Name in bold, then the Units in parentheses only when there are some. The names are the same in every interface language. The lists show the plain text of the result, without formatting; a template Typst cannot read turns the field red and shows the grey `(empty)` fallback in the lists. A Row series does not use the template.
+
+For a series made from a row of a worksheet, **Row series** chooses between **Row number** and **Value of column…**, which shows the cell of the column you pick on that row.
+
+New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**.
+
 Drag the legend to move it anywhere on the figure. Right-click it and choose **Reset Position** to put it back. A series with **Show in legend** cleared does not appear.
+
+## Color bar
+
+A color bar colors the curves of one or more groups by a **value** instead of by their rank in the group, and shows the scale. It replaces the entries of those groups in the legend. Each layer has at most one bar. It is the way to show, for example, the time of each spectrum of a kinetic: the curves keep the gradient of their group, and the bar says which color is which time.
+
+To put a group on the bar, open the page of the group in the Series window and tick **On the color bar**, or open the **Legend** tab of Graph Properties, unfold the **Color bar** section at the bottom (it is closed until the layer has a bar, and opens by itself once the bar is shown), tick **Show color bar**, then tick **On the bar** for each group. A group that had no color gradient gets the first one of the list. Unticking **On the bar** gives the curves their own colors and legend entries back: a group left off the bar, like a reference spectrum, keeps its color and its legend entry. While a group is on a visible bar, the line and symbol colors of its curves are greyed out in the Series window: the color comes from the bar.
+
+<img src="../images/graphs-properties-color-bar.png" alt="The Graph Properties window on its Legend tab, with the Color bar section open: the series group Kinetics on the bar, its Range row, Chain the segments, then the value, placement and title rows." width="640">
+
+The **Color bar** section has:
+
+- **Show color bar**. Cleared, the curves get their own colors and legend entries back; the settings are kept.
+- **Series groups**. Every group of the layer is listed, in the order of the graph (the same order as in the Object Manager), each with an **On the bar** box. The order of the bar always follows this order; there is nothing to move. Between two groups that are on the bar, a line **Break label** holds the Typst text written under the bar, right of the value of the break between them; there is none after the last group. The label stays with the group above it, so it comes back when you tick again a group you had cleared below it. Under each group on the bar, a **Range** row shows **From** and **to**, where empty means **Auto**, the smallest and the largest value of the curves of the group. **Chain the segments** makes each segment start where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change, only the scale.
+- **Value from**. The header row that gives the value of each curve: **x'** (the default), **Comments**, **Long Name**, **Short Name** or **Units**. For a row series, **Row series** chooses **No value** or **Value of column…** with the column to read. A cell that holds text or a unit (`57 min`) has no value. The value is read each time the figure is drawn: change the x' of a column and the color follows. A line such as **1 curve has no value** lists the curves of the bar that have none; they keep their own color and are left off the bar.
+- **Scale**: **Linear** or **Log**. On a log scale a value of zero or less has no color.
+- **Position**: the four corners of the plot area, **Below the frame** or **Right of the frame**. Outside the frame the figure grows to make room; the plot area keeps its size. **Orientation** (**Horizontal** or **Vertical**) is greyed out for those two places, which force it. Drag the bar to move it anywhere on the figure; **Position** then reads **Dragged**, and choosing any place in the list, even **Below the frame**, brings the bar back there. A bar inside the plot area keeps its size when moved and is not stretched: click it, then pull one of the small squares around it, as for a rectangle drawn on the graph, to make it longer, shorter, thicker or thinner. The texts of the bar keep their font size and are placed again around the strip. Below or right of the frame the length follows the frame and only the thickness can be pulled. Choosing another **Position** keeps the size; a drag of the bar is undone in one step.
+- **Ticks**: **Ends and breaks** (the default) or **Automatic**.
+- **Title**: Typst text written under the bar.
+
+A value outside the range of a segment takes the color of the nearer end. Double-click the bar to open the Legend tab with the section unfolded. In a script, `pyst.color_bar(…)` does the same, with `length=` and `thickness=` for the size of the strip; the order of its `groups` list does not matter, the bar follows the graph.
 
 ## Titles and formulas
 

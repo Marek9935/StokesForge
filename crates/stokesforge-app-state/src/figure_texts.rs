@@ -28,6 +28,11 @@ pub fn figure_texts() -> FigureTexts {
 pub fn series_label_text(label: &SeriesLabel) -> String {
     match label {
         SeriesLabel::Text(text) => text.clone(),
+        // The plain text Typst produces; empty if the template does not
+        // compile (the lists then show the grey fallback of an empty text).
+        SeriesLabel::Template { markup } => {
+            stokesforge_render::formula::plain_text(markup).unwrap_or_default()
+        }
         SeriesLabel::Row(row) => tr!("graph-row-series", number = row.saturating_add(1)),
         SeriesLabel::Missing => tr!("graph-series-broken-reference"),
     }
@@ -39,5 +44,22 @@ pub fn theme_name(index: usize) -> String {
     match index.min(stokesforge_plot::THEMES.len() - 1) {
         0 => tr!("plot-theme-light"),
         _ => tr!("plot-theme-dark"),
+    }
+}
+
+/// The label of a « Text from » choice of a legend (#499), in the current
+/// language. The names of the header rows are those of the worksheet.
+pub fn legend_text_from_label(from: &stokesforge_plot::LegendTextFrom) -> String {
+    use stokesforge_plot::LegendTextFrom as From;
+    match from {
+        From::LongName => tr!("legend-text-from-long-name"),
+        From::Comments => tr!("legend-text-from-comments"),
+        From::XPrime => tr!("legend-text-from-x-prime"),
+        From::Units => tr!("legend-text-from-units"),
+        From::ShortName => tr!("legend-text-from-short-name"),
+        From::LongNameUnits => tr!("legend-text-from-long-name-units"),
+        From::LongNameComments => tr!("legend-text-from-long-name-comments"),
+        From::Custom => tr!("legend-text-from-custom"),
+        From::Unknown(_) => tr!("legend-text-from-unknown"),
     }
 }

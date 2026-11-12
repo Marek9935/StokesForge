@@ -351,6 +351,8 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 | `x_grid`, `y_grid`, `x_visible`, `y_visible` | `True` or `False` |
 | `legend_visible` | `True` or `False` |
 | `legend_position` | `"top_left"`, `"top_right"`, `"bottom_left"`, `"bottom_right"` |
+| `legend_text_from` | Which header row gives the legend entries: `"long_name"` (default), `"comments"`, `"x_prime"`, `"units"`, `"short_name"`, `"long_name_units"`, `"long_name_comments"` or `"custom"` |
+| `legend_template` | The Typst text used by `"custom"`. It reads the variables `long-name` (`ln`), `short-name` (`sn`), `units` (`u`), `comments` (`c`) and `x-prime` (`xp`), for example `*#ln* #if u != "" [(#u)]` |
 | `plot_width`, `plot_height` | Size of the plot area of the column (width) and of the row (height) of `panel`, in `unit`. From 1.27 cm to 70.56 cm (36 to 2000 pt). |
 | `plot_left`, `plot_top` | Distance from the edge of the image to the first plot area, in `unit`, from 0 to 70.56 cm. `None` means automatic. |
 | `fixed_size` | `True` or `False`: the Fixed figure size of Graph Properties |

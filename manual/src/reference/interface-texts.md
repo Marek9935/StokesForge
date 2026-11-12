@@ -189,6 +189,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | the file has no title | le fichier n'a pas de titre |
 | Theme | Thème |
 | Theme… | Thème… |
+| Title | Titre |
 | Title from the file | Titre du fichier |
 | Tools | Outils |
 | Top | Haut |

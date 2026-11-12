@@ -257,6 +257,12 @@ pub fn non_trivial_spec(
                 ..Default::default()
             },
             color: "#118899".to_string(),
+            // #499: a custom template and a column for the row series.
+            text: stokesforge_plot::LegendText {
+                from: stokesforge_plot::LegendTextFrom::Custom,
+                template: "%(LL) (%(LU))".to_string(),
+                row_column: Some(y1),
+            },
         },
         title_color: "#aa8811".to_string(),
         // Issue #35: free texts, all fields non-default.
@@ -311,6 +317,35 @@ pub fn non_trivial_spec(
         group_names: [(3, "Séries d'été".to_string())].into(),
         // Color gradient kept by group 3 (#213).
         group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),
+        // #499: a colour bar, two segments in a chain, a break label, a
+        // choice that only a newer version knows.
+        color_bar: Some(stokesforge_plot::ColorBarSpec {
+            segments: vec![
+                stokesforge_plot::ColorBarSegment {
+                    group: 3,
+                    from: Some(0.0),
+                    to: Some(57.0),
+                    label: "57 min".to_string(),
+                },
+                stokesforge_plot::ColorBarSegment::new(4),
+            ],
+            chain: true,
+            value: stokesforge_plot::ColorBarValue::Comments,
+            row_column: None,
+            scale: stokesforge_plot::ColorBarScale::Log,
+            orientation: stokesforge_plot::ColorBarOrientation::Horizontal,
+            position: stokesforge_plot::ColorBarPosition::Below,
+            anchor: None,
+            ticks: stokesforge_plot::ColorBarTicks::Auto,
+            title: "Time".to_string(),
+            font: stokesforge_plot::TextFont {
+                size: Some(13.0),
+                ..Default::default()
+            },
+            length: Some(180.0),
+            thickness: Some(10.0),
+            visible: true,
+        }),
         // #398: a free frame, negative left.
         free_frame: Some(stokesforge_plot::FreeFrame {
             left: -120.5,
@@ -331,6 +366,11 @@ pub fn non_trivial_spec(
             font: stokesforge_plot::TextFont::default(),
             // Issue #90: color of the legend and of the title of the panel.
             color: "#228833".to_string(),
+            // #499: a list choice.
+            text: stokesforge_plot::LegendText {
+                from: stokesforge_plot::LegendTextFrom::LongNameComments,
+                ..Default::default()
+            },
         },
         title_font: stokesforge_plot::TextFont {
             family: "Noto Sans".to_string(),

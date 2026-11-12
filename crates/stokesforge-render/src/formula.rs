@@ -454,23 +454,7 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
 /// would read a field): the only addition is the broken-reference suffix, preceded
 /// by a space.
 pub fn escape(text: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    let mut escaped = String::with_capacity(text.len() + 3);
-    escaped.push_str("#\"");
-    for character in text.chars() {
-        match character {
-            '\\' => escaped.push_str("\\\\"),
-            '"' => escaped.push_str("\\\""),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            other => escaped.push(other),
-        }
-    }
-    escaped.push('"');
-    escaped
+    stokesforge_plot::typst_literal(text)
 }
 
 /// Typst's standard library, built once for the whole process.
@@ -580,6 +564,26 @@ pub struct Compiled {
 }
 
 impl Compiled {
+    /// The text the page shows, without any formatting (`Δ` stays `Δ`): the
+    /// text runs of the laid-out page, in order. Used by the lists that name
+    /// a series from a custom legend template (#499).
+    pub fn plain_text(&self) -> String {
+        fn collect(frame: &typst::layout::Frame, out: &mut String) {
+            for (_, item) in frame.items() {
+                match item {
+                    typst::layout::FrameItem::Text(run) => out.push_str(run.text.as_str()),
+                    typst::layout::FrameItem::Group(group) => collect(&group.frame, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut out = String::new();
+        if let Some(page) = self.page() {
+            collect(&page.frame, &mut out);
+        }
+        out
+    }
+
     /// The compiled page, if the formula produced one.
     pub fn page(&self) -> Option<&Page> {
         self.document.pages().first()
@@ -698,6 +702,33 @@ pub fn diagnose(text: &str) -> Option<String> {
     }
     memo.insert(text.to_owned(), verdict.clone());
     verdict
+}
+
+/// The plain text Typst produces for `markup` (#499), or `None` if it does
+/// not compile. Memoized per text, bounded: a list asks on every frame.
+pub fn plain_text(markup: &str) -> Option<String> {
+    const MAX_ENTRIES: usize = 256;
+    static MEMO: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    let memo = MEMO.get_or_init(Default::default);
+    if let Some(known) = memo
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .get(markup)
+    {
+        return known.clone();
+    }
+    let text = match resolve_fonts(&FontChoice::default()) {
+        Ok((sans, math)) => compile(markup, 12.0, [0, 0, 0, 255], sans, math)
+            .ok()
+            .map(|compiled| compiled.plain_text()),
+        Err(_) => None,
+    };
+    let mut memo = memo.lock().unwrap_or_else(|err| err.into_inner());
+    if memo.len() >= MAX_ENTRIES {
+        memo.clear();
+    }
+    memo.insert(markup.to_owned(), text.clone());
+    text
 }
 
 /// Compiles a complete Typst document, page settings included.
@@ -1479,6 +1510,38 @@ mod tests {
         assert_eq!(diagnose(""), None);
         // Second request: same verdict, from memory.
         assert_eq!(diagnose("$ (unclosed"), diagnose("$ (unclosed"));
+    }
+
+    /// #499: a custom legend template reads its variables; the values are
+    /// drawn literally and a smart `#if` drops empty parentheses. Witness: a
+    /// value in markup form would make `*b*` bold (text `Ab`), a template
+    /// without the `#if` would give `Abs ()`.
+    #[test]
+    fn a_legend_template_reads_its_variables_literally() {
+        use stokesforge_plot::{template_source, LegendField};
+        let source = |template: &str, units: &str, name: &str| {
+            template_source(template, |field| match field {
+                LegendField::LongName | LegendField::ShortName => name.to_string(),
+                LegendField::Units => units.to_string(),
+                _ => String::new(),
+            })
+        };
+        let template = "*#ln* #if u != \"\" [(#u)]";
+        let hard = "A *b* # $ \" \\ \u{394}";
+        let full = source(template, "mM", hard);
+        assert_eq!(diagnose(&full), None);
+        assert_eq!(
+            plain_text(&full).as_deref(),
+            Some("A *b* # $ \" \\ \u{394} (mM)")
+        );
+        assert_eq!(
+            plain_text(&source(template, "", "Abs")).as_deref(),
+            Some("Abs")
+        );
+        // Same name for the long and the short variable.
+        let same = source("#long-name/#short-name.", "", "Abs");
+        assert_eq!(plain_text(&same).as_deref(), Some("Abs/Abs."));
+        assert_eq!(plain_text(&source("#nope", "", "x")), None);
     }
 
     /// Two different sizes of the same formula give different page sizes —

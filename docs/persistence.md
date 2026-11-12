@@ -830,3 +830,37 @@ the sheet stays, ordinary. A column identifier that no longer exists is accepted
 clipboard carries a link only when both its ends are inside the copied roots
 (#391, `docs/data-model.md`); otherwise the copy is ordinary. Additive field: it
 does not change the version number of the format.
+
+## Legend text source: additive fields (#499)
+
+`LegendSpecRecord` gained `text_from` (the key of a `LegendTextFrom`, `String`),
+`text_template` (`String`) and `text_row_column` (`Option<u64>`), all
+`#[serde(default)]`. **`FORMAT_VERSION` did not move**: a file without the
+fields reads as today's text (long name, then short name), and the default
+source is written as an empty `text_from`, so a graph that never touched the
+setting is byte-identical to before. A key written by a newer version becomes
+`LegendTextFrom::Unknown(key)`: read as the long name, written back as it was
+(invariant 10). An older reader that saves the file again drops the three
+fields without a message. Witness `tests/witnesses/v1/project.stf`
+regenerated with a custom template and a row column on one legend and a
+list choice on the other; unit tests in `schema.rs`
+(`a_legend_without_text_settings_reads_as_the_default`).
+
+## Colour bar: additive field (#499, step C)
+
+`PanelSpecRecord` gained `color_bar` (`Option<ColorBarRecord>`),
+`#[serde(default)]`: segments (group, optional typed ends, break label),
+`chain`, the value source, scale, orientation, position, anchor, ticks, title
+`visible`, `font` (`TextFontRecord`, not written when default, so an older
+file stays byte-identical; the witness holds a non-default one) and the strip
+`length` / `thickness` in points (`Option<f64>`, `None` = automatic, not
+written, set by pulling a resize handle of a bar inside the frame; the witness
+holds both). **`FORMAT_VERSION` did not move**: a file without it has no bar
+and its curves keep their stored colors. Every choice is a stored key; a
+default is written as an empty string and an unknown key (newer version)
+becomes `Unknown(key)`, read as the default and written back as it was
+(invariant 10). The colour of a curve on a bar is never stored: it is computed
+at each draw (`stokesforge-render::color_bar`). An older reader that saves the
+file again drops the bar without a message. Witness
+`tests/witnesses/v1/project.stf` regenerated with a two-segment chained bar;
+unit test `a_color_bar_round_trips_and_keeps_unknown_choices` in `convert.rs`.

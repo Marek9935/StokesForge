@@ -388,6 +388,7 @@ impl VisibilityTarget {
                     side,
                 },
                 TextTarget::Legend { panel } => TextTarget::Legend { panel: to(panel)? },
+                TextTarget::ColorBar { panel } => TextTarget::ColorBar { panel: to(panel)? },
             }),
         })
     }
@@ -506,6 +507,8 @@ pub fn selection_after_history(
 pub struct SeriesRow {
     pub target: SeriesRef,
     pub label: String,
+    /// `label` is the grey fallback of an empty « Text from » row (#499).
+    pub label_fallback: bool,
     pub spec: SeriesSpec,
     pub selected: bool,
     /// A column of the series comes from an out-of-date calculation and the
@@ -731,9 +734,12 @@ pub fn object_tree_of_spec(
                         .enumerate()
                         .map(|(rank, s)| {
                             let target = SeriesRef::new(index, rank);
+                            let (label, label_fallback) =
+                                crate::state::series_list_entry(tree, s, &panel.legend.text);
                             SeriesRow {
                                 target,
-                                label: crate::state::series_list_label(tree, s),
+                                label,
+                                label_fallback,
                                 spec: s.clone(),
                                 selected: selected == Some(VisibilityTarget::Series(target)),
                                 stale: spec.stale_warning

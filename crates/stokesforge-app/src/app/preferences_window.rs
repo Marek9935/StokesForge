@@ -32,6 +32,7 @@ use super::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
 use crate::theme;
 use stokesforge_app_state::default_folders::FolderKind;
+use stokesforge_app_state::figure_texts::legend_text_from_label;
 use stokesforge_app_state::file_picker::PickRequest;
 use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::length_unit::LengthUnit;
@@ -39,6 +40,7 @@ use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry, ObjectMana
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{Action, AppState, PNG_EXPORT_SCALES};
 use stokesforge_app_state::tr;
+use stokesforge_plot::LegendTextFrom;
 use stokesforge_render_svg::SvgTextMode;
 
 /// The rubrics, in the order of #148, already delivered.
@@ -377,6 +379,8 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let before = (metadata, x_prime);
     let mut comma = state.new_graph_decimal_comma();
     let comma_before = comma;
+    let mut legend_text = state.new_graph_legend_text();
+    let legend_text_before = legend_text.clone();
     form(ui, "preferences_display_new", |rows| {
         rows.section(tr!("preferences-new-workbooks"));
         rows.note(tr!("preferences-new-workbooks-note"));
@@ -393,12 +397,29 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
             tr!("preferences-new-graph-decimal-comma"),
             Some(tr!("preferences-new-graph-decimal-comma", "hint")),
         );
+        rows.row(tr!("preferences-new-graph-legend-text"), |ui| {
+            let options = LegendTextFrom::CHOICES
+                .iter()
+                .filter(|from| **from != LegendTextFrom::Custom)
+                .map(|from| ChoiceOption::new(from.clone(), legend_text_from_label(from)))
+                .collect::<Vec<_>>();
+            choice(
+                ui,
+                "preferences_new_graph_legend_text",
+                &mut legend_text,
+                &options,
+            );
+        });
+        rows.note(tr!("preferences-new-graph-legend-text", "hint"));
     });
     if (metadata, x_prime) != before {
         actions.push(Action::SetWorkbookHeaderDefaults { metadata, x_prime });
     }
     if comma != comma_before {
         actions.push(Action::SetNewGraphDecimalComma(comma));
+    }
+    if legend_text != legend_text_before {
+        actions.push(Action::SetNewGraphLegendText(legend_text));
     }
 }
 

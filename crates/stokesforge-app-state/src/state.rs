@@ -63,8 +63,9 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec, PanelSpec, Panels,
-    PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorBarSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec,
+    PanelSpec, Panels, PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor,
+    TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -1290,6 +1291,9 @@ pub enum Action {
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
+    /// The « Text from » given to the legend of new graphs (#499); the graphs
+    /// that exist keep their own.
+    SetNewGraphLegendText(stokesforge_plot::LegendTextFrom),
     /// The default of "Keep in Results" for the analyses (M5, #148); the choice
     /// of an operation already run is remembered apart.
     SetAnalysisKeepResults(bool),
@@ -1410,6 +1414,21 @@ pub enum Action {
         /// The moved text.
         target: TextTarget,
         /// Its new anchor; `None` puts it back at its default place.
+        anchor: Option<TextAnchor>,
+    },
+    /// Sets the strip size of a colour bar inside the frame (#499): the
+    /// resize handle that was pulled and released. One undo entry
+    /// ([`PlotEditKind::ColorBar`]). A `None` field is left as it is.
+    SetColorBarSize {
+        /// Target graph.
+        graph: NodeId,
+        /// Index of the layer in the graph's panels.
+        panel: usize,
+        /// Strip length in points (bounded by the model).
+        length: Option<f64>,
+        /// Strip thickness in points (bounded by the model).
+        thickness: Option<f64>,
+        /// New anchor of a dragged bar.
         anchor: Option<TextAnchor>,
     },
     /// Sets the font and size of a title or of the legend (issues #77,
@@ -1880,11 +1899,77 @@ fn row_series_name(row: usize) -> String {
     crate::tr!("graph-row-series", number = (row + 1))
 }
 
-/// Displayed name of a series in the list of the properties window: the
-/// same rule as the graph legend, [`stokesforge_core::series_label`] (single
-/// source, issue #25).
-pub fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
-    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree))
+/// Displayed name of a series in the lists (Object Manager, series list of
+/// the properties window): the legend's name ([`series_legend_label`]), or, when
+/// the chosen « Text from » row is empty for the column, a grey fallback that
+/// names the column (#499). The second value is `true` for that fallback, so
+/// the list paints it muted. The decision « empty » stays in
+/// [`stokesforge_core::series_label`] (single source, issue #25); the
+/// legend itself stays empty.
+pub fn series_list_entry(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> (String, bool) {
+    let label = stokesforge_core::series_label(series, tree, text);
+    let shown = crate::figure_texts::series_label_text(&label);
+    let named = matches!(
+        label,
+        stokesforge_core::SeriesLabel::Text(_) | stokesforge_core::SeriesLabel::Template { .. }
+    );
+    // An empty text, or a template that does not compile or shows nothing.
+    if series.row.is_none() && named && shown.trim().is_empty() {
+        let sheet = tree
+            .parent(series.y)
+            .ok()
+            .flatten()
+            .and_then(|id| tree.node(id))
+            .map(|node| node.name().to_string())
+            .unwrap_or_default();
+        let letters = tree.column_letters(series.y).unwrap_or_default();
+        let column = format!("{sheet} {letters}").trim().to_string();
+        return (crate::tr!("graph-series-empty-text", column = column), true);
+    }
+    (shown, false)
+}
+
+/// [`series_list_entry`] without the flag: the text of a list row.
+pub fn series_list_label(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> String {
+    series_list_entry(tree, series, text).0
+}
+
+/// The name the legend shows for a series (empty stays empty), same rule as
+/// the graph legend, [`stokesforge_core::series_label`] (single source, issue
+/// #25). It is what the legend-entry name editor starts from.
+///
+/// `text` is the « Text from » setting of the legend of the panel that holds
+/// the series (#499).
+pub fn series_legend_label(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> String {
+    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree, text))
+}
+
+/// Label of a column in the « Value of column… » picker (#499): the letter
+/// and the Long Name (« A — Wavelength »), the letter alone without a long name.
+pub fn column_letter_name(tree: &Tree, column: NodeId) -> String {
+    let letters = tree.column_letters(column).unwrap_or_default();
+    let long = tree
+        .node(column)
+        .and_then(Node::as_column)
+        .map(|c| c.meta().long_name.clone())
+        .unwrap_or_default();
+    if long.is_empty() {
+        letters
+    } else {
+        format!("{letters} \u{2014} {long}")
+    }
 }
 
 /// Payload of the drag of **whole rows** of a sheet to an open
@@ -2752,6 +2837,8 @@ pub enum PlotTarget {
     Annotation(AnnotationRef),
     /// The legend (frame or entry, issue #53).
     Legend,
+    /// The colour bar (#499).
+    ColorBar,
     /// A graphic object: rectangle, ellipse, line or arrow (issue #76).
     Object(ShapeRef),
 }
@@ -2767,6 +2854,7 @@ impl PlotTarget {
             PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", side = axis.key()),
             PlotTarget::Annotation(_) => tr!("plot-target-text"),
             PlotTarget::Legend => tr!("plot-target-legend"),
+            PlotTarget::ColorBar => tr!("plot-target-color-bar"),
             PlotTarget::Object(_) => tr!("plot-target-object"),
         }
     }
@@ -2780,6 +2868,8 @@ impl PlotTarget {
                 (PlotSettingsTab::PlotArea, None)
             }
             PlotTarget::Legend => (PlotSettingsTab::Legend, None),
+            // The colour bar is a folded section of the Legend tab.
+            PlotTarget::ColorBar => (PlotSettingsTab::Legend, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
             }
@@ -2804,6 +2894,10 @@ pub struct PlotSettings {
     pub tab: PlotSettingsTab,
     /// Axis displayed in the "Axes" tab.
     pub axis: PlotAxis,
+    /// One-shot request: unfold the « Color bar » section of the Legend tab
+    /// and scroll it into view (opened from the bar itself). The page clears
+    /// it once it has done so.
+    pub color_bar_unfold: bool,
 }
 
 /// Edit draft of the graph properties window: a whole
@@ -5623,6 +5717,27 @@ impl AppState {
         self.gesture(Self::commit_plot_edit_in_gesture);
     }
 
+    /// True if `draft` differs from the spec of `graph` in the model by the
+    /// part `same` copies back from the model alone (#499).
+    fn only_differs_by(
+        &self,
+        graph: NodeId,
+        draft: &PlotSpec,
+        same: impl Fn(&mut PanelSpec, &PanelSpec),
+    ) -> bool {
+        let Some(current) = self.plot_spec(graph) else {
+            return false;
+        };
+        if current.panels.len() != draft.panels.len() {
+            return false;
+        }
+        let mut aligned = draft.clone();
+        for (panel, original) in aligned.panels.iter_mut().zip(current.panels.iter()) {
+            same(panel, original);
+        }
+        aligned == current
+    }
+
     fn commit_plot_edit_in_gesture(&mut self) {
         let Some(edit) = self.plot_edit.clone() else {
             return;
@@ -5630,10 +5745,32 @@ impl AppState {
         if self.plot_spec(edit.graph).as_ref() == Some(&edit.spec) {
             return;
         }
-        self.dispatch(Action::SetPlotSpec {
-            graph: edit.graph,
-            spec: edit.spec.clone(),
-        });
+        let kind = if self.only_differs_by(edit.graph, &edit.spec, |panel, original| {
+            panel.legend.text = original.legend.text.clone();
+        }) {
+            // A change of the « Text from » setting alone has its own
+            // history label (#499).
+            Some(PlotEditKind::LegendText)
+        } else if self.only_differs_by(edit.graph, &edit.spec, |panel, original| {
+            panel.color_bar = original.color_bar.clone();
+        }) {
+            // Same for the colour bar alone (#499).
+            Some(PlotEditKind::ColorBar)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            self.execute(Command::EditPlotSpec {
+                graph: edit.graph,
+                spec: edit.spec.clone(),
+                kind,
+            });
+        } else {
+            self.dispatch(Action::SetPlotSpec {
+                graph: edit.graph,
+                spec: edit.spec.clone(),
+            });
+        }
         if let Some(current) = self.plot_edit.as_mut() {
             current.base = edit.spec;
         }
@@ -5921,10 +6058,10 @@ impl AppState {
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.creation_folder(),
                 name: None,
-                spec: PlotSpec {
+                spec: self.with_new_graph_legend(PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
                     ..PlotSpec::empty("")
-                },
+                }),
             }),
             Action::SetFrameSize {
                 graph,
@@ -6467,6 +6604,9 @@ impl AppState {
                     T::Text(TextTarget::Legend { panel }) => {
                         (PlotSettingsTab::Legend, None, panel, None)
                     }
+                    T::Text(TextTarget::ColorBar { panel }) => {
+                        (PlotSettingsTab::Legend, None, panel, None)
+                    }
                     // The address is a field of the layer; the tab is named
                     // where the axis is drawn (#396).
                     T::Text(TextTarget::AxisTitle { panel, side }) => (
@@ -6491,6 +6631,11 @@ impl AppState {
                     _ => (PlotSettingsTab::Graph, None, 0, None),
                 };
                 self.open_plot_settings(graph, tab, axis);
+                if matches!(target, T::Text(TextTarget::ColorBar { .. })) {
+                    if let Some(settings) = self.plot_settings.as_mut() {
+                        settings.color_bar_unfold = true;
+                    }
+                }
                 if let Some(edit) = self.plot_edit.as_mut() {
                     edit.selected_panel = panel;
                     if let Some(series) = series {
@@ -6570,6 +6715,32 @@ impl AppState {
                 target,
                 anchor,
             } => self.edit_annotations(graph, |spec| target.set_anchor(spec, anchor)),
+            Action::SetColorBarSize {
+                graph,
+                panel,
+                length,
+                thickness,
+                anchor,
+            } => self.edit_plot_object(graph, PlotEditKind::ColorBar, |spec| {
+                let Some(bar) = spec
+                    .panels
+                    .get_mut(panel)
+                    .and_then(|panel| panel.color_bar.as_mut())
+                else {
+                    return false;
+                };
+                if let Some(length) = length {
+                    bar.length = ColorBarSpec::clamp_size(Some(length), ColorBarSpec::MIN_LENGTH);
+                }
+                if let Some(thickness) = thickness {
+                    bar.thickness =
+                        ColorBarSpec::clamp_size(Some(thickness), ColorBarSpec::MIN_THICKNESS);
+                }
+                if anchor.is_some() {
+                    bar.anchor = anchor;
+                }
+                true
+            }),
             Action::SetTextFont {
                 graph,
                 target,
@@ -6695,6 +6866,17 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetNewGraphLegendText(from) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_new_graph_legend_text(from)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetNewGraphDecimalComma(comma) => {
                 if let Err(error) = self
                     .object_manager_preferences
@@ -6766,6 +6948,14 @@ impl AppState {
     /// See [`Action::OpenPlotSettings`]. Switching to another graph first
     /// commits the draft of the previous one; a graph that no longer exists (or
     /// is not a graph) leaves everything as it is.
+    /// The Legend page has unfolded the colour bar section as asked: the
+    /// request is spent.
+    pub fn spend_color_bar_unfold(&mut self) {
+        if let Some(settings) = self.plot_settings.as_mut() {
+            settings.color_bar_unfold = false;
+        }
+    }
+
     fn open_plot_settings(&mut self, graph: NodeId, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
         if self.plot_spec(graph).is_none() {
             return;
@@ -6789,6 +6979,7 @@ impl AppState {
             graph,
             tab,
             axis: axis.or(current_axis).unwrap_or(PlotAxis::Bottom),
+            color_bar_unfold: false,
         });
     }
 
@@ -8474,6 +8665,23 @@ impl AppState {
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// « Text from » of the legend of new graphs (#499).
+    pub fn new_graph_legend_text(&self) -> stokesforge_plot::LegendTextFrom {
+        self.object_manager_preferences
+            .new_graph_legend_text()
+            .clone()
+    }
+
+    /// A new graph spec carrying the legend default of the Preferences
+    /// (#499): the setting rides in the creation command itself.
+    fn with_new_graph_legend(&self, mut spec: PlotSpec) -> PlotSpec {
+        let from = self.new_graph_legend_text();
+        for panel in spec.panels.iter_mut() {
+            panel.legend.text.from = from.clone();
+        }
+        spec
     }
 
     /// The default folder of a kind of file dialog, as written in the preferences
@@ -11380,11 +11588,11 @@ impl AppState {
         // The new-graph default of the Preferences rides in the spec of the
         // creation itself: one command, one history step.
         // A fresh layer shows no mirror, so there is nothing to switch off.
-        let spec = PlotSpec {
+        let spec = self.with_new_graph_legend(PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
-        };
+        });
         self.execute(Command::AddGraph {
             parent,
             name: None,
@@ -12032,11 +12240,11 @@ impl AppState {
         };
         let mut panel = PanelSpec::default();
         panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
-        let spec = PlotSpec {
+        let spec = self.with_new_graph_legend(PlotSpec {
             panels: Panels::new(vec![panel]),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
-        };
+        });
         self.execute(Command::AddGraph {
             parent,
             name: None,

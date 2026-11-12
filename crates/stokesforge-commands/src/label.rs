@@ -315,13 +315,17 @@ pub enum PlotEditKind {
     DistributeLayers,
     /// A graph switched between the regular grid and free placement (#398).
     LayerPlacement,
+    /// The « Text from » setting of a legend changed (#499).
+    LegendText,
+    /// The colour bar of a layer edited (#499).
+    ColorBar,
     /// The page of a graph fitted to its layers (#505).
     FitPage,
     /// The layout of a graph fitted to its page (#505, K1).
     FitLayout,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 29] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -347,6 +351,8 @@ impl PlotEditKind {
         Self::MatchLayerSize,
         Self::DistributeLayers,
         Self::LayerPlacement,
+        Self::LegendText,
+        Self::ColorBar,
         Self::FitPage,
         Self::FitLayout,
     ];
@@ -379,6 +385,8 @@ impl std::fmt::Display for PlotEditKind {
             Self::MatchLayerSize => "Match Layer Size",
             Self::DistributeLayers => "Distribute Layers",
             Self::LayerPlacement => "Change Layer Placement",
+            Self::LegendText => "Change Legend Text",
+            Self::ColorBar => "Change Color Bar",
             Self::FitPage => "Fit Page to Layout",
             Self::FitLayout => "Fit Layout to Page",
         })

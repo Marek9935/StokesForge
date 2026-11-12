@@ -181,6 +181,10 @@ pub const TICK_WIDTH: Quantity = Quantity::whole(1.0)
 /// row) gives both bounds back to the data; an emptied field is rejected (#344).
 pub const AXIS_BOUND: Quantity = FREE.with_auto(AutoKind::Group);
 
+/// A typed end of a colour bar segment (#499): a free number, Auto (the
+/// smallest / largest value of the members) when empty.
+pub const COLOR_BAR_BOUND: Quantity = FREE.with_auto(AutoKind::Field);
+
 /// Thickness of a series line, in points: 0 to 20, decimals typed.
 pub const LINE_WIDTH: Quantity = Quantity::real(0.1, 1.0, 2)
     .between(0.0, 20.0)

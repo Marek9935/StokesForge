@@ -117,6 +117,26 @@ system font → Noto Sans Math (fallback). Tests: `formula.rs`
 (`an_areas_font_is_set_in_the_source_with_its_math`), `geometry.rs`
 (`the_font_size_of_a_text_box_changes_its_size`), `stokesforge-render-svg/tests/typst.rs`.
 
+Legend text (#499): the text of each entry is `core::series_label(series, tree,
+&panel.legend.text)`, the single function the legend and the series lists read
+(#25). `LegendText` (`stokesforge-plot/src/legend.rs`) says which header row
+gives it; a typed name still wins; an empty chosen row is an empty entry (only
+the default Long Name source falls back to the short name). A custom template is
+pure Typst that reads string variables (`VARIABLES`, the one table:
+`long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`,
+`x-prime`/`xp`, same names in every language). `template_source` puts a
+preamble of `#let` lines (values as Typst string literals, `typst_string`:
+only `\` and `"` escaped, so they draw literally, #33) before the template; the
+label is `SeriesLabel::Template { markup }` and is drawn with the rich style
+(`Prepared::legend_is_typed`), every other label literally. A broken series
+with a template says only that it is broken. The lists (Object Manager,
+series list) show `formula::plain_text(markup)`, the text of the laid-out page
+(core cannot call Typst), memoized; an empty text or a template that does not
+compile gives the grey fallback of the lists. The Template field is checked
+(`diagnose`) with the preamble. « Custom… » starts from
+`LegendTextFrom::template()` of the previous choice (`LegendText::choose_custom`,
+never over a typed template). A row series ignores the template. compile). Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
+
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the
 whole legend, which can also be moved by dragging it from an entry.
@@ -1241,3 +1261,32 @@ series and object from the tree, including for hidden contents; only one
 kind is selected at a time. Revalidation discards the addresses
 absent from the spec. The properties and the format bars reuse this
 same view in a detached window.
+
+Colour bar, lot 1 (#499 step C): `stokesforge-render/src/color_bar.rs::value_colors(panel)`
+gives the colour each series takes from its value on the layer's bar
+(`ResolvedSeries::value`, read by `core::series_value`); `Prepared::value_color`
+carries it, `Prepared::line()` / `symbol()` hand the painting a `Cow` copy so the
+spec is never changed, and `Prepared::in_legend()` drops a series that has one
+(drawn entries and `entry_ranks` share that predicate). The bar itself is drawn
+in a later lot.
+
+Colour bar, lot 2 (#499 step C): `color_bar::draw` runs after `legend::draw`. Each segment is a rounded bar (a cap and two
+circles per end) whose body is `Rectangle` stripes of 2 points reaching under the next one, never narrower than 3
+(egui draws a rectangle of 2 points or less as a faint line: seams on a scaled figure) (no gradient element in Plotters); the ticks are `scale::format_tick` through the
+epaint measurement, never Typst; the title and the break labels are `formula::rich_style`; a break is a
+drawn triangle (`Polygon`), not a glyph, centred on the gap and touching the bar's top, its tick and value label centred on
+the gap, its label under the bar after the value label, smaller (`BarStyles::small`); ticks leave the bar's edge outwards. Below / Right of the frame the bar owns a **band**
+(`color_bar::band(spec)`, a function of the spec alone, fixed thicknesses) that `CellPlan` adds to the
+gutters on that side: the image grows (and a Fixed figure reports `fixed_overflow`), the frame never
+changes, and `draw_panel` gives the chart `margin_bottom/right(MARGIN + band)` **for every layer of the
+cell** (superimposed layers must keep the same plot area). Those two places force the orientation
+(Below horizontal, Right vertical); corners and a dragged bar (`anchor`, wins over the position) are
+inside the frame and ask no band. In the legacy layout (no stored frame, no padding) nothing is reserved
+and an outside place draws at the bottom right corner. `DrawnText { ColorBar }` serves picking and drag
+exactly like the legend (`TextTarget::ColorBar` has a font of its own (`ColorBarSpec::font`: title, ticks, break labels, measured through the same single measure; the band rows grow with a size above the label size) and no colour, is not listed in
+the Object Manager). Test: `figure_layout.rs` (band), `agreement.rs` (stripes, ticks, labels on both
+backends), `cache_session.rs` (click and drag).
+
+Colour bar, size (#499): `ColorBarSpec::length` / `thickness` (points, `None` = automatic, bounded 20 / 4 to 4000) replace the automatic strip length (inside the frame only: below / right the strip follows the frame, the length is remembered) and `THICK`; `band` and `cross_size` read the thickness, the texts keep their size and are laid out around the strip by the one `draw`. The handles are `bar_resize.rs` of `stokesforge-render-egui` (look and grab radius of `shape_tools`): `color_bar::resize_handles` says which (eight for a dragged bar; the ones facing the frame for a corner bar; one for Below / Right), `color_bar::resized` is the pure arithmetic (bounds, opposite edge fixed for a dragged bar), the gesture is measured on the screen with the scale at the press (the figure grows with the band, so its scale moves during the pull). One `GraphEvent::ColorBarResized` on release becomes `Action::SetColorBarSize`, one `EditPlotSpec(ColorBar)` entry. Tests: `render/src/color_bar.rs` (arithmetic), `cache_session.rs` (gesture), `render-svg/tests/color_bar.rs`, `agreement.rs` (custom size on both backends).
+
+Colour bar, log scale: on a log scale only the curves whose value is <= 0 have no value (they keep their stored colour and the ordinary legend entry); the range and the ticks come from the valid values only.
