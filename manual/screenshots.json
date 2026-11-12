@@ -52,7 +52,7 @@
   {
     "image": "graphs-properties-color-bar.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the series group Kinetics with its On the bar box ticked and its folded Ranges, Chain the segments, the value, scale, placement, ticks and title settings."
+    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the series group Kinetics with its On the bar box ticked and its Range row, Chain the segments, the value, scale, placement, ticks and title settings."
   },
   {
     "image": "graphs-formula-title.png",

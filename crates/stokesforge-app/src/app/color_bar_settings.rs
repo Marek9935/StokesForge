@@ -216,12 +216,6 @@ pub(super) fn color_bar_editor(
     commit
 }
 
-/// True if the « Ranges… » fold of a segment starts open: one of its ends is
-/// typed (#499).
-pub(super) fn ranges_open_by_default(segment: &ColorBarSegment) -> bool {
-    segment.from.is_some() || segment.to.is_some()
-}
-
 /// The groups of the bar that are followed by another one, in graph order
 /// (`order`): each carries the label of the break between the two. None for
 /// the last group on the bar; the label of a group is kept in its segment, so
@@ -239,7 +233,7 @@ pub(super) fn groups_with_a_break(bar: &ColorBarSpec, order: &[u32]) -> Vec<u32>
 }
 
 /// Every series group of the layer, in graph order, each with its « on the
-/// bar » box; under a ticked group its folded ranges; between two ticked
+/// bar » box; under a ticked group its range; between two ticked
 /// groups the label of their break; then the chain option. Draws into any
 /// form, so the block can be moved to another page.
 fn groups_section(
@@ -288,33 +282,25 @@ fn groups_section(
         if on_bar {
             previous = Some(group);
             if let Some(segment) = bar.segments.iter_mut().find(|s| s.group == group) {
-                let open = ranges_open_by_default(segment);
-                let edited = form.collapsible_open(
-                    ("color_bar_ranges", group),
-                    tr!("plot-color-bar-ranges"),
-                    open,
-                    |form| {
-                        form.row(tr!("plot-axes-from"), |ui| {
-                            let first = auto_number_field(
-                                ui,
-                                ("color_bar_from", group),
-                                &mut segment.from,
-                                &quantities::COLOR_BAR_BOUND,
-                                &hint_from,
-                            );
-                            ui.label(tr!("analysis-field-to"));
-                            let second = auto_number_field(
-                                ui,
-                                ("color_bar_to", group),
-                                &mut segment.to,
-                                &quantities::COLOR_BAR_BOUND,
-                                &hint_from,
-                            );
-                            first.changed || second.changed
-                        })
-                    },
-                );
-                *commit |= edited.unwrap_or(false);
+                *commit |= form.row(tr!("plot-color-bar-range"), |ui| {
+                    ui.label(tr!("plot-axes-from"));
+                    let first = auto_number_field(
+                        ui,
+                        ("color_bar_from", group),
+                        &mut segment.from,
+                        &quantities::COLOR_BAR_BOUND,
+                        &hint_from,
+                    );
+                    ui.label(tr!("analysis-field-to"));
+                    let second = auto_number_field(
+                        ui,
+                        ("color_bar_to", group),
+                        &mut segment.to,
+                        &quantities::COLOR_BAR_BOUND,
+                        &hint_from,
+                    );
+                    first.changed || second.changed
+                });
             }
         }
     }

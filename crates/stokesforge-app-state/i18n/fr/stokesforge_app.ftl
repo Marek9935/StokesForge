@@ -1058,7 +1058,7 @@ plot-color-bar-group-break = Étiquette de rupture
     .hint = Texte Typst écrit sous la barre, à droite de la valeur de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
 plot-color-bar-group-on = Sur la barre
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
-plot-color-bar-ranges = Plages…
+plot-color-bar-range = Plage
 plot-color-bar-no-series-groups = Cette couche n’a aucun groupe de séries. Groupez d’abord ses courbes, dans la fenêtre Séries.
 plot-color-bar-chain =
     Enchaîner les segments

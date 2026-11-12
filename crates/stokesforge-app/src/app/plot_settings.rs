@@ -4899,12 +4899,10 @@ mod tests {
     }
 
     /// #499: the break label sits between two ticked groups only (none after
-    /// the last), and the ranges fold opens by itself when an end is typed.
-    /// Witness: a break on every group, or a fold closed over a typed end,
-    /// fails.
+    /// the last). Witness: a break on every group fails.
     #[test]
-    fn breaks_sit_between_ticked_groups_and_ranges_open_when_set() {
-        use super::super::color_bar_settings::{groups_with_a_break, ranges_open_by_default};
+    fn breaks_sit_between_ticked_groups() {
+        use super::super::color_bar_settings::groups_with_a_break;
         use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
         let bar = |groups: &[u32]| ColorBarSpec {
             segments: groups.iter().map(|g| ColorBarSegment::new(*g)).collect(),
@@ -4921,10 +4919,39 @@ mod tests {
         // A free group in the middle does not break the chain of two.
         assert_eq!(groups_with_a_break(&bar(&[3, 1]), &[1, 2, 3]), [1]);
         assert_eq!(groups_with_a_break(&bar(&[1, 2, 3]), &[1, 2, 3]), [1, 2]);
-        let mut segment = ColorBarSegment::new(1);
-        assert!(!ranges_open_by_default(&segment));
-        segment.to = Some(5.0);
-        assert!(ranges_open_by_default(&segment));
+    }
+
+    /// #499: a ticked group always shows its « Range » row (From and to, no
+    /// fold to open), and a typed end reaches the model on Enter, the other
+    /// end staying Auto. Witness: a row folded away fails the lookup, an edit
+    /// that does not reach the segment, or that touches the other end, fails.
+    #[test]
+    fn the_range_row_is_always_shown_and_its_edits_reach_the_model() {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            let template = panel.series[0].clone();
+            panel.series.clear();
+            let mut series = template;
+            series.group = Some(1);
+            panel.series.push(series);
+            let mut segment = ColorBarSegment::new(1);
+            segment.from = Some(2.0);
+            panel.color_bar = Some(ColorBarSpec {
+                visible: true,
+                segments: vec![segment],
+                ..ColorBarSpec::default()
+            });
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-color-bar-range")));
+        assert!(is_painted(&painted, &tr!("common-auto")), "empty end");
+        type_into(&context, &mut harness, "2", "7"); // appended: 27
+        let model = harness.model();
+        let segment = &model.panels[0].color_bar.as_ref().unwrap().segments[0];
+        assert_eq!((segment.from, segment.to), (Some(27.0), None));
     }
 
     /// #499: the section opens by itself when the layer's bar is shown, and

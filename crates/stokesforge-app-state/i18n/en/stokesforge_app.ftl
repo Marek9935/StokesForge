@@ -1059,7 +1059,7 @@ plot-color-bar-group-break = Break label
     .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
 plot-color-bar-group-on = On the bar
     .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
-plot-color-bar-ranges = Ranges…
+plot-color-bar-range = Range
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
 plot-color-bar-chain =
     Chain the segments
