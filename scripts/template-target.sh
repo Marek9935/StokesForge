@@ -14,7 +14,7 @@
 # and never waiting); pending = a refresh asked while one ran.
 #
 # refresh. src/ is synced by content (rsync --checksum --delete), so unchanged sources keep their mtime
-# and cargo rebuilds only what the merge changed. The five commands are exactly the ones the agents
+# and cargo rebuilds only what the merge changed. The four commands are the build steps the agents
 # run (same feature sets), all through the cargo queue shim in the `low` class (2 jobs, last, never in
 # background mode). Their JSON messages list every artifact built or found fresh; scripts/template-sweep.py
 # then deletes the rest of target/ (stale deps, fingerprints, build dirs) and `incremental/`.
@@ -44,10 +44,11 @@ say() { echo "template: $*"; }
 max_kb="${SF_TEMPLATE_MAX_KB:-83886080}"        # 80 GB
 min_free_kb="${SF_TEMPLATE_MIN_FREE_KB:-52428800}"   # 50 GB
 
-# The five refresh commands (cargo arguments), as the agents run them plus the JSON message format.
+# The four refresh commands (cargo arguments), as the agents run them plus the JSON message format.
+# No doc tests: cargo refuses `test --doc --no-run` (#526); rustdoc compiles them when they run,
+# against the library artifacts these commands already build.
 REFRESH_CMDS=(
     "nextest run --workspace --no-run --cargo-message-format json"
-    "test --workspace --doc --no-run --message-format json"
     "clippy --workspace --all-targets --message-format json"
     "build -p stokesforge-app --message-format json"
     "test -p stokesforge-app --release --lib --no-run --message-format json"
@@ -61,7 +62,7 @@ ref() {
     else echo main; fi
 }
 
-build_all() {   # run the five commands; the JSON of each in log/<i>.json
+build_all() {   # run the four commands; the JSON of each in log/<i>.json
     local i=0 c cargo
     cargo="$(shim)"
     rm -rf "$T/log"; mkdir -p "$T/log"

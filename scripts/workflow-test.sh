@@ -916,10 +916,9 @@ EOF
     clog() { cat "$FAKE_LOG" 2> /dev/null || true; }
     calls() { grep -vc ' clean$' "$FAKE_LOG" || true; }
 
-    # Refresh, cold: exactly the five commands, each in the low class, no cargo clean, a stamp.
+    # Refresh, cold: exactly the four commands, each in the low class, no cargo clean, a stamp.
     tt refresh > "$sb/out" 2>&1 || fail "template refresh: $(cat "$sb/out")"
     eq "$(clog)" "low nextest run --workspace --no-run --cargo-message-format json
-low test --workspace --doc --no-run --message-format json
 low clippy --workspace --all-targets --message-format json
 low build -p stokesforge-app --message-format json
 low test -p stokesforge-app --release --lib --no-run --message-format json" "template refresh: the command list (all in the low class)"
@@ -949,11 +948,11 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     echo "rustc 1.99.0" > "$sb/rustc.txt"; : > "$FAKE_LOG"
     tt refresh > "$sb/out" 2>&1 || fail "toolchain refresh: $(cat "$sb/out")"
     eq "$(head -n 1 "$FAKE_LOG")" "none clean" "toolchain changed: clean comes first"
-    eq "$(calls)" 5 "toolchain changed: one rebuild"
+    eq "$(calls)" 4 "toolchain changed: one rebuild"
     : > "$FAKE_LOG"
     SF_TEMPLATE_MAX_KB=1 tt refresh > "$sb/out" 2>&1 || fail "oversize refresh: $(cat "$sb/out")"
     eq "$(grep -c ' clean$' "$FAKE_LOG")" 1 "oversize target: exactly one clean"
-    eq "$(calls)" 10 "oversize target: sweep, clean, one more build"
+    eq "$(calls)" 8 "oversize target: sweep, clean, one more build"
     grep -q 'WARNING: still above' "$sb/out" || fail "oversize after a clean build is not reported"
     : > "$FAKE_LOG"
     SF_TEMPLATE_CARGO="$sb/none" tt refresh > "$sb/out" 2>&1 && fail "refresh without the shim accepted"
@@ -968,7 +967,7 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     [ -e "$T/pending" ] || fail "pending: not written"
     echo go > "$sb/gate"
     wait "$bg" || fail "pending: the first refresh failed: $(cat "$sb/out1")"
-    eq "$(calls)" 10 "pending: a second pass ran"
+    eq "$(calls)" 8 "pending: a second pass ran"
     [ ! -e "$T/pending" ] || fail "pending: left behind"
     unset bg
 
