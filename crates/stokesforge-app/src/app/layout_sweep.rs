@@ -34,12 +34,12 @@ const KNOWN_FAILURES: &[(&str, &str, &str)] = &[
     (
         "graph properties Axes",
         "Afficher les étiquettes de graduation",
-        "bug: fr Axes page, the tick labels checkbox text runs past the dialog edge",
+        "#525: fr Axes page, the tick labels checkbox text runs past the dialog edge",
     ),
     (
         "graph properties Axes",
         "Trait de l'axe, graduations et étiquettes",
-        "bug: fr Axes page, the axis line hint runs past the dialog edge",
+        "#525: fr Axes page, the axis line hint runs past the dialog edge",
     ),
 ];
 
