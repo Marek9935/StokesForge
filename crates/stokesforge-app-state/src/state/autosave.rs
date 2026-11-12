@@ -300,16 +300,16 @@ impl AppState {
         {
             self.autosave_remove_slot();
         }
-        if self.autosave.slot.is_none() {
-            self.autosave.slot =
-                Some(Slot::acquire(&dir, &stem, std::process::id()).map_err(AutosaveError::Dir)?);
-        }
-        let path = self
-            .autosave
-            .slot
-            .as_ref()
-            .map(|slot| slot.path().to_path_buf())
-            .expect("the slot was just taken");
+        let path = match &self.autosave.slot {
+            Some(slot) => slot.path().to_path_buf(),
+            None => {
+                let slot =
+                    Slot::acquire(&dir, &stem, std::process::id()).map_err(AutosaveError::Dir)?;
+                let path = slot.path().to_path_buf();
+                self.autosave.slot = Some(slot);
+                path
+            }
+        };
         Ok(Some(AutosaveJob {
             handle: self.handle.clone(),
             path,

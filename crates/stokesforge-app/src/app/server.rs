@@ -43,7 +43,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -414,6 +414,7 @@ mod tests {
     use super::*;
     use std::path::Path;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::Mutex as StdMutex;
 
     use stokesforge_app_state::state::Action;
     use stokesforge_core::{Column, ColumnFormula, ColumnMeta, FormulaPart, Project};
