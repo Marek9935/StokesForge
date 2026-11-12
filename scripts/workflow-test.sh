@@ -512,6 +512,13 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     mkdir -p "$wt/docs"; echo d > "$wt/docs/d.md"; git -C "$wt" add docs; git -C "$wt" commit -q -m "docs"; stamp
     SHOTS_CONTENT=1 SF_MANUAL_SHOTS="$shots" deliver || fail "docs only: $(cat "$sb/out")"
     [ ! -e "$tmp/shots.log" ] || fail "docs only: the screenshots were regenerated"
+    # Only tests and a non-interface crate changed: the fake is not called.
+    dsb; rm -f "$tmp/shots.log"
+    mkdir -p "$wt/crates/x/tests" "$wt/crates/stokesforge-arch-guard/src"
+    echo t > "$wt/crates/x/tests/t.rs"; echo g > "$wt/crates/stokesforge-arch-guard/src/lib.rs"
+    git -C "$wt" add crates; git -C "$wt" commit -q -m "tests"; stamp
+    SHOTS_CONTENT=1 SF_MANUAL_SHOTS="$shots" deliver || fail "tests only: $(cat "$sb/out")"
+    [ ! -e "$tmp/shots.log" ] || fail "tests only: the screenshots were regenerated"
     # The head moves after the first check (here a commit made while the screenshots run): the check
     # inside the lock refuses it.
     dsb; ui_change; base="$(main_head)"
