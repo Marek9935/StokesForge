@@ -897,13 +897,13 @@ plot-axes-show-gridlines = Afficher le quadrillage
 plot-axes-show-tick-labels = Afficher les étiquettes de graduation
 plot-axes-show-ticks = Afficher les graduations
 plot-axes-show-minor-ticks = Afficher les sous-graduations
-plot-axes-minor-tick-count = Sous-graduations par intervalle
+plot-axes-minor-tick-count = Sous-graduations
     .auto = Auto
     .hint = Nombre de petits tirets entre deux graduations principales. Vide = Auto. Sans effet en échelle logarithmique, qui montre toujours 2 à 9
 plot-axes-ticks-section = Graduations
 
-plot-axes-tick-length = Longueur des grands tirets (px)
-plot-axes-minor-tick-length = Longueur des petits tirets (px)
+plot-axes-tick-length = Grands tirets (px)
+plot-axes-minor-tick-length = Petits tirets (px)
 plot-axes-tick-width = Épaisseur des tirets (pt)
 plot-axes-tick-mark-color = Couleur des tirets
     .auto = Auto (couleur de l'axe)

@@ -56,8 +56,10 @@ the project through `SessionHandle::save` into **a single file per process** of
 and its `.lock` lock), only if the project has changed since the last copy, the
 last save or the start. Neither the history, nor `saved_revision`, nor the
 path, nor the "modified" title moves, and the user's `.stf` is never written.
-The deadline is skipped (and starts again 5 s later) during a macro, a script,
-an import or a recalculation; a write failure gives a single warning. The copy
+The deadline is skipped (and starts again 5 s later, silently) during a macro
+(an open Graph Properties window included, even before its first edit; a
+session refusal `MacroOpen` counts as busy), a script, an import or a
+recalculation; a write failure gives a single warning. The copy
 is deleted on save, on clean close, and for New, Open of another project and
 Discard; a lost session keeps it. At startup (`main`, root window),
 `scan_recovery` lists the copies with no held lock and newer than their `.stf`

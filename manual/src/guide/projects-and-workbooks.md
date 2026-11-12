@@ -47,7 +47,7 @@ StokesForge has no list of recent projects. Use **File ▸ Open…**.
 
 ### Recovery copies
 
-By default, StokesForge writes a recovery copy of your project every 5 minutes while it has unsaved changes. The copy goes to a separate recovery folder. It never overwrites your file.
+By default, StokesForge writes a recovery copy of your project every 5 minutes while it has unsaved changes. The copy goes to a separate recovery folder. It never overwrites your file. While a window such as Graph Properties is open, the copy waits for it to close.
 
 If StokesForge does not close properly (a crash, a power cut), the next start offers the copies that are newer than the saved file in a **Recover Projects** window. For each copy:
 

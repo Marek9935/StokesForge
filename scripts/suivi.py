@@ -713,6 +713,8 @@ def build_status():
     def group_wts(g):
         return sorted(w for m in members.get(g, []) for w in by_issue.get(m["issue"], []))
 
+    answered = {m.get("issue") for m in map(read_json, glob.glob(os.path.join(suivi_dir(), "qcm", "*", "meta.json")))
+                if isinstance(m, dict) and m.get("finished")}
     colours = []
     for c in COLOURS:
         held = [r for r in recs.values() if r.get("colour") == c and held_by(r)]
@@ -735,7 +737,7 @@ def build_status():
             "what": lead.get("what", ""), "waiting": lead.get("waiting", ""), "wait_kind": lead.get("wait_kind", ""),
             **({"line": line_of(recs, lead["issue"])} if line_of(recs, lead["issue"]) != "main" else {}),
             "held_by": why, "agent_idle_min": agent_idle_min(holder) if holder else None,
-            **wait_view(recs, g),
+            **wait_view(recs, g), "qcm_answered": any(m in answered for m in members_of(recs, g)),
             "worktrees": group_wts(g), "since": since, "days": days})
     paused, done = [], []
     for r in recs.values():
