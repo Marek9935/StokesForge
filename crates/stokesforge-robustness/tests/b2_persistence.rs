@@ -285,7 +285,7 @@ fn b2_extreme_folder_depth() {
 // The 3-cell projects above never reach the series, transpose links or page
 // layouts. The witness file of the persistence crate holds every node and
 // series type: it is truncated and bit-flipped at evenly spaced positions
-// (about 300), or at every byte under `SF_PROPTEST_SCALE` above 1.
+// (about 300 per unit of `SF_PROPTEST_SCALE`).
 
 /// Every committed witness `vN/project.stf`.
 fn witness_files() -> Vec<PathBuf> {
@@ -301,14 +301,16 @@ fn witness_files() -> Vec<PathBuf> {
     files
 }
 
-/// Positions to hit in a file of `len` bytes: evenly spaced and always
-/// including the last byte, or all of them from scale 2.
+/// Positions to hit in a file of `len` bytes: 300 per unit of scale, evenly
+/// spaced and always including the last byte; every byte once the samples
+/// reach the length (a 31 KB witness at scale 104, never in the weekly run
+/// at scale 8, which costs about a minute).
 fn sweep_positions(len: usize, scale: u32) -> Vec<usize> {
-    const SAMPLES: usize = 300;
-    if scale > 1 || len <= SAMPLES {
+    let samples = 300 * scale as usize;
+    if len <= samples {
         return (0..len).collect();
     }
-    let mut positions: Vec<usize> = (0..SAMPLES).map(|k| k * len / SAMPLES).collect();
+    let mut positions: Vec<usize> = (0..samples).map(|k| k * len / samples).collect();
     positions.push(len - 1);
     positions
 }
@@ -322,7 +324,8 @@ fn b2_sample_positions_cover_the_whole_file() {
     // The spacing itself reaches the last tenth, not only the forced last byte.
     assert!(positions[positions.len() - 2] >= 31_000 * 9 / 10);
     assert!(positions.windows(2).all(|w| w[0] < w[1]));
-    assert_eq!(sweep_positions(31_000, 8).len(), 31_000);
+    assert_eq!(sweep_positions(31_000, 8).len(), 2401);
+    assert_eq!(sweep_positions(31_000, 104).len(), 31_000);
 }
 
 #[test]

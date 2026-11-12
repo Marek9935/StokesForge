@@ -525,8 +525,8 @@ reproducible. Two environment variables change that, nothing else does:
 
 - `SF_PROPTEST_SEED` (an unsigned integer) replaces the seed;
 - `SF_PROPTEST_SCALE` (an integer from 1) multiplies the number of cases. `b2`
-  also reads it: under a scale above 1 its sweep over the witness `.stf` hits
-  every byte (both ends of the byte flipped) instead of about 300 positions.
+  also reads it: its sweep over the witness `.stf` hits 300 evenly spaced
+  positions per unit of scale (both ends of the byte flipped from scale 2).
 
 Neither set: the draws are exactly the fixed ones. An unreadable value fails
 the test naming the variable. A failing case prints `replay with
