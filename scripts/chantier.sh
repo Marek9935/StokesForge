@@ -66,6 +66,9 @@
 #
 # Template target (#523): a worktree created here gets a copy of the template target of main
 # (scripts/template-target.sh copy; one briefing line says copied or why not; it never fails the run).
+# A rerun on an existing worktree removes the leftover of an interrupted copy (#528; kept while a copy still
+# runs there); only if one was removed and there is no target/, the copy is redone. Other reruns never copy.
+# The copy can wait up to 900 s for a template refresh: run this in the background while one runs.
 #
 # Test seams: SF_ISSUE_LINE_<n> (the declared line of issue <n>), SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
 # `glab issue view` lookup; SF_ISSUES_JSON (a file with the JSON of `glab issue
@@ -419,6 +422,18 @@ ensure_wt() {
         branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || echo '?')"
         if [ "$dry" = 0 ]; then
             colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+            # #528: a rerun removes the leftover of an interrupted template copy (kept while a copy runs there)
+            # and, only then, redoes the copy when the worktree has no target/.
+            local tt stale
+            tt="$(dirname "$0")/template-target.sh"
+            stale="$("$tt" clear-stale "$wt" 2>&1 | tail -n 1 || true)"
+            if [ -n "$stale" ]; then
+                case "$stale" in
+                *removed*) if [ -e "$wt/target" ]; then tnotes+=("#$n: $stale")
+                    else tnotes+=("#$n: leftover of an interrupted copy removed; $("$tt" copy "$wt" 2>&1 | tail -n 1 | sed 's/^template: //' || true)"); fi ;;
+                *) tnotes+=("#$n: $stale") ;;
+                esac
+            fi
         else
             colour="${pcolour:-$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")}" || exit 1
         fi

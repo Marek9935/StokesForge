@@ -1021,6 +1021,29 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     mkdir -p "$sb/wt5"; SF_TEMPLATE_DIR="$sb/nothing" tt copy "$sb/wt5" > "$sb/out" 2>&1 || fail "no template: $(cat "$sb/out")"
     grep -q 'none yet' "$sb/out" && [ ! -e "$sb/wt5/target" ] || fail "no template message: $(cat "$sb/out")"
 
+    # Interrupted copy (#528). 1: a leftover with no lock holder is removed, then the copy happens.
+    mkdir -p "$sb/wt8/.target-copying"; echo junk > "$sb/wt8/.target-copying/junk"
+    tt copy "$sb/wt8" > "$sb/out" 2>&1 || fail "leftover copy: $(cat "$sb/out")"
+    [ -f "$sb/wt8/target/debug/deps/libfoo-0123456789abcdef.rlib" ] && [ ! -e "$sb/wt8/target/junk" ] && [ ! -e "$sb/wt8/.target-copying" ] || fail "leftover copy: $(cat "$sb/out")"
+    # 2: a copy still running (flock on the folder) is never deleted; the copy says why and exits 0.
+    mkdir -p "$sb/wt9/.target-copying"; echo mine > "$sb/wt9/.target-copying/mine"; rm -f "$sb/held3"
+    flock -x "$sb/wt9/.target-copying" bash -c "echo held > '$sb/held3'; cat '$sb/gate' > /dev/null" &
+    bg=$!
+    "$here/wait-for.sh" "$sb/held3" held 30 > /dev/null || fail "folder lock holder never started"
+    tt copy "$sb/wt9" > "$sb/out" 2>&1 || fail "copy over a running copy: $(cat "$sb/out")"
+    grep -q 'a copy is still running there' "$sb/out" && [ -f "$sb/wt9/.target-copying/mine" ] && [ ! -e "$sb/wt9/target" ] || fail "copy over a running copy: $(cat "$sb/out")"
+    echo go > "$sb/gate"; wait "$bg"; unset bg
+    # 8: SIGTERM during the copy removes the half-done folder at once.
+    mkdir -p "$sb/fakecp" "$sb/wt10"
+    printf '#!/usr/bin/env bash\necho started > "%s/cpstarted"\nexec cat "%s/gate" > /dev/null\n' "$sb" "$sb" > "$sb/fakecp/cp"; chmod +x "$sb/fakecp/cp"
+    rm -f "$sb/cpstarted"
+    PATH="$sb/fakecp:$PATH" "$here/template-target.sh" copy "$sb/wt10" > "$sb/out" 2>&1 &
+    bg=$!
+    "$here/wait-for.sh" "$sb/cpstarted" started 30 > /dev/null || fail "trap: the copy never started"
+    [ -d "$sb/wt10/.target-copying" ] || fail "trap: no copying folder"
+    kill -TERM "$bg"; wait "$bg" || true; unset bg
+    [ ! -e "$sb/wt10/.target-copying" ] && [ ! -e "$sb/wt10/target" ] || fail "trap: the half-done folder is still there"
+
     # chantier.sh: the briefing says it; a rerun on an existing worktree copies nothing; --dry-run copies nothing.
     chant() { ( cd "$sb/StokesForge" && "$here/chantier.sh" "$@" ); }
     export SF_ISSUE_TITLE="Template copy"
@@ -1033,6 +1056,21 @@ low test -p stokesforge-app --release --lib --no-run --message-format json" "tem
     chant 21 > "$sb/out" 2>&1 || fail "chantier rerun: $(cat "$sb/out")"
     [ ! -e "$sb/_stokesforge/feature21/target" ] || fail "chantier rerun copied into an existing worktree"
     [ "$(wc -l < "$sb/out")" -le 30 ] || fail "briefing too long with the build cache line"
+    # 5: a normal rerun (target/ present, no leftover) still copies nothing (above). 3: a leftover and no target/.
+    mkdir -p "$sb/_stokesforge/feature21/.target-copying"; echo junk > "$sb/_stokesforge/feature21/.target-copying/junk"
+    chant 21 > "$sb/out" 2>&1 || fail "chantier rerun with a leftover: $(cat "$sb/out")"
+    [ ! -e "$sb/_stokesforge/feature21/.target-copying" ] && [ -f "$sb/_stokesforge/feature21/target/debug/deps/libfoo-0123456789abcdef.rlib" ] || fail "rerun with a leftover: not cleaned or not copied: $(cat "$sb/out")"
+    grep -q '^Build cache #21: leftover of an interrupted copy removed; copied' "$sb/out" || fail "rerun with a leftover: briefing lines: $(cat "$sb/out")"
+    [ "$(wc -l < "$sb/out")" -le 30 ] || fail "briefing too long with the leftover lines"
+    # 4: the same rerun with the folder locked keeps it, says so, copies nothing.
+    rm -rf "$sb/_stokesforge/feature21/target"; mkdir -p "$sb/_stokesforge/feature21/.target-copying"; rm -f "$sb/held4"
+    flock -x "$sb/_stokesforge/feature21/.target-copying" bash -c "echo held > '$sb/held4'; cat '$sb/gate' > /dev/null" &
+    bg=$!
+    "$here/wait-for.sh" "$sb/held4" held 30 > /dev/null || fail "rerun lock holder never started"
+    chant 21 > "$sb/out" 2>&1 || fail "chantier rerun with a running copy: $(cat "$sb/out")"
+    echo go > "$sb/gate"; wait "$bg"; unset bg
+    [ -d "$sb/_stokesforge/feature21/.target-copying" ] && [ ! -e "$sb/_stokesforge/feature21/target" ] && grep -q '^Build cache #21: template: kept .*a copy is still running' "$sb/out" || fail "rerun with a running copy: $(cat "$sb/out")"
+    rm -rf "$sb/_stokesforge/feature21/.target-copying"
     unset SF_ISSUE_TITLE
 
     # Prune: paused 3 days or more lose incremental and release; deps stay; held, line, recordless and
@@ -1063,6 +1101,19 @@ JSON
         [ -f "$w/$k/target/release/r" ] && [ -f "$w/$k/target/debug/incremental/i" ] || fail "prune touched $k"
     done
     grep -q 'kept feature34' "$sb/out" || fail "prune: the busy worktree is not reported: $(cat "$sb/out")"
+    # 6: the weekly sweep removes the leftover of a paused worktree; a locked one is kept.
+    mkdir -p "$w/feature31/.target-copying" "$w/feature32/.target-copying"; rm -f "$sb/held5"
+    flock -x "$w/feature32/.target-copying" bash -c "echo held > '$sb/held5'; cat '$sb/gate' > /dev/null" &
+    bg=$!
+    "$here/wait-for.sh" "$sb/held5" held 30 > /dev/null || fail "sweep lock holder never started"
+    tt status > "$sb/out3" 2>&1 || true     # 9: status lists a leftover
+    grep -q "leftover of an interrupted copy: .*feature31" "$sb/out3" || fail "status shows no leftover: $(cat "$sb/out3")"
+    SF_TEMPLATE_STATUS_JSON="$sb/status.json" tt weekly > "$sb/out" 2>&1 || fail "weekly: $(cat "$sb/out")"
+    tt status > "$sb/out2" 2>&1 || true
+    echo go > "$sb/gate"; wait "$bg"
+    [ ! -e "$w/feature31/.target-copying" ] && [ -d "$w/feature32/.target-copying" ] || fail "weekly sweep: $(cat "$sb/out")"
+    grep -q "copy running: .*feature32" "$sb/out2" || fail "status: running copy not shown: $(cat "$sb/out2")"
+    rm -rf "$w/feature32/.target-copying"
     unset bg
 )
 
@@ -1140,6 +1191,13 @@ touch "$tas/untracked"
 ta || fail "test-all: untracked file, exit code"
 [ ! -e "$tstamp" ] || fail "test-all: a tree with an untracked file got a stamp"
 rm "$tas/untracked"
+# 7: .target-copying is ignored by git (the repo's real .gitignore), so a leftover never blocks the stamp.
+cp "$here/../.gitignore" "$tas/.gitignore"; git -C "$tas" add .gitignore; git -C "$tas" commit -q -m ignore
+tstamp="$tas/.git/sf-tested/$(git -C "$tas" rev-parse HEAD)"
+mkdir -p "$tas/.target-copying"; echo x > "$tas/.target-copying/x"
+ta || fail "test-all: leftover copy folder, exit code"
+[ -e "$tstamp" ] || fail "test-all: a leftover .target-copying blocked the stamp"
+rm -rf "$tas/.target-copying"
 # Old stamps are pruned, recent ones kept.
 mkdir -p "$tas/.git/sf-tested"; : > "$tas/.git/sf-tested/old"; : > "$tas/.git/sf-tested/recent"
 touch -d '40 days ago' "$tas/.git/sf-tested/old"

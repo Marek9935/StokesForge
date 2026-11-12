@@ -145,4 +145,6 @@ scripts/template-target.sh refresh                   # first template, about 50 
 scripts/template-timer-install.sh                    # weekly prune of paused worktrees and size check
 ```
 
+`chantier.sh` may wait up to 900 s for the template lock while a refresh runs (`SF_TEMPLATE_WAIT_S`): run it in the background then, since the 10-minute Bash cap killing the copy is the usual cause of a leftover `.target-copying/` (#528). That folder is ignored by git; a rerun of `chantier.sh`, the next copy and the weekly prune remove it unless a copy still holds its lock; `template-target.sh status` reports it.
+
 After that `deliver.sh` refreshes the template by itself at every merge to `main`. `scripts/template-target.sh status` shows commit, size and whether a refresh runs.
