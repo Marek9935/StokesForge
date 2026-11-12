@@ -8213,6 +8213,50 @@ fn plot_rows_and_empty_graph_names() {
     assert!(!name.contains(" plot"), "{name}");
 }
 
+/// #507, D6: a graph created by `AddGraph`, `PlotColumns` or `PlotRows` has no
+/// legend frame, while a graph that is loaded keeps its own (the model
+/// default is the frame). Witness: a creation path that forgets
+/// `with_new_graph_legend` leaves the frame on.
+#[test]
+fn new_graphs_have_no_legend_frame() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    let last = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    let frames = |state: &AppState| {
+        state
+            .plot_spec(last(state))
+            .unwrap()
+            .panels
+            .iter()
+            .map(|panel| panel.legend.frame)
+            .collect::<Vec<_>>()
+    };
+    state.dispatch(Action::AddGraph);
+    assert_eq!(frames(&state), [false]);
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns,
+        plot_type: PlotType::Line,
+    });
+    assert!(frames(&state).iter().all(|frame| !frame));
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert!(frames(&state).iter().all(|frame| !frame));
+    // The model default is still today's look: a spec that did not go
+    // through a creation path keeps its frame.
+    assert!(stokesforge_plot::LegendSpec::default().frame);
+}
+
 /// Plot of a row selection (#166): a fresh graph where each row is
 /// a series, not all the columns crossed; a single undo step.
 #[test]
@@ -8584,6 +8628,97 @@ fn changing_the_legend_text_source_is_one_undo_step() {
     assert_eq!(state.undo_label(), label_before, "a single history entry");
 }
 
+/// #507: the size set with the format toolbar (`Action::SetTextFont` on the
+/// legend) is what the Legend tab's draft holds when the window opens, and a
+/// size set while the window is open reaches the draft too (an untouched draft
+/// follows the model). Witness: a tab that kept its own copy of the font shows
+/// the old size.
+#[test]
+fn the_toolbar_font_size_of_the_legend_is_the_tab_value() {
+    use stokesforge_plot::{TextFont, TextTarget};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let font = |size| TextFont {
+        family: "Noto Sans".into(),
+        size: Some(size),
+        ..TextFont::default()
+    };
+    state.dispatch(Action::SetTextFont {
+        graph,
+        target: TextTarget::Legend { panel: 0 },
+        font: font(20.0),
+    });
+    state.dispatch(PlotTarget::Legend.open_settings(graph));
+    let shown = |state: &AppState| {
+        state.plot_edit().unwrap().spec.panels[0]
+            .legend
+            .font
+            .clone()
+    };
+    assert_eq!(shown(&state).size, Some(20.0));
+    assert_eq!(shown(&state).family, "Noto Sans");
+
+    state.dispatch(Action::SetTextFont {
+        graph,
+        target: TextTarget::Legend { panel: 0 },
+        font: font(24.0),
+    });
+    state.begin_plot_edit(graph);
+    assert_eq!(shown(&state).size, Some(24.0));
+}
+
+/// #507: several edits of the Legend tab (font, frame, columns, spacing) are
+/// one history entry, and the committed values reach the model. Witness: one
+/// entry per commit (the first Undo leaves the later edits), or a setting the
+/// commit drops.
+#[test]
+fn several_legend_tab_edits_are_one_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    let label_before = state.undo_label();
+
+    state.dispatch(PlotTarget::Legend.open_settings(graph));
+    let edit_legend = |state: &mut AppState, apply: &dyn Fn(&mut stokesforge_plot::LegendSpec)| {
+        let edit = state.plot_edit_mut().expect("draft");
+        apply(&mut edit.spec.panels.get_mut(0).expect("panel").legend);
+        state.commit_plot_edit();
+    };
+    edit_legend(&mut state, &|legend| legend.font.size = Some(20.0));
+    edit_legend(&mut state, &|legend| {
+        legend.frame = false;
+        legend.frame_color = "#ff0000".into();
+        legend.frame_width = Some(2.0);
+        legend.background = "#ffffff80".into();
+    });
+    edit_legend(&mut state, &|legend| {
+        legend.columns = 2;
+        legend.row_gap = Some(6.0);
+        legend.column_gap = Some(20.0);
+        legend.swatch_length = Some(40.0);
+    });
+    state.close_plot_settings();
+
+    let legend = state.plot_spec(graph).expect("spec").panels[0]
+        .legend
+        .clone();
+    assert_eq!(legend.font.size, Some(20.0));
+    assert!(!legend.frame);
+    assert_eq!(legend.frame_color, "#ff0000");
+    assert_eq!(legend.frame_width_pt(), 2.0);
+    assert_eq!(legend.background, "#ffffff80");
+    assert_eq!(legend.column_count(), 2);
+    assert_eq!(legend.row_gap_pt(), 6.0);
+    assert_eq!(legend.column_gap_pt(), 20.0);
+    assert_eq!(legend.swatch_length_pt(), 40.0);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
 /// #499 step C: editing the colour bar in Graph Properties is one history
 /// entry, and one Undo brings back the graph without a bar. Witness: a bar
 /// edit that is not part of the committed draft (or one entry per field)
@@ -8662,15 +8797,17 @@ fn resizing_the_color_bar_is_one_bounded_undo_step() {
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     let mut spec = state.plot_spec(graph).expect("spec");
-    spec.panels.get_mut(0).expect("panel").color_bar = Some(ColorBarSpec {
+    let panel = spec.panels.get_mut(0).expect("panel");
+    panel.color_bar = Some(ColorBarSpec {
         segments: vec![ColorBarSegment::new(1)],
         position: ColorBarPosition::BottomRight,
-        font: TextFont {
-            size: Some(17.0),
-            ..TextFont::default()
-        },
         ..ColorBarSpec::default()
     });
+    // The bar's font is the legend's (#507): resizing leaves it alone.
+    panel.legend.font = TextFont {
+        size: Some(17.0),
+        ..TextFont::default()
+    };
     state.dispatch(Action::SetPlotSpec { graph, spec });
     let before = state.plot_spec(graph).expect("spec");
     let bar = |state: &AppState| {
@@ -8690,7 +8827,14 @@ fn resizing_the_color_bar_is_one_bounded_undo_step() {
     let resized = bar(&state);
     assert_eq!(resized.length, Some(ColorBarSpec::MIN_LENGTH), "bounded");
     assert_eq!(resized.thickness, Some(30.0));
-    assert_eq!(resized.font.size, Some(17.0), "the font is not resized");
+    assert_eq!(
+        state.plot_spec(graph).expect("spec").panels[0]
+            .legend
+            .font
+            .size,
+        Some(17.0),
+        "the font is not resized"
+    );
     assert_eq!(
         state.snapshot().history.undo_label,
         Some(HistoryLabel::EditPlotSpec(PlotEditKind::ColorBar))

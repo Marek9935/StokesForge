@@ -195,21 +195,27 @@ fn font_sizes(document: &str) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
-/// The bar's own font (title, ticks): size 30 in the bar reaches the SVG,
-/// the default bar has no such size. Witness: a bar font not read leaves 24.19 (30 scaled)
+/// #507, D7: the bar shares the font of the legend (title, ticks). The legend
+/// is hidden so that only the bar can carry the size: size 30 in the legend
+/// font reaches the bar's texts in the SVG, the default font has no such
+/// size. Witness: a bar that ignores the legend font leaves 24.19 (30 scaled)
 /// out.
 #[test]
-fn the_bar_font_size_reaches_the_export() {
-    let mut project = Project::new("Bar").expect("project");
-    let mut big = bar();
-    big.font.size = Some(30.0);
-    big.title = "Time".to_string();
-    let spec = spec_with(&mut project, Some(big), &[0.0, 57.0]);
-    let sized = font_sizes(&export(&spec, &project));
-    assert!(
-        sized.iter().any(|size| size.starts_with("24.19")),
-        "{sized:?}"
-    );
+fn the_bar_uses_the_legend_font_in_the_export() {
+    let big_documents = |title: &str| {
+        let mut project = Project::new("Bar").expect("project");
+        let mut big = bar();
+        big.title = title.to_string();
+        let mut spec = spec_with(&mut project, Some(big), &[0.0, 57.0]);
+        let panel = spec.panels.get_mut(0).expect("panel");
+        panel.legend.visible = false;
+        panel.legend.font.size = Some(30.0);
+        export(&spec, &project)
+    };
+    let count = |document: &str| document.matches("FONT-SIZE=\"24.19").count();
+    let (titled, untitled) = (big_documents("Time"), big_documents(""));
+    assert!(count(&untitled) > 0, "the ticks");
+    assert!(count(&titled) > count(&untitled), "the title too");
     let mut other = Project::new("Default").expect("project");
     let plain = spec_with(&mut other, Some(bar()), &[0.0, 57.0]);
     assert!(!font_sizes(&export(&plain, &other))

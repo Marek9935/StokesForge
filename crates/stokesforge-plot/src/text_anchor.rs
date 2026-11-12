@@ -238,14 +238,12 @@ impl TextTarget {
                 .legend
                 .font
                 .clone(),
-            // The bar's own texts (title, ticks, break labels).
-            Self::ColorBar { .. } => spec
-                .panels
-                .get(self.panel_index(spec)?)?
-                .color_bar
-                .as_ref()?
-                .font
-                .clone(),
+            // The bar shares the legend's font (#507, D7).
+            Self::ColorBar { .. } => {
+                let panel = spec.panels.get(self.panel_index(spec)?)?;
+                panel.color_bar.as_ref()?;
+                panel.legend.font.clone()
+            }
         })
     }
 
@@ -267,10 +265,12 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_font = font,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_font = font,
             Self::Legend { .. } => panel.legend.font = font,
-            Self::ColorBar { .. } => match panel.color_bar.as_mut() {
-                Some(bar) => bar.font = font,
-                None => return false,
-            },
+            Self::ColorBar { .. } => {
+                if panel.color_bar.is_none() {
+                    return false;
+                }
+                panel.legend.font = font;
+            }
         }
         true
     }
@@ -459,8 +459,8 @@ mod tests {
         assert_eq!(spec.reset_text_anchors(), 0);
     }
 
-    /// #499: the bar's font is set and read like the legend's; without a bar
-    /// there is nothing to set. Witness: `set_font` returning false for the bar.
+    /// #507 (D7): the bar's font is the legend's; without a bar there is
+    /// nothing to set. Witness: the bar writing a font of its own.
     #[test]
     fn the_color_bar_font_is_set_and_read() {
         let mut spec = PlotSpec::empty("T");
@@ -473,7 +473,15 @@ mod tests {
         spec.panels.get_mut(0).expect("panel").color_bar = Some(crate::ColorBarSpec::default());
         assert_eq!(bar.font(&spec), Some(crate::TextFont::default()));
         assert!(bar.set_font(&mut spec, font.clone()));
-        assert_eq!(bar.font(&spec), Some(font));
+        assert_eq!(bar.font(&spec), Some(font.clone()));
+        assert_eq!(spec.panels[0].legend.font, font);
+        let legend = TextTarget::Legend { panel: 0 };
+        let other = crate::TextFont {
+            size: Some(9.0),
+            ..Default::default()
+        };
+        assert!(legend.set_font(&mut spec, other.clone()));
+        assert_eq!(bar.font(&spec), Some(other));
     }
 
     #[test]

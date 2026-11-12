@@ -119,6 +119,8 @@ fn exact_spec_stable_export_and_style_witness() {
     panel.bottom.range_min = Some(1.);
     panel.bottom.range_max = Some(10.);
     panel.left.label = "$I$".into();
+    // A new graph has no legend frame (#507, D6).
+    panel.legend.frame = false;
     // A graph created by a script is explicit (#394): the frames of the
     // 480 x 360 pt figure, the title band inside.
     let legacy = layout_of(&expected);

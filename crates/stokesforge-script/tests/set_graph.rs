@@ -122,6 +122,53 @@ fn set_graph_sets_the_graph_and_the_panel() {
     );
 }
 
+/// #507: the legend box keys set the spec (lengths in points) and the bounds
+/// refuse what the model could not draw, leaving the graph untouched.
+/// Witness: a key not applied, or a bound that lets a zero column through.
+#[test]
+fn set_graph_sets_the_legend_box_and_refuses_out_of_range_values() {
+    let b = bench();
+    run(&b, GRAPH);
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), legend_frame=False, legend_frame_color='#112233',\n\
+             legend_frame_width=2.5, legend_background='#ffee0080', legend_columns=3,\n\
+             legend_row_gap=7, legend_column_gap=20.5, legend_swatch_length=41)",
+    );
+    let legend = &graph_spec(&b).panels[0].legend;
+    assert!(!legend.frame);
+    assert_eq!(legend.frame_color, "#112233");
+    assert_eq!(legend.frame_width, Some(2.5));
+    assert_eq!(legend.background, "#ffee0080");
+    assert_eq!(legend.columns, 3);
+    assert_eq!(legend.row_gap, Some(7.0));
+    assert_eq!(legend.column_gap, Some(20.5));
+    assert_eq!(legend.swatch_length, Some(41.0));
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), legend_frame_color='', legend_background='')",
+    );
+    let legend = &graph_spec(&b).panels[0].legend;
+    assert!(legend.frame_color.is_empty() && legend.background.is_empty());
+
+    let before = graph_spec(&b);
+    for body in [
+        "pyst.set_graph(g, legend_columns=0)",
+        "pyst.set_graph(g, legend_columns=-2)",
+        "pyst.set_graph(g, legend_columns=2.5)",
+        "pyst.set_graph(g, legend_row_gap=-1)",
+        "pyst.set_graph(g, legend_column_gap=float('nan'))",
+        "pyst.set_graph(g, legend_column_gap=float('inf'))",
+        "pyst.set_graph(g, legend_swatch_length=1)",
+        "pyst.set_graph(g, legend_frame_width=0)",
+        "pyst.set_graph(g, legend_frame='yes')",
+        "pyst.set_graph(g, legend_background='red')",
+    ] {
+        refused(&b, body);
+    }
+    assert_eq!(graph_spec(&b), before);
+}
+
 #[test]
 fn set_graph_leaves_absent_keys_alone_and_targets_the_right_axis() {
     let b = bench();

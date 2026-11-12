@@ -1500,3 +1500,36 @@ fn the_screen_and_the_export_agree_on_a_custom_bar_size() {
     let default = |p: &&Primitive| matches!(p, Primitive::Rect((_, y0), (_, y1)) if y1 - y0 == 12);
     assert!(primitives.iter().filter(default).count() < 20);
 }
+
+// -- #507: the legend box --
+
+/// Every box setting non-default (hidden frame colour and thickness aside,
+/// the frame shown thick and red, a translucent background, two columns,
+/// other gaps and a long thumbnail): the screen and the export draw the same
+/// figure, and it is not the default one. Witness: a setting read by one
+/// backend only breaks `agree`; one read by neither leaves the figure equal to
+/// the default one.
+#[test]
+fn the_screen_and_the_export_agree_on_a_non_default_legend_box() {
+    let default = realistic();
+    let (plain, _) = agree(
+        default.project.tree(),
+        &default.spec,
+        LARGE,
+        "default legend",
+    );
+    let mut boxed = realistic();
+    for panel in boxed.spec.panels.iter_mut() {
+        let legend = &mut panel.legend;
+        legend.frame = true;
+        legend.frame_color = "#cc0000".to_string();
+        legend.frame_width = Some(3.0);
+        legend.background = "#ffee0080".to_string();
+        legend.columns = 2;
+        legend.row_gap = Some(9.0);
+        legend.column_gap = Some(25.0);
+        legend.swatch_length = Some(44.0);
+    }
+    let (changed, _) = agree(boxed.project.tree(), &boxed.spec, LARGE, "boxed legend");
+    assert_ne!(plain, changed, "the settings change nothing");
+}

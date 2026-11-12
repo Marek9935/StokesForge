@@ -153,7 +153,7 @@ menu-graph-axes = Axes…
 menu-graph-series = Séries…
     .hint = Modifie le type de tracé, le trait et le symbole de chaque série
 menu-graph-legend = Légende…
-    .hint = Modifie l'affichage et la position de la légende
+    .hint = Modifie le texte, la police, le cadre, le fond et la disposition de la légende
 menu-graph-theme = Thème…
     .hint = Modifie les couleurs globales et applique des thèmes prédéfinis
 menu-graph-png-resolution = Résolution PNG
@@ -1056,6 +1056,19 @@ plot-legend-row-text = Série de ligne
 plot-legend-row-number = Numéro de ligne
 plot-legend-row-column-value = Valeur de la colonne…
 plot-legend-row-column = Colonne
+plot-legend-position-dragged = Déplacée
+plot-legend-text-section = Texte
+plot-legend-frame-section = Cadre
+plot-legend-frame-show = Afficher le cadre
+plot-legend-frame-color = Couleur du cadre
+    .auto = Auto (couleur du texte)
+plot-legend-frame-width = Épaisseur du cadre (pt)
+plot-legend-background-auto = Auto (fond du calque)
+plot-legend-layout-section = Disposition
+plot-legend-columns = Colonnes
+plot-legend-row-gap = Espace entre les lignes (pt)
+plot-legend-column-gap = Espace entre les colonnes (pt)
+plot-legend-swatch-length = Longueur de l'échantillon de trait (pt)
 
 # Onglet Barre de couleurs (#499)
 
@@ -2092,6 +2105,7 @@ disabled-color-invalid = Saisissez d'abord une couleur valide
 disabled-gradient-min-colors = Un dégradé a besoin d'au moins deux couleurs
 disabled-mirror-off = Activez d'abord l'axe miroir
 disabled-ticks-off = Affichez d'abord les graduations
+disabled-legend-frame-off = Affichez d'abord le cadre
 disabled-minor-ticks-off = Affichez d'abord les sous-graduations
 disabled-analysis-issues = Corrigez d'abord le problème signalé dans le formulaire
 

@@ -512,6 +512,7 @@ pub fn series_swatch(tree: &Tree, spec: &stokesforge_plot::SeriesSpec, rect: Rec
         broken,
         bars,
         (0, rect.height() as i32 / 2),
+        stokesforge_render::legend::KEY_WIDTH,
         stokesforge_render::paint::INK,
     );
     drop(area);
@@ -1317,7 +1318,8 @@ impl GraphView {
 
     /// Where the legend line of series `series` (rank in
     /// `PanelSpec::series`) of layer `panel` is drawn on screen: center and
-    /// size of the line, over the whole width of the frame.
+    /// size of the entry's cell (the whole width of the frame for a lone
+    /// column, one column's share otherwise, #507).
     pub fn legend_entry_screen_box(
         &self,
         panel: usize,
@@ -1329,7 +1331,7 @@ impl GraphView {
             .panels
             .iter()
             .find(|drawn| drawn.index == panel)?;
-        let frame = panel
+        panel
             .texts
             .iter()
             .find(|text| matches!(text.target, TextTarget::Legend { .. }))?;
@@ -1338,8 +1340,8 @@ impl GraphView {
             .iter()
             .find(|line| line.series == series)?;
         self.figure_box_to_screen(
-            (frame.center.0, line.center_y),
-            (frame.size.0, line.height.round() as u32),
+            (line.center_x, line.center_y),
+            (line.width.round() as u32, line.height.round() as u32),
         )
     }
 

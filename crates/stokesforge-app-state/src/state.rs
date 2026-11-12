@@ -8675,11 +8675,13 @@ impl AppState {
     }
 
     /// A new graph spec carrying the legend default of the Preferences
-    /// (#499): the setting rides in the creation command itself.
+    /// (#499): the setting rides in the creation command itself. A new graph
+    /// also has no legend frame (#507, D6); an opened file keeps its own.
     fn with_new_graph_legend(&self, mut spec: PlotSpec) -> PlotSpec {
         let from = self.new_graph_legend_text();
         for panel in spec.panels.iter_mut() {
             panel.legend.text.from = from.clone();
+            panel.legend.frame = false;
         }
         spec
     }

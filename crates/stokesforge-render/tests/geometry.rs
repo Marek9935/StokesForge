@@ -1024,3 +1024,162 @@ fn a_colour_bar_replaces_its_groups_entries_and_keeps_the_ranks_of_the_others() 
     );
     assert_eq!(panel.legend_entries, 2);
 }
+
+// ---- Legend box (#507) -------------------------------------------------
+
+/// A graph of `n` curves, the legend adjusted by `adjust`; returns the frame
+/// `(width, height)` and the cells of the entries.
+fn legend_box(
+    n: usize,
+    adjust: impl Fn(&mut stokesforge_plot::LegendSpec) + 'static,
+) -> ((u32, u32), Vec<stokesforge_render::DrawnLegendRow>) {
+    let mut columns = vec![("X", vec![0.0, 1.0, 2.0])];
+    let names = ["A", "B", "C", "D", "E", "F"];
+    for name in names.iter().take(n) {
+        columns.push((name, vec![10.0, 20.0, 30.0]));
+    }
+    let drawn = geometry(&columns, move |ids| {
+        let mut panel = PanelSpec::at(0, 0);
+        for index in 0..n {
+            panel
+                .series
+                .push(SeriesSpec::new_xy(ids[0], ids[index + 1]));
+        }
+        adjust(&mut panel.legend);
+        PlotSpec::empty("Test").with_panels(panel)
+    });
+    let panel = drawn.panel(0).expect("panel");
+    let frame = panel
+        .texts
+        .iter()
+        .find(|text| matches!(text.target, stokesforge_plot::TextTarget::Legend { .. }))
+        .expect("legend");
+    (frame.size, panel.legend_rows.clone())
+}
+
+/// The default legend keeps today's formula: padding 6 around, a row per
+/// entry, 4 between rows, a thumbnail of 26 and a gap of 6 before the text.
+/// Witness: any default constant that moves changes the height or the width
+/// gap with the swatch.
+#[test]
+fn the_default_legend_box_keeps_todays_formula() {
+    let (size, rows) = legend_box(3, |_| {});
+    let height = rows[0].height as u32;
+    assert_eq!(size.1, 6 * 2 + 3 * height + 2 * 4);
+    // A lone column: each cell spans the whole frame.
+    assert!(rows.iter().all(|row| row.width == size.0 as f64));
+    // Row pitch = row height + the default gap.
+    assert_eq!(rows[1].center_y - rows[0].center_y, (height + 4) as f64);
+    // The text is placed after the 26 + 6 of the thumbnail: widening the
+    // swatch by 24 widens the frame by 24 (a swatch of 50, test below).
+    let (wide, _) = legend_box(3, |legend| legend.swatch_length = Some(50.0));
+    assert_eq!(wide.0, size.0 + 24);
+    assert_eq!(wide.1, size.1);
+}
+
+/// 3 entries on 2 columns fill down first (D2): A, B in the first column, C
+/// alone in the second, at the height of A. The cells cut the frame in two.
+/// Witness: a row-major fill puts B beside A.
+#[test]
+fn three_entries_on_two_columns_fill_down_first() {
+    let (size, rows) = legend_box(3, |legend| legend.columns = 2);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].center_x, rows[1].center_x, "A and B share a column");
+    assert!(rows[2].center_x > rows[0].center_x, "C is on the right");
+    assert_eq!(rows[2].center_y, rows[0].center_y, "C starts the column");
+    assert!(rows[1].center_y > rows[0].center_y);
+    assert_eq!(rows[0].width + rows[2].width, size.0 as f64);
+    // Two rows, not three.
+    let height = rows[0].height as u32;
+    assert_eq!(size.1, 6 * 2 + 2 * height + 4);
+    // More columns than entries are capped.
+    let (_, capped) = legend_box(3, |legend| legend.columns = 9);
+    assert_eq!(capped[2].center_y, capped[0].center_y);
+    assert_eq!(capped[1].center_y, capped[0].center_y);
+}
+
+/// The gaps and the thumbnail move the frame by exactly their share.
+/// Witness: a gap not read leaves the size unchanged.
+#[test]
+fn the_row_and_column_gaps_size_the_frame() {
+    let (base, rows) = legend_box(4, |legend| legend.columns = 2);
+    let (rowy, _) = legend_box(4, |legend| {
+        legend.columns = 2;
+        legend.row_gap = Some(10.0);
+    });
+    assert_eq!(rowy.1, base.1 + 6, "one gap per column of two rows: +6");
+    assert_eq!(rowy.0, base.0);
+    let (colx, _) = legend_box(4, |legend| {
+        legend.columns = 2;
+        legend.column_gap = Some(30.0);
+    });
+    assert_eq!(colx.0, base.0 + 18, "the default column gap is 12");
+    assert_eq!(colx.1, base.1);
+    assert_eq!(rows.len(), 4);
+}
+
+/// A corner legend on several columns grows away from its corner and stays
+/// inside the plot area (#507): top right grows left and down.
+/// Witness: anchoring the frame by its left edge in the right corners pushes
+/// the second column out through the right side.
+#[test]
+fn a_corner_legend_with_two_columns_stays_inside_the_plot_area() {
+    use stokesforge_plot::LegendPosition;
+    for position in [
+        LegendPosition::TopLeft,
+        LegendPosition::TopRight,
+        LegendPosition::BottomLeft,
+        LegendPosition::BottomRight,
+    ] {
+        let mut columns = vec![("X", vec![0.0, 1.0, 2.0])];
+        let names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+        for name in names {
+            columns.push((name, vec![10.0, 20.0, 30.0]));
+        }
+        let drawn = geometry(&columns, move |ids| {
+            let mut panel = PanelSpec::at(0, 0);
+            for index in 0..8 {
+                panel
+                    .series
+                    .push(SeriesSpec::new_xy(ids[0], ids[index + 1]));
+            }
+            panel.legend.columns = 2;
+            panel.legend.position = position;
+            PlotSpec::empty("Test").with_panels(panel)
+        });
+        let panel = drawn.panel(0).expect("panel");
+        let frame = panel
+            .texts
+            .iter()
+            .find(|text| matches!(text.target, stokesforge_plot::TextTarget::Legend { .. }))
+            .expect("legend");
+        let (ox, oy) = (panel.pixel_origin.0 as f64, panel.pixel_origin.1 as f64);
+        let (w, h) = (panel.pixel_size.0 as f64, panel.pixel_size.1 as f64);
+        // The cells of the entries are the drawn frame's own measure.
+        let rows = &panel.legend_rows;
+        let left = rows
+            .iter()
+            .map(|r| r.center_x - r.width / 2.0)
+            .fold(f64::MAX, f64::min);
+        let right = rows
+            .iter()
+            .map(|r| r.center_x + r.width / 2.0)
+            .fold(f64::MIN, f64::max);
+        assert!(left >= ox, "{position:?}: left edge {left} < {ox}");
+        assert!(
+            right <= ox + w,
+            "{position:?}: right edge {right} > {}",
+            ox + w
+        );
+        let top = rows
+            .iter()
+            .map(|r| r.center_y - r.height / 2.0)
+            .fold(f64::MAX, f64::min);
+        let bottom = rows
+            .iter()
+            .map(|r| r.center_y + r.height / 2.0)
+            .fold(f64::MIN, f64::max);
+        assert!(top >= oy && bottom <= oy + h, "{position:?}: vertical");
+        let _ = frame;
+    }
+}

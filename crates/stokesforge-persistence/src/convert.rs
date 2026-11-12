@@ -476,6 +476,14 @@ impl From<&LegendSpec> for LegendSpecRecord {
             },
             text_template: value.text.template.clone(),
             text_row_column: value.text.row_column.map(NodeId::raw),
+            frame_hidden: !value.frame,
+            frame_color: value.frame_color.clone(),
+            frame_width: value.frame_width,
+            background: value.background.clone(),
+            columns: value.columns.max(1),
+            row_gap: value.row_gap,
+            column_gap: value.column_gap,
+            swatch_length: value.swatch_length,
         }
     }
 }
@@ -493,6 +501,14 @@ impl From<LegendSpecRecord> for LegendSpec {
                 template: value.text_template,
                 row_column: value.text_row_column.map(NodeId::from_raw),
             },
+            frame: !value.frame_hidden,
+            frame_color: value.frame_color,
+            frame_width: value.frame_width,
+            background: value.background,
+            columns: value.columns.max(1),
+            row_gap: value.row_gap,
+            column_gap: value.column_gap,
+            swatch_length: value.swatch_length,
         }
     }
 }
@@ -607,7 +623,6 @@ fn color_bar_to_record(bar: &ColorBarSpec) -> ColorBarRecord {
         anchor: bar.anchor.map(anchor_to_record),
         ticks: key(bar.ticks.key(), ColorBarTicks::default().key()),
         title: bar.title.clone(),
-        font: font_to_record(&bar.font),
         length: bar.length,
         thickness: bar.thickness,
         visible: bar.visible,
@@ -635,7 +650,6 @@ fn record_to_color_bar(record: ColorBarRecord) -> ColorBarSpec {
         anchor: record.anchor.map(record_to_anchor),
         ticks: ColorBarTicks::from_key(&record.ticks),
         title: record.title,
-        font: record_to_font(record.font),
         length: record.length,
         thickness: record.thickness,
         visible: record.visible,
@@ -1578,10 +1592,6 @@ mod tests {
             anchor: None,
             ticks: ColorBarTicks::Auto,
             title: "Time".to_string(),
-            font: stokesforge_plot::TextFont {
-                size: Some(18.0),
-                ..Default::default()
-            },
             length: Some(140.0),
             thickness: Some(9.0),
             visible: false,
@@ -1594,8 +1604,10 @@ mod tests {
         let back = record_to_panel_spec(rmp_serde::from_slice(&bytes).unwrap()).unwrap();
         assert_eq!(back.color_bar, Some(bar));
 
-        // A bar with the default font writes no font key: a file stays
-        // byte-identical to one written before the font existed.
+        // A default bar writes none of the optional keys: a file stays
+        // byte-identical to an older one. The bar has no font key any more
+        // (it shares the legend's, #507): one written by an earlier build of
+        // the branch is ignored, not refused (checked below).
         let plain = PanelSpec {
             color_bar: Some(ColorBarSpec::default()),
             ..PanelSpec::at(0, 0)
@@ -1616,6 +1628,30 @@ mod tests {
         assert!(bar_fields
             .iter()
             .all(|(key, _)| !matches!(key.as_str(), Some("font" | "length" | "thickness"))));
+
+        // A `font` key left in a bar record by an earlier build is ignored.
+        let mut value = rmpv::decode::read_value(&mut std::io::Cursor::new(
+            rmp_serde::to_vec_named(&panel_spec_to_record(&plain)).unwrap(),
+        ))
+        .unwrap();
+        let rmpv::Value::Map(fields) = &mut value else {
+            panic!("a layer is written as a map");
+        };
+        for (key, bar) in fields.iter_mut() {
+            if let (Some("color_bar"), rmpv::Value::Map(bar_fields)) = (key.as_str(), bar) {
+                bar_fields.push((
+                    rmpv::Value::from("font"),
+                    rmpv::Value::Map(vec![(rmpv::Value::from("size"), rmpv::Value::from(18.0))]),
+                ));
+            }
+        }
+        let mut with_font = Vec::new();
+        rmpv::encode::write_value(&mut with_font, &value).unwrap();
+        let reloaded: PanelSpecRecord = rmp_serde::from_slice(&with_font).unwrap();
+        assert_eq!(
+            record_to_panel_spec(reloaded).unwrap().color_bar,
+            Some(ColorBarSpec::default())
+        );
 
         let none = panel_spec_to_record(&PanelSpec::at(0, 0));
         assert!(none.color_bar.is_none());
