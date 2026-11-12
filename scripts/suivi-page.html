@@ -353,7 +353,12 @@ function cardLine(c,tests,qcms){
   if(qcmOpen)parts.push('répondre au questionnaire');
   if(todo>0)parts.push('cocher '+todo+(todo===1?' essai':' essais'));
   const requested=readyToMerge&&c.merge_requested===true;      // a request voided by the server arrives false
-  if(readyToMerge&&!requested)parts.push('lancer la fusion');
+  /* The button needs a message the agent stored (#531); a run in progress or ended (failed: until a new store) hides it. */
+  const prepared=c.merge_prepared===true;
+  const run=c.merge_run&&typeof c.merge_run==='object'?c.merge_run:null;
+  const canClick=readyToMerge&&prepared&&!run&&!requested;
+  const preparing=readyToMerge&&!prepared&&!run;
+  if(canClick)parts.push('lancer la fusion');
   /* A `you` note only completes a card the user has on the page (#483): once the form is finished,
      the entries ticked and the merge launched, it is stale and dropped, not shown as the user's turn (#530). */
   const youKind=note!==''&&c.wait_kind==='you';
@@ -370,7 +375,7 @@ function cardLine(c,tests,qcms){
   let text,also='';
   if(you){
     text='À toi : '+parts.join(' · ');
-    if(parts.length===1&&readyToMerge&&!requested)also='';
+    if(parts.length===1&&canClick)also='';
     else if(agent){
       if(hearing&&away)also='l’agent écoute, il repart à ta réponse';
       else if(known&&stopped)also='agent à l’arrêt, écris-lui après ta réponse';
@@ -382,21 +387,32 @@ function cardLine(c,tests,qcms){
       'Agent à l’arrêt depuis '+(idle>=60?Math.floor(idle/60)+' h':idle+' min');
   }
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
-  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,mergeNote:''};
+  else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,mergeButton:canClick,mergeNote:mergeNoteOf(run,preparing,requested,false)};
   else text='En pause';
+  const mergeNote=mergeNoteOf(run,preparing,requested,c.listening===true);
   return {user:you,text:text,also:also,note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,
-          mergeNote:requested?'Fusion demandée'+(c.listening===true?'':' · l’agent la lira à sa reprise'):''};
+          mergeButton:canClick,mergeNote:mergeNote};
 }
 /* The step the strip highlights: the stored state, except « questions » with a form answered and none open,
    which the agent is already turning into code (#530). */
 function shownStep(c,qcmOpen){
   return c.state==='questions'&&!qcmOpen&&c.qcm_answered===true?'code':c.state;
 }
-/* What the merge area shows, from cardLine's fields: the button before the click, the grey note after. */
+/* The grey merge note (#531): the agent still preparing, the run's state, or the failure with its reason. */
+function mergeNoteOf(run,preparing,requested,listening){
+  if(run){
+    if(run.state==='running')return 'Fusion en cours';
+    if(run.state==='retesting')return 'Tests relancés, puis fusion';
+    if(run.state==='ok')return 'Fusionnée';
+    return 'Échec : '+(run.reason||'la fusion a échoué');
+  }
+  if(preparing)return 'L’agent prépare la fusion';
+  if(requested)return 'Fusion demandée'+(listening?'':' · l’agent la lira à sa reprise');
+  return '';
+}
+/* What the merge area shows, from cardLine's fields: the button only when allowed, the grey note otherwise. */
 function mergeUi(l){
-  if(l.mergeRequested)return {button:false,note:l.mergeNote};
-  if(l.mergeReady)return {button:true,note:''};
-  return {button:false,note:''};
+  return {button:l.mergeButton===true,note:l.mergeButton===true?'':(l.mergeNote||'')};
 }
 /* The « Retirer » control of a form's box (#479): `asking` = the box is in its confirmation step.
    the answers already given = q.progress.answered, the figure « Avancement » shows (« Plus tard » is not one). */
@@ -862,11 +878,17 @@ async function withdrawForm(q){
   }catch(e){$('sub').textContent='Formulaire non retiré : il est peut-être déjà fini ou retiré, ou le serveur ne répond pas.';}
   etag=null;load();
 }
+function mergeRefusal(status,text){
+  if(status===409&&/not prepared|no stored message/.test(text||''))return 'Fusion non lancée : l’agent n’a pas encore préparé la fusion.';
+  if(status===409&&/store the message again/.test(text||''))return 'Fusion non lancée : la dernière tentative a échoué, l’agent doit préparer la fusion à nouveau.';
+  if(status===409)return 'Fusion non lancée : les essais ne sont plus tous OK.';
+  return 'Fusion non lancée : le serveur ne répond pas.';
+}
 async function askMerge(n){
   try{
     const r=await fetch('/api/issue/'+encodeURIComponent(n)+'/merge',{method:'POST',headers:{'X-Suivi':'1','Content-Type':'application/json'},body:'{}'});
-    if(!r.ok)throw new Error(r.status);
-  }catch(e){$('sub').textContent='Fusion non demandée : les essais ne sont plus tous OK, ou le serveur ne répond pas.';}
+    if(!r.ok){$('sub').textContent=mergeRefusal(r.status,await r.text());}
+  }catch(e){$('sub').textContent=mergeRefusal(0,'');}
   etag=null;load();
 }
 function startPolling(){if(timer==null)timer=setInterval(load,2000);}
