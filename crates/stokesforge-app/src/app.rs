@@ -295,6 +295,8 @@ pub struct StokesForgeApp {
     /// The server thread's status (#475), once attached by [`ServedApp`];
     /// `None`: no thread, the paint pass polls.
     server: Option<Arc<server::ServerStatus>>,
+    /// The "background tasks stopped" warning has been said (once, #475).
+    server_stop_told: bool,
     /// Native file picker in progress, on a separate thread (#192).
     file_picker: FilePicker,
     /// Opens a folder in the system's file manager (Preferences › Folders);
@@ -556,6 +558,7 @@ impl StokesForgeApp {
         Self {
             state: StateSlot::new(state),
             server: None,
+            server_stop_told: false,
             file_picker: FilePicker::default(),
             folder_opener: open_folder_in_file_manager,
             window_title,
@@ -1009,6 +1012,11 @@ impl StokesForgeApp {
         if self.state.take_quit_ready() {
             self.quit_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.state.quit_waits_for_autosave() {
+            // Quit waits for the recovery copy being written (#475): the
+            // thread wakes the window at the end of the write, and this look is
+            // the fallback.
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
     }
 
@@ -1206,6 +1214,7 @@ impl StokesForgeApp {
         // without a push notification from the actor, this is the only place
         // that refreshes the snapshot after a script (see the top doc of
         // `stokesforge_app_state::state`). Never blocks, even without a running script.
+        self.tell_server_stopped();
         self.poll_jobs_without_server();
         // The work also continues when its console is hidden or collapsed.
         if self.state.script_running() {
@@ -1217,9 +1226,16 @@ impl StokesForgeApp {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         // Background import: progress, and creation of the sheets at the end. The
-        // created workbooks open as after an immediate import.
+        // created workbooks open as after an immediate import. With the server
+        // thread the sheets are created by the thread (#475); this pass only
+        // opens the windows of the workbooks it created.
         if self.state.import_progress().is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        for book in self.state.take_books_to_open() {
+            self.open_tab(Tab::Book(book));
+        }
+        if !self.server_running() && self.state.import_progress().is_some() {
             let root = self.state.tree().root();
             let before = self
                 .state

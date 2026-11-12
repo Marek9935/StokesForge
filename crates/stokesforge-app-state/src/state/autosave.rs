@@ -47,6 +47,7 @@ use std::time::{Duration, Instant};
 use stokesforge_commands::CommandError;
 use stokesforge_session::SessionError;
 
+use super::import_apply::ImportRun;
 use super::AppState;
 use crate::errors;
 use crate::recovery::{self, Found, Slot};
@@ -70,12 +71,15 @@ pub(super) struct AutosaveState {
     /// New, Open, quit). A job result from an older generation is discarded.
     epoch: u64,
     /// A job is being written by the server thread, with the lock released.
-    in_flight: bool,
+    pub(super) in_flight: bool,
     /// The slot removed while a job was in flight: its file is deleted when
     /// the write ends, never before (the write would bring it back).
     orphan: Option<Slot>,
     /// The last write failed (the warning has already been given).
     failed: bool,
+    /// Quit is accepted and waits for the write in flight; the status message
+    /// has been said.
+    pub(super) quit_waiting: bool,
     /// The copies offered at startup, as long as the window is open.
     found: Vec<Found>,
     /// The copy whose deletion is waiting for confirmation.
@@ -145,6 +149,8 @@ pub struct ServerTick {
     pub next: Option<Duration>,
     /// A copy to write, with the lock released, then `finish_autosave`.
     pub autosave: Option<AutosaveJob>,
+    /// A finished import to apply, with the lock released, then `import_apply_finish`.
+    pub import: Option<ImportRun>,
 }
 
 impl AppState {
@@ -247,6 +253,7 @@ impl AppState {
         let busy = self.snapshot.history.in_macro
             || self.script_running()
             || self.import_job.is_some()
+            || self.import_applying
             || self.recalc_since.is_some()
             || self.autosave.in_flight;
         if busy {
@@ -328,7 +335,8 @@ impl AppState {
     pub fn finish_autosave(&mut self, job: &AutosaveJob, result: Result<(), SessionError>) -> bool {
         let before = self.recorded_count();
         self.background(|state| state.finish_autosave_pass(job, result));
-        self.recorded_count() != before
+        // A quit that waited for this write: wake the window so that it closes.
+        self.recorded_count() != before || self.autosave.quit_waiting
     }
 
     fn finish_autosave_pass(&mut self, job: &AutosaveJob, result: Result<(), SessionError>) {

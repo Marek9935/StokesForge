@@ -41,6 +41,7 @@
 //! application: while [`StokesForgeApp::server_running`] is false the paint
 //! pass does the polling itself (`poll_without_server`), as before #475.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -52,6 +53,8 @@ use parking_lot::lock_api::ArcMutexGuard;
 use parking_lot::{Mutex, RawMutex};
 use stokesforge_app_state::state::{AppState, AutosaveJob};
 use stokesforge_session::SessionError;
+
+use stokesforge_app_state::tr;
 
 use super::StokesForgeApp;
 
@@ -169,13 +172,23 @@ fn run_for_real(job: &AutosaveJob) -> Result<(), SessionError> {
     job.run()
 }
 
-/// One pass of the thread: tick under the lock, the autosave write without it,
-/// its record under the lock again, and the wake.
+/// Records the files of an import in the recent list (a file of the
+/// configuration folder). A parameter so that a test does not write it.
+pub(super) type RecordImports = dyn Fn(&[PathBuf]) + Send + Sync;
+
+fn record_for_real(paths: &[PathBuf]) {
+    super::remember_recent_imports(paths);
+}
+
+/// One pass of the thread: tick under the lock, the autosave write and the
+/// commands of a finished import without it, their record under the lock again,
+/// and the wake.
 pub(super) fn serve_once(
     shared: &Mutex<AppState>,
     now: Instant,
     repaint: &impl Repaint,
     run: &RunJob,
+    record: &RecordImports,
 ) -> Pass {
     let Some(mut guard) = shared.try_lock() else {
         return Pass::Busy;
@@ -187,28 +200,37 @@ pub(super) fn serve_once(
     if let Some(job) = tick.autosave {
         // The lock is released: the write may take as long as the actor needs.
         let result = run(&job);
-        changed |= finish_with_retry(shared, &job, result);
+        changed |= with_lock_retry(shared, |state| state.finish_autosave(&job, result));
+        next = Some(Duration::ZERO);
+    }
+    if let Some(mut import) = tick.import {
+        // The lock is released: the commands go through the session as the
+        // interface's own, one macro, undoable (invariant 1).
+        import.execute();
+        let (done, imported) = with_lock_retry(shared, |state| {
+            let done = state.import_apply_finish(import);
+            (done, state.take_imported_paths())
+        });
+        changed |= done;
+        if !imported.is_empty() {
+            record(&imported);
+        }
         next = Some(Duration::ZERO);
     }
     wake(repaint, changed);
     Pass::Done(next)
 }
 
-/// Records the end of a write. The thread never blocks on the lock: it looks
+/// Runs `body` under the lock. The thread never blocks on the lock: it looks
 /// again every [`BUSY_RETRY`], also while the application quits (the exit
 /// releases the guard before it joins, and waits for this to end).
-fn finish_with_retry(
-    shared: &Mutex<AppState>,
-    job: &AutosaveJob,
-    result: Result<(), SessionError>,
-) -> bool {
-    let mut result = Some(result);
+fn with_lock_retry<R>(shared: &Mutex<AppState>, body: impl FnOnce(&mut AppState) -> R) -> R {
+    let mut body = Some(body);
     loop {
         if let Some(mut guard) = shared.try_lock() {
-            if let Some(result) = result.take() {
-                return guard.finish_autosave(job, result);
+            if let Some(body) = body.take() {
+                return body(&mut guard);
             }
-            return false;
         }
         std::thread::park_timeout(BUSY_RETRY);
     }
@@ -229,6 +251,11 @@ impl ServerStatus {
     pub(super) fn running(&self) -> bool {
         !self.ended.load(Ordering::Acquire)
     }
+
+    /// The thread ended while unwinding (an internal error).
+    pub(super) fn panicked(&self) -> bool {
+        self.panicked.load(Ordering::Acquire)
+    }
 }
 
 /// Marks the end of the thread, also when it unwinds.
@@ -240,9 +267,8 @@ struct EndGuard {
 impl Drop for EndGuard {
     fn drop(&mut self) {
         if std::thread::panicking() {
-            // #475 panic policy pending: the user has not decided what an
-            // end of the server thread should say or do. Until then the UI
-            // sees `running() == false` and polls in its own pass.
+            // The UI sees `running() == false` and polls in its own pass, and
+            // says so once (`tell_server_stopped`).
             self.status.panicked.store(true, Ordering::Release);
         }
         self.status.ended.store(true, Ordering::Release);
@@ -265,16 +291,18 @@ impl ServerThread {
             repaint,
             Arc::new(run_for_real),
             Arc::new(Instant::now),
+            Arc::new(record_for_real),
         )
     }
 
-    /// The write and the clock are parameters so that a test can hold a write
-    /// in flight and move time.
+    /// The write, the clock and the recent-files record are parameters so that
+    /// a test can hold a write in flight, move time and keep the user's files.
     pub(super) fn spawn_with(
         shared: SharedState,
         repaint: impl Repaint,
         run: Arc<RunJob>,
         clock: Arc<Clock>,
+        record: Arc<RecordImports>,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let status = Arc::new(ServerStatus::default());
@@ -289,7 +317,7 @@ impl ServerThread {
                     done: done_tx,
                 };
                 while !thread_stop.load(Ordering::Acquire) {
-                    let pass = serve_once(&shared, clock(), &repaint, run.as_ref());
+                    let pass = serve_once(&shared, clock(), &repaint, run.as_ref(), record.as_ref());
                     thread_status.ticks.fetch_add(1, Ordering::Relaxed);
                     match pass {
                         Pass::Busy => std::thread::park_timeout(BUSY_RETRY),
@@ -313,6 +341,12 @@ impl ServerThread {
 
     pub(super) fn status(&self) -> Arc<ServerStatus> {
         Arc::clone(&self.status)
+    }
+
+    /// What a finished script calls to wake the thread at once (#475). Empty
+    /// when the thread did not start.
+    pub(super) fn waker(&self) -> Option<std::thread::Thread> {
+        self.join.as_ref().map(|join| join.thread().clone())
     }
 
     /// Asks the thread to look again (the state may have changed).
@@ -353,6 +387,11 @@ impl ServedApp {
     /// Starts the thread. `ctx` is the context the thread wakes.
     pub fn new(mut app: StokesForgeApp, ctx: egui::Context) -> Self {
         let thread = ServerThread::spawn(app.state.shared(), ctx);
+        if let Some(server) = thread.waker() {
+            // The end of a script wakes the thread at once; its 50 ms look
+            // stays as the fallback.
+            app.state.set_waker(Arc::new(move || server.unpark()));
+        }
         app.server = Some(thread.status());
         Self { app, thread }
     }
@@ -387,6 +426,16 @@ impl StokesForgeApp {
     /// ended) the paint pass polls the background work itself.
     pub(super) fn server_running(&self) -> bool {
         self.server.as_ref().is_some_and(|status| status.running())
+    }
+
+    /// Says once, in the status bar, that the server thread died of an internal
+    /// error: from then on this window runs the background work itself
+    /// (`poll_*_without_server`).
+    pub(super) fn tell_server_stopped(&mut self) {
+        if !self.server_stop_told && self.server.as_ref().is_some_and(|status| status.panicked()) {
+            self.server_stop_told = true;
+            self.state.warn(tr!("status-server-stopped"));
+        }
     }
 
     /// The autosave poll of `logic`, when no thread runs.
@@ -441,6 +490,8 @@ mod tests {
         }
     }
 
+    fn no_record(_: &[PathBuf]) {}
+
     fn real_run() -> &'static RunJob {
         &run_for_real
     }
@@ -486,11 +537,11 @@ mod tests {
         let counter = Counter::default();
         let t0 = Instant::now();
         assert_eq!(
-            serve_once(&shared, t0, &counter, real_run()),
+            serve_once(&shared, t0, &counter, real_run(), &no_record),
             Pass::Done(Some(PERIOD))
         );
         shared.lock().dispatch(Action::AddGraph);
-        serve_once(&shared, t0 + PERIOD, &counter, real_run());
+        serve_once(&shared, t0 + PERIOD, &counter, real_run(), &no_record);
         assert_eq!(copies(dir.path()), 1);
     }
 
@@ -504,7 +555,7 @@ mod tests {
         let shared = slot.shared();
         let counter = Counter::default();
         assert_eq!(
-            serve_once(&shared, Instant::now(), &counter, real_run()),
+            serve_once(&shared, Instant::now(), &counter, real_run(), &no_record),
             Pass::Busy
         );
         assert_eq!(counter.count(), 0);
@@ -524,6 +575,7 @@ mod tests {
                 t0 + Duration::from_secs(second),
                 &counter,
                 real_run(),
+                &no_record,
             );
         }
         assert_eq!(counter.count(), 0);
@@ -587,11 +639,11 @@ mod tests {
         let t0 = Instant::now();
         while shared.lock().recalc_work().is_some() {
             assert!(Instant::now() < deadline, "recalculation too long");
-            serve_once(&shared, t0, &counter, real_run());
+            serve_once(&shared, t0, &counter, real_run(), &no_record);
             std::thread::sleep(Duration::from_millis(5));
         }
-        serve_once(&shared, t0, &counter, real_run());
-        serve_once(&shared, t0, &counter, real_run());
+        serve_once(&shared, t0, &counter, real_run(), &no_record);
+        serve_once(&shared, t0, &counter, real_run(), &no_record);
         let state = shared.lock();
         assert!(state.recalc_work().is_none());
         assert_eq!(state.tree().len(), before + 1, "the snapshot is fresh");
@@ -657,7 +709,13 @@ mod tests {
         let clock: Arc<Clock> =
             Arc::new(move || t0 + Duration::from_secs(clock_offset.load(Ordering::SeqCst)));
         let mut thread =
-            ServerThread::spawn_with(Arc::clone(&shared), Counter::default(), run, clock);
+            ServerThread::spawn_with(
+            Arc::clone(&shared),
+            Counter::default(),
+            run,
+            clock,
+            Arc::new(|_: &[PathBuf]| {}),
+        );
         // The first pass arms the deadline; then the project changes and the
         // clock jumps past the deadline.
         while thread.status().ticks.load(Ordering::Relaxed) == 0 {

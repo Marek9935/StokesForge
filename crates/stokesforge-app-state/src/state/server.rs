@@ -31,6 +31,7 @@ struct ServerStamp {
     recalc: bool,
     import: bool,
     import_ready: bool,
+    import_applying: bool,
     lost: bool,
 }
 
@@ -46,6 +47,7 @@ impl AppState {
             recalc: self.recalc_since.is_some(),
             import: self.import_job.is_some(),
             import_ready: self.import_job.as_ref().is_some_and(|j| j.ready.is_some()),
+            import_applying: self.import_applying,
             lost: self.session_lost,
         }
     }
@@ -62,6 +64,10 @@ impl AppState {
         self.background(|state| {
             state.poll_import_progress();
         });
+        // A finished import is taken out here and its commands run with the
+        // lock released (`import_apply.rs`); it is taken before the autosave
+        // decides, which then waits for it.
+        let import = self.import_apply_begin();
         let step = self.background(|state| state.autosave_decide(now));
         let changed = self.server_stamp() != before;
         let (autosave, auto_next) = match step {
@@ -76,6 +82,9 @@ impl AppState {
         if self.script_running() {
             sooner(SCRIPT_LOOK);
         }
+        if import.is_some() {
+            sooner(Duration::ZERO);
+        }
         if self.recalc_since.is_some() || self.import_job.is_some() {
             sooner(WORK_LOOK);
         }
@@ -83,6 +92,7 @@ impl AppState {
             changed,
             next,
             autosave,
+            import,
         }
     }
 }

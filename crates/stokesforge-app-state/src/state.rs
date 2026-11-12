@@ -86,6 +86,7 @@ mod analysis;
 mod autosave;
 mod column_use;
 mod import_advanced;
+mod import_apply;
 mod import_auto;
 mod import_check;
 mod import_grid;
@@ -119,6 +120,7 @@ mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{AutosaveJob, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
+pub use import_apply::ImportRun;
 pub use column_use::FullColumnsCopy;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
@@ -1521,6 +1523,9 @@ impl SaveTarget {
         }
     }
 }
+
+/// A function that wakes the server thread, callable from any thread (#475).
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 /// Severity of a status bar message (S-M4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -3441,6 +3446,17 @@ pub struct AppState {
     pending_full_copy: Option<NodeId>,
     /// Import in progress on a background thread.
     import_job: Option<ImportJob>,
+    /// A finished import is being applied by the server thread, with the lock
+    /// released (#475): a second import, a new project and the autosave wait.
+    import_applying: bool,
+    /// What the script's thread calls after sending its reply: wakes the server
+    /// thread at once instead of leaving it to its 50 ms look (#475). A plain
+    /// closure: the state knows nothing of the thread nor of egui.
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    waker: Option<Wake>,
+    /// Workbooks created by an import that the thread applied: the paint pass
+    /// opens them as windows (#475).
+    books_to_open: Vec<NodeId>,
     /// Start of a formula recalculation the interface did not wait for (#239);
     /// `None` when none is running. As long as it is set, the snapshot is
     /// not refreshed (the actor would answer only at the end) and the status bar
@@ -3614,6 +3630,9 @@ impl AppState {
             column_use: None,
             pending_full_copy: None,
             import_job: None,
+            import_applying: false,
+            waker: None,
+            books_to_open: Vec::new(),
             recalc_since: None,
             applied_revision: 0,
             session_lost: false,
@@ -4050,6 +4069,11 @@ impl AppState {
     #[must_use]
     pub fn script_available(&self) -> bool {
         cfg!(feature = "python")
+    }
+
+    /// Sets what wakes the server thread when a script ends (#475).
+    pub fn set_waker(&mut self, waker: Wake) {
+        self.waker = Some(waker);
     }
 
     /// True while a script is running (between [`Action::RunScript`] and the
@@ -7207,7 +7231,7 @@ impl AppState {
         if paths.is_empty() {
             return;
         }
-        if self.import_job.is_some() {
+        if self.import_job.is_some() || self.import_applying {
             self.fail(tr!("error-import-running"));
             return;
         }
@@ -7416,35 +7440,76 @@ impl AppState {
             return false;
         };
         let origin = std::mem::take(&mut reply.origin);
-        // A job made of Origin projects only has nothing for the recipes: it
-        // must not open an empty "Import" entry nor say "0 of 0".
+        let applied = Self::import_is_applied(&job, &reply, &origin);
+        if applied {
+            let (destination, dropped, skipped) = (job.destination, job.dropped, job.skipped);
+            self.import_batch(
+                destination,
+                dropped.is_some(),
+                skipped,
+                reply.items,
+                &reply.models,
+            );
+        }
+        self.import_leftovers(job.dropped, reply.for_window, origin);
+        applied
+    }
+
+    /// Does this reply create anything? A job made of Origin projects only has
+    /// nothing for the recipes: it must not open an empty "Import" entry nor
+    /// say "0 of 0".
+    fn import_is_applied(
+        job: &ImportJob,
+        reply: &ImportReply,
+        origin: &[origin_import::OriginRead],
+    ) -> bool {
         let origin_only =
             reply.items.is_empty() && reply.for_window.is_empty() && !origin.is_empty();
-        let applied = !origin_only && (job.dropped.is_none() || !reply.items.is_empty());
-        if applied {
-            let count = reply.items.len();
-            self.apply_import(job.destination, reply.items);
-            if job.skipped > 0 {
-                self.warn(tr!("status-import-skipped", count = job.skipped));
-            }
-            if job.dropped.is_some() && !self.gesture_failed() {
-                self.notice(tr!(
-                    "status-import-dropped",
-                    count = count,
-                    models = reply.models.join(", ")
-                ));
-            }
+        !origin_only && (job.dropped.is_none() || !reply.items.is_empty())
+    }
+
+    /// The commands of a finished import and the messages that go with them.
+    /// Runs on the state of the paint pass (no server thread) or on the scratch
+    /// state of [`import_apply`] (#475).
+    fn import_batch(
+        &mut self,
+        destination: ImportDestination,
+        dropped: bool,
+        skipped: usize,
+        items: Vec<ImportItem>,
+        models: &[String],
+    ) {
+        let count = items.len();
+        self.apply_import(destination, items);
+        if skipped > 0 {
+            self.warn(tr!("status-import-skipped", count = skipped));
         }
-        if let Some(target_book) = job.dropped {
-            if !reply.for_window.is_empty() {
+        if dropped && !self.gesture_failed() {
+            self.notice(tr!(
+                "status-import-dropped",
+                count = count,
+                models = models.join(", ")
+            ));
+        }
+    }
+
+    /// What a finished import leaves for the windows: files that the import
+    /// window takes over, Origin projects for the chooser. No command.
+    fn import_leftovers(
+        &mut self,
+        dropped: Option<Option<NodeId>>,
+        for_window: Vec<PathBuf>,
+        origin: Vec<origin_import::OriginRead>,
+    ) {
+        if let Some(target_book) = dropped {
+            if !for_window.is_empty() {
                 if self.import_state.is_none() {
                     self.open_import(target_book);
                 }
-                self.add_import_paths(reply.for_window);
+                self.add_import_paths(for_window);
             }
         }
         self.add_origin_reads(origin);
-        applied
     }
 
     /// Files imported successfully since the last call, for the
@@ -7617,6 +7682,7 @@ impl AppState {
     pub fn can_reopen_last_import(&self) -> bool {
         (self.last_import.is_some() || self.last_origin_import.is_some())
             && self.import_job.is_none()
+            && !self.import_applying
     }
 
     /// [`Action::ReopenLastImport`]: undoes the last import if it is still
@@ -9062,7 +9128,10 @@ impl AppState {
     /// Changing project must not pick up an import or script result launched
     /// on the old project, nor interrupt a macro.
     pub fn can_new_project(&self) -> bool {
-        !self.script_running() && self.import_job.is_none() && !self.snapshot.history.in_macro
+        !self.script_running()
+            && self.import_job.is_none()
+            && !self.import_applying
+            && !self.snapshot.history.in_macro
     }
 
     /// The gesture waiting for the "Discard Changes · Cancel · Save" answer
@@ -9095,8 +9164,31 @@ impl AppState {
     }
 
     /// Nothing holds the application back any more (Quit accepted); once only.
+    ///
+    /// While the server thread is still writing the recovery copy (#475), Quit
+    /// is held back and says why, once: the window stays open and closes as
+    /// soon as the write ends (the slot is already removed, its file goes with
+    /// the end of the write).
     pub fn take_quit_ready(&mut self) -> bool {
-        std::mem::take(&mut self.quit_ready)
+        if !self.quit_ready {
+            return false;
+        }
+        if self.autosave.in_flight {
+            if !self.autosave.quit_waiting {
+                self.autosave.quit_waiting = true;
+                self.notice(tr!("status-quit-waiting-autosave"));
+            }
+            return false;
+        }
+        self.autosave.quit_waiting = false;
+        self.quit_ready = false;
+        true
+    }
+
+    /// Quit is accepted and waits for the end of the recovery copy's write
+    /// (#475): the window keeps painting until it ends.
+    pub fn quit_waits_for_autosave(&self) -> bool {
+        self.quit_ready && self.autosave.in_flight
     }
 
     /// A gesture that would replace or close the project (S-F3): with no work
@@ -12346,6 +12438,7 @@ impl AppState {
             .as_ref()
             .map(|source| source.path.clone());
         let (reply_tx, reply_rx) = mpsc::channel();
+        let waker = self.waker.clone();
 
         let spawned = thread::Builder::new()
             .name("stokesforge-app-script".to_owned())
@@ -12367,6 +12460,10 @@ impl AppState {
                 // (window closed during the run): the channel is then simply
                 // dropped.
                 let _ = reply_tx.send(reply);
+                // The server thread notices the end at once (#475).
+                if let Some(wake) = waker {
+                    wake();
+                }
             });
 
         match spawned {
