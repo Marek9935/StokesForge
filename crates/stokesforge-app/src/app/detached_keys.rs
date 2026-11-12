@@ -1021,6 +1021,92 @@ fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_detached() {
     tab_switch_commits_the_pending_entry(Place::Detached);
 }
 
+/// Clicks the tab of the workbook's second sheet.
+fn click_second_tab(bench: &mut Bench, place: Place) {
+    let name = bench.app.state.worksheets_of(bench.book())[1].1.clone();
+    let output = pass_at(bench, place, Vec::new());
+    let tab = texts(&output.shapes)
+        .into_iter()
+        .filter(|text| text.text == name)
+        .max_by(|a, b| a.center.y.total_cmp(&b.center.y))
+        .unwrap_or_else(|| panic!("{place:?}: the tab {name:?} is painted"));
+    click_at(bench, place, tab.center);
+}
+
+/// R1 (#524): a dialog is open in the main window, a cell entry is pending in
+/// the detached workbook and another sheet tab is clicked: the switch is
+/// refused like Enter (sheet and entry stay, the band says why); once the
+/// dialog is closed the same click writes and switches. Witness: drop the
+/// `refuse_entry` guard of `chosen_sheet` in `workbook.rs`.
+#[test]
+fn a_dialog_in_the_main_window_refuses_a_sheet_switch_with_a_pending_entry() {
+    let mut bench = bench();
+    let sheet2 = add_second_sheet(&mut bench, Place::Detached);
+    let sheet1 = first_sheet(&bench);
+    at_cell(&mut bench, Place::Detached, sheet1, 0);
+    type_digits(&mut bench, Place::Detached, "77");
+    bench.app.state.dispatch(Action::OpenAbout);
+    settle(&mut bench);
+    click_second_tab(&mut bench, Place::Detached);
+    assert_eq!(
+        bench.app.state.selected_sheet_in(bench.book()),
+        Some(sheet1),
+        "the sheet stays"
+    );
+    assert_eq!(typed_cell(&bench).as_deref(), Some("77"), "the entry stays");
+    pass_at(&mut bench, Place::Detached, Vec::new());
+    assert!(band_in(&bench, Window::Book).is_some(), "the band shows");
+    bench.app.state.dispatch(Action::CloseAbout);
+    settle(&mut bench);
+    click_second_tab(&mut bench, Place::Detached);
+    assert_eq!(
+        bench.app.state.selected_sheet_in(bench.book()),
+        Some(sheet2)
+    );
+    assert_eq!(typed_cell(&bench), None);
+    let mut expected = dump(&bench.app.state);
+    *cell_of(&mut expected, "Sheet1", 0) = "77".into();
+    assert_eq!(dump(&bench.app.state), expected, "A1 holds 77");
+    bench.finish();
+}
+
+/// R2 (#524): a Long Name still being typed when another sheet tab is clicked
+/// is written, docked and detached. Witness (detached): drop the root refresh
+/// of `drain_detached_tabs`; (docked): drop the header commit in
+/// `AppState::select_sheet`.
+#[test]
+fn switching_sheet_tab_with_a_pending_long_name_writes_it() {
+    for place in Place::BOTH {
+        let mut bench = bench_at(place);
+        let sheet2 = add_second_sheet(&mut bench, place);
+        let sheet1 = first_sheet(&bench);
+        let column = bench.app.state.tree().children(sheet1).unwrap()[0];
+        let open = |state: &mut AppState| {
+            state.begin_header_edit(column, stokesforge_app_state::state::HeaderField::LongName);
+            state.header_editing_mut().unwrap().buffer = "Elapsed".into();
+        };
+        match place {
+            Place::Docked => open(&mut bench.app.state),
+            Place::Detached => with_view(&bench, open),
+        }
+        for _ in 0..3 {
+            pass_at(&mut bench, place, Vec::new());
+        }
+        click_second_tab(&mut bench, place);
+        assert_eq!(
+            bench.app.state.selected_sheet_in(bench.book()),
+            Some(sheet2),
+            "{place:?}: Sheet2 is shown"
+        );
+        assert_eq!(
+            bench.app.state.column_meta(column).long_name,
+            "Elapsed",
+            "{place:?}: the Long Name is written in the root"
+        );
+        bench.finish();
+    }
+}
+
 /// The two cells the key sequence of [`the_same_keys_give_the_same_result_docked_and_detached`]
 /// moves, read in the root state.
 fn a1_a2(bench: &Bench) -> (String, String) {

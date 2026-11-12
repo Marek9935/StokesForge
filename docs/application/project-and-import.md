@@ -15,6 +15,10 @@ first, by `AppState` itself (`commit_open_entries`, called by `save` and
 file holds what was typed, and Cancel leaves the value committed (Ctrl+Z
 undoes it). A refused entry (a number out of range) stays open and is left out
 of the save. Autosave and the quit after a lost session do not commit.
+Switching sheet (`AppState::select_sheet`, whoever asks) commits the open cell
+entry and header field first, one undo step each; a cell value the column
+refuses is dropped silently. In a detached workbook with a dialog open in the
+main window the switch is refused like Enter: sheet and entry stay (#524).
 The entries open in detached windows (their own `view_state`) are committed
 by `StokesForgeApp::commit_view_entries` before Save, Save As, New Project,
 Open and Quit, then the main state refreshes. The same call closes the graph

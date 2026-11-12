@@ -199,7 +199,10 @@ The width is pushed only at the **end of a resize done by hand**
 header): pushing the rendered width on every frame would mark the project
 as modified on every opening. The detached view has its own `AppState`; its
 width also goes through the actor, and the main state rereads it on its
-refresh.
+refresh. More generally, a write the detached view made under its own session
+identity (a cell entry closed by a click elsewhere) is pulled by the root
+before it publishes its snapshot (`drain_detached_tabs`, #524): otherwise the
+stale root snapshot would be pushed back over the view.
 
 **Same default width floating / maximized (#337).** Reported under
 #330: maximized, the workbook window made the never-set columns go from 57 to 62 px of spacing between letters. Cause: the first frame of an
