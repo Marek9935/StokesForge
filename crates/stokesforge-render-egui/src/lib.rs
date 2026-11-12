@@ -192,10 +192,17 @@ pub enum GraphEvent {
         widths: Vec<f64>,
         /// Frame height of every row.
         heights: Vec<f64>,
-        /// The whole figure was scaled with an L corner (else a boundary or
-        /// a graph corner was pulled).
+        /// An L corner was pulled, a page corner that adds or removes empty
+        /// space (else a boundary or a graph corner was pulled).
         figure: bool,
+        /// The empty space around the grid after an outer edge was pulled
+        /// (#505); `None` for every other gesture (the slack stays as it is).
+        slack: Option<stokesforge_plot::GridSlack>,
     },
+    /// An outer edge (or an Alt-dragged line) is pulled outward and the page
+    /// has no room left: signalled **once per drag**, while it bumps (#505,
+    /// F3), so the application can say how to enlarge the page.
+    PageEdgeReached,
     /// A graph of a regular grid was dragged to another place, or moved by an
     /// arrow key, in the Page Layout Mode (#491): the base layer of the graph
     /// and where it goes, to commit as **one** change of the model. Nothing is
@@ -326,6 +333,9 @@ struct FramePreview {
     /// Frame widths and heights the Page Layout Mode is pulling a regular grid
     /// to (#426), whole vectors.
     grid: Option<(Vec<f64>, Vec<f64>)>,
+    /// The empty space around the grid the Page Layout Mode is pulling an
+    /// outer edge to (#505); with `grid`.
+    slack: Option<stokesforge_plot::GridSlack>,
     /// The frames the Page Layout Mode is moving or scaling (#426): base
     /// layer and frame, several at once for a page corner drag or a nudge of
     /// a selection.
@@ -345,6 +355,9 @@ impl FramePreview {
             };
             spec.frame_widths = widths.iter().map(bounds).collect();
             spec.frame_heights = heights.iter().map(bounds).collect();
+            if let Some(slack) = self.slack {
+                spec.grid_slack = Some(slack).filter(|s| !s.is_zero());
+            }
             return;
         }
         if !self.frees.is_empty() || self.page.is_some() {
@@ -1427,11 +1440,17 @@ impl GraphView {
     /// `pos`, in the **last** drawn figure (#357): where a drop on the edge of
     /// the figure puts its new cell beside. `None` before the first draw.
     pub fn nearest_cell(&self, pos: Pos2) -> Option<usize> {
+        self.nearest_cell_except(pos, None)
+    }
+
+    /// [`nearest_cell`](Self::nearest_cell) without the cell `except` (the graph
+    /// being moved, #503): the nearest **other** cell. Holes are never cells.
+    pub fn nearest_cell_except(&self, pos: Pos2, except: Option<usize>) -> Option<usize> {
         let drawn = self.last.as_ref()?;
         drawn
             .panels
             .iter()
-            .filter(|panel| panel.overlay.is_none())
+            .filter(|panel| panel.overlay.is_none() && Some(panel.index) != except)
             .filter_map(|panel| {
                 let rect = self.plot_rect_screen(panel.index)?;
                 Some((panel.index, rect.distance_to_pos(pos)))

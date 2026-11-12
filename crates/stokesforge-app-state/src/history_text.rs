@@ -151,6 +151,8 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::LayerPlacement => tr!("history-plot-layer-placement"),
             PlotEditKind::LegendText => tr!("history-plot-legend-text"),
             PlotEditKind::ColorBar => tr!("history-plot-color-bar"),
+            PlotEditKind::FitPage => tr!("history-plot-fit-page"),
+            PlotEditKind::FitLayout => tr!("history-plot-fit-layout"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::SortFolder { name: None } => tr!("history-sort-folder"),

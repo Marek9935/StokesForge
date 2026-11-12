@@ -1469,6 +1469,7 @@ mod tests {
             widths: vec![380.0],
             heights: vec![330.0],
             figure: false,
+            slack: None,
         });
         bench.settle();
         assert_eq!(

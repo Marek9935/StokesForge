@@ -795,6 +795,20 @@ pub(crate) struct PlotSpecRecord {
     /// bounding box of the cells (today's behaviour). Written only when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) free_page: Option<FreePageRecord>,
+    /// Empty space around the outer cells of a regular grid (#505): absent =
+    /// none (the figure hugs the grid). Written only when set, so a file
+    /// without it stays byte for byte what it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) grid_slack: Option<GridSlackRecord>,
+}
+
+/// [`stokesforge_plot::GridSlack`], flat, in points. Written as held.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GridSlackRecord {
+    pub(crate) left: f64,
+    pub(crate) top: f64,
+    pub(crate) right: f64,
+    pub(crate) bottom: f64,
 }
 
 /// [`stokesforge_plot::FreePage`], flat, in points. Written as held.
@@ -875,6 +889,7 @@ impl Default for PlotSpecRecord {
             figure_top: None,
             layer_placement: LayerPlacementRecord::Grid,
             free_page: None,
+            grid_slack: None,
         }
     }
 }

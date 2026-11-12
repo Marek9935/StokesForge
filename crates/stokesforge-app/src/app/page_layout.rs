@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use eframe::egui;
-use stokesforge_app_state::frame_sizes::SizeLock;
+use stokesforge_app_state::frame_sizes::{page_fit_available, SizeLock};
 use stokesforge_app_state::quantities::Quantity;
 use stokesforge_app_state::state::Action;
 use stokesforge_app_state::tr;
@@ -100,7 +100,7 @@ pub(super) fn length_unit(ctx: &egui::Context) -> LengthUnit {
 
 /// The ratio locks of the application, as the root published them this frame:
 /// the strip of a detached graph window has no `AppState` of its own for them.
-fn published_size_lock(ctx: &egui::Context, graph: NodeId) -> Option<SizeLock> {
+pub(super) fn published_size_lock(ctx: &egui::Context, graph: NodeId) -> Option<SizeLock> {
     ctx.data(|data| data.get_temp::<HashMap<NodeId, SizeLock>>(size_locks_id()))
         .and_then(|locks| locks.get(&graph).copied())
 }
@@ -180,13 +180,12 @@ pub(super) fn grid_step_points(unit: LengthUnit, fine: bool) -> f64 {
 }
 
 /// Feeds the view of the frame: the unit of the sizes written on the boxes, the
-/// snapping grid and the ratio lock of the figure's corners.
+/// snapping grid.
 pub(super) fn feed_view(ctx: &egui::Context, view: &mut GraphView, graph: NodeId) {
     let unit = length_unit(ctx);
     let snap = snap_state(ctx, graph);
     view.set_length_unit(unit);
     view.set_layout_grid(snap.on.then(|| grid_step_points(unit, snap.fine)));
-    view.set_figure_ratio_lock(published_size_lock(ctx, graph).map(|lock| lock.ratio));
 }
 
 // ---------------------------------------------------------------------------
@@ -804,12 +803,16 @@ fn figure_size_controls(
     let width_changed = number_field(ui, ("layout_figure", 0), &mut fields.0, &quantity).changed;
     ui.label(by);
     let height_changed = number_field(ui, ("layout_figure", 1), &mut fields.1, &quantity).changed;
-    let (icon, tooltip) = if published.is_some() {
-        (Icon::LockClosed, tr!("plot-size-lock-closed"))
+    let (icon, role, tooltip) = if published.is_some() {
+        (
+            Icon::LockClosed,
+            IconRole::Accent,
+            tr!("plot-size-lock-closed"),
+        )
     } else {
-        (Icon::LockOpen, tr!("plot-size-lock-open"))
+        (Icon::LockOpen, IconRole::Muted, tr!("plot-size-lock-open"))
     };
-    if icon_button(ui, icon, IconRole::Neutral, tooltip).clicked() {
+    if icon_button(ui, icon, role, tooltip).clicked() {
         session.push(Action::SetSizeLock {
             graph,
             lock: match published {
@@ -817,6 +820,31 @@ fn figure_size_controls(
                 None => SizeLock::close(size),
             },
         });
+    }
+    // #505: the page does not follow the layers by itself; this button does it.
+    // K1: its inverse comes right after.
+    let fit = tr!("action-layout-fit-page");
+    keep_together(ui, &[&fit], 1, ui.spacing().interact_size.x);
+    let available = page_fit_available(spec, &view.layout_boxes(), image);
+    if ui
+        .add_enabled(available, egui::Button::new(fit))
+        .on_hover_text(tr!("action-layout-fit-page", "hint"))
+        .on_disabled_hover_text(tr!("action-layout-fit-page", "disabled"))
+        .clicked()
+    {
+        model.push(Action::FitPageToLayout { graph });
+    }
+    // K1: the inverse, the graphs scale to fill the page (the padlock plays
+    // no part).
+    let fill = tr!("action-layout-fit-layout");
+    keep_together(ui, &[&fill], 1, ui.spacing().interact_size.x);
+    if ui
+        .add_enabled(available, egui::Button::new(fill))
+        .on_hover_text(tr!("action-layout-fit-layout", "hint"))
+        .on_disabled_hover_text(tr!("action-layout-fit-layout", "disabled"))
+        .clicked()
+    {
+        model.push(Action::FitLayoutToPage { graph });
     }
     if !(width_changed || height_changed) {
         return;
@@ -954,6 +982,7 @@ fn box_controls(
                 widths,
                 heights,
                 figure: false,
+                slack: None,
             });
         }
     }
@@ -1692,6 +1721,7 @@ mod tests {
             placement: LayerPlacement::Grid,
             free_cells: Vec::new(),
             free_origin: (0.0, 0.0),
+            grid_slack: [0; 4],
         }
     }
 
@@ -1933,43 +1963,47 @@ mod tests {
         }
     }
 
-    /// The ratio lock is the application's, per graph, published to every
-    /// graph window and carried to a detached view: closed in Graph Properties
-    /// (`set_size_lock`), a pull of the figure's corner keeps its ratio in the
-    /// strip's window, and the fork of a detached view carries it. Witness:
-    /// the lock kept in `PlotEdit` (nothing to publish), or not fed to the view
-    /// (the ratio drifts as it does without a lock).
+    /// K1: pulling the figure's corner adds empty space, whatever the padlock
+    /// of Figure size says: the frames are unchanged and the right slack grows.
+    /// Witness: the lock fed to the view again (the frames would scale).
     #[test]
-    fn the_ratio_lock_is_the_applications_and_reaches_the_view_and_a_detached_fork() {
-        let ratio_after_pull = |locked: bool| {
+    fn a_figure_corner_pull_adds_space_and_ignores_the_padlock() {
+        for locked in [false, true] {
             let mut bench = Bench::new(2, false);
             let spec = bench.spec();
             let (w, h) = stokesforge_app_state::frame_sizes::figure_extent(&spec).unwrap();
             if locked {
-                // As Graph Properties does: through the state, not the view.
                 bench
                     .state
                     .set_size_lock(bench.graph, SizeLock::close((w, h)));
             }
             bench.frame(Vec::new());
             let sent = bench.pull_figure_corner(egui::vec2(80.0, 2.0));
-            assert!(
-                sent.iter()
-                    .any(|a| matches!(a, Action::SetGridFrames { figure: true, .. })),
-                "{sent:?}"
-            );
-            bench.apply(sent);
-            let (nw, nh) =
-                stokesforge_app_state::frame_sizes::figure_extent(&bench.spec()).unwrap();
-            assert!(nw > w + 10.0, "the figure grew: {w} -> {nw}");
+            let edits: Vec<&Action> = sent
+                .iter()
+                .filter(|action| matches!(action, Action::SetGridFrames { .. }))
+                .collect();
+            let [Action::SetGridFrames {
+                widths,
+                figure: true,
+                slack: Some(slack),
+                ..
+            }] = edits.as_slice()
+            else {
+                panic!("one figure action expected, got {sent:?}");
+            };
+            assert_eq!(widths, &spec.frame_widths, "locked {locked}");
+            assert!(slack.right > 40.0 && slack.left == 0.0, "{slack:?}");
             bench.session.shutdown().unwrap();
-            (nh / nw, h / w)
-        };
-        let (kept, wanted) = ratio_after_pull(true);
-        assert!((kept - wanted).abs() < 0.004, "{kept} vs {wanted}");
-        let (free, wanted) = ratio_after_pull(false);
-        assert!((free - wanted).abs() > 0.02, "no lock, no ratio: {free}");
+        }
+    }
 
+    /// The ratio lock is the application's, per graph, published to every
+    /// graph window and carried to a detached view (the figure's corners no
+    /// longer read it, K1): closed in Graph Properties (`set_size_lock`), the
+    /// fork of a detached view carries it. Witness: the lock not published.
+    #[test]
+    fn the_ratio_lock_is_the_applications_and_reaches_the_view_and_a_detached_fork() {
         let mut bench = Bench::new(2, false);
         let image = bench.view.layout_image().expect("image");
         let lock = SizeLock::close((image.width, image.height)).expect("lock");
