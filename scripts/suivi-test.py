@@ -4618,6 +4618,22 @@ class TestTagReport(LabelBase):
         self.assertEqual((d["kind"], d["jobs"], d["human"]), ("rc", ["a", "b"], "Vérifie."))
         self.assertNotEqual(self.run_cli("tag-wait", "389", "soon", env={"SF_SUIVI_DIR": self.state}).returncode, 0)
 
+    def test_tag_wait_again_keeps_the_jobs_and_the_human_check(self):
+        env = {"SF_SUIVI_DIR": self.state}
+        self.assertEqual(self.run_cli("tag-wait", "7", "rc", "--jobs", "a", "--human", "x", env=env).returncode, 0)
+        suivi.mark_added(7)
+        self.assertEqual(self.run_cli("tag-wait", "7", "rc", env=env).returncode, 0)     # same kind: label already added
+        d = jload(suivi.tagwait_path(7))
+        self.assertEqual((d["kind"], d["jobs"], d["human"]), ("rc", ["a"], "x"))
+        self.assertTrue(d.get("added_at"))
+        self.assertEqual(self.run_cli("tag-wait", "7", "final", env=env).returncode, 0)
+        d = jload(suivi.tagwait_path(7))
+        self.assertEqual((d["kind"], d["jobs"], d["human"]), ("final", ["a"], "x"))
+        self.assertFalse(d.get("added_at"))                                                  # a new kind adds its label
+        self.assertEqual(self.run_cli("tag-wait", "7", "final", "--jobs", "b,c", env=env).returncode, 0)
+        d = jload(suivi.tagwait_path(7))
+        self.assertEqual((d["jobs"], d["human"]), (["b", "c"], "x"))
+
 
 class TestPage(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
@@ -4693,6 +4709,24 @@ class TestPage(unittest.TestCase):
         self.assertEqual(self.merge_label({"issue": 7, "line": "main"}), "Fusionner")
         # lang: fr end
         self.assertIn("mergeLabel(c)", self.page())
+
+    def link_parts(self, text):
+        src = re.search(r"/\*LINKS-START\*/(.*)/\*LINKS-END\*/", self.page(), re.S).group(1)
+        r = subprocess.run(["node", "-e", src + "\nprocess.stdout.write(JSON.stringify(linkParts(%s)));" % json.dumps(text)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_only_gitlab_urls_become_links_in_a_card(self):
+        u = "https://gitlab.com/x/-/package_files/9/download"
+        self.assertEqual(self.link_parts("get " + u + ", then run"),
+                         [{"text": "get "}, {"href": u}, {"text": ", then run"}])
+        self.assertEqual(self.link_parts(u), [{"href": u}])
+        for bad in ("javascript:x", "http://evil", "https://gitlab.com.evil.org/x", "https://evil.org/https:/gitlab.com", "plain"):
+            self.assertEqual([p for p in self.link_parts(bad) if "href" in p], [], bad)
+        self.assertIn("appendLinked(el('li'),s)", self.page())
+        self.assertIn("appendLinked(el('code'),p)", self.page())
 
     def test_ci_line_sits_above_the_tabs_outside_the_banner(self):
         html = self.page()

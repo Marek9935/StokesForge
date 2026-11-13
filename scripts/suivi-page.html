@@ -702,6 +702,28 @@ document.addEventListener('drop',e=>{
   if(all.length)dropToBox(all);
   else if(k==='empty')noDrag();
 });
+/*LINKS-START*/
+/* Only https://gitlab.com/ URLs become links (#497); every other text, javascript: or look-alike hosts included, stays text. */
+function linkParts(text){
+  const out=[],t=String(text==null?'':text),re=/https:\/\/gitlab\.com\/[^\s<>"'`)\]]*/g;
+  let last=0,m;
+  while((m=re.exec(t))){
+    const url=m[0].replace(/[.,;:!?]+$/,'');
+    if(m.index>last)out.push({text:t.slice(last,m.index)});
+    out.push({href:url});
+    last=m.index+url.length;re.lastIndex=last;
+  }
+  if(last<t.length)out.push({text:t.slice(last)});
+  return out;
+}
+function appendLinked(parent,text){
+  linkParts(text).forEach(p=>{
+    if(p.href){const a=el('a','',p.href);a.href=p.href;a.target='_blank';a.rel='noopener';parent.appendChild(a);}
+    else parent.appendChild(document.createTextNode(p.text));
+  });
+  return parent;
+}
+/*LINKS-END*/
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'&&!isSettled(x)?' isback':''));
   b.appendChild(head(x,x.title||''));
@@ -710,10 +732,10 @@ function testBox(x){
   if(x.intro)b.appendChild(el('div','intro',x.intro));
   if(Array.isArray(x.where)&&x.where.length){
     b.appendChild(el('div','lbl','Où'));
-    const w=el('div','where');x.where.forEach((p,i)=>{if(i)w.appendChild(el('span','sep','›'));w.appendChild(el('code','',p));});b.appendChild(w);
+    const w=el('div','where');x.where.forEach((p,i)=>{if(i)w.appendChild(el('span','sep','›'));w.appendChild(appendLinked(el('code'),p));});b.appendChild(w);
   }
   if(Array.isArray(x.steps)&&x.steps.length){
-    b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(el('li','',s)));b.appendChild(o);
+    b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(appendLinked(el('li'),s)));b.appendChild(o);
   }
   if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
   if(fr.around)b.appendChild(el('div','around',fr.around));

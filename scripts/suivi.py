@@ -3141,9 +3141,18 @@ def labels_enabled(real_dir):
 
 
 def cmd_tag_wait(a):
+    """Merge with an earlier declaration (#497): the kind comes from this call, the jobs and the
+    human check stay unless this call gives new ones, `added_at` stays only while the kind (so the
+    label) is unchanged, otherwise the service adds the new waiting label."""
     p = tagwait_path(a.issue)
-    write_json(p, {"issue": a.issue, "kind": a.kind, "jobs": [j for j in (a.jobs or "").split(",") if j],
-                   "human": a.human or "", "declared_at": time.time()})
+    old = read_json(p)
+    old = old if isinstance(old, dict) else {}
+    rec = {"issue": a.issue, "kind": a.kind,
+           "jobs": [j for j in a.jobs.split(",") if j] if a.jobs else (old.get("jobs") or []),
+           "human": a.human or old.get("human") or "", "declared_at": time.time()}
+    if old.get("added_at") and old.get("kind") == a.kind:
+        rec["added_at"] = old["added_at"]
+    write_json(p, rec)
     print("tag-wait: #%d waits for %s; the service adds the label %s within about %d s"
           % (a.issue, "a final tag" if a.kind == "final" else "an -rcN or a final tag", LABEL_WAITS[a.kind],
              labels_poll_seconds()))
