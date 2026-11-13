@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
-use stokesforge_app::app::{PassHook, ServedApp};
+use stokesforge_app::app::{BenchState, PassHook, ServedApp};
 use stokesforge_app_state::preferences::Preferences;
 use stokesforge_app_state::state::{Action, AppState, ImportDestination};
 use stokesforge_core::{
@@ -363,7 +363,7 @@ fn start_threads(
     column_a: NodeId,
     column_d: NodeId,
     imports: Vec<PathBuf>,
-    shared: Arc<parking_lot::Mutex<AppState>>,
+    shared: Arc<BenchState>,
     waker: Arc<dyn Fn() + Send + Sync>,
     handle: stokesforge_session::SessionHandle,
     ctx: egui::Context,

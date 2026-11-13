@@ -297,7 +297,7 @@ pub(super) mod bench {
         pub(in crate::app) graph: NodeId,
         pub(in crate::app) tab: Tab,
         /// The folder of the project file of [`Bench::with_every_window`].
-        dir: Option<tempfile::TempDir>,
+        pub(in crate::app) dir: Option<tempfile::TempDir>,
     }
 
     /// The windows a [`Bench::with_every_window`] detaches (#459).
@@ -464,7 +464,14 @@ pub(super) mod bench {
             let Self {
                 app, frame, ctx, ..
             } = self;
-            let mut output = ctx.run_ui(raw, |ui| app.ui(ui, frame));
+            // As `ServedApp::ui`: the windows are published after `ui`, where the
+            // lock would be released (L1+: the children lock it themselves).
+            app.defer_viewport_publication();
+            let mut output = ctx.run_ui(raw, |ui| {
+                app.ui(ui, frame);
+                let pending = app.take_pending_viewports();
+                super::super::window_detach::publish_viewports(ui.ctx(), pending);
+            });
             output.textures_delta.clear();
             for (id, viewport) in &output.viewport_output {
                 if let Some(callback) = &viewport.viewport_ui_cb {

@@ -2697,7 +2697,7 @@ fn the_server_guard_sees_a_call_outside_the_module() {
 }
 
 /// The thread only ever `try_lock`s: a blocking `.lock()` or `lock_arc()` of
-/// the shared state is the UI side's (`StateSlot`), never the thread's.
+/// the shared application is the UI side's (`AppSlot`), never the thread's.
 #[test]
 fn the_server_thread_never_blocks_on_the_lock() {
     let sources = sources::sources();
@@ -2718,4 +2718,69 @@ fn the_server_thread_never_blocks_on_the_lock() {
             "{name} blocks on the lock"
         );
     }
+}
+
+const PUBLISH_MODULE: &str = "app/window_detach.rs";
+
+/// Every `show_viewport_deferred(` call of the production code that is not in
+/// `fn publish_viewports` of [`PUBLISH_MODULE`] (#475, step 2: the windows are
+/// published after the application lock is released, in one place).
+fn publications_outside_the_publish_function(sources: &[SourceFile]) -> Vec<String> {
+    let mut offenders = Vec::new();
+    for file in sources {
+        let text = file.production().code_as_text();
+        let allowed = (file.path == PUBLISH_MODULE)
+            .then(|| text.find("fn publish_viewports"))
+            .flatten()
+            .map(|start| {
+                let end = text[start..]
+                    .find("\n}\n")
+                    .map_or(text.len(), |e| start + e);
+                start..end
+            });
+        for (position, _) in text.match_indices(".show_viewport_deferred(") {
+            if allowed
+                .as_ref()
+                .is_some_and(|range| range.contains(&position))
+            {
+                continue;
+            }
+            let line = text[..position].matches('\n').count() + 1;
+            offenders.push(format!("src/{}:{line}", file.path));
+        }
+    }
+    offenders
+}
+
+#[test]
+fn show_viewport_deferred_lives_only_in_the_publish_function() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.path == PUBLISH_MODULE),
+        "{PUBLISH_MODULE} not read: the guard would no longer see the module"
+    );
+    let offenders = publications_outside_the_publish_function(&sources);
+    assert!(
+        offenders.is_empty(),
+        "show_viewport_deferred outside publish_viewports (#475: the windows are \
+         published after the application lock is released): {offenders:?}"
+    );
+}
+
+#[test]
+fn the_publication_guard_sees_a_call_elsewhere() {
+    let sources = vec![
+        file(
+            PUBLISH_MODULE,
+            "fn publish_viewports(c: &C) {\n    c.show_viewport_deferred(a);\n}\n\nfn other(c: &C) {\n    c.show_viewport_deferred(b);\n}\n",
+        ),
+        file("app.rs", "fn ui(c: &C) { c.show_viewport_deferred(x); }"),
+    ];
+    assert_eq!(
+        publications_outside_the_publish_function(&sources),
+        vec![
+            "src/app/window_detach.rs:6".to_string(),
+            "src/app.rs:1".to_string()
+        ]
+    );
 }

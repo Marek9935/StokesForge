@@ -87,7 +87,7 @@ guards.
 One background thread (`stokesforge-server`, `stokesforge-app/src/app/server.rs`) owns the
 follow-up of the work that does not depend on painting: autosave, the end of a script run,
 the end of a recalculation, the progress of an import. It shares **one** `AppState` with the
-interface through one lock (`parking_lot::Mutex`, owned guard `StateSlot`): the interface
+interface through one lock (`parking_lot::Mutex`, owned guard `AppSlot` over the whole `StokesForgeApp`): the interface
 holds the guard during a pass (`logic`, `ui`, `on_exit`) and gives it back after, the thread
 only `try_lock`s between two passes (busy: again in 10 ms). The tick itself is pure
 (`AppState::server_tick(now)` in `stokesforge-app-state/src/state/server.rs`, injected clock);

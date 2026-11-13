@@ -548,7 +548,76 @@ pub(super) fn script_viewport() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("stokesforge_script_window")
 }
 
+/// The body of a detached window: what `show_viewport_deferred` runs for each
+/// of its passes.
+pub(super) type ViewportBody = Box<dyn Fn(&mut egui::Ui, egui::ViewportClass) + Send + Sync>;
+
+/// A window `ui` wants published this pass (#475, step 2). Published by
+/// [`publish_viewports`] once the application lock is released, so that the
+/// body, which may run inside the pass (embedded viewports), can lock it.
+pub(super) struct PendingViewport {
+    pub(super) id: egui::ViewportId,
+    pub(super) builder: egui::ViewportBuilder,
+    pub(super) body: ViewportBody,
+    /// Wake the window after the publication (its content changed).
+    pub(super) repaint: bool,
+}
+
+/// THE place that registers a deferred viewport (`tests/guards.rs`:
+/// `show_viewport_deferred_lives_only_in_the_publish_function`).
+pub(super) fn publish_viewports(ctx: &egui::Context, pending: Vec<PendingViewport>) {
+    for PendingViewport {
+        id,
+        builder,
+        body,
+        repaint,
+    } in pending
+    {
+        ctx.show_viewport_deferred(id, builder, body);
+        if repaint {
+            ctx.request_repaint_of(id);
+        }
+    }
+}
+
 impl StokesForgeApp {
+    /// Asks for the publication of a detached window: queued when a
+    /// [`ServedApp`](super::ServedApp) publishes after releasing the lock,
+    /// at once otherwise (a test that drives `ui` on a plain app).
+    fn publish_viewport(
+        queue: &mut Option<Vec<PendingViewport>>,
+        ctx: &egui::Context,
+        id: egui::ViewportId,
+        builder: egui::ViewportBuilder,
+        repaint: bool,
+        body: impl Fn(&mut egui::Ui, egui::ViewportClass) + Send + Sync + 'static,
+    ) {
+        let pending = PendingViewport {
+            id,
+            builder,
+            body: Box::new(body),
+            repaint,
+        };
+        match queue {
+            Some(queue) => queue.push(pending),
+            None => publish_viewports(ctx, vec![pending]),
+        }
+    }
+
+    /// From now on `ui` queues the windows instead of publishing them.
+    pub(super) fn defer_viewport_publication(&mut self) {
+        self.pending_viewports.get_or_insert_with(Vec::new);
+    }
+
+    /// The windows queued by the pass that just ended, to publish after the lock
+    /// is released.
+    pub(super) fn take_pending_viewports(&mut self) -> Vec<PendingViewport> {
+        self.pending_viewports
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
     pub(super) fn drain_object_manager(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         let Some(view) = &self.om_view else {
             return;
@@ -624,43 +693,47 @@ impl StokesForgeApp {
             [220.0, 140.0],
             self.detach_init(PanelKind::Object),
         );
-        ctx.show_viewport_deferred(id, builder, move |ui, _class| {
-            super::window_band::stop_keys(ui.ctx());
-            super::shortcuts::refuse_quit_in_detached(ui.ctx());
-            // Read before painting (#459), queued after the window's own actions.
-            let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
-            live.report(ui.ctx());
-            let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
-            let mut actions = Vec::new();
-            let mut gestures = Vec::new();
-            let reattach = detached_panel_contents(ui, &tr!("action-object-manager"), |ui| {
-                gestures = object_manager_contents(
-                    ui,
-                    &model.tree,
-                    model.model.as_ref(),
-                    model.spec.as_ref(),
-                    model.settings,
-                    &mut actions,
-                );
-            });
-            actions.append(&mut keys);
-            if reattach || !actions.is_empty() || !gestures.is_empty() {
-                let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
-                requests.reattach |= reattach;
-                requests.actions.append(&mut actions);
-                if let Some(graph) = model.graph {
-                    requests
-                        .gestures
-                        .extend(gestures.into_iter().map(|gesture| (graph, gesture)));
+        Self::publish_viewport(
+            &mut self.pending_viewports,
+            ctx,
+            id,
+            builder,
+            changed,
+            move |ui, _class| {
+                super::window_band::stop_keys(ui.ctx());
+                super::shortcuts::refuse_quit_in_detached(ui.ctx());
+                // Read before painting (#459), queued after the window's own actions.
+                let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
+                live.report(ui.ctx());
+                let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
+                let mut actions = Vec::new();
+                let mut gestures = Vec::new();
+                let reattach = detached_panel_contents(ui, &tr!("action-object-manager"), |ui| {
+                    gestures = object_manager_contents(
+                        ui,
+                        &model.tree,
+                        model.model.as_ref(),
+                        model.spec.as_ref(),
+                        model.settings,
+                        &mut actions,
+                    );
+                });
+                actions.append(&mut keys);
+                if reattach || !actions.is_empty() || !gestures.is_empty() {
+                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    requests.reattach |= reattach;
+                    requests.actions.append(&mut actions);
+                    if let Some(graph) = model.graph {
+                        requests
+                            .gestures
+                            .extend(gestures.into_iter().map(|gesture| (graph, gesture)));
+                    }
+                    root.request_repaint_of(egui::ViewportId::ROOT);
                 }
-                root.request_repaint_of(egui::ViewportId::ROOT);
-            }
-            super::page_layout::note_field_focus(ui.ctx());
-            super::window_band::paint(ui.ctx());
-        });
-        if changed {
-            ctx.request_repaint_of(id);
-        }
+                super::page_layout::note_field_focus(ui.ctx());
+                super::window_band::paint(ui.ctx());
+            },
+        );
     }
 
     pub(super) fn detach_script_console(&mut self) {
@@ -725,42 +798,47 @@ impl StokesForgeApp {
             [300.0, 220.0],
             self.detach_init(PanelKind::Script),
         );
-        ctx.show_viewport_deferred(id, builder, move |ui, _class| {
-            super::window_band::stop_keys(ui.ctx());
-            super::shortcuts::refuse_quit_in_detached(ui.ctx());
-            // Read before painting (#459), queued after the window's own actions.
-            let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
-            live.report(ui.ctx());
-            let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
-            let source = model.source.clone();
-            let mut actions = Vec::new();
-            let ctx = ui.ctx().clone();
-            if ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::SHORTCUT_RUN_SCRIPT))
-            {
-                actions.push(Action::RunScript);
-            }
-            let reattach = detached_panel_contents(ui, &tr!("script-title"), |ui| {
-                if !model.available {
-                    ui.weak(tr!("script-unavailable"));
+        Self::publish_viewport(
+            &mut self.pending_viewports,
+            ctx,
+            id,
+            builder,
+            changed,
+            move |ui, _class| {
+                super::window_band::stop_keys(ui.ctx());
+                super::shortcuts::refuse_quit_in_detached(ui.ctx());
+                // Read before painting (#459), queued after the window's own actions.
+                let mut keys = super::shortcuts::read_detached_history_and_save(ui.ctx());
+                live.report(ui.ctx());
+                let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
+                let source = model.source.clone();
+                let mut actions = Vec::new();
+                let ctx = ui.ctx().clone();
+                if ctx.input_mut(|input| {
+                    input.consume_shortcut(&super::shortcuts::SHORTCUT_RUN_SCRIPT)
+                }) {
+                    actions.push(Action::RunScript);
                 }
-                script_model_contents(ui, &ctx, &mut model, &mut actions);
-            });
-            actions.append(&mut keys);
-            if source != model.source || reattach || !actions.is_empty() {
-                let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
-                if source != model.source {
-                    requests.source = Some(model.source.clone());
+                let reattach = detached_panel_contents(ui, &tr!("script-title"), |ui| {
+                    if !model.available {
+                        ui.weak(tr!("script-unavailable"));
+                    }
+                    script_model_contents(ui, &ctx, &mut model, &mut actions);
+                });
+                actions.append(&mut keys);
+                if source != model.source || reattach || !actions.is_empty() {
+                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    if source != model.source {
+                        requests.source = Some(model.source.clone());
+                    }
+                    requests.reattach |= reattach;
+                    requests.actions.append(&mut actions);
+                    root.request_repaint_of(egui::ViewportId::ROOT);
                 }
-                requests.reattach |= reattach;
-                requests.actions.append(&mut actions);
-                root.request_repaint_of(egui::ViewportId::ROOT);
-            }
-            super::page_layout::note_field_focus(ui.ctx());
-            super::window_band::paint(ui.ctx());
-        });
-        if changed {
-            ctx.request_repaint_of(id);
-        }
+                super::page_layout::note_field_focus(ui.ctx());
+                super::window_band::paint(ui.ctx());
+            },
+        );
     }
 
     /// Switches to detached mode: the next render opens the Project Manager
@@ -871,9 +949,12 @@ impl StokesForgeApp {
             [220.0, 140.0],
             self.detach_init(PanelKind::Project),
         );
-        ctx.show_viewport_deferred(
+        Self::publish_viewport(
+            &mut self.pending_viewports,
+            ctx,
             egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
             builder,
+            changed,
             move |ui, _class| {
                 super::window_band::stop_keys(ui.ctx());
                 super::shortcuts::refuse_quit_in_detached(ui.ctx());
@@ -937,11 +1018,6 @@ impl StokesForgeApp {
                 super::window_band::paint(ui.ctx());
             },
         );
-        if changed {
-            ctx.request_repaint_of(egui::ViewportId::from_hash_of(
-                "stokesforge_project_manager_window",
-            ));
-        }
     }
 
     /// Removes `tab` from the floating windows and detaches it into a separate
@@ -1169,6 +1245,7 @@ impl StokesForgeApp {
         let Self {
             state,
             detached_tabs,
+            pending_viewports,
             ..
         } = self;
         for (tab, detached) in detached_tabs.iter() {
@@ -1211,14 +1288,14 @@ impl StokesForgeApp {
                 requests,
                 root_context,
             };
-            ctx.show_viewport_deferred(
+            Self::publish_viewport(
+                pending_viewports,
+                ctx,
                 egui::ViewportId::from_hash_of(tab),
                 viewport,
+                changed,
                 move |ui, _class| payload.show(ui),
             );
-            if changed {
-                ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
-            }
         }
     }
 }

@@ -597,7 +597,7 @@ const SHOTS: &[Shot] = &[
                     .join("data")
                     .join("recovery"),
             ));
-            *h.state_mut().app.state = state;
+            h.state_mut().app.state = state;
             act(h, Action::OpenPreferences);
             click(h, "Folders");
             grow_dialog(h, 100.0);

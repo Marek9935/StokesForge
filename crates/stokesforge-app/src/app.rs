@@ -220,8 +220,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use server::StateSlot;
-pub use server::{PassHook, ServedApp};
+pub use server::{BenchState, PassHook, ServedApp};
 #[doc(hidden)]
 pub use server_stats::{bench_flush_stats, bench_write_in_flight};
 
@@ -294,7 +293,11 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 8;
 /// floating windows, and the strict minimum for rendering.
 pub struct StokesForgeApp {
     /// The state, sole holder of the logic.
-    state: StateSlot,
+    state: AppState,
+    /// The windows `ui` wants published this pass (#475, step 2): `Some` when a
+    /// [`ServedApp`] publishes them after releasing the lock, `None`: published
+    /// at once (a test that drives `ui` on a plain app).
+    pending_viewports: Option<Vec<window_detach::PendingViewport>>,
     /// The server thread's status (#475), once attached by [`ServedApp`];
     /// `None`: no thread, the paint pass polls.
     server: Option<Arc<server::ServerStatus>>,
@@ -559,7 +562,8 @@ impl StokesForgeApp {
 
         let window_title = state.window_title();
         Self {
-            state: StateSlot::new(state),
+            state,
+            pending_viewports: None,
             server: None,
             server_stop_told: false,
             file_picker: FilePicker::default(),
@@ -821,6 +825,17 @@ impl StokesForgeApp {
         actions.push(Action::PickFile(PickRequest::SaveProjectAs {
             suggested: suggested_file_name(self.state.path()),
         }));
+    }
+
+    /// What every pass of the application may need before it acts, whichever
+    /// window it paints (#475, step 2): the root runs it, and a detached window
+    /// will run it too from L1 on, so that a Save As started there is answered
+    /// in its own pass. Today only the file picker (its answer is applied
+    /// where its request came from). Not in it: the busy-indicator repaints and
+    /// the opening of the workbooks an import created (`poll_background_jobs`),
+    /// the window title and status, the figure offer: they belong to the root.
+    fn pass_prelude(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        self.poll_file_picker(ctx, actions);
     }
 
     /// Starts the requested pickers, then applies the answer of the one that
@@ -1114,7 +1129,7 @@ impl eframe::App for StokesForgeApp {
                 }
             }
         }
-        self.poll_file_picker(&ctx, &mut actions);
+        self.pass_prelude(&ctx, &mut actions);
         if std::mem::take(&mut self.close_requested) {
             actions.push(Action::Quit {
                 pending_edits: false,
