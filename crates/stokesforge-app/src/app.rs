@@ -215,6 +215,8 @@ mod window_chrome;
 mod window_detach;
 mod window_placement;
 mod window_stack;
+#[cfg(test)]
+mod window_stress;
 mod workbook;
 
 use std::collections::{HashMap, HashSet};

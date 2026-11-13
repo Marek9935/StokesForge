@@ -368,6 +368,18 @@ pub(super) mod bench {
             if detached {
                 app.detach_tab(tab);
             }
+            Self::from_app(session, app, graph)
+        }
+
+        /// A bench on `app`, whose "main" graph is `graph` (the one
+        /// [`Self::child`] and [`Self::tab`] stand for). Nothing is detached or
+        /// painted yet.
+        pub(in crate::app) fn from_app(
+            session: Session,
+            app: StokesForgeApp,
+            graph: NodeId,
+        ) -> Self {
+            let tab = Tab::Graph(graph);
             let app = AppSlot::new(app);
             let ctx = egui::Context::default();
             ctx.set_embed_viewports(false);
@@ -618,6 +630,18 @@ pub(super) mod bench {
                 Window::ObjectManager => self.app.om_view.as_ref().unwrap().queued_actions(),
                 Window::Console => self.app.script_view.as_ref().unwrap().queued_actions(),
             }
+        }
+
+        /// Has the root published a window `id` that still registers itself?
+        pub(in crate::app) fn has_window(&self, id: egui::ViewportId) -> bool {
+            self.callbacks.contains_key(&id)
+        }
+
+        /// [`Self::act_in_window`] for the window `id`.
+        pub(in crate::app) fn act_in(&mut self, id: egui::ViewportId, action: Action) {
+            let ctx = self.ctx.clone();
+            self.app
+                .apply_pass_actions(&ctx, id, Vec::new(), vec![action], false);
         }
 
         /// The detached graph window produces `action` this pass: applied at once
