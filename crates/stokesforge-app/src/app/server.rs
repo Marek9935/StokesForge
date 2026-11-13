@@ -74,6 +74,7 @@ use stokesforge_session::SessionError;
 
 use stokesforge_app_state::tr;
 
+use super::server_stats;
 use super::StokesForgeApp;
 
 /// Retry delay when the UI holds the lock.
@@ -208,16 +209,23 @@ pub(super) fn serve_once(
     run: &RunJob,
     record: &RecordImports,
 ) -> Pass {
+    let held = server_stats::start();
     let Some(mut guard) = shared.try_lock() else {
+        server_stats::event("busy", false);
         return Pass::Busy;
     };
     let tick = guard.server_tick(now);
     drop(guard);
+    server_stats::since("tick", held, tick.changed);
     let mut changed = tick.changed;
     let mut next = tick.next;
     if let Some(job) = tick.autosave {
         // The lock is released: the write may take as long as the actor needs.
+        server_stats::write_began();
+        let written = server_stats::start();
         let result = run(&job);
+        server_stats::write_ended();
+        server_stats::since("write", written, result.is_ok());
         changed |= with_lock_retry(shared, |state| state.finish_autosave(&job, result));
         next = Some(Duration::ZERO);
     }
@@ -236,6 +244,9 @@ pub(super) fn serve_once(
         next = Some(Duration::ZERO);
     }
     wake(repaint, changed);
+    if changed {
+        server_stats::event("wake", true);
+    }
     Pass::Done(next)
 }
 
@@ -247,7 +258,10 @@ fn with_lock_retry<R>(shared: &Mutex<AppState>, body: impl FnOnce(&mut AppState)
     loop {
         if let Some(mut guard) = shared.try_lock() {
             if let Some(body) = body.take() {
-                return body(&mut guard);
+                let held = server_stats::start();
+                let result = body(&mut guard);
+                server_stats::since("finish", held, true);
+                return result;
             }
         }
         std::thread::park_timeout(BUSY_RETRY);
@@ -403,7 +417,12 @@ impl ServerThread {
 pub struct ServedApp {
     app: StokesForgeApp,
     thread: ServerThread,
+    pass_hook: Option<PassHook>,
 }
+
+/// What a bench runs at the end of a paint pass, under the lock, where a
+/// gesture would be applied.
+pub type PassHook = Box<dyn FnMut(&mut AppState, &egui::Context) + Send>;
 
 impl ServedApp {
     /// Starts the thread. `ctx` is the context the thread wakes.
@@ -415,21 +434,55 @@ impl ServedApp {
             app.state.set_waker(Arc::new(move || server.unpark()));
         }
         app.server = Some(thread.status());
-        Self { app, thread }
+        Self {
+            app,
+            thread,
+            pass_hook: None,
+        }
+    }
+
+    /// For the bench (`examples/server_bench.rs`): runs `hook` at the end of
+    /// each paint pass, with the lock held. Nothing in the application sets it.
+    #[doc(hidden)]
+    pub fn set_pass_hook(&mut self, hook: PassHook) {
+        self.pass_hook = Some(hook);
+    }
+
+    /// For the bench: what a paint pass does after a gesture (the thread looks
+    /// again), for a change made from a bench thread.
+    #[doc(hidden)]
+    pub fn bench_waker(&self) -> Arc<dyn Fn() + Send + Sync> {
+        match self.thread.waker() {
+            Some(server) => Arc::new(move || server.unpark()),
+            None => Arc::new(|| {}),
+        }
+    }
+
+    /// For the bench: the shared state, as the thread sees it.
+    #[doc(hidden)]
+    pub fn shared_state(&self) -> Arc<Mutex<AppState>> {
+        self.app.state.shared()
     }
 }
 
 impl eframe::App for ServedApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let waited = server_stats::start();
         self.app.state.acquire();
+        server_stats::since("logic", waited, false);
         self.app.logic(ctx, frame);
         self.app.state.release();
         self.thread.unpark();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let waited = server_stats::start();
         self.app.state.acquire();
+        server_stats::since("ui", waited, false);
         self.app.ui(ui, frame);
+        if let Some(hook) = &mut self.pass_hook {
+            hook(&mut self.app.state, ui.ctx());
+        }
         self.app.state.release();
         self.thread.unpark();
     }
@@ -440,6 +493,8 @@ impl eframe::App for ServedApp {
         // Guard released, then joined: a write in flight ends silently and the
         // normal slot removal follows it. All before `session.shutdown()`.
         let _ended = self.thread.shut_down(&mut self.app.state, SHUTDOWN_WAIT);
+        server_stats::event("exit", true);
+        server_stats::bench_flush_stats();
     }
 }
 

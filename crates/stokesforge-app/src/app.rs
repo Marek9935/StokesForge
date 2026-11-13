@@ -199,6 +199,7 @@ mod reorder_list;
 mod results_pane;
 mod script_console;
 mod server;
+mod server_stats;
 pub(crate) mod shortcuts;
 mod stale_export;
 mod state_toggle;
@@ -219,8 +220,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub use server::ServedApp;
 use server::StateSlot;
+pub use server::{PassHook, ServedApp};
+#[doc(hidden)]
+pub use server_stats::{bench_flush_stats, bench_write_in_flight};
 
 use about_window::about_window;
 use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
