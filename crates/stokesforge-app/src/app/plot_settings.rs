@@ -1314,6 +1314,16 @@ pub(super) fn formula_field(
     )
 }
 
+/// How a [`formula_field_with_end`] stands after the frame.
+pub(super) struct FieldEnd {
+    /// The field has focus now (a draft is being typed).
+    pub(super) focused: bool,
+    /// The field was left this frame (click elsewhere, Enter, Tab or Escape).
+    pub(super) left: bool,
+    /// It was left by Escape (S-F7): the caller gives the old value back.
+    pub(super) escaped: bool,
+}
+
 /// [`formula_field`] whose text is checked by `diagnose` (a template that reads
 /// variables needs them defined first).
 fn formula_field_with(
@@ -1323,6 +1333,19 @@ fn formula_field_with(
     value: &mut String,
     diagnose: &dyn Fn(&str) -> Option<String>,
 ) -> bool {
+    formula_field_with_end(form, label, hint, value, diagnose).left
+}
+
+/// [`formula_field_with`] that also says whether the field has focus and how
+/// it was left, for a field kept as a draft outside a dialog (Preferences,
+/// #502).
+pub(super) fn formula_field_with_end(
+    form: &mut Form<'_>,
+    label: &str,
+    hint: &str,
+    value: &mut String,
+    diagnose: &dyn Fn(&str) -> Option<String>,
+) -> FieldEnd {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
@@ -1335,8 +1358,29 @@ fn formula_field_with(
             }
         }
         formula_help(ui, hint);
-        response.lost_focus()
+        // egui gives the focus back at the start of the pass where Escape is
+        // pressed: the field is then "left" with that key down.
+        let left = response.lost_focus();
+        FieldEnd {
+            focused: response.has_focus(),
+            left,
+            escaped: left && ui.input(|input| input.key_pressed(egui::Key::Escape)),
+        }
     })
+}
+
+/// The one validation of a custom legend template (S-T3), shared by the
+/// Legend tab of Graph Properties and the Preferences (#502): a later fix
+/// applies to both. The template reads variables, so it is checked with them
+/// defined; an empty template is reported (the entries have no text) but is
+/// allowed.
+pub(crate) fn legend_template_issue(template: &str) -> Option<String> {
+    if template.is_empty() {
+        return Some(tr!("plot-legend-template-empty"));
+    }
+    stokesforge_render_egui::formula::diagnose(&stokesforge_plot::template_source(template, |_| {
+        String::new()
+    }))
 }
 
 /// Edits a mirror axis (#176): it takes the scale of the opposite axis and has neither
@@ -2259,20 +2303,7 @@ fn legend_text_editor(
         text.choose_custom();
     }
     if text.from == LegendTextFrom::Custom {
-        // The template reads variables: it is checked with them defined.
-        let diagnose = |template: &str| {
-            stokesforge_render_egui::formula::diagnose(&stokesforge_plot::template_source(
-                template,
-                |_| String::new(),
-            ))
-        };
-        commit |= formula_field_with(
-            form,
-            &tr!("plot-legend-template"),
-            &tr!("plot-legend-template", "hint"),
-            &mut text.template,
-            &diagnose,
-        );
+        commit |= legend_template_field(form, &mut text.template).left;
     }
     if !row_columns.is_empty() {
         #[derive(Clone, Copy, PartialEq)]
@@ -2322,6 +2353,19 @@ fn legend_text_editor(
         }
     }
     commit
+}
+
+/// The « Template » row of a custom legend, with its help icon and the shared
+/// validation ([`legend_template_issue`]): the one field of the Legend tab and
+/// of the Preferences (#502).
+pub(super) fn legend_template_field(form: &mut Form<'_>, template: &mut String) -> FieldEnd {
+    formula_field_with_end(
+        form,
+        &tr!("plot-legend-template"),
+        &tr!("plot-legend-template", "hint"),
+        template,
+        &legend_template_issue,
+    )
 }
 
 /// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of

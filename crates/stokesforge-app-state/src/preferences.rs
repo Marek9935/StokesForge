@@ -293,6 +293,11 @@ struct PreferencesFile {
     /// long name.
     #[serde(default, deserialize_with = "lenient")]
     new_graph_legend_text: Option<String>,
+    /// Template of the legend of **new** graphs when « Text from » is
+    /// Custom (#502); kept whatever the current choice, so returning to Custom
+    /// finds it again. Missing or unreadable: empty.
+    #[serde(default, deserialize_with = "lenient")]
+    new_graph_legend_template: Option<String>,
     /// "Keep in Results" remembered per analysis operation (M5, #148), by
     /// [`OperationKind::key`]. Kept raw: an unreadable entry is dropped alone.
     #[serde(default)]
@@ -338,11 +343,11 @@ where
 }
 
 /// The stored choice of the legend text of new graphs: one of the list
-/// choices, otherwise (missing, unknown, custom) the long name.
+/// choices (Custom included, #502), otherwise (missing, unknown) the long name.
 fn new_graph_legend_choice(key: Option<&str>) -> stokesforge_plot::LegendTextFrom {
     use stokesforge_plot::LegendTextFrom;
     match LegendTextFrom::from_key(key.unwrap_or_default()) {
-        LegendTextFrom::Custom | LegendTextFrom::Unknown(_) => LegendTextFrom::LongName,
+        LegendTextFrom::Unknown(_) => LegendTextFrom::LongName,
         known => known,
     }
 }
@@ -373,7 +378,7 @@ pub struct Preferences {
     show_column_formula_help: bool,
     import_guide_hidden: bool,
     new_graph_decimal_comma: bool,
-    new_graph_legend_text: stokesforge_plot::LegendTextFrom,
+    new_graph_legend_text: stokesforge_plot::LegendText,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
     default_folders: [Option<String>; 3],
@@ -449,7 +454,11 @@ impl Preferences {
             show_column_formula_help: file.show_column_formula_help.unwrap_or(true),
             import_guide_hidden: file.import_guide_hidden.unwrap_or(false),
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
-            new_graph_legend_text: new_graph_legend_choice(file.new_graph_legend_text.as_deref()),
+            new_graph_legend_text: stokesforge_plot::LegendText {
+                from: new_graph_legend_choice(file.new_graph_legend_text.as_deref()),
+                template: file.new_graph_legend_template.unwrap_or_default(),
+                row_column: None,
+            },
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
             default_folders: [
@@ -649,21 +658,32 @@ impl Preferences {
         self.save_field("new_graph_decimal_comma", comma.into())
     }
 
-    /// « Text from » given to the legend of **new** graphs (#499): the long
-    /// name by default. Never [`stokesforge_plot::LegendTextFrom::Custom`]
-    /// (a template has no default).
-    pub fn new_graph_legend_text(&self) -> &stokesforge_plot::LegendTextFrom {
+    /// « Text from » and custom template given to the legend of **new**
+    /// graphs (#499, #502): the long name by default. The template is kept
+    /// whatever the choice; it is read only under Custom. `row_column` is
+    /// always `None`.
+    pub fn new_graph_legend_text(&self) -> &stokesforge_plot::LegendText {
         &self.new_graph_legend_text
     }
 
-    /// Remembers the choice without replacing the other preferences.
+    /// Remembers the choice and the template, in one write, without replacing
+    /// the other preferences. The template is saved as typed (empty or
+    /// invalid included: the graph falls back to the raw text, invariant 10).
     pub fn save_new_graph_legend_text(
         &mut self,
-        from: stokesforge_plot::LegendTextFrom,
+        text: stokesforge_plot::LegendText,
     ) -> std::io::Result<()> {
-        let from = new_graph_legend_choice(Some(from.key()));
-        self.new_graph_legend_text = from.clone();
-        self.save_field("new_graph_legend_text", from.key().into())
+        let text = stokesforge_plot::LegendText {
+            from: new_graph_legend_choice(Some(text.from.key())),
+            template: text.template,
+            row_column: None,
+        };
+        let fields = [
+            ("new_graph_legend_text", text.from.key().into()),
+            ("new_graph_legend_template", text.template.clone().into()),
+        ];
+        self.new_graph_legend_text = text;
+        self.save_fields(fields)
     }
 
     /// Size cap of a `.stf` on open, in MB (A2, #316); 512 by default, always within
@@ -1315,6 +1335,62 @@ mod tests {
         assert_eq!(reread.language(), Some("fr"));
         let text = std::fs::read_to_string(path).unwrap();
         assert!(text.contains("\"future\""), "{text}");
+    }
+
+    /// #502: the legend choice (Custom included) and its template are written
+    /// together and read back; an unknown or unreadable value falls back alone.
+    /// Witnesses: no template key written, or Custom mapped to the long name,
+    /// fails the round trip; no `lenient` on the template fails the second part.
+    #[test]
+    fn the_legend_choice_and_its_template_round_trip() {
+        use stokesforge_plot::{LegendText, LegendTextFrom};
+        let (_dir, path) = written(r#"{"language":"fr"}"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences
+            .save_new_graph_legend_text(LegendText {
+                from: LegendTextFrom::Custom,
+                template: "*#ln*".to_string(),
+                row_column: None,
+            })
+            .unwrap();
+        let reread = Preferences::load_from(Some(path.clone()));
+        assert_eq!(reread.new_graph_legend_text().from, LegendTextFrom::Custom);
+        assert_eq!(reread.new_graph_legend_text().template, "*#ln*");
+        assert_eq!(reread.language(), Some("fr"));
+        // Another choice keeps the template.
+        let mut preferences = reread;
+        preferences
+            .save_new_graph_legend_text(LegendText {
+                from: LegendTextFrom::Units,
+                template: "*#ln*".to_string(),
+                row_column: None,
+            })
+            .unwrap();
+        let reread = Preferences::load_from(Some(path));
+        assert_eq!(reread.new_graph_legend_text().from, LegendTextFrom::Units);
+        assert_eq!(reread.new_graph_legend_text().template, "*#ln*");
+
+        let (_dir, path) = written(r#"{"new_graph_legend_template":7,"language":"fr"}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.new_graph_legend_text().template, "");
+        assert_eq!(preferences.language(), Some("fr"));
+        let (_dir, path) = written(r#"{"new_graph_legend_text":"smart_v9"}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(
+            preferences.new_graph_legend_text().from,
+            LegendTextFrom::LongName
+        );
+    }
+
+    /// #502: another save rewrites only its own key: the template stays.
+    /// Witness: `save_fields` rewriting the whole document drops it.
+    #[test]
+    fn saving_the_decimal_comma_keeps_the_legend_template_key() {
+        let (_dir, path) = written(r##"{"new_graph_legend_template":"#ln"}"##);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences.save_new_graph_decimal_comma(true).unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("new_graph_legend_template"), "{text}");
     }
 
     /// M5: the per-operation choices are read entry by entry: an unknown

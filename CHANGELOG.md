@@ -26,6 +26,10 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Preferences > Display > New > Legend text from offers Custom… (#502): a
+  Template row (the Legend tab's own field and validation) sets the template
+  that every new graph starts with. An empty template is flagged but kept.
+
 - Legend text source (#499): Graph Properties > Legend has a « Text from »
   setting that chooses which worksheet header row gives every legend entry
   (Long Name, Comments, x', Units, Short Name, Long Name (Units), Long Name,
