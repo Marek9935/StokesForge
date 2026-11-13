@@ -343,8 +343,8 @@ fn a_dialog_closed_in_a_small_window_keeps_the_size_the_user_chose() {
 /// Page Layout Mode do nothing (Esc, the snap key, the arrows): the mode and
 /// the snap stay, the window's band says why, and the root sleeping after it
 /// published the dialog changes nothing. Once the dialog is closed, Esc leaves
-/// the mode. Witness: remove `stop_keys` from `DetachedTabViewport::show`; or
-/// clear the published signal at each root pass.
+/// the mode. Witness: remove `stop_keys` from `detached_graph_pass`; or
+/// stop publishing the dialog at each pass.
 #[test]
 fn a_dialog_in_the_main_window_stops_the_mode_keys_of_a_detached_graph() {
     let _language =

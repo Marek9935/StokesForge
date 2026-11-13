@@ -4688,35 +4688,6 @@ fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
 /// The detached note edits on a local view: its input does not reach the state
 /// of the root, and its validation joins the undoable command path.
 #[test]
-fn detached_note_view_keeps_its_buffer_local_and_commits_through_the_root() {
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let mut project = demo_project();
-    let root = project.root();
-    let note = project
-        .add_note(root, Some("Note1"), "before")
-        .expect("note");
-    let (_session, mut state) = start(project, &dir.path().join("project.stf"));
-
-    let mut detached = state.fork_for_detached_view().unwrap();
-    detached.begin_note_edit(note);
-    if let Some(edit) = detached.note_editing_mut() {
-        edit.buffer = "after".to_string();
-    }
-    assert!(state.note_editing().is_none());
-    assert_eq!(state.note_text(note), Some("before".to_string()));
-
-    state.dispatch(Action::SetNoteText {
-        note,
-        text: "after".to_string(),
-    });
-    detached.sync_detached_snapshot(state.snapshot().clone());
-    assert_eq!(detached.note_text(note), Some("after".to_string()));
-    assert!(state.can_undo());
-    state.dispatch(Action::Undo);
-    assert_eq!(state.note_text(note), Some("before".to_string()));
-}
-
-#[test]
 fn editing_a_note_commits_on_dispatch_and_is_undoable() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let mut project = demo_project();
@@ -5122,30 +5093,6 @@ fn refreshing_from_the_source_keeps_the_raw_data_name() {
         "the file was re-read"
     );
     assert_eq!(state.tree().node(sheet).unwrap().name(), "Raw Data");
-}
-
-/// The detached view keeps its selections and its copies, then provides this
-/// context to the main command path before a deferred paste.
-#[test]
-fn detached_book_view_reuses_the_grid_selection_and_clipboard() {
-    let dir = tempfile::tempdir().unwrap();
-    let (_session, mut state) = start_demo(dir.path());
-    let book = book_named(state.tree(), "Book1");
-    let sheet = sheet_named(state.tree(), "Sheet1");
-    let columns = state.visible_columns(sheet);
-    let source = columns[1].0;
-    let target = columns[0].0;
-    let mut detached = state.fork_for_detached_view().unwrap();
-    detached.select_cell(sheet, source, 0);
-    let copied = detached.copy_selection(sheet).unwrap();
-    state.adopt_detached_book_view(&mut detached, book);
-    assert_eq!(state.selection(sheet), detached.selection(sheet));
-    state.select_cell(sheet, target, 1);
-    state.dispatch(Action::Paste {
-        sheet,
-        text: copied,
-    });
-    assert_eq!(cell_f64(&state, target, 1), cell_f64(&state, source, 0));
 }
 
 /// An unreadable file produces no empty workbook; a later valid file
@@ -10201,44 +10148,44 @@ fn undo_state_is_fresh_right_after_a_grouped_clear() {
 
 // -- Undoing a graph's properties does not undo a detached input (#21) --
 
-/// While the graph properties window holds a macro, a detached view
-/// (other sender identity) cannot slip a write into it:
-/// it is refused, and undoing the properties does not touch the workbook.
+/// While the main window holds the macro of the graph properties, a detached
+/// window (its own sender identity, swapped in for its paint) cannot slip a
+/// write into it: the actor refuses it, and undoing the properties does not
+/// touch the workbook. (The macro is opened with no dialog: the state's own
+/// guards would otherwise drop the write before it reaches the actor.)
 #[test]
 fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut main) = start_demo(dir.path());
-    let graph = plotted_graph(&mut main);
     let book = book_named(main.tree(), "Book1");
     let sheet = main.selected_sheet_in(book).unwrap();
     let column = main.visible_columns(sheet)[0].0;
     let before = cell_f64(&main, column, 0);
 
-    let mut detached = main.fork_for_detached_view().expect("detached view");
-    main.dispatch(Action::OpenPlotSettings {
-        graph,
-        tab: PlotSettingsTab::Graph,
-        axis: None,
-    });
-    detached.dispatch(Action::CommitCell {
+    let window = main.new_session_identity();
+    main.open_root_macro_for_test();
+    let root = main.replace_session_identity(window);
+    main.dispatch(Action::CommitCell {
         column,
         row: 0,
         text: "99".into(),
     });
     assert!(
-        detached.status().is_some_and(|status| status.is_error()),
-        "the foreign input is refused during the dialog"
+        main.status().is_some_and(|status| status.is_error()),
+        "the foreign input is refused during the macro"
     );
+    let window = main.replace_session_identity(root);
     main.cancel_plot_settings();
-    detached.refresh();
-    assert_eq!(cell_f64(&detached, column, 0), before);
+    assert_eq!(cell_f64(&main, column, 0), before);
 
-    // The dialog closed, the same input goes through and stays.
-    detached.dispatch(Action::CommitCell {
+    // The macro closed, the same input goes through and stays.
+    let root = main.replace_session_identity(window);
+    main.dispatch(Action::CommitCell {
         column,
         row: 0,
         text: "99".into(),
     });
+    let _window = main.replace_session_identity(root);
     main.refresh();
     assert_eq!(cell_f64(&main, column, 0), 99.0);
 }
@@ -16382,11 +16329,11 @@ fn the_strip_sets_the_figure_fixed_in_one_undo_step() {
 }
 
 /// #426: the ratio lock is the session's, per graph: an action sets it, it
-/// changes no model and no history, a detached fork carries it, and a figure
+/// changes no model and no history, and a figure
 /// scale committed under a closed lock keeps its ratio instead of taking the
 /// new image's. Witness: `adopt_next` not called.
 #[test]
-fn the_size_lock_is_session_state_shared_with_a_detached_fork() {
+fn the_size_lock_is_session_state() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let spec = graph_spec(&state, graph);
@@ -16399,9 +16346,6 @@ fn the_size_lock_is_session_state_shared_with_a_detached_fork() {
     });
     assert_eq!(state.size_lock(graph), Some(lock));
     assert_eq!(state.snapshot().revision, revision, "no model change");
-    let mut fork = state.fork_for_detached_view().unwrap();
-    assert_eq!(fork.size_lock(graph), Some(lock), "carried to the fork");
-
     // A scale of the figure adopts the next image: `follow` keeps the ratio.
     let widths: Vec<f64> = spec.frame_widths.iter().map(|w| w * 1.3).collect();
     let heights: Vec<f64> = spec.frame_heights.iter().map(|h| h * 1.2).collect();
@@ -16419,8 +16363,7 @@ fn the_size_lock_is_session_state_shared_with_a_detached_fork() {
     assert!((followed.ratio - lock.ratio).abs() < 1e-12, "ratio kept");
 
     state.dispatch(Action::SetSizeLock { graph, lock: None });
-    fork.sync_detached_sheet_editor(&state);
-    assert_eq!(fork.size_lock(graph), None);
+    assert_eq!(state.size_lock(graph), None);
 }
 
 /// #394: deleting a cell that empties its column removes that column; the

@@ -19,9 +19,9 @@ Switching sheet (`AppState::select_sheet`, whoever asks) commits the open cell
 entry and header field first, one undo step each; a cell value the column
 refuses is dropped silently. In a detached workbook with a dialog open in the
 main window the switch is refused like Enter: sheet and entry stay (#524).
-The entries open in detached windows (their own `view_state`) are committed
-by `StokesForgeApp::commit_view_entries` before Save, Save As, New Project,
-Open and Quit, then the main state refreshes. The same call closes the graph
+The cell, header and note entries are the state's own whatever window holds
+them (#475, L2): `AppState::save` commits them, and `StokesForgeApp::commit_view_entries`
+(called before Save, Save As, New Project, Open and Quit) closes the graph
 text editors (titles, legends, group names, free texts: egui-side, in egui temp
 data) of the floating and detached graphs and sends their usual undoable
 actions (`graph_text_edit::commit_open_text_editors`); they no longer raise an

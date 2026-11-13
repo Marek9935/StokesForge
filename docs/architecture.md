@@ -97,8 +97,10 @@ painted), only when something they show changed. Applying a finished import
 stays in the paint pass. Step 2 (L0, L1): the windows are published after the guard is
 released, and the **detached graph** locks the application itself
 (`lock_app_from_viewport`), paints from the shared state and applies its actions in its
-own pass (`app/detached_graph.rs`); the workbook and the three panels keep their fork and
-queues until L2 and L3.
+own pass (`app/detached_graph.rs`); so does the **detached workbook** (L2,
+`app/detached_book.rs`): no fork of the state, one cell entry in the application, and a
+sender identity per detached window swapped into the state for its paint (#21). The
+three panels keep their copy and queues until L3.
 Rules and tests: `.claude/rules/app.md`, `docs/application/shell-and-code.md`, `docs/tests.md`.
 
 ## The three separation lines

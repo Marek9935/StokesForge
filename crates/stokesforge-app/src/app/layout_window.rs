@@ -28,8 +28,9 @@
 //!   (`detached_graph.rs`): a covered root, which on native Wayland gets no frame
 //!   callback, delays nothing the graph does. What still goes through the root is
 //!   Reattach and Close (a flag the root drains, until L4), the dialogs (painted by
-//!   the root, #472: the window shows a band) and the workbook and panels, which
-//!   keep their queues until L2/L3; for those the vendored winit still reports the
+//!   the root, #472: the window shows a band) and the panels, which
+//!   keep their queues until L3 (the workbook serves itself like the graph since
+//!   L2); for those the vendored winit still reports the
 //!   ROOT (the only window that opts in) as occluded after 100 ms without a
 //!   callback while a redraw is wanted (`vendor/winit/STOKESFORGE.md`, "Frame
 //!   starvation"), so eframe keeps running its `logic` and `ui` unpainted about

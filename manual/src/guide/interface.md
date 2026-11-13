@@ -224,7 +224,7 @@ You can detach several windows at the same time. A note and a matrix always stay
 What follows a detached window:
 
 - The data and the undo history stay the same: you work on the same project. Undo and redo apply to the whole project, wherever the change was made.
-- A cell or a text being edited in a detached window is its own input. Confirm it before you reattach the window.
+- Only one cell can be edited at a time in the whole application. If you start typing in a cell and click in another window (a detached workbook, a graph, or the main window), the value you were typing is confirmed first, as when you click another workbook in the main window. It is one change in the history.
 - The toolbars and the menu bar remain in the main window.
 - Which windows are detached is not saved. When you open the project again, its windows are back in the main window.
 

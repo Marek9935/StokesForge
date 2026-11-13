@@ -249,6 +249,8 @@ pub(super) mod bench {
         pub(in crate::app) info: egui::ViewportInfo,
         /// Files dropped on the window during this pass.
         pub(in crate::app) dropped: Vec<Arc<dyn egui::DroppedFile + Send + Sync>>,
+        /// Files hovering the window during this pass.
+        hovered: Vec<egui::HoveredFile>,
     }
 
     impl Pass {
@@ -261,6 +263,7 @@ pub(super) mod bench {
                 size: egui::vec2(1400.0, 900.0),
                 info: egui::ViewportInfo::default(),
                 dropped: Vec::new(),
+                hovered: Vec::new(),
             }
         }
 
@@ -299,6 +302,12 @@ pub(super) mod bench {
         /// The window's OS-reported state for this pass.
         pub(in crate::app) fn info(mut self, info: egui::ViewportInfo) -> Self {
             self.info = info;
+            self
+        }
+
+        /// Files hovering the window during this pass.
+        pub(in crate::app) fn hovering(mut self, files: usize) -> Self {
+            self.hovered = vec![egui::HoveredFile::default(); files];
             self
         }
 
@@ -402,6 +411,33 @@ pub(super) mod bench {
             }
         }
 
+        /// The project with the first workbook detached into its own window
+        /// (the graph stays a floating window), not yet painted (#475, L2).
+        pub(in crate::app) fn with_detached_book() -> Self {
+            let (session, graph) = plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let book = Tab::Book(app.state.books()[0].0);
+            app.open_tab(book);
+            app.detach_tab(book);
+            Self::from_app(session, app, graph)
+        }
+
+        /// The viewport of the detached workbook of [`Self::with_detached_book`]
+        /// and [`Self::with_every_window`].
+        pub(in crate::app) fn book_id(&self) -> egui::ViewportId {
+            egui::ViewportId::from_hash_of(Tab::Book(self.book()))
+        }
+
+        /// [`Self::start`] for the detached workbook.
+        pub(in crate::app) fn start_book(&mut self) {
+            self.root(Pass::root());
+            let id = self.book_id();
+            for _ in 0..3 {
+                self.child_in(id, Pass::child());
+            }
+        }
+
         /// The same project, saved in a file of its own, with the workbook, the
         /// three panels and the graph all detached (#459).
         pub(in crate::app) fn with_every_window() -> Self {
@@ -485,6 +521,7 @@ pub(super) mod bench {
                 time: Some(self.time),
                 events: pass.events,
                 dropped_files: pass.dropped,
+                hovered_files: pass.hovered,
                 focused: pass.focused,
                 viewport_id: id,
                 ..Default::default()
@@ -615,17 +652,11 @@ pub(super) mod bench {
         }
 
         /// What `window` queued for the root and the root has not drained yet.
-        /// The graph queues nothing: its actions are applied in its own pass
-        /// (#475, L1).
+        /// The graph and the workbook queue nothing: their actions are applied
+        /// in their own pass (#475, L1, L2).
         pub(in crate::app) fn queued_by(&self, window: Window) -> Vec<Action> {
             match window {
-                Window::Graph => Vec::new(),
-                Window::Book => self.app.detached_tabs[&Tab::Book(self.book())]
-                    .requests
-                    .lock()
-                    .unwrap()
-                    .actions
-                    .clone(),
+                Window::Graph | Window::Book => Vec::new(),
                 Window::ProjectManager => self.app.pm_requests.lock().unwrap().actions.clone(),
                 Window::ObjectManager => self.app.om_view.as_ref().unwrap().queued_actions(),
                 Window::Console => self.app.script_view.as_ref().unwrap().queued_actions(),

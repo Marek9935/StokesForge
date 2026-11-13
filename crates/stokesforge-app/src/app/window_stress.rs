@@ -1,5 +1,6 @@
-//! Randomised stress of the windows (#475, step 2, L6): the root and up to
-//! three detached graphs play seeded random passes while the REAL server
+//! Randomised stress of the windows (#475, step 2, L6): the root, up to
+//! three detached graphs and a detachable workbook play seeded random passes
+//! while the REAL server
 //! thread ticks (its clock jumps a whole autosave period at each step), and
 //! the invariants of the window mechanism are checked after every step.
 //!
@@ -10,7 +11,11 @@
 //! Close (a flag followed by a pass of the window, a pass of the root or
 //! nothing, and the OS cross); edits of cells of the DOCKED workbook from the
 //! root; stale echoes of closed ids; and long stretches where the root is
-//! covered (no root pass at all) while the graphs keep acting. Each seed runs
+//! covered (no root pass at all) while the graphs keep acting. Since L2 the
+//! second workbook detaches, reattaches and closes like a graph; digits are
+//! typed in it and in the docked workbook; a press in another window ends the
+//! entry; and a macro of the root opened with no dialog meets a click that
+//! would commit the detached entry. Each seed runs
 //! on the Wayland path (the windows close themselves) or on the root path
 //! (X11, Windows), by its parity.
 //!
@@ -21,11 +26,13 @@
 //! nothing while a dialog is open), a Cancel leaves the tree and the history
 //! as before the dialog, a closed id is never woken, undoing everything gives
 //! the initial tree back, and the last recovery copy reloads equal to the
-//! project (a `.stf` round trip).
+//! project (a `.stf` round trip); at most one entry is open in the whole
+//! application, a press elsewhere ends it (no dialog), and no cell commit is
+//! absorbed into a macro the root holds (#21).
 //!
-//! **Growing it.** The workbook and the panels (L2, L3) will join as new
-//! kinds in [`Rig::step`] (one `match` arm and a `fn` per kind) and in the
-//! window lists of [`Rig::check`]; nothing else changes. Replay a failure
+//! **Growing it.** The panels (L3) will join as new kinds in [`Rig::step`]
+//! (one `match` arm and a `fn` per kind) and in the window lists of
+//! [`Rig::check`]; nothing else changes. Replay a failure
 //! with `SF_STRESS_SEED=<seed>` (the seed is printed on failure).
 
 use std::collections::HashSet;
@@ -41,6 +48,7 @@ use stokesforge_core::{Column, NodeId, Project, Tree};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
 use stokesforge_session::Session;
 
+use super::detached_book::book_viewport;
 use super::detached_graph::graph_viewport;
 use super::server::{serve_once, Clock, Repaint, RunJob, ServerThread};
 use super::tab::Tab;
@@ -130,6 +138,10 @@ struct Rig {
     graphs: Vec<NodeId>,
     columns: Vec<NodeId>,
     book: NodeId,
+    /// The workbook that detaches (the first stays docked).
+    book2: NodeId,
+    sheet2: NodeId,
+    columns2: Vec<NodeId>,
     thread: ServerThread,
     offset: Arc<AtomicU64>,
     t0: Instant,
@@ -160,6 +172,16 @@ impl Rig {
                     .unwrap()
             })
             .collect();
+        let book2 = project.add_empty_workbook(root, Some("Book2")).unwrap();
+        let sheet2 = project.add_worksheet(book2, Some("Sheet1")).unwrap();
+        let columns2: Vec<NodeId> = (0..2u32)
+            .map(|k| {
+                let values: Vec<f64> = (0..12u32).map(|i| f64::from(100 + i * (k + 3))).collect();
+                project
+                    .add_column(sheet2, None, None, Column::from_f64(&values))
+                    .unwrap()
+            })
+            .collect();
         let graphs: Vec<NodeId> = ["One", "Two", "Three"]
             .iter()
             .enumerate()
@@ -183,6 +205,7 @@ impl Rig {
         // The workbook is DOCKED in the root; the graphs float, the first is
         // detached.
         app.open_tab(Tab::Book(book));
+        app.open_tab(Tab::Book(book2));
         for graph in &graphs {
             app.open_tab(Tab::Graph(*graph));
         }
@@ -213,6 +236,9 @@ impl Rig {
             graphs,
             columns,
             book,
+            book2,
+            sheet2,
+            columns2,
             thread,
             offset,
             t0,
@@ -253,6 +279,22 @@ impl Rig {
             .collect()
     }
 
+    /// Is the second workbook in its own window, and has the root published it?
+    fn book2_live(&self) -> bool {
+        self.bench.app.detached_books.contains_key(&self.book2)
+            && self.bench.has_window(book_viewport(self.book2))
+    }
+
+    /// A pass of the workbook's window, if it still has a closure: a pending
+    /// Reattach or Close makes it leave in the pass before.
+    fn book2_pass(&mut self, pass: Pass) {
+        let id = book_viewport(self.book2);
+        if self.bench.has_window(id) {
+            let output = self.bench.child_in(id, pass);
+            self.after_pass(&output);
+        }
+    }
+
     fn may_root(&self) -> bool {
         self.covered == 0
     }
@@ -284,10 +326,22 @@ impl Rig {
                 self.after_pass(&output);
             }
         }
+        let id = book_viewport(self.book2);
+        if !self.bench.app.detached_books.contains_key(&self.book2) && self.bench.has_window(id) {
+            let output = self.bench.child_in(id, Pass::child().focused(false));
+            self.after_pass(&output);
+        }
         for graph in self.detached() {
             assert!(
                 self.bench.has_window(graph_viewport(graph)),
                 "a detached graph has no live window after a root pass (seed {})",
+                self.seed
+            );
+        }
+        if self.bench.app.detached_books.contains_key(&self.book2) {
+            assert!(
+                self.bench.has_window(id),
+                "the detached workbook has no live window after a root pass (seed {})",
                 self.seed
             );
         }
@@ -331,24 +385,29 @@ impl Rig {
         let dialog_before = self.blocking().then(|| self.baseline());
         let roll = self.dice.below(100);
         match roll {
-            0..=21 => self.gesture(),
-            22..=29 => self.keys(),
-            30..=37 => self.pointer(),
-            38..=45 => self.dialog(),
-            46..=55 => self.detach(),
-            56..=65 => self.leave(true),
-            66..=71 => self.leave(false),
-            72..=79 => self.docked_edit(),
-            80..=89 => self.plain_root(),
-            90..=94 => self.sweep(),
-            _ => self.echo(),
+            0..=15 => self.gesture(),
+            16..=22 => self.keys(),
+            23..=28 => self.pointer(),
+            29..=34 => self.dialog(),
+            35..=42 => self.detach(),
+            43..=50 => self.leave(true),
+            51..=55 => self.leave(false),
+            56..=61 => self.docked_edit(),
+            62..=69 => self.plain_root(),
+            70..=73 => self.sweep(),
+            74..=76 => self.echo(),
+            77..=81 => self.book_detach(),
+            82..=86 => self.book_leave(),
+            87..=92 => self.book_type(),
+            93..=96 => self.book_click(),
+            _ => self.root_macro(),
         }
         // A dialog open the whole step: no window and no key changed the model.
         if let Some(before) = dialog_before {
-            if !(38..=45).contains(&roll) && self.blocking() {
+            if !(29..=34).contains(&roll) && self.blocking() {
                 assert!(
                     **self.bench.app.state.tree() == *before.tree,
-                    "the model changed while a dialog was open (seed {})",
+                    "the model changed while a dialog was open (step kind {roll}, seed {})",
                     self.seed
                 );
             }
@@ -374,6 +433,10 @@ impl Rig {
             .map(graph_viewport)
             .filter(|id| !self.bench.has_window(*id))
             .collect();
+        let id = book_viewport(self.book2);
+        if !self.bench.app.detached_books.contains_key(&self.book2) && !self.bench.has_window(id) {
+            self.closed.insert(id);
+        }
     }
 
     // -- The kinds of step ---------------------------------------------------
@@ -436,6 +499,9 @@ impl Rig {
     fn keys(&mut self) {
         let key = [egui::Key::Z, egui::Key::Y, egui::Key::S][self.dice.below(3)];
         let live = self.live();
+        if self.book2_live() && self.dice.below(3) == 0 {
+            return self.book2_pass(Pass::child().events(vec![ctrl(key)]));
+        }
         match self.dice.pick(&live) {
             Some(graph) if !self.may_root() || self.dice.coin() => {
                 self.window_pass(graph, Pass::child().events(vec![ctrl(key)]));
@@ -490,6 +556,10 @@ impl Rig {
             }
             return;
         }
+        // An entry open in the docked grid closes when a dialog takes the focus
+        // (#465): do it before the macro of the dialog opens, as the gesture
+        // would.
+        self.bench.app.state.commit_open_entries();
         let graph = self.graphs[self.dice.below(self.graphs.len())];
         let open = Action::OpenPlotSettings {
             graph,
@@ -679,10 +749,283 @@ impl Rig {
         }
     }
 
+    // -- The workbook (L2) ------------------------------------------------------
+
+    /// The second workbook goes to its own window.
+    fn book_detach(&mut self) {
+        let tab = Tab::Book(self.book2);
+        if self.bench.app.detached_books.contains_key(&self.book2) {
+            return;
+        }
+        if !self.bench.app.floating_tabs.contains(&tab) {
+            self.bench.app.open_tab(tab);
+        }
+        self.bench.app.detach_tab(tab);
+        self.closed.remove(&book_viewport(self.book2));
+        if self.may_root() {
+            self.root_pass(Pass::root());
+        }
+    }
+
+    /// Reattach or Close of the detached workbook, as for a graph: the flag,
+    /// then a pass of the window, the OS cross, a pass of the root, or nothing.
+    fn book_leave(&mut self) {
+        let (tab, id) = (Tab::Book(self.book2), book_viewport(self.book2));
+        let reattach = self.dice.coin();
+        let Some(window) = self.bench.app.detached_books.get_mut(&self.book2) else {
+            return;
+        };
+        let fresh = !(window.reattach || window.close);
+        if reattach {
+            window.reattach = true;
+        } else {
+            window.close = true;
+        }
+        let own_pass = self.bench.has_window(id);
+        match self.dice.below(4) {
+            0 if own_pass => {
+                self.book2_pass(Pass::child());
+                if self.wayland {
+                    assert!(
+                        !self.bench.app.is_tab_detached(tab),
+                        "the workbook did not leave in its own pass (seed {})",
+                        self.seed
+                    );
+                }
+            }
+            1 if own_pass && !reattach => {
+                self.book2_pass(Pass::child().info(os_close()));
+                if self.wayland {
+                    assert!(
+                        !self.bench.app.is_tab_detached(tab),
+                        "the cross did not close the workbook in its own pass (seed {})",
+                        self.seed
+                    );
+                }
+            }
+            2 if self.may_root() => {
+                self.root_pass(Pass::root());
+                assert!(
+                    !self.bench.app.is_tab_detached(tab),
+                    "the root pass did not carry out the flag (seed {})",
+                    self.seed
+                );
+            }
+            _ => return,
+        }
+        if fresh && !self.bench.app.is_tab_detached(tab) {
+            assert_eq!(
+                self.bench.app.floating_tabs.contains(&tab),
+                reattach,
+                "Reattach floats the workbook, Close does not (seed {})",
+                self.seed
+            );
+        }
+    }
+
+    /// Digits typed in a cell of the docked workbook (root passes) or of the
+    /// detached one (its window): the entry stays open.
+    fn book_type(&mut self) {
+        let detached = self.book2_live() && (self.dice.coin() || !self.may_root());
+        // The docked grid is behind the modal of a dialog of the root.
+        if !detached && (!self.may_root() || self.blocking()) {
+            return;
+        }
+        let (book, columns) = if detached {
+            (self.book2, self.columns2.clone())
+        } else {
+            (self.book, self.columns.clone())
+        };
+        let Some(sheet) = self.bench.app.state.selected_sheet_in(book) else {
+            return;
+        };
+        let column = columns[self.dice.below(columns.len())];
+        self.bench
+            .app
+            .state
+            .select_cell(sheet, column, self.dice.below(12));
+        let digits = 1 + self.dice.below(3);
+        for _ in 0..digits {
+            let digit = (b'0' + u8::try_from(self.dice.below(10)).unwrap_or(0)) as char;
+            let events = vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                egui::Event::Text(digit.to_string()),
+            ];
+            for step in 0..3 {
+                let events = if step == 0 {
+                    events.clone()
+                } else {
+                    Vec::new()
+                };
+                if detached {
+                    self.book2_pass(Pass::child().events(events));
+                } else {
+                    self.root_pass(Pass::root().focused(true).events(events));
+                }
+            }
+        }
+    }
+
+    /// A press in a window: the entry held elsewhere ends (one entry in the
+    /// whole application), unless a dialog is open in the main window. A press
+    /// in the detached workbook lands on a painted cell; in a graph window or in
+    /// the root, anywhere.
+    fn book_click(&mut self) {
+        let blocked = self.blocking();
+        let holder_docked = self
+            .bench
+            .app
+            .state
+            .editing()
+            .is_some_and(|edit| self.columns.contains(&edit.column));
+        let entry = self.bench.app.state.editing().is_some();
+        let live = self.live();
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let pos = egui::pos2(
+            100.0 + self.dice.below(800) as f32,
+            100.0 + self.dice.below(500) as f32,
+        );
+        match self.dice.below(3) {
+            0 if self.book2_live() => {
+                let output = self
+                    .bench
+                    .child_in(book_viewport(self.book2), Pass::child());
+                if !self.bench.has_window(book_viewport(self.book2)) {
+                    return;
+                }
+                let cells: Vec<egui::Pos2> = super::test_support::texts(&output.shapes)
+                    .into_iter()
+                    .filter(|text| text.text.chars().all(|c| c.is_ascii_digit()))
+                    .map(|text| text.center)
+                    .collect();
+                let target = self.dice.pick(&cells).unwrap_or(pos);
+                self.book2_pass(Pass::child().events(press(target)));
+                if entry && holder_docked && !blocked {
+                    assert!(
+                        self.bench.app.state.editing().is_none(),
+                        "a press in the detached workbook left the entry of another window \
+                         open (seed {})",
+                        self.seed
+                    );
+                }
+            }
+            1 => {
+                let Some(graph) = self.dice.pick(&live) else {
+                    return;
+                };
+                self.window_pass(graph, Pass::child().events(press(pos)));
+                if entry && !blocked {
+                    assert!(
+                        self.bench.app.state.editing().is_none(),
+                        "a press in a graph window left the entry open (seed {})",
+                        self.seed
+                    );
+                }
+            }
+            // A press in the root under its own dialog is the dialog's: the
+            // modal takes it (a docked entry then closes by the rule of #465).
+            _ if self.may_root() && !blocked => {
+                self.root_pass(Pass::root().focused(true).events(press(pos)));
+            }
+            _ => {}
+        }
+    }
+
+    /// #21: an entry is open in the detached workbook, the root opens a macro
+    /// with NO dialog, and a click in the workbook would commit the entry. The
+    /// commit is refused: the cell is unchanged while the macro is open, and
+    /// the macro's rollback gives back the model and the history.
+    fn root_macro(&mut self) {
+        if self.blocking() || !self.book2_live() {
+            return;
+        }
+        let column = self.columns2[self.dice.below(self.columns2.len())];
+        let row = self.dice.below(12);
+        self.bench.app.state.select_cell(self.sheet2, column, row);
+        for digit in ["4", "2"] {
+            let events = vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                egui::Event::Text(digit.into()),
+            ];
+            self.book2_pass(Pass::child().events(events));
+            for _ in 0..3 {
+                self.book2_pass(Pass::child());
+            }
+        }
+        if self
+            .bench
+            .app
+            .state
+            .editing()
+            .is_none_or(|edit| edit.column != column || edit.row != row)
+        {
+            return;
+        }
+        let before = self.baseline();
+        let text = self.bench.app.state.cell_text(column, row);
+        self.bench.app.state.open_root_macro_for_test();
+        if !self.bench.has_window(book_viewport(self.book2)) {
+            return;
+        }
+        let output = self
+            .bench
+            .child_in(book_viewport(self.book2), Pass::child());
+        let others: Vec<egui::Pos2> = super::test_support::texts(&output.shapes)
+            .into_iter()
+            .filter(|t| t.text.chars().all(|c| c.is_ascii_digit()) && t.text != "42")
+            .map(|t| t.center)
+            .collect();
+        if let Some(target) = self.dice.pick(&others) {
+            for pressed in [true, false] {
+                self.book2_pass(Pass::child().events(vec![
+                    egui::Event::PointerMoved(target),
+                    egui::Event::PointerButton {
+                        pos: target,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]));
+            }
+        }
+        assert_eq!(
+            self.bench.app.state.cell_text(column, row),
+            text,
+            "a cell commit was absorbed into a macro of the root (seed {})",
+            self.seed
+        );
+        self.bench.app.state.cancel_plot_settings();
+        let after = self.baseline();
+        assert!(
+            *after.tree == *before.tree && after.history == before.history,
+            "rolling back the root macro did not give the model and the history back (seed {})",
+            self.seed
+        );
+    }
+
     /// A bare pass of every window, none of them focused.
     fn sweep(&mut self) {
         for graph in self.live() {
             self.window_pass(graph, Pass::child().focused(false));
+        }
+        if self.book2_live() {
+            self.book2_pass(Pass::child().focused(false));
         }
     }
 
@@ -720,10 +1063,19 @@ impl Rig {
                 "{tab:?} has its view in two places (seed {seed})"
             );
         }
-        let book = Tab::Book(self.book);
+        let book = Tab::Book(self.book2);
         assert!(
-            !(app.detached_tabs.contains_key(&book) && app.floating_tabs.contains(&book)),
+            !(app.detached_books.contains_key(&self.book2) && app.floating_tabs.contains(&book)),
             "the workbook is both docked and detached (seed {seed})"
+        );
+        assert!(
+            !app.detached_books.contains_key(&self.book),
+            "the docked workbook detached by itself (seed {seed})"
+        );
+        // One entry in the whole application, whatever the window.
+        assert!(
+            !(app.state.editing().is_some() && app.state.header_editing().is_some()),
+            "a cell entry and a header entry are open at once (seed {seed})"
         );
         let mut seen = HashSet::new();
         assert!(
@@ -732,8 +1084,11 @@ impl Rig {
         );
         // The list of the application is the truth about which windows exist.
         let listed: HashSet<egui::ViewportId> = app.open_viewports().into_iter().collect();
-        let expected: HashSet<egui::ViewportId> =
+        let mut expected: HashSet<egui::ViewportId> =
             self.detached().into_iter().map(graph_viewport).collect();
+        if app.detached_books.contains_key(&self.book2) {
+            expected.insert(book_viewport(self.book2));
+        }
         assert_eq!(
             listed, expected,
             "the open windows are not the detached ones (seed {seed})"
@@ -802,6 +1157,7 @@ impl Rig {
         // Only the root and the windows of the application were ever woken.
         let allowed: HashSet<egui::ViewportId> = std::iter::once(egui::ViewportId::ROOT)
             .chain(self.graphs.iter().copied().map(graph_viewport))
+            .chain(std::iter::once(book_viewport(self.book2)))
             .collect();
         let woken = self.woken.0.lock().unwrap().clone();
         assert!(
@@ -900,7 +1256,7 @@ fn random_window_passes_keep_the_invariants() {
     let first = env_seed().unwrap_or(0x57_0475);
     with_watchdog(Duration::from_secs(120), move || {
         for seed in [first & !1, first | 1] {
-            stress_run(seed, 90);
+            stress_run(seed, 120);
         }
     });
 }

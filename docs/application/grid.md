@@ -197,12 +197,11 @@ takes the default width. No fit-to-content by double-click.
 The width is pushed only at the **end of a resize done by hand**
 (`finished_column_resizes`: handle released, width read from the extent of the
 header): pushing the rendered width on every frame would mark the project
-as modified on every opening. The detached view has its own `AppState`; its
-width also goes through the actor, and the main state rereads it on its
-refresh. More generally, a write the detached view made under its own session
-identity (a cell entry closed by a click elsewhere) is pulled by the root
-before it publishes its snapshot (`drain_detached_tabs`, #524): otherwise the
-stale root snapshot would be pushed back over the view.
+as modified on every opening. The detached workbook paints and writes the
+application's own state (#475, L2): its width goes through the actor like any
+other, and a write made under the window's session identity (a cell entry closed
+by a click elsewhere, #524) is in the one snapshot at once, with nothing to pull
+back.
 
 **Same default width floating / maximized (#337).** Reported under
 #330: maximized, the workbook window made the never-set columns go from 57 to 62 px of spacing between letters. Cause: the first frame of an

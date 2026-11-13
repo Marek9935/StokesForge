@@ -1999,23 +1999,19 @@ mod tests {
     }
 
     /// The ratio lock is the application's, per graph, published to every
-    /// graph window and carried to a detached view (the figure's corners no
-    /// longer read it, K1): closed in Graph Properties (`set_size_lock`), the
-    /// fork of a detached view carries it. Witness: the lock not published.
+    /// graph window (the figure's corners no longer read it, K1): closed in
+    /// Graph Properties (`set_size_lock`). Witness: the lock not published.
     #[test]
-    fn the_ratio_lock_is_the_applications_and_reaches_the_view_and_a_detached_fork() {
+    fn the_ratio_lock_is_the_applications_and_reaches_the_view() {
         let mut bench = Bench::new(2, false);
         let image = bench.view.layout_image().expect("image");
         let lock = SizeLock::close((image.width, image.height)).expect("lock");
         bench.state.set_size_lock(bench.graph, Some(lock));
         bench.frame(Vec::new());
         assert_eq!(published_size_lock(&bench.ctx, bench.graph), Some(lock));
-        // The fork of a detached view carries it, and a resync refreshes it.
-        let mut fork = bench.state.fork_for_detached_view().unwrap();
-        assert_eq!(fork.size_lock(bench.graph), Some(lock));
         bench.state.set_size_lock(bench.graph, None);
-        fork.sync_detached_sheet_editor(&bench.state);
-        assert_eq!(fork.size_lock(bench.graph), None);
+        bench.frame(Vec::new());
+        assert_eq!(published_size_lock(&bench.ctx, bench.graph), None);
         bench.session.shutdown().unwrap();
     }
 

@@ -74,6 +74,9 @@ use super::StokesForgeApp;
 
 /// The view state of a graph detached into its own OS window.
 pub(super) struct DetachedGraph {
+    /// The sender identity of this window (#21): in the state while the window
+    /// commits an entry a click in it ended, here the rest of the time.
+    pub(super) identity: Option<stokesforge_session::SessionHandle>,
     /// The view (shape cache, zoom/pan), moved out of
     /// [`StokesForgeApp::graph_views`] for the duration of the detaching: it
     /// goes back there, the same one, on Reattach or Close.
@@ -106,8 +109,13 @@ pub(super) struct DetachedGraph {
 }
 
 impl DetachedGraph {
-    pub(super) fn new(view: GraphView, collapsed: bool) -> Self {
+    pub(super) fn new(
+        view: GraphView,
+        collapsed: bool,
+        identity: stokesforge_session::SessionHandle,
+    ) -> Self {
         Self {
+            identity: Some(identity),
             view,
             collapsed,
             needs_initial_repaint: true,
@@ -275,16 +283,25 @@ impl StokesForgeApp {
     fn detached_graph_pass(&mut self, ui: &mut egui::Ui, graph: NodeId, size: [f32; 2]) {
         let ctx = ui.ctx().clone();
         let viewport = ctx.viewport_id();
+        // The dialog is the application's: seen at once, not at the next root
+        // pass.
+        super::window_band::publish_dialog(&ctx, self.state.open_dialog());
         super::window_band::stop_keys(&ctx);
         super::shortcuts::refuse_quit_in_detached(&ctx);
         begin_file_drop(&ctx);
         if self.detached_graphs.contains_key(&graph) {
+            // One entry in the application: a press here ends the entry held by
+            // a workbook, before this window paints. Under the window's own
+            // identity (#21).
+            super::detached_book::WindowIdentity::enter(self, Tab::Graph(graph))
+                .commit_entry_held_elsewhere(&ctx, super::detached_book::PassOf::Graph);
             let mut prelude = Vec::new();
             // What every pass may need before it acts (the file picker): a Save
             // As started here is answered here.
             self.pass_prelude(&ctx, &mut prelude);
             let mut own = Vec::new();
             let woke = self.paint_detached_graph(ui, graph, size, &mut own);
+            self.answer_refusals(&ctx);
             self.apply_pass_actions(&ctx, viewport, prelude, own, woke);
             self.keep_or_close_own_window(&ctx, viewport, graph);
         }

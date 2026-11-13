@@ -2,7 +2,7 @@
 //! covers it on native Wayland?
 //!
 //! A root window and one deferred child viewport (no decorations, opaque, like
-//! `show_detached_tabs`). The child maximises itself, so it fully covers the
+//! `show_detached_books`). The child maximises itself, so it fully covers the
 //! root, then queues a request every 200 ms into a shared counter and wakes the
 //! root with `request_repaint_of(ROOT)`, as a detached window does. The root
 //! drains the counter in `ui`. The child keeps repainting itself, so the

@@ -255,11 +255,12 @@ A dialog opened from a detached window is painted by the root, in the main windo
 the detached window shows a band. Rule: a content feature works everywhere, a
 global feature stays in the main window. See [`../windows.md`](../windows.md),
 "Where a dialog is painted". `main.rs` hands eframe the `ServedApp`, the
-`StokesForgeApp` behind its lock (#475). The closure of a **detached graph**
-locks it (`lock_app_from_viewport`, after the root released its guard), paints
-and applies its own actions in the same pass (`detached_graph.rs`); the closures
-of the workbook and of the three panels still never reach the application: they
-queue requests the root drains (until L2 and L3 of #475).
+`StokesForgeApp` behind its lock (#475). The closure of a **detached graph** and
+that of a **detached workbook** lock it (`lock_app_from_viewport`, after the root
+released its guard), paint and apply their own actions in the same pass
+(`detached_graph.rs`, `detached_book.rs`); the closures of the three panels still
+never reach the application: they queue requests the root drains (until L3 of
+#475).
 
 ### Collapsible and detached panels (#100)
 
@@ -338,9 +339,9 @@ The real redrawing of the OS windows remains to be checked manually.
 ### Generic detaching of content tabs
 
 `StokesForgeApp::detach_tab`/`reattach_tab` generalize the
-mechanism above to `Tab::Book` (`show_detached_tabs`, forked view and queues,
-until L2 of #475) and `Tab::Graph` (`show_detached_graphs`, serves itself, see
-below) (`Tab::is_detachable`, #473;
+mechanism above to `Tab::Book` (`show_detached_books`, serves itself, L2 of #475)
+and `Tab::Graph` (`show_detached_graphs`, serves itself, L1; see below)
+(`Tab::is_detachable`, #473;
 `detach_tab` ignores a note and a matrix, which stay floating):
 the detach icon opens an OS window; that window offers a
 reattach icon. Closing a detached content window closes only its
@@ -349,44 +350,58 @@ reopenable from the Project Manager. Several contents can be
 detached at the same time, each in its own `ViewportId`.
 
 **Default sizes of the detached windows** (`show_detached_graphs`,
-`show_detached_tabs`):
+`show_detached_books`):
 `Tab::Graph` opens at 560×540, which holds the reference figure, its
 controls and its header. The workbook has a
 uniform size of 420×360. The workbook grid keeps the same widths and
 headers in floating and detached windows; a narrow window
 scrolls horizontally.
 
-**A single `ViewModel` structure, not one per kind of content.** The PM
-has only one form of content (a read-only tree); the two kinds
-detachable here are very different (virtualized editable grid,
-interactive graph with shape cache).
-`DetachedTabViewModel` now serves the workbook alone (`view_state`): the graph
-has its own state, `DetachedGraph`, reached under the lock.
+**One shared state, no copy (#475, L1 and L2).** `tab_contents`
+(`app/contents.rs`, with `note_contents` and `matrix_contents`, used by the
+floating windows only; shared by the floating windows and the maximization area)
+takes `&mut AppState`. A detached window gets it by locking the whole
+application from its viewport closure, so the dock and a detached window literally
+paint the same state with the same function (`book_contents`/`grid_contents` for
+the workbook, `graph_view_contents` for the graph): layout, header, selection,
+menus, grid shortcuts, the entry in progress, the clipboard and the renaming of a
+sheet are the application's. The `fork_for_detached_view` copy of `AppState` and
+its `sync_detached_*` / `adopt_detached_*` / `return_selection_*` plumbing, the
+`DetachedTab*` structures and the `detached-workbook-unavailable` text are gone
+(guard `no_detached_window_has_a_fork_of_the_state`). The pure-read free
+functions over a `&Tree` (`cell_text_in`, `visible_columns_in`, ...) stay for the
+panels, which still paint from a cloned snapshot. A note and a matrix never detach
+(#473), so `note_contents` and `matrix_contents` have a floating caller only.
 
-**Reading the model is factored out, transient editing is not.**
-`tab_contents` (`app/contents.rs`, with `note_contents` and `matrix_contents`, used by the floating windows only;
-shared by the floating windows and the maximization area)
-takes `&mut AppState`, which the `'static`, `Send + Sync` closure of
-`show_viewport_deferred` cannot capture — the same problem already solved
-for the PM (putting the whole `AppState` behind a lock would shift the
-problem to solve, for one tab as for the other). The workaround:
-`DetachedTabViewModel::snapshot`, a clone of `Snapshot` (cheap),
-resynchronized from `self.state` at each frame before the call — same pattern
-as `ProjectManagerViewModel::tree`. Every pure read goes through
-free functions of `stokesforge_app_state::state`, factored out over a `&Tree` for
-the occasion (`cell_text_in`, `visible_columns_in`, `row_count_in`,
-`worksheets_of_in`, `note_text_in`, `node_title_in`): the exact body of the
-corresponding `AppState` method, not a rewrite — the dock and a
-detached window thus literally display the same rule.
+**The detached workbook serves itself (#475, L2).** Like the graph, its closure
+locks the application, paints (`paint_detached_book`) and applies its actions at
+once (`apply_pass_actions`), keeps a small view state (`DetachedBook`: collapse,
+focus, size to restore, the Reattach/Close flags, the self-registration flag of
+the Wayland path, and its sender identity), and reattaches or closes itself on
+native Wayland (same pattern as the graph, `keep_or_close_own_book_window`; the
+root path elsewhere, `drain_detached_book_flags`). Two rules come with it:
 
-The detached workbook has a local view `AppState`, synchronized with the snapshot
-of the root. It calls the same `book_contents`/`grid_contents` as the
-floating workbook; layout, header, selection, menus and grid shortcuts
-thus share the same code. Its selection and its input stay local
-to the window. Before handling its actions, the root takes over their grid
-context, then applies the same undoable commands. No content function is
-specific to the detached window. A note and a matrix never detach (#473), so
-`note_contents` and `matrix_contents` have a floating caller only.
+- **One cell entry in the whole application.** The entry (cell, header) is the
+  state's. A press in a window other than the one that holds it ends it, exactly
+  as a click in another workbook does in the main window, in one history entry:
+  the window pressed commits it before it paints
+  (`commit_entry_held_elsewhere`: the root for an entry of a detached workbook, a
+  detached workbook for an entry held by another window, a detached graph for any
+  entry). While a dialog is open in the main window the commit is refused (the
+  entry stays; in a window the band says why). A workbook window that closes
+  commits its own entry (`commit_entry_of_closing_book`).
+- **The sender identity (#21).** The gestures of the grid write straight into the
+  state while it paints (a cell entry closed by a click, a sheet tab). Each
+  detached window owns a `SessionHandle::with_new_identity()` made at the detaching
+  (`DetachedBook::identity`, `DetachedGraph::identity`), put into the state for
+  the duration of that paint only by an RAII guard (`WindowIdentity`, given back
+  even on a panic), so a write made while the main window holds a macro open
+  (the properties of a graph) is refused by the actor (`ForeignMacro`) instead of
+  being absorbed and undone with the macro. The actions a window returns are
+  dispatched afterwards with the main identity, after the gate of the open
+  dialog (`apply_pass_actions`), which stays the first barrier. The graph window
+  writes through its actions only; its identity covers the entry a press in it
+  ends.
 
 **The detached graph serves itself (#475, L1).** Its viewport closure takes the
 whole application through `lock_app_from_viewport` (the single blocking door; the

@@ -189,7 +189,7 @@ pub(super) fn toggle_collapse(collapsed_tabs: &mut HashSet<Tab>, tab: Tab) {
 /// Sets the collapse to a precise value rather than toggling it — used
 /// by [`StokesForgeApp::reattach_tab`] to pour back into
 /// `collapsed_tabs` the state proper to the detached window
-/// (`DetachedTabViewModel::collapsed`) rather than guess it.
+/// (`DetachedBook::collapsed`) rather than guess it.
 pub(super) fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bool) {
     if !matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
         return;

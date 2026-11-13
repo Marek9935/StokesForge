@@ -151,6 +151,7 @@ mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
+mod detached_book;
 mod detached_graph;
 #[cfg(test)]
 mod detached_keys;
@@ -257,9 +258,7 @@ use status_history::{low_r2_list_window, status_history_window};
 use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use transpose_ui::transpose_relink_window;
-use window_detach::{
-    snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
-};
+use window_detach::{snapshot_stamp, DetachedProjectManagerRequests, ProjectManagerViewModel};
 use window_placement::geometry_rect;
 use window_stack::window_nodes;
 
@@ -346,7 +345,7 @@ pub struct StokesForgeApp {
     /// focused (see the top doc of `window_stack.rs`, § Confined floating
     /// windows).
     /// Absent while maximized or detached into a separate OS window
-    /// (same invariant as `detached_tabs` for this second case).
+    /// (same invariant as `detached_books` for this second case).
     floating_tabs: Vec<Tab>,
     /// Cascade rank assigned to each currently open floating window, at its
     /// creation — used to compute its default position
@@ -427,9 +426,10 @@ pub struct StokesForgeApp {
     /// `window_detach.rs`, § Generic detaching of content tabs. One entry per detached tab; absent from
     /// `floating_tabs` while it is (same invariant as `pm_detached`
     /// for the Project Manager, generalized to several simultaneous tabs).
-    /// Only the workbooks (L2) keep this fork; the graphs are in
-    /// `detached_graphs`.
-    detached_tabs: HashMap<Tab, DetachedTab>,
+    /// The workbooks detached into their own OS window (#475, L2): the view
+    /// state of each, reached by the window's own pass under the application
+    /// lock. Absent from `floating_tabs` while detached.
+    detached_books: HashMap<NodeId, detached_book::DetachedBook>,
     /// The graphs detached into their own OS window (#475, L1): the view state
     /// of each, reached by the window's own pass under the application lock.
     /// Absent from `floating_tabs` and from `graph_views` while detached.
@@ -625,7 +625,7 @@ impl StokesForgeApp {
             panel_memory: panel_memory::PanelMemory::default(),
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
-            detached_tabs: HashMap::new(),
+            detached_books: HashMap::new(),
             detached_graphs: HashMap::new(),
             windows_close_themselves: false,
             released_windows: Vec::new(),
@@ -681,10 +681,7 @@ impl StokesForgeApp {
     /// The active workbook: maximized, otherwise in the foreground, otherwise the only
     /// detached workbook.
     fn active_book(&self) -> Option<NodeId> {
-        let mut detached_books = self.detached_tabs.keys().filter_map(|tab| match tab {
-            Tab::Book(book) => Some(*book),
-            _ => None,
-        });
+        let mut detached_books = self.detached_books.keys().copied();
         let only_detached_book = detached_books
             .next()
             .filter(|_| detached_books.next().is_none());
@@ -701,15 +698,16 @@ impl StokesForgeApp {
     fn is_tab_detached(&self, tab: Tab) -> bool {
         match tab {
             Tab::Graph(graph) => self.detached_graphs.contains_key(&graph),
-            _ => self.detached_tabs.contains_key(&tab),
+            Tab::Book(book) => self.detached_books.contains_key(&book),
+            Tab::Matrix(_) | Tab::Note(_) => false,
         }
     }
 
     /// Every content tab detached into its own OS window.
     fn detached_tab_list(&self) -> Vec<Tab> {
-        self.detached_tabs
+        self.detached_books
             .keys()
-            .copied()
+            .map(|book| Tab::Book(*book))
             .chain(self.detached_graphs.keys().map(|graph| Tab::Graph(*graph)))
             .collect()
     }
@@ -735,7 +733,8 @@ impl StokesForgeApp {
     fn remove_detached_window(&mut self, ctx: &egui::Context, tab: Tab) -> bool {
         let removed = match tab {
             Tab::Graph(graph) => self.release_graph_window(graph).is_some(),
-            _ => self.detached_tabs.remove(&tab).is_some(),
+            Tab::Book(book) => self.release_book_window(book).is_some(),
+            Tab::Matrix(_) | Tab::Note(_) => false,
         };
         if removed {
             ctx.send_viewport_cmd_to(
@@ -992,9 +991,9 @@ impl StokesForgeApp {
 
     fn active_content_tab(&mut self, ctx: &egui::Context) -> Option<Tab> {
         if !ctx.input(|input| input.focused) {
-            for (&tab, detached) in &self.detached_tabs {
-                if detached.view_model.lock().is_ok_and(|model| model.focused) {
-                    self.active_detached = Some(tab);
+            for (&book, window) in &self.detached_books {
+                if window.focused {
+                    self.active_detached = Some(Tab::Book(book));
                 }
             }
             for (&graph, window) in &self.detached_graphs {
@@ -1195,15 +1194,10 @@ impl eframe::App for StokesForgeApp {
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
         window_band::publish_dialog(&ctx, self.state.open_dialog());
-        // Entries refused in a detached window: said through the same path as a
-        // refused action.
-        for viewport in window_band::take_refusals(&ctx) {
-            if let Some(dialog) = self.state.open_dialog() {
-                if self.viewport_is_open(viewport) {
-                    self.refuse_in_window(&ctx, viewport, dialog);
-                }
-            }
-        }
+        self.answer_refusals(&ctx);
+        // One entry in the application: a press in the main window ends the
+        // entry held by a detached workbook.
+        self.commit_entry_held_elsewhere(&ctx, detached_book::PassOf::Root);
         self.pass_prelude(&ctx, &mut actions);
         if std::mem::take(&mut self.close_requested) {
             actions.push(Action::Quit {
@@ -1235,7 +1229,8 @@ impl eframe::App for StokesForgeApp {
             &mut actions,
         );
         self.object_manager_panel(ui, active_tab, &mut actions);
-        self.drain_detached_tabs(&ctx, &mut actions);
+        self.show_detached_books(&ctx);
+        self.drain_detached_book_flags(&ctx);
         self.show_detached_graphs(&ctx);
         self.drain_detached_graph_flags(&ctx);
         self.show_workspace(
@@ -1283,7 +1278,6 @@ impl eframe::App for StokesForgeApp {
         self.drain_layout_actions(&mut actions);
         actions.extend(history);
         self.dispatch_actions(&ctx, actions);
-        self.return_selection_to_detached_books(&ctx);
         self.close_when_ready(&ctx);
         self.capture_figure_offer(frame);
         self.offer_figure();
@@ -1299,9 +1293,7 @@ impl eframe::App for StokesForgeApp {
             // pass runs only every 100 ms (`docs/windows.md`, #457), and the
             // result of a click would wait for two of them.
             ctx.request_repaint();
-            // The workbooks keep their copy of the snapshot (L2 removes it); the
-            // other windows read the shared state and only need to look again.
-            self.republish_detached_tabs();
+            // The windows read the shared state and only need to look again.
             server::wake(
                 &ctx,
                 true,
@@ -1473,86 +1465,16 @@ impl StokesForgeApp {
         }
     }
 
-    /// The detached requests stay drained before the workspace.
-    pub(super) fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if !self.detached_tabs.is_empty() {
-            // A workbook view that wrote on its own session identity (a cell
-            // entry closed by a click elsewhere) is ahead of the root: the
-            // root pulls the write before publishing, else it would push its
-            // stale snapshot back over the view (#524).
-            let root_revision = self.state.snapshot().revision;
-            let view_ahead = self.detached_tabs.values().any(|detached| {
-                let model = detached
-                    .view_model
-                    .lock()
-                    .unwrap_or_else(|err| err.into_inner());
-                model
-                    .view_state
-                    .as_ref()
-                    .is_some_and(|view| view.snapshot().revision > root_revision)
-            });
-            if view_ahead {
-                self.state.refresh();
-            }
-            self.show_detached_tabs(ctx);
-            // Same draining as for the Project Manager, generalized to
-            // several tabs: each may have accumulated actions and/or
-            // asked to be reattached since the last frame.
-            let mut to_reattach: Vec<Tab> = Vec::new();
-            let mut to_close: Vec<Tab> = Vec::new();
-            let mut incoming: Vec<(egui::ViewportId, Vec<Action>)> = Vec::new();
-            let mut local_messages = Vec::new();
-            for (tab, detached) in &self.detached_tabs {
-                let viewport = egui::ViewportId::from_hash_of(tab);
-                if let Tab::Book(book) = tab {
-                    let mut model = detached
-                        .view_model
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner());
-                    if let Some(view_state) = model.view_state.as_mut() {
-                        local_messages.push((
-                            viewport,
-                            self.state.adopt_detached_book_view(view_state, *book),
-                        ));
-                    }
+    /// Entries refused in a detached window (a typed value while a dialog is
+    /// open in the main window): said through the same path as a refused
+    /// action. Run by the root and by the passes of the windows that serve
+    /// themselves, so that the band shows in the pass of the gesture.
+    pub(super) fn answer_refusals(&mut self, ctx: &egui::Context) {
+        for viewport in window_band::take_refusals(ctx) {
+            if let Some(dialog) = self.state.open_dialog() {
+                if self.viewport_is_open(viewport) {
+                    self.refuse_in_window(ctx, viewport, dialog);
                 }
-                let mut requests = detached
-                    .requests
-                    .lock()
-                    .unwrap_or_else(|err| err.into_inner());
-                incoming.push((viewport, std::mem::take(&mut requests.actions)));
-                if std::mem::take(&mut requests.reattach) {
-                    to_reattach.push(*tab);
-                }
-                if std::mem::take(&mut requests.close) {
-                    to_close.push(*tab);
-                }
-            }
-            // The messages the local view of a workbook recorded: said in its
-            // window when they are warnings or errors (#471).
-            for (viewport, messages) in local_messages {
-                if let Some(message) = messages
-                    .iter()
-                    .rfind(|message| message.level != StatusLevel::Info)
-                {
-                    self.band_in(ctx, viewport, message);
-                }
-            }
-            // During a dialog open in the main window (the modal graph
-            // properties window above all), a history macro is open by the
-            // root: letting the actions of a detached window in would have
-            // them absorbed, then undone with the graph (issue #21). They are
-            // refused, and the window says why.
-            for (viewport, window_actions) in incoming {
-                self.accept_detached_actions(ctx, viewport, window_actions, actions);
-            }
-            for tab in to_reattach {
-                window_band::clear(ctx, egui::ViewportId::from_hash_of(tab));
-                self.reattach_tab(tab);
-            }
-            for tab in to_close {
-                window_band::clear(ctx, egui::ViewportId::from_hash_of(tab));
-                self.close_detached_tab(tab);
             }
         }
     }
@@ -1666,7 +1588,7 @@ impl StokesForgeApp {
             self.detach_tab(tab);
         }
         if detached_this_frame {
-            // `show_detached_tabs` already published the viewports of this
+            // `show_detached_books` already published the viewports of this
             // frame before the header asked for the detachment. Without a
             // second root frame, eframe may thus stay idle
             // without ever creating the deferred viewport and calling its callback.
@@ -1700,34 +1622,21 @@ impl StokesForgeApp {
     }
 
     /// A save, or a gesture that may replace the project, takes the entries
-    /// open in the detached windows too (#465, #466): cell, header and note
-    /// through `AppState::commit_open_entries` on their own state, and the
-    /// graph text editors (titles, legends, free texts, egui-side) of the
-    /// floating and detached graphs through the usual actions. The main state
-    /// then reads the result before it saves or asks its question.
+    /// open in the graph views too (#465, #466): the graph text editors
+    /// (titles, legends, free texts, egui-side) of the floating and detached
+    /// graphs, through the usual actions. The cell, header and note entries are
+    /// the state's own, whatever window holds them (#475, L2): `AppState::save`
+    /// commits them.
     fn commit_view_entries(&mut self, ctx: &egui::Context) {
-        let mut committed = false;
         let mut actions = Vec::new();
         for (graph, view) in &mut self.graph_views {
             graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
-        }
-        for detached in self.detached_tabs.values() {
-            let mut model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            if let Some(view) = model.view_state.as_mut() {
-                committed |= view.commit_open_entries();
-            }
         }
         for (graph, window) in &mut self.detached_graphs {
             graph_text_edit::commit_open_text_editors(ctx, &mut window.view, *graph, &mut actions);
         }
         for action in actions {
             self.state.dispatch(action);
-        }
-        if committed {
-            self.state.refresh();
         }
     }
 
@@ -1751,15 +1660,6 @@ impl StokesForgeApp {
             };
             let pending_edits = pending_edits
                 || self.graph_views.values().any(&graph_editing)
-                || self.detached_tabs.values().any(|detached| {
-                    detached.view_model.lock().map_or(true, |model| {
-                        model.view_state.as_ref().is_some_and(|state| {
-                            state.editing().is_some()
-                                || state.header_editing().is_some()
-                                || state.note_editing().is_some()
-                        })
-                    })
-                })
                 || self
                     .detached_graphs
                     .values()
@@ -2315,7 +2215,10 @@ impl StokesForgeApp {
                 egui::ViewportCommand::Close,
             );
         }
-        self.detached_tabs.clear();
+        let books: Vec<NodeId> = self.detached_books.keys().copied().collect();
+        for book in books {
+            self.release_book_window(book);
+        }
         let graphs: Vec<NodeId> = self.detached_graphs.keys().copied().collect();
         for graph in graphs {
             self.release_graph_window(graph);
@@ -2647,86 +2550,6 @@ mod tests {
             assert!(panel.top() >= menu.bottom() - 1.0, "{name} under the menu");
         }
         assert!(pm.right() <= om.left(), "{pm:?} then {om:?}");
-        session.shutdown().unwrap();
-    }
-
-    #[test]
-    fn a_detached_command_publishes_its_result_in_the_pass_that_applied_it() {
-        use eframe::App as _;
-        let (session, _graph) = plotted_graph();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let book = app.state.books()[0].0;
-        let sheet = app.state.selected_sheet_in(book).unwrap();
-        let column = app.state.visible_columns(sheet)[0].0;
-        let tab = Tab::Book(book);
-        app.detach_tab(tab);
-        let ctx = egui::Context::default();
-        ctx.set_embed_viewports(false);
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        egui_extras::install_image_loaders(&ctx);
-        let mut frame = eframe::Frame::_new_kittest();
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            ..Default::default()
-        };
-        for _ in 0..8 {
-            ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame))
-                .textures_delta
-                .clear();
-        }
-        // A server thread is running (#475): `logic` asks for no wake of its own.
-        app.server = Some(Arc::new(server::ServerStatus::default()));
-        app.logic(&ctx, &mut frame);
-        let mut idle = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
-        idle.textures_delta.clear();
-        assert_eq!(
-            idle.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
-            Duration::MAX
-        );
-        app.detached_tabs[&tab]
-            .requests
-            .lock()
-            .unwrap()
-            .actions
-            .push(Action::CommitCell {
-                column,
-                row: 0,
-                text: "42".into(),
-            });
-        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
-        output.textures_delta.clear();
-        assert_eq!(
-            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
-            Duration::ZERO,
-            "the command changed the snapshot after painting"
-        );
-        assert_eq!(app.state.cell_text(column, 0), "42");
-        // #457: the same root pass already published the result and woke the
-        // detached window, so a root that is only repainted every 100 ms (a
-        // detached window covers it) does not make the result wait for two.
-        assert_eq!(
-            output.viewport_output[&egui::ViewportId::from_hash_of(tab)].repaint_delay,
-            Duration::ZERO,
-            "the detached window is woken in the pass that applied the command"
-        );
-        assert_eq!(
-            app.detached_tabs[&tab]
-                .view_model
-                .lock()
-                .unwrap()
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .revision,
-            app.state.revision(),
-            "the pass publishes the result itself"
-        );
         session.shutdown().unwrap();
     }
 
@@ -3310,8 +3133,9 @@ mod tests {
         (column, app.state.cell_text(column, 1))
     }
 
-    /// D1 of #465/#466: the entries open in a detached window are taken by a
-    /// save, Save As and the replacing gestures, like those of the main window.
+    /// D1 of #465/#466: the entry open in a detached window (the state's own,
+    /// #475 L2) is taken by a save, Save As and the replacing gestures, like
+    /// that of the main window.
     #[test]
     fn a_save_takes_the_entries_open_in_a_detached_window() {
         let dir = tempfile::tempdir().unwrap();
@@ -3322,14 +3146,8 @@ mod tests {
             let book = app.state.books()[0].0;
             app.detach_tab(Tab::Book(book));
             let (column, before) = detached_first_cell(&mut app, book);
-            // The entry lives in the detached window's own state.
-            {
-                let detached = &app.detached_tabs[&Tab::Book(book)];
-                let mut model = detached.view_model.lock().unwrap();
-                let view = model.view_state.as_mut().expect("detached view state");
-                view.begin_edit(column, 1);
-                view.editing_mut().unwrap().buffer = "77".to_string();
-            }
+            app.state.begin_edit(column, 1);
+            app.state.editing_mut().unwrap().buffer = "77".to_string();
             assert_ne!(before, "77", "witness: the cell differs");
             let target = dir.path().join(format!("{gesture}.stf"));
             let action = match gesture {
@@ -3348,17 +3166,8 @@ mod tests {
             };
             // A separate frame from the typing: nothing else commits the entry.
             app.dispatch_actions(&egui::Context::default(), vec![action]);
-            let detached = &app.detached_tabs[&Tab::Book(book)];
             assert!(
-                detached
-                    .view_model
-                    .lock()
-                    .unwrap()
-                    .view_state
-                    .as_ref()
-                    .unwrap()
-                    .editing()
-                    .is_none(),
+                app.state.editing().is_none(),
                 "{gesture}: the detached entry was taken"
             );
             assert_eq!(app.state.cell_text(column, 1), "77", "{gesture}");
@@ -3489,13 +3298,8 @@ mod tests {
         let book = app.state.books()[0].0;
         app.detach_tab(Tab::Book(book));
         let (column, before) = detached_first_cell(&mut app, book);
-        {
-            let detached = &app.detached_tabs[&Tab::Book(book)];
-            let mut model = detached.view_model.lock().unwrap();
-            let view = model.view_state.as_mut().unwrap();
-            view.begin_edit(column, 1);
-            view.editing_mut().unwrap().buffer = "77".to_string();
-        }
+        app.state.begin_edit(column, 1);
+        app.state.editing_mut().unwrap().buffer = "77".to_string();
         app.dispatch_actions(&egui::Context::default(), vec![Action::Undo]);
         assert_eq!(app.state.cell_text(column, 1), before);
         session.shutdown().unwrap();
@@ -3607,7 +3411,7 @@ mod tests {
         );
         assert!(app.floating_rects.contains_key(&graph));
         assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
-        assert!(app.detached_tabs.contains_key(&Tab::Book(book)));
+        assert!(app.detached_books.contains_key(&book));
         paint(&mut app, vec![egui::Event::PointerMoved(discard)]);
         let button = |pressed| egui::Event::PointerButton {
             pos: discard,
@@ -3619,7 +3423,7 @@ mod tests {
         let output = paint(&mut app, vec![button(false)]);
         assert_eq!(app.state.tree().len(), 1);
         assert!(app.floating_tabs.is_empty());
-        assert!(app.detached_tabs.is_empty());
+        assert!(app.detached_books.is_empty());
         assert!(app.graph_views.is_empty());
         assert!(app.floating_rects.is_empty());
         assert!(!header_rows(&context, Some(book)).metadata);
@@ -3667,7 +3471,7 @@ mod tests {
             "the workbook, on top, stays on top"
         );
         assert!(app.collapsed_tabs.contains(&Tab::Graph(graph)));
-        assert!(app.detached_tabs.is_empty(), "detaching is not remembered");
+        assert!(app.detached_books.is_empty(), "detaching is not remembered");
         assert_eq!(app.floating_rects[&graph], rect);
     }
 

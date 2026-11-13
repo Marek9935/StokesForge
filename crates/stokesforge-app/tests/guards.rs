@@ -2601,6 +2601,84 @@ fn the_viewports_guard_sees_a_bare_builder() {
     }
 }
 
+/// The names of the fork of the application state that a detached workbook once
+/// used (#475, L2): `path:line` of each use in production code. One shared
+/// state serves every window; a copy of it that is synchronised and "adopted"
+/// back is the mechanism the step removed.
+fn state_fork_names(sources: &[SourceFile]) -> Vec<String> {
+    const FORBIDDEN: [&str; 4] = [
+        "fork_for_detached_view",
+        "sync_detached_",
+        "adopt_detached_",
+        "return_selection_to_detached",
+    ];
+    let mut found = Vec::new();
+    for file in sources {
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if (i == 0 || !is_ident(source.mask[i - 1]))
+                && FORBIDDEN
+                    .iter()
+                    .any(|name| starts_with_at(&source.mask, i, name))
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn no_detached_window_has_a_fork_of_the_state() {
+    let offenders = state_fork_names(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "a detached window paints and writes the shared state under the application lock; \
+         no fork, no `sync_detached_*`, no `adopt_detached_*` (#475): {offenders:?}"
+    );
+}
+
+/// The witness: each name is seen, in any file of either crate; a comment, test
+/// code and a longer unrelated name pass.
+#[test]
+fn the_fork_guard_sees_every_name_of_the_fork() {
+    for code in [
+        "fn f(s: &AppState) { s.fork_for_detached_view(); }",
+        "fn f(v: &mut AppState) { v.sync_detached_snapshot(s); }",
+        "fn f(v: &mut AppState) { v.sync_detached_sheet_editor(r); }",
+        "fn f(v: &mut AppState) { v.adopt_detached_book_view(s, b); }",
+        "fn f(s: &AppState) { s.return_selection_to_detached_view(v, b); }",
+    ] {
+        for path in ["app/window_detach.rs", "app-state/state.rs"] {
+            assert_eq!(
+                state_fork_names(&[file(path, code)]).len(),
+                1,
+                "not seen in {path}: {code}"
+            );
+        }
+    }
+    for (path, code) in [
+        ("app/a.rs", "fn f() {} // fork_for_detached_view()"),
+        (
+            "app/a.rs",
+            "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { s.fork_for_detached_view(); } }",
+        ),
+        (
+            "app/a.rs",
+            "fn f() { s.adopt_next(); s.adopt_joined_lines(); }",
+        ),
+    ] {
+        assert!(
+            state_fork_names(&[file(path, code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
 /// `APP_ID` is what ties a window to `stokesforge.desktop` and to its icon.
 #[test]
 fn the_application_id_is_the_desktop_name() {
