@@ -10641,6 +10641,76 @@ fn a_finished_import_is_applied_by_the_tick_in_one_history_entry() {
     assert!(!state.can_undo(), "a single entry for the whole batch");
 }
 
+/// A gesture of the interface arriving while the import's macro is open is
+/// refused (the import runs on a sender of its own, like a script, #21): it never
+/// joins the Import entry, and undoing the import leaves the rest alone.
+#[test]
+fn a_ui_edit_during_the_import_macro_is_refused_and_never_joins_the_entry() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    state.dispatch(Action::AddColumn { sheet });
+    let column = state.visible_columns(sheet)[0].0;
+    let root_children =
+        |tree: &stokesforge_core::Tree| tree.node(tree.root()).unwrap().children().len();
+    let before = root_children(&session.handle().snapshot().unwrap().tree);
+    let file = dir.path().join("wide.csv");
+    let row: Vec<String> = (0..600).map(|c| c.to_string()).collect();
+    std::fs::write(&file, format!("{}\n", row.join(",")).repeat(10)).unwrap();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Wide"),
+        paths: vec![file],
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut run = loop {
+        if let Some(run) = state.server_tick(std::time::Instant::now()).import {
+            break run;
+        }
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let worker = std::thread::spawn(move || {
+        run.execute();
+        run
+    });
+    let busy = stokesforge_app_state::tr!("error-command-foreign-group");
+    let mut refused = false;
+    let mut accepted = 0;
+    while !worker.is_finished() && !refused {
+        state.dispatch(Action::CommitCell {
+            column,
+            row: 0,
+            text: (accepted + 1).to_string(),
+        });
+        let status = state.status().unwrap();
+        if status.is_error() && status.text == busy {
+            refused = true;
+        } else {
+            accepted += 1;
+        }
+    }
+    let run = worker.join().unwrap();
+    assert!(
+        refused,
+        "an edit during the macro is refused ({accepted} accepted before; last status {:?})",
+        state.status().map(|s| s.text.clone())
+    );
+    state.import_apply_finish(run);
+    state.refresh();
+    // The edits accepted before the macro are their own entries; one Undo takes
+    // the whole import and nothing else.
+    state.dispatch(Action::Undo);
+    assert_eq!(root_children(state.tree()), before);
+    assert_eq!(
+        state.cell_text(column, 0),
+        accepted.to_string(),
+        "the user's edits before the import are intact"
+    );
+}
+
 /// The paint pass has no part in it: `poll_import` finds nothing left to do.
 #[test]
 fn an_import_taken_by_the_tick_is_not_applied_twice_by_the_paint_pass() {

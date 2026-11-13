@@ -11,10 +11,10 @@
 //!    the selected sheets, the session handle). `import_applying` stays set;
 //! 2. [`ImportRun::execute`], with the lock RELEASED: the ordinary
 //!    `apply_import` (one macro "Import", plain undoable `Command`s through the
-//!    session, invariant 1) runs on a **scratch** `AppState` over a clone of the
-//!    UI's session handle. It is the same sender as the interface's, so the
-//!    macro belongs to the interface and no other writer interleaves (an open
-//!    macro refuses them, #21);
+//!    session, invariant 1) runs on a **scratch** `AppState` over a handle with a
+//!    sender identity of its own, as a script's. The macro belongs to that sender, so a write of the
+//!    interface that arrives meanwhile is refused with `MacroOpen` (#21), never
+//!    absorbed into the Import entry;
 //! 3. [`AppState::import_apply_finish`], under the lock: takes back what the scratch
 //!    state produced (messages, recalculation wait, recent files, last import),
 //!    refreshes the snapshot and flags the new workbooks, which the next paint
@@ -129,7 +129,10 @@ impl AppState {
             .map_or(0, |node| node.children().len());
         self.import_applying = true;
         Some(ImportRun {
-            handle: self.handle.clone(),
+            // The sender of its own, as a script's (#21): a gesture of the
+            // interface that arrives while the macro is open is refused
+            // (MacroOpen), never absorbed into the Import entry.
+            handle: self.handle.with_new_identity(),
             snapshot: self.snapshot.clone(),
             selected_sheets: self.selected_sheets.clone(),
             size_locks: self.size_locks.clone(),

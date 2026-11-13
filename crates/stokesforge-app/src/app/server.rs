@@ -43,7 +43,7 @@
 //!   back (`poll_*_without_server`) and says it once (`tell_server_stopped`).
 //! - **Finished import**: taken out under the lock (`import_apply_begin`), its
 //!   commands run by [`serve_once`] with the lock RELEASED, on a scratch
-//!   `AppState` over a clone of the UI's session handle (one macro, ordinary
+//!   `AppState` over a handle with a sender identity of its own, as a script's (one macro, ordinary
 //!   undoable `Command`s, one history entry), then recorded under the lock again
 //!   (`import_apply_finish`). Opening windows is flagged for the next paint pass.
 //! - **Finished script**: its thread calls the waker (`AppState::set_waker`)
@@ -270,7 +270,7 @@ impl ServerStatus {
         !self.ended.load(Ordering::Acquire)
     }
 
-    /// The thread ended while unwinding (an internal error).
+    /// The thread ended in error: it unwound, or it could not start.
     pub(super) fn panicked(&self) -> bool {
         self.panicked.load(Ordering::Acquire)
     }
@@ -348,6 +348,9 @@ impl ServerThread {
             })
             .ok();
         if join.is_none() {
+            // The thread could not start: the same end as a panic for the UI
+            // (fallback polls and the one-time warning).
+            status.panicked.store(true, Ordering::Release);
             status.ended.store(true, Ordering::Release);
         }
         Self {
@@ -1184,5 +1187,49 @@ mod tests {
                 stress_run(seed * 0x9E37_79B9, 1500);
             }
         });
+    }
+
+    /// `ServedApp::new` wires the waker: calling it unparks the server thread,
+    /// which then looks again at once (it was parked until its autosave
+    /// deadline, minutes away).
+    #[test]
+    fn the_served_app_waker_unparks_the_server_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Session::spawn(demo(), None).expect("session");
+        let mut state = AppState::new(
+            session.handle(),
+            dir.path().join("a.stf").display().to_string(),
+        )
+        .expect("state");
+        state.set_recovery_dir(None);
+        let app = StokesForgeApp::new(state);
+        let mut served = ServedApp::new(app, egui::Context::default());
+        // The state is held from `new()` on, like a test that drives `ui`
+        // directly; between two passes the lock is free and the thread works.
+        served.app.state.release();
+        let status = served.thread.status();
+        let ticks = || status.ticks.load(Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ticks() == 0 {
+            assert!(Instant::now() < deadline, "the first pass");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // Let the thread reach its park.
+        std::thread::sleep(Duration::from_millis(200));
+        let before = ticks();
+        served.app.state.acquire();
+        served.app.state.wake_server();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while ticks() == before {
+            assert!(
+                Instant::now() < deadline,
+                "the waker did not wake the thread"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        served.app.state.acquire();
+        let _ = served
+            .thread
+            .shut_down(&mut served.app.state, Duration::from_secs(5));
     }
 }

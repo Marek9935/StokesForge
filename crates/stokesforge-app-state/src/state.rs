@@ -3452,7 +3452,6 @@ pub struct AppState {
     /// What the script's thread calls after sending its reply: wakes the server
     /// thread at once instead of leaving it to its 50 ms look (#475). A plain
     /// closure: the state knows nothing of the thread nor of egui.
-    #[cfg_attr(not(feature = "python"), allow(dead_code))]
     waker: Option<Wake>,
     /// Workbooks created by an import that the thread applied: the paint pass
     /// opens them as windows (#475).
@@ -4069,6 +4068,13 @@ impl AppState {
     #[must_use]
     pub fn script_available(&self) -> bool {
         cfg!(feature = "python")
+    }
+
+    /// Calls the waker, if one is set: wakes the server thread now.
+    pub fn wake_server(&self) {
+        if let Some(wake) = &self.waker {
+            wake();
+        }
     }
 
     /// Sets what wakes the server thread when a script ends (#475).

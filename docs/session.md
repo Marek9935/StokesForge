@@ -138,14 +138,15 @@ The full table, with what it fixes and why, is at the top of
 ## A third client: the server thread (#475)
 
 Besides the interface thread and the script thread, the application's server thread
-(`stokesforge-app/src/app/server.rs`) holds a clone of the interface's `SessionHandle` (it never
-uses `with_new_identity`). It calls `save` for the autosave, `snapshot` and `recalc_running` when
-it collects a recalculation, `actor_alive`. It executes commands only to apply a finished import
-(L6): one `Import` macro of ordinary undoable commands, one history entry, with the application lock released. The
-macro belongs to the interface's sender (same handle), so a gesture of the interface that
-arrives during the few milliseconds of the application joins the macro (#21) and the autosave
-waits; `AppState::can_new_project` and a second import refuse meanwhile. Otherwise it opens no
-macro and meets `MacroOpen` only as a refusal of `save` that it reads as "busy". Its
+(`stokesforge-app/src/app/server.rs`) holds a clone of the interface's `SessionHandle`. It calls `save` for the
+autosave (the interface's own sender: `save` only reads, creates no history entry), `snapshot` and
+`recalc_running` when it collects a recalculation, `actor_alive`. It executes commands only to apply
+a finished import: one `Import` macro of ordinary undoable commands, one history entry, with the
+application lock released, on a handle with `with_new_identity()` like a script's (#21). While that
+macro is open, a write of the interface is refused with `MacroOpen` and shown by the usual
+refusal path (the same message and status band as a write during a script), so it never joins the
+Import entry and Ctrl+Z of the import leaves later edits alone. `AppState::can_new_project` and a
+second import refuse meanwhile, and the autosave waits (its `save` reads `MacroOpen` as "busy"). Its
 requests wait for the actor like the interface's: a long recalculation delays them, and it
 holds no lock on the application state while it waits for the autosave write.
 
