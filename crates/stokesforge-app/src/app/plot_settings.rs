@@ -1314,16 +1314,6 @@ pub(super) fn formula_field(
     )
 }
 
-/// How a [`formula_field_with_end`] stands after the frame.
-pub(super) struct FieldEnd {
-    /// The field has focus now (a draft is being typed).
-    pub(super) focused: bool,
-    /// The field was left this frame (click elsewhere, Enter, Tab or Escape).
-    pub(super) left: bool,
-    /// It was left by Escape (S-F7): the caller gives the old value back.
-    pub(super) escaped: bool,
-}
-
 /// [`formula_field`] whose text is checked by `diagnose` (a template that reads
 /// variables needs them defined first).
 fn formula_field_with(
@@ -1333,19 +1323,6 @@ fn formula_field_with(
     value: &mut String,
     diagnose: &dyn Fn(&str) -> Option<String>,
 ) -> bool {
-    formula_field_with_end(form, label, hint, value, diagnose).left
-}
-
-/// [`formula_field_with`] that also says whether the field has focus and how
-/// it was left, for a field kept as a draft outside a dialog (Preferences,
-/// #502).
-pub(super) fn formula_field_with_end(
-    form: &mut Form<'_>,
-    label: &str,
-    hint: &str,
-    value: &mut String,
-    diagnose: &dyn Fn(&str) -> Option<String>,
-) -> FieldEnd {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
@@ -1358,14 +1335,7 @@ pub(super) fn formula_field_with_end(
             }
         }
         formula_help(ui, hint);
-        // egui gives the focus back at the start of the pass where Escape is
-        // pressed: the field is then "left" with that key down.
-        let left = response.lost_focus();
-        FieldEnd {
-            focused: response.has_focus(),
-            left,
-            escaped: left && ui.input(|input| input.key_pressed(egui::Key::Escape)),
-        }
+        response.lost_focus()
     })
 }
 
@@ -2303,7 +2273,11 @@ fn legend_text_editor(
         text.choose_custom();
     }
     if text.from == LegendTextFrom::Custom {
-        commit |= legend_template_field(form, &mut text.template).left;
+        if let Some(template) = legend_template_field(form, "plot_legend_template", &text.template)
+        {
+            text.template = template;
+            commit = true;
+        }
     }
     if !row_columns.is_empty() {
         #[derive(Clone, Copy, PartialEq)]
@@ -2357,15 +2331,30 @@ fn legend_text_editor(
 
 /// The « Template » row of a custom legend, with its help icon and the shared
 /// validation ([`legend_template_issue`]): the one field of the Legend tab and
-/// of the Preferences (#502).
-pub(super) fn legend_template_field(form: &mut Form<'_>, template: &mut String) -> FieldEnd {
-    formula_field_with_end(
-        form,
-        &tr!("plot-legend-template"),
-        &tr!("plot-legend-template", "hint"),
-        template,
-        &legend_template_issue,
-    )
+/// of the Preferences (#502). It is the standard text field
+/// ([`field_state::edit_text`]): a draft while focused, committed on leave or
+/// Enter (which is consumed, S-N3), given back on Escape (S-F7). A template is
+/// never refused; once the field is left, its issue is painted on it (S-T3).
+/// Returns the template committed this frame.
+pub(super) fn legend_template_field(
+    form: &mut Form<'_>,
+    id_salt: &str,
+    current: &str,
+) -> Option<String> {
+    form.row(tr!("plot-legend-template"), |ui| {
+        let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
+        let edited = field_state::edit_text(ui, id_salt, width, current, |text| {
+            field_state::Verdict::Valid(text.to_owned())
+        });
+        if !edited.response.has_focus() {
+            let shown = edited.value.as_deref().unwrap_or(current);
+            if let Some(error) = legend_template_issue(shown) {
+                field_state::show_issue(ui, &edited.response, &FieldIssue::refused(error));
+            }
+        }
+        formula_help(ui, &tr!("plot-legend-template", "hint"));
+        edited.value
+    })
 }
 
 /// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of
@@ -5020,6 +5009,102 @@ mod tests {
             harness.state.plot_settings().is_none(),
             "second Escape: Cancel"
         );
+    }
+
+    /// A graph whose legend text is a custom template `#ln`, on its Legend tab.
+    fn custom_template_harness() -> Harness {
+        let mut harness = harness(|spec| {
+            let text = &mut first_panel(spec).legend.text;
+            text.from = stokesforge_plot::LegendTextFrom::Custom;
+            text.template = "#ln".to_owned();
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        harness
+    }
+
+    /// #502, S-F7: Escape in the Legend tab's template field gives the old
+    /// template back and the dialog stays open. Witness: a field that keeps
+    /// what was typed (plain text edit) leaves `zzz` in the draft.
+    #[test]
+    fn escape_gives_back_the_legend_template() {
+        let mut harness = custom_template_harness();
+        let context = test_support::context();
+        focus_field(&context, &mut harness.state, "#ln");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("zzz".into())],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Escape)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        assert!(harness.state.plot_settings().is_some(), "dialog stays open");
+        assert_eq!(harness.draft().panels[0].legend.text.template, "#ln");
+    }
+
+    /// #502, S-N3: Enter in the template field commits it and does not close
+    /// Graph Properties. Witness: an Enter that is not consumed closes it.
+    #[test]
+    fn enter_in_the_legend_template_commits_and_keeps_the_window_open() {
+        let mut harness = custom_template_harness();
+        let context = test_support::context();
+        focus_field(&context, &mut harness.state, "#ln");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("zzz".into())],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        assert!(harness.state.plot_settings().is_some(), "dialog stays open");
+        assert!(harness.draft().panels[0]
+            .legend
+            .text
+            .template
+            .contains("zzz"));
+    }
+
+    /// #502, S-T3: a template that cannot be read says why once the field is
+    /// left, not while typing. Witness: dropping the issue on the field.
+    #[test]
+    fn a_broken_legend_template_is_red_once_left() {
+        let mut harness = custom_template_harness();
+        let context = test_support::context();
+        let center = focus_field(&context, &mut harness.state, "#ln");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("#(".into())],
+        );
+        let message = super::legend_template_issue("#(").expect("the template is broken");
+        let hovered = paint_window(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::PointerMoved(center)],
+        );
+        assert!(
+            hovered.iter().all(|t| !t.text.contains(&message)),
+            "no red bubble from the draft while typing"
+        );
+        click_label(&context, &mut harness.state, &tr!("plot-legend-text-from"));
+        paint_window(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::PointerMoved(center)],
+        );
+        let painted = paint_window(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::PointerMoved(center)],
+        );
+        assert!(
+            painted.iter().any(|t| t.text.contains(&message)),
+            "the bubble says why: {message}"
+        );
+        assert!(harness.draft().panels[0]
+            .legend
+            .text
+            .template
+            .contains("#("));
     }
 
     /// Enter in a Graph Properties number field (S-N3): commits the field into

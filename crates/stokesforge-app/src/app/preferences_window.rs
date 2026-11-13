@@ -25,7 +25,7 @@
 use eframe::egui;
 
 use super::dialogs::{modal_live_settings, DialogOutcome, InteractiveSize, SizeClass};
-use super::form::{choice, form, ChoiceOption, Form};
+use super::form::{choice, form, ChoiceOption};
 use super::object_manager_ui::object_manager_group_label;
 use super::plot_settings::legend_template_field;
 use super::reorder_list::{move_before, reorder_move, reorder_row};
@@ -380,7 +380,6 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let before = (metadata, x_prime);
     let mut comma = state.new_graph_decimal_comma();
     let comma_before = comma;
-    let ctx = ui.ctx().clone();
     let legend_text = state.new_graph_legend_text();
     let mut picked_from = legend_text.from.clone();
     let mut template_commit: Option<String> = None;
@@ -413,7 +412,8 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
             );
         });
         if legend_text.from == LegendTextFrom::Custom {
-            template_commit = legend_template_draft(&ctx, rows, &legend_text.template);
+            template_commit =
+                legend_template_field(rows, "preferences_legend_template", &legend_text.template);
         }
         rows.note(tr!("preferences-new-graph-legend-text", "hint"));
     });
@@ -441,29 +441,6 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     if next != legend_text {
         actions.push(Action::SetNewGraphLegendText(next));
     }
-}
-
-/// The « Template » row of the legend text default (#502): the one field of
-/// the Legend tab (shared validation, help icon), kept as a draft while it has
-/// focus. Returns the text to save once the field is left (click elsewhere,
-/// Enter, Tab); Escape gives `saved` back (S-F7) and saves nothing.
-fn legend_template_draft(ctx: &egui::Context, rows: &mut Form<'_>, saved: &str) -> Option<String> {
-    let buffer_id = egui::Id::new("preferences_legend_template_buffer");
-    let mut draft: String = ctx
-        .data(|data| data.get_temp(buffer_id))
-        .unwrap_or_else(|| saved.to_owned());
-    let end = legend_template_field(rows, &mut draft);
-    if end.focused {
-        ctx.data_mut(|data| data.insert_temp(buffer_id, draft.clone()));
-        return None;
-    }
-    ctx.data_mut(|data| data.remove::<String>(buffer_id));
-    if end.left {
-        // The Enter that ends the field must not also be the window's Close
-        // (the window reads it after its content).
-        ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ENTER));
-    }
-    (end.left && !end.escaped && draft != saved).then_some(draft)
 }
 
 /// Export: how a graph file is written (SVG text, PNG resolution — the same
