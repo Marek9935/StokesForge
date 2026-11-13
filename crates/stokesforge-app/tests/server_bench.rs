@@ -43,6 +43,8 @@ struct Sample {
 
 struct Run {
     out: String,
+    /// `WAYLAND_DEBUG=client` log, when the run asked for it (`config.env`).
+    wayland: String,
     samples: Vec<Sample>,
     finished: bool,
 }
@@ -107,6 +109,21 @@ fn build_example() {
     );
 }
 
+/// Native windows (xdg toplevels) the application created and destroyed, from
+/// a `WAYLAND_DEBUG=client` log: `-> xdg_surface#N.get_toplevel(new id
+/// xdg_toplevel#M)` and `-> xdg_toplevel#M.destroy()`.
+fn toplevels(log: &str) -> (usize, usize) {
+    let sent = |object: &str, request: &str| {
+        log.lines()
+            .filter(|line| line.contains(&format!("-> {object}#")) && line.contains(request))
+            .count()
+    };
+    (
+        sent("xdg_surface", ".get_toplevel("),
+        sent("xdg_toplevel", ".destroy("),
+    )
+}
+
 fn read_samples(path: &Path) -> Vec<Sample> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
@@ -135,6 +152,8 @@ fn run_once(config: &Config) -> Option<Run> {
     let compositor = Compositor::start()?;
     let dir = tempfile::tempdir().expect("scratch folder");
     let stats = dir.path().join("stats.tsv");
+    let wayland_log = dir.path().join("wayland.log");
+    let wants_wayland_log = config.env.iter().any(|(key, _)| *key == "WAYLAND_DEBUG");
     let mut cmd = Command::new(exe_path());
     cmd.env_remove("DISPLAY")
         .env_remove("STOKESFORGE_X11")
@@ -149,7 +168,9 @@ fn run_once(config: &Config) -> Option<Run> {
         .env("XDG_CONFIG_HOME", dir.path().join("config"))
         .envs(config.env.iter().copied())
         .stdout(Stdio::piped())
-        .stderr(if std::env::var_os("PROBE_STDERR").is_some() {
+        .stderr(if wants_wayland_log {
+            Stdio::from(std::fs::File::create(&wayland_log).expect("log file"))
+        } else if std::env::var_os("PROBE_STDERR").is_some() {
             Stdio::inherit()
         } else {
             Stdio::null()
@@ -177,6 +198,7 @@ fn run_once(config: &Config) -> Option<Run> {
     let out = reader.join().unwrap_or_default();
     Some(Run {
         out,
+        wayland: std::fs::read_to_string(&wayland_log).unwrap_or_default(),
         samples: read_samples(&stats),
         finished,
     })
@@ -700,4 +722,33 @@ fn covering_windows_serve_themselves_with_the_root_left_alone() {
         );
     }
     assert!(all_ok, "a covering window needed the root:\n{}", r.out);
+}
+
+/// #475, after the GNOME trial: a reattached window leaves no native window
+/// behind. The `covering` scenario detaches and reattaches a graph, a
+/// workbook and the Project Manager, one after the other. Counted on the
+/// Wayland wire, the application creates four toplevels in all (the main
+/// window and the three it detached) and no more: egui listing a viewport
+/// that no window of ours owns makes eframe create an empty "egui window"
+/// (default title), which stays until the application quits.
+#[test]
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn reattached_windows_leave_no_native_window_behind() {
+    build_example();
+    let Some(r) = run_once(&Config {
+        scenario: "covering",
+        big: false,
+        secs: 20,
+        env: &[("WAYLAND_DEBUG", "client")],
+    }) else {
+        return skip();
+    };
+    assert!(r.finished, "the bench did not end:\n{}", r.out);
+    let (created, destroyed) = toplevels(&r.wayland);
+    let ok = created == 4;
+    println!(
+        "server-bench: toplevels created={created} (expected 4) destroyed={destroyed} {}",
+        verdict(ok)
+    );
+    assert!(ok, "{} ghost window(s) created", created.saturating_sub(4));
 }
