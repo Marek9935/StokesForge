@@ -47,7 +47,7 @@
 # Refused before the lock if the message closes the issue (`Closes #<n>` and the other GitLab
 # keywords); after the push it runs `suivi.py tag-wait <n> <kind>`, and the service then adds the
 # label `attente-rc` / `attente-final` on GitLab (no glab call here). The call carries no
-# --jobs/--human: `tag-wait` merges with an earlier `suivi.py tag-wait <n> <kind> --jobs .. --human ..`
+# --jobs/--step/--files/--human: `tag-wait` merges with an earlier `suivi.py tag-wait <n> <kind> --jobs .. --human ..`
 # (#497), so declare those first and they survive.
 #
 # INTEGRATION LINE (#480). If the issue's record declares a line (suivi.py line <n>, e.g. PostV1.1),

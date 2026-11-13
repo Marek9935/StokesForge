@@ -57,7 +57,8 @@ parent while a sub-issue is), `en-pause` (a record that holds nothing), none for
 closed issues. The tracking state wins over a hand edit; demotion held -> paused waits 10 min
 (SF_SUIVI_LABELS_SETTLE, seconds). Waiting labels `attente-rc` (an -rcN or a final tag proves it) and
 `attente-final` (final tag only) hide `en-pause`; the machine adds one only for `tag-wait <n> rc|final
-[--jobs a,b] [--human "text"]` (tagwait/<n>.json, label added once) and removes them at closure. Tags
+[--jobs a,b] [--step "gesture -> what you see"]... [--files exe,tar.gz,rpm,deb,manual] [--human "text"]`
+(tagwait/<n>.json, label added once) and removes them at closure. Tags
 are read on GitLab (tags.json; the first run seeds, nothing is done): at a new tag each waiting issue
 gets a comment with its job results (GitHub public API, SF_SUIVI_TAGJOBS_API) and, unless a job failed,
 a card in « En attente » (a trial entry without `try`); the card ticked OK closes the issue and drops
@@ -65,6 +66,17 @@ the label in one PUT. Only PUT with add_labels/remove_labels (never `labels=`). 
 or empty read writes nothing. The thread runs only for the real state folder: with SF_SUIVI_DIR or
 --state it stays off unless SF_SUIVI_LABELS=on (off forces it off). `labels sync [--dry-run]` is one
 pass by hand; `tag-check <tag> --dry-run` reads and writes nothing.
+
+TAG CARDS (#497). A card names each built file the trial needs (`--files`; the job that builds it joins
+the issue's jobs), with its direct link read from the generic package `stokesforge` at the tag's
+version (`/-/package_files/<id>/download`, the highest id of a repeated name; the predictable generic URL
+when GitLab cannot be read, after retrying at each poll until the 6 h cap), the package page, the hand
+route (Package registry; Releases on a final tag), the declared steps, or "nothing to do by hand" for
+a jobs-only proof. The registry is read before the comment: an unreadable one writes nothing. The
+service (not a test, not `tag-check`) also downloads those files to ~/Downloads/StokesForge-<version>/
+(SF_SUIVI_DOWNLOAD=on|off, SF_SUIVI_DOWNLOAD_DIR): a file of the same size is kept, `<name>.part` is
+renamed when complete, a failure only adds a warning to the card. `tag-check <tag> --card <n> [--files k]`
+prints the card JSON for issue n: GETs only, no download.
 
 CI WATCHER (#452). `serve` runs a daemon thread that polls the CI of the newest commit of `main`
 every ~120 s through `scripts/ci-status.sh --head` (glab, one PROJECT_ID): the Linux and Windows jobs
@@ -2702,6 +2714,20 @@ RELEASE_JOBS = ("release-linux", "test-linux-packages", "upload-linux-packages",
                 "dist-windows", "publier")
 FAILED_CONCLUSIONS = ("failure", "timed_out", "cancelled", "startup_failure", "action_required")
 FINAL_TAG_RE = re.compile(r"v\d+\.\d+\.\d+")
+GITLAB_WEB = "https://gitlab.com/askrzypczak/stokesforge"
+GITLAB_GENERIC = "https://gitlab.com/api/v4/projects/askrzypczak%2Fstokesforge/packages/generic/stokesforge"
+# lang: fr begin
+# Built files a trial may need (#497): kind -> (name pattern as scripts/release-publish.sh, label, job that builds it).
+FILE_KINDS = {
+    "exe": ("StokesForge-{v}-windows-setup.exe", "Installeur Windows", "dist-windows"),
+    "tar.gz": ("StokesForge-{v}-linux-x86_64.tar.gz", "Archive Linux", "release-linux"),
+    "rpm": ("StokesForge-{v}-linux-x86_64.rpm", "Paquet rpm", "upload-linux-packages"),
+    "deb": ("StokesForge-{v}-linux-x86_64.deb", "Paquet deb", "upload-linux-packages"),
+    "manual": ("StokesForge-{v}-manual.tar.gz", "Manuel", "release-manual"),
+}
+# lang: fr end
+DOWNLOAD_TIMEOUT = 600.0     # seconds per file, all included
+_DOWNLOADS_ON = []           # the real service turns it on; SF_SUIVI_DOWNLOAD=on|off overrides (tests, tag-check)
 
 
 class LabelFail(Exception):
@@ -2962,10 +2988,116 @@ def pages_verdict(tag, sha):
     return "missing"
 
 
+def tag_version(tag):
+    """The package version of a tag: the tag without its leading `v` (as release-upload.sh)."""
+    return tag[1:] if tag.startswith("v") else tag
+
+
+def package_lookup(version):
+    """What the generic package `stokesforge` at exactly `version` holds: {'id': package id or None,
+    'files': {name: {'id', 'size'}}}. GitLab's name/version filters are fuzzy (`third-party-licenses`
+    and other versions come back), so the answer is filtered again; a repeated file name keeps the
+    highest id. Raises LabelFail when GitLab cannot be read."""
+    pk = [p for p in gl_list("projects/%d/packages?package_type=generic&package_name=stokesforge&package_version=%s"
+                             % (GITLAB_PROJECT, version))
+          if isinstance(p, dict) and p.get("name") == "stokesforge" and p.get("version") == version
+          and isinstance(p.get("id"), int)]
+    if not pk:
+        return {"id": None, "files": {}}
+    pid = max(p["id"] for p in pk)
+    files = {}
+    for f in gl_list("projects/%d/packages/%d/package_files" % (GITLAB_PROJECT, pid)):
+        if not (isinstance(f, dict) and isinstance(f.get("id"), int) and f.get("file_name")):
+            continue
+        if f["file_name"] not in files or f["id"] > files[f["file_name"]]["id"]:
+            files[f["file_name"]] = {"id": f["id"], "size": f.get("size") if isinstance(f.get("size"), int) else None}
+    return {"id": pid, "files": files}
+
+
+def file_entries(version, kinds, pkg):
+    """[(kind, file name, url or None, size or None)]; url None = read OK but the file is not in the
+    registry; `pkg` None = the registry could not be read, the predictable generic URL stands in."""
+    out = []
+    for k in kinds:
+        name = FILE_KINDS[k][0].format(v=version)
+        if pkg is None:
+            out.append((k, name, "%s/%s/%s" % (GITLAB_GENERIC, version, name), None))
+        elif name in pkg["files"]:
+            f = pkg["files"][name]
+            out.append((k, name, "%s/-/package_files/%d/download" % (GITLAB_WEB, f["id"]), f["size"]))
+        else:
+            out.append((k, name, None, None))
+    return out
+
+
+def download_enabled():
+    v = os.environ.get("SF_SUIVI_DOWNLOAD")
+    return v == "on" if v in ("on", "off") else bool(_DOWNLOADS_ON)
+
+
+def download_dir(version):
+    base = os.environ.get("SF_SUIVI_DOWNLOAD_DIR") or os.path.expanduser("~/Downloads")
+    return os.path.join(base, "StokesForge-%s" % version)
+
+
+def open_url(url, timeout):
+    import urllib.request
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "stokesforge-suivi"}), timeout=timeout)
+
+
+def fetch_one(url, dest, size):
+    """'present' (same size already there, nothing read) or 'fetched'; raises on any failure. The
+    bytes go to `<dest>.part`, renamed only when complete; the whole file has DOWNLOAD_TIMEOUT s."""
+    if size is not None and os.path.isfile(dest) and os.path.getsize(dest) == size:
+        return "present"
+    deadline = time.time() + DOWNLOAD_TIMEOUT
+    part = dest + ".part"
+    with open_url(url, 60) as r:
+        want = r.headers.get("Content-Length")
+        want = int(want) if want and want.isdigit() else None
+        if want is not None and os.path.isfile(dest) and os.path.getsize(dest) == want:
+            return "present"
+        got = 0
+        try:
+            with open(part, "wb") as f:
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    got += len(chunk)
+                    if time.time() > deadline:
+                        raise Fail("download timed out")
+            if want is not None and got != want:
+                raise Fail("download cut short")
+            os.replace(part, dest)
+        except BaseException:
+            if os.path.exists(part):
+                os.remove(part)
+            raise
+    return "fetched"
+
+
+def download_files(version, entries):
+    """{file name: 'present'|'fetched'|'failed'} for the entries that have a url. Never raises."""
+    out = {}
+    folder = download_dir(version)
+    for _, name, url, size in entries:
+        if not url:
+            continue
+        try:
+            os.makedirs(folder, exist_ok=True)
+            out[name] = fetch_one(url, os.path.join(folder, name), size)
+        except Exception:
+            out[name] = "failed"
+    return out
+
+
 def wanted_jobs(n, declared, kind):
     d = declared.get(n)
+    builders = [FILE_KINDS[k][2] for k in (d or {}).get("files") or [] if k in FILE_KINDS]
     if d and d.get("jobs"):
-        return list(d["jobs"])
+        return list(d["jobs"]) + [b for b in dict.fromkeys(builders) if b not in d["jobs"]]
     return list(RELEASE_JOBS) + (["pages"] if kind == "final" else [])
 
 
@@ -2981,14 +3113,52 @@ def waiting_issues(kind):
 
 
 # lang: fr begin
-def tag_card(tag, n, declared, results):
+def tag_steps(n, d):
+    steps = ([d["human"]] if d and d.get("human") else []) + [x for x in (d or {}).get("steps") or [] if isinstance(x, str)]
+    if steps:
+        return steps
+    jobs = (d or {}).get("jobs") or []
+    if len(jobs) == 1:
+        return ["Rien à faire à la main : le job %s est vert, coche OK." % jobs[0]]
+    if jobs:
+        return ["Rien à faire à la main : les jobs %s sont verts, coche OK." % ", ".join(jobs)]
+    return ["Relis l'issue #%d : ce que le tag devait prouver l'est-il ?" % n]
+
+
+def tag_where(tag, n, info):
+    v = tag_version(tag)
+    info = info or {}
+    out = []
+    pkg = info.get("pkg")
+    dl = info.get("dl") or {}
+    for k, name, url, _ in file_entries(v, info.get("kinds") or [], pkg):
+        label = FILE_KINDS[k][1]
+        out.append("%s : %s" % (label, url) if url else "⚠ %s absent du registre (%s)" % (label, name))
+    if pkg and pkg.get("id"):
+        out.append("Page du paquet : %s/-/packages/%d" % (GITLAB_WEB, pkg["id"]))
+    shown = download_dir(v)
+    home = os.path.expanduser("~")
+    shown = "~" + shown[len(home):] if shown.startswith(home + os.sep) else shown
+    for status, fmt in (("present", "✔ déjà dans {d}/ : {n}"), ("fetched", "✔ téléchargé dans {d}/ : {n}"),
+                        ("failed", "⚠ téléchargement raté : {n} (lien ci-dessus)")):
+        names = [x for x, st in dl.items() if st == status]
+        if names:
+            out.append(fmt.format(d=shown, n=", ".join(names)))
+    out.append("À la main : GitLab → Deploy → Package registry → stokesforge %s (pas third-party-licenses) : %s/-/packages"
+               % (v, GITLAB_WEB))
+    if tag_kind(tag) == "final":
+        out.append("Sur un tag final, les fichiers sont aussi sous Deploy → Releases : %s/-/releases" % GITLAB_WEB)
+    out += ["GitHub → Actions → run du tag %s" % tag, "L'issue #%d sur GitLab" % n]
+    return out
+
+
+def tag_card(tag, n, declared, results, info=None):
     d = declared.get(n)
-    steps = [d["human"]] if d and d.get("human") else ["Relis l'issue #%d : ce que le tag devait prouver l'est-il ?" % n]
     ok = ", ".join(j for j, v in results if v == "ok") or "aucun"
     return {"title": "Tag %s : vérifier #%d" % (tag, n),
             "intro": "Le tag %s est posé. Jobs réussis : %s." % (tag, ok),
-            "where": ["GitHub → Actions → run du tag %s" % tag, "L'issue #%d sur GitLab" % n],
-            "steps": steps,
+            "where": tag_where(tag, n, info),
+            "steps": tag_steps(n, d),
             "expect": "Coche OK si la preuve est faite : l'issue #%d sera fermée et son étiquette retirée. "
                       "Retour la laisse ouverte." % n,
             "colour": "", "name": "Tag %s" % tag}
@@ -3045,6 +3215,27 @@ def tag_report(tag, sha, d, now, dry, lines, force=False):
     if undecided and not expired:
         lines.append("%s: not decided yet (%s); retry later" % (tag, unreadable or ("no run for this commit" if not ran else "job running")))
         return False
+    # The registry is read BEFORE any comment: once `comment` is set the issue leaves `todo`, so a later
+    # failure would lose the card. An unreadable registry retries at the next poll, like GitHub, until
+    # the cap; then the card goes out with the predictable generic URLs.
+    def kinds_of(n):
+        return [k for k in (declared.get(n) or {}).get("files") or [] if k in FILE_KINDS]
+    carded = [n for n in todo if kinds_of(n) and not any(v == "failed" for _, v in res[n])
+              and (all(v == "ok" for _, v in res[n]) or n not in declared)]
+    pkg = None
+    if carded:
+        try:
+            pkg = package_lookup(tag_version(tag))
+        except LabelFail as e:
+            if not expired:
+                lines.append("%s: package registry unreadable (%s); retry later" % (tag, e))
+                return False
+            lines.append("%s: package registry unreadable (%s); predictable URLs on the cards" % (tag, e))
+    dls = {}
+    if carded and download_enabled() and not dry:
+        for n in carded:
+            ents = file_entries(tag_version(tag), kinds_of(n), pkg)
+            dls[n] = download_files(tag_version(tag), ents)
     for n in todo:
         results = res[n]
         h = handled.setdefault(str(n), {})
@@ -3060,7 +3251,8 @@ def tag_report(tag, sha, d, now, dry, lines, force=False):
         h["comment"] = True
         tag_save(d)
         if proven:
-            card = tag_card(tag, n, declared, results)
+            info = {"kinds": kinds_of(n), "pkg": pkg, "dl": dls.get(n)}
+            card = tag_card(tag, n, declared, results, info)
             card["issue"] = n
             h["card"] = new_card(card, today().isoformat())
             tag_save(d)
@@ -3140,16 +3332,32 @@ def labels_enabled(real_dir):
     return seam == "on" if seam in ("on", "off") else real_dir
 
 
+def file_kinds_arg(text):
+    kinds = [k for k in text.split(",") if k]
+    bad = [k for k in kinds if k not in FILE_KINDS]
+    if bad or not kinds:
+        raise argparse.ArgumentTypeError("unknown file kind %s (allowed: %s)" % (", ".join(bad) or "(none)", ", ".join(FILE_KINDS)))
+    return list(dict.fromkeys(kinds))
+
+
 def cmd_tag_wait(a):
-    """Merge with an earlier declaration (#497): the kind comes from this call, the jobs and the
-    human check stay unless this call gives new ones, `added_at` stays only while the kind (so the
-    label) is unchanged, otherwise the service adds the new waiting label."""
+    """Merge with an earlier declaration (#497): the kind comes from this call, the jobs, the steps
+    and the files stay unless this call gives new ones, `added_at` stays only while the kind (so the
+    label) is unchanged, otherwise the service adds the new waiting label. `--human` is one step."""
     p = tagwait_path(a.issue)
     old = read_json(p)
     old = old if isinstance(old, dict) else {}
+    new_steps = bool(a.step or a.human)
     rec = {"issue": a.issue, "kind": a.kind,
            "jobs": [j for j in a.jobs.split(",") if j] if a.jobs else (old.get("jobs") or []),
-           "human": a.human or old.get("human") or "", "declared_at": time.time()}
+           "human": (a.human or "") if new_steps else old.get("human") or "",
+           "steps": list(a.step or []) if new_steps else old.get("steps") or [],
+           "files": a.files if a.files else old.get("files") or [],
+           "declared_at": time.time()}
+    loose = [st for st in (rec["steps"] if new_steps else []) if "\u2192" not in st]
+    if loose:
+        print("tag-wait: warning: %d step(s) without the arrow (gesture -> what you see), kept as given" % len(loose),
+              file=sys.stderr)
     if old.get("added_at") and old.get("kind") == a.kind:
         rec["added_at"] = old["added_at"]
     write_json(p, rec)
@@ -3174,6 +3382,10 @@ def cmd_labels_sync(a):
 
 
 def cmd_tag_check(a):
+    if a.card is not None:
+        return print_sample_card(a)
+    if not a.dry_run:
+        raise Fail("tag-check needs --dry-run (or --card N)")
     lines = []
     try:
         d = gl_get("projects/%d/repository/tags/%s" % (GITLAB_PROJECT, a.tag))
@@ -3184,6 +3396,29 @@ def cmd_tag_check(a):
     except LabelFail as e:
         raise Fail(str(e))
     print("\n".join(lines) or "no issue waits for %s" % a.tag)
+    return 0
+
+
+def print_sample_card(a):
+    """The card tag_report would build for issue `a.card` at tag `a.tag`, as JSON: GET calls only,
+    no comment, no download, nothing written. The jobs are shown as green."""
+    declared = load_tagwait()
+    d = dict(declared.get(a.card) or {})
+    if a.files:
+        d["files"] = a.files
+    if d:
+        d.setdefault("issue", a.card)
+        declared[a.card] = d
+    kinds = [k for k in d.get("files") or [] if k in FILE_KINDS]
+    pkg = None
+    if kinds:
+        try:
+            pkg = package_lookup(tag_version(a.tag))
+        except LabelFail as e:
+            print("tag-check: registry unreadable (%s); predictable URLs" % e, file=sys.stderr)
+    results = [(j, "ok") for j in wanted_jobs(a.card, declared, tag_kind(a.tag))]
+    print(json.dumps(tag_card(a.tag, a.card, declared, results, {"kinds": kinds, "pkg": pkg, "dl": None}),
+                     ensure_ascii=False, indent=2))
     return 0
 
 
@@ -3694,6 +3929,7 @@ def cmd_serve(a):
         threading.Thread(target=build_auto_loop, daemon=True).start()
     if labels_enabled(real_dir):
         import threading
+        _DOWNLOADS_ON.append(True)
         threading.Thread(target=labels_loop, args=(labels_path(),), daemon=True).start()
     print("suivi: listening on http://127.0.0.1:%d/ (state %s)" % (srv.server_address[1], state), flush=True)
     try:
@@ -3769,14 +4005,20 @@ def parser():
     p.add_argument("issue", type=int)
     p.add_argument("kind", choices=sorted(LABEL_WAITS))
     p.add_argument("--jobs", help="comma-separated GitHub/GitLab jobs that prove it")
-    p.add_argument("--human", help="what the user must check by eye (French, shown on the card)")
+    p.add_argument("--human", help="what the user must check by eye (French, shown on the card); one step")
+    p.add_argument("--step", action="append", metavar="'GESTURE → WHAT YOU SEE'",
+                   help="one trial step (French), repeatable; replaces the earlier steps")
+    p.add_argument("--files", type=file_kinds_arg, metavar="KINDS",
+                   help="built files the trial needs, comma-separated: %s (the card links them, #497)" % ", ".join(FILE_KINDS))
     q = add("labels", None, "GitLab labels en-cours / en-pause (#467)").add_subparsers(dest="lcmd", required=True)
     x = q.add_parser("sync", help="one reconciliation pass by hand", allow_abbrev=False)
     x.set_defaults(fn=cmd_labels_sync)
     x.add_argument("--dry-run", action="store_true", help="print the PUTs, write nothing")
     p = add("tag-check", cmd_tag_check, "read-only: what the service would report for a tag")
     p.add_argument("tag")
-    p.add_argument("--dry-run", action="store_true", required=True, help="required: this command never writes")
+    p.add_argument("--dry-run", action="store_true", help="required without --card: this command never writes")
+    p.add_argument("--card", type=int, metavar="N", help="print the JSON card the service would make for issue N (GETs only, no download)")
+    p.add_argument("--files", type=file_kinds_arg, metavar="KINDS", help="with --card: use these file kinds instead of the declaration's")
     p = add("serve", cmd_serve, "serve the local tracking page on 127.0.0.1 only")
     p.add_argument("--port", type=int, help="default 8441 (env SF_SUIVI_PORT); 0 = any free port")
     p.add_argument("--state", help="state folder (default: ../_stokesforge/.suivi)")

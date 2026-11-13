@@ -3980,6 +3980,8 @@ st = json.load(open(d + "/state.json"))
 base = "projects/86104040/"
 rel, _, query = path[len(base):].partition("?")
 q = urllib.parse.parse_qs(query)
+if mode == "failpkg" and method == "GET" and rel.startswith("packages"):
+    sys.exit(1)
 if method != "GET":
     n = int(rel.split("/")[1])
     iss = st["issues"][str(n)]
@@ -4018,6 +4020,10 @@ elif rel == "pipelines":
     out(st.get("pipelines", []))
 elif rel.startswith("pipelines/") and rel.endswith("/jobs"):
     out(st.get("pipeline_jobs", []))
+elif rel == "packages":
+    out(st.get("packages", []))             # no filtering: GitLab's own filter is fuzzy too
+elif rel.startswith("packages/") and rel.endswith("/package_files"):
+    out(st.get("package_files", {}).get(rel.split("/")[1], []))
 else:
     out([])
 """
@@ -4140,8 +4146,9 @@ class LabelBase(Base):
         self.gh.runs.append({"id": run_id, "head_sha": sha, "created_at": created, "name": "CI"})
         self.gh.jobs[run_id] = jobs
 
-    def declare(self, n, kind, jobs=None, human=""):
-        suivi.write_json(suivi.tagwait_path(n), {"issue": n, "kind": kind, "jobs": jobs or [], "human": human, "declared_at": 1})
+    def declare(self, n, kind, jobs=None, human="", **extra):
+        suivi.write_json(suivi.tagwait_path(n), dict({"issue": n, "kind": kind, "jobs": jobs or [], "human": human,
+                                                      "declared_at": 1}, **extra))
 
 
 class TestLabelWanted(Base):
@@ -4633,6 +4640,297 @@ class TestTagReport(LabelBase):
         self.assertEqual(self.run_cli("tag-wait", "7", "final", "--jobs", "b,c", env=env).returncode, 0)
         d = jload(suivi.tagwait_path(7))
         self.assertEqual((d["jobs"], d["human"]), (["b", "c"], "x"))
+
+
+class FileStandIn:
+    """A local stand-in for the GitLab package files: path -> bytes, every request logged."""
+    def __init__(self, files):
+        self.files, self.hits = files, []
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                outer.hits.append(self.path)
+                data = outer.files.get(self.path)
+                if data is None:
+                    self.send_response(404); self.end_headers(); return
+                self.send_response(200); self.send_header("Content-Length", str(len(data))); self.end_headers()
+                self.wfile.write(data)
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    @property
+    def url(self):
+        return "http://127.0.0.1:%d" % self.srv.server_address[1]
+
+    def close(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+
+# lang: fr begin
+class TestTagFiles(LabelBase):
+    """#497: the card names each built file with its link, the hand route and the steps."""
+    V = "1.1.0-rc3"
+    EXE = "StokesForge-1.1.0-rc3-windows-setup.exe"
+    TGZ = "StokesForge-1.1.0-rc3-linux-x86_64.tar.gz"
+    MAN = "StokesForge-1.1.0-rc3-manual.tar.gz"
+    RPM = "StokesForge-1.1.0-rc3-linux-x86_64.rpm"
+    WEB = "https://gitlab.com/askrzypczak/stokesforge"
+    PREDICT = "https://gitlab.com/api/v4/projects/askrzypczak%2Fstokesforge/packages/generic/stokesforge/1.1.0-rc3/"
+
+    def scene(self, files, jobs=None, tag="v1.1.0-rc3", human="", **extra):
+        self.seed_tag()
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=jobs, human=human, files=files, **extra)
+        self.gh_run([gh_job(j) for j in suivi.RELEASE_JOBS])
+        self.tag(tag)
+
+    def seed_tag(self):
+        self.tag("v1.0.0", sha="a" * 40)
+        suivi.tag_pass(NOW)
+
+    def package(self, pid, files, name="stokesforge", version=None):
+        self.fstate.setdefault("packages", []).append({"id": pid, "name": name, "version": version or self.V})
+        self.fstate.setdefault("package_files", {})[str(pid)] = [
+            {"id": i, "file_name": n, "size": sz} for i, n, sz in files]
+        self.save_fake()
+
+    def card(self):
+        c = jload(os.path.join(self.state, "tests", "1-1.json"))
+        suivi.check_entry({k: v for k, v in c.items() if k not in ("n", "status")})
+        return c
+
+    def where(self):
+        return "\n".join(self.card()["where"])
+
+    def notes(self):
+        return [w for w in self.writes() if w["path"].endswith("/notes")]
+
+    def test_each_file_has_its_direct_link_and_the_package_page(self):
+        self.scene(["exe", "rpm"])
+        self.package(5, [(101, self.EXE, 3), (102, self.RPM, 3)])
+        suivi.tag_pass(NOW + 1)
+        w = self.where()
+        self.assertIn("Installeur Windows : %s/-/package_files/101/download" % self.WEB, w)
+        self.assertIn("Paquet rpm : %s/-/package_files/102/download" % self.WEB, w)
+        self.assertIn("Page du paquet : %s/-/packages/5" % self.WEB, w)
+        self.assertNotIn("Archive Linux", w)
+
+    def test_tar_gz_is_the_linux_archive_never_the_manual(self):
+        self.scene(["tar.gz"])
+        self.package(5, [(103, self.MAN, 3), (104, self.TGZ, 3)])
+        suivi.tag_pass(NOW + 1)
+        w = self.where()
+        self.assertIn("Archive Linux : %s/-/package_files/104/download" % self.WEB, w)
+        self.assertNotIn("/103/", w)
+        self.assertNotIn("Manuel", w)
+
+    def test_only_the_stokesforge_package_of_exactly_this_version_counts(self):
+        self.scene(["exe"])
+        self.package(9, [(201, self.EXE, 3)], name="third-party-licenses")
+        self.package(8, [(202, self.EXE, 3)], version="1.1.0-rc2")
+        self.package(3, [(203, self.EXE, 3)])
+        suivi.tag_pass(NOW + 1)
+        w = self.where()
+        self.assertIn("/-/package_files/203/download", w)
+        self.assertIn("/-/packages/3", w)
+        self.assertNotIn("/201/", w + "/")
+        self.assertNotIn("/202/", w + "/")
+
+    def test_a_repeated_file_name_takes_the_highest_id(self):
+        self.scene(["exe"])
+        self.package(5, [(101, self.EXE, 3), (105, self.EXE, 3), (103, self.EXE, 3)])
+        suivi.tag_pass(NOW + 1)
+        self.assertIn("/-/package_files/105/download", self.where())
+
+    def test_an_unreadable_registry_retries_before_any_comment_then_falls_back_to_the_predictable_url(self):
+        self.scene(["exe"])
+        self.mode("failpkg")
+        suivi.tag_pass(NOW + 1)
+        self.assertEqual(self.writes(), [])                                   # no comment: the issue stays in `todo`
+        self.assertNotIn("v1.1.0-rc3", jload(suivi.tags_path())["seen"])
+        suivi.tag_pass(NOW + 2)
+        self.assertEqual(self.writes(), [])
+        suivi.tag_pass(NOW + 7 * 3600)                                        # past the cap: stop waiting
+        self.assertEqual(len(self.notes()), 1)
+        w = self.where()
+        self.assertIn("Installeur Windows : " + self.PREDICT + self.EXE, w)
+        self.assertNotIn("absent du registre", w)                             # we do not know: no claim
+        self.assertNotIn("Page du paquet", w)
+        self.assertIn("v1.1.0-rc3", jload(suivi.tags_path())["seen"])
+
+    def test_every_card_has_the_hand_route_and_only_a_final_tag_names_releases(self):
+        self.scene(["exe"])
+        self.package(5, [(101, self.EXE, 3)])
+        suivi.tag_pass(NOW + 1)
+        w = self.where()
+        self.assertIn("Deploy → Package registry → stokesforge 1.1.0-rc3 (pas third-party-licenses) : %s/-/packages" % self.WEB, w)
+        self.assertNotIn("Releases", w)
+        self.assertIn("Deploy → Releases", "\n".join(suivi.tag_card("v1.1.0", 1, {}, [], None)["where"]))
+        self.assertNotIn("Releases", "\n".join(suivi.tag_card("v1.1.0-rc3", 1, {}, [], None)["where"]))
+        self.assertIn("stokesforge 1.1.0 ", "\n".join(suivi.tag_card("v1.1.0", 1, {}, [], None)["where"]))
+
+    def test_jobs_only_proof_says_nothing_to_do_by_hand_and_declared_steps_win(self):
+        self.assertEqual(suivi.tag_steps(1, {"jobs": ["publier"]}), ["Rien à faire à la main : le job publier est vert, coche OK."])
+        self.assertEqual(suivi.tag_steps(1, {"jobs": ["a", "b"]}),
+                         ["Rien à faire à la main : les jobs a, b sont verts, coche OK."])
+        self.assertEqual(suivi.tag_steps(1, {"jobs": ["a"], "steps": ["Ouvre → tu vois"]}), ["Ouvre → tu vois"])
+        self.assertEqual(suivi.tag_steps(1, {"jobs": ["a"], "human": "Regarde."}), ["Regarde."])
+        self.assertIn("Relis l'issue #4", suivi.tag_steps(4, None)[0])
+        self.assertIn("Relis l'issue #4", suivi.tag_steps(4, {"jobs": [], "files": ["exe"]})[0])
+
+    def test_a_hand_placed_label_keeps_its_wording_and_gets_the_hand_route(self):
+        self.seed_tag()
+        self.issue(1, ["attente-rc"])
+        self.gh_run([gh_job(j) for j in suivi.RELEASE_JOBS])
+        self.tag("v1.1.0-rc3")
+        suivi.tag_pass(NOW + 1)
+        c = self.card()
+        self.assertIn("Relis l'issue #1", c["steps"][0])
+        self.assertIn("Package registry → stokesforge 1.1.0-rc3", self.where())
+        self.assertNotIn("Installeur", self.where())
+        self.assertFalse([x for x in self.calls() if "/packages" in x], "no file declared: the registry is not read")
+
+    def test_tag_wait_takes_repeatable_steps_and_files_and_refuses_an_unknown_kind(self):
+        env = {"SF_SUIVI_DIR": self.state}
+        r = self.run_cli("tag-wait", "389", "rc", "--step", "Ouvre l'installeur → la fenêtre s'ouvre",
+                         "--step", "Quitte → plus de processus", "--files", "exe,rpm,exe", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        d = jload(suivi.tagwait_path(389))
+        self.assertEqual((d["steps"], d["files"]), (["Ouvre l'installeur → la fenêtre s'ouvre", "Quitte → plus de processus"],
+                                                    ["exe", "rpm"]))
+        r = self.run_cli("tag-wait", "389", "rc", env=env)                     # no new steps or files: kept
+        d = jload(suivi.tagwait_path(389))
+        self.assertEqual((len(d["steps"]), d["files"]), (2, ["exe", "rpm"]))
+        self.run_cli("tag-wait", "389", "rc", "--step", "Seul → seul", "--files", "deb", env=env)
+        d = jload(suivi.tagwait_path(389))
+        self.assertEqual((d["steps"], d["files"]), (["Seul → seul"], ["deb"]))
+        before = slurp(suivi.tagwait_path(389))
+        r = self.run_cli("tag-wait", "389", "rc", "--files", "bogus", env=env)
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(slurp(suivi.tagwait_path(389)), before)
+        r = self.run_cli("tag-wait", "390", "rc", "--files", "exe,bogus", env=env)
+        self.assertEqual(r.returncode, 2)
+        self.assertFalse(os.path.exists(suivi.tagwait_path(390)))
+        r = self.run_cli("tag-wait", "391", "rc", "--step", "sans flèche", "--step", "avec → flèche", env=env)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+        self.assertEqual(jload(suivi.tagwait_path(391))["steps"], ["sans flèche", "avec → flèche"])
+
+    def test_human_stays_one_step_and_an_old_record_still_reads(self):
+        self.assertEqual(suivi.tag_steps(1, {"human": "Vérifie.", "steps": ["a → b"]}), ["Vérifie.", "a → b"])
+        env = {"SF_SUIVI_DIR": self.state}
+        self.run_cli("tag-wait", "7", "rc", "--human", "Vérifie.", env=env)
+        self.assertEqual(suivi.tag_steps(7, jload(suivi.tagwait_path(7))), ["Vérifie."])
+
+    def test_a_file_missing_from_the_registry_still_gets_a_card_with_a_warning(self):
+        self.scene(["exe", "rpm"])
+        self.package(5, [(101, self.EXE, 3)])
+        suivi.tag_pass(NOW + 1)
+        w = self.where()
+        self.assertIn("⚠ Paquet rpm absent du registre", w)
+        self.assertIn("Installeur Windows : ", w)
+        self.assertIn("Package registry → stokesforge", w)
+        self.assertEqual(len(self.notes()), 1)
+
+    def test_no_package_at_all_warns_for_every_file(self):
+        self.scene(["exe"])
+        suivi.tag_pass(NOW + 1)
+        self.assertIn("⚠ Installeur Windows absent du registre", self.where())
+        self.assertNotIn("Page du paquet", self.where())
+
+    def test_the_job_that_builds_a_needed_file_joins_the_wanted_jobs(self):
+        decl = {1: {"jobs": ["release-linux"], "files": ["exe", "rpm", "deb", "manual", "tar.gz"]}}
+        self.assertEqual(suivi.wanted_jobs(1, decl, "rc"),
+                         ["release-linux", "dist-windows", "upload-linux-packages", "release-manual"])
+        self.assertEqual(suivi.wanted_jobs(1, {1: {"jobs": [], "files": ["exe"]}}, "rc"), list(suivi.RELEASE_JOBS))
+        self.scene(["exe"], jobs=["release-linux"])
+        self.gh.jobs[1] = [gh_job("release-linux"), gh_job("dist-windows", "failure")]
+        suivi.tag_pass(NOW + 1)
+        self.assertIn("`dist-windows`: failed", self.load_fake()["issues"]["1"]["notes"][0])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")), "a failed builder job: no card")
+
+    def test_download_fetches_skips_what_is_there_and_never_blocks_the_card(self):
+        files = {"/dl/101": b"EXEEXE", "/dl/102": b"RPM!", }
+        srv = FileStandIn(files)
+        self.addCleanup(srv.close)
+        dest = os.path.join(self.tmp.name, "Downloads")
+        os.makedirs(os.path.join(dest, "StokesForge-" + self.V))
+        with open(os.path.join(dest, "StokesForge-" + self.V, self.EXE), "wb") as f:
+            f.write(b"EXEEXE")                                                     # already there, same size
+        real = suivi.open_url
+        patcher = mock.patch.object(suivi, "open_url", lambda url, t: real(srv.url + "/dl/" + url.split("/")[-2], t))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ["SF_SUIVI_DOWNLOAD"] = "on"
+        os.environ["SF_SUIVI_DOWNLOAD_DIR"] = dest
+        self.addCleanup(os.environ.pop, "SF_SUIVI_DOWNLOAD", None)
+        self.addCleanup(os.environ.pop, "SF_SUIVI_DOWNLOAD_DIR", None)
+        self.scene(["exe", "rpm", "deb"])
+        self.package(5, [(101, self.EXE, 6), (102, self.RPM, 4), (109, "StokesForge-1.1.0-rc3-linux-x86_64.deb", 4)])
+        suivi.tag_pass(NOW + 1)
+        folder = os.path.join(dest, "StokesForge-" + self.V)
+        self.assertEqual(sorted(srv.hits), ["/dl/102", "/dl/109"])
+        self.assertNotIn("/dl/101", srv.hits)                                      # never refetched
+        with open(os.path.join(folder, self.RPM), "rb") as f:
+            self.assertEqual(f.read(), b"RPM!")
+        self.assertFalse([f for f in os.listdir(folder) if f.endswith(".part")])
+        w = self.where()
+        self.assertIn("✔ déjà dans ", w)
+        self.assertIn(self.EXE, w.split("✔ déjà dans ")[1].split("\n")[0])
+        self.assertIn("✔ téléchargé dans ", w)
+        self.assertIn("⚠ téléchargement raté : StokesForge-1.1.0-rc3-linux-x86_64.deb (lien ci-dessus)", w)   # 404
+        self.assertEqual(len(self.notes()), 1)                                     # the comment and the card went out
+
+    def test_fetch_one_without_a_known_size_compares_content_length_and_keeps_a_complete_file(self):
+        srv = FileStandIn({"/f": b"BBBB", "/short": b"BB"})
+        self.addCleanup(srv.close)
+        dest = os.path.join(self.tmp.name, "f.bin")
+        with open(dest, "wb") as f:
+            f.write(b"AAAA")
+        self.assertEqual(suivi.fetch_one(srv.url + "/f", dest, None), "present")
+        self.assertEqual(slurp(dest), "AAAA")
+        os.remove(dest)
+        self.assertEqual(suivi.fetch_one(srv.url + "/f", dest, None), "fetched")
+        self.assertEqual(slurp(dest), "BBBB")
+        self.assertFalse(os.path.exists(dest + ".part"))
+        with self.assertRaises(Exception):
+            suivi.fetch_one(srv.url + "/missing", os.path.join(self.tmp.name, "m.bin"), None)
+
+    def test_no_download_unless_enabled(self):
+        self.assertFalse(suivi.download_enabled())
+        called = []
+        with mock.patch.object(suivi, "open_url", lambda *a: called.append(a)):
+            self.scene(["exe"])
+            self.package(5, [(101, self.EXE, 3)])
+            suivi.tag_pass(NOW + 1)
+        self.assertEqual(called, [])
+        self.assertNotIn("téléch", self.where())
+
+    def test_tag_check_card_prints_the_card_with_get_calls_only(self):
+        self.scene(["exe"], human="Lance l'installeur.")
+        self.package(5, [(101, self.EXE, 3)])
+        os.environ["SF_SUIVI_DOWNLOAD"] = "on"
+        self.addCleanup(os.environ.pop, "SF_SUIVI_DOWNLOAD", None)
+        env = {"PATH": os.environ["PATH"], "FAKE_DIR": self.fake, "SF_SUIVI_DIR": self.state, "SF_SUIVI_DOWNLOAD": "on",
+               "SF_SUIVI_DOWNLOAD_DIR": os.path.join(self.tmp.name, "nodl")}
+        r = self.run_cli("tag-check", "v1.1.0-rc3", "--card", "1", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = json.loads(r.stdout)
+        suivi.check_entry(c)
+        self.assertIn("Installeur Windows : %s/-/package_files/101/download" % self.WEB, "\n".join(c["where"]))
+        self.assertEqual(c["steps"], ["Lance l'installeur."])
+        self.assertTrue(all("--method" not in x for x in self.calls()), self.calls())
+        self.assertEqual(self.writes(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "nodl")))
+        r = self.run_cli("tag-check", "v1.1.0", "--card", "9", "--files", "deb", env=env)   # no declaration: the sample uses --files
+        self.assertIn("⚠ Paquet deb absent du registre", json.loads(r.stdout)["where"][0])
+# lang: fr end
 
 
 class TestPage(unittest.TestCase):
