@@ -2784,3 +2784,42 @@ fn the_publication_guard_sees_a_call_elsewhere() {
         ]
     );
 }
+
+/// A viewport closure takes the application lock through
+/// `lock_app_from_viewport` alone (#475): it waits for the lock, and panics
+/// instead of hanging if its own thread holds the UI guard. A `lock_arc(` of
+/// the shared application elsewhere would skip that check.
+#[test]
+fn the_application_lock_is_taken_only_by_the_server_module() {
+    let sources = sources::sources();
+    let offenders = calls_outside_server(&sources, &[".lock_arc(", ".try_lock_arc("]);
+    assert!(
+        offenders.is_empty(),
+        "lock_arc outside app/server.rs (#475: a window locks through \
+         lock_app_from_viewport): {offenders:?}"
+    );
+    // The detached graph window does use the door.
+    let window = sources
+        .iter()
+        .find(|f| f.path == "app/detached_graph.rs")
+        .expect("detached_graph.rs");
+    assert!(
+        window
+            .production()
+            .code_as_text()
+            .contains("lock_app_from_viewport("),
+        "the detached graph window locks through lock_app_from_viewport"
+    );
+}
+
+#[test]
+fn the_lock_guard_sees_a_call_elsewhere() {
+    let sources = vec![
+        file("app/server.rs", "fn a(s: &S) { s.lock_arc(); }"),
+        file("app/window_detach.rs", "fn b(s: &S) { s.lock_arc(); }"),
+    ];
+    assert_eq!(
+        calls_outside_server(&sources, &[".lock_arc("]),
+        vec!["src/app/window_detach.rs:1".to_string()]
+    );
+}

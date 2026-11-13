@@ -123,6 +123,9 @@ impl AppSlot {
     /// Puts `app` behind the lock, held.
     pub(super) fn new(app: StokesForgeApp) -> Self {
         let shared = Arc::new(Mutex::new(app));
+        // The windows reach the application through this handle, weak so that
+        // the application does not keep itself alive.
+        shared.lock().shared_self = Arc::downgrade(&shared);
         let mut slot = Self {
             guard: None,
             shared,
@@ -194,8 +197,6 @@ impl std::ops::DerefMut for AppSlot {
 /// for the lock (only the server thread competes, for a tick). If this thread
 /// already holds the UI guard (an embedded viewport painted inside the pass
 /// that holds it) it panics at once with a clear message instead of hanging.
-// Used by the closures from L1 on; the re-entry test uses it now.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn lock_app_from_viewport(shared: &SharedApp) -> AppGuard {
     assert!(
         UI_GUARDS_HELD.with(|held| held.get()) == 0,
@@ -208,20 +209,34 @@ pub(super) fn lock_app_from_viewport(shared: &SharedApp) -> AppGuard {
 
 /// What wakes the windows. A trait so that the tests count the wakes.
 pub(super) trait Repaint: Send + 'static {
-    fn repaint_root(&self);
+    fn repaint(&self, window: egui::ViewportId);
 }
 
 impl Repaint for egui::Context {
-    fn repaint_root(&self) {
-        self.request_repaint_of(egui::ViewportId::ROOT);
+    fn repaint(&self, window: egui::ViewportId) {
+        self.request_repaint_of(window);
     }
 }
 
-/// The single rule that wakes the windows from the thread: only when the tick
-/// found that something they show changed (#475). Focus plays no part.
-pub(super) fn wake(repaint: &impl Repaint, changed: bool) {
-    if changed {
-        repaint.repaint_root();
+/// THE rule that wakes the windows (#475): when something they show changed,
+/// the root and every OPEN window in `open` are repainted, except `from` (the
+/// window that made the change and is painting). `open` lists only the windows
+/// that exist: a closed one is never woken. The thread calls it when its tick
+/// changed something, a window's pass calls it after a write. Focus plays no
+/// part.
+pub(super) fn wake(
+    repaint: &impl Repaint,
+    changed: bool,
+    open: &[egui::ViewportId],
+    from: Option<egui::ViewportId>,
+) {
+    if !changed {
+        return;
+    }
+    for window in std::iter::once(egui::ViewportId::ROOT).chain(open.iter().copied()) {
+        if Some(window) != from {
+            repaint.repaint(window);
+        }
     }
 }
 
@@ -268,6 +283,9 @@ pub(super) fn serve_once(
         server_stats::event("busy", false);
         return Pass::Busy;
     };
+    // The windows to wake if the tick changed something (a read of the list,
+    // nothing else of the application but its state is touched).
+    let open = guard.open_viewports();
     let state = &mut guard.state;
     let tick = state.server_tick(now);
     let garbage = state.take_garbage();
@@ -306,7 +324,7 @@ pub(super) fn serve_once(
         }
         next = Some(Duration::ZERO);
     }
-    wake(repaint, changed);
+    wake(repaint, changed, &open, None);
     if changed {
         server_stats::event("wake", true);
     }
@@ -639,19 +657,24 @@ mod tests {
 
     const PERIOD: Duration = Duration::from_secs(300);
 
-    /// Counts the wakes.
+    /// Counts the wakes and remembers whom they went to.
     #[derive(Clone, Default)]
-    struct Counter(Arc<AtomicUsize>);
+    struct Counter(Arc<AtomicUsize>, Arc<StdMutex<Vec<egui::ViewportId>>>);
 
     impl Repaint for Counter {
-        fn repaint_root(&self) {
+        fn repaint(&self, window: egui::ViewportId) {
             self.0.fetch_add(1, Ordering::SeqCst);
+            self.1.lock().unwrap().push(window);
         }
     }
 
     impl Counter {
         fn count(&self) -> usize {
             self.0.load(Ordering::SeqCst)
+        }
+
+        fn woken(&self) -> Vec<egui::ViewportId> {
+            self.1.lock().unwrap().clone()
         }
     }
 
@@ -729,6 +752,26 @@ mod tests {
             Pass::Busy
         );
         assert_eq!(counter.count(), 0);
+    }
+
+    /// T12 (#475): the one wake rule. A change wakes the root and the OPEN
+    /// windows it is given, except the one that painted; no change, nobody.
+    /// Witness: wake the root only, or wake `from` too.
+    #[test]
+    fn a_change_wakes_the_root_and_the_other_open_windows_only() {
+        let (a, b) = (
+            egui::ViewportId::from_hash_of("a"),
+            egui::ViewportId::from_hash_of("b"),
+        );
+        let counter = Counter::default();
+        wake(&counter, false, &[a, b], None);
+        assert_eq!(counter.count(), 0, "nothing changed");
+        wake(&counter, true, &[a, b], Some(a));
+        assert_eq!(counter.woken(), vec![egui::ViewportId::ROOT, b]);
+        // The thread, which paints nothing, wakes everybody.
+        let counter = Counter::default();
+        wake(&counter, true, &[a, b], None);
+        assert_eq!(counter.woken(), vec![egui::ViewportId::ROOT, a, b]);
     }
 
     /// Nothing changes: no wake, however many ticks.
@@ -818,6 +861,34 @@ mod tests {
         assert!(state.recalc_work().is_none());
         assert_eq!(state.tree().len(), before + 1, "the snapshot is fresh");
         assert_eq!(counter.count(), 1, "one wake for the end");
+    }
+
+    /// The same end of a recalculation, with a window open: the one wake goes to
+    /// the root and to that window (#475, L1: a detached graph reads the shared
+    /// state and has to look again). Witness: wake the root only.
+    #[test]
+    fn the_end_of_a_recalculation_wakes_the_open_windows_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, slot) = free_slot(heavy_formula_project(), dir.path());
+        let shared = slot.shared();
+        shared.lock().pm_detached = true;
+        state_of(&shared).dispatch(Action::AddGraph);
+        let counter = Counter::default();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let t0 = Instant::now();
+        while state_of(&shared).recalc_work().is_some() {
+            assert!(Instant::now() < deadline, "recalculation too long");
+            serve_once(&shared, t0, &counter, real_run(), &no_record);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        serve_once(&shared, t0, &counter, real_run(), &no_record);
+        assert_eq!(
+            counter.woken(),
+            vec![
+                egui::ViewportId::ROOT,
+                super::super::project_manager::viewport_id()
+            ]
+        );
     }
 
     /// Runs five root passes of a [`ServedApp`] on embedded viewports (the
@@ -930,7 +1001,7 @@ mod tests {
         passes_end_with(false, || {
             let bench = super::super::test_support::bench::Bench::with_every_window();
             let ctx = bench.ctx.clone();
-            let app = bench.app;
+            let app = bench.app.into_app();
             (Box::new((bench.session, bench.dir)), app, ctx)
         });
     }

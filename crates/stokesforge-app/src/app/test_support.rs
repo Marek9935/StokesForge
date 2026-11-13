@@ -231,6 +231,7 @@ pub(super) mod bench {
     use stokesforge_session::Session;
 
     use super::super::graph_window::tests::plotted_graph;
+    use super::super::server::AppSlot;
     use super::super::tab::Tab;
     use super::super::StokesForgeApp;
 
@@ -243,6 +244,11 @@ pub(super) mod bench {
         pub(in crate::app) focused: bool,
         pub(in crate::app) dt: f64,
         pub(in crate::app) size: egui::Vec2,
+        /// What the OS says about the window (rectangles, monitor, maximised);
+        /// the parent and the focus are the bench's.
+        pub(in crate::app) info: egui::ViewportInfo,
+        /// Files dropped on the window during this pass.
+        pub(in crate::app) dropped: Vec<Arc<dyn egui::DroppedFile + Send + Sync>>,
     }
 
     impl Pass {
@@ -253,6 +259,8 @@ pub(super) mod bench {
                 focused: false,
                 dt: 0.05,
                 size: egui::vec2(1400.0, 900.0),
+                info: egui::ViewportInfo::default(),
+                dropped: Vec::new(),
             }
         }
 
@@ -279,6 +287,21 @@ pub(super) mod bench {
             self
         }
 
+        /// Files dropped on the window during this pass.
+        pub(in crate::app) fn dropped(
+            mut self,
+            files: Vec<Arc<dyn egui::DroppedFile + Send + Sync>>,
+        ) -> Self {
+            self.dropped = files;
+            self
+        }
+
+        /// The window's OS-reported state for this pass.
+        pub(in crate::app) fn info(mut self, info: egui::ViewportInfo) -> Self {
+            self.info = info;
+            self
+        }
+
         pub(in crate::app) fn dt(mut self, dt: f64) -> Self {
             self.dt = dt;
             self
@@ -287,7 +310,9 @@ pub(super) mod bench {
 
     pub(in crate::app) struct Bench {
         pub(in crate::app) session: Session,
-        pub(in crate::app) app: StokesForgeApp,
+        /// The application behind its lock, as the binary runs it: the passes of
+        /// the windows lock it themselves (#475).
+        pub(in crate::app) app: AppSlot,
         pub(in crate::app) ctx: egui::Context,
         frame: eframe::Frame,
         callbacks: HashMap<egui::ViewportId, Callback>,
@@ -323,11 +348,24 @@ pub(super) mod bench {
     impl Bench {
         /// A project with one graph, detached and not yet painted.
         pub(in crate::app) fn new() -> Self {
+            Self::with_graph(true)
+        }
+
+        /// The same project with the graph still a floating window of the root,
+        /// to be detached by the test.
+        pub(in crate::app) fn floating_graph() -> Self {
+            Self::with_graph(false)
+        }
+
+        fn with_graph(detached: bool) -> Self {
             let (session, graph) = plotted_graph();
             let state = AppState::new(session.handle(), String::new()).unwrap();
             let mut app = StokesForgeApp::new(state);
             let tab = Tab::Graph(graph);
-            app.detach_tab(tab);
+            if detached {
+                app.detach_tab(tab);
+            }
+            let app = AppSlot::new(app);
             let ctx = egui::Context::default();
             ctx.set_embed_viewports(false);
             ctx.set_fonts(stokesforge_render_egui::font_definitions());
@@ -368,7 +406,7 @@ pub(super) mod bench {
             app.state.set_object_manager_open_for_test(true);
             app.om_detached = true;
             app.detach_script_console();
-            bench.app = app;
+            bench.app = AppSlot::new(app);
             bench.dir = Some(dir);
             bench
         }
@@ -385,7 +423,7 @@ pub(super) mod bench {
             let mut app = StokesForgeApp::new(state);
             let book = app.state.books()[0].0;
             app.open_tab(Tab::Book(book));
-            bench.app = app;
+            bench.app = AppSlot::new(app);
             bench.dir = Some(dir);
             bench
         }
@@ -425,10 +463,12 @@ pub(super) mod bench {
 
         fn raw(&mut self, pass: Pass, id: egui::ViewportId) -> egui::RawInput {
             self.time += pass.dt;
+            let info = pass.info.clone();
             let mut raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, pass.size)),
                 time: Some(self.time),
                 events: pass.events,
+                dropped_files: pass.dropped,
                 focused: pass.focused,
                 viewport_id: id,
                 ..Default::default()
@@ -439,7 +479,7 @@ pub(super) mod bench {
                     egui::ViewportInfo {
                         parent: Some(egui::ViewportId::ROOT),
                         focused: Some(pass.focused),
-                        ..Default::default()
+                        ..info
                     },
                 );
             } else {
@@ -464,13 +504,15 @@ pub(super) mod bench {
             let Self {
                 app, frame, ctx, ..
             } = self;
-            // As `ServedApp::ui`: the windows are published after `ui`, where the
-            // lock would be released (L1+: the children lock it themselves).
+            // As `ServedApp::ui`: the windows are published after `ui`, with the
+            // lock released, and the pass takes it again for the test.
             app.defer_viewport_publication();
             let mut output = ctx.run_ui(raw, |ui| {
                 app.ui(ui, frame);
                 let pending = app.take_pending_viewports();
+                app.release();
                 super::super::window_detach::publish_viewports(ui.ctx(), pending);
+                app.acquire();
             });
             output.textures_delta.clear();
             for (id, viewport) in &output.viewport_output {
@@ -492,6 +534,17 @@ pub(super) mod bench {
             id: egui::ViewportId,
             pass: Pass,
         ) -> egui::FullOutput {
+            self.child_with(id, pass, |_| {})
+        }
+
+        /// [`Self::child_in`], with `inside` run first, inside that window's pass
+        /// (a request made from the window to the context).
+        pub(in crate::app) fn child_with(
+            &mut self,
+            id: egui::ViewportId,
+            pass: Pass,
+            inside: impl FnOnce(&egui::Context),
+        ) -> egui::FullOutput {
             self.focused_child = pass.focused.then_some(id);
             let raw = self.raw(pass, id);
             let callback = self
@@ -499,7 +552,17 @@ pub(super) mod bench {
                 .get(&id)
                 .expect("the root published it")
                 .clone();
-            let mut output = self.ctx.run_ui(raw, |ui| callback(ui));
+            // The window locks the application itself: the test lets go of it
+            // for the pass, as the root does between its own.
+            self.app.release();
+            let mut inside = Some(inside);
+            let mut output = self.ctx.run_ui(raw, |ui| {
+                if let Some(inside) = inside.take() {
+                    inside(ui.ctx());
+                }
+                callback(ui)
+            });
+            self.app.acquire();
             output.textures_delta.clear();
             output
         }
@@ -524,14 +587,11 @@ pub(super) mod bench {
         }
 
         /// What `window` queued for the root and the root has not drained yet.
+        /// The graph queues nothing: its actions are applied in its own pass
+        /// (#475, L1).
         pub(in crate::app) fn queued_by(&self, window: Window) -> Vec<Action> {
             match window {
-                Window::Graph => self.app.detached_tabs[&self.tab]
-                    .requests
-                    .lock()
-                    .unwrap()
-                    .actions
-                    .clone(),
+                Window::Graph => Vec::new(),
                 Window::Book => self.app.detached_tabs[&Tab::Book(self.book())]
                     .requests
                     .lock()
@@ -544,9 +604,14 @@ pub(super) mod bench {
             }
         }
 
-        pub(in crate::app) fn queue_in_window(&self, action: Action) {
-            let detached = &self.app.detached_tabs[&self.tab];
-            detached.requests.lock().unwrap().actions.push(action);
+        /// The detached graph window produces `action` this pass: applied at once
+        /// by the same function as its pass (`apply_pass_actions`), without
+        /// painting a gesture.
+        pub(in crate::app) fn act_in_window(&mut self, action: Action) {
+            let id = self.child_id();
+            let ctx = self.ctx.clone();
+            self.app
+                .apply_pass_actions(&ctx, id, Vec::new(), vec![action], false);
         }
 
         pub(in crate::app) fn open_plot_settings(&self) -> Action {

@@ -65,7 +65,7 @@ fn a_dialog_asked_by_a_detached_window_is_painted_by_the_root_only() {
         Duration::MAX,
         "root asleep"
     );
-    bench.queue_in_window(Action::OpenAbout);
+    bench.act_in_window(Action::OpenAbout);
     let opening = bench.root(Pass::root());
     assert!(bench.app.state.about_open());
     assert_eq!(
@@ -87,14 +87,14 @@ fn a_dialog_asked_by_a_detached_window_is_painted_by_the_root_only() {
 }
 
 /// Case 2. OK clicked in the root: the detached window already holds the new
-/// snapshot in that very pass. Witness: remove the republication after a
-/// change of the stamp.
+/// snapshot in that very pass: it reads the shared state and is woken. Witness:
+/// remove the wake after a change of the stamp.
 #[test]
 fn ok_in_the_root_reaches_the_detached_window_in_the_same_pass() {
     use super::window_detach::snapshot_stamp;
     let mut bench = Bench::new();
     bench.start();
-    bench.queue_in_window(bench.open_plot_settings());
+    bench.act_in_window(bench.open_plot_settings());
     let mut root = bench.root(Pass::root());
     for _ in 0..5 {
         root = bench.root(Pass::root());
@@ -105,14 +105,6 @@ fn ok_in_the_root_reaches_the_detached_window_in_the_same_pass() {
     assert!(bench.app.state.plot_settings().is_none());
     let after = snapshot_stamp(bench.app.state.snapshot());
     assert_ne!(before, after);
-    let published = bench.app.detached_tabs[&bench.tab]
-        .view_model
-        .lock()
-        .unwrap()
-        .snapshot
-        .as_ref()
-        .map(snapshot_stamp);
-    assert_eq!(published, Some(after));
     assert_eq!(
         delay(&last, bench.child_id()),
         Duration::ZERO,
@@ -128,7 +120,7 @@ fn ok_in_the_root_reaches_the_detached_window_in_the_same_pass() {
 fn a_dialog_opened_while_the_root_was_unfocused_paints_in_full_and_takes_typing() {
     let mut bench = Bench::new();
     bench.start();
-    bench.queue_in_window(bench.open_plot_settings());
+    bench.act_in_window(bench.open_plot_settings());
     for _ in 0..4 {
         bench.root(Pass::root().dt(0.11));
     }
@@ -159,7 +151,7 @@ fn a_dialog_opened_while_the_root_was_unfocused_paints_in_full_and_takes_typing(
 fn the_main_window_is_asked_to_come_forward_once() {
     let mut bench = Bench::new();
     bench.start();
-    bench.queue_in_window(bench.open_plot_settings());
+    bench.act_in_window(bench.open_plot_settings());
     let opening = bench.root(Pass::root());
     assert_eq!(focus_commands(&opening), 1);
     for _ in 0..3 {
@@ -180,7 +172,7 @@ fn the_main_window_is_asked_to_come_forward_once() {
 fn the_window_of_the_gesture_says_where_the_dialog_is() {
     let mut bench = Bench::new();
     bench.start();
-    bench.queue_in_window(bench.open_plot_settings());
+    bench.act_in_window(bench.open_plot_settings());
     bench.root(Pass::root());
     let text = band_text(&bench).expect("a band in the window");
     assert!(
@@ -218,7 +210,7 @@ fn a_question_that_opens_alone_is_announced_in_the_focused_window() {
 fn ctrl_z_in_a_dialog_field_undoes_the_text_and_not_the_model() {
     let mut bench = Bench::new();
     bench.start();
-    bench.queue_in_window(bench.open_plot_settings());
+    bench.act_in_window(bench.open_plot_settings());
     let mut root = bench.root(Pass::root());
     for _ in 0..5 {
         root = bench.root(Pass::root().focused(true));
@@ -275,7 +267,7 @@ fn a_confirmation_drops_the_detached_action_and_is_painted_by_the_root() {
         pending_edits: true,
     });
     let books = bench.app.state.books().len();
-    bench.queue_in_window(Action::AddWorkbook);
+    bench.act_in_window(Action::AddWorkbook);
     let mut root = bench.root(Pass::root());
     for _ in 0..3 {
         root = bench.root(Pass::root());
@@ -292,7 +284,7 @@ fn a_confirmation_drops_the_detached_action_and_is_painted_by_the_root() {
 fn closing_the_window_that_opened_a_dialog_leaves_the_dialog() {
     let mut bench = Bench::new();
     bench.start();
-    bench.queue_in_window(bench.open_plot_settings());
+    bench.act_in_window(bench.open_plot_settings());
     let mut root = bench.root(Pass::root());
     for _ in 0..5 {
         root = bench.root(Pass::root());
@@ -365,15 +357,7 @@ fn a_dialog_in_the_main_window_stops_the_mode_keys_of_a_detached_graph() {
         bench.child(Pass::child());
     }
     let graph = bench.graph;
-    let in_mode = |bench: &Bench| {
-        bench.app.detached_tabs[&bench.tab]
-            .view_model
-            .lock()
-            .unwrap()
-            .graph_view
-            .as_ref()
-            .is_some_and(|view| view.layout_mode())
-    };
+    let in_mode = |bench: &Bench| bench.app.detached_graphs[&bench.graph].view.layout_mode();
     let snap = |bench: &Bench| super::page_layout::published_snap(&bench.ctx, graph).on;
     assert!(in_mode(&bench), "the mode is on");
     let snap_before = snap(&bench);

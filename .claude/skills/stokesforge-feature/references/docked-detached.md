@@ -13,6 +13,7 @@ Read before touching a UI surface (workbook, graph, note, matrix, fixed panel, g
 ## Check
 
 - [ ] one writing per content (`book_contents`, `graph_view_contents`; the note and the matrix never detach, #473); otherwise factor, or change both and say so in the report
+- [ ] the detached **graph** serves itself (#475, L1): its closure locks the app through `lock_app_from_viewport` and applies its actions in its pass (`apply_pass_actions`), with no fork and no queue; the workbook and the panels still fork and queue until L2/L3; a window that writes wakes the others through `server::wake`
 - [ ] a new `AppState` field also exists in the detached view when it must apply there
 - [ ] a global shortcut tried with a graph active and a workbook detached; in a detached window only Ctrl+Z, Ctrl+Y and Ctrl+S act (`read_detached_history_and_save`, read before painting, queued after the window's own actions, #459); any other global key stays in the main window
 - [ ] no egui ID computed under `Context::data_mut`

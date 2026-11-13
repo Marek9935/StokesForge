@@ -92,8 +92,13 @@ holds the guard during a pass (`logic`, `ui`, `on_exit`) and gives it back after
 only `try_lock`s between two passes (busy: again in 10 ms). The tick itself is pure
 (`AppState::server_tick(now)` in `stokesforge-app-state/src/state/server.rs`, injected clock);
 the blocking autosave write runs with the lock released. Windows are woken by one function
-(`wake()`), only when the tick found something they show changed. Applying a finished import
-stays in the paint pass. Detached windows keep their fork; nothing visible changed (step 1).
+(`wake()`: the root and every OPEN window, never a closed one, except the window that
+painted), only when something they show changed. Applying a finished import
+stays in the paint pass. Step 2 (L0, L1): the windows are published after the guard is
+released, and the **detached graph** locks the application itself
+(`lock_app_from_viewport`), paints from the shared state and applies its actions in its
+own pass (`app/detached_graph.rs`); the workbook and the three panels keep their fork and
+queues until L2 and L3.
 Rules and tests: `.claude/rules/app.md`, `docs/application/shell-and-code.md`, `docs/tests.md`.
 
 ## The three separation lines

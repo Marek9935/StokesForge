@@ -6,12 +6,14 @@
 //!
 //! Moved from `app.rs` (#101), then split by phase (#124): publishing
 //! the snapshot, painting and collecting events, window commands.
-//! The callback's payload stays owned and `'static`; its two locks
-//! keep the same duration, and business actions still wait for the root.
-//! That stays true when a detached window covers the main one (#457): on
-//! native Wayland the covered root gets no frame callback, so the vendored
-//! winit reports it occluded after 100 ms and eframe runs its `logic` and `ui`
-//! unpainted about every 100 ms (`vendor/winit/STOKESFORGE.md`, "Frame
+//! The callback's payload stays owned and `'static`. **The detached graph is no
+//! longer here** (#475, L1): its window locks the application and serves itself
+//! (`detached_graph.rs`). What remains in this file, the workbook (until L2) and
+//! the three panels (until L3), still works on a copy and queues its business
+//! actions for the root. That stays true when such a window covers the main one
+//! (#457): on native Wayland the covered root gets no frame callback, so the
+//! vendored winit reports it occluded after 100 ms and eframe runs its `logic` and
+//! `ui` unpainted about every 100 ms (`vendor/winit/STOKESFORGE.md`, "Frame
 //! starvation"). The viewport's request wakes the root, the root applies it,
 //! and the end of that same pass publishes the result back to the viewports
 //! ([`StokesForgeApp::republish_detached_tabs`]), so one action waits for one
@@ -27,8 +29,9 @@
 //! where the dialog is (`app.rs`, `announce_opened_dialog`).
 //!
 //! The graph, the workbook and the three panels read Ctrl+Z, Ctrl+Y and Ctrl+S
-//! at the top of their frame, before anything is painted, and queue the actions
-//! after their own (#459, `shortcuts::read_detached_history_and_save`); Ctrl+Q
+//! at the top of their frame, before anything is painted, and put the actions
+//! after their own (#459, `shortcuts::read_detached_history_and_save`; the graph
+//! applies them at once, the others queue them for the root); Ctrl+Q
 //! closes nothing there (`shortcuts::refuse_quit_in_detached`). No other global
 //! key is read in a detached window.
 //!
@@ -145,15 +148,13 @@
 //! the main loop after [`AppState::adopt_detached_book_view`]; they
 //! thus keep the single undoable-command path.
 //!
-//! [`Tab::Graph`] escapes this limit: [`stokesforge_render_egui::GraphView`]
-//! has no global lock on `AppState` to respect (its shape cache and
-//! its zoom/pan navigation are already scoped per graph, in
-//! [`StokesForgeApp::graph_views`]) — [`graph_view_contents`] is thus
-//! **literally** the same function for a floating window and for a
-//! detached window, the view itself simply migrating out of `graph_views` for the
-//! duration of the detaching ([`StokesForgeApp::detach_tab`]/[`StokesForgeApp::
-//! reattach_tab`]) to stay an `Arc<Mutex<_>>` the closure can capture
-//! without duplicating the cache.
+//! [`Tab::Graph`] does not take this detour any more (#475, L1): the window of a
+//! detached graph locks the whole application and paints
+//! [`graph_view_contents`](super::graph_window::graph_view_contents) — the
+//! function of the floating window — from the shared state
+//! (`detached_graph.rs`); its [`GraphView`](stokesforge_render_egui::GraphView)
+//! migrates to [`StokesForgeApp::detached_graphs`] for the duration of the
+//! detaching ([`StokesForgeApp::detach_tab`]/[`StokesForgeApp::reattach_tab`]).
 //!
 //! # OM and console (#100)
 //!
@@ -165,24 +166,20 @@
 //! All use `detached_panel_contents`: home-made frame without native
 //! decoration, Reattach only, OS close converted into a reattach.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use stokesforge_core::NodeId;
-use stokesforge_render_egui::GraphView;
 use stokesforge_session::{Snapshot, WindowGeometry};
 
 use stokesforge_app_state::panel_layout::{DetachAt, PanelKind};
 use stokesforge_app_state::state::{Action, AppState, ProjectTreeNode};
 use stokesforge_app_state::tr;
 
-use super::figure_copy::request_figure_copy;
+use super::detached_graph::DetachedGraph;
 use super::file_drop::{begin_file_drop, finish_file_drop};
-use super::graph_window::graph_view_contents;
-use super::object_manager_ui::{
-    object_manager_contents, selected_manager_target, ObjectManagerRequest,
-};
+use super::object_manager_ui::{object_manager_contents, ObjectManagerRequest};
 use super::project_manager::{
     project_manager_contents_from_tree, PmEntry, PmInteraction, PROJECT_MANAGER_WIDTH,
 };
@@ -194,9 +191,7 @@ use super::window_chrome::{
     show_window_contents_bounded, window_header, HeaderPlacement, PanelPlacement,
     WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE, WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
 };
-use super::window_placement::{
-    floating_window_display_size, viewport_room, FigureFollow, GRAPH_WINDOW_SIZE,
-};
+use super::window_placement::floating_window_display_size;
 use super::window_stack::toggle_collapse_to;
 use super::workbook::book_contents;
 use super::StokesForgeApp;
@@ -361,77 +356,6 @@ pub(super) fn detached_panel_contents(
     reattach
 }
 
-/// The detached window follows the figure (#394), like a floating one: when the
-/// figure's logical size changed since the last frame, the inner size of the OS
-/// window grows or shrinks by the difference at the display scale, clamped to
-/// the monitor. A maximized window only records the figure.
-fn follow_figure_in_viewport(
-    ctx: &egui::Context,
-    follows: &mut HashMap<NodeId, FigureFollow>,
-    graph: NodeId,
-    scale: Option<f32>,
-    in_layout_mode: bool,
-) {
-    let Some(size) = super::graph_window::published_figure_size(ctx, graph) else {
-        return;
-    };
-    let origin = super::graph_window::published_figure_origin(ctx, graph);
-    let Some(step) = FigureFollow::observe(follows, graph, size, origin, scale) else {
-        return;
-    };
-    // In the Page Layout Mode the window is maximised (or about to be): the
-    // figure is recorded, the window keeps its size.
-    if in_layout_mode {
-        return;
-    }
-    let (inner, maximized, monitor, outer) = ctx.input(|input| {
-        let viewport = input.viewport();
-        (
-            viewport.inner_rect.map(|rect| rect.size()),
-            viewport.maximized.unwrap_or(false),
-            viewport.monitor_size,
-            viewport.outer_rect,
-        )
-    });
-    let Some(inner) = inner.filter(|_| !maximized) else {
-        return;
-    };
-    // Free placement (#398): the image's origin moved, and the window moves by
-    // that at the kept scale so that page coordinates stay still on screen,
-    // as a floating window does. Without the outer rectangle (a native Wayland
-    // client cannot know nor set where its window is) nothing is sent.
-    let free_shift = FigureFollow::origin_follow(step);
-    if let (Some(outer), true) = (outer, free_shift != egui::Vec2::ZERO) {
-        let corner = FigureFollow::shifted_corner(follows, graph, outer.min, free_shift);
-        // Kept on the monitor when the window was on it.
-        let corner = match monitor {
-            Some(monitor) => {
-                let limit = (monitor - outer.size()).max(egui::Vec2::ZERO);
-                egui::pos2(
-                    if outer.min.x <= limit.x {
-                        corner.x.min(limit.x)
-                    } else {
-                        corner.x
-                    },
-                    if outer.min.y <= limit.y {
-                        corner.y.min(limit.y)
-                    } else {
-                        corner.y
-                    },
-                )
-            }
-            None => corner,
-        };
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(corner));
-    }
-    let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
-        return;
-    };
-    let chrome = (inner - area).max(egui::Vec2::ZERO);
-    let target = FigureFollow::resize(follows, graph, step, inner, chrome, viewport_room(monitor));
-    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target));
-}
-
 /// A content tab detached into a separate OS window — see the top doc
 /// of the module, § generic detaching. Same pattern as the Project Manager
 /// (`pm_view_model`/`pm_requests`), repeated once per tab rather than once
@@ -463,10 +387,6 @@ pub(super) struct DetachedTabViewModel {
     /// `book_contents`) while keeping its selection and its
     /// input in progress.
     pub(super) view_state: Option<AppState>,
-    /// `Tab::Graph`: the view (shape cache, zoom/pan), moved out of
-    /// [`StokesForgeApp::graph_views`] for the duration of the detaching — see
-    /// [`StokesForgeApp::detach_tab`]/[`StokesForgeApp::reattach_tab`].
-    pub(super) graph_view: Option<GraphView>,
     /// `Tab::Graph`/`Tab::Book`: collapse of the content, specific to this detached
     /// window — initialized from [`StokesForgeApp::collapsed_tabs`] by
     /// `detach_tab`, toggled directly here (no detour through
@@ -491,13 +411,6 @@ pub(super) struct DetachedTabViewModel {
     /// expanded since).
     pub(super) expanded_size: Option<egui::Vec2>,
     pub(super) focused: bool,
-    /// `Tab::Graph`: the figure last painted, from which the OS window follows
-    /// the figure when its size changes (#394), see
-    /// [`FigureFollow`](super::window_placement::FigureFollow).
-    pub(super) figure_follow: HashMap<NodeId, FigureFollow>,
-    /// `Tab::Graph`: the maximise the Page Layout Mode forced on the OS window
-    /// (`layout_window::follow_mode_maximize`).
-    pub(super) mode_maximize: super::layout_window::ModeMaximize,
 }
 
 /// What a detached window writes, so that [`StokesForgeApp::ui`](eframe::App::ui) (the only one to
@@ -584,7 +497,7 @@ impl StokesForgeApp {
     /// Asks for the publication of a detached window: queued when a
     /// [`ServedApp`](super::ServedApp) publishes after releasing the lock,
     /// at once otherwise (a test that drives `ui` on a plain app).
-    fn publish_viewport(
+    pub(super) fn publish_viewport(
         queue: &mut Option<Vec<PendingViewport>>,
         ctx: &egui::Context,
         id: egui::ViewportId,
@@ -1028,7 +941,7 @@ impl StokesForgeApp {
     /// [`StokesForgeApp::detach_project_manager`] and
     /// [`StokesForgeApp::detach_script_console`] for their own paths.
     pub(super) fn detach_tab(&mut self, tab: Tab) {
-        if self.detached_tabs.contains_key(&tab) {
+        if self.is_tab_detached(tab) {
             return;
         }
         if !self.floating_tabs.contains(&tab) {
@@ -1052,18 +965,19 @@ impl StokesForgeApp {
             // detaching it.
             self.maximized_tab = None;
         }
-        let graph_view = match tab {
-            Tab::Graph(id) => {
-                let mut view = self.graph_views.remove(&id).unwrap_or_default();
-                view.invalidate_surface();
-                Some(view)
-            }
-            _ => None,
-        };
         self.window_positions.remove(&tab);
         self.window_sizes.remove(&tab);
         if let Tab::Graph(graph) = tab {
             self.figure_follow.remove(&graph);
+            // The view moves with its cache to the window's state; it comes
+            // back, the same one, on Reattach or Close.
+            let mut view = self.graph_views.remove(&graph).unwrap_or_default();
+            view.invalidate_surface();
+            self.detached_graphs.insert(
+                graph,
+                DetachedGraph::new(view, self.collapsed_tabs.contains(&tab)),
+            );
+            return;
         }
         let view_state = match tab {
             Tab::Book(_) => self.state.fork_for_detached_view().ok(),
@@ -1072,13 +986,10 @@ impl StokesForgeApp {
         let view_model = DetachedTabViewModel {
             snapshot: Some(self.state.snapshot().clone()),
             view_state,
-            graph_view,
             needs_initial_repaint: true,
             collapsed: self.collapsed_tabs.contains(&tab),
             focused: false,
             expanded_size: None,
-            figure_follow: HashMap::new(),
-            mode_maximize: None,
         };
         self.detached_tabs.insert(
             tab,
@@ -1089,31 +1000,32 @@ impl StokesForgeApp {
         );
     }
 
-    /// Removes `tab` from [`StokesForgeApp::detached_tabs`] and pushes it back as a
+    /// Removes `tab` from the detached windows and pushes it back as a
     /// floating window (new cascade rank). No effect if it is not
-    /// detached. Any [`GraphView`] moved by
-    /// [`StokesForgeApp::detach_tab`] returns to [`StokesForgeApp::graph_views`] — the
-    /// graph's shape cache survives detaching/reattaching, as
-    /// it already survives the closing of a floating window.
+    /// detached. The [`GraphView`] of a graph returns to
+    /// [`StokesForgeApp::graph_views`] — the graph's shape cache survives
+    /// detaching/reattaching, as it already survives the closing of a floating
+    /// window.
     pub(super) fn reattach_tab(&mut self, tab: Tab) {
-        let Some(detached) = self.detached_tabs.remove(&tab) else {
-            return;
-        };
-        {
-            let mut model = detached
+        if let Tab::Graph(graph) = tab {
+            let Some(window) = self.detached_graphs.remove(&graph) else {
+                return;
+            };
+            let mut view = window.view;
+            view.invalidate_surface();
+            self.graph_views.insert(graph, view);
+            toggle_collapse_to(&mut self.collapsed_tabs, tab, window.collapsed);
+            self.figure_follow.remove(&graph);
+            self.leave_layout_mode(graph);
+        } else {
+            let Some(detached) = self.detached_tabs.remove(&tab) else {
+                return;
+            };
+            let model = detached
                 .view_model
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
-            if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
-                let mut view = view;
-                view.invalidate_surface();
-                self.graph_views.insert(id, view);
-            }
             toggle_collapse_to(&mut self.collapsed_tabs, tab, model.collapsed);
-        }
-        if let Tab::Graph(graph) = tab {
-            self.figure_follow.remove(&graph);
-            self.leave_layout_mode(graph);
         }
         if !self.floating_tabs.contains(&tab) {
             self.push_floating_tab(tab);
@@ -1124,23 +1036,17 @@ impl StokesForgeApp {
     /// and the graph's cache returns to the application, as after the
     /// closing of a floating window.
     pub(super) fn close_detached_tab(&mut self, tab: Tab) {
-        let Some(detached) = self.detached_tabs.remove(&tab) else {
-            return;
-        };
-        {
-            let mut model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
-                let mut view = view;
-                view.invalidate_surface();
-                self.graph_views.insert(id, view);
-            }
-        }
-        // Closing the window ends the Page Layout Mode.
         if let Tab::Graph(graph) = tab {
+            let Some(window) = self.detached_graphs.remove(&graph) else {
+                return;
+            };
+            let mut view = window.view;
+            view.invalidate_surface();
+            self.graph_views.insert(graph, view);
+            // Closing the window ends the Page Layout Mode.
             self.leave_layout_mode(graph);
+        } else {
+            self.detached_tabs.remove(&tab);
         }
     }
 
@@ -1162,7 +1068,11 @@ impl StokesForgeApp {
             .iter()
             .map(|tab| tab_node(*tab))
             .collect();
-        let mut detached: Vec<NodeId> = self.detached_tabs.keys().map(|t| tab_node(*t)).collect();
+        let mut detached: Vec<NodeId> = self
+            .detached_tab_list()
+            .iter()
+            .map(|t| tab_node(*t))
+            .collect();
         detached.sort_by_key(|node| node.raw());
         let nodes: Vec<NodeId> = self.floating_rects.keys().copied().collect();
         for node in nodes {
@@ -1213,14 +1123,13 @@ impl StokesForgeApp {
     /// Does **not** drain the requests produced: [`StokesForgeApp::ui`](eframe::App::ui) does it
     /// right after, once this function has returned, exactly as for
     /// `pm_requests`.
-    /// Publishes the snapshot to the detached windows and wakes the ones it
-    /// changed, outside `show_detached_tabs` (#457). Called at the end of the
-    /// root pass, once the actions of the frame are applied.
-    pub(super) fn republish_detached_tabs(&self, ctx: &egui::Context) {
-        for (tab, detached) in &self.detached_tabs {
-            if detached.publish_snapshot(&self.state) {
-                ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
-            }
+    /// Publishes the snapshot to the detached workbooks, outside
+    /// `show_detached_tabs` (#457). Called at the end of the root pass, once the
+    /// actions of the frame are applied; the wake of the windows is
+    /// [`server::wake`](super::server::wake)'s.
+    pub(super) fn republish_detached_tabs(&self) {
+        for detached in self.detached_tabs.values() {
+            detached.publish_snapshot(&self.state);
         }
     }
 
@@ -1255,14 +1164,10 @@ impl StokesForgeApp {
             let root_context = ctx.clone();
             let tab = *tab;
             let title = tr!("window-title-detached", name = tab_title(state, tab));
-            // `Tab::Graph` starts at a size that contains its reference
-            // figure and its return to the initial framing.
             // The workbook uses a uniform size; its grid uses the same
-            // widths and headers as in the floating window.
-            let size = match tab {
-                Tab::Graph(_) => [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y],
-                _ => [420.0, 360.0],
-            };
+            // widths and headers as in the floating window. (The graph has
+            // its own window, `detached_graph.rs`.)
+            let size = [420.0, 360.0];
             // Without native decoration: the home-made bar (`window_header`,
             // placement `Detached`) is all the user has to
             // move/resize/close this window — see the top doc of the
@@ -1333,18 +1238,12 @@ impl DetachedTab {
                 .view_state
                 .as_ref()
                 .is_some_and(|view| view.renaming_sheet() != state.renaming_sheet());
-        let mode_differs = model
-            .graph_view
-            .as_ref()
-            .is_some_and(|view| view.layout_mode() != model.mode_maximize.is_some());
         model.snapshot = Some(snapshot.clone());
         if let Some(view_state) = model.view_state.as_mut() {
             view_state.sync_detached_snapshot(snapshot.clone());
             view_state.sync_detached_sheet_editor(state);
         }
-        // A mode toggled from the root's menu: the viewport maximises or
-        // restores its window on its next frame.
-        changed || mode_differs
+        changed
     }
 }
 
@@ -1396,11 +1295,10 @@ impl DetachedTabViewport {
             model.focused = is_active;
             root_context.request_repaint_of(egui::ViewportId::ROOT);
         }
-        // Read before anything is painted (#459): a cell, a field or the Page
-        // Layout Mode never sees these keys. Queued after the window's own
-        // actions, below. Workbook and graph only; the detached note and
-        // matrix read none (#473 removes them).
-        let mut keys = if matches!(self.tab, Tab::Book(_) | Tab::Graph(_)) {
+        // Read before anything is painted (#459): a cell or a field never sees
+        // these keys. Queued after the window's own actions, below. Workbook
+        // only here; the graph reads them in its own pass.
+        let mut keys = if matches!(self.tab, Tab::Book(_)) {
             super::shortcuts::read_detached_history_and_save(ui.ctx())
         } else {
             Vec::new()
@@ -1451,16 +1349,7 @@ impl DetachedTabViewport {
     ) -> (WindowHeaderActions, egui::Frame) {
         let tab = self.tab;
         let id = self.id;
-        let root_context = &self.root_context;
         let mut header_actions = WindowHeaderActions::default();
-        // Page Layout Mode (#426): the keys come first, before anything is
-        // painted, and the OS window follows the mode.
-        if let Tab::Graph(graph) = tab {
-            let view = model.graph_view.get_or_insert_with(GraphView::default);
-            super::page_layout::handle_keys(ui.ctx(), view, graph, &mut requests.actions);
-            let in_mode = view.layout_mode();
-            super::layout_window::follow_mode_maximize(ui.ctx(), &mut model.mode_maximize, in_mode);
-        }
         // Default stroke (inactive) only — the active outline
         // is no longer recolored here (B7,
         // `retours-2026-09-23-bugs.md`): the
@@ -1497,7 +1386,6 @@ impl DetachedTabViewport {
             // content may overflow, but it must modify neither
             // the Frame nor the viewport's clip rectangle.
             show_window_contents_bounded(ui, |ui| {
-                let tree = &snapshot.tree;
                 match tab {
                     Tab::Book(id) => {
                         if let Some(view_state) = model.view_state.as_mut() {
@@ -1506,27 +1394,11 @@ impl DetachedTabViewport {
                             ui.label(tr!("detached-workbook-unavailable"));
                         }
                     }
-                    Tab::Graph(id) => {
-                        let view = model.graph_view.get_or_insert_with(GraphView::default);
-                        let before = selected_manager_target(view);
-                        // Ctrl+C in this viewport: the figure of **this** graph (#149).
-                        request_figure_copy(ui.ctx(), view, tree, id, &mut requests.actions);
-                        graph_view_contents(ui, view, &snapshot, id, &mut requests.actions);
-                        follow_figure_in_viewport(
-                            ui.ctx(),
-                            &mut model.figure_follow,
-                            id,
-                            model.graph_view.as_ref().and_then(GraphView::display_scale),
-                            model.mode_maximize.is_some(),
-                        );
-                        let view = model.graph_view.get_or_insert_with(GraphView::default);
-                        if before != selected_manager_target(view) {
-                            root_context.request_repaint_of(egui::ViewportId::ROOT);
-                        }
-                    }
-                    // Never detached (`Tab::is_detachable`, #473): nothing
-                    // to paint, and no panic (invariant 10).
-                    Tab::Matrix(_) | Tab::Note(_) => {}
+                    // Never here: the graph has its own window
+                    // (`detached_graph.rs`), the note and the matrix never
+                    // detach (`Tab::is_detachable`, #473): nothing to paint,
+                    // and no panic (invariant 10).
+                    Tab::Graph(_) | Tab::Matrix(_) | Tab::Note(_) => {}
                 }
             });
         });
@@ -1661,19 +1533,6 @@ impl DetachedTabViewport {
                 .unwrap_or(false);
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
-            // Restore while in the Page Layout Mode leaves it, as the Restore
-            // of a floating window does (`reconcile_layout_modes`), through the
-            // same path as Esc. A restore done from outside the application
-            // (an OS shortcut) cannot be told from a maximise the compositor
-            // has not applied yet, so it leaves the mode alone.
-            if let (true, Tab::Graph(graph)) = (is_maximized, self.tab) {
-                if let Some(view) = model.graph_view.as_mut().filter(|v| v.layout_mode()) {
-                    super::page_layout::leave_mode(view, graph, &mut requests.actions);
-                    if !requests.actions.is_empty() {
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                }
-            }
         }
         if header_actions.detach {
             requests.reattach = true;
@@ -1696,12 +1555,15 @@ mod tests {
     //! outline (B7). Moved from `app.rs` with their code (#123).
     use std::time::Duration;
 
-    use super::super::graph_window::graph_drop_target;
     use super::super::graph_window::tests::plotted_graph;
     use super::super::grid::role_label;
+    use super::super::test_support::bench::delay;
+    use super::super::test_support::bench::{Bench, Pass, Window};
     use super::super::window_chrome::tests::find_icon_centers;
+    use super::super::window_placement::GRAPH_WINDOW_SIZE;
     use super::*;
     use crate::theme;
+    use stokesforge_render_egui::GraphView;
 
     /// A detached panel carries the application id: egui copies the icon to a
     /// child window, not the id (#388).
@@ -1859,126 +1721,77 @@ mod tests {
         let book = Tab::Book(app.state.books()[0].0);
         for tab in [book, Tab::Graph(graph)] {
             app.detach_tab(tab);
-            assert!(app.detached_tabs.contains_key(&tab), "{tab:?} must detach");
+            assert!(app.is_tab_detached(tab), "{tab:?} must detach");
             assert!(!app.floating_tabs.contains(&tab), "{tab:?}");
         }
     }
 
-    /// #104: no mouse input in the reader viewports; the
-    /// publication of a new snapshot is enough to ask for their redraw.
+    /// #104 (T7): at rest every viewport sleeps, the root and the five windows;
+    /// a write made in the root's pass wakes them all; a navigation selection
+    /// wakes the Project Manager only. No periodic
+    /// wake-up. Witness: an unconditional wake at the end of the root pass.
     #[test]
     fn a_mutation_wakes_the_detached_windows_at_rest() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let book = app.state.books()[0].0;
-        let sheet = app.state.selected_sheet_in(book).unwrap();
-        let column = app.state.visible_columns(sheet)[0].0;
-        app.detach_tab(Tab::Book(book));
-        app.detach_tab(Tab::Graph(graph));
-        app.detach_project_manager();
-        let ids = [
-            egui::ViewportId::from_hash_of(Tab::Book(book)),
-            egui::ViewportId::from_hash_of(Tab::Graph(graph)),
-            egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
-        ];
-        let ctx = egui::Context::default();
-        ctx.set_embed_viewports(false);
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
-        egui_extras::install_image_loaders(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let paint = |app: &mut StokesForgeApp| {
-            let mut output = ctx.run_ui(input.clone(), |ui| {
-                app.show_detached_tabs(ui.ctx());
-                app.show_detached_project_manager(ui.ctx(), None);
-            });
-            output.textures_delta.clear();
-            output
-        };
-        let settle = |app: &mut StokesForgeApp| {
+        let mut bench = Bench::with_every_window();
+        bench.start_every_window();
+        let ids: Vec<_> = Window::ALL.iter().map(|w| bench.id_of(*w)).collect();
+        let every: Vec<_> = std::iter::once(egui::ViewportId::ROOT)
+            .chain(ids.iter().copied())
+            .collect();
+        let settle = |bench: &mut Bench| {
             for _ in 0..8 {
-                let output = paint(app);
-                for id in ids {
-                    let callback = output.viewport_output[&id].viewport_ui_cb.as_ref().unwrap();
-                    let mut child = input.clone();
-                    child.viewport_id = id;
-                    child.viewports.insert(
-                        id,
-                        egui::ViewportInfo {
-                            parent: Some(egui::ViewportId::ROOT),
-                            ..Default::default()
-                        },
-                    );
-                    ctx.run_ui(child, |ui| callback(ui)).textures_delta.clear();
+                bench.root(Pass::root());
+                for id in &ids {
+                    bench.child_in(*id, Pass::child().focused(false));
                 }
             }
-            let output = paint(app);
-            for id in ids {
-                assert_eq!(
-                    output.viewport_output[&id].repaint_delay,
-                    Duration::MAX,
-                    "the viewport {id:?} must sleep at rest"
-                );
-            }
         };
-        settle(&mut app);
-        app.state.dispatch(Action::CommitCell {
-            column,
-            row: 0,
-            text: "42".into(),
-        });
-        let output = paint(&mut app);
-        for id in ids {
+        settle(&mut bench);
+        let output = bench.root(Pass::root());
+        for id in &every {
             assert_eq!(
-                output.viewport_output[&id].repaint_delay,
+                delay(&output, *id),
+                Duration::MAX,
+                "the viewport {id:?} must sleep at rest"
+            );
+        }
+        // Something to undo, then Ctrl+Z in the root: a write of the root's pass.
+        bench.app.state.dispatch(Action::AddWorkbook);
+        settle(&mut bench);
+        let ctrl_z = egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        let output = bench.root(Pass::root().focused(true).events(vec![ctrl_z]));
+        for id in &ids {
+            assert_eq!(
+                delay(&output, *id),
                 Duration::ZERO,
                 "the mutation must wake {id:?}"
             );
         }
-        settle(&mut app);
-        app.state.set_window_geometry(
-            graph,
-            WindowGeometry {
-                x: 10.0,
-                y: 20.0,
-                width: 500.0,
-                height: 400.0,
-                view: None,
-            },
-        );
-        app.state.refresh();
-        let output = paint(&mut app);
-        for id in ids {
-            assert_eq!(
-                output.viewport_output[&id].repaint_delay,
-                Duration::ZERO,
-                "the geometry must wake {id:?}"
-            );
-        }
-        settle(&mut app);
-        app.pm_selection
+        settle(&mut bench);
+        let book = bench.book();
+        bench
+            .app
+            .pm_selection
             .insert(super::super::project_manager::PmEntry::Window(Tab::Book(
                 book,
             )));
-        let output = paint(&mut app);
+        let output = bench.root(Pass::root());
         assert_eq!(
-            output.viewport_output[&ids[2]].repaint_delay,
+            delay(&output, bench.id_of(Window::ProjectManager)),
             Duration::ZERO,
             "a navigation selection wakes the Project Manager"
         );
-        for id in &ids[..2] {
-            assert_eq!(output.viewport_output[id].repaint_delay, Duration::MAX);
+        for window in [Window::Graph, Window::Book] {
+            assert_eq!(delay(&output, bench.id_of(window)), Duration::MAX);
         }
-        settle(&mut app);
-        session.shutdown().unwrap();
+        settle(&mut bench);
+        bench.finish();
     }
 
     /// #426: a Page Layout Mode asked from inside a detached window (its
@@ -1988,78 +1801,38 @@ mod tests {
     /// waking only the viewport it was made in.
     #[test]
     fn a_page_layout_mode_asked_in_a_detached_window_starts_without_another_click() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        app.detach_tab(Tab::Graph(graph));
-        let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
-        let ctx = egui::Context::default();
-        ctx.set_embed_viewports(false);
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
-        egui_extras::install_image_loaders(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let paint_root = |app: &mut StokesForgeApp| {
-            let mut output = ctx.run_ui(input.clone(), |ui| {
-                app.run_layout_mode_requests(ui.ctx(), Some(graph));
-                app.show_detached_tabs(ui.ctx());
-            });
-            output.textures_delta.clear();
-            output
-        };
-        let child_input = || {
-            let mut child = input.clone();
-            child.viewport_id = id;
-            child.viewports.insert(
-                id,
-                egui::ViewportInfo {
-                    parent: Some(egui::ViewportId::ROOT),
-                    ..Default::default()
-                },
-            );
-            child
-        };
-        let paint_child = |output: &egui::FullOutput, ask: bool| {
-            let callback = output.viewport_output[&id].viewport_ui_cb.as_ref().unwrap();
-            let mut child_output = ctx.run_ui(child_input(), |ui| {
-                if ask {
-                    super::super::page_layout::request_layout_mode_toggle(ui.ctx(), graph);
-                }
-                callback(ui)
-            });
-            child_output.textures_delta.clear();
-            child_output
-        };
-        let mut output = paint_root(&mut app);
+        let mut bench = Bench::new();
+        bench.start();
         for _ in 0..6 {
-            paint_child(&output, false);
-            output = paint_root(&mut app);
+            bench.root(Pass::root());
+            bench.child(Pass::child());
         }
-        assert_eq!(output.viewport_output[&id].repaint_delay, Duration::MAX);
+        let id = bench.child_id();
+        let graph = bench.graph;
+        let output = bench.root(Pass::root());
+        assert_eq!(delay(&output, id), Duration::MAX);
         assert_eq!(
-            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
+            delay(&output, egui::ViewportId::ROOT),
             Duration::MAX,
             "the bench must be at rest"
         );
         // The menu entry, clicked in the detached window.
-        let child_output = paint_child(&output, true);
-        let root_delay = child_output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
-        assert_eq!(root_delay, Duration::ZERO, "the root must run the request");
-        // The root frame that follows enters the mode and wakes the window.
-        let output = paint_root(&mut app);
+        let child_output = bench.child_with(id, Pass::child(), |ctx| {
+            super::super::page_layout::request_layout_mode_toggle(ctx, graph);
+        });
         assert_eq!(
-            app.read_graph_view(graph, GraphView::layout_mode),
+            delay(&child_output, egui::ViewportId::ROOT),
+            Duration::ZERO,
+            "the root must run the request"
+        );
+        // The root frame that follows enters the mode and wakes the window.
+        let output = bench.root(Pass::root());
+        assert_eq!(
+            bench.app.read_graph_view(graph, GraphView::layout_mode),
             Some(true)
         );
-        assert_eq!(output.viewport_output[&id].repaint_delay, Duration::ZERO);
-        let child_output = paint_child(&output, false);
+        assert_eq!(delay(&output, id), Duration::ZERO);
+        let child_output = bench.child(Pass::child());
         let commands = &child_output.viewport_output[&id].commands;
         assert!(
             commands
@@ -2067,7 +1840,7 @@ mod tests {
                 .any(|command| matches!(command, egui::ViewportCommand::Maximized(true))),
             "{commands:?}"
         );
-        session.shutdown().unwrap();
+        bench.finish();
     }
 
     /// The Restore button of a detached graph's header, pressed while the window
@@ -2079,45 +1852,23 @@ mod tests {
     #[test]
     fn the_restore_button_of_a_detached_graph_leaves_the_page_layout_mode() {
         for (maximized, leaves) in [(true, true), (false, false)] {
-            let (session, graph) = plotted_graph();
-            let state = AppState::new(session.handle(), String::new()).unwrap();
-            let mut app = StokesForgeApp::new(state);
-            app.detach_tab(Tab::Graph(graph));
-            app.toggle_layout_mode(graph, Some(true));
-            let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
-            let ctx = egui::Context::default();
-            ctx.set_embed_viewports(false);
-            ctx.set_fonts(stokesforge_render_egui::font_definitions());
-            theme::install(&ctx);
-            egui_extras::install_image_loaders(&ctx);
-            ctx.all_styles_mut(|style| style.animation_time = 0.0);
-            let size = egui::vec2(1400.0, 900.0);
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            let mut bench = Bench::new();
+            let graph = bench.graph;
+            bench.app.toggle_layout_mode(graph, Some(true));
+            bench.start();
+            let id = bench.child_id();
+            let info = egui::ViewportInfo {
+                maximized: Some(maximized),
                 ..Default::default()
             };
-            let mut root = ctx.run_ui(input.clone(), |ui| app.show_detached_tabs(ui.ctx()));
-            root.textures_delta.clear();
-            let callback = root.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-            let paint = |events: Vec<egui::Event>| {
-                let mut child = input.clone();
-                child.viewport_id = id;
-                child.events = events;
-                child.viewports.insert(
-                    id,
-                    egui::ViewportInfo {
-                        parent: Some(egui::ViewportId::ROOT),
-                        maximized: Some(maximized),
-                        focused: Some(true),
-                        ..Default::default()
-                    },
-                );
-                let mut output = ctx.run_ui(child, |ui| callback(ui));
-                output.textures_delta.clear();
-                output
+            let pass = |events: Vec<egui::Event>| {
+                Pass::child()
+                    .size(1400.0, 900.0)
+                    .info(info.clone())
+                    .events(events)
             };
-            paint(Vec::new());
-            let first = paint(Vec::new());
+            bench.child_in(id, pass(Vec::new()));
+            let first = bench.child_in(id, pass(Vec::new()));
             // The three icons at the right end of the header band: maximise /
             // restore, reattach, close.
             let in_header: Vec<egui::Pos2> = find_icon_centers(&first.shapes)
@@ -2125,15 +1876,15 @@ mod tests {
                 .filter(|pos| pos.y < WINDOW_HEADER_HEIGHT)
                 .collect();
             let restore = in_header[in_header.len() - 3];
-            paint(vec![egui::Event::PointerMoved(restore)]);
+            bench.child_in(id, pass(vec![egui::Event::PointerMoved(restore)]));
             let button = |pressed| egui::Event::PointerButton {
                 pos: restore,
                 button: egui::PointerButton::Primary,
                 pressed,
                 modifiers: egui::Modifiers::NONE,
             };
-            paint(vec![button(true)]);
-            let clicked = paint(vec![button(false)]);
+            bench.child_in(id, pass(vec![button(true)]));
+            let clicked = bench.child_in(id, pass(vec![button(false)]));
             let commands = &clicked.viewport_output[&id].commands;
             assert!(
                 commands
@@ -2142,82 +1893,47 @@ mod tests {
                 "maximized={maximized}: {commands:?}"
             );
             assert_eq!(
-                app.read_graph_view(graph, GraphView::layout_mode),
+                bench.app.read_graph_view(graph, GraphView::layout_mode),
                 Some(!leaves),
                 "maximized={maximized}"
             );
-            session.shutdown().unwrap();
+            bench.finish();
         }
     }
 
     /// #426: the strip of a detached graph keeps answering: each click on its
     /// controls takes effect, not only the first. The clicks go through the
-    /// detached viewport's own input, as in the real window, with the root
-    /// woken and painted only when the viewport asked for it.
+    /// detached viewport's own input, as in the real window, and the window
+    /// applies them in its own pass; the root is painted only when the viewport
+    /// asked for it.
     #[test]
     fn the_strip_of_a_detached_graph_answers_every_click() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        app.detach_tab(Tab::Graph(graph));
-        app.toggle_layout_mode(graph, Some(true));
-        let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
-        let ctx = egui::Context::default();
-        ctx.set_embed_viewports(false);
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
-        egui_extras::install_image_loaders(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        let size = egui::vec2(1400.0, 900.0);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        let mut bench = Bench::new();
+        let graph = bench.graph;
+        bench.app.toggle_layout_mode(graph, Some(true));
+        bench.start();
+        let id = bench.child_id();
+        let info = egui::ViewportInfo {
+            maximized: Some(true),
             ..Default::default()
         };
-        let mut time = 0.0;
-        let mut paint_root = |app: &mut StokesForgeApp| {
-            let mut raw = input.clone();
-            time += 0.7;
-            raw.time = Some(time);
-            let mut actions = Vec::new();
-            let mut output = ctx.run_ui(raw, |ui| {
-                app.run_layout_mode_requests(ui.ctx(), Some(graph));
-                app.drain_detached_tabs(ui.ctx(), &mut actions);
-            });
-            for action in actions {
-                app.state.dispatch(action);
+        let paint_child = |bench: &mut Bench, events: Vec<egui::Event>| {
+            let output = bench.child_in(
+                id,
+                Pass::child()
+                    .size(1400.0, 900.0)
+                    .dt(0.7)
+                    .info(info.clone())
+                    .events(events),
+            );
+            if delay(&output, egui::ViewportId::ROOT) == Duration::ZERO {
+                bench.root(Pass::root().size(1400.0, 900.0).dt(0.7));
             }
-            output.textures_delta.clear();
             output
         };
-        let mut root = paint_root(&mut app);
-        let mut child_time = 0.0;
-        let mut paint_child =
-            |app: &mut StokesForgeApp, root: &mut egui::FullOutput, events: Vec<egui::Event>| {
-                let callback = root.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-                let mut child = input.clone();
-                child_time += 0.7;
-                child.time = Some(child_time);
-                child.viewport_id = id;
-                child.events = events;
-                child.viewports.insert(
-                    id,
-                    egui::ViewportInfo {
-                        parent: Some(egui::ViewportId::ROOT),
-                        maximized: Some(true),
-                        focused: Some(true),
-                        ..Default::default()
-                    },
-                );
-                let mut output = ctx.run_ui(child, |ui| callback(ui));
-                output.textures_delta.clear();
-                if output.viewport_output[&egui::ViewportId::ROOT].repaint_delay == Duration::ZERO {
-                    *root = paint_root(app);
-                }
-                output
-            };
-        let mut last = paint_child(&mut app, &mut root, Vec::new());
+        let mut last = paint_child(&mut bench, Vec::new());
         for _ in 0..6 {
-            last = paint_child(&mut app, &mut root, Vec::new());
+            last = paint_child(&mut bench, Vec::new());
         }
         let find = |output: &egui::FullOutput, needle: &str| {
             super::super::test_support::texts(&output.shapes)
@@ -2226,12 +1942,11 @@ mod tests {
                 .map(|t| t.center)
                 .unwrap_or_else(|| panic!("{needle:?} not painted"))
         };
-        let fine = || super::super::page_layout::published_snap(&ctx, graph).fine;
-        let snap_on = || super::super::page_layout::published_snap(&ctx, graph).on;
-        let mut click = |app: &mut StokesForgeApp,
-                         root: &mut egui::FullOutput,
-                         last: &mut egui::FullOutput,
-                         label: String| {
+        let fine =
+            |bench: &Bench| super::super::page_layout::published_snap(&bench.ctx, graph).fine;
+        let snap_on =
+            |bench: &Bench| super::super::page_layout::published_snap(&bench.ctx, graph).on;
+        let click = |bench: &mut Bench, last: &mut egui::FullOutput, label: String| {
             let pos = find(last, &label);
             for pressed in [None, Some(true), Some(false)] {
                 let events = match pressed {
@@ -2243,126 +1958,69 @@ mod tests {
                         modifiers: egui::Modifiers::NONE,
                     }],
                 };
-                *last = paint_child(app, root, events);
+                *last = paint_child(bench, events);
             }
             for _ in 0..3 {
-                *last = paint_child(app, root, Vec::new());
+                *last = paint_child(bench, Vec::new());
             }
         };
-        assert!(!fine());
+        assert!(!fine(&bench));
         // The same spot, four times: the step toggles every time.
         for (round, want) in [true, false, true, false].into_iter().enumerate() {
-            click(&mut app, &mut root, &mut last, tr!("layout-mode-step-fine"));
-            assert_eq!(fine(), want, "step click {round}");
+            click(&mut bench, &mut last, tr!("layout-mode-step-fine"));
+            assert_eq!(fine(&bench), want, "step click {round}");
         }
         // Snap: on, off, on.
         for (round, want) in [false, true, false].into_iter().enumerate() {
-            click(&mut app, &mut root, &mut last, tr!("layout-mode-snap"));
-            assert_eq!(snap_on(), want, "snap click {round}");
+            click(&mut bench, &mut last, tr!("layout-mode-snap"));
+            assert_eq!(snap_on(&bench), want, "snap click {round}");
         }
-        // Grid mode and When axes are added reach the model through the root,
-        // and keep answering after each round trip.
-        let placement = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().layer_placement;
-        let fixed = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().fixed_figure;
+        // Grid mode and When axes are added reach the model in the window's own
+        // pass, and keep answering after each round trip.
+        let placement = |bench: &Bench| bench.app.state.plot_spec(graph).unwrap().layer_placement;
+        let fixed = |bench: &Bench| bench.app.state.plot_spec(graph).unwrap().fixed_figure;
         for (round, free) in [true, false, true, false].into_iter().enumerate() {
-            click(
-                &mut app,
-                &mut root,
-                &mut last,
-                tr!("layout-mode-placement-free"),
-            );
+            click(&mut bench, &mut last, tr!("layout-mode-placement-free"));
             assert_eq!(
-                placement(&app) == stokesforge_plot::LayerPlacement::Free,
+                placement(&bench) == stokesforge_plot::LayerPlacement::Free,
                 free,
                 "grid mode click {round}"
             );
         }
         for (round, want) in [true, false, true, false].into_iter().enumerate() {
-            click(
-                &mut app,
-                &mut root,
-                &mut last,
-                tr!("plot-figure-size-fixed"),
-            );
-            assert_eq!(fixed(&app), want, "axes click {round}");
+            click(&mut bench, &mut last, tr!("plot-figure-size-fixed"));
+            assert_eq!(fixed(&bench), want, "axes click {round}");
         }
-        session.shutdown().unwrap();
+        bench.finish();
     }
 
-    /// #426: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z pressed in a detached graph
+    /// #426 (T1): Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z pressed in a detached graph
     /// window itself (Page Layout Mode, focused) reach the model like the same
-    /// keys in the main window. The key goes through the detached viewport's own
-    /// input and the action is drained to the model through the root.
-    /// Witness: reading the shortcuts only for a workbook (#459 moved the read
-    /// before the painting, for the graph, the workbook and the panels).
+    /// keys in the main window, **in the window's own pass**: no root pass runs
+    /// here. Witness: send the actions back to a root list, or read the
+    /// shortcuts only for a workbook (#459 moved the read before the painting).
     #[test]
     fn undo_and_redo_work_from_a_detached_graph_window() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        app.detach_tab(Tab::Graph(graph));
-        app.toggle_layout_mode(graph, Some(true));
-        let id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
-        let ctx = egui::Context::default();
-        ctx.set_embed_viewports(false);
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
-        egui_extras::install_image_loaders(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1400.0, 900.0),
-            )),
+        let mut bench = Bench::new();
+        let graph = bench.graph;
+        bench.app.toggle_layout_mode(graph, Some(true));
+        bench.start();
+        let id = bench.child_id();
+        let info = egui::ViewportInfo {
+            maximized: Some(true),
             ..Default::default()
         };
-        let mut time = 0.0;
-        let mut paint_root = |app: &mut StokesForgeApp| {
-            let mut raw = input.clone();
-            time += 0.7;
-            raw.time = Some(time);
-            let mut actions = Vec::new();
-            let mut output = ctx.run_ui(raw, |ui| {
-                app.run_layout_mode_requests(ui.ctx(), Some(graph));
-                app.drain_detached_tabs(ui.ctx(), &mut actions);
-            });
-            for action in actions {
-                app.state.dispatch(action);
-            }
-            output.textures_delta.clear();
-            output
+        let pass = |events: Vec<egui::Event>| {
+            Pass::child()
+                .size(1400.0, 900.0)
+                .dt(0.7)
+                .info(info.clone())
+                .events(events)
         };
-        let mut root = paint_root(&mut app);
-        let mut child_time = 0.0;
-        let mut paint_child =
-            |app: &mut StokesForgeApp, root: &mut egui::FullOutput, events: Vec<egui::Event>| {
-                let callback = root.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-                let mut child = input.clone();
-                child_time += 0.7;
-                child.time = Some(child_time);
-                child.viewport_id = id;
-                child.events = events;
-                child.focused = true;
-                child.viewports.insert(
-                    id,
-                    egui::ViewportInfo {
-                        parent: Some(egui::ViewportId::ROOT),
-                        maximized: Some(true),
-                        focused: Some(true),
-                        ..Default::default()
-                    },
-                );
-                let mut output = ctx.run_ui(child, |ui| callback(ui));
-                output.textures_delta.clear();
-                if output.viewport_output[&egui::ViewportId::ROOT].repaint_delay == Duration::ZERO {
-                    *root = paint_root(app);
-                }
-                output
-            };
         for _ in 0..6 {
-            paint_child(&mut app, &mut root, Vec::new());
+            bench.child_in(id, pass(Vec::new()));
         }
-        let fixed = |app: &StokesForgeApp| app.state.plot_spec(graph).unwrap().fixed_figure;
+        let fixed = |bench: &Bench| bench.app.state.plot_spec(graph).unwrap().fixed_figure;
         let key = |key: egui::Key, shift: bool| {
             let mut modifiers = egui::Modifiers::COMMAND.plus(egui::Modifiers::CTRL);
             if shift {
@@ -2376,26 +2034,24 @@ mod tests {
                 modifiers,
             }]
         };
-        let before = fixed(&app);
-        // An edit made from the model, as the strip does through the root.
-        app.state.dispatch(Action::SetFigureFixed {
+        let before = fixed(&bench);
+        // An edit made from the model, as the strip does.
+        bench.app.state.dispatch(Action::SetFigureFixed {
             graph,
             fixed: !before,
         });
-        assert_eq!(fixed(&app), !before);
+        assert_eq!(fixed(&bench), !before);
         for (events, want, what) in [
             (key(egui::Key::Z, false), before, "Ctrl+Z"),
             (key(egui::Key::Y, false), !before, "Ctrl+Y"),
             (key(egui::Key::Z, false), before, "Ctrl+Z again"),
             (key(egui::Key::Z, true), !before, "Ctrl+Shift+Z"),
         ] {
-            paint_child(&mut app, &mut root, events);
-            for _ in 0..2 {
-                paint_child(&mut app, &mut root, Vec::new());
-            }
-            assert_eq!(fixed(&app), want, "{what} in the detached graph window");
+            // The key and nothing else: the history moves in that very pass.
+            bench.child_in(id, pass(events));
+            assert_eq!(fixed(&bench), want, "{what} in the detached graph window");
         }
-        session.shutdown().unwrap();
+        bench.finish();
     }
 
     /// Issue #16: the state of each window (open/maximized/closed, collapsed,
@@ -2443,7 +2099,7 @@ mod tests {
         assert_eq!((detached.x, detached.y), (open.x, open.y));
 
         // Closed: the floating geometry stays the one from before.
-        app.detached_tabs.clear();
+        app.detached_graphs.clear();
         app.sync_window_views();
         let closed = persisted_view(&session, graph);
         assert_eq!(closed.view.unwrap().mode, WindowMode::Closed);
@@ -2469,7 +2125,7 @@ mod tests {
                 Ok(Vec::new())
             }
         }
-        for kind in ["workbook", "graph", "explorer"] {
+        for kind in ["workbook", "explorer"] {
             let (session, graph) = plotted_graph();
             let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
             let mut app = StokesForgeApp::new(state);
@@ -2568,6 +2224,65 @@ mod tests {
         }
     }
 
+    /// A file dropped on a detached graph is applied in the window's own pass
+    /// (the import starts there, with no destination workbook) and does not
+    /// consume the pending drop of the root viewport (shared egui memory).
+    #[test]
+    fn a_file_dropped_on_a_detached_graph_leaves_the_pending_drop_of_the_root() {
+        #[derive(Debug)]
+        struct FakeFile(std::path::PathBuf);
+        impl egui::DroppedFile for FakeFile {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                Ok(Vec::new())
+            }
+        }
+        let mut bench = Bench::new();
+        bench.start();
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800., 600.),
+            )),
+            dropped_files: vec![Arc::new(FakeFile("root.csv".into()))],
+            ..Default::default()
+        };
+        // The root takes its drop at the start of its pass, alone.
+        bench
+            .ctx
+            .run_ui(root_input.clone(), |ui| begin_file_drop(ui.ctx()))
+            .textures_delta
+            .clear();
+        assert!(bench.app.state.import_progress().is_none());
+        let id = bench.child_id();
+        bench.child_in(
+            id,
+            Pass::child().dropped(vec![Arc::new(FakeFile("detached.csv".into()))]),
+        );
+        assert!(
+            bench.app.state.import_progress().is_some(),
+            "the drop is applied by the window's own pass"
+        );
+        let mut root_action = None;
+        let mut again = root_input;
+        again.dropped_files.clear();
+        bench
+            .ctx
+            .run_ui(again, |ui| root_action = finish_file_drop(ui.ctx()))
+            .textures_delta
+            .clear();
+        assert_eq!(
+            root_action,
+            Some(Action::DropFiles {
+                paths: vec!["root.csv".into()],
+                target_book: None
+            })
+        );
+        bench.finish();
+    }
+
     /// A file hovering a detached workbook: its viewport's border lights up in
     /// the drop colour, replacing the active outline, and nothing else is
     /// outlined (#386).
@@ -2641,76 +2356,33 @@ mod tests {
 
     #[test]
     fn a_detached_graph_rebuilds_its_shapes_in_its_viewport() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let context = egui::Context::default();
-        context.set_embed_viewports(false);
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
-
-        // Paint the floating view first: the detaching must transfer
-        // an already filled `GraphView`, then rebuild it in the
-        // coordinates of the distinct OS viewport.
-        let mut root_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            ..Default::default()
-        };
-        let mut output = context.run_ui(root_input.clone(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                graph_drop_target(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
-            });
-        });
-        output.textures_delta.clear();
+        // The floating view is painted first: the detaching must transfer an
+        // already filled `GraphView`, then rebuild it in the coordinates of the
+        // distinct OS viewport.
+        let mut bench = Bench::floating_graph();
+        let graph = bench.graph;
+        for _ in 0..4 {
+            bench.root(Pass::root().size(1100.0, 700.0));
+        }
         assert!(
-            !app.graph_views[&graph].cache().shapes().is_empty(),
+            !bench.app.graph_views[&graph].cache().shapes().is_empty(),
             "the starting floating view must have built its figure"
         );
-
-        app.detach_tab(Tab::Graph(graph));
-        let viewport_id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
-        output = context.run_ui(root_input.clone(), |ui| {
-            app.show_detached_tabs(ui.ctx());
-        });
-        let callback = output
-            .viewport_output
-            .get(&viewport_id)
-            .and_then(|viewport| viewport.viewport_ui_cb.clone());
-        output.textures_delta.clear();
-        let callback = callback.expect("the detaching must publish a viewport callback");
-
-        root_input.viewport_id = viewport_id;
-        root_input.viewports.insert(
-            viewport_id,
-            egui::ViewportInfo {
-                parent: Some(egui::ViewportId::ROOT),
-                ..Default::default()
-            },
-        );
-        root_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            GRAPH_WINDOW_SIZE,
-        ));
-        output = context.run_ui(root_input, |ui| callback(ui));
-        output.textures_delta.clear();
+        bench.app.detach_tab(Tab::Graph(graph));
+        bench.root(Pass::root().size(1100.0, 700.0));
+        let viewport_id = bench.child_id();
+        let output = bench.child(Pass::child().size(GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y));
         assert_eq!(
-            output.viewport_output[&viewport_id].repaint_delay,
+            delay(&output, viewport_id),
             Duration::ZERO,
             "the first callback must schedule the viewport's stabilization frame"
         );
-
-        let model = app.detached_tabs[&Tab::Graph(graph)]
-            .view_model
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+        let window = &bench.app.detached_graphs[&graph];
         assert!(
-            !model.needs_initial_repaint,
+            !window.needs_initial_repaint,
             "the first callback must ask for a single stabilization frame"
         );
-        let view = model.graph_view.as_ref().unwrap();
+        let view = &window.view;
         assert!(
             !view.cache().shapes().is_empty(),
             "the detached viewport must not serve the emptied cache of the root viewport"
@@ -2742,6 +2414,7 @@ mod tests {
             figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
             "the figure must stay inside the detached window, not {figure_rect:?} for a window of {GRAPH_WINDOW_SIZE:?}"
         );
+        bench.finish();
     }
 
     // B8 (`retours-2026-09-23-bugs.md`): same mechanism as
@@ -2916,53 +2589,16 @@ mod tests {
         );
     }
 
-    // B9 (`retours-2026-09-23-bugs.md`): the B3 fix
-    // reduces the size requested from egui for an internal floating window
-    // during a collapse, but a detached window is a real OS viewport —
-    // nothing sent a `ViewportCommand::InnerSize` when its collapse
-    // chevron toggled, so the OS kept the big expanded size. This test
-    // drives the detached viewport's callback (same scheme as
-    // `a_detached_graph_rebuilds_its_shapes_in_its_viewport`), clicks
-    // the collapse chevron, and checks the geometry/state — not
-    // the appearance: the rendering tests do not cover this mechanism (see
-    // the report, § "In your final report").
     #[test]
     fn a_collapsed_detached_window_shrinks_then_restores_its_os_viewport() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let context = egui::Context::default();
-        context.set_embed_viewports(false);
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        egui_extras::install_image_loaders(&context);
-
-        let root_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            ..Default::default()
-        };
-        context
-            .run_ui(root_input.clone(), |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    graph_drop_target(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
-                });
-            })
-            .textures_delta
-            .clear();
-
-        app.detach_tab(Tab::Graph(graph));
-        let tab = Tab::Graph(graph);
-        let viewport_id = egui::ViewportId::from_hash_of(tab);
-        let mut output = context.run_ui(root_input.clone(), |ui| {
-            app.show_detached_tabs(ui.ctx());
-        });
-        let callback = output.viewport_output[&viewport_id]
-            .viewport_ui_cb
-            .clone()
-            .expect("the detaching must publish a viewport callback");
-        output.textures_delta.clear();
+        let mut bench = Bench::floating_graph();
+        let graph = bench.graph;
+        for _ in 0..4 {
+            bench.root(Pass::root().size(1100.0, 700.0));
+        }
+        bench.app.detach_tab(Tab::Graph(graph));
+        bench.root(Pass::root().size(1100.0, 700.0));
+        let viewport_id = bench.child_id();
 
         // Simulated "OS" rectangle: the test controls it, as the real
         // backend would by reporting, frame after frame, the size
@@ -2972,33 +2608,26 @@ mod tests {
             GRAPH_WINDOW_SIZE,
         ));
 
-        let paint = |events: Vec<egui::Event>| -> egui::FullOutput {
-            let mut input = root_input.clone();
-            input.viewport_id = viewport_id;
-            input.viewports.insert(
+        let paint = |bench: &mut Bench, events: Vec<egui::Event>| -> egui::FullOutput {
+            let info = egui::ViewportInfo {
+                outer_rect: Some(outer_rect.get()),
+                ..Default::default()
+            };
+            bench.child_in(
                 viewport_id,
-                egui::ViewportInfo {
-                    parent: Some(egui::ViewportId::ROOT),
-                    outer_rect: Some(outer_rect.get()),
-                    ..Default::default()
-                },
-            );
-            input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                outer_rect.get().size(),
-            ));
-            input.events = events;
-            let mut output = context.run_ui(input, |ui| callback(ui));
-            output.textures_delta.clear();
-            output
+                Pass::child()
+                    .size(outer_rect.get().width(), outer_rect.get().height())
+                    .info(info)
+                    .events(events),
+            )
         };
 
         // Stabilization frame (Wayland, see `needs_initial_repaint`):
         // consumes the initial repaint and primes `expanded_size` with the
         // starting size.
-        paint(Vec::new());
+        paint(&mut bench, Vec::new());
         // Second frame: the icons' SVG textures are ready.
-        let first = paint(Vec::new());
+        let first = paint(&mut bench, Vec::new());
         let icon_pos = *find_icon_centers(&first.shapes)
             .first()
             .expect("the collapse arrow must be painted, at the top left");
@@ -3006,19 +2635,25 @@ mod tests {
         // A click (null drag, press then release) on the collapse
         // chevron, spread over two frames as egui's click detection
         // requires — see `click_at`.
-        paint(vec![egui::Event::PointerMoved(icon_pos)]);
-        paint(vec![egui::Event::PointerButton {
-            pos: icon_pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-        let collapsed_output = paint(vec![egui::Event::PointerButton {
-            pos: icon_pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }]);
+        paint(&mut bench, vec![egui::Event::PointerMoved(icon_pos)]);
+        paint(
+            &mut bench,
+            vec![egui::Event::PointerButton {
+                pos: icon_pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let collapsed_output = paint(
+            &mut bench,
+            vec![egui::Event::PointerButton {
+                pos: icon_pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
 
         let expected_collapsed_height = WINDOW_HEADER_HEIGHT + WINDOW_CONTENT_MARGIN.sum().y;
         let commands = &collapsed_output.viewport_output[&viewport_id].commands;
@@ -3032,13 +2667,10 @@ mod tests {
             "the collapse must reduce the OS viewport to the height of its header band, \
              commands={commands:?}"
         );
-        {
-            let model = app.detached_tabs[&tab]
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            assert!(model.collapsed, "the collapse must be applied to the model");
-        }
+        assert!(
+            bench.app.detached_graphs[&graph].collapsed,
+            "the collapse must be applied to the window's state"
+        );
 
         // The OS applies the command: the next frame reports the small
         // rectangle. Nothing of it is persisted since issue #16: the
@@ -3048,24 +2680,30 @@ mod tests {
             outer_rect.get().min,
             egui::vec2(GRAPH_WINDOW_SIZE.x, expected_collapsed_height),
         ));
-        paint(Vec::new());
+        paint(&mut bench, Vec::new());
 
         // Expand: same chevron (different glyph, same rectangle), same
         // click scheme — must recover exactly the size from before
         // the collapse, not a default size.
-        paint(vec![egui::Event::PointerMoved(icon_pos)]);
-        paint(vec![egui::Event::PointerButton {
-            pos: icon_pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-        let expanded_output = paint(vec![egui::Event::PointerButton {
-            pos: icon_pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }]);
+        paint(&mut bench, vec![egui::Event::PointerMoved(icon_pos)]);
+        paint(
+            &mut bench,
+            vec![egui::Event::PointerButton {
+                pos: icon_pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let expanded_output = paint(
+            &mut bench,
+            vec![egui::Event::PointerButton {
+                pos: icon_pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
         let commands = &expanded_output.viewport_output[&viewport_id].commands;
         assert!(
             commands.iter().any(|command| matches!(
@@ -3076,13 +2714,11 @@ mod tests {
             )),
             "the expand must restore exactly the size from before the collapse, commands={commands:?}"
         );
-        {
-            let model = app.detached_tabs[&tab]
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            assert!(!model.collapsed, "the expand must be applied to the model");
-        }
+        assert!(
+            !bench.app.detached_graphs[&graph].collapsed,
+            "the expand must be applied to the window's state"
+        );
+        bench.finish();
     }
 
     /// #394: a detached graph window follows its figure through the viewport's
@@ -3090,58 +2726,30 @@ mod tests {
     /// maximized OS window is left alone.
     #[test]
     fn a_detached_graph_window_follows_its_figure() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let context = egui::Context::default();
-        context.set_embed_viewports(false);
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        egui_extras::install_image_loaders(&context);
-        let root_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            ..Default::default()
-        };
-        app.detach_tab(Tab::Graph(graph));
-        let tab = Tab::Graph(graph);
-        let viewport_id = egui::ViewportId::from_hash_of(tab);
-        let mut output = context.run_ui(root_input.clone(), |ui| {
-            app.show_detached_tabs(ui.ctx());
-        });
-        let callback = output.viewport_output[&viewport_id]
-            .viewport_ui_cb
-            .clone()
-            .expect("a viewport callback");
-        output.textures_delta.clear();
-
+        let mut bench = Bench::new();
+        let graph = bench.graph;
+        bench.start();
+        let viewport_id = bench.child_id();
         let inner = std::cell::Cell::new(egui::Rect::from_min_size(
             egui::pos2(100.0, 80.0),
             GRAPH_WINDOW_SIZE,
         ));
         let monitor = std::cell::Cell::new(Some(egui::vec2(3000.0, 2000.0)));
         let maximized = std::cell::Cell::new(false);
-        let paint = || -> Option<egui::Vec2> {
-            let mut input = root_input.clone();
-            input.viewport_id = viewport_id;
-            input.viewports.insert(
+        let paint = |bench: &mut Bench| -> Option<egui::Vec2> {
+            let info = egui::ViewportInfo {
+                outer_rect: Some(inner.get()),
+                inner_rect: Some(inner.get()),
+                monitor_size: monitor.get(),
+                maximized: Some(maximized.get()),
+                ..Default::default()
+            };
+            let output = bench.child_in(
                 viewport_id,
-                egui::ViewportInfo {
-                    parent: Some(egui::ViewportId::ROOT),
-                    outer_rect: Some(inner.get()),
-                    inner_rect: Some(inner.get()),
-                    monitor_size: monitor.get(),
-                    maximized: Some(maximized.get()),
-                    ..Default::default()
-                },
+                Pass::child()
+                    .size(inner.get().width(), inner.get().height())
+                    .info(info),
             );
-            input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                inner.get().size(),
-            ));
-            let mut output = context.run_ui(input, |ui| callback(ui));
-            output.textures_delta.clear();
             output.viewport_output[&viewport_id]
                 .commands
                 .iter()
@@ -3150,70 +2758,63 @@ mod tests {
                     _ => None,
                 })
         };
-        let publish = |app: &mut StokesForgeApp| {
-            let mut output = context.run_ui(root_input.clone(), |ui| {
-                app.show_detached_tabs(ui.ctx());
-            });
-            output.textures_delta.clear();
-        };
-        let figure = || super::super::graph_window::published_figure_size(&context, graph);
-        let scale = |app: &StokesForgeApp| {
-            app.detached_tabs[&tab]
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner())
-                .graph_view
-                .as_ref()
-                .and_then(GraphView::display_scale)
+        let figure =
+            |bench: &Bench| super::super::graph_window::published_figure_size(&bench.ctx, graph);
+        let scale = |bench: &Bench| {
+            bench.app.detached_graphs[&graph]
+                .view
+                .display_scale()
                 .expect("painted")
         };
         for _ in 0..3 {
-            assert_eq!(paint(), None, "the first frames resize nothing");
+            assert_eq!(paint(&mut bench), None, "the first frames resize nothing");
         }
-        let (before, scale_before) = (figure().expect("published"), scale(&app));
+        let (before, scale_before) = (figure(&bench).expect("published"), scale(&bench));
 
-        let add_cell = |app: &mut StokesForgeApp, side| {
-            app.state.dispatch(Action::AddCell {
+        let add_cell = |bench: &mut Bench, side| {
+            bench.app.state.dispatch(Action::AddCell {
                 graph,
                 panel: 0,
                 side,
                 columns: Vec::new(),
             })
         };
-        // A cell on the left (#503) grows the figure like one on the right.
-        add_cell(&mut app, stokesforge_core::compose::CellSide::Left);
-        publish(&mut app);
-        let command = paint().expect("the viewport follows the figure");
-        let grown = figure().expect("published").0 - before.0;
+        // A cell on the left (#503) grows the figure like one on the right. The
+        // window reads the shared state: no publication in between.
+        add_cell(&mut bench, stokesforge_core::compose::CellSide::Left);
+        let command = paint(&mut bench).expect("the viewport follows the figure");
+        let grown = figure(&bench).expect("published").0 - before.0;
         assert!(grown > 0);
         assert!(
             (command.x - (inner.get().width() + grown as f32 * scale_before)).abs() < 0.01,
             "{command:?} for +{grown} at scale {scale_before}"
         );
         assert_eq!(command.y, inner.get().height(), "same height");
-        assert_eq!(paint(), None, "once");
+        assert_eq!(paint(&mut bench), None, "once");
 
         // The OS applied it; a new change is clamped to the monitor.
         inner.set(egui::Rect::from_min_size(inner.get().min, command));
         for _ in 0..2 {
-            paint();
+            paint(&mut bench);
         }
         monitor.set(Some(command + egui::vec2(10.0, 0.0)));
-        add_cell(&mut app, stokesforge_core::compose::CellSide::Right);
-        publish(&mut app);
-        let clamped = paint().expect("clamped growth");
+        add_cell(&mut bench, stokesforge_core::compose::CellSide::Right);
+        let clamped = paint(&mut bench).expect("clamped growth");
         assert_eq!(clamped.x, command.x + 10.0, "stops at the monitor");
 
         // Maximized by the OS: nothing is sent.
         inner.set(egui::Rect::from_min_size(inner.get().min, clamped));
         for _ in 0..2 {
-            paint();
+            paint(&mut bench);
         }
         maximized.set(true);
-        app.state.dispatch(Action::Undo);
-        publish(&mut app);
-        assert_eq!(paint(), None, "a maximized window does not resize");
-        session.shutdown().unwrap();
+        bench.app.state.dispatch(Action::Undo);
+        assert_eq!(
+            paint(&mut bench),
+            None,
+            "a maximized window does not resize"
+        );
+        bench.finish();
     }
 
     /// #398: a detached free graph follows the move of its image's origin: the
@@ -3223,56 +2824,27 @@ mod tests {
     #[test]
     fn a_detached_free_graph_window_follows_the_origin_of_its_figure() {
         for known in [true, false] {
-            let (session, graph) = plotted_graph();
-            let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-            let mut app = StokesForgeApp::new(state);
-            app.state
+            let mut bench = Bench::new();
+            let graph = bench.graph;
+            bench
+                .app
+                .state
                 .dispatch(Action::SetLayerPlacement { graph, free: true });
-            let context = egui::Context::default();
-            context.set_embed_viewports(false);
-            context.set_fonts(stokesforge_render_egui::font_definitions());
-            egui_extras::install_image_loaders(&context);
-            let root_input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1100.0, 700.0),
-                )),
-                ..Default::default()
-            };
-            app.detach_tab(Tab::Graph(graph));
-            let tab = Tab::Graph(graph);
-            let viewport_id = egui::ViewportId::from_hash_of(tab);
-            let publish = |app: &mut StokesForgeApp| {
-                let mut output = context.run_ui(root_input.clone(), |ui| {
-                    app.show_detached_tabs(ui.ctx());
-                });
-                output.textures_delta.clear();
-                output
-            };
-            let mut output = publish(&mut app);
-            let callback = output.viewport_output[&viewport_id]
-                .viewport_ui_cb
-                .clone()
-                .expect("a viewport callback");
-            output.textures_delta.clear();
+            bench.start();
+            let viewport_id = bench.child_id();
             let outer = egui::Rect::from_min_size(egui::pos2(400.0, 300.0), GRAPH_WINDOW_SIZE);
-            let paint = || -> Option<egui::Pos2> {
-                let mut input = root_input.clone();
-                input.viewport_id = viewport_id;
-                input.viewports.insert(
+            let paint = |bench: &mut Bench| -> Option<egui::Pos2> {
+                let info = egui::ViewportInfo {
+                    outer_rect: known.then_some(outer),
+                    inner_rect: Some(outer),
+                    monitor_size: Some(egui::vec2(3000.0, 2000.0)),
+                    maximized: Some(false),
+                    ..Default::default()
+                };
+                let output = bench.child_in(
                     viewport_id,
-                    egui::ViewportInfo {
-                        parent: Some(egui::ViewportId::ROOT),
-                        outer_rect: known.then_some(outer),
-                        inner_rect: Some(outer),
-                        monitor_size: Some(egui::vec2(3000.0, 2000.0)),
-                        maximized: Some(false),
-                        ..Default::default()
-                    },
+                    Pass::child().size(outer.width(), outer.height()).info(info),
                 );
-                input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, outer.size()));
-                let mut output = context.run_ui(input, |ui| callback(ui));
-                output.textures_delta.clear();
                 output.viewport_output[&viewport_id]
                     .commands
                     .iter()
@@ -3282,33 +2854,28 @@ mod tests {
                     })
             };
             for _ in 0..3 {
-                assert_eq!(paint(), None, "the first frames move nothing");
+                assert_eq!(paint(&mut bench), None, "the first frames move nothing");
             }
-            let origin = || {
-                super::super::graph_window::published_figure_origin(&context, graph)
+            let origin = |bench: &Bench| {
+                super::super::graph_window::published_figure_origin(&bench.ctx, graph)
                     .expect("free origin")
             };
-            let before = origin();
-            let scale = app.detached_tabs[&tab]
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner())
-                .graph_view
-                .as_ref()
-                .and_then(GraphView::display_scale)
+            let before = origin(&bench);
+            let scale = bench.app.detached_graphs[&graph]
+                .view
+                .display_scale()
                 .expect("painted");
-            let snapshot = app.state.tree().clone();
+            let snapshot = bench.app.state.tree().clone();
             let spec = stokesforge_core::compose::current_plot_spec(&snapshot, graph).unwrap();
             let mut frame = spec.panels[0].sanitized_free_frame();
             frame.left -= 30.0;
-            app.state.dispatch(Action::SetFreeLayout {
+            bench.app.state.dispatch(Action::SetFreeLayout {
                 graph,
                 frames: vec![(0, frame)],
                 page: None,
             });
-            publish(&mut app);
-            let command = paint();
-            let shift = (origin().0 - before.0) as f32;
+            let command = paint(&mut bench);
+            let shift = (origin(&bench).0 - before.0) as f32;
             assert!(shift < -1.0, "the origin moved left: {shift}");
             if known {
                 let command = command.expect("the window follows the origin");
@@ -3320,7 +2887,7 @@ mod tests {
             } else {
                 assert_eq!(command, None, "no outer rectangle: nothing to send");
             }
-            session.shutdown().unwrap();
+            bench.finish();
         }
     }
 
@@ -3337,39 +2904,14 @@ mod tests {
     // color *and* the geometry of this outline.
     #[test]
     fn the_detached_window_recolors_its_outline_according_to_the_os_focus() {
-        let (session, graph) = plotted_graph();
-        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let context = egui::Context::default();
-        context.set_embed_viewports(false);
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-
-        let root_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            ..Default::default()
-        };
-        context
-            .run_ui(root_input.clone(), |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    graph_drop_target(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
-                });
-            })
-            .textures_delta
-            .clear();
-
-        app.detach_tab(Tab::Graph(graph));
-        let viewport_id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
-        let mut output = context.run_ui(root_input.clone(), |ui| {
-            app.show_detached_tabs(ui.ctx());
-        });
-        let callback = output.viewport_output[&viewport_id]
-            .viewport_ui_cb
-            .clone()
-            .expect("the detaching must publish a viewport callback");
-        output.textures_delta.clear();
+        let mut bench = Bench::floating_graph();
+        let graph = bench.graph;
+        for _ in 0..4 {
+            bench.root(Pass::root().size(1100.0, 700.0));
+        }
+        bench.app.detach_tab(Tab::Graph(graph));
+        bench.root(Pass::root().size(1100.0, 700.0));
+        let viewport_id = bench.child_id();
 
         // All the rectangular shapes whose stroke is not of zero
         // width — since B7, there can be two: the default stroke of the
@@ -3395,33 +2937,23 @@ mod tests {
             out
         }
 
-        let paint_focused = |focused: bool| {
-            let mut input = root_input.clone();
-            input.viewport_id = viewport_id;
-            input.focused = focused;
-            input.viewports.insert(
+        let paint_focused = |bench: &mut Bench, focused: bool| {
+            let output = bench.child_in(
                 viewport_id,
-                egui::ViewportInfo {
-                    parent: Some(egui::ViewportId::ROOT),
-                    ..Default::default()
-                },
+                Pass::child()
+                    .focused(focused)
+                    .size(GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y),
             );
-            input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                GRAPH_WINDOW_SIZE,
-            ));
-            let mut output = context.run_ui(input, |ui| callback(ui));
-            output.textures_delta.clear();
             stroke_shapes(&output.shapes)
         };
 
-        let style = egui::Style::default();
+        let style = (*bench.ctx.global_style()).clone();
         let content_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, GRAPH_WINDOW_SIZE);
 
         // Other shapes of the window (border of the plotted graph, etc.) have
         // their own stroke, unrelated to activity — so we look for
         // the presence of the right outline rather than the exclusivity of its color.
-        let inactive_strokes = paint_focused(false);
+        let inactive_strokes = paint_focused(&mut bench, false);
         assert!(
             inactive_strokes.iter().any(|(color, rect)| *color
                 == style.visuals.window_stroke().color
@@ -3437,7 +2969,7 @@ mod tests {
              {inactive_strokes:?}"
         );
 
-        let active_strokes = paint_focused(true);
+        let active_strokes = paint_focused(&mut bench, true);
         let active_outline = active_strokes
             .iter()
             .find(|(color, _)| *color == style.visuals.selection.stroke.color)
@@ -3452,6 +2984,7 @@ mod tests {
              from the content — B7 is not fixed (found {:?})",
             active_outline.1,
         );
+        bench.finish();
     }
 
     /// A detached graph whose `requests.actions` hold `CommitCell`-like writes
@@ -3466,6 +2999,16 @@ mod tests {
             app,
             egui::ViewportId::from_hash_of(Tab::Graph(graph)),
         )
+    }
+
+    /// The detached graph produces `actions` in its pass: applied at once.
+    fn act(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        viewport: egui::ViewportId,
+        actions: Vec<Action>,
+    ) {
+        app.apply_pass_actions(ctx, viewport, Vec::new(), actions, false);
     }
 
     fn send(app: &StokesForgeApp, actions: Vec<Action>) {
@@ -3496,9 +3039,7 @@ mod tests {
         let ctx = egui::Context::default();
         app.state.dispatch(Action::OpenAbout);
         let history = app.state.status_history().count();
-        send(&app, vec![Action::Undo]);
-        let actions = drain(&mut app, &ctx);
-        assert!(actions.is_empty(), "the write is refused");
+        act(&mut app, &ctx, viewport, vec![Action::Undo]);
         let now = std::time::Instant::now();
         let (text, level) = super::super::window_band::text_at(&ctx, viewport, now)
             .expect("the band of the window of the gesture");
@@ -3513,8 +3054,7 @@ mod tests {
         // one entry with a count (#453).
         let recorded = app.state.recorded_count();
         super::super::window_band::clear(&ctx, viewport);
-        send(&app, vec![Action::Undo]);
-        drain(&mut app, &ctx);
+        act(&mut app, &ctx, viewport, vec![Action::Undo]);
         assert_eq!(app.state.recorded_count(), recorded + 1);
         assert_eq!(app.state.status_history().count(), history + 1);
         assert_eq!(app.state.status_history().last().unwrap().count, 2);
@@ -3522,8 +3062,12 @@ mod tests {
         // Dialog closed: the gesture goes through, no band is posted.
         app.state.dispatch(Action::CloseAbout);
         super::super::window_band::clear(&ctx, viewport);
-        send(&app, vec![Action::Undo]);
-        assert_eq!(drain(&mut app, &ctx).len(), 1);
+        act(&mut app, &ctx, viewport, vec![Action::Undo]);
+        assert_eq!(
+            app.state.status().expect("the line").text,
+            "Nothing to undo",
+            "the gesture goes through"
+        );
         assert_eq!(
             super::super::window_band::text_at(&ctx, viewport, now),
             None
@@ -3634,10 +3178,7 @@ mod tests {
         assert_eq!(band(viewport), None);
         // Ctrl+Z with nothing to undo, from the window: plain, no band (#453).
         assert!(app.state.undo_label().is_none());
-        send(&app, vec![Action::Undo]);
-        let actions = drain(&mut app, &ctx);
-        assert_eq!(actions.len(), 1);
-        app.dispatch_actions(&ctx, actions);
+        act(&mut app, &ctx, viewport, vec![Action::Undo]);
         assert_eq!(band(viewport), None, "Nothing to undo is plain");
         let status = app.state.status().expect("the line");
         assert_eq!(status.text, "Nothing to undo");
@@ -3647,26 +3188,22 @@ mod tests {
         );
         // A real warning of an action drained from the window: a title makes
         // a Fixed figure grow past its reserve.
-        let graph = match app.detached_tabs.keys().next() {
-            Some(Tab::Graph(graph)) => *graph,
-            other => panic!("a detached graph, got {other:?}"),
-        };
+        let graph = *app.detached_graphs.keys().next().expect("a detached graph");
         let mut spec = app.state.plot_spec(graph).expect("the spec");
         spec.title.clear();
         spec.fixed_figure = true;
         app.state.dispatch(Action::SetPlotSpec { graph, spec });
         let mut titled = app.state.plot_spec(graph).expect("the spec");
         titled.title = "A title".to_owned();
-        send(
-            &app,
+        act(
+            &mut app,
+            &ctx,
+            viewport,
             vec![Action::SetPlotSpec {
                 graph,
                 spec: titled,
             }],
         );
-        let actions = drain(&mut app, &ctx);
-        assert_eq!(actions.len(), 1);
-        app.dispatch_actions(&ctx, actions);
         let (text, level) = band(viewport).expect("the band of the window");
         assert!(text.contains("Fixed"), "{text}");
         assert_eq!(level, super::super::window_band::BandLevel::Warning);
@@ -3678,20 +3215,21 @@ mod tests {
     /// open. Witness: pushing an action that no gesture caused.
     #[test]
     fn idle_detached_windows_get_no_band_while_a_dialog_is_open() {
-        let (session, mut app, viewport) = detached_graph_app();
-        let ctx = egui::Context::default();
-        app.state.dispatch(Action::OpenAbout);
-        let recorded = app.state.recorded_count();
+        let mut bench = Bench::new();
+        bench.start();
+        bench.app.state.dispatch(Action::OpenAbout);
+        let recorded = bench.app.state.recorded_count();
         for _ in 0..10 {
-            assert!(drain(&mut app, &ctx).is_empty());
+            bench.child(Pass::child().focused(false));
+            bench.root(Pass::root());
         }
         let now = std::time::Instant::now();
         assert_eq!(
-            super::super::window_band::text_at(&ctx, viewport, now),
+            super::super::window_band::text_at(&bench.ctx, bench.child_id(), now),
             None
         );
-        assert_eq!(app.state.recorded_count(), recorded);
-        session.shutdown().unwrap();
+        assert_eq!(bench.app.state.recorded_count(), recorded);
+        bench.finish();
     }
 
     /// #471: the detached console refuses a run while a dialog is open, with

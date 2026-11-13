@@ -254,8 +254,12 @@ of the parent's arrow.
 A dialog opened from a detached window is painted by the root, in the main window;
 the detached window shows a band. Rule: a content feature works everywhere, a
 global feature stays in the main window. See [`../windows.md`](../windows.md),
-"Where a dialog is painted". `main.rs` hands eframe the `StokesForgeApp` itself;
-the deferred closures never reach the application (they queue requests).
+"Where a dialog is painted". `main.rs` hands eframe the `ServedApp`, the
+`StokesForgeApp` behind its lock (#475). The closure of a **detached graph**
+locks it (`lock_app_from_viewport`, after the root released its guard), paints
+and applies its own actions in the same pass (`detached_graph.rs`); the closures
+of the workbook and of the three panels still never reach the application: they
+queue requests the root drains (until L2 and L3 of #475).
 
 ### Collapsible and detached panels (#100)
 
@@ -333,8 +337,10 @@ The real redrawing of the OS windows remains to be checked manually.
 
 ### Generic detaching of content tabs
 
-`StokesForgeApp::detach_tab`/`reattach_tab`/`show_detached_tabs` generalize the
-mechanism above to `Tab::Book` and `Tab::Graph` (`Tab::is_detachable`, #473;
+`StokesForgeApp::detach_tab`/`reattach_tab` generalize the
+mechanism above to `Tab::Book` (`show_detached_tabs`, forked view and queues,
+until L2 of #475) and `Tab::Graph` (`show_detached_graphs`, serves itself, see
+below) (`Tab::is_detachable`, #473;
 `detach_tab` ignores a note and a matrix, which stay floating):
 the detach icon opens an OS window; that window offers a
 reattach icon. Closing a detached content window closes only its
@@ -342,7 +348,8 @@ view, without reattaching it or deleting the project data. It stays
 reopenable from the Project Manager. Several contents can be
 detached at the same time, each in its own `ViewportId`.
 
-**Default sizes of the detached windows** (`show_detached_tabs`):
+**Default sizes of the detached windows** (`show_detached_graphs`,
+`show_detached_tabs`):
 `Tab::Graph` opens at 560×540, which holds the reference figure, its
 controls and its header. The workbook has a
 uniform size of 420×360. The workbook grid keeps the same widths and
@@ -353,10 +360,8 @@ scrolls horizontally.
 has only one form of content (a read-only tree); the two kinds
 detachable here are very different (virtualized editable grid,
 interactive graph with shape cache).
-`DetachedTabViewModel` carries one field per kind (`view_state` for a
-workbook, `graph_view` for a graph) rather than two disjoint types to make coexist in the table of
-detached tabs — the fields unused for the kind of `Tab` served
-stay at their default value.
+`DetachedTabViewModel` now serves the workbook alone (`view_state`): the graph
+has its own state, `DetachedGraph`, reached under the lock.
 
 **Reading the model is factored out, transient editing is not.**
 `tab_contents` (`app/contents.rs`, with `note_contents` and `matrix_contents`, used by the floating windows only;
@@ -383,13 +388,23 @@ context, then applies the same undoable commands. No content function is
 specific to the detached window. A note and a matrix never detach (#473), so
 `note_contents` and `matrix_contents` have a floating caller only.
 
-`Tab::Graph` escapes this limit: `GraphView` has no global lock on
-`AppState` to respect (its shape cache and its zoom/pan navigation are
-already scoped per graph, in `StokesForgeApp::graph_views`) — `graph_view_contents`
-is therefore **literally** the same function for a floating window and a
-detached window; the view itself simply migrates out of `graph_views` for the time
-of the detachment so it stays capturable by the closure without duplicating the
-cache.
+**The detached graph serves itself (#475, L1).** Its viewport closure takes the
+whole application through `lock_app_from_viewport` (the single blocking door; the
+root published the window after releasing its own guard, `publish_viewports`),
+reads the shared `Snapshot`, paints with `graph_view_contents` (literally the
+function of the floating window) and applies the actions of its gestures at once
+(`apply_pass_actions`: the dialog gate of #471, `dispatch_actions`, the band of an
+opened dialog, the figure offer). Ctrl+Z, Ctrl+Y and Ctrl+S are read before the
+painting and applied after the window's own actions; the file picker is polled
+in its pass too (`pass_prelude`), so a Save As started there is answered there.
+The view (`GraphView`, with its shape cache) migrates to `StokesForgeApp::
+detached_graphs` for the time of the detachment and returns, the same one, on
+Reattach or Close. A write wakes the root and the other open windows
+(`server::wake`, never a closed one); Reattach and Close only raise a flag and wake
+the root, which moves the window (L4 moves them to the window). A root covered by
+the graph (Page Layout Mode maximised) therefore delays nothing for the graph.
+The Page Layout Mode of a detached graph stays as it was: the OS window maximises
+and restores itself.
 
 `Tab::Script` is not detachable: its input (`AppState::script_source`)
 is a direct field of `AppState`, not a deferred buffer like

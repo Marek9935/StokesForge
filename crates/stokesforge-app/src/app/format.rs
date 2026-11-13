@@ -1064,11 +1064,7 @@ mod tests {
         assert!(!app.graph_views.contains_key(&graph));
         assert_eq!(app.selected_series(graph), Some(target));
         let ctx = egui::Context::default();
-        app.detached_tabs[&Tab::Graph(graph)]
-            .view_model
-            .lock()
-            .unwrap()
-            .focused = true;
+        app.detached_graphs.get_mut(&graph).unwrap().focused = true;
         let mut output = ctx.run_ui(
             egui::RawInput {
                 focused: false,

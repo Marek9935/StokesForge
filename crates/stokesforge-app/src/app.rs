@@ -151,6 +151,7 @@ mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
+mod detached_graph;
 #[cfg(test)]
 mod detached_keys;
 mod dialogs;
@@ -298,6 +299,15 @@ pub struct StokesForgeApp {
     /// [`ServedApp`] publishes them after releasing the lock, `None`: published
     /// at once (a test that drives `ui` on a plain app).
     pending_viewports: Option<Vec<window_detach::PendingViewport>>,
+    /// The handle the windows take the application through, set when the
+    /// application is put behind its lock ([`server::AppSlot`]); weak, the
+    /// application does not keep itself alive.
+    shared_self: std::sync::Weak<parking_lot::Mutex<StokesForgeApp>>,
+    /// Offers a figure to the system clipboard, captured once by the root from
+    /// its window (no `Frame` in a detached window's pass, #475).
+    figure_offer: Option<Box<dyn figure_copy::FigureOffer>>,
+    /// The root already tried to capture [`Self::figure_offer`].
+    figure_offer_captured: bool,
     /// The server thread's status (#475), once attached by [`ServedApp`];
     /// `None`: no thread, the paint pass polls.
     server: Option<Arc<server::ServerStatus>>,
@@ -415,7 +425,13 @@ pub struct StokesForgeApp {
     /// `window_detach.rs`, § Generic detaching of content tabs. One entry per detached tab; absent from
     /// `floating_tabs` while it is (same invariant as `pm_detached`
     /// for the Project Manager, generalized to several simultaneous tabs).
+    /// Only the workbooks (L2) keep this fork; the graphs are in
+    /// `detached_graphs`.
     detached_tabs: HashMap<Tab, DetachedTab>,
+    /// The graphs detached into their own OS window (#475, L1): the view state
+    /// of each, reached by the window's own pass under the application lock.
+    /// Absent from `floating_tabs` and from `graph_views` while detached.
+    detached_graphs: HashMap<NodeId, detached_graph::DetachedGraph>,
     /// Position of each floating window, in logical coordinates of the
     /// workspace, moved by the house title bar and bounded by
     /// `clamp_to_workspace` — sole source of truth of the position.
@@ -564,6 +580,9 @@ impl StokesForgeApp {
         Self {
             state,
             pending_viewports: None,
+            shared_self: std::sync::Weak::new(),
+            figure_offer: None,
+            figure_offer_captured: false,
             server: None,
             server_stop_told: false,
             file_picker: FilePicker::default(),
@@ -598,6 +617,7 @@ impl StokesForgeApp {
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
+            detached_graphs: HashMap::new(),
             window_positions: HashMap::new(),
             window_sizes: HashMap::new(),
             figure_follow: HashMap::new(),
@@ -664,6 +684,55 @@ impl StokesForgeApp {
                 _ => None,
             })
             .or(only_detached_book)
+    }
+
+    /// Is `tab` detached into its own OS window (a graph, or a workbook)?
+    fn is_tab_detached(&self, tab: Tab) -> bool {
+        match tab {
+            Tab::Graph(graph) => self.detached_graphs.contains_key(&graph),
+            _ => self.detached_tabs.contains_key(&tab),
+        }
+    }
+
+    /// Every content tab detached into its own OS window.
+    fn detached_tab_list(&self) -> Vec<Tab> {
+        self.detached_tabs
+            .keys()
+            .copied()
+            .chain(self.detached_graphs.keys().map(|graph| Tab::Graph(*graph)))
+            .collect()
+    }
+
+    /// Every OS window that is open right now besides the root: the detached
+    /// content windows and the detached panels. The windows [`server::wake`]
+    /// wakes, never a closed one.
+    fn open_viewports(&self) -> Vec<egui::ViewportId> {
+        self.detached_tab_list()
+            .iter()
+            .map(egui::ViewportId::from_hash_of)
+            .chain(self.pm_detached.then(project_manager::viewport_id))
+            .chain(
+                self.om_detached
+                    .then(window_detach::object_manager_viewport),
+            )
+            .chain(self.script_detached.then(window_detach::script_viewport))
+            .collect()
+    }
+
+    /// Takes down the detached window of `tab`, if any, and tells the OS to
+    /// close it. Returns whether there was one.
+    fn remove_detached_window(&mut self, ctx: &egui::Context, tab: Tab) -> bool {
+        let removed = match tab {
+            Tab::Graph(graph) => self.detached_graphs.remove(&graph).is_some(),
+            _ => self.detached_tabs.remove(&tab).is_some(),
+        };
+        if removed {
+            ctx.send_viewport_cmd_to(
+                egui::ViewportId::from_hash_of(tab),
+                egui::ViewportCommand::Close,
+            );
+        }
+        removed
     }
 
     /// [`Self::collect_shortcuts`], with Undo and Redo held back and returned: the
@@ -917,23 +986,23 @@ impl StokesForgeApp {
                     self.active_detached = Some(tab);
                 }
             }
+            for (&graph, window) in &self.detached_graphs {
+                if window.focused {
+                    self.active_detached = Some(Tab::Graph(graph));
+                }
+            }
         }
         self.active_detached
-            .filter(|tab| self.detached_tabs.contains_key(tab))
+            .filter(|tab| self.is_tab_detached(*tab))
             .or(self.maximized_tab)
             .or_else(|| self.floating_tabs.last().copied())
     }
 
     /// The bars and the export also read the detached view targeted by the panel.
     fn read_graph_view<R>(&self, graph: NodeId, read: impl FnOnce(&GraphView) -> R) -> Option<R> {
-        if let Some(detached) = self.detached_tabs.get(&Tab::Graph(graph)) {
-            let model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            model.graph_view.as_ref().map(read)
-        } else {
-            self.graph_views.get(&graph).map(read)
+        match self.detached_graphs.get(&graph) {
+            Some(window) => Some(read(&window.view)),
+            None => self.graph_views.get(&graph).map(read),
         }
     }
 
@@ -950,14 +1019,9 @@ impl StokesForgeApp {
         graph: NodeId,
         run: impl FnOnce(&mut GraphView) -> R,
     ) -> Option<R> {
-        if let Some(detached) = self.detached_tabs.get(&Tab::Graph(graph)) {
-            let mut model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            Some(run(model.graph_view.get_or_insert_with(GraphView::default)))
-        } else {
-            Some(run(self.graph_views.entry(graph).or_default()))
+        match self.detached_graphs.get_mut(&graph) {
+            Some(window) => Some(run(&mut window.view)),
+            None => Some(run(self.graph_views.entry(graph).or_default())),
         }
     }
 
@@ -1139,7 +1203,7 @@ impl eframe::App for StokesForgeApp {
         let (metadata, x_prime) = self.state.workbook_header_defaults();
         grid::publish_header_row_defaults(&ctx, metadata, x_prime);
         analysis_menu::publish_last_presets(&ctx, &self.state);
-        graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
+        graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tab_list().iter());
         let history = self.collect_shortcuts_deferring_history(&ctx, &mut actions);
         self.begin_layout_frame(&ctx, active_graph(active_tab_kind(active_tab)));
         // Ctrl+C on the active graph, before panels and contents read
@@ -1161,6 +1225,8 @@ impl eframe::App for StokesForgeApp {
         );
         self.object_manager_panel(ui, active_tab, &mut actions);
         self.drain_detached_tabs(&ctx, &mut actions);
+        self.show_detached_graphs(&ctx);
+        self.drain_detached_graph_flags(&ctx);
         self.show_workspace(
             ui,
             active_tab,
@@ -1205,7 +1271,8 @@ impl eframe::App for StokesForgeApp {
         self.dispatch_actions(&ctx, actions);
         self.return_selection_to_detached_books(&ctx);
         self.close_when_ready(&ctx);
-        self.offer_figure(frame);
+        self.capture_figure_offer(frame);
+        self.offer_figure();
 
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
@@ -1218,7 +1285,15 @@ impl eframe::App for StokesForgeApp {
             // pass runs only every 100 ms (`docs/windows.md`, #457), and the
             // result of a click would wait for two of them.
             ctx.request_repaint();
-            self.republish_detached_tabs(&ctx);
+            // The workbooks keep their copy of the snapshot (L2 removes it); the
+            // other windows read the shared state and only need to look again.
+            self.republish_detached_tabs();
+            server::wake(
+                &ctx,
+                true,
+                &self.open_viewports(),
+                Some(egui::ViewportId::ROOT),
+            );
         }
         self.screenshot(&ctx);
         self.autoquit(&ctx);
@@ -1577,8 +1652,8 @@ impl StokesForgeApp {
     fn open_tabs(&self) -> HashSet<Tab> {
         self.floating_tabs
             .iter()
-            .chain(self.detached_tabs.keys())
             .copied()
+            .chain(self.detached_tab_list())
             .collect()
     }
 
@@ -1605,7 +1680,7 @@ impl StokesForgeApp {
         for (graph, view) in &mut self.graph_views {
             graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
         }
-        for (tab, detached) in &self.detached_tabs {
+        for detached in self.detached_tabs.values() {
             let mut model = detached
                 .view_model
                 .lock()
@@ -1613,9 +1688,9 @@ impl StokesForgeApp {
             if let Some(view) = model.view_state.as_mut() {
                 committed |= view.commit_open_entries();
             }
-            if let (Tab::Graph(graph), Some(view)) = (tab, model.graph_view.as_mut()) {
-                graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
-            }
+        }
+        for (graph, window) in &mut self.detached_graphs {
+            graph_text_edit::commit_open_text_editors(ctx, &mut window.view, *graph, &mut actions);
         }
         for action in actions {
             self.state.dispatch(action);
@@ -1651,9 +1726,13 @@ impl StokesForgeApp {
                             state.editing().is_some()
                                 || state.header_editing().is_some()
                                 || state.note_editing().is_some()
-                        }) || model.graph_view.as_ref().is_some_and(graph_editing)
+                        })
                     })
-                });
+                })
+                || self
+                    .detached_graphs
+                    .values()
+                    .any(|window| graph_editing(&window.view));
             match action {
                 Action::OpenProject { path, .. } => Action::OpenProject {
                     path,
@@ -1731,17 +1810,8 @@ impl StokesForgeApp {
 
     /// The detached window or panel the person works in, if any.
     fn focused_detached_viewport(&self, ctx: &egui::Context) -> Option<egui::ViewportId> {
-        let open_viewports = self
-            .detached_tabs
-            .keys()
-            .map(egui::ViewportId::from_hash_of)
-            .chain(self.pm_detached.then(project_manager::viewport_id))
-            .chain(
-                self.om_detached
-                    .then(window_detach::object_manager_viewport),
-            )
-            .chain(self.script_detached.then(window_detach::script_viewport));
-        let mut focused = open_viewports.filter(|viewport| {
+        let open_viewports = self.open_viewports();
+        let mut focused = open_viewports.into_iter().filter(|viewport| {
             ctx.input(|input| {
                 input
                     .raw
@@ -1786,8 +1856,8 @@ impl StokesForgeApp {
 
     /// Is `viewport` a detached window or panel that is still open?
     fn viewport_is_open(&self, viewport: egui::ViewportId) -> bool {
-        self.detached_tabs
-            .keys()
+        self.detached_tab_list()
+            .iter()
             .any(|tab| egui::ViewportId::from_hash_of(tab) == viewport)
             || (self.pm_detached && viewport == project_manager::viewport_id())
             || (self.om_detached && viewport == window_detach::object_manager_viewport())
@@ -1937,14 +2007,11 @@ impl StokesForgeApp {
                     ..
                 }
         ) {
-            let graphs =
-                self.graph_views
-                    .keys()
-                    .copied()
-                    .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
-                        Tab::Graph(graph) => Some(*graph),
-                        _ => None,
-                    }));
+            let graphs = self
+                .graph_views
+                .keys()
+                .copied()
+                .chain(self.detached_graphs.keys().copied());
             graphs
                 .filter_map(|graph| {
                     let target = self
@@ -1989,8 +2056,9 @@ impl StokesForgeApp {
             let source_open = self
                 .floating_tabs
                 .iter()
-                .chain(self.detached_tabs.keys())
-                .any(|tab| tab_node(*tab) == source);
+                .copied()
+                .chain(self.detached_tab_list())
+                .any(|tab| tab_node(tab) == source);
             if !duplicate || source_open {
                 if let Some((id, kind)) = window_nodes(&self.state.project_tree())
                     .into_iter()
@@ -2003,8 +2071,8 @@ impl StokesForgeApp {
         let removed: Vec<_> = self
             .floating_tabs
             .iter()
-            .chain(self.detached_tabs.keys())
             .copied()
+            .chain(self.detached_tab_list())
             .filter(|tab| {
                 self.state.tree().node(tab_node(*tab)).is_none_or(
                     |node| matches!(node.kind(), stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden),
@@ -2012,12 +2080,7 @@ impl StokesForgeApp {
             })
             .collect();
         for tab in &removed {
-            if self.detached_tabs.remove(tab).is_some() {
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::from_hash_of(tab),
-                    egui::ViewportCommand::Close,
-                );
-            }
+            self.remove_detached_window(ctx, *tab);
             self.pm_selection
                 .remove(&project_manager::PmEntry::Window(*tab));
             self.collapsed_tabs.remove(tab);
@@ -2135,10 +2198,7 @@ impl StokesForgeApp {
                 .graph_views
                 .keys()
                 .copied()
-                .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
-                    Tab::Graph(graph) => Some(*graph),
-                    _ => None,
-                }))
+                .chain(self.detached_graphs.keys().copied())
                 .collect(),
             _ => Vec::new(),
         };
@@ -2218,13 +2278,14 @@ impl StokesForgeApp {
         project_manager::forget_views(ctx);
         // NodeIds may be reused: forget all the
         // views and geometries of the old identity before painting.
-        for tab in self.detached_tabs.keys() {
+        for tab in self.detached_tab_list() {
             ctx.send_viewport_cmd_to(
                 egui::ViewportId::from_hash_of(tab),
                 egui::ViewportCommand::Close,
             );
         }
         self.detached_tabs.clear();
+        self.detached_graphs.clear();
         self.floating_tabs.clear();
         self.cascade_rank.clear();
         self.next_cascade = 0;
@@ -2815,14 +2876,14 @@ mod tests {
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Graph(graph));
         app.detach_tab(Tab::Graph(graph));
-        assert!(app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(app.is_tab_detached(Tab::Graph(graph)));
         app.dispatch_actions(&context, vec![Action::DeleteObjects(vec![graph])]);
-        assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(!app.is_tab_detached(Tab::Graph(graph)));
         assert!(!app.state.tree().contains(graph));
         app.dispatch_actions(&context, vec![Action::Undo]);
         assert!(app.state.tree().contains(graph));
         assert!(!app.floating_tabs.contains(&Tab::Graph(graph)));
-        assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(!app.is_tab_detached(Tab::Graph(graph)));
         app.open_tab(Tab::Book(book));
         assert!(app.floating_tabs.contains(&Tab::Book(book)), "witness");
         // An undoable deletion asks nothing (S-F3, #229).
@@ -3351,9 +3412,11 @@ mod tests {
         app.detach_tab(Tab::Graph(graph));
         let context = egui::Context::default();
         {
-            let detached = &app.detached_tabs[&Tab::Graph(graph)];
-            let mut model = detached.view_model.lock().unwrap();
-            let view = model.graph_view.as_mut().expect("detached graph view");
+            let view = &mut app
+                .detached_graphs
+                .get_mut(&graph)
+                .expect("detached graph view")
+                .view;
             graph_text_edit::start_text_editor(
                 &context,
                 view,

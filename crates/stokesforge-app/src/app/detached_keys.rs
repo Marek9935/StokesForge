@@ -7,6 +7,7 @@
 use std::time::Instant;
 
 use eframe::egui;
+use stokesforge_app_state::file_picker::FilePicker;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
@@ -154,11 +155,17 @@ fn ctrl_s_in_each_detached_window_saves_the_project() {
             bench.id_of(window),
             Pass::child().events(vec![ctrl(egui::Key::S)]),
         );
-        assert_eq!(
-            bench.queued_by(window),
-            vec![Action::Save],
-            "{window:?}: one Save is queued"
-        );
+        if window == Window::Graph {
+            // The graph applies its actions in its own pass (#475, L1).
+            assert!(bench.queued_by(window).is_empty(), "{window:?}: no queue");
+            assert!(bench.path().exists(), "{window:?}: saved at once");
+        } else {
+            assert_eq!(
+                bench.queued_by(window),
+                vec![Action::Save],
+                "{window:?}: one Save is queued"
+            );
+        }
         settle(&mut bench);
         assert!(bench.path().exists(), "{window:?}: the file was written");
         assert_eq!(band_in(&bench, window), None, "{window:?}: no band");
@@ -188,22 +195,33 @@ fn ctrl_shift_s_in_a_detached_window_saves_nothing() {
     bench.finish();
 }
 
-/// With no file yet, Ctrl+S queues the Save and writes nothing: the root then
-/// asks where (`dispatch_actions`; never a real picker in a test, so the root
-/// does not run here). Witness: drop Save from the reader.
+/// T6 (#475): with no file yet, Ctrl+S in the detached graph asks where to
+/// save, and the answer of the picker is applied in the window's own passes:
+/// the file is written although no root pass ran. Witness: poll the picker in
+/// the root pass only (take `pass_prelude` out of the graph's pass).
 #[test]
-fn ctrl_s_with_no_file_yet_queues_the_save_and_writes_nothing() {
+fn ctrl_s_with_no_file_yet_saves_as_from_a_detached_graph_without_any_root_pass() {
     let mut bench = Bench::new();
     bench.start();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("saved.stf");
+    FilePicker::script_next_answer(Some(vec![path.clone()]));
     bench.child(Pass::child().events(vec![ctrl(egui::Key::S)]));
-    let queued = bench.app.detached_tabs[&bench.tab]
-        .requests
-        .lock()
-        .unwrap()
-        .actions
-        .clone();
-    assert_eq!(queued, vec![Action::Save]);
-    assert!(bench.app.state.path().is_empty());
+    assert!(bench.app.file_picker.is_open(), "the picker was asked");
+    assert!(!path.exists(), "nothing is written before the answer");
+    // The picker answers on its thread; the window polls it in its own passes.
+    for _ in 0..500 {
+        if path.exists() {
+            break;
+        }
+        bench.child(Pass::child());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        path.exists(),
+        "Save As from the window alone wrote the file"
+    );
+    assert_eq!(bench.app.state.path(), path.to_string_lossy());
     bench.finish();
 }
 
@@ -427,15 +445,7 @@ fn ctrl_s_in_the_page_layout_mode_saves_and_keeps_the_mode() {
         bench.root(Pass::root());
         bench.child_in(bench.id_of(Window::Graph), Pass::child());
     }
-    let in_mode = |bench: &Bench| {
-        bench.app.detached_tabs[&bench.tab]
-            .view_model
-            .lock()
-            .unwrap()
-            .graph_view
-            .as_ref()
-            .is_some_and(|view| view.layout_mode())
-    };
+    let in_mode = |bench: &Bench| bench.app.detached_graphs[&bench.graph].view.layout_mode();
     assert!(in_mode(&bench));
     press(&mut bench, Window::Graph, ctrl(egui::Key::S));
     assert!(bench.path().exists(), "saved");
@@ -491,12 +501,14 @@ fn ctrl_z_pressed_with_a_strip_click_in_the_same_frame_undoes_the_click() {
         ctrl(egui::Key::Z),
     ];
     bench.child_in(id, Pass::child().events(both));
-    let queued = bench.queued_by(Window::Graph);
-    assert_eq!(queued.len(), 2, "the click, then the key: {queued:?}");
-    assert!(matches!(queued[0], Action::SetFigureFixed { .. }));
-    assert_eq!(queued[1], Action::Undo);
-    settle(&mut bench);
+    // The click, then the key, in that very pass: the click is made and undone.
     assert_eq!(fixed(&bench), before, "the click was undone");
+    assert!(
+        bench.app.state.redo_label().is_some(),
+        "the click took place before the key"
+    );
+    settle(&mut bench);
+    assert_eq!(fixed(&bench), before, "still undone after the root");
     bench.finish();
 }
 
