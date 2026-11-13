@@ -196,11 +196,17 @@ pub fn free_frames_from_grid(
 /// [`stokesforge_core::compose::set_grid_placement`] (L7 then C4). `false`,
 /// with `spec` unchanged, if it is already in that placement or the
 /// conversion is refused.
+///
+/// `bind` gives the spec as drawn (#501, [`bind_spec`]): the measurements read
+/// it, never the stored text, and only frames and placement are written into
+/// `spec`, so no bound text can reach the model. [`as_stored`] for a spec
+/// whose texts use no variable.
 pub fn set_layer_placement(
     spec: &mut PlotSpec,
     free: bool,
     measurer: &TextMeasurer,
     choice: &stokesforge_render::FontChoice,
+    bind: &dyn for<'a> Fn(&'a PlotSpec) -> std::borrow::Cow<'a, PlotSpec>,
 ) -> bool {
     use stokesforge_plot::LayerPlacement;
     let mut candidate = spec.clone();
@@ -209,14 +215,14 @@ pub fn set_layer_placement(
             return false;
         }
         let reference = spec.clone();
-        let _ = fix_legacy_frames(&reference, &mut candidate, measurer, choice);
-        let Ok(Some(frames)) = free_frames_from_grid(&candidate, measurer, choice) else {
+        let _ = fix_legacy_frames(&bind(&reference), &mut candidate, measurer, choice);
+        let Ok(Some(frames)) = free_frames_from_grid(&bind(&candidate), measurer, choice) else {
             return false;
         };
         // #505: a grid with empty space around it keeps its image as the
         // page of the free graph, so nothing moves.
         let page = if candidate.sanitized_grid_slack().is_some() {
-            figure_layout(&candidate, measurer, choice)
+            figure_layout(&bind(&candidate), measurer, choice)
                 .ok()
                 .map(|layout| stokesforge_plot::FreePage {
                     left: 0.0,
@@ -238,6 +244,12 @@ pub fn set_layer_placement(
     }
     *spec = candidate;
     true
+}
+
+/// The `bind` of [`set_layer_placement`] for a spec that is measured as it is
+/// stored.
+pub fn as_stored(spec: &PlotSpec) -> std::borrow::Cow<'_, PlotSpec> {
+    std::borrow::Cow::Borrowed(spec)
 }
 
 /// The frame of a layer added beside layer `panel` of a free graph (#398, L8),

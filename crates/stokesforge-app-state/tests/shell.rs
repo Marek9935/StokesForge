@@ -16345,7 +16345,8 @@ fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let before = graph_spec(&state, graph);
-    let (width, height) = stokesforge_app_state::frame_sizes::figure_extent(&before).unwrap();
+    let (width, height) =
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &before).unwrap();
     state.dispatch(Action::SetFigureTotal {
         graph,
         axis: SizeAxis::Width,
@@ -16353,7 +16354,8 @@ fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
         ratio: Some(height / width),
     });
     let (new_width, new_height) =
-        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(&state, graph))
+            .unwrap();
     assert!((new_width - (width + 100.0)).abs() < 1.0, "{new_width}");
     assert!(
         (new_height / new_width - height / width).abs() < 0.003,
@@ -16376,7 +16378,8 @@ fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
         ratio: None,
     });
     let (_, kept) =
-        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(&state, graph))
+            .unwrap();
     assert!((kept - height).abs() < 1.0);
     state.dispatch(Action::Undo);
 
@@ -16418,7 +16421,7 @@ fn the_size_lock_is_session_state() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let spec = graph_spec(&state, graph);
-    let image = stokesforge_app_state::frame_sizes::figure_extent(&spec).unwrap();
+    let image = stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &spec).unwrap();
     let lock = stokesforge_app_state::frame_sizes::SizeLock::close(image).expect("lock");
     let revision = state.snapshot().revision;
     state.dispatch(Action::SetSizeLock {
@@ -16438,7 +16441,8 @@ fn the_size_lock_is_session_state() {
         slack: None,
     });
     let new_image =
-        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(&state, graph))
+            .unwrap();
     let mut followed = state.size_lock(graph).expect("still closed");
     followed.follow(new_image);
     assert!((followed.ratio - lock.ratio).abs() < 1e-12, "ratio kept");
@@ -16592,7 +16596,9 @@ fn the_warning_of_a_fixed_figure_that_grew_survives_the_window_closing() {
 fn go_free(state: &mut AppState, graph: NodeId) {
     let mut spec = graph_spec(state, graph);
     assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
-        &mut spec, true
+        state.tree(),
+        &mut spec,
+        true
     ));
     state.dispatch(Action::SetPlotSpec { graph, spec });
 }
@@ -17013,7 +17019,7 @@ fn fitting_the_total_of_a_free_graph_with_a_page_writes_the_page() {
     });
     go_free(&mut state, graph);
     let mut without = graph_spec(&state, graph);
-    set_total_in_draft(&mut without, SizeAxis::Width, 700.0, None).expect("fit");
+    set_total_in_draft(state.tree(), &mut without, SizeAxis::Width, 700.0, None).expect("fit");
     assert_eq!(without.free_page, None);
 
     let mut spec = graph_spec(&state, graph);
@@ -17024,7 +17030,7 @@ fn fitting_the_total_of_a_free_graph_with_a_page_writes_the_page() {
         height: 600.0,
     });
     let before = spec.panels[1].sanitized_free_frame();
-    set_total_in_draft(&mut spec, SizeAxis::Width, 600.0, None).expect("fit");
+    set_total_in_draft(state.tree(), &mut spec, SizeAxis::Width, 600.0, None).expect("fit");
     let page = spec.free_page.expect("page");
     assert_eq!((page.width, page.height), (600.0, 600.0));
     assert!(spec.panels[1].sanitized_free_frame().left < before.left);
@@ -17137,6 +17143,7 @@ fn set_layer_placement_is_one_step_with_the_draft_result() {
     let grid = graph_spec(&state, graph);
     let mut expected = grid.clone();
     assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+        state.tree(),
         &mut expected,
         true
     ));
@@ -19366,4 +19373,113 @@ fn quit_during_an_autosave_write_hands_out_no_second_copy() {
         state.server_tick(later).autosave.is_none(),
         "a second copy was handed out while the window closes"
     );
+}
+
+/// #501 bench: the graph of `cell_bench`, its Y column given a long name, a
+/// title and a left axis title that are the variable `#ln`.
+fn variable_text_bench(dir: &Path) -> (Session, AppState, NodeId) {
+    let (session, mut state, graph, columns) = cell_bench(dir);
+    for column in [columns[0], columns[1]] {
+        session
+            .handle()
+            .execute(stokesforge_commands::Command::SetColumnMeta {
+                column,
+                meta: ColumnMeta {
+                    long_name: "Absorbance of a very long named sample, measured twice, ".repeat(6),
+                    ..ColumnMeta::default()
+                },
+            })
+            .expect("meta");
+    }
+    state.refresh();
+    let mut spec = graph_spec(&state, graph);
+    spec.title = "#ln".into();
+    spec.title_visible = true;
+    spec.panels.get_mut(0).expect("panel").left.label = "#ln".into();
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    (session, state, graph)
+}
+
+/// #501: the size typed in the strip is fitted on the text as drawn (the long
+/// name of `#ln`), so the image is the typed size once the variables are bound.
+/// Witness: `fit_and_apply` on the raw spec measures `#ln` and the bound image
+/// is another size.
+#[test]
+fn a_figure_total_is_fitted_on_the_bound_texts() {
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph) = variable_text_bench(dir.path());
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Height,
+        target: 420.0,
+        ratio: None,
+    });
+    let spec = graph_spec(&state, graph);
+    let (_, height) = stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &spec)
+        .expect("bound extent");
+    assert!((height - 420.0).abs() < 0.1, "{height}");
+    let raw = stokesforge_app_state::frame_sizes::figure_layout(&spec).expect("raw layout");
+    assert_ne!(
+        raw.size.1,
+        stokesforge_app_state::frame_sizes::figure_layout_in(state.tree(), &spec)
+            .expect("bound layout")
+            .size
+            .1,
+        "witness: the raw `#ln` measures like another text, the test proves nothing"
+    );
+}
+
+/// #501, P1: a bound spec never reaches the model. Every edit that measures
+/// the figure (size typed, placement switch, fit page, a new cell, undo) leaves
+/// the stored texts as typed.
+/// Witness: committing the bound spec stores the long name or the preamble.
+#[test]
+fn editing_the_frames_never_stores_a_bound_text() {
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph) = variable_text_bench(dir.path());
+    let stored = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        assert_eq!(spec.title, "#ln", "title");
+        assert_eq!(spec.panels[0].left.label, "#ln", "axis title");
+        assert!(!format!("{spec:?}").contains("sf-vars"), "preamble stored");
+    };
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: 640.0,
+        ratio: Some(0.75),
+    });
+    stored(&state);
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    stored(&state);
+    state.dispatch(Action::SetLayerPlacement { graph, free: true });
+    stored(&state);
+    state.dispatch(Action::FitPageToLayout { graph });
+    stored(&state);
+    state.dispatch(Action::FitLayoutToPage { graph });
+    stored(&state);
+    state.dispatch(Action::Undo);
+    stored(&state);
+    state.dispatch(Action::Redo);
+    stored(&state);
+    // The drafts of Graph Properties: the helpers write frames only.
+    let mut draft = graph_spec(&state, graph);
+    stokesforge_app_state::frame_sizes::set_total_in_draft(
+        state.tree(),
+        &mut draft,
+        SizeAxis::Height,
+        500.0,
+        None,
+    )
+    .expect("fit");
+    assert_eq!(draft.title, "#ln");
+    assert_eq!(draft.panels[0].left.label, "#ln");
 }

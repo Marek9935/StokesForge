@@ -419,11 +419,13 @@ impl Changes {
         Ok(changes)
     }
 
-    /// Fits the total size of the image along `axis`, the frames following in
+    /// Fits the total size of the image along `axis`, measured on the text as
+    /// drawn (#501), the frames written into the stored `spec` only, the frames following in
     /// proportion (#407). A value out of the range the graph allows is refused
     /// with that range, never brought back.
     fn fit_figure(
         &self,
+        tree: &stokesforge_core::Tree,
         spec: &mut PlotSpec,
         key: &str,
         axis: SizeAxis,
@@ -431,15 +433,20 @@ impl Changes {
     ) -> Result<(), HostError> {
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let choice = stokesforge_render_svg::FontChoice::default();
-        let fitted =
-            stokesforge_render_svg::fit_figure_size(spec, &measurer, &choice, axis, points)
-                .ok()
-                .flatten()
-                .ok_or_else(|| {
-                    HostError::InvalidValue(format!(
-                        "{key} cannot be set: the graph has no plot area to scale"
-                    ))
-                })?;
+        let fitted = stokesforge_render_svg::fit_figure_size(
+            &bound(tree, spec),
+            &measurer,
+            &choice,
+            axis,
+            points,
+        )
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            HostError::InvalidValue(format!(
+                "{key} cannot be set: the graph has no plot area to scale"
+            ))
+        })?;
         let (low, high) = fitted.range;
         if points < low - LENGTH_TOLERANCE || points > high + LENGTH_TOLERANCE {
             return Err(HostError::InvalidValue(format!(
@@ -457,6 +464,7 @@ impl Changes {
     /// panel, `cell` its `(row, column)`.
     fn apply(
         &self,
+        tree: &stokesforge_core::Tree,
         spec: &mut PlotSpec,
         layer: usize,
         cell: (usize, usize),
@@ -468,7 +476,13 @@ impl Changes {
         if free != (spec.layer_placement == LayerPlacement::Free) {
             let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
             let choice = stokesforge_render_svg::FontChoice::default();
-            if !stokesforge_render_svg::set_layer_placement(spec, free, &measurer, &choice) {
+            if !stokesforge_render_svg::set_layer_placement(
+                spec,
+                free,
+                &measurer,
+                &choice,
+                &|spec| bound(tree, spec),
+            ) {
                 return Err(HostError::InvalidValue(
                     "the layer placement cannot be switched: the layers do not fit a grid"
                         .to_owned(),
@@ -612,10 +626,10 @@ impl Changes {
         // the axes, Fixed, Left / Top and the placement set above. Width
         // first: the height is measured at the new width.
         if let Some(width) = self.figure_width {
-            self.fit_figure(spec, "figure_width", SizeAxis::Width, width)?;
+            self.fit_figure(tree, spec, "figure_width", SizeAxis::Width, width)?;
         }
         if let Some(height) = self.figure_height {
-            self.fit_figure(spec, "figure_height", SizeAxis::Height, height)?;
+            self.fit_figure(tree, spec, "figure_height", SizeAxis::Height, height)?;
         }
         Ok(())
     }
@@ -645,14 +659,14 @@ fn set_graph_native(
         // writes nothing, the graph staying as it was. A switch to free fixes
         // them itself; a free graph is never legacy.
         if changes.sets_size() && !switching && before.layer_placement == LayerPlacement::Grid {
-            bridge::fix_frames(Some(&before), &mut spec);
+            bridge::fix_frames(&snapshot.tree, Some(&before), &mut spec);
         }
         let reference = if switching {
             before.clone()
         } else {
             spec.clone()
         };
-        changes.apply(&mut spec, layer, panel, side)?;
+        changes.apply(&snapshot.tree, &mut spec, layer, panel, side)?;
         let changed = spec != reference;
         Ok::<_, HostError>((spec, changed))
     };
@@ -756,4 +770,9 @@ pub(crate) fn set_graph(
     let (id, epoch) = (graph.id, graph.epoch);
     py.detach(|| set_graph_native(&context, id, epoch, panel, side, &changes))
         .map_err(to_py_error)
+}
+
+/// The spec as drawn (#501): variables bound, for measuring only. Never stored.
+fn bound<'a>(tree: &stokesforge_core::Tree, spec: &'a PlotSpec) -> std::borrow::Cow<'a, PlotSpec> {
+    stokesforge_render_svg::bind_spec(tree, spec, &stokesforge_render_svg::FigureTexts::default())
 }

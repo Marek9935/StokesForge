@@ -10,11 +10,17 @@
 //! does not measure text, so the measured values come from the caller:
 //! `stokesforge_render_svg::fix_legacy_frames`, measured as the screen and the
 //! exports measure.
+//!
+//! #501: every measurement reads the spec **as drawn** (the variables of its
+//! Typst texts bound, [`bound`]); every write goes to the stored `spec` passed
+//! in, and only frames, pages and placement are written. A bound spec never
+//! leaves this module, so it can never reach a command.
 
 use stokesforge_core::compose::{
     set_figure_offset, set_fixed_figure, set_frame_size, set_free_frame, CellSide, FigureOffset,
     FrameAxis, FreeField,
 };
+use stokesforge_core::Tree;
 use stokesforge_plot::{FreeFrame, LayerPlacement, PlotSpec};
 use stokesforge_render::pipeline::{BesideSide, SizeAxis};
 
@@ -27,30 +33,37 @@ pub fn is_legacy(spec: &PlotSpec) -> bool {
         && spec.frame_heights.is_empty()
 }
 
+/// The spec as the screen and the exports draw it (#501): the variables of its
+/// texts bound in `tree`. Only to measure, never to store.
+fn bound<'a>(tree: &Tree, spec: &'a PlotSpec) -> std::borrow::Cow<'a, PlotSpec> {
+    stokesforge_render::bind_spec(tree, spec, &crate::figure_texts::figure_texts())
+}
+
 /// Fixes the frames of a legacy `target` from `reference`, the spec as it is
 /// now (see the module doc). `false` when nothing was to be done.
-pub fn fix_from(reference: &PlotSpec, target: &mut PlotSpec) -> bool {
+pub fn fix_from(tree: &Tree, reference: &PlotSpec, target: &mut PlotSpec) -> bool {
     if !is_legacy(target) {
         return false;
     }
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
-    stokesforge_render_svg::fix_legacy_frames(reference, target, &measurer, &choice)
+    stokesforge_render_svg::fix_legacy_frames(&bound(tree, reference), target, &measurer, &choice)
         .unwrap_or(false)
 }
 
 /// Fixes a spec that was just created legacy: its frames are the ones it is
 /// drawn with, so that a new graph is exactly 480 x 360 pt and explicit.
-pub fn fix_new(spec: &mut PlotSpec) {
+pub fn fix_new(tree: &Tree, spec: &mut PlotSpec) {
     let reference = spec.clone();
-    fix_from(&reference, spec);
+    fix_from(tree, &reference, spec);
 }
 
 /// The layout of the figure of `spec`, computed now with the measurement of the
 /// exports (Typst titles included): for the surfaces that cannot rely on a
 /// painted view, like the size fields of Graph Properties when the graph is not
 /// on screen or has just been edited in the draft. Measuring a title builds the
-/// Typst engine: the caller memoizes.
+/// Typst engine: the caller memoizes. **Raw**: `spec` is measured as given; use
+/// [`figure_layout_in`] for a stored spec, whose variables are not bound yet.
 pub fn figure_layout(spec: &PlotSpec) -> Option<stokesforge_render::pipeline::FigureLayout> {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
@@ -64,8 +77,7 @@ pub fn figure_layout_in(
     tree: &stokesforge_core::Tree,
     spec: &PlotSpec,
 ) -> Option<stokesforge_render::pipeline::FigureLayout> {
-    let bound = stokesforge_render::bind_spec(tree, spec, &crate::figure_texts::figure_texts());
-    figure_layout(&bound)
+    figure_layout(&bound(tree, spec))
 }
 
 /// Sets one frame size of a draft spec: gives it the `drawn` frames if it is
@@ -168,6 +180,7 @@ impl SizeLock {
 /// `None`, with the draft unchanged, if the target or the ratio is not usable
 /// or the graph has no frame to scale.
 pub fn set_total_in_draft(
+    tree: &Tree,
     spec: &mut PlotSpec,
     axis: SizeAxis,
     target_pt: f64,
@@ -177,20 +190,20 @@ pub fn set_total_in_draft(
         return None;
     }
     let mut candidate = spec.clone();
-    fix_from(spec, &mut candidate);
-    let first = fit_and_apply(&mut candidate, axis, target_pt)?;
+    fix_from(tree, spec, &mut candidate);
+    let first = fit_and_apply(tree, &mut candidate, axis, target_pt)?;
     let other = match lock_ratio {
         None => None,
         Some(ratio) => {
-            let extent = figure_extent(&candidate)?;
+            let extent = figure_extent(tree, &candidate)?;
             let (other_axis, other_target) = match axis {
                 SizeAxis::Width => (SizeAxis::Height, extent.0 * ratio),
                 SizeAxis::Height => (SizeAxis::Width, extent.1 / ratio),
             };
-            let second = fit_and_apply(&mut candidate, other_axis, other_target)?;
+            let second = fit_and_apply(tree, &mut candidate, other_axis, other_target)?;
             // Moving the other axis may change the bands of this one (tick
             // labels, title boxes): reach the applied size again.
-            fit_and_apply(&mut candidate, axis, first_applied(&first, target_pt))?;
+            fit_and_apply(tree, &mut candidate, axis, first_applied(&first, target_pt))?;
             Some((second.range, second.raised))
         }
     };
@@ -210,7 +223,8 @@ fn first_applied(first: &stokesforge_render::pipeline::FittedFigure, target: f64
 
 /// The size of the image of `spec` as frames and bands add up, in points
 /// before the whole-point rounding of the layout: `(width, height)`.
-pub fn figure_extent(spec: &PlotSpec) -> Option<(f64, f64)> {
+pub fn figure_extent(tree: &Tree, spec: &PlotSpec) -> Option<(f64, f64)> {
+    let spec = &*bound(tree, spec);
     let layout = figure_layout(spec)?;
     if layout.placement == LayerPlacement::Free {
         stokesforge_render::pipeline::free_extent(spec, &layout)
@@ -221,14 +235,21 @@ pub fn figure_extent(spec: &PlotSpec) -> Option<(f64, f64)> {
 
 /// Fits `spec` along `axis` and writes the frames; what the fit said.
 fn fit_and_apply(
+    tree: &Tree,
     spec: &mut PlotSpec,
     axis: SizeAxis,
     target_pt: f64,
 ) -> Option<stokesforge_render::pipeline::FittedFigure> {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
-    let fitted = stokesforge_render_svg::fit_figure_size(spec, &measurer, &choice, axis, target_pt)
-        .ok()??;
+    let fitted = stokesforge_render_svg::fit_figure_size(
+        &bound(tree, spec),
+        &measurer,
+        &choice,
+        axis,
+        target_pt,
+    )
+    .ok()??;
     fitted.apply_to(spec);
     Some(fitted)
 }
@@ -276,10 +297,12 @@ pub fn set_offset_in_draft(
 /// the frame the grid draws it with, so nothing moves on screen. To the grid:
 /// [`set_grid_placement`] (L7 then C4). `false`, with the draft unchanged, if
 /// the draft is already in that placement or the conversion is refused.
-pub fn set_placement_in_draft(spec: &mut PlotSpec, free: bool) -> bool {
+pub fn set_placement_in_draft(tree: &Tree, spec: &mut PlotSpec, free: bool) -> bool {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
-    stokesforge_render_svg::set_layer_placement(spec, free, &measurer, &choice)
+    stokesforge_render_svg::set_layer_placement(spec, free, &measurer, &choice, &|spec| {
+        bound(tree, spec)
+    })
 }
 
 /// The four numbers of the frame of a layer as Graph Properties shows them in
@@ -339,7 +362,12 @@ pub fn set_free_field_in_draft(
 
 /// The frame of a layer added beside layer `panel` of a free `spec` (#398,
 /// L8), measured like the exports. `None` if the graph is not free.
-pub fn place_beside(spec: &PlotSpec, panel: usize, side: CellSide) -> Option<FreeFrame> {
+pub fn place_beside(
+    tree: &Tree,
+    spec: &PlotSpec,
+    panel: usize,
+    side: CellSide,
+) -> Option<FreeFrame> {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
     let side = match side {
@@ -348,7 +376,7 @@ pub fn place_beside(spec: &PlotSpec, panel: usize, side: CellSide) -> Option<Fre
         CellSide::Left => BesideSide::Left,
         CellSide::Above => BesideSide::Above,
     };
-    stokesforge_render_svg::place_beside(spec, &measurer, &choice, panel, side)
+    stokesforge_render_svg::place_beside(&bound(tree, spec), &measurer, &choice, panel, side)
         .ok()
         .flatten()
 }
@@ -358,13 +386,14 @@ pub fn place_beside(spec: &PlotSpec, panel: usize, side: CellSide) -> Option<Fre
 /// the exports. `None` if the graph is not free or there are fewer than three
 /// cells.
 pub fn distribute_frames(
+    tree: &Tree,
     spec: &PlotSpec,
     targets: &[usize],
     axis: stokesforge_render::pipeline::DistributeAxis,
 ) -> Option<stokesforge_render::pipeline::CellFrames> {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
-    stokesforge_render_svg::distribute_frames(spec, &measurer, &choice, targets, axis)
+    stokesforge_render_svg::distribute_frames(&bound(tree, spec), &measurer, &choice, targets, axis)
         .ok()
         .flatten()
 }
@@ -410,15 +439,16 @@ pub fn page_fit_available(
 /// around smaller graphs and grows to hold a graph that went beyond it; the
 /// graphs do not move. Measures the figure (Typst titles included) in Free:
 /// the caller memoizes.
-pub fn spec_fitted_to_layers(spec: &PlotSpec) -> Option<PlotSpec> {
+pub fn spec_fitted_to_layers(tree: &Tree, spec: &PlotSpec) -> Option<PlotSpec> {
     let mut fitted = spec.clone();
     if spec.layer_placement == LayerPlacement::Grid {
         spec.sanitized_grid_slack()?;
         fitted.grid_slack = None;
         return Some(fitted);
     }
-    let layout = figure_layout(spec)?;
-    let boxes = stokesforge_render::graph_boxes(spec, &layout);
+    let drawn = bound(tree, spec);
+    let layout = figure_layout(&drawn)?;
+    let boxes = stokesforge_render::graph_boxes(&drawn, &layout);
     fitted.free_page = Some(free_page_to_fit(&boxes, layout.free_page_rect()?)?);
     Some(fitted)
 }
@@ -433,12 +463,12 @@ pub fn spec_fitted_to_layers(spec: &PlotSpec) -> Option<PlotSpec> {
 /// are mapped affinely from their bounding box to the page
 /// ([`stokesforge_render::boxes_fitted_to_page`]). The padlock of Figure size
 /// plays no part. Measures the figure: the caller memoizes.
-pub fn spec_layout_fitted_to_page(spec: &PlotSpec) -> Option<PlotSpec> {
+pub fn spec_layout_fitted_to_page(tree: &Tree, spec: &PlotSpec) -> Option<PlotSpec> {
     let mut fitted = spec.clone();
     if spec.layer_placement == LayerPlacement::Grid {
         let slack = spec.sanitized_grid_slack()?;
-        fix_new(&mut fitted);
-        let layout = figure_layout(&fitted)?;
+        fix_new(tree, &mut fitted);
+        let layout = figure_layout_in(tree, &fitted)?;
         let (widths, heights) = (&layout.frame_widths, &layout.frame_heights);
         if widths.is_empty() || heights.is_empty() {
             return None;
@@ -458,8 +488,9 @@ pub fn spec_layout_fitted_to_page(spec: &PlotSpec) -> Option<PlotSpec> {
         fitted.grid_slack = Some(slack).filter(|slack| !slack.is_zero());
         return (fitted != *spec).then_some(fitted);
     }
-    let layout = figure_layout(spec)?;
-    let boxes = stokesforge_render::graph_boxes(spec, &layout);
+    let drawn = bound(tree, spec);
+    let layout = figure_layout(&drawn)?;
+    let boxes = stokesforge_render::graph_boxes(&drawn, &layout);
     let frames = stokesforge_render::boxes_fitted_to_page(&boxes, layout.free_page_rect()?)?;
     for (base, frame) in frames {
         for (field, value) in [
@@ -480,12 +511,12 @@ pub fn spec_layout_fitted_to_page(spec: &PlotSpec) -> Option<PlotSpec> {
 /// (#505, F1): what a new line costs beside its frame, so the empty space of
 /// the grid can pay for the whole line. Empty when the figure cannot be
 /// measured (the new line is then paid by its frame alone).
-pub fn grid_gutters(spec: &PlotSpec) -> stokesforge_core::compose::Gutters {
+pub fn grid_gutters(tree: &Tree, spec: &PlotSpec) -> stokesforge_core::compose::Gutters {
     // The empty space of the grid is folded into the outer gutters of the
     // layout: measure the grid without it.
     let mut bare = spec.clone();
     bare.grid_slack = None;
-    let Some(layout) = figure_layout(&bare) else {
+    let Some(layout) = figure_layout_in(tree, &bare) else {
         return Default::default();
     };
     let sum = |gutters: &[(u32, u32)]| {
@@ -504,6 +535,11 @@ pub fn grid_gutters(spec: &PlotSpec) -> stokesforge_core::compose::Gutters {
 mod tests {
     use super::*;
     use stokesforge_plot::{PanelSpec, Panels};
+
+    /// A tree without any column: the specs of these tests bind nothing.
+    fn tree() -> stokesforge_core::Project {
+        stokesforge_core::Project::new("t").expect("project")
+    }
 
     #[test]
     fn a_legacy_draft_is_given_the_drawn_frames_by_the_first_edit() {
@@ -586,12 +622,12 @@ mod tests {
     fn a_legacy_spec_takes_the_frames_of_its_reference_only_on_the_same_grid() {
         let reference = PlotSpec::default();
         let mut same = PlotSpec::default();
-        assert!(fix_from(&reference, &mut same));
+        assert!(fix_from(tree().tree(), &reference, &mut same));
         assert_eq!(same.frame_widths.len(), 1);
         let mut wider = PlotSpec::default()
             .with_panels(Panels::new([PanelSpec::at(0, 0), PanelSpec::at(0, 1)]));
         assert!(
-            !fix_from(&reference, &mut wider),
+            !fix_from(tree().tree(), &reference, &mut wider),
             "another grid: left alone"
         );
         assert!(is_legacy(&wider));
@@ -600,7 +636,7 @@ mod tests {
     #[test]
     fn a_new_graph_is_exactly_480_by_360_and_explicit() {
         let mut spec = PlotSpec::default();
-        fix_new(&mut spec);
+        fix_new(tree().tree(), &mut spec);
         assert!(!is_legacy(&spec));
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let size = stokesforge_render_svg::figure_size(
@@ -621,7 +657,7 @@ mod tests {
 
     fn free_two_columns() -> PlotSpec {
         let mut spec = two_columns();
-        assert!(set_placement_in_draft(&mut spec, true));
+        assert!(set_placement_in_draft(tree().tree(), &mut spec, true));
         spec
     }
 
@@ -636,7 +672,7 @@ mod tests {
             legacy
         }] {
             let grid = figure_layout(&spec).expect("grid layout");
-            assert!(set_placement_in_draft(&mut spec, true));
+            assert!(set_placement_in_draft(tree().tree(), &mut spec, true));
             assert_eq!(spec.layer_placement, LayerPlacement::Free);
             assert!(!is_legacy(&spec), "a free graph is never legacy");
             let free = figure_layout(&spec).expect("free layout");
@@ -667,7 +703,10 @@ mod tests {
                     );
                 }
             }
-            assert!(!set_placement_in_draft(&mut spec, true), "already free");
+            assert!(
+                !set_placement_in_draft(tree().tree(), &mut spec, true),
+                "already free"
+            );
         }
     }
 
@@ -684,13 +723,16 @@ mod tests {
             height: 300.0,
             ..first
         });
-        assert!(set_placement_in_draft(&mut spec, false));
+        assert!(set_placement_in_draft(tree().tree(), &mut spec, false));
         assert_eq!(spec.layer_placement, LayerPlacement::Grid);
         assert_eq!((spec.panels[0].row, spec.panels[0].column), (0, 1));
         assert_eq!((spec.panels[1].row, spec.panels[1].column), (0, 0));
         assert_eq!(spec.frame_widths, [200.0, 300.0]);
         assert_eq!(spec.frame_heights, [300.0]);
-        assert!(!set_placement_in_draft(&mut spec, false), "already a grid");
+        assert!(
+            !set_placement_in_draft(tree().tree(), &mut spec, false),
+            "already a grid"
+        );
     }
 
     /// #398: Left and Top are stable page coordinates: what is typed is read
@@ -786,7 +828,8 @@ mod tests {
     fn a_legacy_draft_is_materialised_and_scaled_in_one_draft() {
         let mut spec = PlotSpec::default();
         assert!(is_legacy(&spec));
-        let fit = set_total_in_draft(&mut spec, SizeAxis::Width, 600.0, None).expect("a fit");
+        let fit = set_total_in_draft(tree().tree(), &mut spec, SizeAxis::Width, 600.0, None)
+            .expect("a fit");
         assert!(!fit.raised && fit.other.is_none());
         assert!(!is_legacy(&spec));
         assert_eq!(size_of(&spec).0, 600);
@@ -800,13 +843,20 @@ mod tests {
     fn a_closed_lock_makes_the_other_axis_follow_the_applied_size() {
         let mut unlocked = two_columns();
         let before = unlocked.frame_heights.clone();
-        set_total_in_draft(&mut unlocked, SizeAxis::Width, 800.0, None).expect("a fit");
+        set_total_in_draft(tree().tree(), &mut unlocked, SizeAxis::Width, 800.0, None)
+            .expect("a fit");
         assert_eq!(unlocked.frame_heights, before, "no lock: heights identical");
         let mut spec = two_columns();
         let (w0, h0) = size_of(&spec);
         let ratio = f64::from(h0) / f64::from(w0);
-        let fit =
-            set_total_in_draft(&mut spec, SizeAxis::Width, 800.0, Some(ratio)).expect("a fit");
+        let fit = set_total_in_draft(
+            tree().tree(),
+            &mut spec,
+            SizeAxis::Width,
+            800.0,
+            Some(ratio),
+        )
+        .expect("a fit");
         assert!(!fit.raised);
         let (w, h) = size_of(&spec);
         assert_eq!(w, 800);
@@ -817,7 +867,8 @@ mod tests {
         // A typed value below the range is raised; the height follows the
         // raised width, not the typed one.
         let mut small = two_columns();
-        let fit = set_total_in_draft(&mut small, SizeAxis::Width, 10.0, Some(1.0)).expect("a fit");
+        let fit = set_total_in_draft(tree().tree(), &mut small, SizeAxis::Width, 10.0, Some(1.0))
+            .expect("a fit");
         assert!(fit.raised && fit.other.is_some_and(|other| !other.1));
         let (w, h) = size_of(&small);
         assert!(w > 10, "raised to the minimum, not the typed 10");
@@ -827,7 +878,14 @@ mod tests {
         );
         // Typing the height: the width follows (divided by the ratio).
         let mut tall = two_columns();
-        set_total_in_draft(&mut tall, SizeAxis::Height, 500.0, Some(ratio)).expect("a fit");
+        set_total_in_draft(
+            tree().tree(),
+            &mut tall,
+            SizeAxis::Height,
+            500.0,
+            Some(ratio),
+        )
+        .expect("a fit");
         let (w, h) = size_of(&tall);
         assert_eq!(h, 500);
         assert!((f64::from(w) - 500.0 / ratio).abs() <= 1.0);
@@ -842,7 +900,10 @@ mod tests {
             (500.0, Some(f64::NAN)),
         ] {
             let mut spec = PlotSpec::default();
-            assert!(set_total_in_draft(&mut spec, SizeAxis::Width, target, ratio).is_none());
+            assert!(
+                set_total_in_draft(tree().tree(), &mut spec, SizeAxis::Width, target, ratio)
+                    .is_none()
+            );
             assert_eq!(spec, PlotSpec::default());
         }
     }

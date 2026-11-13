@@ -348,6 +348,7 @@ fn plot_settings_contents(
                         );
                         commit |= graph_settings_page(
                             ui,
+                            &bind_tree,
                             spec,
                             edit.selected_panel,
                             &mut size_lock,
@@ -450,22 +451,31 @@ fn dialog_layout(
         return Some(layout);
     }
     let id = egui::Id::new(("graph_size_layout", graph));
-    // The revision is in the memo: a renamed column changes the bound texts.
-    if let Some((cached, at, layout)) = ctx
-        .data(|data| data.get_temp::<(PlotSpec, stokesforge_session::Revision, FigureLayout)>(id))
-    {
-        if cached == *draft && at == revision {
+    // The revision and the language are in the memo: a renamed column changes
+    // the bound texts, and the language the text of a broken reference.
+    let language = stokesforge_app_state::i18n::language().tag();
+    type Memo = (
+        PlotSpec,
+        stokesforge_session::Revision,
+        &'static str,
+        FigureLayout,
+    );
+    if let Some((cached, at, tag, layout)) = ctx.data(|data| data.get_temp::<Memo>(id)) {
+        if cached == *draft && at == revision && tag == language {
             return Some(layout);
         }
     }
     let layout = stokesforge_app_state::frame_sizes::figure_layout_in(tree, draft)?;
-    ctx.data_mut(|data| data.insert_temp(id, (draft.clone(), revision, layout.clone())));
+    ctx.data_mut(|data| {
+        data.insert_temp::<Memo>(id, (draft.clone(), revision, language, layout.clone()))
+    });
     Some(layout)
 }
 
 /// Graph page: title and background, as a two-column form (#227).
 fn graph_settings_page(
     ui: &mut egui::Ui,
+    tree: &Tree,
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
@@ -501,7 +511,7 @@ fn graph_settings_page(
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
-        commit |= size_section(form, spec, panel, size_lock, layout, unit, env);
+        commit |= size_section(form, tree, spec, panel, size_lock, layout, unit, env);
         // S-L8 (#405, #426): "When axes are added" has an Auto default ("Grows
         // with the axes"), almost never changed; the plot area rows are the
         // written exception of S-L8 (they have no Auto) and sit here too, so the
@@ -576,6 +586,7 @@ fn figure_size_row(
 /// it is drawn with, so only the edited one changes.
 fn size_section(
     form: &mut Form<'_>,
+    tree: &Tree,
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
@@ -584,7 +595,7 @@ fn size_section(
     env: &mut PickerEnv,
 ) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
-        return free_size_section(form, spec, panel, size_lock, layout, unit, env);
+        return free_size_section(form, tree, spec, panel, size_lock, layout, unit, env);
     }
     let (drawn_widths, drawn_heights) = drawn_frames(spec, layout);
     if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
@@ -601,9 +612,16 @@ fn size_section(
         || (frames.0.iter().sum(), frames.1.iter().sum()),
         |layout| layout.size_with_frames(&frames.0, &frames.1),
     );
-    let mut commit = total_row(form, spec, size_lock, (total_width, total_height), unit);
+    let mut commit = total_row(
+        form,
+        tree,
+        spec,
+        size_lock,
+        (total_width, total_height),
+        unit,
+    );
     form.note_dimmed(tr!("plot-size-figure-note"));
-    commit |= placement_row(form, spec);
+    commit |= placement_row(form, tree, spec);
     form.note(tr!("plot-size-note"));
     commit
 }
@@ -676,6 +694,7 @@ fn plot_area_rows(
 /// ([`SizeLock::follow`]).
 fn total_row(
     form: &mut Form<'_>,
+    tree: &Tree,
     spec: &mut PlotSpec,
     size_lock: &mut Option<SizeLock>,
     image: (f64, f64),
@@ -695,7 +714,7 @@ fn total_row(
             let mut shown = round_to_unit(unit.from_points(points), unit);
             let response = number_field(ui, ("graph_total", index), &mut shown, &quantity);
             if response.changed {
-                commit |= type_total(ui, spec, size_lock, axis, unit.to_points(shown), unit);
+                commit |= type_total(ui, tree, spec, size_lock, axis, unit.to_points(shown), unit);
                 ui.ctx().request_repaint();
             }
         }
@@ -722,6 +741,7 @@ fn total_row(
 /// flags the field(s) the value was brought back in.
 fn type_total(
     ui: &egui::Ui,
+    tree: &Tree,
     spec: &mut PlotSpec,
     size_lock: &mut Option<SizeLock>,
     axis: SizeAxis,
@@ -730,7 +750,7 @@ fn type_total(
 ) -> bool {
     let before = spec.clone();
     let ratio = size_lock.map(|lock| lock.ratio);
-    let Some(fit) = set_total_in_draft(spec, axis, target, ratio) else {
+    let Some(fit) = set_total_in_draft(tree, spec, axis, target, ratio) else {
         return false;
     };
     if let Some(lock) = size_lock.as_mut() {
@@ -751,23 +771,22 @@ fn type_total(
     flag_total(ui, typed, &fit, target, unit);
     if fit.raised {
         let raised = target < fit.range.0;
-        set_total_in_draft(spec, axis, shown_end(fit.range, raised), ratio);
+        set_total_in_draft(tree, spec, axis, shown_end(fit.range, raised), ratio);
     }
     if let Some(((low, high), true)) = fit.other {
         let other_axis = match axis {
             SizeAxis::Width => SizeAxis::Height,
             SizeAxis::Height => SizeAxis::Width,
         };
-        let applied =
-            stokesforge_app_state::frame_sizes::figure_extent(spec).map(
-                |extent| match other_axis {
-                    SizeAxis::Width => extent.0,
-                    SizeAxis::Height => extent.1,
-                },
-            );
+        let applied = stokesforge_app_state::frame_sizes::figure_extent(tree, spec).map(|extent| {
+            match other_axis {
+                SizeAxis::Width => extent.0,
+                SizeAxis::Height => extent.1,
+            }
+        });
         let below = applied.is_some_and(|size| (size - low).abs() <= (size - high).abs());
         flag_total_bound(ui, 1 - typed, below, (low, high), unit);
-        set_total_in_draft(spec, other_axis, shown_end((low, high), below), None);
+        set_total_in_draft(tree, spec, other_axis, shown_end((low, high), below), None);
     }
     *spec != before
 }
@@ -844,7 +863,7 @@ fn round_down_in_unit(points: f64, unit: LengthUnit) -> f64 {
 /// goes through the draft like every field of the window; going free leaves
 /// every plot area where it is drawn, going back applies the grid rules of the
 /// model.
-fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
+fn placement_row(form: &mut Form<'_>, tree: &Tree, spec: &mut PlotSpec) -> bool {
     let options = [
         ChoiceOption::new(false, tr!("plot-size-placement-grid")),
         ChoiceOption::new(true, tr!("plot-size-placement-free")),
@@ -853,7 +872,7 @@ fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
     let changed = form.row(tr!("plot-size-placement"), |ui| {
         choice(ui, "plot_layer_placement", &mut free, &options)
     });
-    changed && set_placement_in_draft(spec, free)
+    changed && set_placement_in_draft(tree, spec, free)
 }
 
 /// General › Size of a free graph (#398, #426): the Figure size first, the
@@ -861,6 +880,7 @@ fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
 /// plot area rows are in Advanced ([`free_plot_area_rows`]).
 fn free_size_section(
     form: &mut Form<'_>,
+    tree: &Tree,
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
@@ -870,15 +890,22 @@ fn free_size_section(
 ) -> bool {
     form.section(tr!("plot-size"));
     let Some(layout) = layout else {
-        return placement_row(form, spec);
+        return placement_row(form, tree, spec);
     };
     // The extent as frames and bands add up, not the whole-point size: a total
     // typed and reached reads back as typed (#407).
     let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
         .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
-    let mut commit = total_row(form, spec, size_lock, (total_width, total_height), unit);
+    let mut commit = total_row(
+        form,
+        tree,
+        spec,
+        size_lock,
+        (total_width, total_height),
+        unit,
+    );
     form.note_dimmed(tr!("plot-size-figure-note"));
-    commit |= placement_row(form, spec);
+    commit |= placement_row(form, tree, spec);
     if free_fields(spec, panel).is_none() {
         return commit;
     }
@@ -3303,6 +3330,7 @@ mod tests {
     fn minimum_width(spec: &PlotSpec) -> f64 {
         let mut probe = spec.clone();
         stokesforge_app_state::frame_sizes::set_total_in_draft(
+            stokesforge_core::Project::new("t").unwrap().tree(),
             &mut probe,
             super::SizeAxis::Width,
             1.0,
@@ -3521,9 +3549,12 @@ mod tests {
             "the raise must bend the ratio for this test to prove anything: {w1} x {h1}"
         );
         let shown = total_text(
-            stokesforge_app_state::frame_sizes::figure_extent(&harness.model())
-                .unwrap()
-                .0,
+            stokesforge_app_state::frame_sizes::figure_extent(
+                stokesforge_core::Project::new("t").unwrap().tree(),
+                &harness.model(),
+            )
+            .unwrap()
+            .0,
         );
         type_into(&context, &mut harness, &shown, "20");
         let (width, height) = image_size(&harness.model());
@@ -3676,7 +3707,9 @@ mod tests {
         spec.frame_heights = vec![250.0];
         if free {
             assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
-                spec, true
+                stokesforge_core::Project::new("t").unwrap().tree(),
+                spec,
+                true
             ));
             for index in 0..2 {
                 let panel = spec.panels.get_mut(index).unwrap();

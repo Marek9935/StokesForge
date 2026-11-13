@@ -8,9 +8,7 @@
 //! pixels.
 //!
 //! The preamble is on a single line, framed by two comments that draw nothing,
-//! so it adds no line and no space to a title. A text that starts with a
-//! markup line marker (`- `, `= `…) gets a newline after it instead, so the
-//! marker still starts a line. [`strip_preamble`] drops it
+//! so it adds no line and no space to a title. [`strip_preamble`] drops it
 //! again: the `epaint` fallback of invariant 10 shows and measures what the
 //! user typed, never the `#let`s.
 
@@ -55,21 +53,6 @@ impl VariableValues {
 const START: &str = "/*sf-vars*/";
 /// Closes the preamble.
 const END: &str = "/*sf-end*/";
-/// Closes the preamble of a text that starts with a line marker: the text then
-/// starts on its own line, so the marker keeps its meaning.
-const END_LINE: &str = "/*sf-end-nl*/\n";
-
-/// True if `text` starts with a markup line marker (`= `, `- `, `+ `, `/ `,
-/// `1. `), which only means something at the start of a line.
-fn starts_with_line_marker(text: &str) -> bool {
-    let rest = text.trim_start_matches(['=', ' ', '\t']);
-    let heading = text.starts_with('=') && rest.len() < text.len();
-    let digits = text.trim_start_matches(|c: char| c.is_ascii_digit());
-    let numbered = digits.len() < text.len() && digits.starts_with(". ");
-    let bullet =
-        matches!(text.chars().next(), Some('-' | '+' | '/')) && text[1..].starts_with([' ', '\t']);
-    heading || numbered || bullet
-}
 
 fn collect_identifiers(node: &SyntaxNode, used: &mut Vec<String>) {
     if node.kind() == SyntaxKind::Ident {
@@ -117,12 +100,7 @@ pub fn bind(text: &str, values: &VariableValues) -> String {
     if preamble.is_empty() {
         return text.to_owned();
     }
-    let end = if starts_with_line_marker(text) {
-        END_LINE
-    } else {
-        END
-    };
-    format!("{START}{preamble}{end}{text}")
+    format!("{START}{preamble}{END}{text}")
 }
 
 /// True if `text` uses a variable as code (a math identifier is none).
@@ -244,9 +222,6 @@ pub fn strip_preamble(text: &str) -> &str {
         return text;
     };
     loop {
-        if let Some(after) = rest.strip_prefix(END_LINE) {
-            return after;
-        }
         if let Some(after) = rest.strip_prefix(END) {
             return after;
         }
@@ -324,24 +299,18 @@ mod tests {
         assert_eq!(plain_text(&bound).as_deref(), Some("Abs (mM)"));
     }
 
-    /// Witness: the old same-line preamble draws « - Abs » as plain text, the
-    /// minus included, instead of a list item.
+    /// A line marker typed at the start is no list item, bound or not: the
+    /// layout puts its own strut on the same line as the text. Witness: a
+    /// newline after the preamble turns `- Abs` into a list.
     #[test]
-    fn a_line_marker_keeps_its_meaning() {
+    fn a_line_marker_behaves_like_unbound() {
         let values = values("Abs", "");
-        for (typed, same) in [
-            ("- #ln", "\n- Abs"),
-            ("= #ln", "\n= Abs"),
-            ("+ #ln", "\n+ Abs"),
-        ] {
+        for (typed, plain) in [("- #ln", "- Abs"), ("= #ln", "= Abs"), ("+ #ln", "+ Abs")] {
             let bound = bind(typed, &values);
-            assert_ne!(plain_text(&bound), plain_text(&same.replace('\n', "")));
-            assert_eq!(plain_text(&bound), plain_text(same), "{typed}");
+            assert!(!bound.contains('\n'), "{bound:?}");
+            assert_eq!(plain_text(&bound), plain_text(plain), "{typed}");
             assert_eq!(strip_preamble(&bound), typed);
         }
-        // A dash that is no marker stays on the same line.
-        assert!(!bind("-#ln", &values).contains('\n'));
-        assert!(!bind("a - #ln", &values).contains('\n'));
     }
 
     fn sample_with_title(title: &str) -> crate::sample::Sample {

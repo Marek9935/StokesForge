@@ -1921,3 +1921,49 @@ fn a_handle_sliding_under_the_press_does_not_take_over_a_move() {
         "a move expected, got {signals:?}"
     );
 }
+
+/// #501: a graph title `#ln` is hit where the **bound** title is drawn. The
+/// long name is much wider than the source `#ln`: a point far to one side of
+/// the center is on the drawn title and off the raw source. Witness: the
+/// painted figure built from the unbound spec leaves that point to the void.
+#[test]
+fn a_variable_title_is_hit_where_the_bound_text_is_drawn() {
+    use stokesforge_render_egui::TextTarget;
+    let fixture = Fixture::with_title("#ln");
+    fixture
+        .handle()
+        .execute(Command::SetColumnMeta {
+            column: fixture.column,
+            meta: ColumnMeta {
+                long_name: "Absorbance of a very long named sample, measured twice".to_owned(),
+                ..ColumnMeta::default()
+            },
+        })
+        .expect("meta");
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+    let (center, size, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("title drawn");
+    assert!(size.x > 150.0, "the bound title is wide: {size:?}");
+    let off_center = center + egui::vec2(size.x * 0.4, 0.0);
+    assert_eq!(
+        view.text_target_at(off_center),
+        Some(TextTarget::Title),
+        "a point of the drawn long title"
+    );
+    // The stored title is still the source.
+    let stored = match fixture
+        .snapshot()
+        .tree
+        .get(fixture.graph)
+        .expect("graph")
+        .kind()
+    {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.title.clone(),
+        _ => panic!("not a graph"),
+    };
+    assert_eq!(stored, "#ln");
+}

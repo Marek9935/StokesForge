@@ -1650,7 +1650,11 @@ mod tests {
     #[test]
     fn a_figure_size_typed_on_a_regular_grid_resizes_the_figure() {
         let mut bench = Bench::new(2, false);
-        let before = stokesforge_app_state::frame_sizes::figure_extent(&bench.spec()).unwrap();
+        let before = stokesforge_app_state::frame_sizes::figure_extent(
+            stokesforge_core::Project::new("t").unwrap().tree(),
+            &bench.spec(),
+        )
+        .unwrap();
         let image = bench.view.layout_image().expect("image");
         let unit = bench.state.length_unit();
         let value = crate::number_field::format_value(
@@ -1691,7 +1695,11 @@ mod tests {
         assert_eq!(*axis, SizeAxis::Width);
         assert!((target - LengthUnit::Cm.to_points(40.0)).abs() < 0.01);
         bench.apply(sent);
-        let after = stokesforge_app_state::frame_sizes::figure_extent(&bench.spec()).unwrap();
+        let after = stokesforge_app_state::frame_sizes::figure_extent(
+            stokesforge_core::Project::new("t").unwrap().tree(),
+            &bench.spec(),
+        )
+        .unwrap();
         assert!(after.0 > before.0 + 10.0, "{before:?} -> {after:?}");
         bench.session.shutdown().unwrap();
     }
@@ -1971,7 +1979,11 @@ mod tests {
         for locked in [false, true] {
             let mut bench = Bench::new(2, false);
             let spec = bench.spec();
-            let (w, h) = stokesforge_app_state::frame_sizes::figure_extent(&spec).unwrap();
+            let (w, h) = stokesforge_app_state::frame_sizes::figure_extent(
+                stokesforge_core::Project::new("t").unwrap().tree(),
+                &spec,
+            )
+            .unwrap();
             if locked {
                 bench
                     .state
