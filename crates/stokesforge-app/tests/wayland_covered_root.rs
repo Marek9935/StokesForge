@@ -14,78 +14,25 @@
 
 #![cfg(target_os = "linux")]
 
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The compositor stack, killed by process group on drop.
-struct Compositor {
-    leader: Child,
-    socket: String,
-}
-
-impl Compositor {
-    fn start() -> Option<Self> {
-        for tool in ["mutter", "dbus-run-session"] {
-            if Command::new(tool)
-                .arg("--version")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_err()
-            {
-                eprintln!("skipped: `{tool}` is not installed");
-                return None;
-            }
-        }
-        let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
-        // One socket per test: the tests of this binary share a pid and run in
-        // parallel, and two probes on one compositor would cover each other.
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let socket = format!(
-            "sf-457-test-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let mut cmd = Command::new("dbus-run-session");
-        cmd.args([
-            "--",
-            "mutter",
-            "--headless",
-            "--no-x11",
-            "--wayland-display",
-        ])
-        .arg(&socket)
-        .args(["--virtual-monitor", "1400x900"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-        // Own process group: one kill takes the bus and the compositor.
-        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-        let leader = cmd.spawn().ok()?;
-        let compositor = Self { leader, socket };
-        let deadline = Instant::now() + Duration::from_secs(15);
-        while !runtime.join(&compositor.socket).exists() {
-            if Instant::now() > deadline {
-                eprintln!("skipped: the headless compositor opened no socket");
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        Some(compositor)
-    }
-}
-
-impl Drop for Compositor {
-    fn drop(&mut self) {
-        let group = format!("-{}", self.leader.id());
-        let _ = Command::new("kill").args(["-KILL", "--", &group]).status();
-        let _ = self.leader.wait();
-    }
-}
+#[path = "support/compositor.rs"]
+mod compositor;
+use compositor::Compositor;
 
 /// Builds and runs the probe under the compositor; returns (exit success, stdout).
 fn run_probe(compositor: &Compositor, idle: bool, two: bool) -> (bool, String) {
+    run_probe_env(compositor, idle, two, &[])
+}
+
+/// Same with extra environment variables (the single-state modes of #475).
+fn run_probe_env(
+    compositor: &Compositor,
+    idle: bool,
+    two: bool,
+    extra: &[(&str, &str)],
+) -> (bool, String) {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let built = Command::new(cargo)
         .args([
@@ -109,8 +56,20 @@ fn run_probe(compositor: &Compositor, idle: bool, two: bool) -> (bool, String) {
         .env("WGPU_BACKEND", "gl")
         .env("PROBE_IDLE", if idle { "1" } else { "0" })
         .env("PROBE_TWO", if two { "1" } else { "0" })
+        .envs(extra.iter().copied())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(if std::env::var_os("PROBE_STDERR").is_some() {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        });
+    if let Some(display) = &compositor.x_display {
+        // X11 through Xwayland: no Wayland socket for the probe, so winit picks X11.
+        cmd.env_remove("WAYLAND_DISPLAY").env("DISPLAY", display);
+        if let Some(auth) = &compositor.x_auth {
+            cmd.env("XAUTHORITY", auth);
+        }
+    }
     let mut child = cmd.spawn().expect("probe starts");
     let deadline = Instant::now() + Duration::from_secs(40);
     let status = loop {
@@ -168,4 +127,54 @@ fn a_covered_detached_window_is_not_reported_occluded() {
         ok,
         "a covered child was reported occluded, or the root stalled:\n{out}"
     );
+}
+
+// #475 probe: one state behind one lock, no `set_reports_occlusion`. The three
+// tests below say whether the winit frame-starvation patch and the fork can go.
+
+#[test]
+#[ignore = "manual: #475 probe, needs mutter and dbus-run-session, see the module doc"]
+fn single_state_without_opt_in_keeps_the_covering_window_served() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    // Root `ui` count flat, every gesture applied and painted by the child's own pass.
+    let (ok, out) = run_probe_env(&compositor, false, false, &[("PROBE_MODE", "single")]);
+    println!("{out}");
+    assert!(ok, "the single-state child was not served alone:\n{out}");
+}
+
+#[test]
+#[ignore = "manual: #475 probe, needs mutter and dbus-run-session, see the module doc"]
+fn single_state_child_closes_itself_with_no_root_pass() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    let (ok, out) = run_probe_env(
+        &compositor,
+        false,
+        false,
+        &[("PROBE_MODE", "single"), ("PROBE_REATTACH", "1")],
+    );
+    println!("{out}");
+    assert!(ok, "the child could not close itself:\n{out}");
+}
+
+#[test]
+#[ignore = "manual: #475 probe, needs mutter and dbus-run-session, see the module doc"]
+fn single_state_with_every_window_hidden_reports_what_still_runs() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    // A second maximised process covers root and child: informative, the numbers
+    // are the answer (printed with --nocapture); the test only fails if the probe
+    // itself cannot run to its end.
+    let (ok, out) = run_probe_env(
+        &compositor,
+        false,
+        false,
+        &[("PROBE_MODE", "single"), ("PROBE_COVER", "1")],
+    );
+    println!("{out}");
+    assert!(ok, "the hidden-case probe did not complete:\n{out}");
 }

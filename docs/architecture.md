@@ -82,6 +82,20 @@ guards.
 | `stokesforge-arch-guard` | shared reading of the `Cargo.toml` files for the dependency guards (dev-dependency) | [tests](tests.md) |
 | `stokesforge-logo-gen` | release tool (#388): checks the framing of the two icon SVG (transparent margin, centred on the visual weight across, no tile, no `feDisplacementMap`/`feImage`) and writes the PNG trees (16 to 512 px) and the two `.ico`; reproducible bytes; depends on no workspace crate, never linked into the application | [application](application/shell-and-code.md) |
 
+## The server thread (#475)
+
+One background thread (`stokesforge-server`, `stokesforge-app/src/app/server.rs`) owns the
+follow-up of the work that does not depend on painting: autosave, the end of a script run,
+the end of a recalculation, the progress of an import. It shares **one** `AppState` with the
+interface through one lock (`parking_lot::Mutex`, owned guard `StateSlot`): the interface
+holds the guard during a pass (`logic`, `ui`, `on_exit`) and gives it back after, the thread
+only `try_lock`s between two passes (busy: again in 10 ms). The tick itself is pure
+(`AppState::server_tick(now)` in `stokesforge-app-state/src/state/server.rs`, injected clock);
+the blocking autosave write runs with the lock released. Windows are woken by one function
+(`wake()`), only when the tick found something they show changed. Applying a finished import
+stays in the paint pass. Detached windows keep their fork; nothing visible changed (step 1).
+Rules and tests: `.claude/rules/app.md`, `docs/application/shell-and-code.md`, `docs/tests.md`.
+
 ## The three separation lines
 
 The split is not decorative; each of these three boundaries is

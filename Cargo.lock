@@ -5135,6 +5135,7 @@ dependencies = [
  "fluent-syntax",
  "i18n-embed-fl",
  "image",
+ "parking_lot",
  "serde",
  "serde_json",
  "stokesforge-analysis",

@@ -318,7 +318,8 @@ fn a_dialog_closed_in_a_small_window_keeps_the_size_the_user_chose() {
     let mut bench = Bench::new();
     bench.start();
     let open_and_cancel = |bench: &mut Bench, size: (f32, f32)| {
-        bench.app.state.dispatch(bench.open_plot_settings());
+        let open = bench.open_plot_settings();
+        bench.app.state.dispatch(open);
         let mut root = bench.root(Pass::root().size(size.0, size.1));
         for _ in 0..5 {
             root = bench.root(Pass::root().size(size.0, size.1));

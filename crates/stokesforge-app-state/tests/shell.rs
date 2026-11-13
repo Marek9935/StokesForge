@@ -10569,6 +10569,178 @@ fn wait_import(state: &mut AppState) {
     }
 }
 
+/// A finished import is applied by the server thread's three steps (#475):
+/// the tick takes it out, the commands run detached from the state, the finish
+/// takes the result back. One history entry, the new workbooks flagged for the
+/// paint pass, the recent files queued.
+#[test]
+fn a_finished_import_is_applied_by_the_tick_in_one_history_entry() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let root_children = |state: &AppState| {
+        state
+            .tree()
+            .node(state.tree().root())
+            .unwrap()
+            .children()
+            .len()
+    };
+    let before = root_children(&state);
+    let files: Vec<std::path::PathBuf> = (0..2)
+        .map(|i| {
+            let file = dir.path().join(format!("serie{i}.csv"));
+            std::fs::write(&file, "1,10\n2,20\n").unwrap();
+            file
+        })
+        .collect();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Serie"),
+        paths: files,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut run = loop {
+        if let Some(run) = state.server_tick(std::time::Instant::now()).import {
+            break run;
+        }
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert!(state.import_is_applying(), "taken out, not yet applied");
+    assert_eq!(root_children(&state), before, "nothing created yet");
+    assert!(!state.can_new_project(), "a new project waits for the end");
+    assert!(
+        state
+            .server_tick(std::time::Instant::now())
+            .import
+            .is_none(),
+        "one application at a time"
+    );
+    run.execute();
+    let in_session = session.handle().snapshot().unwrap();
+    assert_eq!(
+        in_session
+            .tree
+            .node(in_session.tree.root())
+            .unwrap()
+            .children()
+            .len(),
+        before + 2,
+        "created in the session"
+    );
+    assert!(state.import_apply_finish(run));
+    assert!(!state.import_is_applying());
+    assert_eq!(root_children(&state), before + 2, "the snapshot is fresh");
+    assert_eq!(state.take_books_to_open().len(), 2);
+    assert!(state.take_books_to_open().is_empty(), "once each");
+    assert_eq!(state.take_imported_paths().len(), 2);
+    assert!(state.status().is_some_and(|status| !status.is_error()));
+    state.dispatch(Action::Undo);
+    assert_eq!(root_children(&state), before);
+    assert!(!state.can_undo(), "a single entry for the whole batch");
+}
+
+/// A gesture of the interface arriving while the import's macro is open is
+/// refused (the import runs on a sender of its own, like a script, #21): it never
+/// joins the Import entry, and undoing the import leaves the rest alone.
+#[test]
+fn a_ui_edit_during_the_import_macro_is_refused_and_never_joins_the_entry() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    state.dispatch(Action::AddColumn { sheet });
+    let column = state.visible_columns(sheet)[0].0;
+    let root_children =
+        |tree: &stokesforge_core::Tree| tree.node(tree.root()).unwrap().children().len();
+    let before = root_children(&session.handle().snapshot().unwrap().tree);
+    let file = dir.path().join("wide.csv");
+    let row: Vec<String> = (0..600).map(|c| c.to_string()).collect();
+    std::fs::write(&file, format!("{}\n", row.join(",")).repeat(10)).unwrap();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Wide"),
+        paths: vec![file],
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut run = loop {
+        if let Some(run) = state.server_tick(std::time::Instant::now()).import {
+            break run;
+        }
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let worker = std::thread::spawn(move || {
+        run.execute();
+        run
+    });
+    let busy = stokesforge_app_state::tr!("error-command-foreign-group");
+    let mut refused = false;
+    let mut accepted = 0;
+    while !worker.is_finished() && !refused {
+        state.dispatch(Action::CommitCell {
+            column,
+            row: 0,
+            text: (accepted + 1).to_string(),
+        });
+        let status = state.status().unwrap();
+        if status.is_error() && status.text == busy {
+            refused = true;
+        } else {
+            accepted += 1;
+        }
+    }
+    let run = worker.join().unwrap();
+    assert!(
+        refused,
+        "an edit during the macro is refused ({accepted} accepted before; last status {:?})",
+        state.status().map(|s| s.text.clone())
+    );
+    state.import_apply_finish(run);
+    state.refresh();
+    // The edits accepted before the macro are their own entries; one Undo takes
+    // the whole import and nothing else.
+    state.dispatch(Action::Undo);
+    assert_eq!(root_children(state.tree()), before);
+    assert_eq!(
+        state.cell_text(column, 0),
+        accepted.to_string(),
+        "the user's edits before the import are intact"
+    );
+}
+
+/// The paint pass has no part in it: `poll_import` finds nothing left to do.
+#[test]
+fn an_import_taken_by_the_tick_is_not_applied_twice_by_the_paint_pass() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let file = dir.path().join("one.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("One"),
+        paths: vec![file],
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut run = loop {
+        if let Some(run) = state.server_tick(std::time::Instant::now()).import {
+            break run;
+        }
+        assert!(std::time::Instant::now() < deadline, "import too long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert!(!state.poll_import(), "the job is no longer the state's");
+    run.execute();
+    state.import_apply_finish(run);
+    assert!(!state.poll_import());
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+}
+
 /// A drop of a big file hands control back right away (#266): reading and
 /// analysis happen on the background thread, nothing is created yet.
 #[test]
@@ -14891,6 +15063,169 @@ mod autosave {
         change(&mut state);
         state.poll_autosave(t0 + PERIOD);
     }
+
+    // -- The server thread's three steps (#475) --
+
+    /// Deadline reached: a job. Finished with Ok: the next tick has none (the
+    /// copy is marked as covering the project).
+    #[test]
+    fn the_server_tick_hands_back_a_job_at_the_deadline_and_finishing_marks_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        assert!(state.server_tick(t0).autosave.is_none());
+        change(&mut state);
+        let almost = t0 + PERIOD - Duration::from_secs(1);
+        assert!(state.server_tick(almost).autosave.is_none());
+        let due = t0 + PERIOD;
+        let job = state.server_tick(due).autosave.expect("a copy is due");
+        assert!(
+            copies(&recovery).is_empty(),
+            "nothing written by the decision"
+        );
+        // A job in flight: no second one.
+        assert!(state.server_tick(due).autosave.is_none());
+        let result = job.run();
+        assert!(result.is_ok());
+        state.finish_autosave(&job, result);
+        assert_eq!(copies(&recovery).len(), 1);
+        assert!(state.server_tick(due + 2 * PERIOD).autosave.is_none());
+    }
+
+    /// New project while the copy is being written: the late result is dropped,
+    /// the mark of the new project stays, no warning for a failure.
+    #[test]
+    fn a_result_arriving_after_new_project_is_discarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.server_tick(t0);
+        change(&mut state);
+        let due = t0 + PERIOD;
+        let job = state.server_tick(due).autosave.expect("job");
+        state.dispatch(Action::NewProject {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        let result = job.run();
+        let messages = state.recorded_count();
+        assert!(!state.finish_autosave(&job, result));
+        // The server thread removes the old slot after unlocking.
+        state.take_garbage().dispose();
+        assert!(
+            copies(&recovery).is_empty(),
+            "the old copy goes with its project: {:?}",
+            copies(&recovery)
+        );
+        // The new project is clean: the old job's revisions must not re-arm it.
+        assert!(state.server_tick(due + 2 * PERIOD).autosave.is_none());
+        assert_eq!(state.recorded_count(), messages);
+        // A failure of a stale job says nothing.
+        change(&mut state);
+        let job = state.server_tick(due + 4 * PERIOD).autosave.expect("job");
+        state.dispatch(Action::NewProject {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        let failure = Err(stokesforge_session::SessionError::Disconnected);
+        let messages = state.recorded_count();
+        state.finish_autosave(&job, failure);
+        assert_eq!(
+            state.recorded_count(),
+            messages,
+            "no warning for a stale job"
+        );
+    }
+
+    /// Quit while the copy is being written: the window waits for the end of the
+    /// write and says why, once (#475); the write ends silently, then the slot
+    /// goes away like at a clean close and the window may close.
+    #[test]
+    fn quitting_during_a_job_waits_for_it_with_a_message_and_leaves_no_slot_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.server_tick(t0);
+        change(&mut state);
+        let job = state.server_tick(t0 + PERIOD).autosave.expect("job");
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        assert!(!state.take_quit_ready(), "not closed while the write runs");
+        assert!(state.quit_waits_for_autosave());
+        assert_eq!(
+            state.status().expect("a message").text,
+            stokesforge_app_state::tr!("status-quit-waiting-autosave")
+        );
+        let said = state.recorded_count();
+        assert!(!state.take_quit_ready());
+        assert_eq!(state.recorded_count(), said, "said once");
+        // The write ends after the quit gesture: it brings the file back.
+        let result = job.run();
+        assert_eq!(copies(&recovery).len(), 1, "the write recreated the file");
+        assert!(
+            state.finish_autosave(&job, result),
+            "the end of the wait wakes the window"
+        );
+        state.take_garbage().dispose();
+        assert!(copies(&recovery).is_empty(), "{:?}", copies(&recovery));
+        assert!(state.take_quit_ready(), "closed as soon as the write ended");
+        assert!(!state.take_quit_ready(), "once only");
+    }
+
+    /// No write in flight: Quit closes at once, with no message.
+    #[test]
+    fn quitting_with_no_job_does_not_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        assert!(state.take_quit_ready());
+        assert!(state.status().is_none_or(
+            |status| status.text != stokesforge_app_state::tr!("status-quit-waiting-autosave")
+        ));
+    }
+
+    /// Nothing changed: the tick says so and gives the time left (a constant
+    /// would be a poll); `None` with the autosave off.
+    #[test]
+    fn an_idle_tick_changes_nothing_and_gives_the_time_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        let first = state.server_tick(t0);
+        assert!(!first.changed);
+        assert_eq!(first.next, Some(PERIOD));
+        let later = state.server_tick(t0 + Duration::from_secs(100));
+        assert!(!later.changed);
+        assert_eq!(later.next, Some(PERIOD - Duration::from_secs(100)));
+        state.dispatch(Action::SetAutosave(false));
+        let off = state.server_tick(t0 + Duration::from_secs(101));
+        assert!(!off.changed);
+        assert_eq!(off.next, None);
+    }
+
+    /// A recalculation is followed every 100 ms by the thread, and its end
+    /// is reported as one change.
+    #[test]
+    fn a_recalculation_ending_is_collected_by_the_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start(heavy_formula_project(), &dir.path().join("l.stf"));
+        state.dispatch(Action::AddGraph);
+        assert!(state.recalc_work().is_some());
+        let tick = state.server_tick(Instant::now());
+        assert_eq!(tick.next, Some(Duration::from_millis(100)));
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while state.recalc_work().is_some() {
+            assert!(Instant::now() < deadline, "recalculation too long");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(state.server_tick(Instant::now()).changed, "the end shows");
+        assert!(!state.server_tick(Instant::now()).changed);
+    }
 }
 
 // -- Issue #382: Help > About StokesForge --
@@ -18977,4 +19312,34 @@ fn sub_header_roles_follow_the_marker_with_two_header_lengths() {
         assert_eq!(table.row_count(), 2, "{header:?}");
         assert_eq!(table.columns.len(), 2);
     }
+}
+
+/// Quit during the write of a recovery copy (#475, M6): once the window has
+/// taken Quit, the deadline is long past and the project still looks dirty,
+/// yet no second copy is handed out while the window closes.
+#[test]
+fn quit_during_an_autosave_write_hands_out_no_second_copy() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state) = start_demo(dir.path());
+    state.set_recovery_dir(Some(dir.path().join("recovery")));
+    state.set_quit_without_prompt(true);
+    let start = std::time::Instant::now();
+    let _ = state.server_tick(start);
+    state.dispatch(Action::AddGraph);
+    let due = start + std::time::Duration::from_secs(3600);
+    let job = state.server_tick(due).autosave.expect("a copy is due");
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(!state.take_quit_ready(), "the write is in flight");
+    let result = job.run();
+    state.finish_autosave(&job, result);
+    // What the thread does after unlocking: the old slot's files go.
+    state.take_garbage().dispose();
+    assert!(state.take_quit_ready(), "the write ended: quit is ready");
+    let later = due + std::time::Duration::from_secs(1);
+    assert!(
+        state.server_tick(later).autosave.is_none(),
+        "a second copy was handed out while the window closes"
+    );
 }

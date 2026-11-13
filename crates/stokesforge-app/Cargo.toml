@@ -56,6 +56,10 @@ egui_extras = { version = "0.36.2", features = ["svg"] }
 # `app::system_clipboard_text`.
 arboard = "3.6.1"
 anyhow = "1"
+# The shared application state and its owned guard (#475, `app/server.rs`).
+# Already in the tree through epaint; `arc_lock` gives the guard that owns its
+# `Arc<Mutex<_>>`.
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Multilingual interface (issue #41, work package #39): the catalog, the

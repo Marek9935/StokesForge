@@ -2616,3 +2616,106 @@ fn the_application_id_is_the_desktop_name() {
         );
     }
 }
+
+// -- The server thread's lock discipline (#475) --
+
+const SERVER_MODULE: &str = "app/server.rs";
+
+/// The calls of `needles` in the production code of the application crate
+/// outside [`SERVER_MODULE`].
+fn calls_outside_server(sources: &[SourceFile], needles: &[&str]) -> Vec<String> {
+    sources
+        .iter()
+        .filter(|file| file.path != SERVER_MODULE && !file.path.starts_with("app-state/"))
+        .flat_map(|file| {
+            file.production()
+                .code_as_text()
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| needles.iter().any(|needle| line.contains(needle)))
+                .map(|(index, _)| format!("src/{}:{}", file.path, index + 1))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The background follow-up (autosave, script, recalculation) is the server
+/// thread's; the paint pass reaches it only through the fallback of
+/// `app/server.rs`. And the thread wakes the windows through `wake()` alone.
+#[test]
+fn the_background_polls_and_the_wake_live_only_in_the_server_module() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.path == SERVER_MODULE),
+        "{SERVER_MODULE} not read: the guard would no longer see the module"
+    );
+    let offenders = calls_outside_server(
+        &sources,
+        &[".poll_autosave(", ".poll_script(", ".poll_recalc("],
+    );
+    assert!(
+        offenders.is_empty(),
+        "poll_autosave / poll_script / poll_recalc outside app/server.rs \
+         (#475, lock discipline in .claude/rules/app.md): {offenders:?}"
+    );
+    // The thread wakes the windows in one place, and `logic` asks for no wake.
+    let server = sources
+        .iter()
+        .find(|f| f.path == SERVER_MODULE)
+        .expect("server module");
+    assert_eq!(
+        server
+            .production()
+            .code_as_text()
+            .matches("request_repaint_of(")
+            .count(),
+        1,
+        "the thread wakes the windows only in wake() (one request_repaint_of)"
+    );
+    let shell = sources.iter().find(|f| f.path == "app.rs").expect("app.rs");
+    let text = shell.production().code_as_text();
+    let start = text.find("fn logic(").expect("logic");
+    let end = text[start..]
+        .find("\n    }\n")
+        .map_or(text.len(), |e| start + e);
+    assert!(
+        !text[start..end].contains("request_repaint"),
+        "logic() schedules no wake: the server thread owns it (#475)"
+    );
+}
+
+#[test]
+fn the_server_guard_sees_a_call_outside_the_module() {
+    let sources = vec![
+        file("app/server.rs", "fn a(s: &mut S) { s.poll_script(); }"),
+        file("app.rs", "fn b(s: &mut S) { s.poll_recalc(); }"),
+    ];
+    assert_eq!(
+        calls_outside_server(&sources, &[".poll_recalc(", ".poll_script("]),
+        vec!["src/app.rs:1".to_string()]
+    );
+}
+
+/// The thread only ever `try_lock`s: a blocking `.lock()` or `lock_arc()` of
+/// the shared state is the UI side's (`StateSlot`), never the thread's.
+#[test]
+fn the_server_thread_never_blocks_on_the_lock() {
+    let sources = sources::sources();
+    let server = sources
+        .iter()
+        .find(|f| f.path == SERVER_MODULE)
+        .expect("server module");
+    let text = server.production().code_as_text();
+    for name in ["serve_once", "with_lock_retry"] {
+        let start = text.find(&format!("fn {name}")).expect("function");
+        let end = text[start..]
+            .find("\n}\n")
+            .map_or(text.len(), |e| start + e);
+        let body = &text[start..end];
+        assert!(body.contains("try_lock"), "{name} must use try_lock");
+        assert!(
+            !body.contains(".lock()") && !body.contains("lock_arc"),
+            "{name} blocks on the lock"
+        );
+    }
+}
