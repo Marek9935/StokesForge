@@ -279,6 +279,10 @@ pub struct ColumnFields {
     pub units: String,
     pub comments: String,
     pub x_prime: String,
+    /// The fields of every column of the worksheet, for `#col("C")` (#501).
+    /// Empty unless the text asked for it ([`with_sheet`]): `column_fields`
+    /// never fills it.
+    pub sheet: Vec<ColumnFields>,
 }
 
 impl ColumnFields {
@@ -309,7 +313,37 @@ pub fn column_fields(tree: &Tree, column: NodeId) -> Option<ColumnFields> {
             .and_then(|m| m.x_prime)
             .map(crate::number_format::format_grid)
             .unwrap_or_default(),
+        sheet: Vec::new(),
     })
+}
+
+/// The fields of every column of the worksheet that holds `column`, in sheet
+/// order (#501, `#col("C")`). Empty if `column` is not a column of the tree.
+pub fn sheet_fields(tree: &Tree, column: NodeId) -> Vec<ColumnFields> {
+    let Ok(Some(sheet)) = tree.parent(column) else {
+        return Vec::new();
+    };
+    let Ok(children) = tree.children(sheet) else {
+        return Vec::new();
+    };
+    children
+        .iter()
+        .filter_map(|id| column_fields(tree, *id))
+        .collect()
+}
+
+/// `fields` with its worksheet attached when `text` may call `col(…)` (#501):
+/// the other texts carry nothing extra.
+pub fn with_sheet(
+    mut fields: ColumnFields,
+    tree: &Tree,
+    column: NodeId,
+    text: &str,
+) -> ColumnFields {
+    if text.contains("col") {
+        fields.sheet = sheet_fields(tree, column);
+    }
+    fields
 }
 
 /// A graph text whose variables read a column (#501).
@@ -398,7 +432,12 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
         let fields = if series.row.is_some() {
             ColumnFields::default()
         } else {
-            column_fields(tree, series.y).unwrap_or_default()
+            with_sheet(
+                column_fields(tree, series.y).unwrap_or_default(),
+                tree,
+                series.y,
+                &series.name,
+            )
         };
         return SeriesLabel::Typed {
             name: series.name.clone(),
@@ -452,7 +491,7 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
         )),
         LegendTextFrom::Custom => SeriesLabel::Template {
             template: text.template.clone(),
-            fields,
+            fields: with_sheet(fields, tree, series.y, &text.template),
         },
     }
 }

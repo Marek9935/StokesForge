@@ -34,9 +34,28 @@ pub struct VariableValues {
     pub units: String,
     pub comments: String,
     pub x_prime: String,
+    /// The columns of the worksheet, for `#col("C")` (#501); each entry's
+    /// `short_name` is the key. Empty when the text does not ask for it.
+    pub sheet: Vec<VariableValues>,
+    /// What every field of an unknown column reads (`#col("Z").ln`): the
+    /// translated « broken reference », or empty where there is none (the
+    /// diagnosis).
+    pub unknown: String,
 }
 
 impl VariableValues {
+    /// Every field reads `text`: the values of a reference with no column.
+    pub fn all(text: &str) -> Self {
+        Self {
+            long_name: text.to_owned(),
+            short_name: text.to_owned(),
+            units: text.to_owned(),
+            comments: text.to_owned(),
+            x_prime: text.to_owned(),
+            ..Self::default()
+        }
+    }
+
     /// The text of one field.
     pub fn get(&self, field: LegendField) -> &str {
         match field {
@@ -57,6 +76,8 @@ impl From<&ColumnFields> for VariableValues {
             units: fields.units.clone(),
             comments: fields.comments.clone(),
             x_prime: fields.x_prime.clone(),
+            sheet: fields.sheet.iter().map(Self::from).collect(),
+            unknown: String::new(),
         }
     }
 }
@@ -73,27 +94,88 @@ const START: &str = "/*sf-vars*/";
 /// Closes the preamble.
 const END: &str = "/*sf-end*/";
 
-fn collect_identifiers(node: &SyntaxNode, used: &mut Vec<String>) {
-    if node.kind() == SyntaxKind::Ident {
-        if let Some(ident) = node.cast::<typst::syntax::ast::Ident>() {
-            used.push(ident.as_str().to_owned());
+/// What a text uses as code: the variable names, and `col(…)` (#501).
+#[derive(Debug, Default)]
+struct Used {
+    names: Vec<String>,
+    /// `col` is used.
+    col: bool,
+    /// The string literals passed to `col(…)`.
+    literals: Vec<String>,
+    /// `col` is called with something else than a literal (or not called):
+    /// the whole sheet is then at hand.
+    any_column: bool,
+}
+
+fn collect_identifiers(node: &SyntaxNode, used: &mut Used) {
+    use typst::syntax::ast;
+    match node.kind() {
+        // `x.ln`: the field is no variable.
+        SyntaxKind::FieldAccess => {
+            if let Some(target) = node.children().next() {
+                collect_identifiers(target, used);
+            }
+            return;
         }
+        SyntaxKind::FuncCall
+            if node
+                .children()
+                .next()
+                .and_then(|callee| callee.cast::<ast::Ident>())
+                .is_some_and(|ident| ident.as_str() == COL) =>
+        {
+            used.col = true;
+            let args = node
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Args);
+            let first = args.and_then(|args| {
+                args.children().find(|child| {
+                    !matches!(
+                        child.kind(),
+                        SyntaxKind::LeftParen | SyntaxKind::Space | SyntaxKind::Comma
+                    )
+                })
+            });
+            match first.and_then(|node| node.cast::<ast::Str>()) {
+                Some(literal) => used.literals.push(literal.get().to_string()),
+                None => used.any_column = true,
+            }
+            for child in node.children().skip(1) {
+                collect_identifiers(child, used);
+            }
+            return;
+        }
+        SyntaxKind::Ident => {
+            if let Some(ident) = node.cast::<ast::Ident>() {
+                if ident.as_str() == COL {
+                    used.col = true;
+                    used.any_column = true;
+                } else {
+                    used.names.push(ident.as_str().to_owned());
+                }
+            }
+        }
+        _ => {}
     }
     for child in node.children() {
         collect_identifiers(child, used);
     }
 }
 
-/// The variable names `text` uses as code. A name can only be used if the text
-/// mentions it: the parse is skipped otherwise.
-fn used_variables(text: &str) -> Vec<String> {
-    let mut used = Vec::new();
-    if VARIABLES
-        .iter()
-        .any(|(long, short, _)| text.contains(long) || text.contains(short))
+/// The function `col` of the preamble (#501).
+const COL: &str = "col";
+
+/// What `text` uses as code. A name can only be used if the text mentions it:
+/// the parse is skipped otherwise.
+fn used_in(text: &str) -> Used {
+    let mut used = Used::default();
+    if text.contains(COL)
+        || VARIABLES
+            .iter()
+            .any(|(long, short, _)| text.contains(long) || text.contains(short))
     {
         collect_identifiers(&parse(text), &mut used);
-        used.retain(|ident| {
+        used.names.retain(|ident| {
             VARIABLES
                 .iter()
                 .any(|(long, short, _)| ident == long || ident == short)
@@ -102,19 +184,59 @@ fn used_variables(text: &str) -> Vec<String> {
     used
 }
 
+/// One column as a Typst dictionary: both names of every variable.
+fn column_dictionary(values: &VariableValues) -> String {
+    let mut out = String::from("(");
+    for (long, short, field) in VARIABLES {
+        let quoted = typst_string(values.get(field));
+        out.push_str(&format!("{long}: {quoted}, {short}: {quoted}, "));
+    }
+    out.push(')');
+    out
+}
+
+/// `#let col(n) = (…).at(n, default: (…));` over the columns the text names
+/// (all of the sheet if it names none by a literal).
+fn col_definition(used: &Used, values: &VariableValues) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    let mut entries = String::new();
+    for column in &values.sheet {
+        let name = column.short_name.as_str();
+        let wanted = used.any_column || used.literals.iter().any(|literal| literal == name);
+        if wanted && !seen.contains(&name) {
+            seen.push(name);
+            entries.push_str(&format!(
+                "{}: {}, ",
+                typst_string(name),
+                column_dictionary(column)
+            ));
+        }
+    }
+    let dictionary = if entries.is_empty() {
+        "(:)".to_owned()
+    } else {
+        format!("({entries})")
+    };
+    let broken = column_dictionary(&VariableValues::all(&values.unknown));
+    format!("#let {COL}(n) = {dictionary}.at(n, default: {broken});")
+}
+
 /// `text` with a preamble that defines the variables it uses as code. A text
 /// that uses none is returned unchanged. A `#let` of the user in the text
 /// comes after the preamble and wins.
 pub fn bind(text: &str, values: &VariableValues) -> String {
-    let used = used_variables(text);
+    let used = used_in(text);
     let mut preamble = String::new();
     for (long, short, field) in VARIABLES {
         let quoted = typst_string(values.get(field));
         for name in [long, short] {
-            if used.iter().any(|ident| ident == name) {
+            if used.names.iter().any(|ident| ident == name) {
                 preamble.push_str(&format!("#let {name} = {quoted};"));
             }
         }
+    }
+    if used.col {
+        preamble.push_str(&col_definition(&used, values));
     }
     if preamble.is_empty() {
         return text.to_owned();
@@ -124,7 +246,8 @@ pub fn bind(text: &str, values: &VariableValues) -> String {
 
 /// True if `text` uses a variable as code (a math identifier is none).
 fn mentions(text: &str) -> bool {
-    !used_variables(text).is_empty()
+    let used = used_in(text);
+    !used.names.is_empty() || used.col
 }
 
 /// True if any Typst text of `spec` may use a variable.
@@ -162,23 +285,21 @@ pub fn bind_spec<'a>(tree: &Tree, spec: &'a PlotSpec, texts: &FigureTexts) -> Co
     if !any_mention(spec) {
         return Cow::Borrowed(spec);
     }
-    let values = |target: TextTarget| match text_context(tree, spec, target)
-        .and_then(|id| column_fields(tree, id))
-    {
-        Some(fields) => VariableValues::from(&fields),
-        None => {
-            let broken = texts.broken_reference.clone();
-            VariableValues {
-                long_name: broken.clone(),
-                short_name: broken.clone(),
-                units: broken.clone(),
-                comments: broken.clone(),
-                x_prime: broken,
+    let values = |text: &str, target: TextTarget| {
+        let context = text_context(tree, spec, target);
+        match context.and_then(|id| column_fields(tree, id).map(|fields| (id, fields))) {
+            Some((id, fields)) => {
+                let fields = stokesforge_core::resolve::with_sheet(fields, tree, id, text);
+                VariableValues {
+                    unknown: texts.broken_reference.clone(),
+                    ..VariableValues::from(&fields)
+                }
             }
+            None => VariableValues::all(&texts.broken_reference),
         }
     };
     let bound = |text: &str, target: TextTarget| -> Option<String> {
-        mentions(text).then(|| bind(text, &values(target)))
+        mentions(text).then(|| bind(text, &values(text, target)))
     };
     let mut out = spec.clone();
     if let Some(text) = bound(&spec.title, TextTarget::Graph) {
@@ -238,33 +359,29 @@ pub fn strip_preamble(text: &str) -> &str {
         if let Some(after) = rest.strip_prefix(END) {
             return after;
         }
-        // `#let name = "…";` — the string may hold anything, `;` and the end
-        // marker included: walk it with its escapes.
+        // `#let …;` — a string may hold anything, `;` and the end marker
+        // included: walk to the `;` outside any string, with its escapes.
         let Some(body) = rest.strip_prefix("#let ") else {
             return text;
         };
-        let Some(open) = body.find('"') else {
-            return text;
-        };
-        let mut chars = body[open + 1..].char_indices();
+        let mut chars = body.char_indices();
+        let mut in_string = false;
         let mut close = None;
         while let Some((index, character)) = chars.next() {
             match character {
-                '\\' => {
+                '\\' if in_string => {
                     chars.next();
                 }
-                '"' => {
-                    close = Some(open + 1 + index + 1);
+                '"' => in_string = !in_string,
+                ';' if !in_string => {
+                    close = Some(index + 1);
                     break;
                 }
                 _ => {}
             }
         }
-        let Some(close) = close else {
-            return text;
-        };
-        match body[close..].strip_prefix(';') {
-            Some(next) => rest = next,
+        match close {
+            Some(close) => rest = &body[close..],
             None => return text,
         }
     }
@@ -425,5 +542,88 @@ mod tests {
         let (sans, math) = resolve_fonts(&FontChoice::default()).unwrap();
         compile(&bound, 12.0, [0, 0, 0, 255], sans, math).expect("compiles");
         assert_eq!(strip_preamble(&bound), "#ln #u");
+    }
+
+    /// A sheet of two columns, `B` (Absorbance, AU) and `C`.
+    fn sheet_values(c_long: &str) -> VariableValues {
+        let column = |short: &str, long: &str, units: &str| VariableValues {
+            long_name: long.to_owned(),
+            short_name: short.to_owned(),
+            units: units.to_owned(),
+            ..Default::default()
+        };
+        VariableValues {
+            sheet: vec![column("B", "Absorbance", "AU"), column("C", c_long, "cps")],
+            unknown: "(broken)".to_owned(),
+            ..values("Absorbance", "AU")
+        }
+    }
+
+    /// #501 lot 4, test 1: a column's field is drawn literally. Witness: put
+    /// the value in as markup (no `typst_string`) and `*b*` turns bold.
+    #[test]
+    fn a_named_column_value_is_drawn_literally() {
+        let long = "A *b* \" \\";
+        let bound = bind("#col(\"C\").ln", &sheet_values(long));
+        assert_eq!(plain_text(&bound).as_deref(), Some(long));
+        let both = bind(
+            "#col(\"B\").ln/#col(\"C\").u/#col(\"C\").long-name",
+            &sheet_values("F"),
+        );
+        assert_eq!(plain_text(&both).as_deref(), Some("Absorbance/cps/F"));
+        assert_eq!(strip_preamble(&bound), "#col(\"C\").ln");
+    }
+
+    /// Test 3: an unknown name, or a call with no sheet, reads the broken
+    /// reference in every field, and the text still compiles. Witness: no
+    /// `default:` in the `.at`, the text fails to compile.
+    #[test]
+    fn an_unknown_column_reads_the_broken_reference() {
+        let bound = bind("#col(\"Z\").ln|#col(\"Z\").xp", &sheet_values("F"));
+        assert_eq!(plain_text(&bound).as_deref(), Some("(broken)|(broken)"));
+        let alone = VariableValues {
+            unknown: "(broken)".to_owned(),
+            ..Default::default()
+        };
+        let bound = bind("#col(\"B\").u", &alone);
+        assert_eq!(plain_text(&bound).as_deref(), Some("(broken)"));
+    }
+
+    /// A non-literal argument reads the whole sheet.
+    #[test]
+    fn a_computed_column_name_reads_the_whole_sheet() {
+        let bound = bind("#let n = \"C\";#col(n).ln", &sheet_values("F"));
+        assert_eq!(plain_text(&bound).as_deref(), Some("F"));
+    }
+
+    /// Test 4: `$col$` in math and a text without `col` are byte-identical.
+    /// Witness: an unconditional `col` preamble.
+    #[test]
+    fn col_is_a_variable_only_as_code() {
+        for text in ["$col$", "$col(x)$", "color red", "a.col", "Collected"] {
+            assert_eq!(bind(text, &sheet_values("F")), text);
+            assert!(!mentions(text), "{text}");
+        }
+        assert!(mentions("#col(\"B\").ln"));
+    }
+
+    #[test]
+    fn the_users_own_col_wins() {
+        let bound = bind(
+            "#let col(n) = (ln: \"mine\");#col(\"B\").ln",
+            &sheet_values("F"),
+        );
+        assert_eq!(plain_text(&bound).as_deref(), Some("mine"));
+    }
+
+    /// Test 6: the field diagnosis accepts the five variables of any column
+    /// and refuses another field. Witness: a plain `diagnose` (no preamble)
+    /// refuses `col` itself.
+    #[test]
+    fn the_diagnosis_knows_col_and_its_fields() {
+        assert_eq!(diagnose_text("#col(\"C\").ln"), None);
+        assert_eq!(diagnose_text("#col(\"Z\").u"), None);
+        assert_eq!(diagnose_text("#col(\"C\").xp #col(\"C\").comments"), None);
+        assert!(diagnose_text("#col(\"C\").nope").is_some());
     }
 }

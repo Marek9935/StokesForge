@@ -34,7 +34,11 @@ pub fn series_label_text(label: &SeriesLabel) -> String {
         // does not compile (the lists then show the grey fallback of an empty
         // text).
         SeriesLabel::Template { template, fields } => {
-            let bound = stokesforge_render::variables::bind(template, &fields.into());
+            let values = stokesforge_render::variables::VariableValues {
+                unknown: tr!("graph-series-broken-reference"),
+                ..fields.into()
+            };
+            let bound = stokesforge_render::variables::bind(template, &values);
             stokesforge_render::formula::plain_text(&bound).unwrap_or_default()
         }
         SeriesLabel::Row(row) => tr!("graph-row-series", number = row.saturating_add(1)),
@@ -46,9 +50,10 @@ pub fn series_label_text(label: &SeriesLabel) -> String {
 /// [`stokesforge_render::variables::VARIABLES`]: what is typed (the two names,
 /// identical in every language) and what it gives (the field, as the header
 /// row is named on screen). Built from the table, so a new variable reaches
-/// every help.
+/// every help; the last row is `#col("C").ln`, the explicit column (#501).
 pub fn variable_help_rows() -> Vec<(String, String)> {
     use stokesforge_plot::LegendField;
+    let named = ("#col(\"C\").ln".to_owned(), tr!("plot-variables-col"));
     stokesforge_render::variables::VARIABLES
         .iter()
         .map(|(long, short, field)| {
@@ -61,6 +66,7 @@ pub fn variable_help_rows() -> Vec<(String, String)> {
             };
             (format!("#{long}  #{short}"), gives)
         })
+        .chain(std::iter::once(named))
         .collect()
 }
 
@@ -101,7 +107,10 @@ mod tests {
     #[test]
     fn every_variable_appears_in_the_help() {
         let rows = variable_help_rows();
-        assert_eq!(rows.len(), stokesforge_render::variables::VARIABLES.len());
+        assert_eq!(
+            rows.len(),
+            stokesforge_render::variables::VARIABLES.len() + 1
+        );
         for (long, short, _) in stokesforge_render::variables::VARIABLES {
             let line = rows
                 .iter()
@@ -112,7 +121,25 @@ mod tests {
         let gives: Vec<&str> = rows.iter().map(|(_, gives)| gives.as_str()).collect();
         assert_eq!(
             gives,
-            ["Long Name", "Short Name", "Units", "Comments", "x'"]
+            [
+                "Long Name",
+                "Short Name",
+                "Units",
+                "Comments",
+                "x'",
+                "The same, read from column C of the sheet"
+            ]
+        );
+    }
+
+    /// #501 lot 4: the help names the explicit column. Witness: drop the row.
+    #[test]
+    fn the_help_lists_the_explicit_column() {
+        let rows = variable_help_rows();
+        assert!(
+            rows.iter().any(|(names, gives)| names == "#col(\"C\").ln"
+                && gives.contains("column C of the sheet")),
+            "{rows:?}"
         );
     }
 }

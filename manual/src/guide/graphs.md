@@ -412,6 +412,8 @@ Which column a text reads depends on where it is:
 
 If there is no such series, or its column was deleted, the variable shows **(broken reference)**. The fields and the editors always show what you typed, not the value. A name that is not a variable, such as `#nope`, turns the field red.
 
+To name a column yourself, write `#col("C")` followed by a dot and the variable: `#col("C").ln` is the **Long Name** of column C, `#col("C").u` its **Units**, and every variable above works the same way (`.long-name`, `.sn`, `.comments`, `.xp`…). The name between quotes is the **Short Name** of a column of the same worksheet as the column the text reads. With two curves, a Y axis title `#col("B").ln, #col("C").ln` gives `Absorbance, Fluorescence`, where `#ln` alone would only give the first. A name that no column has shows **(broken reference)**; renaming the Short Name of a column breaks the references to it.
+
 ### Axis titles with units
 
 Put a formula in the **Units** field to get a superscript:

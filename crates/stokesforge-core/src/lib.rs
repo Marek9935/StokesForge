@@ -94,9 +94,9 @@ pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::{spreadsheet_name, Project};
 pub use resolve::{
     bar_width, column_fields, histogram, resolve_column, resolve_panel, resolve_series,
-    resolve_series_in, resolve_spec, series_label, series_value, text_context, ColumnFields,
-    MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues, SeriesLabel,
-    TextTarget,
+    resolve_series_in, resolve_spec, series_label, series_value, text_context, with_sheet,
+    ColumnFields, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+    SeriesLabel, TextTarget,
 };
 pub use sheet_refs::{FormulaInput, FormulaInputs};
 pub use transpose::{

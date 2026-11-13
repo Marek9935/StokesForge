@@ -1702,3 +1702,101 @@ fn a_variable_title_is_laid_out_and_drawn_bound_on_screen_and_in_the_export() {
     assert!(document.contains("Absorbance(verylongname)"), "{document}");
     assert!(!document.contains("sf-vars") && !document.contains("#ln"));
 }
+
+// -- #501 lot 4: `#col("C")` names a column of the sheet --
+
+/// The minimal graph with two curves on the Y axis: column B (Absorbance, AU)
+/// then C (Fluorescence, cps), both in the sheet of the X column.
+fn two_series_fixture() -> Sample {
+    let mut fixture = minimal();
+    let first = fixture.spec.panels[0].series[0].clone();
+    let x = first.x.expect("x column");
+    let sheet = fixture
+        .project
+        .tree()
+        .parent(x)
+        .expect("tree")
+        .expect("sheet");
+    let mut curves = Vec::new();
+    for (name, long, unit) in [("B", "Absorbance", "AU"), ("C", "Fluorescence", "cps")] {
+        let meta = ColumnMeta {
+            long_name: long.to_owned(),
+            unit: unit.to_owned(),
+            ..ColumnMeta::default()
+        };
+        let column = Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float((0..64).map(f64::from).collect()),
+            meta,
+        )
+        .expect("column");
+        let id = fixture
+            .project
+            .add_column(sheet, None, Some(name), column)
+            .expect("add");
+        let mut series = first.clone();
+        series.name.clear();
+        series.y = id;
+        curves.push(series);
+    }
+    fixture.spec.panels.get_mut(0).expect("panel").series = curves;
+    fixture
+}
+
+fn svg_text(fixture: &Sample) -> String {
+    let tree = fixture.project.tree();
+    let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &FigureTexts::default());
+    let plot = resolve_spec(tree, &bound);
+    let bytes = stokesforge_render_svg::export_bytes(
+        &plot,
+        SIZE,
+        &TextMeasurer::default(),
+        &stokesforge_render_svg::FontChoice::default(),
+        stokesforge_render_svg::ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    String::from_utf8(bytes).expect("utf-8")
+}
+
+/// A Y axis title that names its columns reads both of them, where `#ln` reads
+/// only the first curve. Witness: a lookup in the wrong sheet, or the context
+/// column returned for every name, gives « Absorbance (AU), Absorbance (AU) »
+/// or the broken reference.
+#[test]
+fn an_axis_title_names_the_column_of_each_curve() {
+    let mut fixture = two_series_fixture();
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    panel.left.label = "#col(\"B\").ln (#col(\"B\").u), #col(\"C\").ln (#col(\"C\").u)".to_owned();
+    panel.left.unit.clear();
+    let tree = fixture.project.tree();
+    let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &FigureTexts::default());
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout = stokesforge_render_svg::figure_layout(&bound, &measurer, &choice).expect("layout");
+    let drawn = drawn_with_typst(tree, &bound, layout.size);
+    assert_eq!(layout.title_band, drawn.title_height, "screen = layout");
+    let document = svg_text(&fixture);
+    assert!(
+        document.contains("Absorbance(AU),Fluorescence(cps)"),
+        "{document}"
+    );
+    assert!(!document.contains("sf-vars") && !document.contains("#col"));
+}
+
+/// The legend binds a typed series name with the sheet of its own column.
+/// Witness: a legend that does not pass the sheet shows the broken reference
+/// and never « Fluorescence ».
+#[test]
+fn a_typed_series_name_names_another_column() {
+    let mut fixture = two_series_fixture();
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    panel.series[0].name = "#col(\"C\").ln".to_owned();
+    // The second curve is named apart, so « Fluorescence » can only come from
+    // the first entry reading column C.
+    panel.series[1].name = "other".to_owned();
+    let document = svg_text(&fixture);
+    assert!(document.contains("Fluorescence"), "{document}");
+    assert!(!document.contains("#col"));
+}

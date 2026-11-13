@@ -28,6 +28,15 @@ use crate::scale::forward;
 use crate::texts::FigureTexts;
 use crate::variables::{self, VariableValues};
 
+/// The values of an entry's column, an unknown `#col("Z")` reading the broken
+/// reference of `texts` (#501).
+fn known(fields: &stokesforge_core::ColumnFields, texts: &FigureTexts) -> VariableValues {
+    VariableValues {
+        unknown: texts.broken_reference.clone(),
+        ..VariableValues::from(fields)
+    }
+}
+
 /// A point in plot space.
 pub type Point = (f64, f64);
 
@@ -171,13 +180,11 @@ impl Prepared<'_> {
             // binder of #501, on the fields of the entry's column.
             SeriesLabel::Template { .. } if self.broken => return texts.broken_reference.clone(),
             SeriesLabel::Template { template, fields } => {
-                variables::bind(template, &VariableValues::from(fields))
+                variables::bind(template, &known(fields, texts))
             }
             // A broken named series is annotated and drawn literally.
             SeriesLabel::Typed { name, .. } if self.broken => name.clone(),
-            SeriesLabel::Typed { name, fields } => {
-                variables::bind(name, &VariableValues::from(fields))
-            }
+            SeriesLabel::Typed { name, fields } => variables::bind(name, &known(fields, texts)),
             SeriesLabel::Text(name) => name.clone(),
             SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
         };

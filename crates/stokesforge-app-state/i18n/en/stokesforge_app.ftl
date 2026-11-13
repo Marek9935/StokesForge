@@ -1134,6 +1134,7 @@ plot-theme-note = Applies to all titles, axes, ticks and gridlines. Replaces col
 # Memo of the Typst syntax, under every title field
 
 plot-variables-memo-header = Variables
+plot-variables-col = The same, read from column C of the sheet
 plot-variables-note = Axis titles read the X or Y column of the first series, the other texts its Y column; a legend entry reads its own series.
 plot-math-memo-header = Math syntax
 plot-math-greek = Greek letters λ, Δ

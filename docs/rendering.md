@@ -167,15 +167,32 @@ a legend entry its own series. A hidden series counts, a row series does not.
 reference with no column (no series, column deleted) makes every variable the
 translated « (broken reference) » of `FigureTexts`, on screen and in export.
 
+Explicit column (#501, lot 4): `#col("C").ln` (any of the ten names:
+`.long-name`, `.u`, `.xp`…) reads column `C`, whatever the context column. `"C"`
+is the **Short Name**, looked up in the worksheet of the text's context column
+(a legend entry: of its series' column); no other sheet. The binder (`used_in`)
+spots `col` as a code identifier (never in math, never a `.col` field) and
+collects the string literals of its `col(…)` calls; the one-line preamble then
+holds `#let col(n) = ("B": (long-name: "…", ln: "…", …), …).at(n, default:
+(long-name: "(broken reference)", …));`, one dictionary per named column, every
+value a `typst_string`. A non-literal argument (`#col(n)`) puts **the whole
+sheet** in the dictionary; an unknown name, no context column or a deleted
+column reads the default, so every field is « (broken reference) » and the text
+still compiles (no red frame). Core attaches the sheet (`ColumnFields::sheet`,
+`resolve::with_sheet`) only when the text contains `col`, so the other texts are
+byte-identical and borrowed. `strip_preamble` walks any `#let …;` to the `;`
+outside a string. Renaming a Short Name breaks the references to it. The help
+row of every field: `#col("C").ln`.
+
 When Typst refuses a bound text, the `epaint` fallback (invariant 10) draws and
 measures what the user typed: `formula::fallback_text` strips the preamble, so a
 failed template shows `#ln #nope`, never the `#let` lines. The editors (the
 Graph Properties fields, the in-place editor, the Object Manager) show the
 typed source, never the value. A field diagnoses `variables::diagnose_text`
 (the text bound to empty values): `#ln` is valid, `#nope` is red. Tests:
-`variables.rs` (binder, `bind_spec` by text kind, broken reference), `resolve.rs`
+`variables.rs` (binder, `bind_spec` by text kind, broken reference, `col`), `resolve.rs`
 (`text_context`), `frame_sizes` in `shell.rs`, `agreement.rs` (legend template,
-typed name, variable title on screen and in the SVG), `plot_settings.rs`
+typed name, variable title on screen and in the SVG, `col` in an axis title and a typed name), `plot_settings.rs`
 (`a_variable_is_valid_in_a_text_field_and_an_unknown_name_is_red`).
 
 Legend box (#507): `LegendSpec` carries the frame (shown, colour, thickness in
