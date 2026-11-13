@@ -1161,13 +1161,17 @@ impl eframe::App for StokesForgeApp {
     /// question "Discard Changes · Cancel · Save" (S-F3, #229): held back here
     /// (also with the window minimized, where only `logic` runs), it becomes
     /// `Action::Quit`, and the window closes when the state releases it.
-    /// While a dialog is open (it blocks the main window), the cross does
-    /// nothing, as in most applications (#533): nothing can then quit in the
-    /// middle of a dialog and its undo group.
+    /// While a dialog is open (it blocks the main window), the cross only
+    /// flashes the dialog, like a click outside it, as in most applications
+    /// (#533): nothing can then quit in the middle of a dialog and its undo
+    /// group.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.quit_confirmed && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_requested = self.state.open_dialog().is_none();
+            if !self.close_requested {
+                dialogs::flash_open_modal(ctx);
+            }
         }
         // The autosave (#317) is the server thread's (#475); `logic` polls it
         // only when no thread runs (a bench, a test, a thread that ended).
@@ -2906,8 +2910,9 @@ mod tests {
     /// and becomes `Action::Quit`; with unsaved work, the question
     /// "Discard Changes · Cancel · Save" opens and the window stays;
     /// Discard releases it, and the next request is no longer held back.
-    /// While a dialog is open (Graph Properties here), the cross does nothing
-    /// at all (#533). Witness: drop the `open_dialog` check in `logic`.
+    /// While a dialog is open (Graph Properties here), the cross only flashes
+    /// the dialog (#533). Witnesses: drop the `open_dialog` check in `logic`,
+    /// or the call to `flash_open_modal`.
     #[test]
     fn closing_the_window_asks_before_losing_work() {
         use eframe::App as _;
@@ -2960,6 +2965,13 @@ mod tests {
         assert!(!commands.contains(&egui::ViewportCommand::Close));
         assert!(app.state.unsaved_pending().is_none(), "no question");
         assert!(app.state.plot_settings().is_some(), "Properties stays open");
+        let flash_start = egui::Id::new("stokesforge_plot_settings").with("flash_start");
+        assert!(
+            context
+                .data(|data| data.get_temp::<f64>(flash_start))
+                .is_some(),
+            "the cross flashes the dialog, like a click outside it"
+        );
         app.state.cancel_plot_settings();
         let commands = image(&mut app, true);
         assert!(commands.contains(&egui::ViewportCommand::CancelClose));

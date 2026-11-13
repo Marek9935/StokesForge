@@ -411,7 +411,7 @@ root path elsewhere, `drain_detached_book_flags`). Two rules come with it:
   Properties commits the open entries first (own undo step), nothing commits an
   entry while the macro is open (it stays open), `dispatch_actions` runs the
   actions that open the macro last in their pass, and the cross of the main
-  window does nothing while a dialog is open. The actions a window returns are
+  window only flashes the open dialog, like a click outside it. The actions a window returns are
   dispatched afterwards with the main identity, after the gate of the open
   dialog (`apply_pass_actions`), which stays the first barrier. The graph window
   writes through its actions only; its identity covers the entry a press in it

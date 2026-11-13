@@ -126,8 +126,8 @@ sender identity): opening Properties (or a shape edit) first commits every open
 entry as its own undo step, a refused value staying open; while the macro is
 open nothing commits an entry (`commit_open_entries` does nothing); the root
 pass dispatches the actions that open the macro last, so a rename pushed in the
-same frame lands before it; and the cross of the main window does nothing while
-a dialog is open (`AppState::open_dialog`, checked in `logic`), as in most
+same frame lands before it; and the cross of the main window only flashes the
+open dialog (`AppState::open_dialog`, checked in `logic`), as in most
 applications, so nothing quits in the middle of the macro. Cancel of Properties
 therefore never rolls back what the user typed.
 
