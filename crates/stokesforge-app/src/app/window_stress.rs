@@ -633,8 +633,8 @@ impl Rig {
             return;
         }
         // An entry open in the docked grid closes when a dialog takes the focus
-        // (#465): do it before the macro of the dialog opens, as the gesture
-        // would.
+        // (#465), as the click would. Opening Properties commits the open
+        // entries itself (#533), and nothing commits during its macro.
         self.bench.app.state.commit_open_entries();
         let graph = self.graphs[self.dice.below(self.graphs.len())];
         let open = Action::OpenPlotSettings {
