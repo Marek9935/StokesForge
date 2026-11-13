@@ -10190,6 +10190,73 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     assert_eq!(cell_f64(&main, column, 0), 99.0);
 }
 
+// -- An open entry never joins the Properties macro (#533) --
+
+/// T0: the reported case, a docked cell entry committed by the grid on the
+/// click that opens Properties (before the action is dispatched), stays after
+/// Cancel.
+#[test]
+fn a_cell_entry_committed_by_the_click_survives_cancel_of_properties() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let graph = plotted_graph(&mut state);
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "77".to_string();
+    state.commit_open_entries();
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    state.cancel_plot_settings();
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(77.0));
+}
+
+/// T1: an entry still open when Properties opens commits BEFORE the macro, as
+/// its own step: a late commit, Cancel, and the value stays; one Undo brings
+/// the old value back. Witness: remove the commit in `open_plot_settings`.
+#[test]
+fn opening_properties_commits_the_open_entry_as_its_own_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let graph = plotted_graph(&mut state);
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "77".to_string();
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    assert!(state.editing().is_none(), "committed on opening");
+    let cell_label = state.undo_label();
+    state.commit_open_entries();
+    state.cancel_plot_settings();
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(77.0));
+    assert_eq!(
+        state.undo_label(),
+        cell_label,
+        "the cell's own step is on top"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0), "one undo");
+}
+
+/// T2: while the Properties macro is open, nothing commits an open entry: it
+/// stays open and the model is untouched. Witness: remove the `plot_macro_open`
+/// guard of `commit_open_entries_in_gesture`.
+#[test]
+fn no_open_entry_commits_while_the_properties_macro_is_open() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let graph = plotted_graph(&mut state);
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "77".to_string();
+    assert!(!state.commit_open_entries());
+    assert!(state.editing().is_some(), "the entry stays open");
+    state.cancel_plot_settings();
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    assert!(state.editing().is_some(), "and is still the user's");
+}
+
 // -- Heavy recalculation: indicator and Stop (issue #239) --
 
 /// A project whose first full recalculation lasts long enough to exceed
