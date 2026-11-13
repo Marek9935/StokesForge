@@ -1305,7 +1305,11 @@ mod tests {
         // Axis titles: X of the first series; Y of the first series per side.
         assert_eq!(at(TextTarget::BottomAxis(0)), Some(x));
         assert_eq!(at(TextTarget::TopAxis(0)), Some(x));
-        assert_eq!(at(TextTarget::LeftAxis(0)), Some(y), "a hidden series counts");
+        assert_eq!(
+            at(TextTarget::LeftAxis(0)),
+            Some(y),
+            "a hidden series counts"
+        );
         assert_eq!(at(TextTarget::RightAxis(0)), Some(t));
         // Titles and annotations: Y of the layer's first series.
         assert_eq!(at(TextTarget::Graph), Some(y));
@@ -1332,7 +1336,10 @@ mod tests {
             panels: vec![PanelSpec::default()].into(),
             ..PlotSpec::default()
         };
-        assert_eq!(text_context(project.tree(), &empty, TextTarget::Graph), None);
+        assert_eq!(
+            text_context(project.tree(), &empty, TextTarget::Graph),
+            None
+        );
         project.remove(y).expect("delete");
         assert_eq!(
             text_context(project.tree(), &spec, TextTarget::Layer(0)),

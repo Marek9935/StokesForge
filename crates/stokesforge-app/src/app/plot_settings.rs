@@ -451,8 +451,8 @@ fn dialog_layout(
     }
     let id = egui::Id::new(("graph_size_layout", graph));
     // The revision is in the memo: a renamed column changes the bound texts.
-    if let Some((cached, at, layout)) =
-        ctx.data(|data| data.get_temp::<(PlotSpec, stokesforge_session::Revision, FigureLayout)>(id))
+    if let Some((cached, at, layout)) = ctx
+        .data(|data| data.get_temp::<(PlotSpec, stokesforge_session::Revision, FigureLayout)>(id))
     {
         if cached == *draft && at == revision {
             return Some(layout);

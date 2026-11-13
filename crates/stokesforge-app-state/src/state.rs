@@ -8275,8 +8275,7 @@ impl AppState {
         if !spec.fixed_figure || crate::frame_sizes::is_legacy(spec) {
             return false;
         }
-        let Some(after) = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, spec)
-        else {
+        let Some(after) = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, spec) else {
             return false;
         };
         if !after.fixed_overflow {

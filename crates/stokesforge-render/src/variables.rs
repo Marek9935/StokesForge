@@ -66,8 +66,8 @@ fn starts_with_line_marker(text: &str) -> bool {
     let heading = text.starts_with('=') && rest.len() < text.len();
     let digits = text.trim_start_matches(|c: char| c.is_ascii_digit());
     let numbered = digits.len() < text.len() && digits.starts_with(". ");
-    let bullet = matches!(text.chars().next(), Some('-' | '+' | '/'))
-        && text[1..].starts_with([' ', '\t']);
+    let bullet =
+        matches!(text.chars().next(), Some('-' | '+' | '/')) && text[1..].starts_with([' ', '\t']);
     heading || numbered || bullet
 }
 
@@ -165,24 +165,24 @@ pub fn bind_spec<'a>(tree: &Tree, spec: &'a PlotSpec, texts: &FigureTexts) -> Co
     if !any_mention(spec) {
         return Cow::Borrowed(spec);
     }
-    let values = |target: TextTarget| {
-        match text_context(tree, spec, target).and_then(|id| column_fields(tree, id)) {
-            Some(fields) => VariableValues {
-                long_name: fields.long_name,
-                short_name: fields.short_name,
-                units: fields.units,
-                comments: fields.comments,
-                x_prime: fields.x_prime,
-            },
-            None => {
-                let broken = texts.broken_reference.clone();
-                VariableValues {
-                    long_name: broken.clone(),
-                    short_name: broken.clone(),
-                    units: broken.clone(),
-                    comments: broken.clone(),
-                    x_prime: broken,
-                }
+    let values = |target: TextTarget| match text_context(tree, spec, target)
+        .and_then(|id| column_fields(tree, id))
+    {
+        Some(fields) => VariableValues {
+            long_name: fields.long_name,
+            short_name: fields.short_name,
+            units: fields.units,
+            comments: fields.comments,
+            x_prime: fields.x_prime,
+        },
+        None => {
+            let broken = texts.broken_reference.clone();
+            VariableValues {
+                long_name: broken.clone(),
+                short_name: broken.clone(),
+                units: broken.clone(),
+                comments: broken.clone(),
+                x_prime: broken,
             }
         }
     };
@@ -198,10 +198,18 @@ pub fn bind_spec<'a>(tree: &Tree, spec: &'a PlotSpec, texts: &FigureTexts) -> Co
             panel.title = text;
         }
         let axes = [
-            (&mut panel.bottom, &source.bottom, TextTarget::BottomAxis(index)),
+            (
+                &mut panel.bottom,
+                &source.bottom,
+                TextTarget::BottomAxis(index),
+            ),
             (&mut panel.top, &source.top, TextTarget::TopAxis(index)),
             (&mut panel.left, &source.left, TextTarget::LeftAxis(index)),
-            (&mut panel.right, &source.right, TextTarget::RightAxis(index)),
+            (
+                &mut panel.right,
+                &source.right,
+                TextTarget::RightAxis(index),
+            ),
         ];
         for (axis, original, target) in axes {
             if let Some(text) = bound(&original.display_label(), target) {
@@ -214,8 +222,7 @@ pub fn bind_spec<'a>(tree: &Tree, spec: &'a PlotSpec, texts: &FigureTexts) -> Co
                 annotation.text = text;
             }
         }
-        if let (Some(bar), Some(original)) = (panel.color_bar.as_mut(), source.color_bar.as_ref())
-        {
+        if let (Some(bar), Some(original)) = (panel.color_bar.as_mut(), source.color_bar.as_ref()) {
             if let Some(text) = bound(&original.title, TextTarget::ColorBar(index)) {
                 bar.title = text;
             }

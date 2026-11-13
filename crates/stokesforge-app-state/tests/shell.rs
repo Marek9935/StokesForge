@@ -11575,12 +11575,18 @@ fn a_variable_title_of_a_deleted_column_shows_the_broken_reference() {
         spec,
     });
     let svg = std::fs::read_to_string(path).expect("exported file");
+    // The title is the first drawn group, before the legend (which names the
+    // broken series with the same words).
     let text = svg
-        .split("<text")
-        .find(|element| element.contains("brokenreference)"))
-        .unwrap_or_else(|| panic!("no broken reference in {svg}"));
+        .split("</svg></g>")
+        .next()
+        .expect("the title group")
+        .to_owned();
     assert!(text.contains("(brokenreference)"), "{text}");
-    assert!(text.contains("fill=\"#202020\""), "not the title colour: {text}");
+    assert!(
+        text.contains("fill=\"#202020\""),
+        "not the title colour: {text}"
+    );
 }
 
 /// S-F3 (#229): the native picker asks before overwriting the typed name;
