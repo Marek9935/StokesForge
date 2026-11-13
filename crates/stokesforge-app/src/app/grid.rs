@@ -4057,6 +4057,7 @@ mod tests {
     /// #465, T1: a click elsewhere ends the entry through the state, in the frame
     /// of the click. An action would be emptied by a blocking dialog that took
     /// the focus (`blocking_confirmations`) and the typed value would be lost.
+    /// (Opening Properties also commits what is still open, #533.)
     #[test]
     fn a_click_elsewhere_commits_the_cell_through_the_state() {
         let mut bench = Bench::new();

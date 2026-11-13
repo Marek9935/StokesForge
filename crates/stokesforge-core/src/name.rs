@@ -1,6 +1,7 @@
 //! Validation of object names (folders, workbooks, sheets, columns...).
 
 use crate::error::{CoreError, CoreResult};
+use crate::transpose::TRANSPOSE_MARK;
 
 /// Characters reserved by the `[Book]Sheet!Col` path grammar.
 pub const RESERVED_NAME_CHARS: &[char] = &['[', ']', '!', '/'];
@@ -29,15 +30,64 @@ fn is_control_or_deceptive_format(c: char) -> bool {
         )
 }
 
-/// True if two names are the same name for a formula and for the sibling rule
-/// (#403): equal ignoring case, the way a column letter or a function name is.
-/// The one comparison shared by the lookup of a sheet or workbook in a formula
-/// and by the check of sibling names, so that they cannot disagree.
+/// True if two names collide for the **sibling rule** (#403, #494): equal
+/// ignoring case, the way a column letter or a function name is, after the
+/// transpose mark `ᵀ` is read as `T`. The one comparison behind every check
+/// of free names and every generator of free names, so that `Sheet1T` and
+/// `Sheet1t` are refused beside `Sheet1ᵀ` (else `Sheet1T!B` could be
+/// ambiguous). The lookup of a formula is narrower: see
+/// [`same_name_ignoring_case_exact`] and [`same_name_folding_transpose_mark`].
 pub fn same_name_ignoring_case(a: &str, b: &str) -> bool {
+    let fold = |s: &str| -> Vec<char> {
+        s.chars()
+            .map(|c| if c == TRANSPOSE_MARK { 'T' } else { c })
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    a == b || fold(a) == fold(b)
+}
+
+/// Lookup tier 1 of a formula (#494): equal ignoring case, with no fold of the
+/// transpose mark (`ᵀ` only equals `ᵀ`).
+pub fn same_name_ignoring_case_exact(a: &str, b: &str) -> bool {
     a == b
         || a.chars()
             .flat_map(char::to_lowercase)
             .eq(b.chars().flat_map(char::to_lowercase))
+}
+
+/// Lookup tier 2 of a formula (#494): equal ignoring case, where in addition
+/// `ᵀ` equals an **uppercase** `T` (never a lowercase `t`).
+pub fn same_name_folding_transpose_mark(a: &str, b: &str) -> bool {
+    fold_transpose_mark(a, b, |x, y| x == y || x.to_lowercase().eq(y.to_lowercase()))
+}
+
+/// Lookup of a path of `pyst` (#494): case-sensitive, where `ᵀ` equals an
+/// uppercase `T`.
+pub fn same_name_folding_transpose_mark_case_sensitive(a: &str, b: &str) -> bool {
+    fold_transpose_mark(a, b, |x, y| x == y)
+}
+
+/// Compares two names character by character: `ᵀ` against `T` is equal,
+/// anything else goes through `same`.
+fn fold_transpose_mark(a: &str, b: &str, same: impl Fn(char, char) -> bool) -> bool {
+    let (mut a, mut b) = (a.chars(), b.chars());
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) => {
+                let equal = match (x == TRANSPOSE_MARK, y == TRANSPOSE_MARK) {
+                    (true, false) => y == 'T',
+                    (false, true) => x == 'T',
+                    _ => same(x, y),
+                };
+                if !equal {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
 }
 
 /// Natural name order (#425): case-insensitive, runs of ASCII digits compared
@@ -121,6 +171,37 @@ pub fn check_name(name: &str) -> CoreResult<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lookup_fold_reads_the_mark_as_an_uppercase_t_only() {
+        let fold = same_name_folding_transpose_mark;
+        assert!(fold("Sheet1\u{1D40}", "Sheet1T"));
+        assert!(fold("Sheet1\u{1D40}", "sheet1T"));
+        assert!(fold("Sheet1T", "Sheet1\u{1D40}"));
+        assert!(!fold("Sheet1\u{1D40}", "Sheet1t"));
+        assert!(!fold("Sheet1t", "Sheet1\u{1D40}"));
+        assert!(fold("Sheet1\u{1D40} 2", "Sheet1T 2"));
+        assert!(!fold("Sheet1", "Sheet1T"));
+        assert!(fold("T\u{1D40}", "tT"));
+        // The first tier never folds.
+        assert!(!same_name_ignoring_case_exact("Sheet1\u{1D40}", "Sheet1T"));
+        assert!(same_name_ignoring_case_exact("Sheet1", "sHEET1"));
+    }
+
+    #[test]
+    fn sibling_comparison_reads_the_mark_as_a_t_of_any_case() {
+        assert!(same_name_ignoring_case("Sheet1\u{1D40}", "Sheet1t"));
+        assert!(same_name_ignoring_case("Sheet1\u{1D40}", "SHEET1T"));
+        assert!(!same_name_ignoring_case("Sheet1\u{1D40}", "Sheet1"));
+    }
+
+    #[test]
+    fn path_fold_is_case_sensitive() {
+        let fold = same_name_folding_transpose_mark_case_sensitive;
+        assert!(fold("Sheet1\u{1D40}", "Sheet1T"));
+        assert!(!fold("Sheet1\u{1D40}", "Sheet1t"));
+        assert!(!fold("Sheet1\u{1D40}", "sheet1T"));
+    }
 
     #[test]
     fn natural_order_compares_digit_runs_by_value() {

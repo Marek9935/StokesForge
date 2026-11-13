@@ -1526,6 +1526,20 @@ pub enum SaveTarget {
     User,
 }
 
+impl Action {
+    /// Whether this action opens the Properties macro (or a shape-edit macro).
+    /// The root pass dispatches such an action last, so an entry that commits
+    /// through an action of the same frame lands before the macro (#533).
+    pub fn opens_plot_macro(&self) -> bool {
+        matches!(
+            self,
+            Action::OpenPlotSettings { .. }
+                | Action::OpenObjectProperties { .. }
+                | Action::BeginShapeEdit
+        )
+    }
+}
+
 impl SaveTarget {
     /// Label of the choice.
     pub fn label(self) -> String {
@@ -6724,7 +6738,11 @@ impl AppState {
                 target,
                 shape,
             } => self.edit_annotations(graph, |spec| target.set(spec, *shape)),
-            Action::BeginShapeEdit => self.begin_plot_macro(),
+            Action::BeginShapeEdit => {
+                // An open entry becomes its own step before the macro (#533).
+                self.commit_open_entries();
+                self.begin_plot_macro();
+            }
             Action::EndShapeEdit { keep: true } => self.end_plot_macro(),
             Action::EndShapeEdit { keep: false } => self.abort_plot_macro(),
             Action::RemoveShape { graph, target } => {
@@ -6999,6 +7017,10 @@ impl AppState {
             self.end_plot_macro();
             self.plot_edit = None;
         }
+        // An entry still open (cell, header, note) becomes its own undo step
+        // BEFORE the macro opens: Cancel must never roll back what the user
+        // typed (#533). A refused value stays open, as on Save.
+        self.commit_open_entries();
         self.begin_plot_macro();
         self.begin_plot_edit(graph);
         let current_axis = self
@@ -8553,6 +8575,11 @@ impl AppState {
     }
 
     fn commit_open_entries_in_gesture(&mut self) -> bool {
+        // While the Properties macro is open a commit would join it and Cancel
+        // would roll it back: the entries stay open (#533).
+        if self.plot_macro_open {
+            return false;
+        }
         let mut committed = false;
         if self.editing.is_some() && self.cell_edit_refusal().is_none() {
             self.commit_edit();
@@ -9934,14 +9961,19 @@ impl AppState {
         if name == current {
             return;
         }
+        // The sibling rule of the model (#494): case and `ᵀ` read as `T`; the
+        // message names the sheet that holds the name.
         let taken = self
             .worksheets_of(book)
-            .iter()
-            .any(|(id, other)| *id != sheet && other == name);
+            .into_iter()
+            .find(|(id, other)| {
+                *id != sheet && stokesforge_core::same_name_ignoring_case(other, name)
+            })
+            .map(|(_, other)| other);
         if name.is_empty() {
             self.fail(tr!("sheet-rename-empty", name = current));
-        } else if taken {
-            self.fail(tr!("sheet-rename-taken", name = name, old = current));
+        } else if let Some(taken) = taken {
+            self.fail(tr!("sheet-rename-taken", name = taken, old = current));
         } else {
             self.execute(Command::Rename {
                 id: sheet,
