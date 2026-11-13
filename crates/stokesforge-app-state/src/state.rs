@@ -127,6 +127,14 @@ pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 /// How long a command waits for the formula recalculation it started to
 /// finish before handing control back to the interface (#239): a recalculation
 /// shorter than that stays invisible and synchronous.
+/// Most columns ONE paste creates when it goes beyond the last column (#495).
+/// A paste is one frame-by-frame-visible gesture and one Undo entry: a TSV
+/// of a few thousand columns (a wide export, a transposed long column) would
+/// build as many columns, each one a command and a refresh, and a sheet the
+/// grid cannot draw at ease. What goes beyond is dropped and counted
+/// (`status-paste-columns-dropped`).
+pub const MAX_PASTE_NEW_COLUMNS: usize = 1000;
+
 const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Why the type of a column cannot change (#431).
@@ -10317,18 +10325,25 @@ impl AppState {
         let first = order.iter().position(|&id| id == anchor_column)?;
         for (i, row) in rows.iter().enumerate() {
             for (offset, text) in row.iter().enumerate() {
-                // Columns beyond the sheet are dropped by the paste.
-                let Some(&column) = order.get(first + offset) else {
-                    break;
-                };
-                let Some(kind) = self
-                    .snapshot
-                    .tree
-                    .node(column)
-                    .and_then(Node::as_column)
-                    .map(Column::column_type)
-                else {
-                    continue;
+                // Columns beyond the sheet are created by the paste (Numeric,
+                // #495), up to the cap; the rest is dropped.
+                let kind = match order.get(first + offset) {
+                    Some(&column) => {
+                        let Some(kind) = self
+                            .snapshot
+                            .tree
+                            .node(column)
+                            .and_then(Node::as_column)
+                            .map(Column::column_type)
+                        else {
+                            continue;
+                        };
+                        kind
+                    }
+                    None if first + offset - order.len() < MAX_PASTE_NEW_COLUMNS => {
+                        ColumnType::Numeric
+                    }
+                    None => break,
                 };
                 if text.trim().is_empty()
                     || (kind == ColumnType::DateTime
@@ -10432,10 +10447,10 @@ impl AppState {
         match clipboard {
             GridClipboard::Text(text) => self.paste_single_value(anchor, text),
             GridClipboard::Relative(relative) => {
-                self.paste_relative(anchor, order_from_anchor, relative, absolute)
+                self.paste_relative(sheet, anchor, order_from_anchor, relative, absolute)
             }
             GridClipboard::FullColumns(columns) => {
-                self.paste_full_columns(anchor, order_from_anchor, columns, absolute)
+                self.paste_full_columns(sheet, anchor, order_from_anchor, columns, absolute)
             }
         }
     }
@@ -10548,9 +10563,59 @@ impl AppState {
         }
     }
 
-    /// Number of columns to drop: `wanted` wanted, `available` places.
-    fn dropped_columns(wanted: usize, available: usize) -> usize {
-        wanted.saturating_sub(available)
+    /// How a paste of `wanted` columns fits a sheet with `available` columns
+    /// from the anchor on (#495): `(created, dropped)`. The missing columns
+    /// are created, up to `cap` per paste; the rest is dropped.
+    fn plan_paste_columns(available: usize, wanted: usize, cap: usize) -> (usize, usize) {
+        let missing = wanted.saturating_sub(available);
+        let created = missing.min(cap);
+        (created, missing - created)
+    }
+
+    /// The columns a paste writes into: `order_from_anchor` plus the
+    /// `created` columns added now at the end of `sheet` (same command as Add
+    /// Column: automatic letter name, default role). The caller has opened its
+    /// `PasteCells` macro BEFORE, so one Undo removes the columns and the
+    /// values, and calls this BEFORE writing headers (a pasted formula reads
+    /// letters of the destination sheet). `wanted` caps the answer.
+    fn paste_targets(
+        &mut self,
+        sheet: NodeId,
+        order_from_anchor: &[NodeId],
+        wanted: usize,
+        created: usize,
+    ) -> Vec<NodeId> {
+        let mut targets: Vec<NodeId> = order_from_anchor.iter().copied().take(wanted).collect();
+        if created == 0 {
+            return targets;
+        }
+        for _ in 0..created {
+            self.execute(Command::AddColumn {
+                sheet,
+                index: None,
+                name: None,
+                column: Column::new(ColumnType::Numeric),
+            });
+        }
+        let order = self.column_order(sheet);
+        let known = order_from_anchor.len();
+        let anchor_position = order.len().saturating_sub(known + created);
+        // The columns after the old last one are the new ones.
+        targets.extend(
+            order
+                .iter()
+                .skip(anchor_position + known)
+                .copied()
+                .take(created),
+        );
+        targets
+    }
+
+    /// The plain notice of the columns a paste added (#495).
+    fn notice_columns_added(&mut self, created: usize) {
+        if created > 0 {
+            self.notice(tr!("status-paste-columns-added", count = created));
+        }
     }
 
     /// [`GridClipboard::Relative`]: see [`AppState::apply_paste`] for the
@@ -10558,6 +10623,7 @@ impl AppState {
     /// `relative` (fields against a data cell, or the reverse).
     fn paste_relative(
         &mut self,
+        sheet: NodeId,
         anchor: GridCursor,
         order_from_anchor: &[NodeId],
         relative: &RelativeCopy,
@@ -10566,14 +10632,14 @@ impl AppState {
         match (anchor, relative) {
             (GridCursor::Header(_, anchor_field), RelativeCopy::HeaderFields { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
-                let targets: Vec<NodeId> = order_from_anchor
-                    .iter()
-                    .copied()
-                    .take(column_count)
-                    .collect();
-                if targets.is_empty() {
+                if order_from_anchor.is_empty() || column_count == 0 {
                     return;
                 }
+                let (created, dropped) = Self::plan_paste_columns(
+                    order_from_anchor.len(),
+                    column_count,
+                    MAX_PASTE_NEW_COLUMNS,
+                );
                 let shift = if absolute {
                     0
                 } else {
@@ -10590,11 +10656,13 @@ impl AppState {
                             .then(|| (HeaderField::from_index(target as usize), cells))
                     })
                     .collect();
-                let grouped = writes.len() * targets.len() > 1;
+                let target_count = column_count - dropped;
+                let grouped = writes.len() * target_count > 1 || created > 0;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail(tr!("error-paste-group"));
                     return;
                 }
+                let targets = self.paste_targets(sheet, order_from_anchor, column_count, created);
                 let mut refusals: Vec<(NodeId, String)> = Vec::new();
                 for &(field, cells) in &writes {
                     for (index, &column) in targets.iter().enumerate() {
@@ -10610,30 +10678,29 @@ impl AppState {
                 }
                 // Header rows dropped: the low anchor pushes them beyond
                 // Formula (`writes` keeps only those that fit).
-                self.warn_dropped(
-                    Self::dropped_columns(column_count, targets.len()),
-                    rows.len() - writes.len(),
-                );
+                self.notice_columns_added(created);
+                self.warn_dropped(dropped, rows.len() - writes.len());
                 // The refusal of a formula goes last: it wins over the
                 // overflow notice, the other fields are pasted.
                 self.fail_formula_paste(&refusals);
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
-                let targets: Vec<NodeId> = order_from_anchor
-                    .iter()
-                    .copied()
-                    .take(column_count)
-                    .collect();
-                if targets.is_empty() || rows.is_empty() {
+                if order_from_anchor.is_empty() || column_count == 0 || rows.is_empty() {
                     return;
                 }
+                let (created, dropped) = Self::plan_paste_columns(
+                    order_from_anchor.len(),
+                    column_count,
+                    MAX_PASTE_NEW_COLUMNS,
+                );
                 let paste_row = if absolute { *start } else { anchor_row };
-                let grouped = targets.len() > 1;
+                let grouped = column_count - dropped > 1;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail(tr!("error-paste-group"));
                     return;
                 }
+                let targets = self.paste_targets(sheet, order_from_anchor, column_count, created);
                 for (index, &column) in targets.iter().enumerate() {
                     let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column)
                     else {
@@ -10650,7 +10717,8 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
-                self.warn_dropped(Self::dropped_columns(column_count, targets.len()), 0);
+                self.notice_columns_added(created);
+                self.warn_dropped(dropped, 0);
             }
             // Copied fields + anchor on a data cell, or copied data rows +
             // anchor on a header field: different kinds, nothing is pasted
@@ -10665,19 +10733,21 @@ impl AppState {
     /// accepted is not written (it is recomputed).
     fn paste_full_columns(
         &mut self,
+        sheet: NodeId,
         anchor: GridCursor,
         order_from_anchor: &[NodeId],
         columns: &[FullColumnCopy],
         absolute: bool,
     ) {
-        let targets: Vec<NodeId> = order_from_anchor
-            .iter()
-            .copied()
-            .take(columns.len())
-            .collect();
-        if targets.is_empty() {
+        if order_from_anchor.is_empty() || columns.is_empty() {
             return;
         }
+        let (created, dropped) = Self::plan_paste_columns(
+            order_from_anchor.len(),
+            columns.len(),
+            MAX_PASTE_NEW_COLUMNS,
+        );
+        let target_count = columns.len() - dropped;
         // Starting field of the header to write: all of them in absolute, from
         // the anchored field (nothing above) in relative if the anchor is a
         // field, none (header dropped) in relative if the anchor is a cell.
@@ -10709,17 +10779,18 @@ impl AppState {
         let header_ops = header_from
             .map(|from| HeaderField::COUNT - from)
             .unwrap_or(0)
-            * targets.len();
-        let body_ops = targets
+            * target_count;
+        let body_ops = columns
             .iter()
-            .zip(columns)
-            .filter(|(_, c)| !c.data.is_empty())
+            .take(target_count)
+            .filter(|c| !c.data.is_empty())
             .count();
-        let grouped = header_ops + body_ops > 1;
+        let grouped = header_ops + body_ops > 1 || created > 0;
         if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
             self.fail(tr!("error-paste-group"));
             return;
         }
+        let targets = self.paste_targets(sheet, order_from_anchor, columns.len(), created);
         // The formulas refused by this paste: the column, and why (#433).
         let mut refusals: Vec<(NodeId, String)> = Vec::new();
         // Per target, what this paste did with the Formula field. A column
@@ -10780,7 +10851,8 @@ impl AppState {
         if grouped {
             self.end_grouped_macro();
         }
-        self.warn_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
+        self.notice_columns_added(created);
+        self.warn_dropped(dropped, 0);
         // The other fields and the values are pasted, the status bar says what
         // is not.
         self.fail_formula_paste(&refusals);

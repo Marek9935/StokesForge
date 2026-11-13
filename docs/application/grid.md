@@ -130,6 +130,16 @@ sheet (left → right, top → bottom), never that of the clicks.
 - **Paste / Paste in Place**: disabled on a non-contiguous selection
   (`GridMenu::paste_enabled`, ambiguous target); pasting with the keyboard is refused
   with a message.
+- **A paste wider than the sheet creates the missing columns (#495)**: any
+  paste that goes beyond the last column (Paste, Paste in Place, a header
+  field paste) adds Numeric columns at the end of the sheet, with the command
+  of Add Column, inside the same `PasteCells` group (one Undo removes columns
+  and values), BEFORE any header is written (a pasted formula reads letters of
+  the destination). At most `MAX_PASTE_NEW_COLUMNS` (1000) per paste: the rest
+  is dropped and counted (orange `status-paste-columns-dropped`), the
+  created ones are said by the plain `status-paste-columns-added`. An outside
+  text is range-checked for the columns it will create as Numeric
+  (`external_paste_range_error`). Header rows beyond Formula are still dropped.
 - **Clipboard format (#259)**: the system text is TSV in the
   Excel/LibreOffice format, written and read by `stokesforge_core::tsv` (`encode`,
   `decode`, `encode_cell`), without egui: a cell that holds a tab, a

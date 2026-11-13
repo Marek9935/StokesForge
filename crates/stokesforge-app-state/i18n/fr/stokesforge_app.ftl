@@ -395,6 +395,11 @@ status-paste-columns-dropped =
         [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
        *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
     }
+status-paste-columns-added =
+    { $count ->
+        [one] Une colonne a été ajoutée pour contenir le collage
+       *[other] { $count } colonnes ont été ajoutées pour contenir le collage
+    }
 status-cell-decimal-comma = « { $text } » a été lu { $value } (virgule décimale)
 status-paste-fields-dropped =
     { $count ->

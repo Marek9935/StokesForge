@@ -393,6 +393,11 @@ status-paste-columns-dropped =
         [one] One column did not fit and was not pasted
        *[other] { $count } columns did not fit and were not pasted
     }
+status-paste-columns-added =
+    { $count ->
+        [one] One column was added to fit the paste
+       *[other] { $count } columns were added to fit the paste
+    }
 status-cell-decimal-comma = "{ $text }" was read as { $value } (decimal comma)
 status-paste-fields-dropped =
     { $count ->

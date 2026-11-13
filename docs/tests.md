@@ -1111,10 +1111,10 @@ Gestures go through egui events, never through a direct call of the
 | absent cell read as empty (`unwrap_or("")`, no more `value_block_keeping_absent_cells`) | `a_pasted_row_shorter_than_the_others_keeps_the_existing_cell`, `a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo` (#311) |
 | present and empty cell treated as absent | `a_present_but_empty_pasted_cell_is_still_a_missing_value`, `pure_data_copy_paste_keeps_working_without_header_markers` |
 | block not cut after the last present cell (column lengthened) | `a_short_last_row_does_not_lengthen_the_shorter_column` |
-| status `status-paste-columns-dropped` removed / set without overflow | `a_paste_wider_than_the_sheet_reports_the_dropped_columns`, `a_paste_that_fits_the_sheet_width_reports_nothing` |
+| status `status-paste-columns-dropped` removed / set without overflow | `a_paste_wider_than_the_sheet_creates_the_missing_columns_in_one_undo` (#495), `a_paste_beyond_the_cap_creates_the_cap_and_counts_the_rest` (`tests/paste_new_columns.rs`), `a_paste_that_fits_the_sheet_width_reports_nothing` |
 | `looks_like_thousands_separator` widened to `\d+,\d+` (or to `1,5`) | `the_thousands_form_is_recognized_exactly` (`stokesforge-core/src/number_format.rs`) |
 | notice `status-cell-decimal-comma` removed, or set on paste | `typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma`, `the_decimal_comma_notice_also_applies_to_a_mixed_cell`, `pasting_a_thousands_looking_number_does_not_notice` (#311) |
-| discarded header rows not counted (`status-paste-fields-dropped`) / combined message broken | `a_header_field_paste_anchored_low_counts_the_rows_beyond_formula`, `a_header_field_paste_anchored_on_long_name_reports_nothing`, `columns_and_header_fields_dropped_together_give_one_combined_notice` (#311) |
+| discarded header rows not counted (`status-paste-fields-dropped`) / combined message broken | `a_header_field_paste_anchored_low_counts_the_rows_beyond_formula`, `a_header_field_paste_anchored_on_long_name_reports_nothing`, `a_header_paste_beyond_the_edge_creates_the_column_and_counts_the_dropped_fields` (#311, #495) |
 | "2026" in Date/Time read as anything other than 2026 seconds | `from_texts_datetime_reads_a_bare_number_as_seconds` (`stokesforge-core/src/column.rs`) |
 
 Paste replays the internal structure when the text is the one that was pushed:

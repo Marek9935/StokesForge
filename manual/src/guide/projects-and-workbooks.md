@@ -286,7 +286,7 @@ A few rules:
 - **Paste** needs a single block of cells or a run of contiguous columns as its target.
 - **Copy** and **Cut** work on several blocks only if they share their rows (side by side) or their columns (stacked). Otherwise they are greyed out.
 - Pasting over a **Mixed** column that ends up with only numbers turns it back to **Numeric**.
-- If part of the pasted data does not fit, the status bar says how many columns or header fields were left out.
+- If the pasted data reaches past the last column, the missing columns are added at the end of the sheet (at most 1000 per paste). The status bar says how many were added, and how many columns beyond that limit or header fields below the last header field were left out.
 
 A paste is one action for Undo.
 

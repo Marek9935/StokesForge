@@ -128,7 +128,7 @@ In a sheet, select cells and use **Copy** in the right-click menu, or press <kbd
 - **Copy with Header** copies the values and the column header.
 - **Paste** puts the cells starting from the selected cell.
 - **Paste in Place** puts them at the position they were copied from. It needs a copy made in the grid.
-- What does not fit in the sheet is left out, and the status bar tells you how many columns or header fields were not pasted.
+- If the pasted cells reach past the last column, StokesForge adds the missing columns at the end of the sheet. One <kbd>Ctrl</kbd>+<kbd>Z</kbd> removes them with the pasted values. A single paste adds at most 1000 columns; the status bar tells you how many columns were added, and how many columns or header fields were left out.
 
 StokesForge has no command that writes a sheet to a CSV file. To get your data out, copy the cells and paste them into a spreadsheet program or a text file.
 
