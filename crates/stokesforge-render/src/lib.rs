@@ -89,6 +89,7 @@ pub mod shapes;
 pub mod subpixel;
 pub mod text;
 pub mod texts;
+pub mod variables;
 pub mod view;
 
 #[cfg(test)]

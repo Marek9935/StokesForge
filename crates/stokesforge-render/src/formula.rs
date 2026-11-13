@@ -457,6 +457,13 @@ pub fn escape(text: &str) -> String {
     stokesforge_plot::typst_literal(text)
 }
 
+/// What the user typed: `text` without the variable preamble
+/// ([`crate::variables::bind`]). The `epaint` fallback draws and measures this,
+/// never the `#let`s (invariants 4 and 10). Identity when there is no preamble.
+pub fn fallback_text(text: &str) -> &str {
+    crate::variables::strip_preamble(text)
+}
+
 /// Typst's standard library, built once for the whole process.
 ///
 /// It depends on no font choice (`Library` carries only the language
