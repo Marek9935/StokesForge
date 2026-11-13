@@ -152,3 +152,4 @@ pub use series::{Geometry, Prepared};
 pub use shapes::DrawnShape;
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};
 pub use texts::FigureTexts;
+pub use variables::bind_spec;

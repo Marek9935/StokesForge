@@ -57,6 +57,17 @@ pub fn figure_layout(spec: &PlotSpec) -> Option<stokesforge_render::pipeline::Fi
     stokesforge_render_svg::figure_layout(spec, &measurer, &choice).ok()
 }
 
+/// [`figure_layout`] of `spec` as drawn in `tree` (#501): the variables of its
+/// Typst texts bound first, so the size is that of the text the screen and the
+/// exports draw. The surfaces that compare a layout with the drawn one use it.
+pub fn figure_layout_in(
+    tree: &stokesforge_core::Tree,
+    spec: &PlotSpec,
+) -> Option<stokesforge_render::pipeline::FigureLayout> {
+    let bound = stokesforge_render::bind_spec(tree, spec, &crate::figure_texts::figure_texts());
+    figure_layout(&bound)
+}
+
 /// Sets one frame size of a draft spec: gives it the `drawn` frames if it is
 /// legacy, then [`set_frame_size`]. For the size fields of Graph Properties,
 /// which edit a draft. `false`, with the draft unchanged, if the size is

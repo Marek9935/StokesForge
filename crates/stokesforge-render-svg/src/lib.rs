@@ -74,7 +74,7 @@ pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 pub use stokesforge_render::pipeline::{FittedFigure, FittedFrames, SizeAxis};
 pub use stokesforge_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
-pub use stokesforge_render::{FigureTexts, FontChoice};
+pub use stokesforge_render::{bind_spec, FigureTexts, FontChoice};
 
 /// Size of the figure of a graph that records no cell size and has no title,
 /// in SVG units: [`pipeline::DEFAULT_FIGURE_SIZE`]. **Not the size to export
@@ -444,7 +444,8 @@ pub fn render_spec(
     size: (u32, u32),
     measurer: &TextMeasurer,
 ) -> Result<String, SvgError> {
-    let plot = resolve_spec(tree, spec);
+    let spec = stokesforge_render::bind_spec(tree, spec, &FigureTexts::default());
+    let plot = resolve_spec(tree, &spec);
     render_to_string(&plot, size, measurer)
 }
 

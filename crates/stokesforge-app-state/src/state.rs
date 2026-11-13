@@ -8275,7 +8275,8 @@ impl AppState {
         if !spec.fixed_figure || crate::frame_sizes::is_legacy(spec) {
             return false;
         }
-        let Some(after) = crate::frame_sizes::figure_layout(spec) else {
+        let Some(after) = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, spec)
+        else {
             return false;
         };
         if !after.fixed_overflow {
@@ -8283,7 +8284,7 @@ impl AppState {
         }
         let Some(before) = self
             .plot_spec(*graph)
-            .and_then(|before| crate::frame_sizes::figure_layout(&before))
+            .and_then(|before| crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &before))
         else {
             return true;
         };
@@ -8883,6 +8884,9 @@ impl AppState {
             ));
             return;
         };
+        // #501: the variables of the texts, before the resolution and the size.
+        let texts = crate::figure_texts::figure_texts();
+        let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let choice = stokesforge_render_svg::FontChoice::default();
@@ -8893,7 +8897,7 @@ impl AppState {
             &measurer,
             &choice,
             format,
-            &crate::figure_texts::figure_texts(),
+            &texts,
         ) {
             Ok(()) => self.notice(tr!(
                 "status-graph-exported",
@@ -8911,6 +8915,8 @@ impl AppState {
         use crate::preferences::CopyFormat;
         use stokesforge_render_svg::ExportFormat;
 
+        let texts = crate::figure_texts::figure_texts();
+        let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         // The order and the choice are those of Preferences › Export: the
@@ -8945,7 +8951,7 @@ impl AppState {
             &measurer,
             &choice,
             &formats,
-            &crate::figure_texts::figure_texts(),
+            &texts,
         ) {
             Ok(results) => results,
             Err(err) => {
@@ -11927,7 +11933,7 @@ impl AppState {
             return;
         };
         let mut spec = before.clone();
-        let drawn = crate::frame_sizes::figure_layout(&spec);
+        let drawn = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &spec);
         let (widths, heights) = drawn.map_or_else(Default::default, |layout| {
             (layout.frame_widths, layout.frame_heights)
         });
@@ -12095,7 +12101,7 @@ impl AppState {
             };
             // Without a stored page, the page is the figure as drawn.
             let old = before.sanitized_free_page().or_else(|| {
-                crate::frame_sizes::figure_layout(&before)
+                crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &before)
                     .and_then(|layout| layout.free_page_rect())
             });
             page_resized =

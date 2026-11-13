@@ -454,6 +454,12 @@ pub(crate) fn export_graph(
     }
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let spec = graph_spec(&snapshot, id, epoch)?;
+    // #501: the variables of the texts, before the resolution and the size.
+    let spec = stokesforge_render_svg::bind_spec(
+        &snapshot.tree,
+        &spec,
+        &stokesforge_render_svg::FigureTexts::default(),
+    );
     let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();

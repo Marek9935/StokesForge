@@ -254,6 +254,8 @@ fn plot_settings_contents(
     let mut size_lock = state.size_lock(settings.graph);
     let size_lock_before = size_lock;
     let published = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
+    // #501: the draft's size is measured on the texts as drawn, variables bound.
+    let (bind_tree, revision) = (state.tree().clone(), state.revision());
     let mut gradient_actions: Vec<Action> = Vec::new();
     let row_columns = legend_row_columns(state, settings.graph);
     // Saved colors, read before borrowing the draft; the
@@ -337,7 +339,13 @@ fn plot_settings_contents(
                 .auto_shrink([false, false])
                 .show(ui, |ui| match chosen_tab {
                     PlotSettingsTab::Graph => {
-                        let layout = dialog_layout(ui.ctx(), settings.graph, spec, published);
+                        let layout = dialog_layout(
+                            ui.ctx(),
+                            settings.graph,
+                            spec,
+                            published,
+                            (&bind_tree, revision),
+                        );
                         commit |= graph_settings_page(
                             ui,
                             spec,
@@ -426,6 +434,7 @@ fn dialog_layout(
     graph: NodeId,
     draft: &PlotSpec,
     published: Option<FigureLayout>,
+    (tree, revision): (&stokesforge_core::Tree, stokesforge_session::Revision),
 ) -> Option<FigureLayout> {
     let stored = !draft.frame_widths.is_empty() || !draft.frame_heights.is_empty();
     // A free graph is always measured from the draft: the origin of the image
@@ -441,13 +450,16 @@ fn dialog_layout(
         return Some(layout);
     }
     let id = egui::Id::new(("graph_size_layout", graph));
-    if let Some((cached, layout)) = ctx.data(|data| data.get_temp::<(PlotSpec, FigureLayout)>(id)) {
-        if cached == *draft {
+    // The revision is in the memo: a renamed column changes the bound texts.
+    if let Some((cached, at, layout)) =
+        ctx.data(|data| data.get_temp::<(PlotSpec, stokesforge_session::Revision, FigureLayout)>(id))
+    {
+        if cached == *draft && at == revision {
             return Some(layout);
         }
     }
-    let layout = stokesforge_app_state::frame_sizes::figure_layout(draft)?;
-    ctx.data_mut(|data| data.insert_temp(id, (draft.clone(), layout.clone())));
+    let layout = stokesforge_app_state::frame_sizes::figure_layout_in(tree, draft)?;
+    ctx.data_mut(|data| data.insert_temp(id, (draft.clone(), revision, layout.clone())));
     Some(layout)
 }
 
