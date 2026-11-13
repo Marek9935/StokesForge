@@ -423,8 +423,10 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     untouched "--wait-tag with Closes" "$base"
     [ ! -e "$SF_SUIVI_DIR/tagwait/7.json" ] || fail "--wait-tag refused but a wait was recorded"
     if wdeliver --wait-tag soon 7 "$sb/msg"; then fail "--wait-tag soon accepted"; fi
+    suivi tag-wait 7 rc --jobs a --human x > /dev/null || fail "tag-wait declaration"
     wdeliver --wait-tag final 7 "$sb/msg" || fail "--wait-tag final: $(cat "$sb/out")"
     eq "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["kind"])' "$SF_SUIVI_DIR/tagwait/7.json")" final "tagwait record kind"
+    eq "$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["jobs"], d["human"])' "$SF_SUIVI_DIR/tagwait/7.json")" "['a'] x" "tagwait record keeps jobs and human"
     [ ! -e "$tmp/glab.log" ] || fail "deliver --wait-tag called glab: $(cat "$tmp/glab.log")"
     # Cleanup warning: a merge that does not close the issue and declared no wait warns (stderr),
     # the fixed colour line stays the only stdout; a declared wait or a Closes keeps it silent.
