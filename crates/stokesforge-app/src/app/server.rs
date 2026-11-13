@@ -520,6 +520,24 @@ impl BenchState {
     pub fn lock(&self) -> parking_lot::MappedMutexGuard<'_, AppState> {
         parking_lot::MutexGuard::map(self.0.lock(), |app| &mut app.state)
     }
+
+    /// A click on "Reattach" of the detached window of `graph`, as its header
+    /// button leaves it (#475, L4); the window acts on it at its next pass.
+    pub fn click_reattach(&self, graph: stokesforge_core::NodeId) {
+        if let Some(window) = self.0.lock().detached_graphs.get_mut(&graph) {
+            window.reattach = true;
+        }
+    }
+
+    /// Where the tab of `graph` is: (detached into its own window, floating in
+    /// the main window), as the application's own lists say.
+    pub fn graph_places(&self, graph: stokesforge_core::NodeId) -> (bool, bool) {
+        let app = self.0.lock();
+        (
+            app.detached_graphs.contains_key(&graph),
+            app.floating_tabs.contains(&super::tab::Tab::Graph(graph)),
+        )
+    }
 }
 
 impl ServedApp {

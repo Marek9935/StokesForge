@@ -400,9 +400,28 @@ in its pass too (`pass_prelude`), so a Save As started there is answered there.
 The view (`GraphView`, with its shape cache) migrates to `StokesForgeApp::
 detached_graphs` for the time of the detachment and returns, the same one, on
 Reattach or Close. A write wakes the root and the other open windows
-(`server::wake`, never a closed one); Reattach and Close only raise a flag and wake
-the root, which moves the window (L4 moves them to the window). A root covered by
-the graph (Page Layout Mode maximised) therefore delays nothing for the graph.
+(`server::wake`, never a closed one). Reattach and Close (L4): on **native Wayland**
+the window carries them out in its own pass, with no root pass
+(`keep_or_close_own_window`): egui removes a viewport at the end of its parent's
+pass, so after its first pass the window registers itself again at the end of each of
+its passes (through the one publish function, with the lock released; it is its own
+parent and the root stops publishing it, `DetachedGraph::self_owned`) and, to leave,
+does not: the entry goes out of `detached_graphs`, the tab floats again (Reattach) or
+is just closed (Close), and egui drops the window at the end of that pass. Under X11
+(`STOKESFORGE_X11`, or any session where the root's window handle is not Wayland) and
+on Windows the window only raises a flag and wakes the root, which moves it
+(`drain_detached_graph_flags`): a viewport that ends at its own pass crashes eframe
+0.36.2 under X11 (stack overflow, probe of #475), and Windows is not measured until a
+user trial. `native_wayland` reads the root's window handle once. A window the root
+removes (project replaced, workbook hidden) is woken once so that its pass ends it.
+The application's lists (`detached_graphs`, `is_tab_detached`) are the truth about
+which windows exist, never egui's viewport map: about 150 ms after a removal the root's
+input may list the id again as an empty entry (no closure, no native window). Tests:
+`app::detached_graph::tests` (Reattach and Close in a child pass alone, the root path
+without Wayland, the late empty entry, the egui guard that fails at an egui upgrade),
+and the manual `server_bench` test `a_covering_detached_graph_reattaches_itself`.
+A root covered by the graph (Page Layout Mode maximised) therefore delays nothing for
+the graph.
 The Page Layout Mode of a detached graph stays as it was: the OS window maximises
 and restores itself.
 

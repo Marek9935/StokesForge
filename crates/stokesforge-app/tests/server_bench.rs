@@ -595,3 +595,62 @@ fn m6_quit_during_autosave_big_project() {
     }
     assert!(all_ok, "M6 failed");
 }
+
+/// #475, step 2, L4 (native Wayland): a detached graph maximised over the root
+/// reattaches itself from its own pass. Real application, GL, headless mutter.
+/// The window is gone from the application's list within 500 ms of the click
+/// and the tab floats in the main window; the root, covered, runs at most one
+/// pass until then (its own throttled passes, #457) and paints the floating tab
+/// once uncovered.
+#[test]
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn a_covering_detached_graph_reattaches_itself() {
+    build_example();
+    let Some(r) = run_once(&Config {
+        scenario: "reattach",
+        big: false,
+        secs: 14,
+        env: &[],
+    }) else {
+        return skip();
+    };
+    println!("{}", r.out);
+    assert!(r.finished, "the bench did not end:\n{}", r.out);
+    let line = |key: &str| {
+        r.out
+            .lines()
+            .find(|line| line.contains(key))
+            .unwrap_or_else(|| panic!("no `{key}` line:\n{}", r.out))
+            .to_string()
+    };
+    let clicked = line("click_to_gone_us");
+    let gone_us: i64 = clicked
+        .split("click_to_gone_us ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.parse().ok())
+        .expect("a time");
+    let delta: u64 = clicked
+        .rsplit("root_ui_delta_until_gone ")
+        .next()
+        .and_then(|value| value.trim().parse().ok())
+        .expect("a count");
+    let after = line("reattach after");
+    let floats = after.contains("(false, true)");
+    let after_delta: u64 = after
+        .rsplit("root_ui_delta_after_uncovered ")
+        .next()
+        .and_then(|value| value.trim().parse().ok())
+        .expect("a count");
+    let ok = (0..500_000).contains(&gone_us) && delta <= 1 && floats && after_delta >= 1;
+    println!(
+        "server-bench: L4 reattach click_to_gone={:.1} ms root_ui_delta_until_gone={delta} floats={floats} root_ui_after_uncovered={after_delta} {}",
+        gone_us as f64 / 1000.0,
+        verdict(ok)
+    );
+    assert!(
+        ok,
+        "the covering window did not reattach itself:\n{}",
+        r.out
+    );
+}

@@ -1008,7 +1008,7 @@ impl StokesForgeApp {
     /// window.
     pub(super) fn reattach_tab(&mut self, tab: Tab) {
         if let Tab::Graph(graph) = tab {
-            let Some(window) = self.detached_graphs.remove(&graph) else {
+            let Some(window) = self.release_graph_window(graph) else {
                 return;
             };
             let mut view = window.view;
@@ -1037,7 +1037,7 @@ impl StokesForgeApp {
     /// closing of a floating window.
     pub(super) fn close_detached_tab(&mut self, tab: Tab) {
         if let Tab::Graph(graph) = tab {
-            let Some(window) = self.detached_graphs.remove(&graph) else {
+            let Some(window) = self.release_graph_window(graph) else {
                 return;
             };
             let mut view = window.view;

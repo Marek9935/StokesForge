@@ -432,6 +432,13 @@ pub struct StokesForgeApp {
     /// of each, reached by the window's own pass under the application lock.
     /// Absent from `floating_tabs` and from `graph_views` while detached.
     detached_graphs: HashMap<NodeId, detached_graph::DetachedGraph>,
+    /// Native Wayland: a detached window closes itself in its own pass (#475,
+    /// L4). Read once by the root from its window handle; false under X11 and
+    /// on Windows, where the root closes it (see `detached_graph.rs`).
+    windows_close_themselves: bool,
+    /// The windows of graphs that closed themselves and that the root removed
+    /// from the list: each one needs one pass of its own to leave egui.
+    released_windows: Vec<egui::ViewportId>,
     /// Position of each floating window, in logical coordinates of the
     /// workspace, moved by the house title bar and bounded by
     /// `clamp_to_workspace` — sole source of truth of the position.
@@ -618,6 +625,8 @@ impl StokesForgeApp {
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
             detached_graphs: HashMap::new(),
+            windows_close_themselves: false,
+            released_windows: Vec::new(),
             window_positions: HashMap::new(),
             window_sizes: HashMap::new(),
             figure_follow: HashMap::new(),
@@ -723,7 +732,7 @@ impl StokesForgeApp {
     /// close it. Returns whether there was one.
     fn remove_detached_window(&mut self, ctx: &egui::Context, tab: Tab) -> bool {
         let removed = match tab {
-            Tab::Graph(graph) => self.detached_graphs.remove(&graph).is_some(),
+            Tab::Graph(graph) => self.release_graph_window(graph).is_some(),
             _ => self.detached_tabs.remove(&tab).is_some(),
         };
         if removed {
@@ -1255,6 +1264,9 @@ impl eframe::App for StokesForgeApp {
         // freeze the actions of every window. Only the root opts in to the report:
         // a reported window gets no pass and loses its input, which a detached
         // window must not.
+        if let Some(wayland) = detached_graph::native_wayland(frame) {
+            self.windows_close_themselves = wayland;
+        }
         #[cfg(target_os = "linux")]
         if !self.occlusion_reported {
             if let Some(window) = frame.winit_window() {
@@ -1295,12 +1307,29 @@ impl eframe::App for StokesForgeApp {
                 Some(egui::ViewportId::ROOT),
             );
         }
+        self.wake_released_windows(&ctx);
         self.screenshot(&ctx);
         self.autoquit(&ctx);
     }
 }
 
 impl StokesForgeApp {
+    /// For the bench: the graph starts detached into its own window.
+    #[doc(hidden)]
+    pub fn bench_detach_graph(&mut self, graph: NodeId) {
+        let tab = Tab::Graph(graph);
+        if !self.floating_tabs.contains(&tab) {
+            self.floating_tabs.push(tab);
+        }
+        self.detach_tab(tab);
+    }
+
+    /// For the bench: the viewport of the detached window of `graph`.
+    #[doc(hidden)]
+    pub fn bench_graph_viewport(graph: NodeId) -> egui::ViewportId {
+        detached_graph::graph_viewport(graph)
+    }
+
     /// Collects the finished jobs before the panels read the snapshot.
     fn poll_background_jobs(&mut self, ctx: &egui::Context) {
         // Probes a script finished on its detached thread **before** painting:
@@ -2285,7 +2314,10 @@ impl StokesForgeApp {
             );
         }
         self.detached_tabs.clear();
-        self.detached_graphs.clear();
+        let graphs: Vec<NodeId> = self.detached_graphs.keys().copied().collect();
+        for graph in graphs {
+            self.release_graph_window(graph);
+        }
         self.floating_tabs.clear();
         self.cascade_rank.clear();
         self.next_cascade = 0;

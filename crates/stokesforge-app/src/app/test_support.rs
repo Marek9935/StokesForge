@@ -319,6 +319,9 @@ pub(super) mod bench {
         time: f64,
         /// The window that has the keyboard, as the root sees it.
         focused_child: Option<egui::ViewportId>,
+        /// Ids of removed windows that the root's input still lists, as an
+        /// empty entry (the late echo measured by the probe of #475).
+        pub(in crate::app) stale: Vec<egui::ViewportId>,
         pub(in crate::app) graph: NodeId,
         pub(in crate::app) tab: Tab,
         /// The folder of the project file of [`Bench::with_every_window`].
@@ -380,6 +383,7 @@ pub(super) mod bench {
                 callbacks: HashMap::new(),
                 time: 0.0,
                 focused_child: None,
+                stale: Vec::new(),
                 graph,
                 tab,
                 dir: None,
@@ -484,7 +488,7 @@ pub(super) mod bench {
                 );
             } else {
                 // The root sees the focus of the windows, as eframe reports it.
-                for window in self.callbacks.keys() {
+                for window in self.callbacks.keys().chain(&self.stale) {
                     raw.viewports.insert(
                         *window,
                         egui::ViewportInfo {
@@ -564,6 +568,18 @@ pub(super) mod bench {
             });
             self.app.acquire();
             output.textures_delta.clear();
+            // What the window registered again in its pass is what egui keeps; a
+            // window that stopped registering is gone from the output.
+            match output.viewport_output.get(&id) {
+                Some(viewport) => {
+                    if let Some(callback) = &viewport.viewport_ui_cb {
+                        self.callbacks.insert(id, callback.clone());
+                    }
+                }
+                None => {
+                    self.callbacks.remove(&id);
+                }
+            }
             output
         }
 

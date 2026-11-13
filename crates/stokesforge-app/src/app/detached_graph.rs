@@ -13,10 +13,25 @@
 //! restore. It lives in [`StokesForgeApp::detached_graphs`] and is reached under
 //! the lock like everything else.
 //!
-//! **What stays with the root.** Reattach and Close only set a flag
-//! ([`DetachedGraph::reattach`], [`DetachedGraph::close`]) and wake the root,
-//! which moves the window ([`StokesForgeApp::drain_detached_graph_flags`], as
-//! before; the window closing itself is L4). The dialogs are painted by the
+//! **Reattach and Close (L4).** On native Wayland the window carries them out
+//! in its own pass, with no root pass: egui removes a viewport at the end of
+//! its parent's pass, so after its first pass the window registers itself again
+//! at the end of each of its passes (it becomes its own parent; the root stops
+//! publishing it, [`DetachedGraph::self_owned`]) and, to leave, simply does not
+//! ([`StokesForgeApp::keep_or_close_own_window`]: the entry goes out of the
+//! list, the tab floats again or closes, egui drops the window at the end of
+//! that pass). Under X11 (`STOKESFORGE_X11`) and on Windows the root does it:
+//! the window only raises a flag ([`DetachedGraph::reattach`],
+//! [`DetachedGraph::close`]) and wakes the root
+//! ([`StokesForgeApp::drain_detached_graph_flags`]), because a viewport that
+//! ends at its own pass crashes eframe 0.36.2 under X11 (stack overflow,
+//! probe of #475) and Windows is not measured. [`native_wayland`] decides, once,
+//! from the window handle of the root. A window the root removes (a project
+//! replaced, a workbook hidden) is woken once so that its pass ends it
+//! ([`StokesForgeApp::release_graph_window`]). The truth about which windows
+//! exist is the application's list, never egui's viewport map: about 150 ms
+//! after a removal the root's input may list the id again as an empty entry.
+//! The dialogs are painted by the
 //! root (#472): this window shows the band that says where the dialog is. Not
 //! run in this pass, because they target the current viewport or belong to the
 //! root alone: `sync_window_title_and_status`, `poll_background_jobs`,
@@ -80,10 +95,14 @@ pub(super) struct DetachedGraph {
     pub(super) figure_follow: HashMap<NodeId, FigureFollow>,
     /// The maximise the Page Layout Mode forced on the OS window.
     pub(super) mode_maximize: super::layout_window::ModeMaximize,
-    /// "Reattach to the main window" was actuated; the root moves the window.
+    /// "Reattach to the main window" was actuated. Native Wayland: the window
+    /// moves itself in the same pass; elsewhere the root drains the flag.
     pub(super) reattach: bool,
-    /// The cross, or Close, was actuated; the root closes the window.
+    /// The cross, or Close, was actuated (same split as `reattach`).
     pub(super) close: bool,
+    /// Native Wayland: the window has had its first pass and registers itself
+    /// from now on (it is its own parent); the root no longer publishes it.
+    pub(super) self_owned: bool,
 }
 
 impl DetachedGraph {
@@ -98,6 +117,7 @@ impl DetachedGraph {
             mode_maximize: None,
             reattach: false,
             close: false,
+            self_owned: false,
         }
     }
 
@@ -105,6 +125,23 @@ impl DetachedGraph {
     /// root): the OS window has to maximise or restore itself at its next pass.
     pub(super) fn mode_differs(&self) -> bool {
         self.view.layout_mode() != self.mode_maximize.is_some()
+    }
+}
+
+/// Is the root's window a native Wayland one? `None` before the root has a
+/// window (a test, a bench). Only there does a detached window close itself.
+pub(super) fn native_wayland(frame: &eframe::Frame) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        let window = frame.winit_window()?;
+        let handle = window.window_handle().ok()?;
+        Some(matches!(handle.as_raw(), RawWindowHandle::Wayland(_)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = frame;
+        None
     }
 }
 
@@ -122,8 +159,56 @@ struct Frame {
 }
 
 impl StokesForgeApp {
-    /// Publishes the viewport of each detached graph (queued for after the lock
-    /// is released) and wakes the ones whose OS window must follow the mode.
+    /// The viewport of the detached window of `graph`: no native decoration,
+    /// the home-made bar is all the user has to move, resize and close it.
+    /// Neither position nor size remembered (issue #16).
+    fn graph_window_builder(&self, graph: NodeId) -> egui::ViewportBuilder {
+        let title = tr!(
+            "window-title-detached",
+            name = tab_title(&self.state, Tab::Graph(graph))
+        );
+        crate::app_logo::viewport()
+            .with_title(title)
+            .with_decorations(false)
+            .with_inner_size([GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y])
+            // The B9 collapse must be able to reduce the height below the
+            // usual minimum.
+            .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT])
+    }
+
+    /// Queues the registration of the window of `graph` (`publish_viewport`,
+    /// the one function that registers a viewport). Called by the root until the
+    /// window's first pass, then by the window itself on native Wayland.
+    fn publish_graph_window(&mut self, ctx: &egui::Context, graph: NodeId, repaint: bool) {
+        let viewport = self.graph_window_builder(graph);
+        let shared = self.shared_self.clone();
+        Self::publish_viewport(
+            &mut self.pending_viewports,
+            ctx,
+            graph_viewport(graph),
+            viewport,
+            repaint,
+            move |ui, _class| {
+                // The root released its guard before this window was
+                // published, so it can take it.
+                let Some(shared) = shared.upgrade() else {
+                    return;
+                };
+                let pending = {
+                    let mut app = lock_app_from_viewport(&shared);
+                    app.detached_graph_pass(ui, graph, [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y]);
+                    app.take_pending_viewports()
+                };
+                // The window registers itself with the lock released (an
+                // embedded viewport runs its body inside this call).
+                super::window_detach::publish_viewports(ui.ctx(), pending);
+            },
+        );
+    }
+
+    /// Publishes the viewport of each detached graph that is not yet its own
+    /// parent (queued for after the lock is released) and wakes the ones whose
+    /// OS window must follow the mode.
     pub(super) fn show_detached_graphs(&mut self, ctx: &egui::Context) {
         let ids: Vec<NodeId> = self.detached_graphs.keys().copied().collect();
         for graph in ids {
@@ -131,40 +216,34 @@ impl StokesForgeApp {
                 continue;
             };
             let changed = window.mode_differs();
-            let title = tr!(
-                "window-title-detached",
-                name = tab_title(&self.state, Tab::Graph(graph))
-            );
-            // Starts at a size that contains the reference figure and its
-            // return to the initial framing.
-            let size = [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y];
-            // Without native decoration: the home-made bar (`window_header`,
-            // placement `Detached`) is all the user has to move, resize and close
-            // this window. Neither position nor size remembered (issue #16).
-            let viewport = crate::app_logo::viewport()
-                .with_title(title)
-                .with_decorations(false)
-                .with_inner_size(size)
-                // The B9 collapse must be able to reduce the height below the
-                // usual minimum.
-                .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
-            let shared = self.shared_self.clone();
-            Self::publish_viewport(
-                &mut self.pending_viewports,
-                ctx,
-                graph_viewport(graph),
-                viewport,
-                changed,
-                move |ui, _class| {
-                    // The root released its guard before this window was
-                    // published, so it can take it.
-                    let Some(shared) = shared.upgrade() else {
-                        return;
-                    };
-                    let mut app = lock_app_from_viewport(&shared);
-                    app.detached_graph_pass(ui, graph, size);
-                },
-            );
+            if window.self_owned {
+                // The window keeps itself registered; the root only wakes it.
+                if changed {
+                    ctx.request_repaint_of(graph_viewport(graph));
+                }
+                continue;
+            }
+            self.publish_graph_window(ctx, graph, changed);
+        }
+    }
+
+    /// Takes the detached window of `graph` out of the list. A window that
+    /// registered itself needs one pass of its own to leave egui (the root
+    /// cannot remove what it does not parent): it is woken once, by
+    /// [`Self::wake_released_windows`].
+    pub(super) fn release_graph_window(&mut self, graph: NodeId) -> Option<DetachedGraph> {
+        let window = self.detached_graphs.remove(&graph)?;
+        if window.self_owned {
+            self.released_windows.push(graph_viewport(graph));
+        }
+        Some(window)
+    }
+
+    /// Wakes, once, the windows the root released: their next pass finds them
+    /// out of the list, does not register them and egui removes them.
+    pub(super) fn wake_released_windows(&mut self, ctx: &egui::Context) {
+        for id in std::mem::take(&mut self.released_windows) {
+            ctx.request_repaint_of(id);
         }
     }
 
@@ -207,9 +286,47 @@ impl StokesForgeApp {
             let mut own = Vec::new();
             let woke = self.paint_detached_graph(ui, graph, size, &mut own);
             self.apply_pass_actions(&ctx, viewport, prelude, own, woke);
+            self.keep_or_close_own_window(&ctx, viewport, graph);
         }
         super::page_layout::note_field_focus(&ctx);
         super::window_band::paint(&ctx);
+    }
+
+    /// Native Wayland (#475, L4): the end of the window's pass. Reattach or
+    /// Close raised in this pass is carried out here, at once; the window then
+    /// does not register itself and egui removes it at the end of this very
+    /// pass. Otherwise the window registers itself again (it is its own parent
+    /// from its first pass on). Elsewhere the root does both, as before.
+    fn keep_or_close_own_window(
+        &mut self,
+        ctx: &egui::Context,
+        viewport: egui::ViewportId,
+        graph: NodeId,
+    ) {
+        if !self.windows_close_themselves {
+            return;
+        }
+        let Some(window) = self.detached_graphs.get_mut(&graph) else {
+            return;
+        };
+        let reattach = std::mem::take(&mut window.reattach);
+        let close = std::mem::take(&mut window.close);
+        if reattach || close {
+            // This pass is the window's last: nobody wakes it for its removal.
+            window.self_owned = false;
+            super::window_band::clear(ctx, viewport);
+            let tab = Tab::Graph(graph);
+            if reattach {
+                self.reattach_tab(tab);
+            } else {
+                self.close_detached_tab(tab);
+            }
+            // The root (the tab floats again, or is gone) was woken by the
+            // pass, with the flag as its reason.
+            return;
+        }
+        window.self_owned = true;
+        self.publish_graph_window(ctx, graph, false);
     }
 
     /// Applies at once what a pass of the window produced: `prelude` (an
@@ -677,5 +794,245 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A bench on the native Wayland path: the windows close themselves.
+    fn wayland_bench() -> Bench {
+        let mut bench = Bench::new();
+        bench.app.windows_close_themselves = true;
+        bench.start();
+        bench
+    }
+
+    fn os_close() -> egui::ViewportInfo {
+        egui::ViewportInfo {
+            events: vec![egui::ViewportEvent::Close],
+            ..Default::default()
+        }
+    }
+
+    /// Asserts that `output` is a pass at the end of which egui dropped the
+    /// window `id`: what eframe reads to destroy the OS window.
+    fn assert_window_dropped(output: &egui::FullOutput, id: egui::ViewportId) {
+        assert!(
+            !output.viewport_output.contains_key(&id),
+            "egui must have dropped the viewport at the end of its own pass"
+        );
+    }
+
+    /// T2, Wayland path: Reattach raised in the window's own pass alone moves
+    /// the graph out of the detached list, floats it in the main window at the
+    /// next root paint, and the window leaves egui at the end of that pass. The
+    /// application's list is the truth, not the viewport map. Witness: the
+    /// flags drained at the root only (`keep_or_close_own_window` returns early).
+    #[test]
+    fn reattach_in_the_window_pass_alone_floats_the_graph_without_a_root_pass() {
+        let mut bench = wayland_bench();
+        let (graph, tab, id) = (bench.graph, bench.tab, bench.child_id());
+        assert!(
+            bench.app.detached_graphs[&graph].self_owned,
+            "after its passes the window registers itself"
+        );
+        let identity = bench.app.detached_graphs[&graph].view.id();
+        bench.app.detached_graphs.get_mut(&graph).unwrap().reattach = true;
+        let output = bench.child(Pass::child());
+        assert!(!bench.app.is_tab_detached(tab), "absent from the list");
+        assert!(!bench.app.open_viewports().contains(&id));
+        assert_window_dropped(&output, id);
+        assert_eq!(delay(&output, egui::ViewportId::ROOT), Duration::ZERO);
+        // The next root paint shows it floating, with the very same view (T3).
+        bench.root(Pass::root());
+        assert!(bench.app.floating_tabs.contains(&tab));
+        assert!(!bench.app.is_tab_detached(tab));
+        assert_eq!(bench.app.graph_views[&graph].id(), identity);
+        bench.finish();
+    }
+
+    /// T2, Wayland path: the cross (a close request of the OS) in the window's
+    /// own pass alone closes the detached view as the root did: the window is
+    /// gone, the graph stays in the project with its cache. Witness: same.
+    #[test]
+    fn close_in_the_window_pass_alone_closes_the_window_and_keeps_the_graph() {
+        let mut bench = wayland_bench();
+        let (graph, tab, id) = (bench.graph, bench.tab, bench.child_id());
+        let identity = bench.app.detached_graphs[&graph].view.id();
+        let output = bench.child(Pass::child().info(os_close()));
+        assert!(!bench.app.is_tab_detached(tab));
+        assert_window_dropped(&output, id);
+        assert_eq!(delay(&output, egui::ViewportId::ROOT), Duration::ZERO);
+        bench.root(Pass::root());
+        assert!(
+            !bench.app.floating_tabs.contains(&tab),
+            "Close does not float the tab"
+        );
+        assert_eq!(bench.app.graph_views[&graph].id(), identity);
+        assert!(bench.app.state.plot_spec(graph).is_some());
+        bench.finish();
+    }
+
+    /// T2, X11 / Windows path: without the Wayland switch the window raises the
+    /// flag and stays registered until the root drains it. Witness: self-close
+    /// on that path.
+    #[test]
+    fn without_wayland_the_root_closes_the_window() {
+        let mut bench = Bench::new();
+        assert!(!bench.app.windows_close_themselves);
+        bench.start();
+        let (graph, tab, id) = (bench.graph, bench.tab, bench.child_id());
+        assert!(!bench.app.detached_graphs[&graph].self_owned);
+        bench.app.detached_graphs.get_mut(&graph).unwrap().reattach = true;
+        let output = bench.child(Pass::child());
+        assert!(
+            bench.app.is_tab_detached(tab),
+            "still in the list until the root pass"
+        );
+        assert!(
+            !output.viewport_output.contains_key(&id)
+                || output.viewport_output[&id].parent == egui::ViewportId::ROOT
+        );
+        bench.root(Pass::root());
+        assert!(!bench.app.is_tab_detached(tab));
+        assert!(bench.app.floating_tabs.contains(&tab));
+        bench.finish();
+    }
+
+    /// A window that registered itself is not published again by the root, and
+    /// a root that removes it wakes it once so that its pass ends it. Witness:
+    /// the root publishing a self-owned window; no wake on release.
+    #[test]
+    fn the_root_leaves_a_self_owned_window_and_wakes_it_once_to_release_it() {
+        let mut bench = wayland_bench();
+        let (graph, tab, id) = (bench.graph, bench.tab, bench.child_id());
+        let output = bench.root(Pass::root());
+        assert_eq!(
+            output.viewport_output[&id].parent, id,
+            "the window is its own parent"
+        );
+        // The root removes it (a project replaced, a workbook hidden).
+        assert!(bench.app.release_graph_window(graph).is_some());
+        assert_eq!(bench.app.released_windows, vec![id], "to be woken once");
+        let ctx = bench.ctx.clone();
+        bench.app.wake_released_windows(&ctx);
+        let output = bench.child(Pass::child());
+        assert_window_dropped(&output, id);
+        assert!(!bench.app.is_tab_detached(tab));
+        // Woken once, not again.
+        assert!(bench.app.released_windows.is_empty());
+        bench.finish();
+    }
+
+    /// The probe's oddity: about 150 ms after a removal the root's input lists
+    /// the id again as an empty entry. It must neither re-create a window nor
+    /// make a write wake the closed id. Witness: wake the ids the root's input
+    /// lists instead of the application's list.
+    #[test]
+    fn a_late_empty_entry_of_a_closed_window_creates_nothing_and_is_never_woken() {
+        let mut bench = wayland_bench();
+        let id = bench.child_id();
+        bench.child(Pass::child().info(os_close()));
+        bench.stale.push(id);
+        let output = bench.root(Pass::root());
+        assert!(
+            output
+                .viewport_output
+                .get(&id)
+                .is_none_or(|viewport| viewport.viewport_ui_cb.is_none()),
+            "no window is created for a stale entry"
+        );
+        assert!(bench.app.open_viewports().is_empty());
+        bench.app.state.dispatch(Action::AddWorkbook);
+        let output = bench.root(Pass::root());
+        assert!(
+            output
+                .viewport_output
+                .get(&id)
+                .is_none_or(|viewport| viewport.repaint_delay != Duration::ZERO),
+            "the closed id is not woken"
+        );
+        bench.finish();
+    }
+
+    /// Guard on egui's internals, which the self-close relies on (#475, L4;
+    /// eframe/egui 0.36.2): a viewport that registers itself from its own pass
+    /// becomes its own parent and survives a parent that stops registering it;
+    /// when it stops registering, it is gone from the output of that very
+    /// pass. An egui upgrade that changes it fails here first; the fix is to
+    /// bring the root-side close back for every platform
+    /// (`windows_close_themselves = false`).
+    #[test]
+    fn egui_drops_a_self_registered_viewport_at_the_end_of_its_own_pass() {
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        let child = egui::ViewportId::from_hash_of("l4-guard-child");
+        let body = |again: bool| {
+            move |ui: &mut egui::Ui, _: egui::ViewportClass| {
+                if again {
+                    // Registers itself again, from its own pass.
+                    ui.ctx().show_viewport_deferred(
+                        egui::ViewportId::from_hash_of("l4-guard-child"),
+                        egui::ViewportBuilder::default(),
+                        |_, _| {},
+                    );
+                }
+            }
+        };
+        let root = |register: bool| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                if register {
+                    ui.ctx().show_viewport_deferred(
+                        child,
+                        egui::ViewportBuilder::default(),
+                        body(false),
+                    );
+                }
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let child_pass = |register_again: bool| {
+            let mut raw = egui::RawInput {
+                viewport_id: child,
+                ..Default::default()
+            };
+            raw.viewports.insert(
+                child,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            let mut output = ctx.run_ui(raw, |ui| {
+                body(register_again)(ui, egui::ViewportClass::Deferred)
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let output = root(true);
+        assert_eq!(
+            output.viewport_output[&child].parent,
+            egui::ViewportId::ROOT
+        );
+        let output = child_pass(true);
+        assert_eq!(
+            output.viewport_output[&child].parent, child,
+            "registering itself makes the window its own parent"
+        );
+        let output = root(false);
+        assert!(
+            output.viewport_output.contains_key(&child),
+            "a root that no longer registers it does not remove it"
+        );
+        assert!(child_pass(true).viewport_output.contains_key(&child));
+        assert!(
+            !child_pass(false).viewport_output.contains_key(&child),
+            "it leaves at the end of its own pass"
+        );
+        // The echo the probe saw: the next root pass lists the id again, but
+        // as an empty entry that no closure can paint. Nothing may rely on the
+        // viewport map for "is this window open".
+        assert!(root(false)
+            .viewport_output
+            .get(&child)
+            .is_none_or(|viewport| viewport.viewport_ui_cb.is_none()));
     }
 }

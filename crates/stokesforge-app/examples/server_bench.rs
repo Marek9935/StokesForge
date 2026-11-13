@@ -10,7 +10,8 @@
 //!   M5), `hidden` (a second maximised process, or a minimised root, covers
 //!   everything; edits, a recalculation and an import come from a bench thread
 //!   that takes the lock like a hidden-window event would: M2, M3, M4, M5),
-//!   `quit` (M6).
+//!   `quit` (M6), `reattach` (#475, L4: a graph detached and maximised over the
+//!   root, Reattach clicked from a bench thread; the window must close itself).
 //! - `BENCH_SIZE`: `small` (about 10k cells) or `big` (1M rows x 10 columns).
 //! - `BENCH_DIR`: scratch folder (preferences, recovery copies, import files).
 //! - `BENCH_SECS`: duration. `BENCH_EDIT_AT`: seconds of the edits of `hidden`.
@@ -183,7 +184,21 @@ fn main() -> eframe::Result {
         (1_000, 6, 3, 1)
     };
     let t = Instant::now();
-    let (project, column_a, column_d) = build_project(rows, data, formulas, terms);
+    let (mut project, column_a, column_d) = build_project(rows, data, formulas, terms);
+    let graph = (plan.scenario == "reattach").then(|| {
+        let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
+        panel
+            .series
+            .push(stokesforge_plot::SeriesSpec::new_xy(column_a, column_d));
+        let root = project.root();
+        project
+            .add_graph(
+                root,
+                None,
+                stokesforge_plot::PlotSpec::empty("Figure").with_panels(panel),
+            )
+            .expect("graph")
+    });
     let session = Session::spawn(project, None).expect("session");
     println!(
         "bench: project rows={rows} columns={} built_ms={}",
@@ -225,13 +240,25 @@ fn main() -> eframe::Result {
             cc.egui_ctx
                 .set_fonts(stokesforge_render_egui::font_definitions());
             stokesforge_app::theme::install(&cc.egui_ctx);
-            let app = stokesforge_app::app::StokesForgeApp::new(state);
+            let mut app = stokesforge_app::app::StokesForgeApp::new(state);
+            if let Some(graph) = graph {
+                app.bench_detach_graph(graph);
+            }
             let ctx = cc.egui_ctx.clone();
             let mut served = ServedApp::new(app, ctx.clone());
             let shared = served.shared_state();
             let waker = served.bench_waker();
             let end = Arc::new(AtomicBool::new(false));
             let continuous = matches!(plan.scenario.as_str(), "lock" | "quit" | "quit_idle");
+            if let Some(graph) = graph {
+                reattach_thread(
+                    graph,
+                    Arc::clone(&shared),
+                    ctx.clone(),
+                    Arc::clone(&passes_for_app),
+                    started,
+                );
+            }
             served.set_pass_hook(pass_hook(
                 &plan,
                 column_a,
@@ -395,7 +422,10 @@ fn start_threads(
             ctx.request_repaint();
         });
     }
-    if scenario == "quit" || scenario == "quit_idle" || scenario == "lock" {
+    if matches!(
+        scenario.as_str(),
+        "quit" | "quit_idle" | "lock" | "reattach"
+    ) {
         return;
     }
     if scenario == "rest" {
@@ -530,6 +560,56 @@ fn start_threads(
             waker();
         });
     }
+}
+
+/// `reattach` (#475, L4): the detached graph is maximised over the root, then
+/// "Reattach" is clicked from here. The window must close itself in its own
+/// pass: the tab floats in the main window, and the root, covered, paints
+/// nothing meanwhile (its passes are counted).
+fn reattach_thread(
+    graph: NodeId,
+    shared: Arc<BenchState>,
+    ctx: egui::Context,
+    passes: Arc<AtomicU64>,
+    started: Instant,
+) {
+    std::thread::spawn(move || {
+        let id = stokesforge_app::app::StokesForgeApp::bench_graph_viewport(graph);
+        std::thread::sleep(Duration::from_secs_f64(
+            (4.0 - started.elapsed().as_secs_f64()).max(0.0),
+        ));
+        println!("bench: reattach before {:?}", shared.graph_places(graph));
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Maximized(true));
+        ctx.request_repaint_of(id);
+        std::thread::sleep(Duration::from_secs(2));
+        let maximised = ctx.viewport_for(id, |viewport| viewport.input.viewport().maximized);
+        // Let a covered root's own throttled passes settle, then count.
+        let root_before = passes.load(Relaxed);
+        let click_us = wall_us();
+        shared.click_reattach(graph);
+        ctx.request_repaint_of(id);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut gone_us = None;
+        while Instant::now() < deadline {
+            if !shared.graph_places(graph).0 {
+                gone_us = Some(wall_us());
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let root_at_gone = passes.load(Relaxed);
+        println!(
+            "bench: reattach maximised={maximised:?} click_to_gone_us {} root_ui_delta_until_gone {}",
+            gone_us.map_or(-1, |gone| (gone - click_us) as i64),
+            root_at_gone - root_before
+        );
+        std::thread::sleep(Duration::from_millis(1500));
+        println!(
+            "bench: reattach after {:?} root_ui_delta_after_uncovered {}",
+            shared.graph_places(graph),
+            passes.load(Relaxed) - root_at_gone
+        );
+    });
 }
 
 /// The cover process, killed when the bench ends by itself.
