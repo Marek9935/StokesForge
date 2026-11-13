@@ -9866,14 +9866,19 @@ impl AppState {
         if name == current {
             return;
         }
+        // The sibling rule of the model (#494): case and `ᵀ` read as `T`; the
+        // message names the sheet that holds the name.
         let taken = self
             .worksheets_of(book)
-            .iter()
-            .any(|(id, other)| *id != sheet && other == name);
+            .into_iter()
+            .find(|(id, other)| {
+                *id != sheet && stokesforge_core::same_name_ignoring_case(other, name)
+            })
+            .map(|(_, other)| other);
         if name.is_empty() {
             self.fail(tr!("sheet-rename-empty", name = current));
-        } else if taken {
-            self.fail(tr!("sheet-rename-taken", name = name, old = current));
+        } else if let Some(taken) = taken {
+            self.fail(tr!("sheet-rename-taken", name = taken, old = current));
         } else {
             self.execute(Command::Rename {
                 id: sheet,
