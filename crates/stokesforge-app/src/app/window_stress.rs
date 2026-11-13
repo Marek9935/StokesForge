@@ -850,6 +850,9 @@ impl Rig {
     }
 }
 
+/// The seed being played, for the message of the watchdog.
+static RUNNING_SEED: AtomicU64 = AtomicU64::new(0);
+
 /// Runs `body` on a thread with a watchdog: a deadlock fails the test instead
 /// of hanging it, a panic is passed on.
 fn with_watchdog(limit: Duration, body: impl FnOnce() + Send + 'static) {
@@ -861,13 +864,17 @@ fn with_watchdog(limit: Duration, body: impl FnOnce() + Send + 'static) {
     match rx.recv_timeout(limit) {
         Ok(Ok(())) => {}
         Ok(Err(panic)) => std::panic::resume_unwind(panic),
-        Err(_) => panic!("deadlock: the run did not end within {limit:?}"),
+        Err(_) => panic!(
+            "deadlock: the run did not end within {limit:?} (SF_STRESS_SEED={})",
+            RUNNING_SEED.load(Ordering::SeqCst)
+        ),
     }
 }
 
 /// One run of `steps` random steps; the seed is printed on any failure.
 fn stress_run(seed: u64, steps: usize) {
-    let wayland = seed % 2 == 0;
+    let wayland = seed.is_multiple_of(2);
+    RUNNING_SEED.store(seed, Ordering::SeqCst);
     let result = std::panic::catch_unwind(|| {
         let mut rig = Rig::new(seed, wayland);
         for _ in 0..steps {
