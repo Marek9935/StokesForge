@@ -348,12 +348,11 @@ fn plot_settings_contents(
                         );
                         commit |= graph_settings_page(
                             ui,
-                            &bind_tree,
+                            (&bind_tree, layout.as_ref()),
                             spec,
                             edit.selected_panel,
                             &mut size_lock,
                             &mut env,
-                            layout.as_ref(),
                             unit,
                         );
                     }
@@ -475,12 +474,11 @@ fn dialog_layout(
 /// Graph page: title and background, as a two-column form (#227).
 fn graph_settings_page(
     ui: &mut egui::Ui,
-    tree: &Tree,
+    (tree, layout): (&Tree, Option<&FigureLayout>),
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
     env: &mut PickerEnv,
-    layout: Option<&FigureLayout>,
     unit: LengthUnit,
 ) -> bool {
     form(ui, "plot_graph_page", |form| {
@@ -511,7 +509,7 @@ fn graph_settings_page(
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
-        commit |= size_section(form, tree, spec, panel, size_lock, layout, unit, env);
+        commit |= size_section(form, (tree, layout), spec, panel, size_lock, unit, env);
         // S-L8 (#405, #426): "When axes are added" has an Auto default ("Grows
         // with the axes"), almost never changed; the plot area rows are the
         // written exception of S-L8 (they have no Auto) and sit here too, so the
@@ -586,16 +584,15 @@ fn figure_size_row(
 /// it is drawn with, so only the edited one changes.
 fn size_section(
     form: &mut Form<'_>,
-    tree: &Tree,
+    (tree, layout): (&Tree, Option<&FigureLayout>),
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
-    layout: Option<&FigureLayout>,
     unit: LengthUnit,
     env: &mut PickerEnv,
 ) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
-        return free_size_section(form, tree, spec, panel, size_lock, layout, unit, env);
+        return free_size_section(form, (tree, layout), spec, panel, size_lock, unit, env);
     }
     let (drawn_widths, drawn_heights) = drawn_frames(spec, layout);
     if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
@@ -880,11 +877,10 @@ fn placement_row(form: &mut Form<'_>, tree: &Tree, spec: &mut PlotSpec) -> bool 
 /// plot area rows are in Advanced ([`free_plot_area_rows`]).
 fn free_size_section(
     form: &mut Form<'_>,
-    tree: &Tree,
+    (tree, layout): (&Tree, Option<&FigureLayout>),
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
-    layout: Option<&FigureLayout>,
     unit: LengthUnit,
     env: &mut PickerEnv,
 ) -> bool {
