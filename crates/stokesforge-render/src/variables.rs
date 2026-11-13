@@ -337,6 +337,80 @@ mod tests {
         assert!(!bind("a - #ln", &values).contains('\n'));
     }
 
+    fn sample_with_title(title: &str) -> crate::sample::Sample {
+        let mut sample = crate::sample::minimal().expect("sample");
+        sample.spec.title = title.to_owned();
+        sample
+    }
+
+    /// Test 6: a spec whose texts use no variable comes back borrowed, so its
+    /// cache entry and pixels are untouched. Witness: always cloning.
+    #[test]
+    fn a_spec_without_variable_is_borrowed() {
+        let sample = sample_with_title("Absorption spectrum (u.a.)");
+        let bound = bind_spec(sample.project.tree(), &sample.spec, &FigureTexts::default());
+        assert!(matches!(bound, Cow::Borrowed(_)));
+        let math = sample_with_title("$ln(x)$ #strong[u]");
+        let bound = bind_spec(math.project.tree(), &math.spec, &FigureTexts::default());
+        assert!(matches!(bound, Cow::Borrowed(_)), "a math identifier");
+    }
+
+    #[test]
+    fn every_text_kind_is_bound_to_its_context_column() {
+        use stokesforge_plot::{AnnotationSpec, ColorBarSegment, ColorBarSpec};
+        let mut sample = crate::sample::minimal().expect("sample");
+        sample.spec.title = "#sn".to_owned();
+        let panel = sample.spec.panels.get_mut(0).expect("panel");
+        panel.title = "#sn".to_owned();
+        panel.bottom.label = "#sn".to_owned();
+        panel.bottom.unit = "#sn".to_owned();
+        panel.annotations.push(AnnotationSpec::new("#sn", 0.0, 0.0));
+        panel.series[0].group = Some(1);
+        let mut bar = ColorBarSpec::default();
+        bar.title = "#sn".to_owned();
+        let mut segment = ColorBarSegment::new(1);
+        segment.label = "#sn".to_owned();
+        bar.segments.push(segment);
+        panel.color_bar = Some(bar);
+        let spec = sample.spec.clone();
+        let bound = bind_spec(sample.project.tree(), &spec, &FigureTexts::default());
+        let panel = &bound.panels[0];
+        let preamble = |name: &str| format!("#let sn = \"{name}\";");
+        // Titles, annotations and the bar: the Y column; the bottom axis: X.
+        for text in [
+            &bound.title,
+            &panel.title,
+            &panel.annotations[0].text,
+            &panel.color_bar.as_ref().unwrap().title,
+            &panel.color_bar.as_ref().unwrap().segments[0].label,
+        ] {
+            assert!(text.contains(&preamble("Absorbance")), "{text}");
+        }
+        assert!(panel.bottom.label.contains(&preamble("Lambda")));
+        assert!(panel.bottom.unit.is_empty(), "the unit is composed away");
+        assert_eq!(strip_preamble(&panel.bottom.label), "#sn (#sn)");
+        // The stored spec is untouched.
+        assert_eq!(spec.title, "#sn");
+    }
+
+    /// Test 4 (render side): no column, no series: every variable is the
+    /// translated broken reference, never an empty text.
+    #[test]
+    fn a_text_without_a_column_reads_the_broken_reference() {
+        let mut sample = sample_with_title("#ln|#u|#c|#sn|#xp");
+        sample.spec.panels.get_mut(0).unwrap().series.clear();
+        let texts = FigureTexts::new(
+            "xx",
+            "(rompue)",
+            |name| name.to_owned(),
+            |count| count.to_string(),
+            |row| row.to_string(),
+        );
+        let bound = bind_spec(sample.project.tree(), &sample.spec, &texts);
+        let shown = plain_text(&bound.title).expect("compiles");
+        assert_eq!(shown, "(rompue)|(rompue)|(rompue)|(rompue)|(rompue)");
+    }
+
     #[test]
     fn the_users_own_let_wins() {
         let bound = bind("#let ln = \"mine\";#ln", &values("Abs", ""));

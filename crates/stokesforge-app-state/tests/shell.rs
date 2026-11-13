@@ -11508,6 +11508,81 @@ fn exporting_a_zoomed_graph_does_not_touch_the_model() {
     assert_eq!(state.snapshot().revision, before.1, "a command was emitted");
 }
 
+/// #501: an axis title `#ln (#u)` is exported with the column's long name and
+/// unit, live: a header edit changes the next export, and Ctrl+Z brings the
+/// first one back byte for byte. Witness: binding outside the closure that
+/// sees the current tree (a stale tree) leaves the second export unchanged.
+#[test]
+fn an_axis_title_with_variables_follows_the_column_header_and_its_undo() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let mut spec = graph_spec(&state, graph);
+    spec.panels.get_mut(0).expect("panel").left.label = "#ln (#u)".to_owned();
+    let spec = Box::new(spec);
+    let signal = state
+        .tree()
+        .child_by_name(sheet_named(state.tree(), "Sheet1"), "Signal")
+        .expect("readable")
+        .expect("Signal");
+    let exported = |state: &mut AppState, name: &str| {
+        let path = dir.path().join(name);
+        state.dispatch(Action::ExportGraph {
+            path: path.clone(),
+            spec: spec.clone(),
+        });
+        let status = state.status().expect("a message");
+        assert!(!status.is_error(), "{}", status.text);
+        std::fs::read_to_string(path).expect("exported file")
+    };
+    let squeezed = |svg: &str| svg.split_whitespace().collect::<String>();
+    let first = exported(&mut state, "first.svg");
+    assert!(!first.contains("#ln") && !first.contains("sf-vars"));
+
+    set_header_field(&mut state, signal, HeaderField::LongName, "Intensity");
+    set_header_field(&mut state, signal, HeaderField::Unit, "mM");
+    let second = exported(&mut state, "second.svg");
+    assert_ne!(first, second, "the export did not follow the header");
+    assert!(squeezed(&second).contains("Intensity"), "{second}");
+    assert!(squeezed(&second).contains("(mM)"), "{second}");
+
+    state.dispatch(Action::Undo);
+    state.dispatch(Action::Undo);
+    assert_eq!(exported(&mut state, "third.svg"), first, "undo restores");
+}
+
+/// #501: a title whose column was deleted shows the translated « broken
+/// reference », in the title colour (no error colour), in the export.
+/// Witness: empty values give a title with no text at all.
+#[test]
+fn a_variable_title_of_a_deleted_column_shows_the_broken_reference() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let mut spec = graph_spec(&state, graph);
+    spec.title = "#ln".to_owned();
+    let spec = Box::new(spec);
+    let signal = state
+        .tree()
+        .child_by_name(sheet_named(state.tree(), "Sheet1"), "Signal")
+        .expect("readable")
+        .expect("Signal");
+    // The column goes with its workbook: the series reference is broken.
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    assert!(state.tree().node(signal).is_none(), "the column is deleted");
+    let path = dir.path().join("broken.svg");
+    state.dispatch(Action::ExportGraph {
+        path: path.clone(),
+        spec,
+    });
+    let svg = std::fs::read_to_string(path).expect("exported file");
+    let text = svg
+        .split("<text")
+        .find(|element| element.contains("brokenreference)"))
+        .unwrap_or_else(|| panic!("no broken reference in {svg}"));
+    assert!(text.contains("(brokenreference)"), "{text}");
+    assert!(text.contains("fill=\"#202020\""), "not the title colour: {text}");
+}
+
 /// S-F3 (#229): the native picker asks before overwriting the typed name;
 /// the `.svg` extension added afterwards targets another file, which it has not
 /// seen. If it exists, the export waits for confirmation: Cancel leaves it
