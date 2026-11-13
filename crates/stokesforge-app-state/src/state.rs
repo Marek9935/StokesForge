@@ -124,9 +124,6 @@ pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
-/// How long a command waits for the formula recalculation it started to
-/// finish before handing control back to the interface (#239): a recalculation
-/// shorter than that stays invisible and synchronous.
 /// Most columns ONE paste creates when it goes beyond the last column (#495).
 /// A paste is one frame-by-frame-visible gesture and one Undo entry: a TSV
 /// of a few thousand columns (a wide export, a transposed long column) would
@@ -135,6 +132,9 @@ pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 /// (`status-paste-columns-dropped`).
 pub const MAX_PASTE_NEW_COLUMNS: usize = 1000;
 
+/// How long a command waits for the formula recalculation it started to
+/// finish before handing control back to the interface (#239): a recalculation
+/// shorter than that stays invisible and synchronous.
 const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Why the type of a column cannot change (#431).
