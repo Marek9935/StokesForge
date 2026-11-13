@@ -215,7 +215,10 @@ pub(super) fn serve_once(
         return Pass::Busy;
     };
     let tick = guard.server_tick(now);
+    let garbage = guard.take_garbage();
     drop(guard);
+    // Freed with the lock released (the previous snapshot's big columns).
+    garbage.dispose();
     server_stats::since("tick", held, tick.changed);
     let mut changed = tick.changed;
     let mut next = tick.next;
@@ -226,7 +229,10 @@ pub(super) fn serve_once(
         let result = run(&job);
         server_stats::write_ended();
         server_stats::since("write", written, result.is_ok());
-        changed |= with_lock_retry(shared, |state| state.finish_autosave(&job, result));
+        changed |= with_lock_retry(shared, |state| {
+            let changed = state.finish_autosave(&job, result);
+            (changed, state.take_garbage())
+        });
         next = Some(Duration::ZERO);
     }
     if let Some(mut import) = tick.import {
@@ -235,7 +241,7 @@ pub(super) fn serve_once(
         import.execute();
         let (done, imported) = with_lock_retry(shared, |state| {
             let done = state.import_apply_finish(import);
-            (done, state.take_imported_paths())
+            ((done, state.take_imported_paths()), state.take_garbage())
         });
         changed |= done;
         if !imported.is_empty() {
@@ -253,14 +259,19 @@ pub(super) fn serve_once(
 /// Runs `body` under the lock. The thread never blocks on the lock: it looks
 /// again every [`BUSY_RETRY`], also while the application quits (the exit
 /// releases the guard before it joins, and waits for this to end).
-fn with_lock_retry<R>(shared: &Mutex<AppState>, body: impl FnOnce(&mut AppState) -> R) -> R {
+fn with_lock_retry<R>(
+    shared: &Mutex<AppState>,
+    body: impl FnOnce(&mut AppState) -> (R, stokesforge_app_state::state::Garbage),
+) -> R {
     let mut body = Some(body);
     loop {
         if let Some(mut guard) = shared.try_lock() {
             if let Some(body) = body.take() {
                 let held = server_stats::start();
-                let result = body(&mut guard);
+                let (result, garbage) = body(&mut guard);
+                drop(guard);
                 server_stats::since("finish", held, true);
+                garbage.dispose();
                 return result;
             }
         }
@@ -1286,5 +1297,112 @@ mod tests {
         let _ = served
             .thread
             .shut_down(&mut served.app.state, Duration::from_secs(5));
+    }
+
+    /// What a tick defers is dropped after the lock is released (#475, M2): the
+    /// previous snapshot of a big project is freed by its drop.
+    #[test]
+    fn the_garbage_of_a_tick_is_dropped_outside_the_lock() {
+        struct Probe {
+            shared: SharedState,
+            free_when_dropped: Arc<AtomicBool>,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                // parking_lot's lock is not re-entrant: held by this thread, it fails.
+                self.free_when_dropped
+                    .store(self.shared.try_lock().is_some(), Ordering::SeqCst);
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, slot) = free_slot(demo(), dir.path());
+        let shared = slot.shared();
+        let free = Arc::new(AtomicBool::new(false));
+        shared.lock().stash_garbage(Probe {
+            shared: Arc::clone(&shared),
+            free_when_dropped: Arc::clone(&free),
+        });
+        serve_once(
+            &shared,
+            Instant::now(),
+            &Counter::default(),
+            real_run(),
+            &no_record,
+        );
+        assert!(
+            free.load(Ordering::SeqCst),
+            "the deferred value was dropped under the lock"
+        );
+        assert!(shared.lock().take_garbage().is_empty());
+    }
+
+    /// Quit while the copy is being written: that write is the only one. The
+    /// slot is removed by Quit, so the record of the write is discarded; the
+    /// deadline has fallen and the project looks dirty, which used to start a
+    /// second write while the window closed (M6).
+    #[test]
+    fn quit_during_an_autosave_write_allows_no_second_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, slot) = free_slot(demo(), dir.path());
+        let shared = slot.shared();
+        let writes = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started) = mpsc::channel();
+        let (go_tx, go) = mpsc::channel::<()>();
+        let go = StdMutex::new(go);
+        let counted = Arc::clone(&writes);
+        let run: Arc<RunJob> = Arc::new(move |job: &AutosaveJob| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let _ = started_tx.send(());
+            let _ = go.lock().map(|go| go.recv_timeout(Duration::from_secs(10)));
+            job.run()
+        });
+        let t0 = Instant::now();
+        let offset = Arc::new(AtomicU64::new(0));
+        let clock_offset = Arc::clone(&offset);
+        let clock: Arc<Clock> =
+            Arc::new(move || t0 + Duration::from_secs(clock_offset.load(Ordering::SeqCst)));
+        let mut thread = ServerThread::spawn_with(
+            Arc::clone(&shared),
+            Counter::default(),
+            run,
+            clock,
+            Arc::new(|_: &[PathBuf]| {}),
+        );
+        while thread.status().ticks.load(Ordering::Relaxed) == 0 {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        shared.lock().dispatch(Action::AddGraph);
+        offset.store(PERIOD.as_secs() + 1, Ordering::SeqCst);
+        thread.unpark();
+        started
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the write is in flight");
+        {
+            let mut state = shared.lock();
+            state.set_quit_without_prompt(true);
+            state.dispatch(Action::Quit {
+                pending_edits: false,
+            });
+        }
+        go_tx.send(()).unwrap();
+        // The window takes Quit as soon as the write has ended, then closes.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !shared.lock().take_quit_ready() {
+            assert!(Instant::now() < deadline, "quit never became ready");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // The deadline is long past and the project is dirty: look again.
+        offset.store(10 * PERIOD.as_secs(), Ordering::SeqCst);
+        let ticks = thread.status().ticks.load(Ordering::Relaxed);
+        thread.unpark();
+        while thread.status().ticks.load(Ordering::Relaxed) < ticks + 2 {
+            assert!(Instant::now() < deadline, "the thread did not look again");
+            thread.unpark();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let mut slot = slot;
+        assert!(thread.shut_down(&mut slot, Duration::from_secs(5)));
+        assert_eq!(writes.load(Ordering::SeqCst), 1, "a second write started");
+        assert_eq!(copies(dir.path()), 0, "no copy is left behind");
     }
 }

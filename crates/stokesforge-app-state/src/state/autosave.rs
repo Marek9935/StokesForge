@@ -80,6 +80,8 @@ pub(super) struct AutosaveState {
     /// Quit is accepted and waits for the write in flight; the status message
     /// has been said.
     pub(super) quit_waiting: bool,
+    /// Quit was handed to the window (it is closing): no new copy.
+    pub(super) closing: bool,
     /// The copies offered at startup, as long as the window is open.
     found: Vec<Found>,
     /// The copy whose deletion is waiting for confirmation.
@@ -137,6 +139,61 @@ impl AutosaveJob {
     /// commits (invariant 1). To be called with the lock RELEASED.
     pub fn run(&self) -> Result<(), SessionError> {
         self.handle.save(&self.path)
+    }
+}
+
+/// Values that the server thread drops AFTER it released the lock (#475): the
+/// previous snapshot (its big columns are freed by the drop) and the files of a
+/// removed recovery slot. Nothing heavy is dropped under the lock.
+#[derive(Default)]
+pub struct Garbage(Vec<Box<dyn std::any::Any + Send>>);
+
+impl Garbage {
+    /// Drops everything (to call with no lock held).
+    pub fn dispose(self) {
+        drop(self);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Debug for Garbage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Garbage({})", self.0.len())
+    }
+}
+
+/// Removes the files of a slot when dropped.
+struct RemoveSlot(Option<Slot>);
+
+impl Drop for RemoveSlot {
+    fn drop(&mut self) {
+        if let Some(slot) = self.0.take() {
+            slot.remove();
+        }
+    }
+}
+
+impl AppState {
+    /// Hands `value` to the server thread to drop outside the lock when it is
+    /// running a tick or a record (`defer_garbage`), else drops it here.
+    pub(super) fn defer_drop<T: Send + 'static>(&mut self, value: T) {
+        if self.defer_garbage {
+            self.garbage.0.push(Box::new(value));
+        }
+    }
+
+    /// Whatever was deferred, for the thread to dispose of after unlocking.
+    pub fn take_garbage(&mut self) -> Garbage {
+        std::mem::take(&mut self.garbage)
+    }
+
+    /// Defers `value` unconditionally (tests of the thread).
+    #[doc(hidden)]
+    pub fn stash_garbage<T: Send + 'static>(&mut self, value: T) {
+        self.garbage.0.push(Box::new(value));
     }
 }
 
@@ -241,7 +298,8 @@ impl AppState {
     /// First third of an autosave (#475), under the lock: decides whether a
     /// copy is due. Pure with respect to the clock (`now` is injected).
     pub(super) fn autosave_decide(&mut self, now: Instant) -> AutosaveStep {
-        if !self.autosave_enabled() || self.session_lost {
+        if !self.autosave_enabled() || self.session_lost || self.quit_ready || self.autosave.closing
+        {
             self.autosave.deadline = None;
             return AutosaveStep::Wait(None);
         }
@@ -334,7 +392,9 @@ impl AppState {
     /// Returns true if something visible changed (a message).
     pub fn finish_autosave(&mut self, job: &AutosaveJob, result: Result<(), SessionError>) -> bool {
         let before = self.recorded_count();
+        self.defer_garbage = true;
         self.background(|state| state.finish_autosave_pass(job, result));
+        self.defer_garbage = false;
         // A quit that waited for this write: wake the window so that it closes.
         self.recorded_count() != before || self.autosave.quit_waiting
     }
@@ -342,7 +402,11 @@ impl AppState {
     fn finish_autosave_pass(&mut self, job: &AutosaveJob, result: Result<(), SessionError>) {
         self.autosave.in_flight = false;
         if let Some(orphan) = self.autosave.orphan.take() {
-            orphan.remove();
+            if self.defer_garbage {
+                self.defer_drop(RemoveSlot(Some(orphan)));
+            } else {
+                orphan.remove();
+            }
         }
         if job.epoch != self.autosave.epoch {
             return;

@@ -59,6 +59,7 @@ impl AppState {
     /// of what the windows show moved during the tick.
     pub fn server_tick(&mut self, now: Instant) -> ServerTick {
         let before = self.server_stamp();
+        self.defer_garbage = true;
         self.poll_script();
         self.poll_recalc();
         self.background(|state| {
@@ -70,6 +71,7 @@ impl AppState {
         let import = self.import_apply_begin();
         let step = self.background(|state| state.autosave_decide(now));
         let changed = self.server_stamp() != before;
+        self.defer_garbage = false;
         let (autosave, auto_next) = match step {
             AutosaveStep::Wait(next) => (None, next),
             // A job is run at once: look again straight after.

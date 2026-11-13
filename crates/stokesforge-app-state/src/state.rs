@@ -119,7 +119,7 @@ pub mod open_dialog;
 mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
-pub use autosave::{AutosaveJob, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
+pub use autosave::{AutosaveJob, Garbage, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
@@ -3229,6 +3229,9 @@ pub struct AppState {
     handle: SessionHandle,
     /// Last snapshot received: frozen, to be refreshed after any mutation.
     snapshot: Snapshot,
+    /// Deferred drops of the server thread (see `Garbage`).
+    garbage: autosave::Garbage,
+    defer_garbage: bool,
     /// Sheet shown in the grid of each **open** workbook —
     /// the `Workbook -> Worksheet` selected in its own tab
     /// `app::tab::Tab::Book`. A workbook with no entry here (or
@@ -3633,6 +3636,8 @@ impl AppState {
             waker: None,
             books_to_open: Vec::new(),
             recalc_since: None,
+            garbage: autosave::Garbage::default(),
+            defer_garbage: false,
             applied_revision: 0,
             session_lost: false,
             quit_without_prompt: false,
@@ -7053,7 +7058,8 @@ impl AppState {
                     self.copied_objects.clear();
                 }
                 let reopened = self.snapshot.epoch != snapshot.epoch;
-                self.snapshot = snapshot;
+                let previous = std::mem::replace(&mut self.snapshot, snapshot);
+                self.defer_drop(previous);
                 self.tell_bound_formulas(reopened);
                 self.revalidate_selection();
                 self.refresh_low_r2_groups();
@@ -9187,6 +9193,7 @@ impl AppState {
             return false;
         }
         self.autosave.quit_waiting = false;
+        self.autosave.closing = true;
         self.quit_ready = false;
         true
     }

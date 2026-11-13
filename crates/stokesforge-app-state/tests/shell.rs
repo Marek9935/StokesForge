@@ -19310,3 +19310,33 @@ fn sub_header_roles_follow_the_marker_with_two_header_lengths() {
         assert_eq!(table.columns.len(), 2);
     }
 }
+
+/// Quit during the write of a recovery copy (#475, M6): once the window has
+/// taken Quit, the deadline is long past and the project still looks dirty,
+/// yet no second copy is handed out while the window closes.
+#[test]
+fn quit_during_an_autosave_write_hands_out_no_second_copy() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state) = start_demo(dir.path());
+    state.set_recovery_dir(Some(dir.path().join("recovery")));
+    state.set_quit_without_prompt(true);
+    let start = std::time::Instant::now();
+    let _ = state.server_tick(start);
+    state.dispatch(Action::AddGraph);
+    let due = start + std::time::Duration::from_secs(3600);
+    let job = state.server_tick(due).autosave.expect("a copy is due");
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(!state.take_quit_ready(), "the write is in flight");
+    let result = job.run();
+    state.finish_autosave(&job, result);
+    // What the thread does after unlocking: the old slot's files go.
+    state.take_garbage().dispose();
+    assert!(state.take_quit_ready(), "the write ended: quit is ready");
+    let later = due + std::time::Duration::from_secs(1);
+    assert!(
+        state.server_tick(later).autosave.is_none(),
+        "a second copy was handed out while the window closes"
+    );
+}
