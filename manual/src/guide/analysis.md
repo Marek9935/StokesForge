@@ -329,7 +329,7 @@ Analyses work on columns. To analyse a row, for example a spectrum recorded acro
 2. Select the whole rows and right-click.
 3. Choose **Analysis** and a category.
 
-StokesForge adds a linked sheet named like the source with a `ᵀ` suffix. It holds the x' values and one column per row, called **Row N**. The analysis then runs on those columns like on any other. If you cancel the analysis window, nothing is added.
+StokesForge adds a linked sheet named like the source with a `ᵀ` suffix. A formula can call it with a plain capital `T`: `Sheet1T!B` reads `Sheet1ᵀ!B` (see [Projects and workbooks](projects-and-workbooks.md)). It holds the x' values and one column per row, called **Row N**. The analysis then runs on those columns like on any other. If you cancel the analysis window, nothing is added.
 
 Only numeric columns can be transposed. A message names the column, by its letter, when it contains text, or when it has no x' value while other columns have one.
 

@@ -1188,7 +1188,10 @@ that no GIL-bound value crosses the wait on the actor.
 
 Path resolution is no longer rewritten in the bridge: `stokesforge-core` exposes
 `Tree::resolve`, the repository's only implementation of the `[Book1]Sheet1!ColA`
-grammar, and the bridge calls it on the tree of its snapshot.
+grammar, and the bridge calls it on the tree of its snapshot. A path name is
+case-sensitive; the exact name wins, and only if no node has it, an uppercase `T`
+reads as the transpose mark `ᵀ` (#494: `[Book1]Sheet1T` finds `Sheet1ᵀ`, `Sheet1t`
+does not), for folders, workbooks and sheets alike.
 
 ## Output capture
 

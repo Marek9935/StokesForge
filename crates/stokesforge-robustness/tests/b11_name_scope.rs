@@ -256,3 +256,25 @@ fn a_folder_of_another_parent_does_not_shift_the_generated_number() {
         );
     }
 }
+
+/// #494: the loader stays exact. A file that holds `Sheet1T` and `Sheet1ᵀ`
+/// side by side (older than the sibling rule that reads `ᵀ` as `T`) still
+/// loads (invariant 12), while the mutation API refuses to make the pair.
+/// Witness: the fold put into `Tree::validate_loaded_names` rejects the file.
+#[test]
+fn b11_a_file_holding_a_plain_t_and_the_transpose_mark_still_loads() {
+    let tree = tree_of(vec![
+        (2, "Sheet1T", note_kind()),
+        (3, "Sheet1\u{1D40}", note_kind()),
+        (4, "Sheet1t", note_kind()),
+    ])
+    .expect("the loader compares names exactly");
+    assert_eq!(tree.len(), 4);
+    let mut project = Project::new("P").unwrap();
+    let root = project.root();
+    project.add_folder(root, "Sheet1\u{1D40}").unwrap();
+    assert!(matches!(
+        project.add_folder(root, "Sheet1T"),
+        Err(CoreError::DuplicateName(_))
+    ));
+}

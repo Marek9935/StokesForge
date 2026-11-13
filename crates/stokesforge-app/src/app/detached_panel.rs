@@ -814,9 +814,9 @@ mod tests {
 
     /// A press in a panel window ends the cell entry held by a detached workbook,
     /// as a click in another workbook would, under the panel's own identity: with
-    /// a macro of the main window open the commit is refused and the cell stays.
-    /// Witness: paint and commit with the main identity (the write is absorbed in
-    /// the macro).
+    /// a macro of the main window open nothing commits (#533) and the cell stays.
+    /// Witness: remove the `plot_macro_open` guard of the commit and paint with
+    /// the main identity (the write is absorbed in the macro).
     #[test]
     fn a_press_in_a_panel_ends_the_entry_of_a_detached_workbook_under_its_identity() {
         let _language = stokesforge_app_state::i18n::test_language(
@@ -847,7 +847,8 @@ mod tests {
         assert!(bench.app.state.open_dialog().is_none(), "only the macro");
         click(&mut bench, Window::ProjectManager, egui::pos2(100.0, 560.0));
         assert_eq!(bench.app.state.cell_text(column, 0), before, "not written");
-        assert!(bench.app.state.status().is_some_and(|s| s.is_error()));
+        // #533: the entry stays open during the macro (nothing commits it).
+        assert!(bench.app.state.editing().is_some(), "the entry stays open");
         bench.app.state.cancel_plot_settings();
         assert_eq!(bench.app.state.cell_text(column, 0), before);
         assert!(bench.app.state.undo_label().is_none(), "no entry was made");

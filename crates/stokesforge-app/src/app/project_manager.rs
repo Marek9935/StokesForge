@@ -889,7 +889,8 @@ fn is_renaming(ctx: &egui::Context, memory_key: egui::Id, id: NodeId) -> bool {
 }
 
 /// Why this name is refused (S-T4, red frame): empty, or already taken by
-/// another child of the same folder.
+/// another child of the same folder under the sibling rule (case and the
+/// transpose mark `ᵀ` read as `T`, #494).
 fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {
@@ -901,7 +902,7 @@ fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Optio
                 (*id, name.as_str())
             }
         };
-        other != id && text == name
+        other != id && stokesforge_core::same_name_ignoring_case(text, name)
     });
     taken.then(|| tr!("field-refused-name-taken"))
 }

@@ -130,7 +130,11 @@ Each line is observed by a command or a page; none is declared
    tag itself (the user's order), reading `scripts/ci-status.sh` for the release
    jobs, the check of what a card says to look at, and any issue whose label was
    not declared (`suivi.py tag-wait`, or `deliver.sh --wait-tag`): it gets a
-   generic card « relis l'issue ». The non-blocking jobs (`test-linux-packages`
+   generic card « relis l'issue ». A declared issue names its steps (`--step`) and the
+   built files it needs (`--files exe,tar.gz,rpm,deb,manual`): its card links each file
+   from the GitLab package registry (and the service downloads them to
+   `~/Downloads/StokesForge-<version>/`), gives the hand route, and says "nothing to do
+   by hand" when a job is the whole proof (#497). The non-blocking jobs (`test-linux-packages`
    while the packages are unpublished, #390) need it most: their failure does
    not stop the release.
 
