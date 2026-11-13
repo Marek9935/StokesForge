@@ -15110,6 +15110,8 @@ mod autosave {
         let result = job.run();
         let messages = state.recorded_count();
         assert!(!state.finish_autosave(&job, result));
+        // The server thread removes the old slot after unlocking.
+        state.take_garbage().dispose();
         assert!(
             copies(&recovery).is_empty(),
             "the old copy goes with its project: {:?}",
@@ -15166,6 +15168,7 @@ mod autosave {
             state.finish_autosave(&job, result),
             "the end of the wait wakes the window"
         );
+        state.take_garbage().dispose();
         assert!(copies(&recovery).is_empty(), "{:?}", copies(&recovery));
         assert!(state.take_quit_ready(), "closed as soon as the write ended");
         assert!(!state.take_quit_ready(), "once only");
