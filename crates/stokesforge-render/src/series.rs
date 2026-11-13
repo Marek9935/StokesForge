@@ -28,7 +28,7 @@ use crate::scale::forward;
 use crate::texts::FigureTexts;
 use crate::variables::{self, VariableValues};
 
-/// The values of an entry's column, an unknown `#col("Z")` reading the broken
+/// The values of an entry's column, an unknown `#col.Z` reading the broken
 /// reference of `texts` (#501).
 fn known(fields: &stokesforge_core::ColumnFields, texts: &FigureTexts) -> VariableValues {
     VariableValues {

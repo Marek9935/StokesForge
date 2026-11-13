@@ -1133,7 +1133,7 @@ plot-theme-note = S'applique à tous les titres, axes, graduations et quadrillag
 # Mémo de la syntaxe Typst, sous chaque champ de titre
 
 plot-variables-memo-header = Variables
-plot-variables-col = Pareil, lu dans la colonne C de la feuille
+plot-variables-col = Pareil, lu dans la colonne A de la feuille
 plot-variables-note = Les titres d'axe lisent la colonne X ou Y de la première série, les autres textes sa colonne Y ; une entrée de légende lit sa propre série.
 plot-math-memo-header = Syntaxe mathématique
 plot-math-greek = Lettres grecques λ, Δ
