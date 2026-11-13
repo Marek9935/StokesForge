@@ -1533,3 +1533,73 @@ fn the_screen_and_the_export_agree_on_a_non_default_legend_box() {
     let (changed, _) = agree(boxed.project.tree(), &boxed.spec, LARGE, "boxed legend");
     assert_ne!(plain, changed, "the settings change nothing");
 }
+
+// -- #501: the variables of the graph texts --
+
+/// The column ids of the sample's X and Y, and a rename of the Y long name.
+fn name_the_columns(fixture: &mut Sample, long_name: &str) {
+    let ids: Vec<NodeId> = fixture.spec.panels[0]
+        .series
+        .iter()
+        .flat_map(|s| [s.x, Some(s.y)])
+        .flatten()
+        .collect();
+    for id in ids {
+        fixture
+            .project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    long_name: long_name.to_owned(),
+                    unit: "mM".to_owned(),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+    }
+}
+
+/// A graph title `#ln`: bound before the layout and the drawing, the size the
+/// layout reserves is the one the screen draws and the SVG shows the long
+/// name, never the variable. Witness: the layout of the **unbound** spec is
+/// another one (the `#ln` source is measured), so a call site that forgets to
+/// bind would fail the equality with the drawn title band.
+#[test]
+fn a_variable_title_is_laid_out_and_drawn_bound_on_screen_and_in_the_export() {
+    let mut fixture = minimal();
+    name_the_columns(&mut fixture, "Absorbance (very long name) \u{394}A");
+    fixture.spec.title = "#ln".to_owned();
+    fixture.spec.frame_widths = vec![700.3];
+    fixture.spec.frame_heights = vec![310.4];
+    let tree = fixture.project.tree();
+    let texts = FigureTexts::default();
+    let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &texts);
+    assert!(matches!(bound, std::borrow::Cow::Owned(_)));
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout = stokesforge_render_svg::figure_layout(&bound, &measurer, &choice).expect("layout");
+    let unbound = stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice)
+        .expect("unbound layout");
+    assert_ne!(
+        layout.title_band, unbound.title_band,
+        "witness: the raw `#ln` source measures like the long name, the test proves nothing"
+    );
+
+    let drawn = drawn_with_typst(tree, &bound, layout.size);
+    assert_eq!(layout.title_band, drawn.title_height, "screen = layout");
+
+    let plot = resolve_spec(tree, &bound);
+    let document = stokesforge_render_svg::export_bytes(
+        &plot,
+        layout.size,
+        &measurer,
+        &choice,
+        stokesforge_render_svg::ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    let document = String::from_utf8(document).expect("utf-8");
+    assert!(document.contains("Absorbance(verylongname)"), "{document}");
+    assert!(!document.contains("sf-vars") && !document.contains("#ln"));
+}
