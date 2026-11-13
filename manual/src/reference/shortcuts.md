@@ -35,6 +35,7 @@ In a detached window only Undo, Redo and Save work. The other shortcuts act in t
 | Cut | <kbd>Ctrl</kbd>+<kbd>X</kbd> |
 | Paste | <kbd>Ctrl</kbd>+<kbd>V</kbd> |
 | Paste at the same place | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> |
+| Paste with rows and columns swapped | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> |
 | Clear the selected cells, then delete them | <kbd>Del</kbd> |
 | Duplicate the sheet | <kbd>Ctrl</kbd>+<kbd>D</kbd> |
 

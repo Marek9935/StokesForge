@@ -312,6 +312,9 @@ action-paste = Paste
 action-paste-in-place = Paste in Place
     .hint = Pastes at the position the cells were copied from
     .disabled = Copy from the grid first. Text from elsewhere has no original position
+action-paste-transposed = Paste Transposed
+    .hint = Pastes the copied cells with rows and columns swapped, as values
+    .disabled = Select a single block of cells or contiguous columns to paste into
 action-clear = Clear
     .hint = Empties the selected cells
 action-remove-formula-keep-data = Remove Formula, Keep Data
@@ -392,6 +395,12 @@ status-paste-columns-dropped =
     { $count ->
         [one] One column did not fit and was not pasted
        *[other] { $count } columns did not fit and were not pasted
+    }
+status-paste-transposed-nothing = Nothing to paste transposed: of the copied header fields, only x' can be pasted
+status-paste-transposed-rows-dropped =
+    { $count ->
+        [one] One header row other than x' was not pasted
+       *[other] { $count } header rows other than x' were not pasted
     }
 status-paste-columns-added =
     { $count ->
@@ -2260,6 +2269,7 @@ help-copy-full-columns = Copy the whole columns
 help-cut = Cut
 help-paste = Paste
 help-paste-absolute = Paste at the same place
+help-paste-transposed = Paste with rows and columns swapped
 help-clear-cells = Clear the selected cells, then delete them
 help-duplicate-sheet = Duplicate the sheet
 help-copy-graph = Copy the graph as an image (nothing selected)

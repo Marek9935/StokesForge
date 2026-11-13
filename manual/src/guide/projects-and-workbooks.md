@@ -276,6 +276,7 @@ The right-click menu has **Clear** and **Delete and Shift Up**. **Delete and Shi
 | **Copy with Header** | | Copies the values and the column header |
 | **Paste** | <kbd>Ctrl</kbd>+<kbd>V</kbd> | Pastes at the selected cell |
 | **Paste in Place** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> | Pastes at the position the cells were copied from |
+| **Paste Transposed** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | Pastes the copied cells with rows and columns swapped |
 
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> copies the whole columns that the selection touches.
 
@@ -287,6 +288,10 @@ A few rules:
 - **Copy** and **Cut** work on several blocks only if they share their rows (side by side) or their columns (stacked). Otherwise they are greyed out.
 - Pasting over a **Mixed** column that ends up with only numbers turns it back to **Numeric**.
 - If the pasted data reaches past the last column, the missing columns are added at the end of the sheet (at most 1000 per paste). The status bar says how many were added, and how many columns beyond that limit or header fields below the last header field were left out.
+
+**Paste Transposed** turns the copied block a quarter turn: a copied column becomes a row, a row becomes a column, a block of 2 rows by 3 columns becomes 3 rows by 2 columns. It works on cells copied in StokesForge and on a table copied from a spreadsheet. The result is a plain copy of the values: it does not follow the source, and a column with a formula is pasted as its values. From **Copy with Header**, only the values of each column are used (name, unit and comment are left out). A long column pasted this way adds the columns it needs, like any paste.
+
+To transpose the x' values, copy the x' cells and paste them transposed onto a cell. A copied column pasted transposed onto an x' cell of the header fills the x' of the successive columns. The other header fields cannot be pasted transposed.
 
 A paste is one action for Undo.
 

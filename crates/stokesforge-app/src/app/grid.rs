@@ -37,7 +37,8 @@ use super::inplace_edit;
 use super::menu_sections::{menu_choice, MenuSections};
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
-    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_SELECT_ALL,
+    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE,
+    SHORTCUT_PASTE_TRANSPOSED, SHORTCUT_SELECT_ALL,
 };
 
 /// Height of a grid row, in points.
@@ -538,6 +539,23 @@ fn grid_clipboard_section(
         {
             state.forget_delete_repeat(sheet);
             actions.push(Action::PasteAbsolute { sheet });
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                menu.paste_enabled,
+                egui::Button::new(tr!("action-paste-transposed"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_TRANSPOSED)),
+            )
+            .on_hover_text(tr!("action-paste-transposed", "hint"))
+            .on_disabled_hover_text(tr!("action-paste-transposed", "disabled"))
+            .clicked()
+        {
+            state.forget_delete_repeat(sheet);
+            match system_clipboard_text() {
+                Some(text) => actions.push(Action::PasteTransposed { sheet, text }),
+                None => state.warn(tr!("status-clipboard-unreadable")),
+            }
             ui.close();
         }
     });
@@ -2602,13 +2620,17 @@ fn grid_clipboard_shortcuts(
     // selection (see its doc).
     let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
         (false, false, None, false, false);
+    let mut paste_transposed_text = None;
     ui.input(|input| {
         let shift = input.modifiers.shift;
+        let alt = input.modifiers.alt;
         for event in &input.events {
             match event {
                 egui::Event::Copy if shift => copy_full_columns = true,
                 egui::Event::Copy => copy = true,
                 egui::Event::Cut => cut = true,
+                // Ctrl+Alt+V and Ctrl+Shift+Alt+V: Alt is read first (#495).
+                egui::Event::Paste(text) if alt => paste_transposed_text = Some(text.clone()),
                 egui::Event::Paste(_) if shift => paste_absolute = true,
                 egui::Event::Paste(text) => paste_text = Some(text.clone()),
                 _ => {}
@@ -2653,7 +2675,10 @@ fn grid_clipboard_shortcuts(
             actions.push(action);
         }
     }
-    if paste_absolute {
+    if let Some(text) = paste_transposed_text {
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::PasteTransposed { sheet, text });
+    } else if paste_absolute {
         state.forget_delete_repeat(sheet);
         actions.push(Action::PasteAbsolute { sheet });
     } else if let Some(text) = paste_text {
@@ -3591,6 +3616,43 @@ mod tests {
             .filter(|&row| selection.contains(tree, bench.sheet, first, row))
             .collect();
         assert_eq!(rows, [1, 2, 3]);
+    }
+
+    /// #495: egui sends Ctrl+V, Ctrl+Shift+V and Ctrl+Alt+V as the same
+    /// `Event::Paste`; Alt is read before Shift, so Ctrl+Alt+V and
+    /// Ctrl+Shift+Alt+V paste transposed, the other two are unchanged.
+    #[test]
+    fn alt_turns_a_paste_event_into_a_transposed_paste() {
+        let mut bench = Bench::new();
+        bench.click_on("102");
+        let mut pressed = |modifiers: egui::Modifiers| -> Vec<Action> {
+            bench.image(vec![egui::Event::ModifiersChanged(modifiers)]);
+            bench.image(vec![egui::Event::Paste("1\t2".to_string())]);
+            let actions = bench.actions.clone();
+            bench.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+            actions
+        };
+        let ctrl = egui::Modifiers::COMMAND;
+        let plain = pressed(ctrl);
+        assert!(
+            matches!(plain.as_slice(), [Action::Paste { .. }]),
+            "{plain:?}"
+        );
+        let absolute = pressed(ctrl.plus(egui::Modifiers::SHIFT));
+        assert!(
+            matches!(absolute.as_slice(), [Action::PasteAbsolute { .. }]),
+            "{absolute:?}"
+        );
+        for modifiers in [
+            ctrl.plus(egui::Modifiers::ALT),
+            ctrl.plus(egui::Modifiers::ALT).plus(egui::Modifiers::SHIFT),
+        ] {
+            let transposed = pressed(modifiers);
+            assert!(
+                matches!(transposed.as_slice(), [Action::PasteTransposed { text, .. }] if text == "1\t2"),
+                "{transposed:?}"
+            );
+        }
     }
 
     /// An empty sheet (a new workbook) is editable: its entry row is row 0.

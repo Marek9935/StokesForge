@@ -314,6 +314,9 @@ action-paste = Coller
 action-paste-in-place = Coller à l'identique
     .hint = Colle à la position d'origine de la copie
     .disabled = Copier d'abord depuis la grille. Un texte venu d'ailleurs n'a pas de position d'origine
+action-paste-transposed = Coller transposé
+    .hint = Colle les cellules copiées en échangeant lignes et colonnes, en valeurs
+    .disabled = Sélectionner un seul bloc de cellules ou des colonnes contiguës pour coller
 action-clear = Effacer
     .hint = Vide les cellules sélectionnées
 action-remove-formula-keep-data = Retirer la formule, garder les données
@@ -394,6 +397,12 @@ status-paste-columns-dropped =
     { $count ->
         [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
        *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
+    }
+status-paste-transposed-nothing = Rien à coller transposé : parmi les champs d'en-tête copiés, seul x' peut être collé
+status-paste-transposed-rows-dropped =
+    { $count ->
+        [one] Une ligne d'en-tête autre que x' n'a pas été collée
+       *[other] { $count } lignes d'en-tête autres que x' n'ont pas été collées
     }
 status-paste-columns-added =
     { $count ->
@@ -2259,6 +2268,7 @@ help-copy-full-columns = Copier les colonnes entières
 help-cut = Couper
 help-paste = Coller
 help-paste-absolute = Coller au même endroit
+help-paste-transposed = Coller en échangeant lignes et colonnes
 help-clear-cells = Vider les cellules sélectionnées, puis les supprimer
 help-duplicate-sheet = Dupliquer la feuille
 help-copy-graph = Copier le graphique comme image (rien de sélectionné)

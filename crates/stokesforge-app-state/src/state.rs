@@ -507,6 +507,18 @@ pub enum Action {
         /// Target sheet.
         sheet: NodeId,
     },
+    /// Pastes `text` rotated a quarter turn (Paste Transposed, Ctrl+Alt+V,
+    /// #495): the copied block (the internal copy if `text` is what we pushed
+    /// to the clipboard, otherwise the outside text as a table) is transposed,
+    /// then pasted like [`Action::Paste`] from the anchor: a frozen copy, values
+    /// only, one undo step. `egui` sends it as the same `Event::Paste` as
+    /// Ctrl+V; the grid tells them apart by `modifiers.alt`.
+    PasteTransposed {
+        /// Target sheet.
+        sheet: NodeId,
+        /// Text received from the system clipboard.
+        text: String,
+    },
     /// Changes the type of all the `columns` in **a single undo step**
     /// (columns menu on a multiple selection, #159).
     SetColumnsType {
@@ -2605,6 +2617,61 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
         return GridClipboard::Text(cell.unwrap_or_default());
     }
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
+}
+
+/// The block of `clipboard` rotated a quarter turn, for Paste Transposed
+/// (#495): what was a row becomes a column. Values only, frozen: a column
+/// copied in full gives its body as a row (header and formula dropped, its
+/// `data` already holds the values even for a Formulas copy), and a copied x'
+/// row (the only header field a column of values can take) becomes a data row;
+/// the other header rows are dropped. A single value stays a value. A missing
+/// cell of a ragged block becomes an empty one. `None` when nothing is left
+/// (no x' row among the copied fields, no cell at all).
+fn transposed_clipboard(clipboard: &GridClipboard) -> Option<GridClipboard> {
+    let data_rows = |rows: Vec<Vec<String>>| {
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        (width > 0).then(|| {
+            GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: rows
+                    .into_iter()
+                    .map(|mut row| {
+                        row.resize(width, String::new());
+                        row
+                    })
+                    .collect(),
+            })
+        })
+    };
+    match clipboard {
+        GridClipboard::Text(text) => Some(GridClipboard::Text(text.clone())),
+        GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => {
+            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+            data_rows(
+                (0..width)
+                    .map(|column| {
+                        rows.iter()
+                            .map(|row| row.get(column).cloned().unwrap_or_default())
+                            .collect()
+                    })
+                    .collect(),
+            )
+        }
+        GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows }) => {
+            if *start != HeaderField::XPrime {
+                return None;
+            }
+            data_rows(
+                rows.first()?
+                    .iter()
+                    .map(|value| vec![value.clone()])
+                    .collect(),
+            )
+        }
+        GridClipboard::FullColumns(columns) => {
+            data_rows(columns.iter().map(|column| column.data.clone()).collect())
+        }
+    }
 }
 
 /// A comma range the Formula field rewrote (#433): the formula it stored and
@@ -6160,6 +6227,7 @@ impl AppState {
             Action::DeleteSelectedCells { sheet } => self.delete_selected_cells(sheet),
             Action::Paste { sheet, text } => self.paste(sheet, text),
             Action::PasteAbsolute { sheet } => self.paste_absolute(sheet),
+            Action::PasteTransposed { sheet, text } => self.paste_transposed(sheet, text),
             Action::SelectAll { sheet } => self.select_all(sheet),
             Action::SetColumnLongName { column, text } => {
                 self.set_column_meta_field(column, |meta| meta.long_name = text);
@@ -10264,28 +10332,9 @@ impl AppState {
     /// rebuilt into a [`GridClipboard`] by [`external_clipboard_from_text`].
     /// See [`AppState::apply_paste`] for the full behavior matrix.
     fn paste(&mut self, sheet: NodeId, text: String) {
-        if !self.paste_target_is_unambiguous(sheet) {
-            return;
-        }
-        if stokesforge_persistence::clipboard::is_object_clipboard(&text) {
-            self.fail(tr!("object-clipboard-use-manager"));
-            return;
-        }
-        let Some(selection) = self.selection.get(&sheet) else {
-            self.fail(tr!("error-paste-no-cell"));
+        let Some((anchor, clipboard, external)) = self.paste_source(sheet, &text) else {
             return;
         };
-        let Some(anchor) = selection.anchor(&self.snapshot.tree, sheet) else {
-            self.fail(tr!("error-paste-no-cell"));
-            return;
-        };
-        let internal = if self.clipboard_text.as_deref() == Some(text.as_str()) {
-            self.grid_clipboard.clone()
-        } else {
-            None
-        };
-        let external = internal.is_none();
-        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(&text));
         if external {
             if let Some(error) = self.external_paste_range_error(sheet, anchor, &clipboard) {
                 self.fail(errors::number::paste_error_message(&error));
@@ -10293,6 +10342,115 @@ impl AppState {
             }
         }
         self.apply_paste(sheet, anchor, &clipboard, false);
+    }
+
+    /// What a paste reads: the anchor of the selection and the block to paste,
+    /// and whether it is an **external** text (not our own copy). `None`, with
+    /// the message said, if the target is ambiguous, the text is an object
+    /// clipboard or nothing is selected. Shared by [`AppState::paste`] and
+    /// [`AppState::paste_transposed`].
+    fn paste_source(
+        &mut self,
+        sheet: NodeId,
+        text: &str,
+    ) -> Option<(GridCursor, GridClipboard, bool)> {
+        if !self.paste_target_is_unambiguous(sheet) {
+            return None;
+        }
+        if stokesforge_persistence::clipboard::is_object_clipboard(text) {
+            self.fail(tr!("object-clipboard-use-manager"));
+            return None;
+        }
+        let anchor = self
+            .selection
+            .get(&sheet)
+            .and_then(|selection| selection.anchor(&self.snapshot.tree, sheet));
+        let Some(anchor) = anchor else {
+            self.fail(tr!("error-paste-no-cell"));
+            return None;
+        };
+        let internal = if self.clipboard_text.as_deref() == Some(text) {
+            self.grid_clipboard.clone()
+        } else {
+            None
+        };
+        let external = internal.is_none();
+        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(text));
+        Some((anchor, clipboard, external))
+    }
+
+    /// Paste Transposed ([`Action::PasteTransposed`], #495): the block of
+    /// [`AppState::paste_source`] rotated a quarter turn
+    /// ([`transposed_clipboard`]), then pasted like Paste from the anchor
+    /// (columns created beyond the edge, one undo step). On an x' cell, the
+    /// first row of the block goes into the x' of the successive columns.
+    fn paste_transposed(&mut self, sheet: NodeId, text: String) {
+        let Some((anchor, clipboard, external)) = self.paste_source(sheet, &text) else {
+            return;
+        };
+        // Header rows other than x' have no place once transposed.
+        let dropped_rows = match &clipboard {
+            GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows }) => {
+                rows.len() - usize::from(*start == HeaderField::XPrime && !rows.is_empty())
+            }
+            _ => 0,
+        };
+        let Some(transposed) = transposed_clipboard(&clipboard) else {
+            self.notice(tr!("status-paste-transposed-nothing"));
+            return;
+        };
+        if external {
+            if let Some(error) = self.external_paste_range_error(sheet, anchor, &transposed) {
+                self.fail(errors::number::paste_error_message(&error));
+                return;
+            }
+        }
+        match (&transposed, anchor) {
+            (
+                GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }),
+                GridCursor::Header(column, HeaderField::XPrime),
+            ) => self.paste_x_prime_row(sheet, column, rows),
+            _ => self.apply_paste(sheet, anchor, &transposed, false),
+        }
+        if dropped_rows > 0 {
+            self.warn(tr!(
+                "status-paste-transposed-rows-dropped",
+                count = dropped_rows
+            ));
+        }
+    }
+
+    /// Transposed paste anchored on an x' cell: the first row of `rows` goes
+    /// into the x' of the successive columns from `anchor_column`, creating
+    /// the missing ones like any paste; a cell that is not a number is refused
+    /// by itself (red message), an empty one clears x'; the other rows are
+    /// dropped and counted as fields.
+    fn paste_x_prime_row(&mut self, sheet: NodeId, anchor_column: NodeId, rows: &[Vec<String>]) {
+        let Some(first) = rows.first() else {
+            return;
+        };
+        let order = self.column_order(sheet);
+        let Some(position) = order.iter().position(|&id| id == anchor_column) else {
+            self.fail(tr!("error-column-gone"));
+            return;
+        };
+        let order_from_anchor = &order[position..];
+        let (created, dropped) =
+            Self::plan_paste_columns(order_from_anchor.len(), first.len(), MAX_PASTE_NEW_COLUMNS);
+        let grouped = first.len() - dropped > 1 || created > 0;
+        if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
+            self.fail(tr!("error-paste-group"));
+            return;
+        }
+        let targets = self.paste_targets(sheet, order_from_anchor, first.len(), created);
+        for (&column, text) in targets.iter().zip(first) {
+            let _ = self.paste_header_text(column, HeaderField::XPrime, text.clone());
+        }
+        if grouped {
+            self.end_grouped_macro();
+        }
+        self.notice_columns_added(created);
+        self.warn_dropped(dropped, rows.len() - 1);
     }
 
     /// The first number of an **external** text paste that a column reading
@@ -12689,8 +12847,8 @@ mod tests {
     }
 
     use super::{
-        external_clipboard_from_text, grid_clipboard_to_text, GridClipboard, HeaderField,
-        RelativeCopy, MISSING_TEXT_DISPLAY,
+        external_clipboard_from_text, grid_clipboard_to_text, transposed_clipboard, FullColumnCopy,
+        GridClipboard, HeaderField, RelativeCopy, MISSING_TEXT_DISPLAY,
     };
     use stokesforge_core::number_format::format_exact as format_f64_for_display;
 
@@ -12826,6 +12984,91 @@ mod tests {
         assert_eq!(
             external_clipboard_from_text("\"a\nb\""),
             GridClipboard::Text("a\nb".to_string())
+        );
+    }
+
+    fn texts(rows: &[&[&str]]) -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|row| row.iter().map(|text| text.to_string()).collect())
+            .collect()
+    }
+
+    /// #495: a data rectangle is rotated, a ragged one is padded with empty
+    /// cells, a single value stays a value, nothing at all gives `None`.
+    #[test]
+    fn transposed_clipboard_rotates_data_rows() {
+        let rows = |rows: Vec<Vec<String>>| {
+            GridClipboard::Relative(RelativeCopy::DataRows { start: 7, rows })
+        };
+        assert_eq!(
+            transposed_clipboard(&rows(texts(&[&["a", "b", "c"], &["d", "e", "f"]]))),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["a", "d"], &["b", "e"], &["c", "f"]]),
+            }))
+        );
+        assert_eq!(
+            transposed_clipboard(&rows(texts(&[&["a", "b"], &["c"]]))),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["a", "c"], &["b", ""]]),
+            })),
+            "a missing cell becomes an empty one"
+        );
+        assert_eq!(transposed_clipboard(&rows(Vec::new())), None);
+        assert_eq!(
+            transposed_clipboard(&GridClipboard::Text("x".into())),
+            Some(GridClipboard::Text("x".into()))
+        );
+    }
+
+    /// #495: a full column gives its body as a row, header and formula
+    /// dropped; columns of different lengths are padded.
+    #[test]
+    fn transposed_clipboard_takes_the_body_of_full_columns() {
+        let column = |data: &[&str]| FullColumnCopy {
+            x_prime: "9".into(),
+            long_name: "name".into(),
+            unit: "u".into(),
+            comment: "c".into(),
+            formula: Some("A*2".into()),
+            data: data.iter().map(|text| text.to_string()).collect(),
+        };
+        assert_eq!(
+            transposed_clipboard(&GridClipboard::FullColumns(vec![
+                column(&["1", "2", "3"]),
+                column(&["4"]),
+            ])),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["1", "2", "3"], &["4", "", ""]]),
+            }))
+        );
+        assert_eq!(
+            transposed_clipboard(&GridClipboard::FullColumns(vec![column(&[])])),
+            None
+        );
+    }
+
+    /// #495: of the copied header fields only the x' row becomes a data row.
+    #[test]
+    fn transposed_clipboard_keeps_only_the_x_prime_row() {
+        let fields =
+            |start, rows| GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows });
+        assert_eq!(
+            transposed_clipboard(&fields(
+                HeaderField::XPrime,
+                texts(&[&["1", "2", "3"], &["n1", "n2", "n3"]])
+            )),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["1"], &["2"], &["3"]]),
+            }))
+        );
+        assert_eq!(
+            transposed_clipboard(&fields(HeaderField::LongName, texts(&[&["a", "b"]]))),
+            None,
+            "no x' row among the copied fields"
         );
     }
 
