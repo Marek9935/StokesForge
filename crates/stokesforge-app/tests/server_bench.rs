@@ -109,19 +109,24 @@ fn build_example() {
     );
 }
 
-/// Native windows (xdg toplevels) the application created and destroyed, from
-/// a `WAYLAND_DEBUG=client` log: `-> xdg_surface#N.get_toplevel(new id
-/// xdg_toplevel#M)` and `-> xdg_toplevel#M.destroy()`.
-fn toplevels(log: &str) -> (usize, usize) {
-    let sent = |object: &str, request: &str| {
-        log.lines()
-            .filter(|line| line.contains(&format!("-> {object}#")) && line.contains(request))
-            .count()
-    };
-    (
-        sent("xdg_surface", ".get_toplevel("),
-        sent("xdg_toplevel", ".destroy("),
-    )
+/// The native windows (xdg toplevels) of a `WAYLAND_DEBUG=client` log: `-> xdg_surface#N.
+/// get_toplevel(new id xdg_toplevel#M)` creates one, `-> xdg_toplevel#M.destroy()`
+/// ends one. Returns how many were created in all and how many were alive at
+/// each `BENCH_STAGE <name>` marker the bench wrote to the same stream.
+fn toplevels(log: &str) -> (usize, Vec<(String, i64)>) {
+    let (mut created, mut live) = (0usize, 0i64);
+    let mut stages = Vec::new();
+    for line in log.lines() {
+        if line.contains("-> xdg_surface#") && line.contains(".get_toplevel(") {
+            created += 1;
+            live += 1;
+        } else if line.contains("-> xdg_toplevel#") && line.contains(".destroy(") {
+            live -= 1;
+        } else if let Some(name) = line.strip_prefix("BENCH_STAGE ") {
+            stages.push((name.trim().to_string(), live));
+        }
+    }
+    (created, stages)
 }
 
 fn read_samples(path: &Path) -> Vec<Sample> {
@@ -730,7 +735,7 @@ fn covering_windows_serve_themselves_with_the_root_left_alone() {
 /// Wayland wire, the application creates four toplevels in all (the main
 /// window and the three it detached) and no more: egui listing a viewport
 /// that no window of ours owns makes eframe create an empty "egui window"
-/// (default title), which stays until the application quits.
+/// (default title), which stays until the application quits; the windows alive after each reattachment are counted too.
 #[test]
 #[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
 fn reattached_windows_leave_no_native_window_behind() {
@@ -744,11 +749,17 @@ fn reattached_windows_leave_no_native_window_behind() {
         return skip();
     };
     assert!(r.finished, "the bench did not end:\n{}", r.out);
-    let (created, destroyed) = toplevels(&r.wayland);
-    let ok = created == 4;
+    let (created, stages) = toplevels(&r.wayland);
+    // The scenario opens the three windows, then reattaches them one by one: the
+    // main window and the windows still detached are all that is alive.
+    let alive: Vec<i64> = stages.iter().map(|(_, live)| *live).collect();
+    let ok = created == 4 && alive == [3, 2, 1];
     println!(
-        "server-bench: toplevels created={created} (expected 4) destroyed={destroyed} {}",
+        "server-bench: toplevels created={created} (expected 4) alive after each stage {stages:?} (expected [3, 2, 1]) {}",
         verdict(ok)
     );
-    assert!(ok, "{} ghost window(s) created", created.saturating_sub(4));
+    assert!(
+        ok,
+        "ghost windows: created {created}, alive per stage {stages:?}"
+    );
 }

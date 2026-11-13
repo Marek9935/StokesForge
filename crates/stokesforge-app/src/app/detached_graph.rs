@@ -1044,9 +1044,13 @@ mod tests {
             !child_pass(false).viewport_output.contains_key(&child),
             "it leaves at the end of its own pass"
         );
-        // The echo the probe saw: the next root pass lists the id again, but
-        // as an empty entry that no closure can paint. Nothing may rely on the
-        // viewport map for "is this window open".
+        // The echo the probe saw: the next root pass lists the id again, as an
+        // empty entry that no closure can paint (`Context::run_dyn` recreates
+        // the entry of the pass's own viewport, parented to itself, so nothing
+        // prunes it). The L4 agent assumed this creates no window; it does:
+        // eframe opens an "egui window" for every listed viewport. Without
+        // `viewport_ghosts` (not installed here) the entry is in the output;
+        // the plugin drops it.
         assert!(root(false)
             .viewport_output
             .get(&child)

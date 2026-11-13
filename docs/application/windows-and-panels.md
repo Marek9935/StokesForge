@@ -440,11 +440,20 @@ on Windows the window only raises a flag and wakes the root, which moves it
 user trial. `native_wayland` reads the root's window handle once. A window the root
 removes (project replaced, workbook hidden) is woken once so that its pass ends it.
 The application's lists (`detached_graphs`, `is_tab_detached`) are the truth about
-which windows exist, never egui's viewport map: about 150 ms after a removal the root's
-input may list the id again as an empty entry (no closure, no native window). Tests:
+which windows exist, never egui's viewport map: right after the window's last pass egui
+recreates an empty entry for its id (`Context::run_dyn` calls `viewport_for` on the
+pass's own viewport, parented to itself, so no other pass prunes it), and eframe opens
+a native "egui window" (default title, empty) for every viewport an output lists. That
+was the ghost windows left in Alt+Tab after each Reattach (GNOME trial of #475; Close
+shares the code). `app/viewport_ghosts.rs` closes it: an `egui::Plugin` whose
+`output_hook` drops from every output the viewports that are not the root and have no
+closure (all our windows are deferred viewports registered with theirs). Tests:
 `app::detached_graph::tests` (Reattach and Close in a child pass alone, the root path
 without Wayland, the late empty entry, the egui guard that fails at an egui upgrade),
-and the manual `server_bench` test `a_covering_detached_graph_reattaches_itself`.
+`app::viewport_ghosts::tests` (windowless: no later output lists a window that closed
+itself), and the manual `server_bench` tests `a_covering_detached_graph_reattaches_itself`
+and `reattached_windows_leave_no_native_window_behind` (counts the native toplevels on
+the Wayland wire: 4 created, not 7, and 3, 2, 1 alive after each Reattach).
 A root covered by the graph (Page Layout Mode maximised) therefore delays nothing for
 the graph.
 The Page Layout Mode of a detached graph stays as it was: the OS window maximises
