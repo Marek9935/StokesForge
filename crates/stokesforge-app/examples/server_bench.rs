@@ -700,6 +700,9 @@ fn covering_thread(
                 root_at_gone - root_before
             );
             std::thread::sleep(Duration::from_millis(1500));
+            // On stderr, with the Wayland log (`WAYLAND_DEBUG=client`): the
+            // test counts the native windows alive at this point.
+            eprintln!("BENCH_STAGE {name}");
         }
     });
 }

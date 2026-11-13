@@ -212,6 +212,7 @@ pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
 mod transpose_ui;
+mod viewport_ghosts;
 mod window_band;
 mod window_chrome;
 mod window_detach;
@@ -1179,6 +1180,8 @@ impl eframe::App for StokesForgeApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` is an `Arc`: the clone avoids the read borrow of the painted Ui.
         let ctx = ui.ctx().clone();
+        // Before any window closes itself (a no-op after the first pass).
+        viewport_ghosts::install(&ctx);
         self.sync_window_title_and_status(&ctx);
         self.prepare_panel_windows();
         let published_stamp = snapshot_stamp(self.state.snapshot());

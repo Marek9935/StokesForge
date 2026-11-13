@@ -43,6 +43,8 @@ struct Sample {
 
 struct Run {
     out: String,
+    /// `WAYLAND_DEBUG=client` log, when the run asked for it (`config.env`).
+    wayland: String,
     samples: Vec<Sample>,
     finished: bool,
 }
@@ -107,6 +109,26 @@ fn build_example() {
     );
 }
 
+/// The native windows (xdg toplevels) of a `WAYLAND_DEBUG=client` log: `-> xdg_surface#N.
+/// get_toplevel(new id xdg_toplevel#M)` creates one, `-> xdg_toplevel#M.destroy()`
+/// ends one. Returns how many were created in all and how many were alive at
+/// each `BENCH_STAGE <name>` marker the bench wrote to the same stream.
+fn toplevels(log: &str) -> (usize, Vec<(String, i64)>) {
+    let (mut created, mut live) = (0usize, 0i64);
+    let mut stages = Vec::new();
+    for line in log.lines() {
+        if line.contains("-> xdg_surface#") && line.contains(".get_toplevel(") {
+            created += 1;
+            live += 1;
+        } else if line.contains("-> xdg_toplevel#") && line.contains(".destroy(") {
+            live -= 1;
+        } else if let Some(name) = line.strip_prefix("BENCH_STAGE ") {
+            stages.push((name.trim().to_string(), live));
+        }
+    }
+    (created, stages)
+}
+
 fn read_samples(path: &Path) -> Vec<Sample> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
@@ -135,6 +157,8 @@ fn run_once(config: &Config) -> Option<Run> {
     let compositor = Compositor::start()?;
     let dir = tempfile::tempdir().expect("scratch folder");
     let stats = dir.path().join("stats.tsv");
+    let wayland_log = dir.path().join("wayland.log");
+    let wants_wayland_log = config.env.iter().any(|(key, _)| *key == "WAYLAND_DEBUG");
     let mut cmd = Command::new(exe_path());
     cmd.env_remove("DISPLAY")
         .env_remove("STOKESFORGE_X11")
@@ -149,7 +173,9 @@ fn run_once(config: &Config) -> Option<Run> {
         .env("XDG_CONFIG_HOME", dir.path().join("config"))
         .envs(config.env.iter().copied())
         .stdout(Stdio::piped())
-        .stderr(if std::env::var_os("PROBE_STDERR").is_some() {
+        .stderr(if wants_wayland_log {
+            Stdio::from(std::fs::File::create(&wayland_log).expect("log file"))
+        } else if std::env::var_os("PROBE_STDERR").is_some() {
             Stdio::inherit()
         } else {
             Stdio::null()
@@ -177,6 +203,7 @@ fn run_once(config: &Config) -> Option<Run> {
     let out = reader.join().unwrap_or_default();
     Some(Run {
         out,
+        wayland: std::fs::read_to_string(&wayland_log).unwrap_or_default(),
         samples: read_samples(&stats),
         finished,
     })
@@ -700,4 +727,39 @@ fn covering_windows_serve_themselves_with_the_root_left_alone() {
         );
     }
     assert!(all_ok, "a covering window needed the root:\n{}", r.out);
+}
+
+/// #475, after the GNOME trial: a reattached window leaves no native window
+/// behind. The `covering` scenario detaches and reattaches a graph, a
+/// workbook and the Project Manager, one after the other. Counted on the
+/// Wayland wire, the application creates four toplevels in all (the main
+/// window and the three it detached) and no more: egui listing a viewport
+/// that no window of ours owns makes eframe create an empty "egui window"
+/// (default title), which stays until the application quits; the windows alive after each reattachment are counted too.
+#[test]
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn reattached_windows_leave_no_native_window_behind() {
+    build_example();
+    let Some(r) = run_once(&Config {
+        scenario: "covering",
+        big: false,
+        secs: 20,
+        env: &[("WAYLAND_DEBUG", "client")],
+    }) else {
+        return skip();
+    };
+    assert!(r.finished, "the bench did not end:\n{}", r.out);
+    let (created, stages) = toplevels(&r.wayland);
+    // The scenario opens the three windows, then reattaches them one by one: the
+    // main window and the windows still detached are all that is alive.
+    let alive: Vec<i64> = stages.iter().map(|(_, live)| *live).collect();
+    let ok = created == 4 && alive == [3, 2, 1];
+    println!(
+        "server-bench: toplevels created={created} (expected 4) alive after each stage {stages:?} (expected [3, 2, 1]) {}",
+        verdict(ok)
+    );
+    assert!(
+        ok,
+        "ghost windows: created {created}, alive per stage {stages:?}"
+    );
 }
