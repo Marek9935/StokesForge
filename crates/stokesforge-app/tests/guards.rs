@@ -2696,6 +2696,22 @@ fn the_server_guard_sees_a_call_outside_the_module() {
     );
 }
 
+/// A Windows checkout has CRLF line ends: the guards read LF anyway, so a
+/// marker such as `"\n    }\n"` still ends a function body (#532).
+#[test]
+fn the_guards_read_crlf_sources_as_lf() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    std::fs::write(
+        dir.path().join("app.rs"),
+        "impl A {\r\n    fn logic(&mut self) {\r\n    }\r\n}\r\n",
+    )
+    .expect("written");
+    let files = sources::read_dirs(&[(dir.path(), "")]);
+    let text = files[0].production().code_as_text();
+    assert!(!text.contains('\r'), "{text:?}");
+    assert!(text.contains("\n    }\n"));
+}
+
 /// The thread only ever `try_lock`s: a blocking `.lock()` or `lock_arc()` of
 /// the shared state is the UI side's (`StateSlot`), never the thread's.
 #[test]
