@@ -57,7 +57,9 @@ If StokesForge does not close properly (a crash, a power cut), the next start of
 - **Ignore** keeps the copy. It is offered again at the next start.
 - **Delete** removes the copy. It asks for confirmation.
 
-The copy is deleted when you save or quit normally.
+The copy is deleted when you save or quit normally. If you quit while a copy is being written, the window stays open for a moment and the status bar says "Writing the recovery copy before closing…"; it closes by itself when the copy is done.
+
+If the status bar says "Background tasks stopped after an internal error; the main window now runs them.", StokesForge keeps working, but save your project and restart when convenient.
 
 To change this, choose **File ▸ Preferences… ▸ General**: **Save a recovery copy automatically** turns it on or off, and **Copy every (min)** sets the period.
 

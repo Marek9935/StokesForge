@@ -22,15 +22,33 @@
 //! - nothing heavy under the lock. The blocking write of the autosave runs with
 //!   the lock **released** ([`serve_once`]: decide under the lock, write
 //!   without it, record under the lock);
-//! - the thread executes no command (invariant 1) and never drops a script
-//!   engine (invariant 9: a finished run only moves it back into the state);
+//! - the thread executes commands only for a finished import, with the lock
+//!   released, and never drops a script engine (invariant 9: a finished run only moves it back into the state);
 //! - one rule to wake the windows: [`wake`], and only when the tick says that
 //!   something they show changed. Focus plays no part;
 //! - on exit the UI releases the guard, **then** joins the thread
 //!   ([`ServerThread::shut_down`]), before the session is shut down.
 //!
-//! What stays in the paint pass: applying a finished import (commands),
-//! the busy-indicator repaints, everything that needs `Frame` or `Context`.
+//! What stays in the paint pass: the busy-indicator repaints, opening the
+//! windows of the workbooks an import created (`take_books_to_open`),
+//! everything that needs `Frame` or `Context`.
+//!
+//! # Four rules of L6
+//!
+//! - **Quit during an autosave write**: `take_quit_ready` refuses while a job is
+//!   in flight and says why once (`status-quit-waiting-autosave`); the window
+//!   stays open and painting, the end of the write wakes it, and the quit
+//!   follows. The join of `on_exit` stays as the last safety net.
+//! - **Panic of the thread**: `EndGuard` marks it; the paint pass takes the polls
+//!   back (`poll_*_without_server`) and says it once (`tell_server_stopped`).
+//! - **Finished import**: taken out under the lock (`import_apply_begin`), its
+//!   commands run by [`serve_once`] with the lock RELEASED, on a scratch
+//!   `AppState` over a clone of the UI's session handle (one macro, ordinary
+//!   undoable `Command`s, one history entry), then recorded under the lock again
+//!   (`import_apply_finish`). Opening windows is flagged for the next paint pass.
+//! - **Finished script**: its thread calls the waker (`AppState::set_waker`)
+//!   after sending the reply; [`ServedApp::new`] makes it unpark this thread.
+//!   The 50 ms look stays as the fallback.
 //!
 //! Detached windows keep their fork (`window_detach.rs`): this thread is step 1
 //! of #475 and changes nothing they see.
@@ -1151,7 +1169,7 @@ mod tests {
         let seed = std::env::var("SF_STRESS_SEED")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(0x5EED_475);
+            .unwrap_or(0x05EE_D475);
         with_watchdog(Duration::from_secs(180), move || stress_run(seed, 250));
     }
 

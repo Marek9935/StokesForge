@@ -140,8 +140,12 @@ The full table, with what it fixes and why, is at the top of
 Besides the interface thread and the script thread, the application's server thread
 (`stokesforge-app/src/app/server.rs`) holds a clone of the interface's `SessionHandle` (it never
 uses `with_new_identity`). It calls `save` for the autosave, `snapshot` and `recalc_running` when
-it collects a recalculation, `actor_alive`. It executes no command (invariant 1), so it opens no
-macro and does not meet `MacroOpen` except as a refusal of `save` that it reads as "busy". Its
+it collects a recalculation, `actor_alive`. It executes commands only to apply a finished import
+(L6): one `Import` macro of ordinary undoable commands, one history entry, with the application lock released. The
+macro belongs to the interface's sender (same handle), so a gesture of the interface that
+arrives during the few milliseconds of the application joins the macro (#21) and the autosave
+waits; `AppState::can_new_project` and a second import refuse meanwhile. Otherwise it opens no
+macro and meets `MacroOpen` only as a refusal of `save` that it reads as "busy". Its
 requests wait for the actor like the interface's: a long recalculation delays them, and it
 holds no lock on the application state while it waits for the autosave write.
 
