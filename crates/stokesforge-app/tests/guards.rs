@@ -2706,7 +2706,7 @@ fn the_server_thread_never_blocks_on_the_lock() {
         .find(|f| f.path == SERVER_MODULE)
         .expect("server module");
     let text = server.production().code_as_text();
-    for name in ["serve_once", "finish_with_retry"] {
+    for name in ["serve_once", "with_lock_retry"] {
         let start = text.find(&format!("fn {name}")).expect("function");
         let end = text[start..]
             .find("\n}\n")

@@ -942,6 +942,7 @@ mod tests {
             app.poll_background_jobs(&ctx);
             std::thread::sleep(Duration::from_millis(5));
         }
+        app.poll_background_jobs(&ctx);
         assert_eq!(app.state.tree().len(), before + 1, "the snapshot is fresh");
         for _ in 0..5 {
             app.poll_background_jobs(&ctx);
