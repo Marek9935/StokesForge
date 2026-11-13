@@ -373,8 +373,10 @@ mod tests {
         panel.bottom.unit = "#sn".to_owned();
         panel.annotations.push(AnnotationSpec::new("#sn", 0.0, 0.0));
         panel.series[0].group = Some(1);
-        let mut bar = ColorBarSpec::default();
-        bar.title = "#sn".to_owned();
+        let mut bar = ColorBarSpec {
+            title: "#sn".to_owned(),
+            ..ColorBarSpec::default()
+        };
         let mut segment = ColorBarSegment::new(1);
         segment.label = "#sn".to_owned();
         bar.segments.push(segment);
