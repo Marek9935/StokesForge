@@ -459,12 +459,16 @@ fn tab_strip_arrows(
 }
 
 /// Why this tab name is refused (S-T4, red frame): empty, or already taken by
-/// another tab of the strip.
+/// another tab of the strip under the sibling rule (case and the transpose
+/// mark `ᵀ` read as `T`, #494).
 fn tab_name_refusal<K: PartialEq>(tabs: &[(K, String)], id: &K, name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {
         Some(tr!("field-refused-name-empty"))
-    } else if tabs.iter().any(|(other, text)| other != id && text == name) {
+    } else if tabs
+        .iter()
+        .any(|(other, text)| other != id && stokesforge_core::same_name_ignoring_case(text, name))
+    {
         Some(tr!("field-refused-name-taken"))
     } else {
         None

@@ -13129,6 +13129,41 @@ fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
     assert_eq!(state.renaming_sheet(), None);
 }
 
+/// The sibling rule of the model (#494): a sheet cannot be renamed `NameT`
+/// or `namet` beside `Nameᵀ`, and the message names the sheet that holds the
+/// name, not the typed text.
+#[test]
+fn renaming_a_sheet_to_a_plain_t_beside_the_transpose_mark_is_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::AddWorksheet { book });
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let other = state.worksheets_of(book).last().unwrap().0;
+    state.dispatch(Action::CommitRenameSheet {
+        sheet: other,
+        name: "Kinetics\u{1D40}".to_string(),
+    });
+    assert_eq!(state.tree().node(other).unwrap().name(), "Kinetics\u{1D40}");
+
+    let revision = state.revision();
+    for name in ["KineticsT", "Kineticst"] {
+        state.dispatch(Action::BeginRenameSheet(sheet1));
+        state.dispatch(Action::CommitRenameSheet {
+            sheet: sheet1,
+            name: name.to_string(),
+        });
+        assert_eq!(
+            state.tree().node(sheet1).unwrap().name(),
+            "Sheet1",
+            "{name}"
+        );
+        let text = state.status().map(|s| s.text.clone()).unwrap_or_default();
+        assert!(text.contains("Kinetics\u{1D40}"), "{name}: {text}");
+        assert_eq!(state.revision(), revision, "no history entry");
+    }
+}
+
 /// Duplicate: "… copy 1", "… copy 2" (first free number), columns
 /// with new identifiers and the same values, copy displayed; the mother's
 /// graphs still plot it; a Ctrl+Z removes the copy.
