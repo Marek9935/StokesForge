@@ -95,7 +95,7 @@ pub use project::{spreadsheet_name, Project};
 pub use resolve::{
     bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_series_in,
     resolve_spec, series_label, series_value, MissingRole, ResolvedPanel, ResolvedPlot,
-    ResolvedSeries, ResolvedValues, SeriesLabel,
+    ResolvedSeries, ResolvedValues, SeriesLabel, column_fields, text_context, ColumnFields, TextTarget,
 };
 pub use sheet_refs::{FormulaInput, FormulaInputs};
 pub use transpose::{

@@ -263,6 +263,115 @@ impl SeriesLabel {
     }
 }
 
+/// The text of the five legend variables of one column (#499, #501): what the
+/// legend template and every Typst text of a graph read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ColumnFields {
+    pub long_name: String,
+    pub short_name: String,
+    pub units: String,
+    pub comments: String,
+    pub x_prime: String,
+}
+
+impl ColumnFields {
+    /// The text of one field.
+    pub fn get(&self, field: LegendField) -> &str {
+        match field {
+            LegendField::LongName => &self.long_name,
+            LegendField::ShortName => &self.short_name,
+            LegendField::Units => &self.units,
+            LegendField::Comments => &self.comments,
+            LegendField::XPrime => &self.x_prime,
+        }
+    }
+}
+
+/// The fields of the column `column`; `None` if it is not a column of the tree
+/// (a broken reference). **Single source** of the legend and of the Typst
+/// variables of the graph texts.
+pub fn column_fields(tree: &Tree, column: NodeId) -> Option<ColumnFields> {
+    let node = tree.node(column).filter(|node| node.kind().is_column())?;
+    let meta = node.as_column().map(Column::meta);
+    Some(ColumnFields {
+        long_name: meta.map(|m| m.long_name.clone()).unwrap_or_default(),
+        short_name: node.name().to_string(),
+        units: meta.map(|m| m.unit.clone()).unwrap_or_default(),
+        comments: meta.map(|m| m.comment.clone()).unwrap_or_default(),
+        x_prime: meta
+            .and_then(|m| m.x_prime)
+            .map(crate::number_format::format_grid)
+            .unwrap_or_default(),
+    })
+}
+
+/// A graph text whose variables read a column (#501).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextTarget {
+    /// The graph title: the first layer that has a series.
+    Graph,
+    /// A layer's title or one of its annotations.
+    Layer(usize),
+    /// Title of the bottom axis of a layer.
+    BottomAxis(usize),
+    /// Title of the top axis of a layer.
+    TopAxis(usize),
+    /// Title of the left axis of a layer.
+    LeftAxis(usize),
+    /// Title of the right axis of a layer.
+    RightAxis(usize),
+    /// Break label of a colour bar: the first series of that group.
+    Group(usize, u32),
+    /// The colour bar's title: the first group of the bar, in graph order.
+    ColorBar(usize),
+}
+
+/// The column the variables of a text of `target` read (#501, Origin-like): the
+/// X column of the first series for a bottom or top axis, the Y column of the
+/// first series on that side for a left or right axis, the Y column of the
+/// first series of the layer for a title or an annotation, the Y column of the
+/// first series of the group for a colour bar. A hidden series counts, a row
+/// series (#166) does not. `None`: no such series, or its column is gone (the
+/// caller shows the broken reference).
+pub fn text_context(tree: &Tree, spec: &PlotSpec, target: TextTarget) -> Option<NodeId> {
+    use stokesforge_plot::SeriesAxis;
+    let column_of = |series: &SeriesSpec, x: bool| -> Option<NodeId> {
+        let id = if x { series.x } else { Some(series.y) }?;
+        column_fields(tree, id).map(|_| id)
+    };
+    let first = |panel: usize, keep: &dyn Fn(&SeriesSpec) -> bool| {
+        spec.panels
+            .get(panel)
+            .and_then(|panel| panel.series.iter().find(|s| s.row.is_none() && keep(s)))
+    };
+    match target {
+        TextTarget::Graph => spec
+            .panels
+            .iter()
+            .position(|panel| panel.series.iter().any(|s| s.row.is_none()))
+            .and_then(|panel| text_context(tree, spec, TextTarget::Layer(panel))),
+        TextTarget::Layer(panel) => first(panel, &|_| true).and_then(|s| column_of(s, false)),
+        TextTarget::BottomAxis(panel) | TextTarget::TopAxis(panel) => {
+            first(panel, &|_| true).and_then(|s| column_of(s, true))
+        }
+        TextTarget::LeftAxis(panel) => {
+            first(panel, &|s| s.axis == SeriesAxis::Left).and_then(|s| column_of(s, false))
+        }
+        TextTarget::RightAxis(panel) => {
+            first(panel, &|s| s.axis == SeriesAxis::Right).and_then(|s| column_of(s, false))
+        }
+        TextTarget::Group(panel, group) => {
+            first(panel, &|s| s.group == Some(group)).and_then(|s| column_of(s, false))
+        }
+        TextTarget::ColorBar(panel) => {
+            let layer = spec.panels.get(panel)?;
+            let bar = layer.color_bar_in_order()?;
+            let group = bar.segments.first()?.group;
+            text_context(tree, spec, TextTarget::Group(panel, group))
+        }
+    }
+}
+
 /// Displayed name of a series: `SeriesSpec::name` if set, otherwise the
 /// long name of the Y column, otherwise its node name, otherwise
 /// [`SeriesLabel::Missing`] if the column no longer exists.
@@ -292,20 +401,9 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
     let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
         return SeriesLabel::Missing;
     };
-    let meta = y_node.as_column().map(Column::meta);
-    let long_name = meta.map(|m| m.long_name.as_str()).unwrap_or_default();
-    let field = |field: LegendField| -> String {
-        match field {
-            LegendField::LongName => long_name.to_string(),
-            LegendField::Units => meta.map(|m| m.unit.clone()).unwrap_or_default(),
-            LegendField::Comments => meta.map(|m| m.comment.clone()).unwrap_or_default(),
-            LegendField::ShortName => y_node.name().to_string(),
-            LegendField::XPrime => meta
-                .and_then(|m| m.x_prime)
-                .map(crate::number_format::format_grid)
-                .unwrap_or_default(),
-        }
-    };
+    let fields = column_fields(tree, series.y).unwrap_or_default();
+    let long_name = fields.long_name.as_str();
+    let field = |field: LegendField| -> String { fields.get(field).to_owned() };
     let joined = |first: LegendField, separator: &str, second: LegendField, wrap: bool| {
         let (a, b) = (field(first), field(second));
         match (a.is_empty(), b.is_empty()) {
@@ -1162,6 +1260,85 @@ mod tests {
             )
             .expect("meta");
         (project, f.x, f.y)
+    }
+
+    /// #501: a project whose X, Y and T columns carry the long names XL, YL
+    /// and TL, and a layer with a hidden series (X, Y, left, group 1) before a
+    /// right-hand one (X, T, group 2).
+    fn context_fixture() -> (Project, PlotSpec, [NodeId; 3]) {
+        let f = Fixture::new();
+        let mut project = f.project;
+        for (id, name) in [(f.x, "XL"), (f.y, "YL"), (f.text, "TL")] {
+            project
+                .set_column_meta(
+                    id,
+                    ColumnMeta {
+                        long_name: name.to_string(),
+                        ..ColumnMeta::default()
+                    },
+                )
+                .expect("meta");
+        }
+        let mut first = SeriesSpec::new_xy(f.x, f.y);
+        first.visible = false;
+        first.group = Some(1);
+        let mut second = SeriesSpec::new_xy(f.x, f.text);
+        second.axis = stokesforge_plot::SeriesAxis::Right;
+        second.group = Some(2);
+        let mut panel = PanelSpec::default();
+        panel.series.push(first);
+        panel.series.push(second);
+        let mut bar = ColorBarSpec::default();
+        bar.segments.push(stokesforge_plot::ColorBarSegment::new(2));
+        panel.color_bar = Some(bar);
+        let spec = PlotSpec {
+            panels: vec![panel].into(),
+            ..PlotSpec::default()
+        };
+        (project, spec, [f.x, f.y, f.text])
+    }
+
+    #[test]
+    fn a_text_context_follows_the_origin_like_rules() {
+        let (project, spec, [x, y, t]) = context_fixture();
+        let at = |target| text_context(project.tree(), &spec, target);
+        // Axis titles: X of the first series; Y of the first series per side.
+        assert_eq!(at(TextTarget::BottomAxis(0)), Some(x));
+        assert_eq!(at(TextTarget::TopAxis(0)), Some(x));
+        assert_eq!(at(TextTarget::LeftAxis(0)), Some(y), "a hidden series counts");
+        assert_eq!(at(TextTarget::RightAxis(0)), Some(t));
+        // Titles and annotations: Y of the layer's first series.
+        assert_eq!(at(TextTarget::Graph), Some(y));
+        assert_eq!(at(TextTarget::Layer(0)), Some(y));
+        // Colour bar: the first series of its group.
+        assert_eq!(at(TextTarget::Group(0, 2)), Some(t));
+        assert_eq!(at(TextTarget::Group(0, 1)), Some(y));
+        assert_eq!(at(TextTarget::ColorBar(0)), Some(t));
+        assert_eq!(at(TextTarget::Group(0, 9)), None);
+        assert_eq!(at(TextTarget::Layer(5)), None);
+    }
+
+    #[test]
+    fn a_text_context_skips_row_series_and_reports_broken_columns() {
+        let (mut project, mut spec, [_, y, _]) = context_fixture();
+        let mut row = SeriesSpec::new(y);
+        row.row = Some(0);
+        spec.panels.get_mut(0).expect("layer").series.insert(0, row);
+        assert_eq!(
+            text_context(project.tree(), &spec, TextTarget::Layer(0)),
+            Some(y)
+        );
+        let empty = PlotSpec {
+            panels: vec![PanelSpec::default()].into(),
+            ..PlotSpec::default()
+        };
+        assert_eq!(text_context(project.tree(), &empty, TextTarget::Graph), None);
+        project.remove(y).expect("delete");
+        assert_eq!(
+            text_context(project.tree(), &spec, TextTarget::Layer(0)),
+            None
+        );
+        assert_eq!(column_fields(project.tree(), y), None);
     }
 
     fn from(from: LegendTextFrom) -> LegendText {
