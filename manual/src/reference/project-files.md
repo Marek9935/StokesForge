@@ -36,6 +36,8 @@ The first **Save** of a new project asks for a file name. The following ones use
 
 If you start a new project, open another one or quit with unsaved changes, StokesForge asks whether to save first. **Discard Changes** loses them for good.
 
+While a dialog is open, the close button of the main window does nothing: finish or cancel the dialog first.
+
 ### Open from the command line
 
 Give the path of a project after the program name:

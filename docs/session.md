@@ -126,10 +126,10 @@ sender identity): opening Properties (or a shape edit) first commits every open
 entry as its own undo step, a refused value staying open; while the macro is
 open nothing commits an entry (`commit_open_entries` does nothing); the root
 pass dispatches the actions that open the macro last, so a rename pushed in the
-same frame lands before it; and Quit (or New, Open) with Properties open first
-closes it like OK (settings kept), then commits the entries as their own step,
-then asks the Discard · Cancel · Save question. Cancel of Properties therefore
-never rolls back what the user typed.
+same frame lands before it; and the cross of the main window does nothing while
+a dialog is open (`AppState::open_dialog`, checked in `logic`), as in most
+applications, so nothing quits in the middle of the macro. Cancel of Properties
+therefore never rolls back what the user typed.
 
 The last point deserves detail: a macro never prevents `Project` from being
 mutated — it only **defers the history entry**. Without a guard, a `Shutdown`

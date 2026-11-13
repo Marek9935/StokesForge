@@ -1161,10 +1161,13 @@ impl eframe::App for StokesForgeApp {
     /// question "Discard Changes · Cancel · Save" (S-F3, #229): held back here
     /// (also with the window minimized, where only `logic` runs), it becomes
     /// `Action::Quit`, and the window closes when the state releases it.
+    /// While a dialog is open (it blocks the main window), the cross does
+    /// nothing, as in most applications (#533): nothing can then quit in the
+    /// middle of a dialog and its undo group.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.quit_confirmed && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.close_requested = true;
+            self.close_requested = self.state.open_dialog().is_none();
         }
         // The autosave (#317) is the server thread's (#475); `logic` polls it
         // only when no thread runs (a bench, a test, a thread that ended).
@@ -2903,10 +2906,13 @@ mod tests {
     /// and becomes `Action::Quit`; with unsaved work, the question
     /// "Discard Changes · Cancel · Save" opens and the window stays;
     /// Discard releases it, and the next request is no longer held back.
+    /// While a dialog is open (Graph Properties here), the cross does nothing
+    /// at all (#533). Witness: drop the `open_dialog` check in `logic`.
     #[test]
     fn closing_the_window_asks_before_losing_work() {
         use eframe::App as _;
-        let (session, _) = plotted_graph();
+        use stokesforge_app_state::state::PlotSettingsTab;
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
@@ -2941,6 +2947,20 @@ mod tests {
                 .map(|viewport| viewport.commands.clone())
                 .unwrap_or_default()
         };
+        app.dispatch_actions(
+            &context,
+            vec![Action::OpenPlotSettings {
+                graph,
+                tab: PlotSettingsTab::Graph,
+                axis: None,
+            }],
+        );
+        let commands = image(&mut app, true);
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!commands.contains(&egui::ViewportCommand::Close));
+        assert!(app.state.unsaved_pending().is_none(), "no question");
+        assert!(app.state.plot_settings().is_some(), "Properties stays open");
+        app.state.cancel_plot_settings();
         let commands = image(&mut app, true);
         assert!(commands.contains(&egui::ViewportCommand::CancelClose));
         assert!(!commands.contains(&egui::ViewportCommand::Close));

@@ -9154,13 +9154,6 @@ impl AppState {
         if gesture == UnsavedGesture::NewProject && !self.can_new_project() {
             return;
         }
-        // Properties (or a shape edit) open: behave like OK first, so the
-        // entries commit as their own step, never into its macro (#533).
-        if self.plot_settings.is_some() {
-            self.close_plot_settings();
-        } else {
-            self.end_plot_macro();
-        }
         self.commit_open_entries();
         if self.has_unsaved_work(pending_edits) {
             self.unsaved_pending = Some(gesture);

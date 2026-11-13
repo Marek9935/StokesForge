@@ -10257,40 +10257,6 @@ fn no_open_entry_commits_while_the_properties_macro_is_open() {
     assert!(state.editing().is_some(), "and is still the user's");
 }
 
-/// T2b: Quit while Properties is open behaves like OK first (settings kept, one
-/// Properties step), then the open entry commits as its own later step, then
-/// the unsaved question is pending. Witness: drop the close-as-OK step of
-/// `request_unsaved`.
-#[test]
-fn quit_with_properties_open_closes_it_like_ok_then_commits_the_entry() {
-    let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state) = start_demo(dir.path());
-    let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let time_col = column_id(&state, sheet1, "Time");
-    let graph = plotted_graph(&mut state);
-    state.dispatch(PlotTarget::Title.open_settings(graph));
-    state.plot_edit_mut().expect("draft").spec.title = "Spectrum".to_string();
-    state.begin_edit(time_col, 0);
-    state.editing_mut().unwrap().buffer = "77".to_string();
-    state.dispatch(Action::Quit {
-        pending_edits: false,
-    });
-    assert!(state.plot_settings().is_none(), "Properties closed");
-    assert_eq!(state.plot_spec(graph).expect("spec").title, "Spectrum");
-    assert_eq!(cell(&state, time_col, 0), Cell::Float(77.0));
-    assert!(state.editing().is_none());
-    assert_eq!(state.unsaved_pending(), Some(&UnsavedGesture::Quit));
-    state.dispatch(Action::Undo);
-    assert_eq!(
-        cell(&state, time_col, 0),
-        Cell::Float(0.0),
-        "entry = own step"
-    );
-    assert_eq!(state.plot_spec(graph).expect("spec").title, "Spectrum");
-    state.dispatch(Action::Undo);
-    assert_ne!(state.plot_spec(graph).expect("spec").title, "Spectrum");
-}
-
 // -- Heavy recalculation: indicator and Stop (issue #239) --
 
 /// A project whose first full recalculation lasts long enough to exceed
