@@ -3148,7 +3148,7 @@ def tag_where(tag, n, info):
                % (v, GITLAB_WEB))
     if tag_kind(tag) == "final":
         out.append("Sur un tag final, les fichiers sont aussi sous Deploy → Releases : %s/-/releases" % GITLAB_WEB)
-    out += ["GitHub → Actions → run du tag %s" % tag, "L'issue #%d sur GitLab" % n]
+    out.append("L'issue #%d : %s/-/issues/%d" % (n, GITLAB_WEB, n))
     return out
 
 
