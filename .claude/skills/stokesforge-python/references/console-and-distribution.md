@@ -12,7 +12,7 @@ Source: `docs/application/state-and-console.md` § The script console does not f
 
 A tiny interruption thread keeps `ScriptEngine::interrupt` non-blocking (raising an async exception needs the GIL). A Python exception is not an application error: its full trace shows, status not in error. Without the feature the console stays visible but disabled (`AppState::script_available`). `ScriptOutput` is a deliberate copy of `stokesforge_script::ScriptOutcome`: a field added to one is mirrored in the other.
 
-The painted console lives in `stokesforge-app/src/app/script_console.rs` (`script_header`, `script_contents`, `script_panel`), tested without a window, with and without interpreter. Its texts are `script-*` keys via `tr!`. Detached console (#100): the same `script_fields_contents` paints attached and detached; `ScriptConsoleModel` holds only input, output and availability; engine and job stay in the root `AppState`; drain the input before publishing and before `RunScript`; polling continues when View hides the console.
+The painted console lives in `stokesforge-app/src/app/script_console.rs` (`script_header`, `script_contents`, `script_panel`), tested without a window, with and without interpreter. Its texts are `script-*` keys via `tr!`. Detached console (#100): the same `script_contents` paints attached and detached from the shared `AppState` (the detached window locks the app in its own pass, `app/detached_panel.rs`, and edits `script_source` directly); engine and job stay in the `AppState`; polling continues when View hides the console.
 
 ## Windows packaging (#332)
 

@@ -651,18 +651,6 @@ pub(super) mod bench {
             }
         }
 
-        /// What `window` queued for the root and the root has not drained yet.
-        /// The graph and the workbook queue nothing: their actions are applied
-        /// in their own pass (#475, L1, L2).
-        pub(in crate::app) fn queued_by(&self, window: Window) -> Vec<Action> {
-            match window {
-                Window::Graph | Window::Book => Vec::new(),
-                Window::ProjectManager => self.app.pm_requests.lock().unwrap().actions.clone(),
-                Window::ObjectManager => self.app.om_view.as_ref().unwrap().queued_actions(),
-                Window::Console => self.app.script_view.as_ref().unwrap().queued_actions(),
-            }
-        }
-
         /// Has the root published a window `id` that still registers itself?
         pub(in crate::app) fn has_window(&self, id: egui::ViewportId) -> bool {
             self.callbacks.contains_key(&id)

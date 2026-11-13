@@ -73,7 +73,7 @@
 mod sources;
 
 use sources::{
-    body, closing, functions, ident_at, is_ident, line_of, short_name, starts_with_at,
+    body, closing, functions, ident_at, is_ident, line_of, mask_source, short_name, starts_with_at,
     unique_function, word_at, SourceFile,
 };
 
@@ -2596,6 +2596,95 @@ fn the_viewports_guard_sees_a_bare_builder() {
     ] {
         assert!(
             bare_viewports(&[file(path, code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
+/// What a detached panel once used to work on a copy and to reach the root
+/// (#475, L3): the request structs and their drains, the copies of the tree, the
+/// selection and the console, the `queued_by` test accessor. `path:line` of each
+/// use anywhere in `src/`, tests included (a comment or a string is blanked).
+fn panel_copy_and_queue_names(sources: &[SourceFile]) -> Vec<String> {
+    const FORBIDDEN: [&str; 13] = [
+        "pm_requests",
+        "pm_view_model",
+        "om_view",
+        "script_view",
+        "queued_by",
+        "DetachedProjectManagerRequests",
+        "ObjectManagerRequests",
+        "ScriptConsoleRequests",
+        "ProjectManagerViewModel",
+        "ObjectManagerModel",
+        "ScriptConsoleModel",
+        "drain_object_manager",
+        "drain_script_console",
+    ];
+    let mut found = Vec::new();
+    for file in sources {
+        let source = mask_source(&file.text);
+        for i in 0..source.mask.len() {
+            if (i == 0 || !is_ident(source.mask[i - 1]))
+                && FORBIDDEN.iter().any(|name| word_at(&source.mask, i, name))
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn no_detached_panel_has_a_copy_or_a_queue() {
+    let offenders = panel_copy_and_queue_names(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "a detached panel paints the shared state and applies its actions in its own \
+         pass: no request struct, no drain, no copy of the tree, the selection or the \
+         console, no `queued_by` (#475, L3): {offenders:?}"
+    );
+}
+
+/// The witness: each name is seen; a comment, a string and a longer name pass.
+#[test]
+fn the_panel_guard_sees_every_name_of_the_queue() {
+    for name in [
+        "pm_requests",
+        "pm_view_model",
+        "om_view",
+        "script_view",
+        "queued_by",
+        "DetachedProjectManagerRequests",
+        "ObjectManagerRequests",
+        "ScriptConsoleRequests",
+        "ProjectManagerViewModel",
+        "ObjectManagerModel",
+        "ScriptConsoleModel",
+        "drain_object_manager",
+        "drain_script_console",
+    ] {
+        assert_eq!(
+            panel_copy_and_queue_names(&[file(
+                "app/a.rs",
+                &format!("fn f(a: &A) {{ a.{name}(); }}")
+            )])
+            .len(),
+            1,
+            "not seen: {name}"
+        );
+    }
+    for code in [
+        "fn f() {} // pm_requests",
+        "fn f() { let a = \"queued_by\"; }",
+        "fn f() { om_viewport(); script_viewport(); }",
+    ] {
+        assert!(
+            panel_copy_and_queue_names(&[file("app/a.rs", code)]).is_empty(),
             "false positive: {code}"
         );
     }

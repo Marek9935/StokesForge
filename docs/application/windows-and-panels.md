@@ -258,9 +258,9 @@ global feature stays in the main window. See [`../windows.md`](../windows.md),
 `StokesForgeApp` behind its lock (#475). The closure of a **detached graph** and
 that of a **detached workbook** lock it (`lock_app_from_viewport`, after the root
 released its guard), paint and apply their own actions in the same pass
-(`detached_graph.rs`, `detached_book.rs`); the closures of the three panels still
-never reach the application: they queue requests the root drains (until L3 of
-#475).
+(`detached_graph.rs`, `detached_book.rs`); so do the closures of the three panels
+(`detached_panel.rs`, L3 of #475): there is no copy of the state and no request
+queue left between a window and the application.
 
 ### Collapsible and detached panels (#100)
 
@@ -313,28 +313,38 @@ is canceled and then handled as a reattachment; it does not hide the
 panel. The Window menu also keeps Detach / Reattach Project Manager.
 
 The separate windows use `show_viewport_deferred`: their rendering is
-independent of that of the main window. The callback exchanges a
-read snapshot and requests with it, through two
-`Arc<Mutex<_>>`, without moving `AppState` or creating a second
-business mutation path. The requests explicitly wake the main
-window so they are handled even when it is idle.
-In the other direction, publishing a changed snapshot explicitly wakes the
-reader viewport (#104): project epoch, model revision or revision
-of the geometries. The Project Manager is also woken if its selection, its
-hiding or the active tab changes. The OM receives the active graph, its selection
-and the filters at each publication: it also follows a detached graph and
-wakes without interaction in its own window. The gestures go back up
-with the identifier of the graph that was painted. The console receives the input,
-the output and the execution state (`ScriptConsoleModel`); new keystrokes
-are drained before publication. The engine and the Python work stay in
-the main `AppState`: detaching, reattaching, collapsing or hiding the console
-does not interrupt them. The root polls the result while a script runs,
-including when the console is hidden. A command applied at the end of a frame
-schedules the root frame that will publish its result; no periodic wake-up
-is added at rest. The windowless tests check the targeted request
-and the return to rest; the cross-cutting tests of the three panels are in
-`app/panel_tests.rs` (clicks, sizes, deferred callbacks, console under Python).
-The real redrawing of the OS windows remains to be checked manually.
+independent of that of the main window. Since L3 of #475 each panel window
+serves itself like the detached graph and workbook (`detached_panel.rs`): its
+closure locks the application (`lock_app_from_viewport`), paints with **the same
+function as the docked panel** (`project_manager_body`, `object_manager_body`,
+`script_contents`) from the shared state, and applies the actions of its gestures
+at once (`apply_pass_actions`: the dialog gate of #471, `dispatch_actions`, the
+wake of the root and of the other open windows). The Project Manager's selection,
+the open windows and the cut nodes are the application's own, so a selection or a
+rename made there is seen by the root and by the Object Manager as soon as its
+pass ends; the Object Manager reads the selection of the graph in front, so it
+follows a selection made in the main window at its next pass (the root wakes the
+panels when `PanelsView`, what they show besides the model, changed). A click in
+the tree opens or closes windows in the panel's own pass. The console edits the
+shared `script_source`; the engine and the Python work stay in the main
+`AppState`: detaching, reattaching, collapsing or hiding the console does not
+interrupt them. The root polls the result while a script runs, including when the
+console is hidden. No periodic wake-up is added at rest.
+
+Each panel window keeps a `PanelWindow`: the flag of Reattach, whether it
+registers itself, and its **sender identity** (#21), put into the state for the
+length of its paint, so that a press in a panel ends the cell entry held by a
+workbook (one entry in the application, `PassOf::Panel`) under the panel's own
+identity: a macro of the main window refuses it. A rename in the Project Manager
+is an egui editor of that viewport that ends in `RenameObjects`, as when docked.
+Reattach (button or OS close, converted) follows the graph (L4): on native Wayland
+the window docks itself in its own pass (`keep_or_close_own_panel`), elsewhere it
+raises the flag and the root docks it (`drain_detached_panel_flags`). A panel that
+View hides while detached has no window. The sizes and positions remembered between
+two launches (#148) are reported by each pass (`LiveWindow`) exactly as before. The
+cross-cutting tests of the three panels are in `app/panel_tests.rs` (docked) and
+`app/detached_panel.rs` (detached, driven by `Bench`); the real redrawing of the OS
+windows remains to be checked manually.
 
 ### Generic detaching of content tabs
 

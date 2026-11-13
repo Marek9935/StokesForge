@@ -1,9 +1,8 @@
 //! Ctrl+Z, Ctrl+Y and Ctrl+S in the detached windows (#459, work package #470).
 //!
 //! The detached graph, workbook and the three panels read these three keys
-//! before they paint, and put the actions after their own (the graph and the
-//! workbook apply them in their own pass, the panels queue them for the root);
-//! Ctrl+Q quits nothing there. The tests drive a root and the five windows the way eframe
+//! before they paint, and put the actions after their own, applied in the
+//! window's own pass (#475); Ctrl+Q quits nothing there. The tests drive a root and the five windows the way eframe
 //! does (`test_support::bench::Bench::with_every_window`).
 use std::time::Instant;
 
@@ -156,18 +155,8 @@ fn ctrl_s_in_each_detached_window_saves_the_project() {
             bench.id_of(window),
             Pass::child().events(vec![ctrl(egui::Key::S)]),
         );
-        if matches!(window, Window::Graph | Window::Book) {
-            // The graph and the workbook apply their actions in their own pass
-            // (#475, L1, L2).
-            assert!(bench.queued_by(window).is_empty(), "{window:?}: no queue");
-            assert!(bench.path().exists(), "{window:?}: saved at once");
-        } else {
-            assert_eq!(
-                bench.queued_by(window),
-                vec![Action::Save],
-                "{window:?}: one Save is queued"
-            );
-        }
+        // Every window applies its actions in its own pass (#475).
+        assert!(bench.path().exists(), "{window:?}: saved at once");
         settle(&mut bench);
         assert!(bench.path().exists(), "{window:?}: the file was written");
         assert_eq!(band_in(&bench, window), None, "{window:?}: no band");
@@ -185,10 +174,6 @@ fn ctrl_shift_s_in_a_detached_window_saves_nothing() {
         bench.child_in(
             bench.id_of(window),
             Pass::child().events(vec![ctrl_shift(egui::Key::S)]),
-        );
-        assert!(
-            bench.queued_by(window).is_empty(),
-            "{window:?}: nothing queued"
         );
         settle(&mut bench);
         assert!(!bench.path().exists(), "{window:?}: nothing saved");
@@ -350,13 +335,7 @@ fn undoing_add_folder_in_the_detached_project_manager_closes_its_name_field() {
     let mut bench = bench();
     let root = bench.app.state.tree().root();
     let pm = bench.id_of(Window::ProjectManager);
-    bench
-        .app
-        .pm_requests
-        .lock()
-        .unwrap()
-        .actions
-        .push(Action::AddFolder { parent: root });
+    bench.act_in(pm, Action::AddFolder { parent: root });
     settle(&mut bench);
     for _ in 0..3 {
         bench.child_in(pm, Pass::child());
@@ -538,7 +517,6 @@ fn ctrl_q_in_a_detached_window_closes_nothing_and_says_where_quit_is() {
             Some(tr!("refused-quit-in-main")),
             "{window:?}: the band"
         );
-        assert!(bench.queued_by(window).is_empty(), "{window:?}: no action");
     }
     // A value typed in a cell stays.
     select_first_cell(&mut bench);
@@ -618,7 +596,6 @@ fn a_dialog_in_the_main_window_stops_the_keys_of_a_detached_workbook_grid() {
     bench.child_in(book, Pass::child());
     assert!(typed_cell(&mut bench).is_none(), "no edit opened");
     assert_eq!(cell(&mut bench), selection, "the selection stayed");
-    assert!(bench.queued_by(Window::Book).is_empty(), "nothing queued");
     bench.root(Pass::root());
     assert_eq!(
         bench.app.state.revision(),
@@ -688,7 +665,6 @@ fn a_dialog_in_the_main_window_stops_the_keys_of_the_detached_project_manager() 
     bench.child_in(pm, Pass::child().events(keys_of_a_surface()));
     bench.child_in(pm, Pass::child());
     assert!(project_manager::renaming_in(&bench.ctx, pm).is_empty());
-    assert!(bench.queued_by(Window::ProjectManager).is_empty());
     settle(&mut bench);
     assert_eq!(bench.app.state.revision(), revision, "the folder stays");
     assert_eq!(bench.app.pm_selection, selection, "the selection stays");

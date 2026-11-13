@@ -38,12 +38,14 @@
 //! X11 and on Windows the root does it from the flags the window raised.
 
 use eframe::egui;
+use stokesforge_app_state::panel_layout::PanelKind;
 use stokesforge_app_state::state::Action;
 use stokesforge_app_state::tr;
 use stokesforge_core::NodeId;
 use stokesforge_session::SessionHandle;
 
 use super::file_drop::{begin_file_drop, finish_file_drop};
+use super::panel_memory::panel_index;
 use super::server::lock_app_from_viewport;
 use super::tab::{tab_title, tab_title_from_tree, Tab};
 use super::window_chrome::{
@@ -109,16 +111,36 @@ pub(super) fn book_viewport(book: NodeId) -> egui::ViewportId {
 /// graph (for the entry a click in its window closes).
 pub(super) struct WindowIdentity<'a> {
     app: &'a mut StokesForgeApp,
-    tab: Tab,
+    key: WindowKey,
     /// The identity the state had; `None` when the window had none to put in.
     previous: Option<SessionHandle>,
 }
 
 impl<'a> WindowIdentity<'a> {
-    pub(super) fn enter(app: &'a mut StokesForgeApp, tab: Tab) -> Self {
-        let own = app.window_identity(tab).and_then(Option::take);
+    pub(super) fn enter(app: &'a mut StokesForgeApp, key: impl Into<WindowKey>) -> Self {
+        let key = key.into();
+        let own = app.window_identity(key).and_then(Option::take);
         let previous = own.map(|own| app.state.replace_session_identity(own));
-        Self { app, tab, previous }
+        Self { app, key, previous }
+    }
+}
+
+/// A detached window that owns a sender identity: a content tab or a panel.
+#[derive(Clone, Copy)]
+pub(super) enum WindowKey {
+    Tab(Tab),
+    Panel(PanelKind),
+}
+
+impl From<Tab> for WindowKey {
+    fn from(tab: Tab) -> Self {
+        Self::Tab(tab)
+    }
+}
+
+impl From<PanelKind> for WindowKey {
+    fn from(kind: PanelKind) -> Self {
+        Self::Panel(kind)
     }
 }
 
@@ -140,7 +162,7 @@ impl Drop for WindowIdentity<'_> {
         if let Some(previous) = self.previous.take() {
             let own = self.app.state.replace_session_identity(previous);
             // A window the pass removed (Reattach, Close) has no place to keep it.
-            if let Some(slot) = self.app.window_identity(self.tab) {
+            if let Some(slot) = self.app.window_identity(self.key) {
                 *slot = Some(own);
             }
         }
@@ -162,21 +184,24 @@ pub(super) enum PassOf {
     Root,
     Book(NodeId),
     Graph,
+    /// A detached panel (Project Manager, Object Manager, console).
+    Panel,
 }
 
 impl StokesForgeApp {
-    /// The identity slot of the detached window of `tab`, if there is one.
-    pub(super) fn window_identity(&mut self, tab: Tab) -> Option<&mut Option<SessionHandle>> {
-        match tab {
-            Tab::Book(book) => self
+    /// The identity slot of the detached window `key`, if there is one.
+    pub(super) fn window_identity(&mut self, key: WindowKey) -> Option<&mut Option<SessionHandle>> {
+        match key {
+            WindowKey::Panel(kind) => Some(&mut self.panel_windows[panel_index(kind)].identity),
+            WindowKey::Tab(Tab::Book(book)) => self
                 .detached_books
                 .get_mut(&book)
                 .map(|window| &mut window.identity),
-            Tab::Graph(graph) => self
+            WindowKey::Tab(Tab::Graph(graph)) => self
                 .detached_graphs
                 .get_mut(&graph)
                 .map(|window| &mut window.identity),
-            Tab::Matrix(_) | Tab::Note(_) => None,
+            WindowKey::Tab(Tab::Matrix(_) | Tab::Note(_)) => None,
         }
     }
 
@@ -236,7 +261,7 @@ impl StokesForgeApp {
             (PassOf::Root, Holder::Docked) => false,
             (PassOf::Book(this), Holder::Book(held)) => held != this,
             (PassOf::Book(_), Holder::Docked) => true,
-            (PassOf::Graph, _) => true,
+            (PassOf::Graph | PassOf::Panel, _) => true,
         };
         if !ends_it {
             return;
@@ -246,7 +271,9 @@ impl StokesForgeApp {
         // doing nothing.
         let refused = match pass {
             PassOf::Root => self.state.open_dialog().is_some(),
-            PassOf::Book(_) | PassOf::Graph => super::window_band::refuse_entry(ctx),
+            PassOf::Book(_) | PassOf::Graph | PassOf::Panel => {
+                super::window_band::refuse_entry(ctx)
+            }
         };
         if refused {
             return;

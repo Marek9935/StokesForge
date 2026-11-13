@@ -4,8 +4,7 @@
 use crate::theme;
 use std::cell::RefCell;
 
-use super::project_manager::tests::{click_at, find_text_center};
-use super::test_support::painted;
+use super::project_manager::tests::click_at;
 use super::window_chrome::tests::find_icon_centers;
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::*;
@@ -84,25 +83,13 @@ impl Panel {
             Self::Script => app.script_detached,
         }
     }
-    fn viewport(self) -> egui::ViewportId {
-        egui::ViewportId::from_hash_of(match self {
-            Self::Project => "stokesforge_project_manager_window",
-            Self::Object => "stokesforge_object_manager_window",
-            Self::Script => "stokesforge_script_window",
-        })
-    }
     fn paint(self, app: &mut StokesForgeApp, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let mut actions = Vec::new();
         match self {
-            Self::Project => app.show_project_manager(
-                ui,
-                &ctx,
-                None,
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut actions,
-            ),
+            Self::Project => {
+                app.show_project_manager(ui, &mut Vec::new(), &mut Vec::new(), &mut actions)
+            }
             Self::Object => app.object_manager_panel(ui, None, &mut actions),
             Self::Script => app.script_panel(ui, &ctx, &mut actions),
         }
@@ -381,26 +368,11 @@ fn panel_headers_have_only_collapse_and_detach_or_reattach() {
     }
 }
 
-fn child_input(id: egui::ViewportId, events: Vec<egui::Event>, close: bool) -> egui::RawInput {
-    let mut input = input(events);
-    input.viewport_id = id;
-    input.viewports.insert(
-        id,
-        egui::ViewportInfo {
-            parent: Some(egui::ViewportId::ROOT),
-            events: if close {
-                vec![egui::ViewportEvent::Close]
-            } else {
-                Vec::new()
-            },
-            ..Default::default()
-        },
-    );
-    input
-}
-
+/// The header icon detaches each panel: the root stops painting it (its own
+/// window paints it, `detached_panel.rs`), the other presentation's state is
+/// kept, and the detaching does not collapse it.
 #[test]
-fn detaching_by_the_icon_then_reattaching_by_click_or_os_close() {
+fn detaching_by_the_icon_leaves_the_root_without_the_panel() {
     for panel in [Panel::Project, Panel::Object, Panel::Script] {
         let session = Session::spawn(Project::new("Panels").unwrap(), None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -416,411 +388,28 @@ fn detaching_by_the_icon_then_reattaching_by_click_or_os_close() {
             output
         };
         paint_root(&ctx, Vec::new());
-        // The home-made button and the compositor's cross follow two distinct
-        // input paths, which must end up in the same attached panel.
-        for close_os in [false, true] {
-            let attached = paint_root(&ctx, Vec::new());
-            assert!(!panel.detached(&app.borrow()));
-            let icons = find_icon_centers(&attached.shapes);
-            click_at(
-                &ctx,
-                icons[usize::from(panel.placement() != PanelPlacement::Left)],
-                egui::Modifiers::NONE,
-                paint_root,
-            );
-            assert!(
-                panel.detached(&app.borrow()),
-                "{panel:?}: the icon detaches"
-            );
-            let registered = paint_root(&ctx, Vec::new());
-            let id = panel.viewport();
-            let callback = registered.viewport_output[&id]
-                .viewport_ui_cb
-                .clone()
-                .expect("deferred callback of the panel");
-            assert_eq!(
-                registered.viewport_output[&id].builder.decorations,
-                Some(false)
-            );
-            let paint_child = |ctx: &egui::Context, events| {
-                let mut output = ctx.run_ui(child_input(id, events, false), |ui| callback(ui));
-                output.textures_delta.clear();
-                output
-            };
-            paint_child(&ctx, Vec::new());
-            let detached = paint_child(&ctx, Vec::new());
-            if close_os {
-                let mut output = ctx.run_ui(child_input(id, Vec::new(), true), |ui| callback(ui));
-                assert!(output.viewport_output[&id]
-                    .commands
-                    .contains(&egui::ViewportCommand::CancelClose));
-                output.textures_delta.clear();
-            } else {
-                let icons = find_icon_centers(&detached.shapes);
-                click_at(
-                    &ctx,
-                    *icons.last().expect("Reattach icon"),
-                    egui::Modifiers::NONE,
-                    paint_child,
-                );
-            }
-            assert!(
-                panel.detached(&app.borrow()),
-                "the request waits for the drain at the root"
-            );
-            let attached_again = paint_root(&ctx, Vec::new());
-            assert!(
-                !panel.detached(&app.borrow()),
-                "{panel:?}: the drain reattaches"
-            );
-            assert!(
-                !attached_again.viewport_output.contains_key(&id),
-                "the panel no longer redeclares a viewport"
-            );
-            assert!(
-                !panel.collapsed(&app.borrow()),
-                "the detaching does not collapse the panel"
-            );
-        }
-        session.shutdown().unwrap();
-    }
-}
-
-#[test]
-fn the_object_manager_callback_follows_the_active_graph_and_the_new_snapshot() {
-    let mut project = Project::new("Panels").unwrap();
-    let first = project
-        .add_graph(
-            project.root(),
-            Some("First"),
-            stokesforge_plot::PlotSpec::empty("First"),
-        )
-        .unwrap();
-    let second = project
-        .add_graph(
-            project.root(),
-            Some("Second"),
-            stokesforge_plot::PlotSpec::empty("Second"),
-        )
-        .unwrap();
-    let session = Session::spawn(project, None).unwrap();
-    let state = AppState::new(session.handle(), String::new()).unwrap();
-    let mut app = StokesForgeApp::new(state);
-    app.state.set_object_manager_open_for_test(true);
-    app.om_detached = true;
-    let ctx = context();
-    let id = egui::ViewportId::from_hash_of("stokesforge_object_manager_window");
-    let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-        app.object_manager_panel(ui, Some(Tab::Graph(first)), &mut Vec::new())
-    });
-    let callback = output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-    output.textures_delta.clear();
-    let paint_child = |close| {
-        let mut output = ctx.run_ui(child_input(id, Vec::new(), close), |ui| callback(ui));
-        output.textures_delta.clear();
-        output
-    };
-    paint_child(false);
-    assert!(painted(&paint_child(false), "First"));
-    let settle = |app: &mut StokesForgeApp, graph| {
-        for _ in 0..8 {
-            ctx.run_ui(input(Vec::new()), |ui| {
-                app.object_manager_panel(ui, Some(Tab::Graph(graph)), &mut Vec::new());
-            })
-            .textures_delta
-            .clear();
-            paint_child(false);
-        }
-        let mut idle = ctx.run_ui(input(Vec::new()), |ui| {
-            app.object_manager_panel(ui, Some(Tab::Graph(graph)), &mut Vec::new());
-        });
-        assert_eq!(
-            idle.viewport_output[&id].repaint_delay,
-            std::time::Duration::MAX,
-            "witness: the viewport sleeps as long as its publication does not change"
-        );
-        idle.textures_delta.clear();
-    };
-    settle(&mut app, first);
-    let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-        app.object_manager_panel(ui, Some(Tab::Graph(second)), &mut Vec::new())
-    });
-    assert_eq!(
-        output.viewport_output[&id].repaint_delay,
-        std::time::Duration::ZERO,
-        "the change wakes the viewport"
-    );
-    output.textures_delta.clear();
-    let changed = paint_child(false);
-    assert!(
-        painted(&changed, "Second"),
-        "the old callback reads the new graph"
-    );
-    assert!(!painted(&changed, "First"));
-    settle(&mut app, second);
-    session
-        .handle()
-        .execute(stokesforge_commands::Command::Rename {
-            id: second,
-            name: "Updated".into(),
-        })
-        .unwrap();
-    app.state.refresh();
-    let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-        app.object_manager_panel(ui, Some(Tab::Graph(second)), &mut Vec::new())
-    });
-    assert_eq!(
-        output.viewport_output[&id].repaint_delay,
-        std::time::Duration::ZERO
-    );
-    output.textures_delta.clear();
-    assert!(
-        painted(&paint_child(false), "Updated"),
-        "the snapshot is republished"
-    );
-    let closed = paint_child(true);
-    assert!(closed.viewport_output[&id]
-        .commands
-        .contains(&egui::ViewportCommand::CancelClose));
-    app.drain_object_manager(&ctx, &mut Vec::new());
-    assert!(!app.om_detached, "the OS close reattaches the panel");
-    session.shutdown().unwrap();
-}
-
-#[test]
-fn detached_input_returns_to_the_attached_console_after_an_os_close() {
-    let session = Session::spawn(Project::new("Console").unwrap(), None).unwrap();
-    let state = AppState::new(session.handle(), String::new()).unwrap();
-    let mut app = StokesForgeApp::new(state);
-    app.state.set_script_source("initial_source".into());
-    app.detach_script_console();
-    let ctx = context();
-    let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
-    let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-        app.show_detached_script_console(ui.ctx())
-    });
-    let callback = output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-    output.textures_delta.clear();
-    let paint = |ctx: &egui::Context, events| {
-        let mut output = ctx.run_ui(child_input(id, events, false), |ui| callback(ui));
-        output.textures_delta.clear();
-        output
-    };
-    paint(&ctx, Vec::new());
-    let output = paint(&ctx, Vec::new());
-    assert!(painted(&output, "initial_source"));
-    if app.state.script_available() {
+        let attached = paint_root(&ctx, Vec::new());
+        assert!(!panel.detached(&app.borrow()));
+        let icons = find_icon_centers(&attached.shapes);
         click_at(
             &ctx,
-            find_text_center(&output.shapes, "initial_source"),
+            icons[usize::from(panel.placement() != PanelPlacement::Left)],
             egui::Modifiers::NONE,
-            paint,
+            paint_root,
         );
-        paint(
-            &ctx,
-            vec![
-                egui::Event::Key {
-                    key: egui::Key::A,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::COMMAND,
-                },
-                egui::Event::Text("modified_source".into()),
-            ],
-        );
-        // A publication can land between the viewport's edit and its
-        // drain at the root: the old buffer must not erase the input.
-        let mut publication = ctx.run_ui(input(Vec::new()), |ui| {
-            app.show_detached_script_console(ui.ctx())
-        });
-        publication.textures_delta.clear();
-        assert!(painted(&paint(&ctx, Vec::new()), "modified_source"));
-        app.drain_script_console(&ctx, &mut Vec::new());
-        assert_eq!(app.state.script_source(), "modified_source");
-    }
-    let mut closed = ctx.run_ui(child_input(id, Vec::new(), true), |ui| callback(ui));
-    assert!(closed.viewport_output[&id]
-        .commands
-        .contains(&egui::ViewportCommand::CancelClose));
-    closed.textures_delta.clear();
-    app.drain_script_console(&ctx, &mut Vec::new());
-    assert!(!app.script_detached);
-    app.script_collapsed = false;
-    let mut attached = ctx.run_ui(input(Vec::new()), |ui| {
-        app.script_panel(ui, &ctx, &mut Vec::new())
-    });
-    assert!(painted(&attached, app.state.script_source()));
-    attached.textures_delta.clear();
-    session.shutdown().unwrap();
-}
-
-#[cfg(feature = "python")]
-#[test]
-fn detaching_and_reattaching_the_console_keeps_the_python_job_and_its_output() {
-    use stokesforge_python::interpreter::{self, EmbeddedPython};
-    let session = Session::spawn(Project::new("Console").unwrap(), None).unwrap();
-    let mut state = AppState::new(session.handle(), String::new()).unwrap();
-    let home = std::env::var_os(interpreter::HOME_ENV)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../vendor/python/extracted/python")
-        });
-    state.set_python(EmbeddedPython::with_home(home));
-    let source = "import time\ntime.sleep(0.15)\nprint('kept_output')";
-    state.set_script_source(source.into());
-    state.dispatch(Action::RunScript);
-    assert!(state.script_running());
-    let mut app = StokesForgeApp::new(state);
-    app.detach_script_console();
-    assert!(app.state.script_running(), "the engine stays at the root");
-    let ctx = context();
-    let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
-    let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-        app.show_detached_script_console(ui.ctx())
-    });
-    let callback = output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-    output.textures_delta.clear();
-    let mut output = ctx.run_ui(child_input(id, Vec::new(), true), |ui| callback(ui));
-    output.textures_delta.clear();
-    app.drain_script_console(&ctx, &mut Vec::new());
-    assert!(!app.script_detached);
-    assert!(
-        app.state.script_running(),
-        "reattaching does not lose the job's channel"
-    );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while app.state.script_running() {
         assert!(
-            std::time::Instant::now() < deadline,
-            "the script must finish"
+            panel.detached(&app.borrow()),
+            "{panel:?}: the icon detaches"
         );
-        app.script_open = false;
-        app.script_collapsed = true;
-        app.poll_background_jobs(&ctx);
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        let after = paint_root(&ctx, Vec::new());
+        assert!(
+            find_icon_centers(&after.shapes).is_empty(),
+            "{panel:?}: the root paints nothing of it"
+        );
+        assert!(
+            !panel.collapsed(&app.borrow()),
+            "the detaching does not collapse the panel"
+        );
+        session.shutdown().unwrap();
     }
-    let output = app.state.script_output().expect("result of the same job");
-    assert_eq!(output.stdout, "kept_output\n");
-    assert!(output.error.is_none(), "{:?}", output.error);
-    assert_eq!(app.state.script_source(), source);
-    app.detach_script_console();
-    let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-        app.show_detached_script_console(ui.ctx())
-    });
-    let callback = output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-    output.textures_delta.clear();
-    let mut output = ctx.run_ui(child_input(id, Vec::new(), false), |ui| callback(ui));
-    assert!(
-        painted(&output, "kept_output"),
-        "the reopened panel receives the output"
-    );
-    output.textures_delta.clear();
-    session.shutdown().unwrap();
-}
-
-/// The old callback must read the new settings even if neither the graph nor the
-/// snapshot changes. The injected storage does not touch the machine.
-#[test]
-fn settings_wake_and_change_the_detached_panel_like_the_anchored_panel() {
-    use stokesforge_app_state::preferences::{ObjectManagerGroup, Preferences};
-    let mut project = Project::new("Detached settings").unwrap();
-    let mut spec = stokesforge_plot::PlotSpec::empty("Witness title");
-    spec.panels
-        .get_mut(0)
-        .unwrap()
-        .annotations
-        .push(stokesforge_plot::AnnotationSpec::new(
-            "Witness annotation",
-            0.0,
-            0.0,
-        ));
-    let graph = project.add_graph(project.root(), None, spec).unwrap();
-    let session = Session::spawn(project, None).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let preferences = Preferences::load_from(Some(dir.path().join("preferences.json")));
-    let state =
-        AppState::new_with_preferences(session.handle(), String::new(), preferences).unwrap();
-    let mut app = StokesForgeApp::new(state);
-    app.om_detached = true;
-    let ctx = context();
-    let id = egui::ViewportId::from_hash_of("stokesforge_object_manager_window");
-    let publish = |app: &mut StokesForgeApp| {
-        let mut output = ctx.run_ui(input(Vec::new()), |ui| {
-            app.object_manager_panel(ui, Some(Tab::Graph(graph)), &mut Vec::new());
-        });
-        output.textures_delta.clear();
-        output
-    };
-    let output = publish(&mut app);
-    let callback = output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
-    let child = || {
-        let mut output = ctx.run_ui(child_input(id, Vec::new(), false), |ui| callback(ui));
-        output.textures_delta.clear();
-        output
-    };
-    child();
-    assert!(!painted(&child(), &tr!("object-manager-axes")));
-    assert!(painted(&child(), &tr!("object-manager-objects")));
-    for _ in 0..8 {
-        publish(&mut app);
-        child();
-    }
-    let idle = publish(&mut app);
-    assert_eq!(
-        idle.viewport_output[&id].repaint_delay,
-        std::time::Duration::MAX,
-        "witness: an unchanged panel sleeps"
-    );
-    app.state.dispatch(Action::SetObjectManagerGroupOpen {
-        group: ObjectManagerGroup::Axes,
-        open: true,
-    });
-    let group_changed = publish(&mut app);
-    assert_eq!(
-        group_changed.viewport_output[&id].repaint_delay,
-        std::time::Duration::ZERO,
-        "a collapse setting alone wakes the panel, even if the axes are still filtered"
-    );
-    app.state.dispatch(Action::SetObjectManagerShowScales(true));
-    let output = publish(&mut app);
-    assert_eq!(
-        output.viewport_output[&id].repaint_delay,
-        std::time::Duration::ZERO
-    );
-    child();
-    let output = child();
-    assert!(painted(&output, &tr!("object-manager-axes")));
-    assert!(painted(&output, &tr!("plot-axis-bottom")));
-    assert!(
-        !painted(&output, "Witness title"),
-        "linked title never listed"
-    );
-    // The anchored panel reads the same initial filters and collapses.
-    app.om_detached = false;
-    publish(&mut app);
-    let anchored = publish(&mut app);
-    assert!(painted(&anchored, &tr!("object-manager-axes")));
-    assert!(painted(&anchored, &tr!("plot-axis-bottom")));
-    app.state.dispatch(Action::ResetObjectManagerSettings);
-    publish(&mut app);
-    let reset = publish(&mut app);
-    assert!(!painted(&reset, &tr!("object-manager-axes")));
-    assert!(painted(&reset, &tr!("object-manager-objects")));
-    app.om_detached = true;
-    publish(&mut app);
-    child();
-    assert!(!painted(&child(), &tr!("object-manager-axes")));
-    assert!(painted(&child(), &tr!("object-manager-objects")));
-    // The reset does not erase the axes already expanded. The filter reveals them,
-    // despite the new default axes_open=false, in both presentations.
-    app.state.dispatch(Action::SetObjectManagerShowScales(true));
-    publish(&mut app);
-    child();
-    assert!(painted(&child(), &tr!("plot-axis-bottom")));
-    app.om_detached = false;
-    publish(&mut app);
-    assert!(painted(&publish(&mut app), &tr!("plot-axis-bottom")));
-    session.shutdown().unwrap();
 }

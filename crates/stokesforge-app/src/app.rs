@@ -155,6 +155,7 @@ mod detached_book;
 mod detached_graph;
 #[cfg(test)]
 mod detached_keys;
+mod detached_panel;
 mod dialogs;
 mod empty_state;
 mod figure_copy;
@@ -221,7 +222,7 @@ mod window_stress;
 mod workbook;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub use server::{BenchState, PassHook, ServedApp};
@@ -258,11 +259,12 @@ use status_history::{low_r2_list_window, status_history_window};
 use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use transpose_ui::transpose_relink_window;
-use window_detach::{snapshot_stamp, DetachedProjectManagerRequests, ProjectManagerViewModel};
+use window_detach::snapshot_stamp;
 use window_placement::geometry_rect;
 use window_stack::window_nodes;
 
 use eframe::egui;
+use stokesforge_app_state::panel_layout::PanelKind;
 use stokesforge_core::{Node, NodeId};
 use stokesforge_render_egui::GraphView;
 use stokesforge_session::WindowGeometry;
@@ -332,13 +334,11 @@ pub struct StokesForgeApp {
     toolbars: ToolbarState,
     om_detached: bool,
     om_collapsed: bool,
-    om_view: Option<window_detach::DetachedObjectManager>,
     /// Visibility and collapse are view states, outside history and the .stf format.
     pm_open: bool,
     pm_collapsed: bool,
     script_open: bool,
     script_detached: bool,
-    script_view: Option<window_detach::DetachedScriptConsole>,
     active_detached: Option<Tab>,
     /// The content tabs currently open as floating windows, in the order in
     /// which they were last focused — the last element is the most recently
@@ -407,20 +407,13 @@ pub struct StokesForgeApp {
     /// the single source; `panel_memory.rs` reads them and sends
     /// `Action::RememberPanelLayout` on every change.
     panel_memory: panel_memory::PanelMemory,
-    /// What the detached OS window of the Project Manager paints, resynchronized
-    /// from `self.state` at every frame by
-    /// [`StokesForgeApp::show_detached_project_manager`] — see its top doc.
-    /// `Arc<Mutex<_>>` only because the `show_viewport_deferred` callback
-    /// requires it (`Fn` + `Send + Sync + 'static`, no capture of `&mut
-    /// self`); it is **not** `AppState` itself behind a lock,
-    /// only this strict subset.
-    pm_view_model: Arc<Mutex<ProjectManagerViewModel>>,
-    /// What the detached OS window of the Project Manager writes (open
-    /// clicks, reattach request), drained every frame by
-    /// [`StokesForgeApp::ui`](eframe::App::ui) — same role as `open_requests`/`actions` for the
-    /// rest of the bench, just set by a deferred callback rather than collected
-    /// directly.
-    pm_requests: Arc<Mutex<DetachedProjectManagerRequests>>,
+    /// The detached window of each panel, in [`PanelKind::ALL`] order (#475, L3):
+    /// the flag of Reattach, whether it registers itself, its sender identity.
+    /// Reached by the window's own pass under the application lock.
+    panel_windows: [detached_panel::PanelWindow; 3],
+    /// What the detached panels showed the last time any window looked (a root
+    /// pass or a panel's own pass): a change wakes them.
+    panels_seen: Option<detached_panel::PanelsView>,
     /// Content tabs (`Book`/`Graph`/`Matrix`/`Note`) currently
     /// detached into a separate OS window — see the top doc of
     /// `window_detach.rs`, § Generic detaching of content tabs. One entry per detached tab; absent from
@@ -602,12 +595,10 @@ impl StokesForgeApp {
             toolbars: ToolbarState::default(),
             om_detached: false,
             om_collapsed: false,
-            om_view: None,
             pm_open: true,
             pm_collapsed: false,
             script_open: true,
             script_detached: false,
-            script_view: None,
             active_detached: None,
             floating_tabs,
             cascade_rank,
@@ -623,8 +614,8 @@ impl StokesForgeApp {
             pm_detached: false,
             script_collapsed: true,
             panel_memory: panel_memory::PanelMemory::default(),
-            pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
-            pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
+            panel_windows: Default::default(),
+            panels_seen: None,
             detached_books: HashMap::new(),
             detached_graphs: HashMap::new(),
             windows_close_themselves: false,
@@ -719,12 +710,12 @@ impl StokesForgeApp {
         self.detached_tab_list()
             .iter()
             .map(egui::ViewportId::from_hash_of)
-            .chain(self.pm_detached.then(project_manager::viewport_id))
             .chain(
-                self.om_detached
-                    .then(window_detach::object_manager_viewport),
+                PanelKind::ALL
+                    .into_iter()
+                    .filter(|kind| self.panel_has_window(*kind))
+                    .map(detached_panel::panel_viewport_id),
             )
-            .chain(self.script_detached.then(window_detach::script_viewport))
             .collect()
     }
 
@@ -1002,6 +993,18 @@ impl StokesForgeApp {
                 }
             }
         }
+        self.current_content_tab()
+    }
+
+    /// [`Self::current_content_tab`] for the stress checks.
+    #[cfg(test)]
+    fn current_content_tab_for_test(&self) -> Option<Tab> {
+        self.current_content_tab()
+    }
+
+    /// The content tab in front, as the last root pass left it: what the
+    /// detached panels follow (#475).
+    fn current_content_tab(&self) -> Option<Tab> {
         self.active_detached
             .filter(|tab| self.is_tab_detached(*tab))
             .or(self.maximized_tab)
@@ -1219,16 +1222,13 @@ impl eframe::App for StokesForgeApp {
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
         self.show_toolbars(ui, &ctx, active_tab, &mut actions);
         self.status_bar(ui, &mut actions);
+        // A Reattach the panel windows raised is carried out before the panels
+        // are painted, so that the docked panel appears in the same pass.
+        self.drain_detached_panel_flags(&ctx);
         self.script_panel(ui, &ctx, &mut actions);
-        self.show_project_manager(
-            ui,
-            &ctx,
-            active_tab,
-            &mut open_requests,
-            &mut close_requests,
-            &mut actions,
-        );
+        self.show_project_manager(ui, &mut open_requests, &mut close_requests, &mut actions);
         self.object_manager_panel(ui, active_tab, &mut actions);
+        self.show_detached_panels(&ctx);
         self.show_detached_books(&ctx);
         self.drain_detached_book_flags(&ctx);
         self.show_detached_graphs(&ctx);
@@ -1285,6 +1285,19 @@ impl eframe::App for StokesForgeApp {
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
         let changed = snapshot_stamp(self.state.snapshot()) != published_stamp;
+        // What the detached panels show besides the model (selection, open
+        // windows, cut nodes, the selection of the graph in front) moved since
+        // they last looked: only they need to look again.
+        let panels_now = self.panels_view();
+        if panels_now != self.panels_seen {
+            for kind in PanelKind::ALL
+                .into_iter()
+                .filter(|kind| self.panel_has_window(*kind))
+            {
+                ctx.request_repaint_of(detached_panel::panel_viewport_id(kind));
+            }
+        }
+        self.panels_seen = panels_now;
         self.announce_opened_dialog(&ctx);
         if changed {
             // A command applied after publication wakes the viewports. The
@@ -1408,61 +1421,24 @@ impl StokesForgeApp {
         }
     }
 
-    /// The panel or its detached viewport occupies a single step of the frame.
+    /// The docked Project Manager occupies a single step of the frame.
     fn show_project_manager(
         &mut self,
         ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        active_tab: Option<Tab>,
         open_requests: &mut Vec<Tab>,
         close_requests: &mut Vec<Tab>,
         actions: &mut Vec<Action>,
     ) {
-        if self.pm_detached {
-            // Draining before publication avoids publishing a stale selection.
-            // Empties what the detached OS window wrote since the
-            // last frame (see the top doc of
-            // `show_detached_project_manager`) — same moment as the rest of
-            // `open_requests`, before painting the fixed panel (which will not
-            // be painted this frame anyway) and the `CentralPanel`.
-            let (should_reattach, new_selection, mut new_close, incoming) = {
-                let mut requests = self
-                    .pm_requests
-                    .lock()
-                    .unwrap_or_else(|err| err.into_inner());
-                open_requests.append(&mut requests.open);
-                (
-                    std::mem::take(&mut requests.reattach),
-                    requests.selection.take(),
-                    std::mem::take(&mut requests.close),
-                    std::mem::take(&mut requests.actions),
-                )
-            };
-            // Selecting, opening a window and Reattach stay free; what writes
-            // is refused while a dialog is open in the main window.
-            self.accept_detached_actions(ctx, project_manager::viewport_id(), incoming, actions);
-            if let Some(selection) = new_selection {
-                self.pm_selection = selection;
-            }
-            close_requests.append(&mut new_close);
-            if should_reattach {
-                self.reattach_project_manager();
-                ctx.request_repaint();
-            }
-        }
-        if !self.pm_open {
+        // A detached panel is painted by its own window (`detached_panel.rs`).
+        if !self.pm_open || self.pm_detached {
             return;
         }
-        if self.pm_detached {
-            self.show_detached_project_manager(ctx, active_tab);
-        } else {
-            // Fixed panel, painted *before* the `CentralPanel` — see the top
-            // doc of the module, § What stays here: this is what guarantees by
-            // construction that it is never covered by it nor covers it,
-            // like the menu bar (`egui::Panel::top`) painted
-            // higher up.
-            self.project_manager_panel(ui, open_requests, close_requests, actions);
-        }
+        // Fixed panel, painted *before* the `CentralPanel` — see the top
+        // doc of the module, § What stays here: this is what guarantees by
+        // construction that it is never covered by it nor covers it,
+        // like the menu bar (`egui::Panel::top`) painted
+        // higher up.
+        self.project_manager_panel(ui, open_requests, close_requests, actions);
     }
 
     /// Entries refused in a detached window (a typed value while a dialog is
@@ -2241,7 +2217,6 @@ impl StokesForgeApp {
         self.floating_rects.clear();
         self.pm_selection.clear();
         self.pm_last_active_tab = None;
-        self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
         ctx.memory_mut(|memory| {
             // In-place editors and deferred formats must not
             // outlive the window they targeted. Keep the

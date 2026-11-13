@@ -30,9 +30,17 @@
 //! application, a press elsewhere ends it (no dialog), and no cell commit is
 //! absorbed into a macro the root holds (#21).
 //!
-//! **Growing it.** The panels (L3) will join as new kinds in [`Rig::step`]
-//! (one `match` arm and a `fn` per kind) and in the window lists of
-//! [`Rig::check`]; nothing else changes. Replay a failure
+//! **The panels (L3).** The Project Manager, the Object Manager and the console
+//! detach, Reattach (flag, OS cross, View) and are hidden like the graphs; the
+//! Project Manager takes clicks on its rows and a half-typed name ended by a
+//! click elsewhere; the Object Manager is checked to show the selection of the
+//! graph in front after its pass (a series selected by a gesture of the main
+//! window); the console takes its Run key (refused under a dialog); a press in
+//! a panel ends the entry held elsewhere. They join the window lists of
+//! [`Rig::check`].
+//!
+//! **Growing it.** A new window is one more kind in [`Rig::step`] (one `match`
+//! arm and a `fn`) and one more list in [`Rig::check`]. Replay a failure
 //! with `SF_STRESS_SEED=<seed>` (the seed is printed on failure).
 
 use std::collections::HashSet;
@@ -43,6 +51,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use stokesforge_app_state::object_manager::VisibilityTarget;
+use stokesforge_app_state::panel_layout::PanelKind;
 use stokesforge_app_state::state::{Action, AutosaveJob, PlotSettingsTab};
 use stokesforge_core::{Column, NodeId, Project, Tree};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
@@ -50,6 +59,8 @@ use stokesforge_session::Session;
 
 use super::detached_book::book_viewport;
 use super::detached_graph::graph_viewport;
+use super::detached_panel::panel_viewport_id;
+use super::panel_memory::panel_index;
 use super::server::{serve_once, Clock, Repaint, RunJob, ServerThread};
 use super::tab::Tab;
 use super::test_support::bench::{Bench, Pass};
@@ -154,6 +165,13 @@ struct Rig {
     closed: HashSet<egui::ViewportId>,
     /// Taken when a dialog is opened by the stress, compared at its Cancel.
     baseline: Option<Baseline>,
+    /// The kind of the step being played, for a failure message.
+    last_roll: usize,
+    /// Which panels had a registered window when the step began.
+    panel_had_window: [bool; 3],
+    /// Ids of panel windows that existed and are gone (a panel that never had a
+    /// window may still hold a wake asked while it was due to open).
+    panels_gone: HashSet<egui::ViewportId>,
 }
 
 impl Rig {
@@ -201,6 +219,7 @@ impl Rig {
             stokesforge_app_state::state::AppState::new(session.handle(), path).expect("state");
         state.set_recovery_dir(Some(dir.path().join("recovery")));
         let mut app = StokesForgeApp::new(state);
+        app.state.set_object_manager_open_for_test(true);
         app.windows_close_themselves = wayland;
         // The workbook is DOCKED in the root; the graphs float, the first is
         // detached.
@@ -248,6 +267,9 @@ impl Rig {
             initial,
             closed: HashSet::new(),
             baseline: None,
+            last_roll: 0,
+            panel_had_window: [false; 3],
+            panels_gone: HashSet::new(),
         };
         // The first passes: the root publishes, the windows paint.
         for _ in 0..3 {
@@ -307,11 +329,31 @@ impl Rig {
                 assert_ne!(
                     viewport.repaint_delay,
                     Duration::ZERO,
-                    "a closed window was woken (seed {})",
-                    self.seed
+                    "a closed window was woken: {} (seed {}, step kind {})",
+                    self.name_of(*id),
+                    self.seed,
+                    self.last_roll
                 );
             }
         }
+    }
+
+    /// Which window an id is, for a failure message.
+    fn name_of(&self, id: egui::ViewportId) -> String {
+        for kind in PanelKind::ALL {
+            if panel_viewport_id(kind) == id {
+                return format!("the {kind:?} panel");
+            }
+        }
+        for graph in &self.graphs {
+            if graph_viewport(*graph) == id {
+                return format!("graph {graph:?}");
+            }
+        }
+        if book_viewport(self.book2) == id {
+            return "the second workbook".to_string();
+        }
+        format!("{id:?}")
     }
 
     fn root_pass(&mut self, pass: Pass) {
@@ -330,6 +372,20 @@ impl Rig {
         if !self.bench.app.detached_books.contains_key(&self.book2) && self.bench.has_window(id) {
             let output = self.bench.child_in(id, Pass::child().focused(false));
             self.after_pass(&output);
+        }
+        for kind in PanelKind::ALL {
+            let id = panel_viewport_id(kind);
+            if !self.bench.app.panel_has_window(kind) && self.bench.has_window(id) {
+                let output = self.bench.child_in(id, Pass::child().focused(false));
+                self.after_pass(&output);
+            }
+            if self.bench.app.panel_has_window(kind) {
+                assert!(
+                    self.bench.has_window(id),
+                    "the detached {kind:?} has no live window after a root pass (seed {})",
+                    self.seed
+                );
+            }
         }
         for graph in self.detached() {
             assert!(
@@ -383,7 +439,12 @@ impl Rig {
             self.covered = 5 + self.dice.below(25);
         }
         let dialog_before = self.blocking().then(|| self.baseline());
-        let roll = self.dice.below(100);
+        for kind in PanelKind::ALL {
+            self.panel_had_window[panel_index(kind)] =
+                self.bench.has_window(panel_viewport_id(kind));
+        }
+        let roll = self.dice.below(120);
+        self.last_roll = roll;
         match roll {
             0..=15 => self.gesture(),
             16..=22 => self.keys(),
@@ -400,7 +461,13 @@ impl Rig {
             82..=86 => self.book_leave(),
             87..=92 => self.book_type(),
             93..=96 => self.book_click(),
-            _ => self.root_macro(),
+            97..=99 => self.root_macro(),
+            100..=104 => self.panel_detach(),
+            105..=109 => self.panel_leave(),
+            110..=113 => self.panel_project_manager(),
+            114..=116 => self.panel_object_manager(),
+            117..=118 => self.panel_console(),
+            _ => self.panel_press(),
         }
         // A dialog open the whole step: no window and no key changed the model.
         if let Some(before) = dialog_before {
@@ -437,6 +504,15 @@ impl Rig {
         if !self.bench.app.detached_books.contains_key(&self.book2) && !self.bench.has_window(id) {
             self.closed.insert(id);
         }
+        for kind in PanelKind::ALL {
+            let id = panel_viewport_id(kind);
+            if self.bench.app.panel_has_window(kind) {
+                self.panels_gone.remove(&id);
+            } else if self.panel_had_window[panel_index(kind)] && !self.bench.has_window(id) {
+                self.panels_gone.insert(id);
+            }
+        }
+        self.closed.extend(self.panels_gone.iter().copied());
     }
 
     // -- The kinds of step ---------------------------------------------------
@@ -1027,6 +1103,9 @@ impl Rig {
         if self.book2_live() {
             self.book2_pass(Pass::child().focused(false));
         }
+        for kind in PanelKind::ALL {
+            self.panel_pass(kind, Pass::child().focused(false));
+        }
     }
 
     /// The echo of a closed window in the root's input, 150 ms late.
@@ -1039,6 +1118,362 @@ impl Rig {
             if self.may_root() {
                 self.root_pass(Pass::root());
             }
+        }
+    }
+
+    // -- The panels (L3) --------------------------------------------------------
+
+    /// A pass of a panel's window, if it still has a closure.
+    fn panel_pass(&mut self, kind: PanelKind, pass: Pass) -> Option<egui::FullOutput> {
+        let id = panel_viewport_id(kind);
+        if !self.bench.has_window(id) {
+            return None;
+        }
+        let output = self.bench.child_in(id, pass);
+        self.after_pass(&output);
+        Some(output)
+    }
+
+    /// A panel goes to its own window, or View hides or shows a panel.
+    fn panel_detach(&mut self) {
+        if self.dice.below(4) == 0 {
+            // View: hide or show the Project Manager or the console.
+            if self.dice.coin() {
+                self.bench.app.pm_open = !self.bench.app.pm_open;
+            } else {
+                self.bench.app.script_open = !self.bench.app.script_open;
+            }
+        } else {
+            let free: Vec<PanelKind> = PanelKind::ALL
+                .into_iter()
+                .filter(|kind| !self.bench.app.panel_detached(*kind))
+                .collect();
+            let Some(kind) = self.dice.pick(&free) else {
+                return;
+            };
+            match kind {
+                PanelKind::Project => self.bench.app.detach_project_manager(),
+                PanelKind::Object => self.bench.app.om_detached = true,
+                PanelKind::Script => self.bench.app.detach_script_console(),
+            }
+        }
+        // A window the root publishes now is no longer a closed one.
+        for kind in PanelKind::ALL {
+            if self.bench.app.panel_has_window(kind) {
+                self.closed.remove(&panel_viewport_id(kind));
+            }
+        }
+        if self.may_root() {
+            self.root_pass(Pass::root());
+        }
+    }
+
+    /// Reattach of a detached panel: the flag of its button, the OS cross, the
+    /// View menu; followed by a pass of the window, of the root, or by nothing.
+    fn panel_leave(&mut self) {
+        let detached: Vec<PanelKind> = PanelKind::ALL
+            .into_iter()
+            .filter(|kind| self.bench.app.panel_detached(*kind))
+            .collect();
+        let Some(kind) = self.dice.pick(&detached) else {
+            return;
+        };
+        let own_pass =
+            self.bench.has_window(panel_viewport_id(kind)) && self.bench.app.panel_has_window(kind);
+        match self.dice.below(4) {
+            0 if own_pass => {
+                self.bench.app.panel_windows[panel_index(kind)].reattach = true;
+                self.panel_pass(kind, Pass::child());
+                if self.wayland {
+                    assert!(
+                        !self.bench.app.panel_detached(kind),
+                        "the {kind:?} window did not dock itself in its own pass (seed {})",
+                        self.seed
+                    );
+                }
+            }
+            1 if own_pass => {
+                self.panel_pass(kind, Pass::child().info(os_close()));
+                if self.wayland {
+                    assert!(
+                        !self.bench.app.panel_detached(kind),
+                        "the cross did not dock the {kind:?} window in its own pass (seed {})",
+                        self.seed
+                    );
+                }
+            }
+            2 if self.may_root() => {
+                self.bench.app.panel_windows[panel_index(kind)].reattach = true;
+                self.root_pass(Pass::root());
+                assert!(
+                    !self.bench.app.panel_detached(kind),
+                    "the root pass did not carry out the Reattach of {kind:?} (seed {})",
+                    self.seed
+                );
+            }
+            3 => {
+                // The View menu: Reattach from the root.
+                self.bench.app.set_panel_detached(kind, false);
+                if self.may_root() {
+                    self.root_pass(Pass::root());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The Project Manager window: a click on a row selects it in the
+    /// application at once; or a half-typed name ended by a click elsewhere.
+    fn panel_project_manager(&mut self) {
+        if !self.panel_live(PanelKind::Project) {
+            return;
+        }
+        let blocked = self.blocking();
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let pm = panel_viewport_id(PanelKind::Project);
+        if self.dice.coin() {
+            // A click on the row of a graph or of the second workbook.
+            let node = if self.dice.coin() {
+                self.graphs[self.dice.below(self.graphs.len())]
+            } else {
+                self.book2
+            };
+            let name = self
+                .bench
+                .app
+                .state
+                .tree()
+                .node(node)
+                .unwrap()
+                .name()
+                .to_string();
+            let Some(output) = self.panel_pass(PanelKind::Project, Pass::child()) else {
+                return;
+            };
+            let rows: Vec<egui::Pos2> = super::test_support::texts(&output.shapes)
+                .into_iter()
+                .filter(|text| text.text == name)
+                .map(|text| text.center)
+                .collect();
+            let Some(row) = self.dice.pick(&rows) else {
+                return;
+            };
+            self.panel_pass(PanelKind::Project, Pass::child().events(press(row)));
+            // The selection is the application's, with no root pass.
+            if !blocked {
+                assert!(
+                    self.bench
+                        .app
+                        .pm_selection
+                        .iter()
+                        .any(|entry| entry.node() == node),
+                    "a click in the Project Manager did not select {name} in the \
+                     application (seed {})",
+                    self.seed
+                );
+            }
+            return;
+        }
+        // A new folder, a name half typed, a click elsewhere in the window.
+        if blocked || !self.panel_live(PanelKind::Project) {
+            return;
+        }
+        let root = self.bench.app.state.tree().root();
+        let before = self
+            .bench
+            .app
+            .state
+            .tree()
+            .node(root)
+            .unwrap()
+            .children()
+            .len();
+        self.bench.act_in(pm, Action::AddFolder { parent: root });
+        let children = self
+            .bench
+            .app
+            .state
+            .tree()
+            .node(root)
+            .unwrap()
+            .children()
+            .to_vec();
+        let Some(folder) = children.last().copied().filter(|_| children.len() > before) else {
+            return;
+        };
+        let name = self
+            .bench
+            .app
+            .state
+            .tree()
+            .node(folder)
+            .unwrap()
+            .name()
+            .to_string();
+        for _ in 0..2 {
+            self.panel_pass(PanelKind::Project, Pass::child());
+        }
+        // The panel shows the folder the action just made.
+        if let Some(output) = self.panel_pass(PanelKind::Project, Pass::child()) {
+            assert!(
+                super::test_support::texts(&output.shapes)
+                    .iter()
+                    .any(|text| text.text.contains(&name)),
+                "the Project Manager does not show the folder made by its own action \
+                 (seed {})",
+                self.seed
+            );
+        }
+        self.panel_pass(
+            PanelKind::Project,
+            Pass::child().events(vec![egui::Event::Text("z".into())]),
+        );
+        self.panel_pass(PanelKind::Project, Pass::child());
+        self.panel_pass(
+            PanelKind::Project,
+            Pass::child().events(press(egui::pos2(100.0, 560.0))),
+        );
+        self.panel_pass(PanelKind::Project, Pass::child());
+        assert!(
+            super::project_manager::renaming_in(&self.bench.ctx, pm).is_empty(),
+            "the name field stayed open after a click elsewhere (seed {})",
+            self.seed
+        );
+    }
+
+    fn panel_live(&self, kind: PanelKind) -> bool {
+        self.bench.app.panel_has_window(kind) && self.bench.has_window(panel_viewport_id(kind))
+    }
+
+    /// The Object Manager window shows the selection of the graph in front: a
+    /// series is selected by a gesture of the main window, and the very next pass
+    /// of the panel paints exactly that selection.
+    fn panel_object_manager(&mut self) {
+        if !self.panel_live(PanelKind::Object) {
+            return;
+        }
+        let graph = self.graphs[self.dice.below(self.graphs.len())];
+        let tree = self.bench.app.state.tree().clone();
+        if self.dice.coin() {
+            let target = VisibilityTarget::Series(SeriesRef::new(0, 0));
+            let ctx = self.bench.ctx.clone();
+            self.bench.app.with_graph_view(graph, |view| {
+                super::object_manager_ui::apply_object_request(
+                    &ctx,
+                    view,
+                    &tree,
+                    graph,
+                    super::object_manager_ui::ObjectManagerRequest::Select(target),
+                    &mut Vec::new(),
+                )
+            });
+        }
+        let Some(output) = self.panel_pass(PanelKind::Object, Pass::child()) else {
+            return;
+        };
+        let painted = output
+            .shapes
+            .iter()
+            .filter(|shape| {
+                matches!(&shape.shape,
+                    egui::Shape::Rect(rect) if rect.fill == crate::theme::list_row_selected_fill())
+            })
+            .count();
+        let active = self.bench.app.current_content_tab_for_test();
+        let selected = match active {
+            Some(Tab::Graph(active)) => self
+                .bench
+                .app
+                .read_graph_view(active, super::object_manager_ui::selected_manager_target)
+                .flatten()
+                .is_some(),
+            _ => false,
+        };
+        assert_eq!(
+            painted,
+            usize::from(selected),
+            "the Object Manager does not show the selection of the graph in front \
+             (seed {})",
+            self.seed
+        );
+    }
+
+    /// The console's Run key: refused with a band under a dialog, a pass of the
+    /// docked-like path otherwise.
+    fn panel_console(&mut self) {
+        if !self.panel_live(PanelKind::Script) {
+            return;
+        }
+        let blocked = self.blocking();
+        let console = panel_viewport_id(PanelKind::Script);
+        let revision = self.bench.app.state.revision();
+        window_band::clear(&self.bench.ctx, console);
+        self.panel_pass(
+            PanelKind::Script,
+            Pass::child().events(vec![ctrl(egui::Key::Enter)]),
+        );
+        if blocked {
+            assert_eq!(
+                self.bench.app.state.revision(),
+                revision,
+                "the console changed the model under a dialog (seed {})",
+                self.seed
+            );
+        }
+    }
+
+    /// A press in a panel window ends the entry held anywhere else, unless a
+    /// dialog is open in the main window.
+    fn panel_press(&mut self) {
+        let live: Vec<PanelKind> = PanelKind::ALL
+            .into_iter()
+            .filter(|kind| self.panel_live(*kind))
+            .collect();
+        let Some(kind) = self.dice.pick(&live) else {
+            return;
+        };
+        let blocked = self.blocking();
+        let entry = self.bench.app.state.editing().is_some();
+        let pos = egui::pos2(
+            40.0 + self.dice.below(200) as f32,
+            40.0 + self.dice.below(300) as f32,
+        );
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.panel_pass(
+            kind,
+            Pass::child().events(vec![
+                egui::Event::PointerMoved(pos),
+                button(true),
+                button(false),
+            ]),
+        );
+        if entry && !blocked && !self.bench.app.state.open_dialog().is_some() {
+            assert!(
+                self.bench.app.state.editing().is_none(),
+                "a press in the {kind:?} window left the entry open (seed {})",
+                self.seed
+            );
         }
     }
 
@@ -1089,6 +1524,12 @@ impl Rig {
         if app.detached_books.contains_key(&self.book2) {
             expected.insert(book_viewport(self.book2));
         }
+        expected.extend(
+            PanelKind::ALL
+                .into_iter()
+                .filter(|kind| app.panel_has_window(*kind))
+                .map(panel_viewport_id),
+        );
         assert_eq!(
             listed, expected,
             "the open windows are not the detached ones (seed {seed})"
@@ -1158,6 +1599,7 @@ impl Rig {
         let allowed: HashSet<egui::ViewportId> = std::iter::once(egui::ViewportId::ROOT)
             .chain(self.graphs.iter().copied().map(graph_viewport))
             .chain(std::iter::once(book_viewport(self.book2)))
+            .chain(PanelKind::ALL.into_iter().map(panel_viewport_id))
             .collect();
         let woken = self.woken.0.lock().unwrap().clone();
         assert!(
@@ -1265,11 +1707,15 @@ mod slow {
     use super::*;
 
     /// Long variant (`cargo test -p stokesforge-app --lib window_stress::slow -- --ignored`):
-    /// many seeds, many steps.
+    /// many seeds, many steps; `SF_STRESS_SEED=<seed>` replays one seed.
     #[test]
     #[ignore = "long: 12 seeds x 600 steps"]
     fn many_random_window_passes_keep_the_invariants() {
         with_watchdog(Duration::from_secs(1800), || {
+            // `SF_STRESS_SEED` replays one seed of the long variant.
+            if let Some(seed) = env_seed() {
+                return stress_run(seed, 600);
+            }
             for seed in 1..=12u64 {
                 stress_run(seed * 0x9E37_79B9, 600);
             }

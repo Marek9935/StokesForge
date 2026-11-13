@@ -97,7 +97,7 @@ pub(super) struct PanelMemory {
     monitors_at: Option<Instant>,
 }
 
-fn index(kind: PanelKind) -> usize {
+pub(super) fn panel_index(kind: PanelKind) -> usize {
     match kind {
         PanelKind::Project => 0,
         PanelKind::Object => 1,
@@ -125,13 +125,13 @@ impl StokesForgeApp {
 
     /// The live window of a panel, for its viewport callback.
     pub(super) fn live_window(&self, kind: PanelKind) -> LiveWindow {
-        self.panel_memory.live[index(kind)].clone()
+        self.panel_memory.live[panel_index(kind)].clone()
     }
 
     /// Where the OS window of `kind` opens: the saved size and position, `None`
     /// for the default. Constant while the window stays detached.
     pub(super) fn detach_init(&self, kind: PanelKind) -> Option<DetachAt> {
-        self.panel_memory.init[index(kind)]
+        self.panel_memory.init[panel_index(kind)]
     }
 
     /// Applies the remembered layout, once, before the first frame:
@@ -147,15 +147,15 @@ impl StokesForgeApp {
         self.om_collapsed = object.collapsed;
         self.script_collapsed = script.collapsed;
         if let Some(at) = project.detach {
-            self.panel_memory.init[index(PanelKind::Project)] = Some(at);
+            self.panel_memory.init[panel_index(PanelKind::Project)] = Some(at);
             self.detach_project_manager();
         }
         if let Some(at) = object.detach {
-            self.panel_memory.init[index(PanelKind::Object)] = Some(at);
+            self.panel_memory.init[panel_index(PanelKind::Object)] = Some(at);
             self.om_detached = true;
         }
         if let Some(at) = script.detach {
-            self.panel_memory.init[index(PanelKind::Script)] = Some(at);
+            self.panel_memory.init[panel_index(PanelKind::Script)] = Some(at);
             self.detach_script_console();
         }
         // What was just restored is not a change to remember.
@@ -168,7 +168,7 @@ impl StokesForgeApp {
         let flags = self.panel_flags();
         let saved = self.state.panel_layout();
         for kind in PanelKind::ALL {
-            let i = index(kind);
+            let i = panel_index(kind);
             let (_, detached) = flags[i];
             if !detached {
                 self.panel_memory.init[i] = None;
@@ -196,7 +196,7 @@ impl StokesForgeApp {
             ..saved
         };
         for kind in PanelKind::ALL {
-            let i = index(kind);
+            let i = panel_index(kind);
             let (collapsed, detached) = flags[i];
             let previous = saved.panel(kind);
             let (size, position) = match self.panel_memory.live[i].get() {
@@ -284,7 +284,7 @@ mod tests {
         "script":{"collapsed":false,"detached":true,"size":[700,440]}}}"#;
 
     /// Same screens: the detached panels come back detached (the console
-    /// through `detach_script_console`, so its view exists), the collapsed state
+    /// included), the collapsed state
     /// is restored, and nothing is written back for that.
     #[test]
     fn the_saved_layout_is_restored_at_startup() {
@@ -294,7 +294,6 @@ mod tests {
         assert!(app.pm_collapsed, "collapsed is restored");
         assert!(!app.om_collapsed && !app.script_collapsed);
         assert!(app.om_detached && app.script_detached && !app.pm_detached);
-        assert!(app.script_view.is_some(), "the console view exists");
         assert_eq!(
             app.detach_init(PanelKind::Object),
             Some(DetachAt {
@@ -325,7 +324,6 @@ mod tests {
             let (session, mut app) = app_on(&file);
             app.apply_startup_panels(screens);
             assert!(!app.om_detached && !app.script_detached, "{screens:?}");
-            assert!(app.script_view.is_none());
             assert!(app.pm_collapsed, "{screens:?}: collapsed is kept");
             session.shutdown().unwrap();
         }
