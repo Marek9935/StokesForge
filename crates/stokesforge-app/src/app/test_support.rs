@@ -231,6 +231,7 @@ pub(super) mod bench {
     use stokesforge_session::Session;
 
     use super::super::graph_window::tests::plotted_graph;
+    use super::super::server::AppSlot;
     use super::super::tab::Tab;
     use super::super::StokesForgeApp;
 
@@ -243,6 +244,13 @@ pub(super) mod bench {
         pub(in crate::app) focused: bool,
         pub(in crate::app) dt: f64,
         pub(in crate::app) size: egui::Vec2,
+        /// What the OS says about the window (rectangles, monitor, maximised);
+        /// the parent and the focus are the bench's.
+        pub(in crate::app) info: egui::ViewportInfo,
+        /// Files dropped on the window during this pass.
+        pub(in crate::app) dropped: Vec<Arc<dyn egui::DroppedFile + Send + Sync>>,
+        /// Files hovering the window during this pass.
+        hovered: Vec<egui::HoveredFile>,
     }
 
     impl Pass {
@@ -253,6 +261,9 @@ pub(super) mod bench {
                 focused: false,
                 dt: 0.05,
                 size: egui::vec2(1400.0, 900.0),
+                info: egui::ViewportInfo::default(),
+                dropped: Vec::new(),
+                hovered: Vec::new(),
             }
         }
 
@@ -279,6 +290,27 @@ pub(super) mod bench {
             self
         }
 
+        /// Files dropped on the window during this pass.
+        pub(in crate::app) fn dropped(
+            mut self,
+            files: Vec<Arc<dyn egui::DroppedFile + Send + Sync>>,
+        ) -> Self {
+            self.dropped = files;
+            self
+        }
+
+        /// The window's OS-reported state for this pass.
+        pub(in crate::app) fn info(mut self, info: egui::ViewportInfo) -> Self {
+            self.info = info;
+            self
+        }
+
+        /// Files hovering the window during this pass.
+        pub(in crate::app) fn hovering(mut self, files: usize) -> Self {
+            self.hovered = vec![egui::HoveredFile::default(); files];
+            self
+        }
+
         pub(in crate::app) fn dt(mut self, dt: f64) -> Self {
             self.dt = dt;
             self
@@ -287,17 +319,22 @@ pub(super) mod bench {
 
     pub(in crate::app) struct Bench {
         pub(in crate::app) session: Session,
-        pub(in crate::app) app: StokesForgeApp,
+        /// The application behind its lock, as the binary runs it: the passes of
+        /// the windows lock it themselves (#475).
+        pub(in crate::app) app: AppSlot,
         pub(in crate::app) ctx: egui::Context,
         frame: eframe::Frame,
         callbacks: HashMap<egui::ViewportId, Callback>,
         time: f64,
         /// The window that has the keyboard, as the root sees it.
         focused_child: Option<egui::ViewportId>,
+        /// Ids of removed windows that the root's input still lists, as an
+        /// empty entry (the late echo measured by the probe of #475).
+        pub(in crate::app) stale: Vec<egui::ViewportId>,
         pub(in crate::app) graph: NodeId,
         pub(in crate::app) tab: Tab,
         /// The folder of the project file of [`Bench::with_every_window`].
-        dir: Option<tempfile::TempDir>,
+        pub(in crate::app) dir: Option<tempfile::TempDir>,
     }
 
     /// The windows a [`Bench::with_every_window`] detaches (#459).
@@ -323,11 +360,36 @@ pub(super) mod bench {
     impl Bench {
         /// A project with one graph, detached and not yet painted.
         pub(in crate::app) fn new() -> Self {
+            Self::with_graph(true)
+        }
+
+        /// The same project with the graph still a floating window of the root,
+        /// to be detached by the test.
+        pub(in crate::app) fn floating_graph() -> Self {
+            Self::with_graph(false)
+        }
+
+        fn with_graph(detached: bool) -> Self {
             let (session, graph) = plotted_graph();
             let state = AppState::new(session.handle(), String::new()).unwrap();
             let mut app = StokesForgeApp::new(state);
             let tab = Tab::Graph(graph);
-            app.detach_tab(tab);
+            if detached {
+                app.detach_tab(tab);
+            }
+            Self::from_app(session, app, graph)
+        }
+
+        /// A bench on `app`, whose "main" graph is `graph` (the one
+        /// [`Self::child`] and [`Self::tab`] stand for). Nothing is detached or
+        /// painted yet.
+        pub(in crate::app) fn from_app(
+            session: Session,
+            app: StokesForgeApp,
+            graph: NodeId,
+        ) -> Self {
+            let tab = Tab::Graph(graph);
+            let app = AppSlot::new(app);
             let ctx = egui::Context::default();
             ctx.set_embed_viewports(false);
             ctx.set_fonts(stokesforge_render_egui::font_definitions());
@@ -342,9 +404,37 @@ pub(super) mod bench {
                 callbacks: HashMap::new(),
                 time: 0.0,
                 focused_child: None,
+                stale: Vec::new(),
                 graph,
                 tab,
                 dir: None,
+            }
+        }
+
+        /// The project with the first workbook detached into its own window
+        /// (the graph stays a floating window), not yet painted (#475, L2).
+        pub(in crate::app) fn with_detached_book() -> Self {
+            let (session, graph) = plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let book = Tab::Book(app.state.books()[0].0);
+            app.open_tab(book);
+            app.detach_tab(book);
+            Self::from_app(session, app, graph)
+        }
+
+        /// The viewport of the detached workbook of [`Self::with_detached_book`]
+        /// and [`Self::with_every_window`].
+        pub(in crate::app) fn book_id(&self) -> egui::ViewportId {
+            egui::ViewportId::from_hash_of(Tab::Book(self.book()))
+        }
+
+        /// [`Self::start`] for the detached workbook.
+        pub(in crate::app) fn start_book(&mut self) {
+            self.root(Pass::root());
+            let id = self.book_id();
+            for _ in 0..3 {
+                self.child_in(id, Pass::child());
             }
         }
 
@@ -368,7 +458,7 @@ pub(super) mod bench {
             app.state.set_object_manager_open_for_test(true);
             app.om_detached = true;
             app.detach_script_console();
-            bench.app = app;
+            bench.app = AppSlot::new(app);
             bench.dir = Some(dir);
             bench
         }
@@ -385,7 +475,7 @@ pub(super) mod bench {
             let mut app = StokesForgeApp::new(state);
             let book = app.state.books()[0].0;
             app.open_tab(Tab::Book(book));
-            bench.app = app;
+            bench.app = AppSlot::new(app);
             bench.dir = Some(dir);
             bench
         }
@@ -425,10 +515,13 @@ pub(super) mod bench {
 
         fn raw(&mut self, pass: Pass, id: egui::ViewportId) -> egui::RawInput {
             self.time += pass.dt;
+            let info = pass.info.clone();
             let mut raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, pass.size)),
                 time: Some(self.time),
                 events: pass.events,
+                dropped_files: pass.dropped,
+                hovered_files: pass.hovered,
                 focused: pass.focused,
                 viewport_id: id,
                 ..Default::default()
@@ -439,12 +532,12 @@ pub(super) mod bench {
                     egui::ViewportInfo {
                         parent: Some(egui::ViewportId::ROOT),
                         focused: Some(pass.focused),
-                        ..Default::default()
+                        ..info
                     },
                 );
             } else {
                 // The root sees the focus of the windows, as eframe reports it.
-                for window in self.callbacks.keys() {
+                for window in self.callbacks.keys().chain(&self.stale) {
                     raw.viewports.insert(
                         *window,
                         egui::ViewportInfo {
@@ -464,7 +557,16 @@ pub(super) mod bench {
             let Self {
                 app, frame, ctx, ..
             } = self;
-            let mut output = ctx.run_ui(raw, |ui| app.ui(ui, frame));
+            // As `ServedApp::ui`: the windows are published after `ui`, with the
+            // lock released, and the pass takes it again for the test.
+            app.defer_viewport_publication();
+            let mut output = ctx.run_ui(raw, |ui| {
+                app.ui(ui, frame);
+                let pending = app.take_pending_viewports();
+                app.release();
+                super::super::window_detach::publish_viewports(ui.ctx(), pending);
+                app.acquire();
+            });
             output.textures_delta.clear();
             for (id, viewport) in &output.viewport_output {
                 if let Some(callback) = &viewport.viewport_ui_cb {
@@ -485,6 +587,17 @@ pub(super) mod bench {
             id: egui::ViewportId,
             pass: Pass,
         ) -> egui::FullOutput {
+            self.child_with(id, pass, |_| {})
+        }
+
+        /// [`Self::child_in`], with `inside` run first, inside that window's pass
+        /// (a request made from the window to the context).
+        pub(in crate::app) fn child_with(
+            &mut self,
+            id: egui::ViewportId,
+            pass: Pass,
+            inside: impl FnOnce(&egui::Context),
+        ) -> egui::FullOutput {
             self.focused_child = pass.focused.then_some(id);
             let raw = self.raw(pass, id);
             let callback = self
@@ -492,8 +605,30 @@ pub(super) mod bench {
                 .get(&id)
                 .expect("the root published it")
                 .clone();
-            let mut output = self.ctx.run_ui(raw, |ui| callback(ui));
+            // The window locks the application itself: the test lets go of it
+            // for the pass, as the root does between its own.
+            self.app.release();
+            let mut inside = Some(inside);
+            let mut output = self.ctx.run_ui(raw, |ui| {
+                if let Some(inside) = inside.take() {
+                    inside(ui.ctx());
+                }
+                callback(ui)
+            });
+            self.app.acquire();
             output.textures_delta.clear();
+            // What the window registered again in its pass is what egui keeps; a
+            // window that stopped registering is gone from the output.
+            match output.viewport_output.get(&id) {
+                Some(viewport) => {
+                    if let Some(callback) = &viewport.viewport_ui_cb {
+                        self.callbacks.insert(id, callback.clone());
+                    }
+                }
+                None => {
+                    self.callbacks.remove(&id);
+                }
+            }
             output
         }
 
@@ -516,30 +651,26 @@ pub(super) mod bench {
             }
         }
 
-        /// What `window` queued for the root and the root has not drained yet.
-        pub(in crate::app) fn queued_by(&self, window: Window) -> Vec<Action> {
-            match window {
-                Window::Graph => self.app.detached_tabs[&self.tab]
-                    .requests
-                    .lock()
-                    .unwrap()
-                    .actions
-                    .clone(),
-                Window::Book => self.app.detached_tabs[&Tab::Book(self.book())]
-                    .requests
-                    .lock()
-                    .unwrap()
-                    .actions
-                    .clone(),
-                Window::ProjectManager => self.app.pm_requests.lock().unwrap().actions.clone(),
-                Window::ObjectManager => self.app.om_view.as_ref().unwrap().queued_actions(),
-                Window::Console => self.app.script_view.as_ref().unwrap().queued_actions(),
-            }
+        /// Has the root published a window `id` that still registers itself?
+        pub(in crate::app) fn has_window(&self, id: egui::ViewportId) -> bool {
+            self.callbacks.contains_key(&id)
         }
 
-        pub(in crate::app) fn queue_in_window(&self, action: Action) {
-            let detached = &self.app.detached_tabs[&self.tab];
-            detached.requests.lock().unwrap().actions.push(action);
+        /// [`Self::act_in_window`] for the window `id`.
+        pub(in crate::app) fn act_in(&mut self, id: egui::ViewportId, action: Action) {
+            let ctx = self.ctx.clone();
+            self.app
+                .apply_pass_actions(&ctx, id, Vec::new(), vec![action], false);
+        }
+
+        /// The detached graph window produces `action` this pass: applied at once
+        /// by the same function as its pass (`apply_pass_actions`), without
+        /// painting a gesture.
+        pub(in crate::app) fn act_in_window(&mut self, action: Action) {
+            let id = self.child_id();
+            let ctx = self.ctx.clone();
+            self.app
+                .apply_pass_actions(&ctx, id, Vec::new(), vec![action], false);
         }
 
         pub(in crate::app) fn open_plot_settings(&self) -> Action {

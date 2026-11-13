@@ -1,11 +1,15 @@
-//! Guard #457: a root window fully covered by a detached window keeps
-//! processing what the detached window asks for, on native Wayland.
+//! The covering window serves itself (#457, #475): on native Wayland a root
+//! fully covered by a maximised window gets no frame callback, and the window on
+//! top must not need it. Gestures are applied and painted by the window's own
+//! passes with the root `ui` count flat; the window closes itself; at rest
+//! nothing wakes the root. (The real application is measured by
+//! `server_bench.rs`, scenarios `reattach` and `covering`.)
 //!
 //! Real compositor, so manual: `#[ignore]`d. Run it with
 //! `cargo test -p stokesforge-app --test wayland_covered_root -- --ignored --nocapture`.
 //! It starts a headless `mutter` on its own Wayland socket, runs the example
-//! `wayland_covered_root` (a root, one maximised child that queues requests and
-//! wakes the root, as a detached window does) with the GL backend, then kills the
+//! `wayland_covered_root` (a root, one maximised child that locks one shared state, applies the
+//! gestures and paints them in its own pass) with the GL backend, then kills the
 //! compositor, its D-Bus session and the example, also when an assertion fails.
 //! It skips with a message when `mutter` or `dbus-run-session` is missing.
 //!
@@ -22,17 +26,8 @@ mod compositor;
 use compositor::Compositor;
 
 /// Builds and runs the probe under the compositor; returns (exit success, stdout).
-fn run_probe(compositor: &Compositor, idle: bool, two: bool) -> (bool, String) {
-    run_probe_env(compositor, idle, two, &[])
-}
-
-/// Same with extra environment variables (the single-state modes of #475).
-fn run_probe_env(
-    compositor: &Compositor,
-    idle: bool,
-    two: bool,
-    extra: &[(&str, &str)],
-) -> (bool, String) {
+/// `extra`: environment knobs of the probe (see its doc).
+fn run_probe(compositor: &Compositor, idle: bool, extra: &[(&str, &str)]) -> (bool, String) {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let built = Command::new(cargo)
         .args([
@@ -55,7 +50,6 @@ fn run_probe_env(
         .env("WAYLAND_DISPLAY", &compositor.socket)
         .env("WGPU_BACKEND", "gl")
         .env("PROBE_IDLE", if idle { "1" } else { "0" })
-        .env("PROBE_TWO", if two { "1" } else { "0" })
         .envs(extra.iter().copied())
         .stdout(Stdio::piped())
         .stderr(if std::env::var_os("PROBE_STDERR").is_some() {
@@ -92,89 +86,48 @@ fn run_probe_env(
 
 #[test]
 #[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
-fn a_covered_root_drains_the_requests_of_the_window_covering_it() {
-    let Some(compositor) = Compositor::start() else {
-        return;
-    };
-    let (ok, out) = run_probe(&compositor, false, false);
-    println!("{out}");
-    assert!(ok, "the covered root stalled:\n{out}");
-}
-
-#[test]
-#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
-fn an_idle_covered_root_stays_asleep() {
-    let Some(compositor) = Compositor::start() else {
-        return;
-    };
-    let (ok, out) = run_probe(&compositor, true, false);
-    println!("{out}");
-    assert!(ok, "the idle root woke up periodically:\n{out}");
-}
-
-#[test]
-#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
-fn a_covered_detached_window_is_not_reported_occluded() {
-    let Some(compositor) = Compositor::start() else {
-        return;
-    };
-    // Child A (small, repaints itself) is fully covered by child B (maximised).
-    // Reported occluded, A would get no pass and lose its input (#457): only the
-    // root asks for the report.
-    let (ok, out) = run_probe(&compositor, false, true);
-    println!("{out}");
-    assert!(
-        ok,
-        "a covered child was reported occluded, or the root stalled:\n{out}"
-    );
-}
-
-// #475 probe: one state behind one lock, no `set_reports_occlusion`. The three
-// tests below say whether the winit frame-starvation patch and the fork can go.
-
-#[test]
-#[ignore = "manual: #475 probe, needs mutter and dbus-run-session, see the module doc"]
-fn single_state_without_opt_in_keeps_the_covering_window_served() {
+fn a_covering_window_is_served_by_its_own_passes() {
     let Some(compositor) = Compositor::start() else {
         return;
     };
     // Root `ui` count flat, every gesture applied and painted by the child's own pass.
-    let (ok, out) = run_probe_env(&compositor, false, false, &[("PROBE_MODE", "single")]);
+    let (ok, out) = run_probe(&compositor, false, &[]);
     println!("{out}");
-    assert!(ok, "the single-state child was not served alone:\n{out}");
+    assert!(ok, "the covering child was not served alone:\n{out}");
 }
 
 #[test]
-#[ignore = "manual: #475 probe, needs mutter and dbus-run-session, see the module doc"]
-fn single_state_child_closes_itself_with_no_root_pass() {
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn an_idle_covering_window_leaves_the_root_asleep() {
     let Some(compositor) = Compositor::start() else {
         return;
     };
-    let (ok, out) = run_probe_env(
-        &compositor,
-        false,
-        false,
-        &[("PROBE_MODE", "single"), ("PROBE_REATTACH", "1")],
-    );
+    let (ok, out) = run_probe(&compositor, true, &[]);
+    println!("{out}");
+    assert!(ok, "the root woke up at rest:\n{out}");
+}
+
+#[test]
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn a_covering_window_closes_itself_with_no_root_pass() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    let (ok, out) = run_probe(&compositor, false, &[("PROBE_REATTACH", "1")]);
     println!("{out}");
     assert!(ok, "the child could not close itself:\n{out}");
 }
 
 #[test]
-#[ignore = "manual: #475 probe, needs mutter and dbus-run-session, see the module doc"]
-fn single_state_with_every_window_hidden_reports_what_still_runs() {
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn with_every_window_hidden_the_probe_reports_what_still_runs() {
     let Some(compositor) = Compositor::start() else {
         return;
     };
     // A second maximised process covers root and child: informative, the numbers
     // are the answer (printed with --nocapture); the test only fails if the probe
     // itself cannot run to its end.
-    let (ok, out) = run_probe_env(
-        &compositor,
-        false,
-        false,
-        &[("PROBE_MODE", "single"), ("PROBE_COVER", "1")],
-    );
+    let (ok, out) = run_probe(&compositor, false, &[("PROBE_COVER", "1")]);
     println!("{out}");
     assert!(ok, "the hidden-case probe did not complete:\n{out}");
 }

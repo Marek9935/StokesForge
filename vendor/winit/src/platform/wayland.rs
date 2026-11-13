@@ -86,14 +86,6 @@ impl<T> EventLoopBuilderExtWayland for EventLoopBuilder<T> {
 pub trait WindowExtWayland {
     /// Returns `xdg_toplevel` of the window or [`None`] if the window is X11 window.
     fn xdg_toplevel(&self) -> Option<NonNull<c_void>>;
-
-    /// StokesForge #457: report this window as occluded
-    /// (`WindowEvent::Occluded`, `is_visible() == Some(false)`) when a redraw is
-    /// wanted and its frame callback has been outstanding for 100 ms. Off by
-    /// default, as upstream. Only a window that must keep running while the
-    /// compositor does not draw it should opt in: a reported window gets no
-    /// frame from the application and its input is dropped. No effect on X11.
-    fn set_reports_occlusion(&self, on: bool);
 }
 
 impl WindowExtWayland for Window {
@@ -105,18 +97,6 @@ impl WindowExtWayland for Window {
             crate::platform_impl::Window::X(_) => None,
             #[cfg(wayland_platform)]
             crate::platform_impl::Window::Wayland(window) => window.xdg_toplevel(),
-        }
-    }
-
-    #[inline]
-    fn set_reports_occlusion(&self, on: bool) {
-        match &self.window {
-            #[cfg(x11_platform)]
-            crate::platform_impl::Window::X(_) => {
-                let _ = on;
-            }
-            #[cfg(wayland_platform)]
-            crate::platform_impl::Window::Wayland(window) => window.set_reports_occlusion(on),
         }
     }
 }

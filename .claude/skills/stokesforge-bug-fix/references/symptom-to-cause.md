@@ -11,7 +11,7 @@ Read at step 3 of `stokesforge-bug-fix`. The costly reflex is repairing where th
 | state lost after save + reload | `stokesforge-persistence` (`convert.rs`, `schema.rs`): a model field without transport |
 | screen ≠ SVG/PDF/PNG export | text measurement (invariant 4) or a feature written in one backend (invariant 5): `stokesforge-rendering` |
 | figure does not update | cache key `(revision, rect, pixels_per_point, view_generation)` of `stokesforge-render-egui` |
-| detached window up to date only on hover | publication in `app/window_detach.rs` (`snapshot_stamp`, `sync_window_views`, `show_detached_tabs`): compare epoch, revision and geometry revision, then `request_repaint_of`; also test the return to idle without periodic repaint (#104) |
+| detached window up to date only on hover | publication in `app/window_detach.rs` for the panels (`snapshot_stamp`) and `server::wake` for the graph and workbook windows (which read the shared state): compare epoch, revision and geometry revision, then `request_repaint_of`; also test the return to idle without periodic repaint (#104) |
 | action wrongly greyed, wrong label, inconsistent menu | `AppState` (`grid_menu`, `undo_label`…), never the egui code |
 | fixed panel misplaced | panel order in `StokesForgeApp::ui` (`app.rs`, the only place that decides it); test `fixed_panels_are_placed_in_the_order_of_ui`. Panel contents live in their module (`app/menus.rs`, `app/script_console.rs`, `app/project_manager.rs`, `app/object_manager_ui.rs`) |
 | floating window: frame, clipping, handles, z-order | `app/window_chrome.rs`, `app/window_placement.rs`, `app/window_stack.rs`; tests in their module |
@@ -21,5 +21,5 @@ Read at step 3 of `stokesforge-bug-fix`. The costly reflex is repairing where th
 | dialog painted or validated wrongly | `app/plot_settings.rs`, `app/import_wizard.rs`; shared frame and blocking in `app/dialogs.rs` |
 | file drop freezes the window | `state::drop_files` keeps only refusals on the UI thread; reading and import run in `start_import`, applied by `poll_import` (#266) |
 | file dropped in the wrong place | `app/file_drop.rs` (who claims the drop) then `state::file_drop_plan` (the decision) |
-| works floating, not in a detached window | two writings where one is needed, or an `AppState` field never copied (`fork_for_detached_view`, `sync_detached_snapshot`, `adopt_detached_book_view`): `.claude/rules/windows.md` § Interface: wiring not to forget (detached window, layer, dialog) |
+| works floating, not in a detached window | two writings where one is needed (every detached window, panels included, shares the one `AppState` since #475 L2/L3, so a missing field is rarely the cause): `.claude/rules/windows.md` § Interface: wiring not to forget (detached window, layer, dialog) |
 | interface freezes | something blocking called from the render loop (model: `ScriptEngine::run`, solved by a detached thread + `poll_script`) |

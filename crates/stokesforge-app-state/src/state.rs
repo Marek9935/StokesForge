@@ -1797,9 +1797,8 @@ fn column_all_numeric_after(column: &Column, write: Option<(usize, &ValueBlock)>
 }
 
 /// Body of [`AppState::cell_text`], factored over a `&Tree` rather than over
-/// `&self`: this is what lets a detached window
-/// (`stokesforge_app::app::StokesForgeApp::show_detached_tabs`, which carries only a clone
-/// of [`Snapshot`], never `AppState` itself — see its top-level doc) paint
+/// `&self`: this is what lets a window that holds only a clone of
+/// [`Snapshot`] (the detached panels) paint
 /// a grid identical to that of the dock, without duplicating the display rule
 /// (`MISSING_TEXT_DISPLAY`, scientific toggle A9/C4 — see
 /// [`AppState::cell_text`] for the detail of these choices).
@@ -3396,10 +3395,6 @@ pub struct AppState {
     /// whether the text received from egui is our own copy (replays the structure)
     /// or external text (see [`external_clipboard_from_text`]).
     clipboard_text: Option<String>,
-    /// A local copy in the detached viewport must be transferred once to
-    /// the root; without this flag, its stale copy would overwrite any more
-    /// recent copy made in another window at every frame.
-    clipboard_dirty: bool,
     /// Selection on which Delete has just **emptied** the cells (not yet
     /// deleted) — see [`AppState::consume_delete_key`]. `Some`
     /// between the two steps of a double press on Delete: a second
@@ -3616,7 +3611,6 @@ impl AppState {
             seen_bound: 0,
             grid_clipboard: None,
             clipboard_text: None,
-            clipboard_dirty: false,
             delete_repeat: None,
             import_state: None,
             projects_to_open: Vec::new(),
@@ -3658,29 +3652,6 @@ impl AppState {
         state.seed_low_r2();
         state.refresh_low_r2_groups();
         Ok(state)
-    }
-
-    /// Gives a detached viewport (workbook or note) its own transient
-    /// state — grid, cell or note entry —, backed by the same
-    /// actor. It can thus use exactly the same widgets as the
-    /// floating window without locking the root's state.
-    pub fn fork_for_detached_view(&self) -> SessionResult<Self> {
-        // Sender identity specific to the detached view: with a plain `clone`,
-        // its writes would be absorbed into a macro opened by the
-        // root (graph properties) then carried away by its undo
-        // (issue #21).
-        let mut view = Self::new(self.handle.with_new_identity(), self.path.clone())?;
-        view.snapshot = self.snapshot.clone();
-        view.selected_sheets = self.selected_sheets.clone();
-        view.renaming_sheet = self.renaming_sheet;
-        view.size_locks = self.size_locks.clone();
-        view.selection = self.selection.clone();
-        view.editing = self.editing.clone();
-        view.header_editing = self.header_editing.clone();
-        view.grid_clipboard = self.grid_clipboard.clone();
-        view.clipboard_text = self.clipboard_text.clone();
-        view.clipboard_dirty = false;
-        Ok(view)
     }
 
     /// Says in the status bar, as a warning kept until the next message (like
@@ -3734,77 +3705,23 @@ impl AppState {
         }
     }
 
-    /// Refreshes a viewport's read without touching its selection or
-    /// its entry buffers. The snapshot comes from the main state.
-    pub fn sync_detached_snapshot(&mut self, snapshot: Snapshot) {
-        self.snapshot = snapshot;
-        self.revalidate_selection();
+    /// A new sender identity for a detached window (#21, #475): a handle to the
+    /// same session that the actor does not take for the main window's. The
+    /// window keeps it and puts it into the state for its own pass only
+    /// ([`Self::replace_session_identity`]), so that a write it makes while the
+    /// main window holds a macro open is refused instead of absorbed into that
+    /// macro (and carried away by its undo).
+    #[must_use]
+    pub fn new_session_identity(&self) -> SessionHandle {
+        self.handle.with_new_identity()
     }
 
-    /// Synchronizes the tab editor without overwriting the local selection.
-    pub fn sync_detached_sheet_editor(&mut self, root: &Self) {
-        self.renaming_sheet = root.renaming_sheet;
-        self.size_locks = root.size_locks.clone();
-    }
-
-    /// Joins the interaction of a detached workbook to the main command
-    /// path before its deferred actions are dispatched.
-    ///
-    /// Returns the messages the local view recorded since the last drain (an
-    /// unreadable system clipboard, a refused write...): they are recorded here
-    /// too, at every level, and handed back so that the shell can show the
-    /// warnings and errors in the window they come from (#471).
-    pub fn adopt_detached_book_view(
-        &mut self,
-        source: &mut Self,
-        book: NodeId,
-    ) -> Vec<StatusMessage> {
-        if let Some(sheet) = source.selected_sheet_in(book) {
-            self.selected_sheets.insert(book, sheet);
-        }
-        for (sheet, _) in source.worksheets_of(book) {
-            if let Some(selection) = source.selection.get(&sheet) {
-                self.selection.insert(sheet, selection.clone());
-            } else {
-                self.selection.remove(&sheet);
-            }
-        }
-        if source.clipboard_dirty {
-            self.grid_clipboard = source.grid_clipboard.clone();
-            self.clipboard_text = source.clipboard_text.clone();
-            source.clipboard_dirty = false;
-        }
-        // The Ctrl+Shift+C question is asked in the main window (#306).
-        if let Some(sheet) = source.pending_full_copy.take() {
-            self.pending_full_copy = Some(sheet);
-        }
-        source.status = None;
-        let pulled: Vec<StatusMessage> = source.status_log.drain(..).collect();
-        for message in &pulled {
-            for _ in 0..message.count {
-                self.record(message.text.clone(), message.level);
-            }
-        }
-        pulled
-    }
-
-    /// The opposite way of [`Self::adopt_detached_book_view`]: once the
-    /// pass's actions are applied, hands the selection of the workbook's sheets
-    /// back to its local view. Without it, a move made by an action (Enter in a
-    /// cell selects the row below) is overwritten by the view's stale selection
-    /// at the next adoption. Returns whether the view changed.
-    pub fn return_selection_to_detached_view(&self, view: &mut Self, book: NodeId) -> bool {
-        let mut changed = false;
-        for (sheet, _) in self.worksheets_of(book) {
-            if view.selection.get(&sheet) != self.selection.get(&sheet) {
-                changed = true;
-                match self.selection.get(&sheet) {
-                    Some(selection) => view.selection.insert(sheet, selection.clone()),
-                    None => view.selection.remove(&sheet),
-                };
-            }
-        }
-        changed
+    /// Swaps the sender identity the state writes with; returns the previous
+    /// one. The shell pairs the two calls with a guard that gives it back, even
+    /// on a panic.
+    #[must_use]
+    pub fn replace_session_identity(&mut self, handle: SessionHandle) -> SessionHandle {
+        std::mem::replace(&mut self.handle, handle)
     }
 
     /// Last snapshot received.
@@ -5093,7 +5010,6 @@ impl AppState {
         let text = grid_clipboard_to_text(&clipboard);
         self.grid_clipboard = Some(clipboard);
         self.clipboard_text = Some(text.clone());
-        self.clipboard_dirty = true;
         Some(text)
     }
 
@@ -5169,7 +5085,6 @@ impl AppState {
         let text = grid_clipboard_to_text(&clipboard);
         self.grid_clipboard = Some(clipboard);
         self.clipboard_text = Some(text.clone());
-        self.clipboard_dirty = true;
         Some(text)
     }
 
@@ -5977,6 +5892,14 @@ impl AppState {
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_object_manager_open_for_test(&mut self, open: bool) {
         self.object_manager_open = open;
+    }
+
+    /// Opens, for a test, the history macro of the graph properties with the
+    /// main window's sender and NO dialog: the state of #21 a detached window
+    /// must not slip a write into. [`Self::cancel_plot_settings`] rolls it back.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn open_root_macro_for_test(&mut self) {
+        self.begin_plot_macro();
     }
 
     /// Scales (axes) listed in the Object Manager (#111), outside the project.
@@ -8212,14 +8135,6 @@ impl AppState {
         self.status_log.iter().filter(move |m| m.seq >= count)
     }
 
-    /// Does this forked view hold messages the root has not pulled yet? A view
-    /// forked by [`AppState::fork_for_detached_view`] has no status bar: the
-    /// root takes its messages at its next drain (#471).
-    #[must_use]
-    pub fn has_local_messages(&self) -> bool {
-        !self.status_log.is_empty()
-    }
-
     /// Records the refusal of a gesture made outside the main window because
     /// `dialog` is open there (#471) and returns its sentence. It goes to the
     /// status bar and the history as an orange, **never** through `warn`
@@ -8563,8 +8478,8 @@ impl AppState {
     /// project takes what is being typed (#465, #466). An entry the grid
     /// would refuse stays open and is left out. Never relies on the grid
     /// losing focus: a blocking dialog clears that action. Returns whether an
-    /// entry was committed. Public so the shell can call it on the view state
-    /// of a detached window (D1 of #465).
+    /// entry was committed. Public so the shell can call it when a click in
+    /// another window ends the entry (#475, L2).
     pub fn commit_open_entries(&mut self) -> bool {
         self.gesture(Self::commit_open_entries_in_gesture)
     }

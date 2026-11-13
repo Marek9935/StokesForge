@@ -73,7 +73,7 @@
 mod sources;
 
 use sources::{
-    body, closing, functions, ident_at, is_ident, line_of, short_name, starts_with_at,
+    body, closing, functions, ident_at, is_ident, line_of, mask_source, short_name, starts_with_at,
     unique_function, word_at, SourceFile,
 };
 
@@ -2601,6 +2601,233 @@ fn the_viewports_guard_sees_a_bare_builder() {
     }
 }
 
+/// What a detached panel once used to work on a copy and to reach the root
+/// (#475, L3): the request structs and their drains, the copies of the tree, the
+/// selection and the console, the `queued_by` test accessor. `path:line` of each
+/// use anywhere in `src/`, tests included (a comment or a string is blanked).
+fn panel_copy_and_queue_names(sources: &[SourceFile]) -> Vec<String> {
+    const FORBIDDEN: [&str; 13] = [
+        "pm_requests",
+        "pm_view_model",
+        "om_view",
+        "script_view",
+        "queued_by",
+        "DetachedProjectManagerRequests",
+        "ObjectManagerRequests",
+        "ScriptConsoleRequests",
+        "ProjectManagerViewModel",
+        "ObjectManagerModel",
+        "ScriptConsoleModel",
+        "drain_object_manager",
+        "drain_script_console",
+    ];
+    let mut found = Vec::new();
+    for file in sources {
+        let source = mask_source(&file.text);
+        for i in 0..source.mask.len() {
+            if (i == 0 || !is_ident(source.mask[i - 1]))
+                && FORBIDDEN.iter().any(|name| word_at(&source.mask, i, name))
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn no_detached_panel_has_a_copy_or_a_queue() {
+    let offenders = panel_copy_and_queue_names(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "a detached panel paints the shared state and applies its actions in its own \
+         pass: no request struct, no drain, no copy of the tree, the selection or the \
+         console, no `queued_by` (#475, L3): {offenders:?}"
+    );
+}
+
+/// The witness: each name is seen; a comment, a string and a longer name pass.
+#[test]
+fn the_panel_guard_sees_every_name_of_the_queue() {
+    for name in [
+        "pm_requests",
+        "pm_view_model",
+        "om_view",
+        "script_view",
+        "queued_by",
+        "DetachedProjectManagerRequests",
+        "ObjectManagerRequests",
+        "ScriptConsoleRequests",
+        "ProjectManagerViewModel",
+        "ObjectManagerModel",
+        "ScriptConsoleModel",
+        "drain_object_manager",
+        "drain_script_console",
+    ] {
+        assert_eq!(
+            panel_copy_and_queue_names(&[file(
+                "app/a.rs",
+                &format!("fn f(a: &A) {{ a.{name}(); }}")
+            )])
+            .len(),
+            1,
+            "not seen: {name}"
+        );
+    }
+    for code in [
+        "fn f() {} // pm_requests",
+        "fn f() { let a = \"queued_by\"; }",
+        "fn f() { om_viewport(); script_viewport(); }",
+    ] {
+        assert!(
+            panel_copy_and_queue_names(&[file("app/a.rs", code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
+/// The names of the fork of the application state that a detached workbook once
+/// used (#475, L2): `path:line` of each use in production code. One shared
+/// state serves every window; a copy of it that is synchronised and "adopted"
+/// back is the mechanism the step removed.
+fn state_fork_names(sources: &[SourceFile]) -> Vec<String> {
+    const FORBIDDEN: [&str; 4] = [
+        "fork_for_detached_view",
+        "sync_detached_",
+        "adopt_detached_",
+        "return_selection_to_detached",
+    ];
+    let mut found = Vec::new();
+    for file in sources {
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if (i == 0 || !is_ident(source.mask[i - 1]))
+                && FORBIDDEN
+                    .iter()
+                    .any(|name| starts_with_at(&source.mask, i, name))
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn no_detached_window_has_a_fork_of_the_state() {
+    let offenders = state_fork_names(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "a detached window paints and writes the shared state under the application lock; \
+         no fork, no `sync_detached_*`, no `adopt_detached_*` (#475): {offenders:?}"
+    );
+}
+
+/// The witness: each name is seen, in any file of either crate; a comment, test
+/// code and a longer unrelated name pass.
+#[test]
+fn the_fork_guard_sees_every_name_of_the_fork() {
+    for code in [
+        "fn f(s: &AppState) { s.fork_for_detached_view(); }",
+        "fn f(v: &mut AppState) { v.sync_detached_snapshot(s); }",
+        "fn f(v: &mut AppState) { v.sync_detached_sheet_editor(r); }",
+        "fn f(v: &mut AppState) { v.adopt_detached_book_view(s, b); }",
+        "fn f(s: &AppState) { s.return_selection_to_detached_view(v, b); }",
+    ] {
+        for path in ["app/window_detach.rs", "app-state/state.rs"] {
+            assert_eq!(
+                state_fork_names(&[file(path, code)]).len(),
+                1,
+                "not seen in {path}: {code}"
+            );
+        }
+    }
+    for (path, code) in [
+        ("app/a.rs", "fn f() {} // fork_for_detached_view()"),
+        (
+            "app/a.rs",
+            "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { s.fork_for_detached_view(); } }",
+        ),
+        (
+            "app/a.rs",
+            "fn f() { s.adopt_next(); s.adopt_joined_lines(); }",
+        ),
+    ] {
+        assert!(
+            state_fork_names(&[file(path, code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
+/// The patch of #457 (winit reporting the root occluded, so that a covered root
+/// kept running) in production code: `path:line` of each use. A detached window
+/// serves itself since #475 and nothing needs the root to run while it is covered.
+fn covered_root_patch_names(sources: &[SourceFile]) -> Vec<String> {
+    const FORBIDDEN: [&str; 2] = ["set_reports_occlusion", "frame_starvation"];
+    let mut found = Vec::new();
+    for file in sources {
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if (i == 0 || !is_ident(source.mask[i - 1]))
+                && FORBIDDEN
+                    .iter()
+                    .any(|name| starts_with_at(&source.mask, i, name))
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn nothing_keeps_the_root_running_for_a_covering_window() {
+    let offenders = covered_root_patch_names(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "a detached window serves itself in its own passes; the occlusion opt-in and the \
+         frame-starvation patch of #457 are gone (#475): {offenders:?}"
+    );
+}
+
+/// The witness: both names are seen; a comment, test code and a longer name pass.
+#[test]
+fn the_covered_root_guard_sees_both_names() {
+    for code in [
+        "fn f(w: &W) { w.set_reports_occlusion(true); }",
+        "use winit::platform::wayland::frame_starvation;",
+    ] {
+        assert_eq!(
+            covered_root_patch_names(&[file("app/a.rs", code)]).len(),
+            1,
+            "not seen: {code}"
+        );
+    }
+    for code in [
+        "fn f() {} // set_reports_occlusion(true)",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { w.set_reports_occlusion(true); } }",
+        "fn f() { my_frame_starvation_free(); }",
+    ] {
+        assert!(
+            covered_root_patch_names(&[file("app/a.rs", code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
 /// `APP_ID` is what ties a window to `stokesforge.desktop` and to its icon.
 #[test]
 fn the_application_id_is_the_desktop_name() {
@@ -2713,7 +2940,7 @@ fn the_guards_read_crlf_sources_as_lf() {
 }
 
 /// The thread only ever `try_lock`s: a blocking `.lock()` or `lock_arc()` of
-/// the shared state is the UI side's (`StateSlot`), never the thread's.
+/// the shared application is the UI side's (`AppSlot`), never the thread's.
 #[test]
 fn the_server_thread_never_blocks_on_the_lock() {
     let sources = sources::sources();
@@ -2734,4 +2961,108 @@ fn the_server_thread_never_blocks_on_the_lock() {
             "{name} blocks on the lock"
         );
     }
+}
+
+const PUBLISH_MODULE: &str = "app/window_detach.rs";
+
+/// Every `show_viewport_deferred(` call of the production code that is not in
+/// `fn publish_viewports` of [`PUBLISH_MODULE`] (#475, step 2: the windows are
+/// published after the application lock is released, in one place).
+fn publications_outside_the_publish_function(sources: &[SourceFile]) -> Vec<String> {
+    let mut offenders = Vec::new();
+    for file in sources {
+        let text = file.production().code_as_text();
+        let allowed = (file.path == PUBLISH_MODULE)
+            .then(|| text.find("fn publish_viewports"))
+            .flatten()
+            .map(|start| {
+                let end = text[start..]
+                    .find("\n}\n")
+                    .map_or(text.len(), |e| start + e);
+                start..end
+            });
+        for (position, _) in text.match_indices(".show_viewport_deferred(") {
+            if allowed
+                .as_ref()
+                .is_some_and(|range| range.contains(&position))
+            {
+                continue;
+            }
+            let line = text[..position].matches('\n').count() + 1;
+            offenders.push(format!("src/{}:{line}", file.path));
+        }
+    }
+    offenders
+}
+
+#[test]
+fn show_viewport_deferred_lives_only_in_the_publish_function() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.path == PUBLISH_MODULE),
+        "{PUBLISH_MODULE} not read: the guard would no longer see the module"
+    );
+    let offenders = publications_outside_the_publish_function(&sources);
+    assert!(
+        offenders.is_empty(),
+        "show_viewport_deferred outside publish_viewports (#475: the windows are \
+         published after the application lock is released): {offenders:?}"
+    );
+}
+
+#[test]
+fn the_publication_guard_sees_a_call_elsewhere() {
+    let sources = vec![
+        file(
+            PUBLISH_MODULE,
+            "fn publish_viewports(c: &C) {\n    c.show_viewport_deferred(a);\n}\n\nfn other(c: &C) {\n    c.show_viewport_deferred(b);\n}\n",
+        ),
+        file("app.rs", "fn ui(c: &C) { c.show_viewport_deferred(x); }"),
+    ];
+    assert_eq!(
+        publications_outside_the_publish_function(&sources),
+        vec![
+            "src/app/window_detach.rs:6".to_string(),
+            "src/app.rs:1".to_string()
+        ]
+    );
+}
+
+/// A viewport closure takes the application lock through
+/// `lock_app_from_viewport` alone (#475): it waits for the lock, and panics
+/// instead of hanging if its own thread holds the UI guard. A `lock_arc(` of
+/// the shared application elsewhere would skip that check.
+#[test]
+fn the_application_lock_is_taken_only_by_the_server_module() {
+    let sources = sources::sources();
+    let offenders = calls_outside_server(&sources, &[".lock_arc(", ".try_lock_arc("]);
+    assert!(
+        offenders.is_empty(),
+        "lock_arc outside app/server.rs (#475: a window locks through \
+         lock_app_from_viewport): {offenders:?}"
+    );
+    // The detached graph window does use the door.
+    let window = sources
+        .iter()
+        .find(|f| f.path == "app/detached_graph.rs")
+        .expect("detached_graph.rs");
+    assert!(
+        window
+            .production()
+            .code_as_text()
+            .contains("lock_app_from_viewport("),
+        "the detached graph window locks through lock_app_from_viewport"
+    );
+}
+
+#[test]
+fn the_lock_guard_sees_a_call_elsewhere() {
+    let sources = vec![
+        file("app/server.rs", "fn a(s: &S) { s.lock_arc(); }"),
+        file("app/window_detach.rs", "fn b(s: &S) { s.lock_arc(); }"),
+    ];
+    assert_eq!(
+        calls_outside_server(&sources, &[".lock_arc("]),
+        vec!["src/app/window_detach.rs:1".to_string()]
+    );
 }

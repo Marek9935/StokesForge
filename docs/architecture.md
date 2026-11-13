@@ -87,13 +87,22 @@ guards.
 One background thread (`stokesforge-server`, `stokesforge-app/src/app/server.rs`) owns the
 follow-up of the work that does not depend on painting: autosave, the end of a script run,
 the end of a recalculation, the progress of an import. It shares **one** `AppState` with the
-interface through one lock (`parking_lot::Mutex`, owned guard `StateSlot`): the interface
+interface through one lock (`parking_lot::Mutex`, owned guard `AppSlot` over the whole `StokesForgeApp`): the interface
 holds the guard during a pass (`logic`, `ui`, `on_exit`) and gives it back after, the thread
 only `try_lock`s between two passes (busy: again in 10 ms). The tick itself is pure
 (`AppState::server_tick(now)` in `stokesforge-app-state/src/state/server.rs`, injected clock);
 the blocking autosave write runs with the lock released. Windows are woken by one function
-(`wake()`), only when the tick found something they show changed. Applying a finished import
-stays in the paint pass. Detached windows keep their fork; nothing visible changed (step 1).
+(`wake()`: the root and every OPEN window, never a closed one, except the window that
+painted), only when something they show changed. Applying a finished import
+stays in the paint pass. Step 2 (L0, L1): the windows are published after the guard is
+released, and the **detached graph** locks the application itself
+(`lock_app_from_viewport`), paints from the shared state and applies its actions in its
+own pass (`app/detached_graph.rs`); so does the **detached workbook** (L2,
+`app/detached_book.rs`): no fork of the state, one cell entry in the application, and a
+sender identity per detached window swapped into the state for its paint (#21). So do the
+three **panels** (L3, `app/detached_panel.rs`): the Project Manager, the Object Manager and
+the console are painted from the shared state with the function of the docked panel, and
+no copy or request queue is left between a window and the application. A covered root, which gets no frame callback on native Wayland, delays nothing: the winit frame-starvation patch of #457 was removed in L5 (only the #72 drop patch remains in `vendor/winit`).
 Rules and tests: `.claude/rules/app.md`, `docs/application/shell-and-code.md`, `docs/tests.md`.
 
 ## The three separation lines

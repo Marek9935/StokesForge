@@ -56,9 +56,9 @@ const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 /// selection of workbook columns — the counterpart, on the target side, of the
 /// grab zone placed by [`grid_contents`](crate::app::grid::grid_contents) at the edge of the grid. Called by
 /// [`tab_contents`](crate::app::contents::tab_contents), hence identically for a tab in a floating window
-/// and for a detached tab ([`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)): it is the
+/// and for a detached tab (`detached_graph.rs`): it is the
 /// only
-/// entry point that both use, see the head doc of the latter — no
+/// entry point that both use — no
 /// separate drop code to maintain for the detached case.
 ///
 /// A hover with an active [`ColumnDragPayload`] records this window as the
@@ -330,9 +330,8 @@ fn graph_contents(
 /// Body of [`graph_contents`], factored over a [`GraphView`] and a
 /// [`Snapshot`] already in hand rather than over `&AppState`/the table
 /// [`StokesForgeApp::graph_views`](crate::app::StokesForgeApp::graph_views): this is what lets
-/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs) paint a detached `Tab::Graph` with
-/// **exactly** this function — no degraded version, see the head doc of
-/// `window_detach.rs`. `GraphView` does not have the global lock problem of
+/// the detached graph window (`detached_graph.rs`) paint a detached `Tab::Graph` with
+/// **exactly** this function — no degraded version. `GraphView` does not have the global lock problem of
 /// `AppState` that the cell/note input buffers have (its cache and its
 /// navigation are already scoped per graph): no need for a separate
 /// "detached" variant, unlike [`grid_contents`](crate::app::grid::grid_contents)/

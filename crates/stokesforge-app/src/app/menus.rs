@@ -1873,7 +1873,7 @@ mod tests {
         // After an import into a new workbook: the re-read follows the
         // foreground workbook, not the mere existence of a source.
         let (session, app, _) = bench();
-        let mut state = app.state.into_state();
+        let mut state = app.state;
         let dir = tempfile::tempdir().unwrap();
         import_file(&mut state, &dir);
         let imported = state.books().last().unwrap().0;

@@ -95,11 +95,15 @@ crate). Two `.clone()`s of the same handle remain **the same** sender — a scri
 that clones its handle for a thread stays "itself". Two **independent** calls to
 `Session::handle()` are two **distinct** senders, even in the same process.
 `SessionHandle::with_new_identity()` gives a handle to the same session with a
-**new** identity. This is what the detached views
-(`AppState::fork_for_detached_view`, in `stokesforge-app-state`) and the script
-engine use, so that their writes are refused (`ForeignMacro`) while a macro is
-open by the interface — instead of being absorbed into it and then undone with
-it (issue #21).
+**new** identity. This is what the detached windows and the script engine use, so
+that their writes are refused (`ForeignMacro`) while a macro is open by the
+interface — instead of being absorbed into it and then undone with it (issue #21).
+A detached window shares the application's single `AppState` (#475, L2): it owns
+a handle with its own identity (`AppState::new_session_identity`) and the shell
+puts it into the state for the length of the window's paint only
+(`AppState::replace_session_identity`, paired with a guard that gives the
+previous one back, even on a panic); the actions a window returns are dispatched
+with the main identity.
 
 This identity exists for a precise reason: without it, one client's work leaked
 into another's macro, and an `abort_macro` could silently undo someone else's
@@ -148,7 +152,7 @@ refusal path (the same message and status band as a write during a script), so i
 Import entry and Ctrl+Z of the import leaves later edits alone. `AppState::can_new_project` and a
 second import refuse meanwhile, and the autosave waits (its `save` reads `MacroOpen` as "busy"). Its
 requests wait for the actor like the interface's: a long recalculation delays them, and it
-holds no lock on the application state while it waits for the autosave write.
+holds no lock on the application state while it waits for the autosave write. The detached windows are not session clients of their own: each one locks the application in its own pass and uses the interface's handle (the detached workbook and the panels under their own sender identity, #21).
 
 ## The principle that governs refusals
 

@@ -54,7 +54,6 @@ use super::shortcuts::{
 use super::tab::active_tab_kind;
 use super::tab::Tab;
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
-use super::window_detach::ObjectManagerModel;
 use super::StokesForgeApp;
 
 #[derive(Clone, Copy)]
@@ -1558,51 +1557,18 @@ fn object_manager_object_row(
 }
 
 impl StokesForgeApp {
+    /// The docked Object Manager. A detached one is painted by its own window
+    /// (`detached_panel.rs`) with the same [`Self::object_manager_body`].
     pub(super) fn object_manager_panel(
         &mut self,
         ui: &mut egui::Ui,
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) {
+        if !self.state.object_manager_open() || self.om_detached {
+            return;
+        }
         let ctx = ui.ctx().clone();
-        self.drain_object_manager(&ctx, actions);
-        if !self.state.object_manager_open() {
-            return;
-        }
-        let graph = active_graph(active_tab_kind(active_tab));
-        let tree = self.state.snapshot().tree.clone();
-        let settings = self.state.object_manager_settings();
-        let selection = graph.and_then(|graph| {
-            self.read_graph_view(graph, selected_manager_target)
-                .flatten()
-        });
-        let spec =
-            graph.and_then(|graph| stokesforge_core::compose::current_plot_spec(&tree, graph));
-        let model = graph.and_then(|graph| {
-            stokesforge_app_state::object_manager::object_tree_with_selection(
-                &tree,
-                graph,
-                selection,
-                settings.show_scales,
-                settings.show_objects,
-            )
-        });
-        if self.om_detached {
-            self.show_detached_object_manager(
-                &ctx,
-                ObjectManagerModel {
-                    stamp: super::window_detach::snapshot_stamp(self.state.snapshot()),
-                    tree,
-                    graph,
-                    selection,
-                    model,
-                    spec,
-                    settings,
-                },
-            );
-            return;
-        }
-        let mut requests = Vec::new();
         let collapsed = self.om_collapsed;
         let panel = if collapsed {
             egui::Panel::right("stokesforge_object_manager_collapsed")
@@ -1627,20 +1593,73 @@ impl StokesForgeApp {
                 self.om_detached = true;
             }
             if !collapsed {
-                requests = object_manager_contents(
-                    ui,
-                    &tree,
-                    model.as_ref(),
-                    spec.as_ref(),
-                    settings,
-                    actions,
-                );
+                self.object_manager_body(ui, &ctx, active_tab, actions, None);
             }
         });
+    }
+
+    /// The contents of the Object Manager for the graph in front: THE painter of
+    /// the panel, docked and detached. The tree and the selection are read from
+    /// the shared state, so that the panel follows a selection made anywhere at
+    /// once. `window` is the detached window that paints it: while a dialog is
+    /// open in the main window only a selection goes through, the rest would
+    /// open an editor, a window or an analysis, or write (#471).
+    pub(super) fn object_manager_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+        window: Option<egui::ViewportId>,
+    ) {
+        let graph = active_graph(active_tab_kind(active_tab));
+        let tree = self.state.snapshot().tree.clone();
+        let settings = self.state.object_manager_settings();
+        let selection = graph.and_then(|graph| {
+            self.read_graph_view(graph, selected_manager_target)
+                .flatten()
+        });
+        let spec =
+            graph.and_then(|graph| stokesforge_core::compose::current_plot_spec(&tree, graph));
+        let model = graph.and_then(|graph| {
+            stokesforge_app_state::object_manager::object_tree_with_selection(
+                &tree,
+                graph,
+                selection,
+                settings.show_scales,
+                settings.show_objects,
+            )
+        });
+        let requests =
+            object_manager_contents(ui, &tree, model.as_ref(), spec.as_ref(), settings, actions);
         if let Some(graph) = graph {
-            for request in requests {
-                self.run_object_manager_request(&ctx, graph, request, actions);
+            self.run_object_manager_requests(ctx, graph, requests, actions, window);
+        }
+    }
+
+    /// Runs the gestures the panel returned. `window` is the detached window that
+    /// painted them: while a dialog is open in the main window only a selection
+    /// goes through, the rest is refused with the band of that window (#471).
+    pub(super) fn run_object_manager_requests(
+        &mut self,
+        ctx: &egui::Context,
+        graph: NodeId,
+        requests: Vec<ObjectManagerRequest>,
+        actions: &mut Vec<Action>,
+        window: Option<egui::ViewportId>,
+    ) {
+        let dialog = window.and(self.state.open_dialog());
+        let mut refused = None;
+        for request in requests {
+            match dialog {
+                Some(open) if !matches!(request, ObjectManagerRequest::Select(_)) => {
+                    refused = Some(open);
+                }
+                _ => self.run_object_manager_request(ctx, graph, request, actions),
             }
+        }
+        if let (Some(viewport), Some(open)) = (window, refused) {
+            self.refuse_in_window(ctx, viewport, open);
         }
     }
 
@@ -3348,7 +3367,7 @@ mod tests {
 
     /// Without an active graph, the panel says so and asks for nothing.
     /// The panel ([`StokesForgeApp::object_manager_panel`]) is painted only when
-    /// open: anchored to the right edge, or in its OS viewport.
+    /// open: anchored to the right edge; detached, its own window paints it.
     #[test]
     fn the_object_manager_is_painted_only_when_open_anchored_right_or_detached() {
         use egui::containers::panel::PanelState;
@@ -3401,12 +3420,14 @@ mod tests {
         let context = egui::Context::default();
         egui_extras::install_image_loaders(&context);
         let output = paint(&mut app, &context);
-        assert!(is_painted(&output, "First"));
+        assert!(
+            !is_painted(&output, "First"),
+            "the root paints nothing: the window paints its own panel"
+        );
         assert!(
             PanelState::load(&context, id).is_none(),
             "no more anchored panel"
         );
-        assert!(app.om_view.is_some(), "the detached reader exists");
         session.shutdown().unwrap();
     }
 

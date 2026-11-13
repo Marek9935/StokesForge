@@ -27,7 +27,7 @@ pub(super) const WINDOW_HEADER_HEIGHT: f32 = 28.0;
 
 /// Inner margin of the `Frame` of a content window, floating or
 /// detached — see [`floating_window_frame`] and the `Frame` built in
-/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs). No vertical margin: the header
+/// [`StokesForgeApp::show_detached_books`](crate::app::StokesForgeApp::show_detached_books). No vertical margin: the header
 /// band (`WINDOW_HEADER_HEIGHT`) and the content's separators
 /// already provide their own spacing, so egui's default margin
 /// (`Frame::window`/`Frame::central_panel`) only added a dead white
@@ -111,7 +111,7 @@ pub(super) struct WindowHeaderActions {
 pub(super) enum HeaderPlacement {
     /// Floating window in the `CentralPanel` (MDI).
     Floating,
-    /// Separate OS window (`StokesForgeApp::show_detached_tabs`), without
+    /// Separate OS window (`StokesForgeApp::show_detached_books`), without
     /// native decoration — this bar is all the user has to
     /// move it, resize it through its maximize icons, or
     /// close/reattach it.
@@ -466,7 +466,7 @@ fn resize_handle_label(source: &str) -> String {
 
 /// Invisible resize border for a detached window without
 /// decoration (`.with_decorations(false)`, see the top doc of
-/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)): eight thin zones at the edges/corners of the
+/// [`StokesForgeApp::show_detached_books`](crate::app::StokesForgeApp::show_detached_books)): eight thin zones at the edges/corners of the
 /// viewport, which delegate resizing to the OS as soon as the drag
 /// starts (`os_gesture::begin_resize`) — same principle as
 /// `os_gesture::start_drag` for moving the title: no delta

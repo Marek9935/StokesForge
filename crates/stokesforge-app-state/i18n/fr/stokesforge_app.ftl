@@ -346,7 +346,6 @@ shortcut-delete = Suppr
 tabs-previous-worksheets = Afficher les feuilles précédentes
 tabs-next-worksheets = Afficher les feuilles suivantes
 
-detached-workbook-unavailable = Classeur indisponible dans cette fenêtre. Le réattacher à la fenêtre principale
 
 
 window-kind-workbook = Classeur

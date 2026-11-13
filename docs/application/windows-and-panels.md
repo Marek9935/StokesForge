@@ -254,8 +254,13 @@ of the parent's arrow.
 A dialog opened from a detached window is painted by the root, in the main window;
 the detached window shows a band. Rule: a content feature works everywhere, a
 global feature stays in the main window. See [`../windows.md`](../windows.md),
-"Where a dialog is painted". `main.rs` hands eframe the `StokesForgeApp` itself;
-the deferred closures never reach the application (they queue requests).
+"Where a dialog is painted". `main.rs` hands eframe the `ServedApp`, the
+`StokesForgeApp` behind its lock (#475). The closure of a **detached graph** and
+that of a **detached workbook** lock it (`lock_app_from_viewport`, after the root
+released its guard), paint and apply their own actions in the same pass
+(`detached_graph.rs`, `detached_book.rs`); so do the closures of the three panels
+(`detached_panel.rs`, L3 of #475): there is no copy of the state and no request
+queue left between a window and the application.
 
 ### Collapsible and detached panels (#100)
 
@@ -308,33 +313,45 @@ is canceled and then handled as a reattachment; it does not hide the
 panel. The Window menu also keeps Detach / Reattach Project Manager.
 
 The separate windows use `show_viewport_deferred`: their rendering is
-independent of that of the main window. The callback exchanges a
-read snapshot and requests with it, through two
-`Arc<Mutex<_>>`, without moving `AppState` or creating a second
-business mutation path. The requests explicitly wake the main
-window so they are handled even when it is idle.
-In the other direction, publishing a changed snapshot explicitly wakes the
-reader viewport (#104): project epoch, model revision or revision
-of the geometries. The Project Manager is also woken if its selection, its
-hiding or the active tab changes. The OM receives the active graph, its selection
-and the filters at each publication: it also follows a detached graph and
-wakes without interaction in its own window. The gestures go back up
-with the identifier of the graph that was painted. The console receives the input,
-the output and the execution state (`ScriptConsoleModel`); new keystrokes
-are drained before publication. The engine and the Python work stay in
-the main `AppState`: detaching, reattaching, collapsing or hiding the console
-does not interrupt them. The root polls the result while a script runs,
-including when the console is hidden. A command applied at the end of a frame
-schedules the root frame that will publish its result; no periodic wake-up
-is added at rest. The windowless tests check the targeted request
-and the return to rest; the cross-cutting tests of the three panels are in
-`app/panel_tests.rs` (clicks, sizes, deferred callbacks, console under Python).
-The real redrawing of the OS windows remains to be checked manually.
+independent of that of the main window. Since L3 of #475 each panel window
+serves itself like the detached graph and workbook (`detached_panel.rs`): its
+closure locks the application (`lock_app_from_viewport`), paints with **the same
+function as the docked panel** (`project_manager_body`, `object_manager_body`,
+`script_contents`) from the shared state, and applies the actions of its gestures
+at once (`apply_pass_actions`: the dialog gate of #471, `dispatch_actions`, the
+wake of the root and of the other open windows). The Project Manager's selection,
+the open windows and the cut nodes are the application's own, so a selection or a
+rename made there is seen by the root and by the Object Manager as soon as its
+pass ends; the Object Manager reads the selection of the graph in front, so it
+follows a selection made in the main window at its next pass (the root wakes the
+panels when `PanelsView`, what they show besides the model, changed). A click in
+the tree opens or closes windows in the panel's own pass. The console edits the
+shared `script_source`; the engine and the Python work stay in the main
+`AppState`: detaching, reattaching, collapsing or hiding the console does not
+interrupt them. The root polls the result while a script runs, including when the
+console is hidden. No periodic wake-up is added at rest.
+
+Each panel window keeps a `PanelWindow`: the flag of Reattach, whether it
+registers itself, and its **sender identity** (#21), put into the state for the
+length of its paint, so that a press in a panel ends the cell entry held by a
+workbook (one entry in the application, `PassOf::Panel`) under the panel's own
+identity: a macro of the main window refuses it. A rename in the Project Manager
+is an egui editor of that viewport that ends in `RenameObjects`, as when docked.
+Reattach (button or OS close, converted) follows the graph (L4): on native Wayland
+the window docks itself in its own pass (`keep_or_close_own_panel`), elsewhere it
+raises the flag and the root docks it (`drain_detached_panel_flags`). A panel that
+View hides while detached has no window. The sizes and positions remembered between
+two launches (#148) are reported by each pass (`LiveWindow`) exactly as before. The
+cross-cutting tests of the three panels are in `app/panel_tests.rs` (docked) and
+`app/detached_panel.rs` (detached, driven by `Bench`); the real redrawing of the OS
+windows remains to be checked manually.
 
 ### Generic detaching of content tabs
 
-`StokesForgeApp::detach_tab`/`reattach_tab`/`show_detached_tabs` generalize the
-mechanism above to `Tab::Book` and `Tab::Graph` (`Tab::is_detachable`, #473;
+`StokesForgeApp::detach_tab`/`reattach_tab` generalize the
+mechanism above to `Tab::Book` (`show_detached_books`, serves itself, L2 of #475)
+and `Tab::Graph` (`show_detached_graphs`, serves itself, L1; see below)
+(`Tab::is_detachable`, #473;
 `detach_tab` ignores a note and a matrix, which stay floating):
 the detach icon opens an OS window; that window offers a
 reattach icon. Closing a detached content window closes only its
@@ -342,54 +359,96 @@ view, without reattaching it or deleting the project data. It stays
 reopenable from the Project Manager. Several contents can be
 detached at the same time, each in its own `ViewportId`.
 
-**Default sizes of the detached windows** (`show_detached_tabs`):
+**Default sizes of the detached windows** (`show_detached_graphs`,
+`show_detached_books`):
 `Tab::Graph` opens at 560×540, which holds the reference figure, its
 controls and its header. The workbook has a
 uniform size of 420×360. The workbook grid keeps the same widths and
 headers in floating and detached windows; a narrow window
 scrolls horizontally.
 
-**A single `ViewModel` structure, not one per kind of content.** The PM
-has only one form of content (a read-only tree); the two kinds
-detachable here are very different (virtualized editable grid,
-interactive graph with shape cache).
-`DetachedTabViewModel` carries one field per kind (`view_state` for a
-workbook, `graph_view` for a graph) rather than two disjoint types to make coexist in the table of
-detached tabs — the fields unused for the kind of `Tab` served
-stay at their default value.
+**One shared state, no copy (#475, L1 and L2).** `tab_contents`
+(`app/contents.rs`, with `note_contents` and `matrix_contents`, used by the
+floating windows only; shared by the floating windows and the maximization area)
+takes `&mut AppState`. A detached window gets it by locking the whole
+application from its viewport closure, so the dock and a detached window literally
+paint the same state with the same function (`book_contents`/`grid_contents` for
+the workbook, `graph_view_contents` for the graph): layout, header, selection,
+menus, grid shortcuts, the entry in progress, the clipboard and the renaming of a
+sheet are the application's. The `fork_for_detached_view` copy of `AppState` and
+its `sync_detached_*` / `adopt_detached_*` / `return_selection_*` plumbing, the
+`DetachedTab*` structures and the `detached-workbook-unavailable` text are gone
+(guard `no_detached_window_has_a_fork_of_the_state`). The pure-read free
+functions over a `&Tree` (`cell_text_in`, `visible_columns_in`, ...) stay for the
+panels' pure reads. A note and a matrix never detach
+(#473), so `note_contents` and `matrix_contents` have a floating caller only.
 
-**Reading the model is factored out, transient editing is not.**
-`tab_contents` (`app/contents.rs`, with `note_contents` and `matrix_contents`, used by the floating windows only;
-shared by the floating windows and the maximization area)
-takes `&mut AppState`, which the `'static`, `Send + Sync` closure of
-`show_viewport_deferred` cannot capture — the same problem already solved
-for the PM (putting the whole `AppState` behind a lock would shift the
-problem to solve, for one tab as for the other). The workaround:
-`DetachedTabViewModel::snapshot`, a clone of `Snapshot` (cheap),
-resynchronized from `self.state` at each frame before the call — same pattern
-as `ProjectManagerViewModel::tree`. Every pure read goes through
-free functions of `stokesforge_app_state::state`, factored out over a `&Tree` for
-the occasion (`cell_text_in`, `visible_columns_in`, `row_count_in`,
-`worksheets_of_in`, `note_text_in`, `node_title_in`): the exact body of the
-corresponding `AppState` method, not a rewrite — the dock and a
-detached window thus literally display the same rule.
+**The detached workbook serves itself (#475, L2).** Like the graph, its closure
+locks the application, paints (`paint_detached_book`) and applies its actions at
+once (`apply_pass_actions`), keeps a small view state (`DetachedBook`: collapse,
+focus, size to restore, the Reattach/Close flags, the self-registration flag of
+the Wayland path, and its sender identity), and reattaches or closes itself on
+native Wayland (same pattern as the graph, `keep_or_close_own_book_window`; the
+root path elsewhere, `drain_detached_book_flags`). Two rules come with it:
 
-The detached workbook has a local view `AppState`, synchronized with the snapshot
-of the root. It calls the same `book_contents`/`grid_contents` as the
-floating workbook; layout, header, selection, menus and grid shortcuts
-thus share the same code. Its selection and its input stay local
-to the window. Before handling its actions, the root takes over their grid
-context, then applies the same undoable commands. No content function is
-specific to the detached window. A note and a matrix never detach (#473), so
-`note_contents` and `matrix_contents` have a floating caller only.
+- **One cell entry in the whole application.** The entry (cell, header) is the
+  state's. A press in a window other than the one that holds it ends it, exactly
+  as a click in another workbook does in the main window, in one history entry:
+  the window pressed commits it before it paints
+  (`commit_entry_held_elsewhere`: the root for an entry of a detached workbook, a
+  detached workbook for an entry held by another window, a detached graph for any
+  entry). While a dialog is open in the main window the commit is refused (the
+  entry stays; in a window the band says why). A workbook window that closes
+  commits its own entry (`commit_entry_of_closing_book`).
+- **The sender identity (#21).** The gestures of the grid write straight into the
+  state while it paints (a cell entry closed by a click, a sheet tab). Each
+  detached window owns a `SessionHandle::with_new_identity()` made at the detaching
+  (`DetachedBook::identity`, `DetachedGraph::identity`), put into the state for
+  the duration of that paint only by an RAII guard (`WindowIdentity`, given back
+  even on a panic), so a write made while the main window holds a macro open
+  (the properties of a graph) is refused by the actor (`ForeignMacro`) instead of
+  being absorbed and undone with the macro. The actions a window returns are
+  dispatched afterwards with the main identity, after the gate of the open
+  dialog (`apply_pass_actions`), which stays the first barrier. The graph window
+  writes through its actions only; its identity covers the entry a press in it
+  ends.
 
-`Tab::Graph` escapes this limit: `GraphView` has no global lock on
-`AppState` to respect (its shape cache and its zoom/pan navigation are
-already scoped per graph, in `StokesForgeApp::graph_views`) — `graph_view_contents`
-is therefore **literally** the same function for a floating window and a
-detached window; the view itself simply migrates out of `graph_views` for the time
-of the detachment so it stays capturable by the closure without duplicating the
-cache.
+**The detached graph serves itself (#475, L1).** Its viewport closure takes the
+whole application through `lock_app_from_viewport` (the single blocking door; the
+root published the window after releasing its own guard, `publish_viewports`),
+reads the shared `Snapshot`, paints with `graph_view_contents` (literally the
+function of the floating window) and applies the actions of its gestures at once
+(`apply_pass_actions`: the dialog gate of #471, `dispatch_actions`, the band of an
+opened dialog, the figure offer). Ctrl+Z, Ctrl+Y and Ctrl+S are read before the
+painting and applied after the window's own actions; the file picker is polled
+in its pass too (`pass_prelude`), so a Save As started there is answered there.
+The view (`GraphView`, with its shape cache) migrates to `StokesForgeApp::
+detached_graphs` for the time of the detachment and returns, the same one, on
+Reattach or Close. A write wakes the root and the other open windows
+(`server::wake`, never a closed one). Reattach and Close (L4): on **native Wayland**
+the window carries them out in its own pass, with no root pass
+(`keep_or_close_own_window`): egui removes a viewport at the end of its parent's
+pass, so after its first pass the window registers itself again at the end of each of
+its passes (through the one publish function, with the lock released; it is its own
+parent and the root stops publishing it, `DetachedGraph::self_owned`) and, to leave,
+does not: the entry goes out of `detached_graphs`, the tab floats again (Reattach) or
+is just closed (Close), and egui drops the window at the end of that pass. Under X11
+(`STOKESFORGE_X11`, or any session where the root's window handle is not Wayland) and
+on Windows the window only raises a flag and wakes the root, which moves it
+(`drain_detached_graph_flags`): a viewport that ends at its own pass crashes eframe
+0.36.2 under X11 (stack overflow, probe of #475), and Windows is not measured until a
+user trial. `native_wayland` reads the root's window handle once. A window the root
+removes (project replaced, workbook hidden) is woken once so that its pass ends it.
+The application's lists (`detached_graphs`, `is_tab_detached`) are the truth about
+which windows exist, never egui's viewport map: about 150 ms after a removal the root's
+input may list the id again as an empty entry (no closure, no native window). Tests:
+`app::detached_graph::tests` (Reattach and Close in a child pass alone, the root path
+without Wayland, the late empty entry, the egui guard that fails at an egui upgrade),
+and the manual `server_bench` test `a_covering_detached_graph_reattaches_itself`.
+A root covered by the graph (Page Layout Mode maximised) therefore delays nothing for
+the graph.
+The Page Layout Mode of a detached graph stays as it was: the OS window maximises
+and restores itself.
 
 `Tab::Script` is not detachable: its input (`AppState::script_source`)
 is a direct field of `AppState`, not a deferred buffer like

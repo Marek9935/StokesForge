@@ -1,12 +1,13 @@
 //! Ctrl+Z, Ctrl+Y and Ctrl+S in the detached windows (#459, work package #470).
 //!
 //! The detached graph, workbook and the three panels read these three keys
-//! before they paint, and queue the actions after their own; Ctrl+Q quits
-//! nothing there. The tests drive a root and the five windows the way eframe
+//! before they paint, and put the actions after their own, applied in the
+//! window's own pass (#475); Ctrl+Q quits nothing there. The tests drive a root and the five windows the way eframe
 //! does (`test_support::bench::Bench::with_every_window`).
 use std::time::Instant;
 
 use eframe::egui;
+use stokesforge_app_state::file_picker::FilePicker;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
@@ -69,14 +70,14 @@ fn band_in(bench: &Bench, window: Window) -> Option<String> {
     window_band::text_at(&bench.ctx, bench.id_of(window), Instant::now()).map(|(text, _)| text)
 }
 
-fn with_view<R>(bench: &Bench, f: impl FnOnce(&mut AppState) -> R) -> R {
-    let detached = &bench.app.detached_tabs[&Tab::Book(bench.book())];
-    let mut model = detached.view_model.lock().unwrap();
-    f(model.view_state.as_mut().expect("the local view"))
+/// The state the detached workbook paints from: the application's own (#475,
+/// L2), one for every window.
+fn with_view<R>(bench: &mut Bench, f: impl FnOnce(&mut AppState) -> R) -> R {
+    f(&mut bench.app.state)
 }
 
 /// The cell A1 of the detached workbook is the selected one.
-fn select_first_cell(bench: &Bench) {
+fn select_first_cell(bench: &mut Bench) {
     let book = bench.book();
     with_view(bench, |view| {
         let sheet = view.selected_sheet_in(book).unwrap();
@@ -85,7 +86,7 @@ fn select_first_cell(bench: &Bench) {
     });
 }
 
-fn typed_cell(bench: &Bench) -> Option<String> {
+fn typed_cell(bench: &mut Bench) -> Option<String> {
     with_view(bench, |view| view.editing().map(|edit| edit.buffer.clone()))
 }
 
@@ -154,11 +155,8 @@ fn ctrl_s_in_each_detached_window_saves_the_project() {
             bench.id_of(window),
             Pass::child().events(vec![ctrl(egui::Key::S)]),
         );
-        assert_eq!(
-            bench.queued_by(window),
-            vec![Action::Save],
-            "{window:?}: one Save is queued"
-        );
+        // Every window applies its actions in its own pass (#475).
+        assert!(bench.path().exists(), "{window:?}: saved at once");
         settle(&mut bench);
         assert!(bench.path().exists(), "{window:?}: the file was written");
         assert_eq!(band_in(&bench, window), None, "{window:?}: no band");
@@ -177,10 +175,6 @@ fn ctrl_shift_s_in_a_detached_window_saves_nothing() {
             bench.id_of(window),
             Pass::child().events(vec![ctrl_shift(egui::Key::S)]),
         );
-        assert!(
-            bench.queued_by(window).is_empty(),
-            "{window:?}: nothing queued"
-        );
         settle(&mut bench);
         assert!(!bench.path().exists(), "{window:?}: nothing saved");
         assert!(!bench.app.file_picker.is_open(), "{window:?}: no picker");
@@ -188,22 +182,33 @@ fn ctrl_shift_s_in_a_detached_window_saves_nothing() {
     bench.finish();
 }
 
-/// With no file yet, Ctrl+S queues the Save and writes nothing: the root then
-/// asks where (`dispatch_actions`; never a real picker in a test, so the root
-/// does not run here). Witness: drop Save from the reader.
+/// T6 (#475): with no file yet, Ctrl+S in the detached graph asks where to
+/// save, and the answer of the picker is applied in the window's own passes:
+/// the file is written although no root pass ran. Witness: poll the picker in
+/// the root pass only (take `pass_prelude` out of the graph's pass).
 #[test]
-fn ctrl_s_with_no_file_yet_queues_the_save_and_writes_nothing() {
+fn ctrl_s_with_no_file_yet_saves_as_from_a_detached_graph_without_any_root_pass() {
     let mut bench = Bench::new();
     bench.start();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("saved.stf");
+    FilePicker::script_next_answer(Some(vec![path.clone()]));
     bench.child(Pass::child().events(vec![ctrl(egui::Key::S)]));
-    let queued = bench.app.detached_tabs[&bench.tab]
-        .requests
-        .lock()
-        .unwrap()
-        .actions
-        .clone();
-    assert_eq!(queued, vec![Action::Save]);
-    assert!(bench.app.state.path().is_empty());
+    assert!(bench.app.file_picker.is_open(), "the picker was asked");
+    assert!(!path.exists(), "nothing is written before the answer");
+    // The picker answers on its thread; the window polls it in its own passes.
+    for _ in 0..500 {
+        if path.exists() {
+            break;
+        }
+        bench.child(Pass::child());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        path.exists(),
+        "Save As from the window alone wrote the file"
+    );
+    assert_eq!(bench.app.state.path(), path.to_string_lossy());
     bench.finish();
 }
 
@@ -216,7 +221,7 @@ fn ctrl_z_with_a_value_typed_in_a_detached_cell_undoes_the_command_not_the_text(
     let mut bench = bench();
     step(&mut bench);
     let base = books(&bench);
-    select_first_cell(&bench);
+    select_first_cell(&mut bench);
     let book = bench.id_of(Window::Book);
     bench.child_in(
         book,
@@ -230,11 +235,15 @@ fn ctrl_z_with_a_value_typed_in_a_detached_cell_undoes_the_command_not_the_text(
         Pass::child().events(vec![egui::Event::Text("7".into())]),
     );
     bench.child_in(book, Pass::child());
-    let typed = typed_cell(&bench).expect("the cell is being edited");
+    let typed = typed_cell(&mut bench).expect("the cell is being edited");
     assert!(typed.ends_with("77"), "typed: {typed:?}");
     press(&mut bench, Window::Book, ctrl(egui::Key::Z));
     assert_eq!(books(&bench), base - 1, "the command was undone");
-    assert_eq!(typed_cell(&bench), Some(typed), "the typed text is left");
+    assert_eq!(
+        typed_cell(&mut bench),
+        Some(typed),
+        "the typed text is left"
+    );
     bench.finish();
 }
 
@@ -326,13 +335,7 @@ fn undoing_add_folder_in_the_detached_project_manager_closes_its_name_field() {
     let mut bench = bench();
     let root = bench.app.state.tree().root();
     let pm = bench.id_of(Window::ProjectManager);
-    bench
-        .app
-        .pm_requests
-        .lock()
-        .unwrap()
-        .actions
-        .push(Action::AddFolder { parent: root });
+    bench.act_in(pm, Action::AddFolder { parent: root });
     settle(&mut bench);
     for _ in 0..3 {
         bench.child_in(pm, Pass::child());
@@ -359,7 +362,7 @@ fn undoing_add_folder_in_the_detached_project_manager_closes_its_name_field() {
 fn a_dialog_in_the_main_window_refuses_the_three_keys_even_with_the_cursor_in_a_field() {
     let mut bench = bench();
     step(&mut bench);
-    select_first_cell(&bench);
+    select_first_cell(&mut bench);
     let book = bench.id_of(Window::Book);
     bench.child_in(
         book,
@@ -373,7 +376,7 @@ fn a_dialog_in_the_main_window_refuses_the_three_keys_even_with_the_cursor_in_a_
         Pass::child().events(vec![egui::Event::Text("7".into())]),
     );
     bench.child_in(book, Pass::child());
-    let typed = typed_cell(&bench).expect("the cursor is in a cell");
+    let typed = typed_cell(&mut bench).expect("the cursor is in a cell");
     bench.app.state.dispatch(Action::OpenAbout);
     bench.root(Pass::root());
     let (base, revision) = (books(&bench), bench.app.state.revision());
@@ -387,7 +390,11 @@ fn a_dialog_in_the_main_window_refuses_the_three_keys_even_with_the_cursor_in_a_
         assert_eq!(books(&bench), base, "{what}: model unchanged");
         assert_eq!(bench.app.state.revision(), revision, "{what}: revision");
         assert!(!bench.path().exists(), "{what}: nothing saved");
-        assert_eq!(typed_cell(&bench), Some(typed.clone()), "{what}: the field");
+        assert_eq!(
+            typed_cell(&mut bench),
+            Some(typed.clone()),
+            "{what}: the field"
+        );
         let band = band_in(&bench, Window::Book).unwrap_or_default();
         assert!(band.contains("main window"), "{what}: band {band:?}");
     }
@@ -427,15 +434,7 @@ fn ctrl_s_in_the_page_layout_mode_saves_and_keeps_the_mode() {
         bench.root(Pass::root());
         bench.child_in(bench.id_of(Window::Graph), Pass::child());
     }
-    let in_mode = |bench: &Bench| {
-        bench.app.detached_tabs[&bench.tab]
-            .view_model
-            .lock()
-            .unwrap()
-            .graph_view
-            .as_ref()
-            .is_some_and(|view| view.layout_mode())
-    };
+    let in_mode = |bench: &Bench| bench.app.detached_graphs[&bench.graph].view.layout_mode();
     assert!(in_mode(&bench));
     press(&mut bench, Window::Graph, ctrl(egui::Key::S));
     assert!(bench.path().exists(), "saved");
@@ -491,12 +490,14 @@ fn ctrl_z_pressed_with_a_strip_click_in_the_same_frame_undoes_the_click() {
         ctrl(egui::Key::Z),
     ];
     bench.child_in(id, Pass::child().events(both));
-    let queued = bench.queued_by(Window::Graph);
-    assert_eq!(queued.len(), 2, "the click, then the key: {queued:?}");
-    assert!(matches!(queued[0], Action::SetFigureFixed { .. }));
-    assert_eq!(queued[1], Action::Undo);
-    settle(&mut bench);
+    // The click, then the key, in that very pass: the click is made and undone.
     assert_eq!(fixed(&bench), before, "the click was undone");
+    assert!(
+        bench.app.state.redo_label().is_some(),
+        "the click took place before the key"
+    );
+    settle(&mut bench);
+    assert_eq!(fixed(&bench), before, "still undone after the root");
     bench.finish();
 }
 
@@ -516,20 +517,19 @@ fn ctrl_q_in_a_detached_window_closes_nothing_and_says_where_quit_is() {
             Some(tr!("refused-quit-in-main")),
             "{window:?}: the band"
         );
-        assert!(bench.queued_by(window).is_empty(), "{window:?}: no action");
     }
     // A value typed in a cell stays.
-    select_first_cell(&bench);
+    select_first_cell(&mut bench);
     let book = bench.id_of(Window::Book);
     bench.child_in(
         book,
         Pass::child().events(vec![egui::Event::Text("7".into())]),
     );
     bench.child_in(book, Pass::child());
-    let typed = typed_cell(&bench).expect("being edited");
+    let typed = typed_cell(&mut bench).expect("being edited");
     let output = bench.child_in(book, Pass::child().events(vec![ctrl(egui::Key::Q)]));
     assert!(!closes(&output, book));
-    assert_eq!(typed_cell(&bench), Some(typed), "the typed value stays");
+    assert_eq!(typed_cell(&mut bench), Some(typed), "the typed value stays");
     bench.finish();
 }
 
@@ -558,20 +558,20 @@ fn keys_of_a_surface() -> Vec<egui::Event> {
 /// no edit opens, the selection stays, the model is untouched and the window's
 /// band says why. Without the dialog the same keys do act (the witness that the
 /// test is not vacuous). Witness: remove `stop_keys` from
-/// `DetachedTabViewport::show`.
+/// `detached_book_pass`.
 #[test]
 fn a_dialog_in_the_main_window_stops_the_keys_of_a_detached_workbook_grid() {
     let mut bench = bench();
-    select_first_cell(&bench);
+    select_first_cell(&mut bench);
     let book = bench.id_of(Window::Book);
-    let cell = |bench: &Bench| {
+    let cell = |bench: &mut Bench| {
         let book_id = bench.book();
         with_view(bench, |view| {
             let sheet = view.selected_sheet_in(book_id).unwrap();
             view.selection(sheet).cloned()
         })
     };
-    let selection = cell(&bench);
+    let selection = cell(&mut bench);
     // No dialog: typing does open an edit.
     bench.child_in(book, Pass::child());
     bench.child_in(
@@ -579,12 +579,12 @@ fn a_dialog_in_the_main_window_stops_the_keys_of_a_detached_workbook_grid() {
         Pass::child().events(vec![egui::Event::Text("7".into())]),
     );
     assert!(
-        typed_cell(&bench).is_some(),
+        typed_cell(&mut bench).is_some(),
         "without a dialog, typing edits"
     );
     bench.child_in(book, Pass::child().events(vec![key(egui::Key::Escape)]));
     bench.child_in(book, Pass::child());
-    assert!(typed_cell(&bench).is_none(), "Esc cancels it");
+    assert!(typed_cell(&mut bench).is_none(), "Esc cancels it");
     // A dialog in the main window.
     bench.app.state.dispatch(Action::OpenAbout);
     bench.root(Pass::root());
@@ -594,9 +594,8 @@ fn a_dialog_in_the_main_window_stops_the_keys_of_a_detached_workbook_grid() {
     );
     bench.child_in(book, Pass::child().events(keys_of_a_surface()));
     bench.child_in(book, Pass::child());
-    assert!(typed_cell(&bench).is_none(), "no edit opened");
-    assert_eq!(cell(&bench), selection, "the selection stayed");
-    assert!(bench.queued_by(Window::Book).is_empty(), "nothing queued");
+    assert!(typed_cell(&mut bench).is_none(), "no edit opened");
+    assert_eq!(cell(&mut bench), selection, "the selection stayed");
     bench.root(Pass::root());
     assert_eq!(
         bench.app.state.revision(),
@@ -666,7 +665,6 @@ fn a_dialog_in_the_main_window_stops_the_keys_of_the_detached_project_manager() 
     bench.child_in(pm, Pass::child().events(keys_of_a_surface()));
     bench.child_in(pm, Pass::child());
     assert!(project_manager::renaming_in(&bench.ctx, pm).is_empty());
-    assert!(bench.queued_by(Window::ProjectManager).is_empty());
     settle(&mut bench);
     assert_eq!(bench.app.state.revision(), revision, "the folder stays");
     assert_eq!(bench.app.pm_selection, selection, "the selection stays");
@@ -693,8 +691,9 @@ fn cursor_of(state: &mut AppState, book: stokesforge_core::NodeId) -> Option<(us
     Some((index, row))
 }
 
-/// Puts the cursor on `(column index, row)` of the fork, types `7` and presses
-/// `keys`; returns the cursor on the fork and on the root once settled.
+/// Puts the cursor on `(column index, row)` of the detached workbook, types `7`
+/// and presses `keys`; returns the cursor read twice once settled (the state is
+/// shared: both reads agree).
 fn type_and_press(
     bench: &mut Bench,
     from: (usize, usize),
@@ -728,10 +727,10 @@ fn type_and_press(
 }
 
 /// Enter, Shift+Enter and Tab in a cell of a detached workbook, no dialog: the
-/// cursor moves like in the main window, on the fork and on the root. Enter
-/// used to move the root only, and the fork's stale selection overwrote it at
-/// the next adoption. Witness: remove `return_selection_to_detached_books`
-/// from the root pass (Enter cases fail; Tab and Shift+Enter keep passing).
+/// cursor moves like in the main window. Enter used to move the root only, and
+/// the fork's stale selection overwrote it at the next adoption (the fork is
+/// gone, #475 L2). Witness: stop the handler of Enter from selecting the row
+/// below (the Enter cases fail; Tab and Shift+Enter keep passing).
 #[test]
 fn enter_tab_and_shift_enter_in_a_detached_cell_move_the_cursor_like_the_main_window() {
     let mut bench = bench();
@@ -743,8 +742,8 @@ fn enter_tab_and_shift_enter_in_a_detached_cell_move_the_cursor_like_the_main_wi
     };
     assert!(rows >= 2, "the sheet has data");
     let at = |what: &str, got: (Cursor, Cursor), want| {
-        assert_eq!(got.0, Some(want), "{what}: the fork");
-        assert_eq!(got.1, Some(want), "{what}: the root");
+        assert_eq!(got.0, Some(want), "{what}: read in the window");
+        assert_eq!(got.1, Some(want), "{what}: read in the root");
     };
     let got = type_and_press(&mut bench, (0, 0), vec![key(egui::Key::Enter)]);
     at("Enter", got, (0, 1));
@@ -912,9 +911,8 @@ fn first_sheet(bench: &Bench) -> stokesforge_core::NodeId {
 }
 
 /// #518 (a): a value still being typed in A1 when Ctrl+S is pressed is in the
-/// saved file, in A1 and nowhere else, docked as detached. Witnesses: remove
-/// `commit_view_entries` from the shell's save (detached fails); remove
-/// `commit_open_entries` in `AppState::save` (docked fails).
+/// saved file, in A1 and nowhere else, docked as detached. Witness: remove
+/// `commit_open_entries` in `AppState::save` (both fail).
 #[test]
 fn ctrl_s_with_a_pending_cell_entry_saves_it_in_its_cell_and_nowhere_else() {
     for place in Place::BOTH {
@@ -1012,10 +1010,9 @@ fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_docked() {
 }
 
 /// Detached: see [`tab_switch_commits_the_pending_entry`]. The click elsewhere
-/// commits in the window's own view, which writes under its own session
-/// identity: the root must pull that write, else it pushes its stale snapshot
-/// back over the view and A1 stays 0. Witness: drop the root `refresh` before
-/// publishing when a view is ahead (detached fails, docked still passes).
+/// commits in the window's own pass, on the shared state, under the window's
+/// own session identity (#475, L2): no copy to pull back (#524). Witness: drop
+/// the commit in the grid's tab switch (detached fails, docked fails too).
 #[test]
 fn switching_sheet_tab_with_a_pending_cell_entry_commits_it_detached() {
     tab_switch_commits_the_pending_entry(Place::Detached);
@@ -1053,7 +1050,11 @@ fn a_dialog_in_the_main_window_refuses_a_sheet_switch_with_a_pending_entry() {
         Some(sheet1),
         "the sheet stays"
     );
-    assert_eq!(typed_cell(&bench).as_deref(), Some("77"), "the entry stays");
+    assert_eq!(
+        typed_cell(&mut bench).as_deref(),
+        Some("77"),
+        "the entry stays"
+    );
     pass_at(&mut bench, Place::Detached, Vec::new());
     assert!(band_in(&bench, Window::Book).is_some(), "the band shows");
     bench.app.state.dispatch(Action::CloseAbout);
@@ -1063,7 +1064,7 @@ fn a_dialog_in_the_main_window_refuses_a_sheet_switch_with_a_pending_entry() {
         bench.app.state.selected_sheet_in(bench.book()),
         Some(sheet2)
     );
-    assert_eq!(typed_cell(&bench), None);
+    assert_eq!(typed_cell(&mut bench), None);
     let mut expected = dump(&bench.app.state);
     *cell_of(&mut expected, "Sheet1", 0) = "77".into();
     assert_eq!(dump(&bench.app.state), expected, "A1 holds 77");
@@ -1071,9 +1072,8 @@ fn a_dialog_in_the_main_window_refuses_a_sheet_switch_with_a_pending_entry() {
 }
 
 /// R2 (#524): a Long Name still being typed when another sheet tab is clicked
-/// is written, docked and detached. Witness (detached): drop the root refresh
-/// of `drain_detached_tabs`; (docked): drop the header commit in
-/// `AppState::select_sheet`.
+/// is written, docked and detached. Witness: drop the header commit in
+/// `AppState::select_sheet` (both fail).
 #[test]
 fn switching_sheet_tab_with_a_pending_long_name_writes_it() {
     for place in Place::BOTH {
@@ -1087,7 +1087,7 @@ fn switching_sheet_tab_with_a_pending_long_name_writes_it() {
         };
         match place {
             Place::Docked => open(&mut bench.app.state),
-            Place::Detached => with_view(&bench, open),
+            Place::Detached => with_view(&mut bench, open),
         }
         for _ in 0..3 {
             pass_at(&mut bench, place, Vec::new());
@@ -1180,4 +1180,140 @@ fn the_same_keys_give_the_same_result_docked_and_detached() {
     let docked = play_history_and_save(Place::Docked);
     let detached = play_history_and_save(Place::Detached);
     assert_eq!(docked, detached, "docked and detached files differ");
+}
+
+// -- #475, L2: one cell entry in the whole application --
+
+/// A second workbook, detached into its own window and holding the value 5 in
+/// its first cell. Returns its viewport and its first column.
+fn second_detached_book(bench: &mut Bench) -> (egui::ViewportId, stokesforge_core::NodeId) {
+    bench.app.state.dispatch(Action::AddWorkbook);
+    let book = bench.app.state.books().last().unwrap().0;
+    let sheet = bench.app.state.worksheets_of(book)[0].0;
+    bench.app.state.dispatch(Action::AddColumn { sheet });
+    let column = bench.app.state.tree().children(sheet).unwrap()[0];
+    bench.app.state.dispatch(Action::CommitCell {
+        column,
+        row: 0,
+        text: "5".into(),
+    });
+    bench.app.open_tab(Tab::Book(book));
+    bench.app.detach_tab(Tab::Book(book));
+    let id = egui::ViewportId::from_hash_of(Tab::Book(book));
+    bench.root(Pass::root());
+    for _ in 0..3 {
+        bench.child_in(id, Pass::child());
+    }
+    (id, column)
+}
+
+/// T5 (#475): half a value typed in workbook A, then a click in a cell of
+/// workbook B (child passes only, no root pass): A's entry is committed, once,
+/// in one history entry, exactly as between two workbooks of the main window; B
+/// has the selection and no entry is open any more. A is docked or detached.
+/// Witness: drop the commit on a click elsewhere in the grid (`state.commit_edit`
+/// of the `Elsewhere` case): A1 stays unwritten, the entry stays open.
+#[test]
+fn typing_in_one_workbook_and_clicking_in_another_commits_the_entry_once() {
+    for place in [Place::Detached, Place::Docked] {
+        let mut bench = bench_at(place);
+        let (other, other_column) = second_detached_book(&mut bench);
+        let sheet = first_sheet(&bench);
+        let column = bench.app.state.tree().children(sheet).unwrap()[0];
+        let before = bench.app.state.cell_text(column, 0);
+        assert_ne!(before, "77", "the witness starts elsewhere");
+        at_cell(&mut bench, place, sheet, 0);
+        type_digits(&mut bench, place, "77");
+        let label = bench.app.state.cell_display(other_column, 0);
+        let output = bench.child_in(other, Pass::child());
+        let target = texts(&output.shapes)
+            .into_iter()
+            .find(|text| text.text == label)
+            .unwrap_or_else(|| panic!("{place:?}: {label:?} is painted in the other window"))
+            .center;
+        bench.child_in(
+            other,
+            Pass::child().events(vec![egui::Event::PointerMoved(target)]),
+        );
+        for pressed in [true, false] {
+            bench.child_in(
+                other,
+                Pass::child().events(vec![egui::Event::PointerButton {
+                    pos: target,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]),
+            );
+        }
+        let state = &mut bench.app.state;
+        assert_eq!(state.cell_text(column, 0), "77", "{place:?}: A1 committed");
+        assert!(state.editing().is_none(), "{place:?}: one entry, closed");
+        // One history entry: a single Undo gives A1 back and leaves the cell
+        // of the other workbook (written before) alone.
+        state.dispatch(Action::Undo);
+        assert_eq!(state.cell_text(column, 0), before, "{place:?}: one entry");
+        assert_eq!(state.cell_text(other_column, 0), "5", "{place:?}");
+        bench.finish();
+    }
+}
+
+/// #475, L2: a press in the main window, or in a detached graph, ends the cell
+/// entry held by a detached workbook, in one history entry, and a dialog open in
+/// the main window refuses it (the entry stays). Witness: drop the
+/// `commit_entry_held_elsewhere` of the root pass (the first case fails) or of
+/// the graph pass (the second).
+#[test]
+fn a_press_in_the_main_window_or_a_graph_window_ends_the_entry_of_a_detached_workbook() {
+    for pressed_in in ["root", "graph"] {
+        let mut bench = bench();
+        let sheet = first_sheet(&bench);
+        let column = bench.app.state.tree().children(sheet).unwrap()[0];
+        let before = bench.app.state.cell_text(column, 0);
+        at_cell(&mut bench, Place::Detached, sheet, 0);
+        type_digits(&mut bench, Place::Detached, "77");
+        let press = vec![egui::Event::PointerButton {
+            pos: egui::pos2(5.0, 5.0),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        // A dialog open in the main window: refused, the entry stays.
+        bench.app.state.dispatch(Action::OpenAbout);
+        bench.root(Pass::root());
+        let press_pass = |bench: &mut Bench| match pressed_in {
+            "root" => {
+                bench.root(Pass::root().focused(true).events(press.clone()));
+            }
+            _ => {
+                bench.child_in(
+                    bench.id_of(Window::Graph),
+                    Pass::child().events(press.clone()),
+                );
+            }
+        };
+        press_pass(&mut bench);
+        if pressed_in == "graph" {
+            assert_eq!(
+                typed_cell(&mut bench).as_deref(),
+                Some("77"),
+                "{pressed_in}: refused"
+            );
+        }
+        bench.app.state.dispatch(Action::CloseAbout);
+        settle(&mut bench);
+        press_pass(&mut bench);
+        assert_eq!(bench.app.state.cell_text(column, 0), "77", "{pressed_in}");
+        assert!(
+            typed_cell(&mut bench).is_none(),
+            "{pressed_in}: entry closed"
+        );
+        bench.app.state.dispatch(Action::Undo);
+        assert_eq!(
+            bench.app.state.cell_text(column, 0),
+            before,
+            "{pressed_in}: one entry"
+        );
+        bench.finish();
+    }
 }

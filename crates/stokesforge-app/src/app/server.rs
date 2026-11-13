@@ -5,14 +5,24 @@
 //!
 //! # The lock
 //!
-//! The state lives in an `Arc<Mutex<AppState>>`. [`StateSlot`] is the UI
-//! thread's side: it owns the guard and dereferences to the state, so every
-//! `self.state.…` of [`StokesForgeApp`](super::StokesForgeApp) reads as before.
-//! The guard is held from `new()` on (a test that drives `ui` or `logic`
-//! directly runs on the slot as it is), and [`ServedApp`] — the `eframe::App`
-//! the binary runs — takes it at the start of `logic`, `ui` and `on_exit` and
-//! gives it back at their end. Between two passes the lock is free, and that is
-//! when the thread works.
+//! The whole [`StokesForgeApp`](super::StokesForgeApp) lives in an
+//! `Arc<Mutex<_>>` (step 2 of #475; step 1 locked the `AppState` alone). The
+//! server thread locks it but touches only `.state`. [`AppSlot`] is the UI
+//! thread's side: it owns the guard and dereferences to the app. The guard is
+//! held from `new()` on (a test that drives `ui` or `logic` directly runs on the
+//! slot as it is), and [`ServedApp`] — the `eframe::App` the binary runs — takes
+//! it at the start of `logic`, `ui` and `on_exit` and gives it back at their
+//! end. Between two passes the lock is free, and that is when the thread works.
+//!
+//! **Publication after release.** `ui` does not register the detached windows:
+//! it queues them (`pending_viewports`), and [`ServedApp::ui`] publishes them
+//! (`window_detach::publish_viewports`) once the guard is released. With
+//! embedded viewports a window paints inside that call, on the thread that just
+//! held the guard: the windows that will lock the app (L1+) can. A thread that
+//! holds a guard counts it (thread-local); [`lock_app_from_viewport`] is the one
+//! door for a window closure and panics with a clear message instead of hanging
+//! when its own thread holds the UI guard. In L0 the closures keep their fork
+//! and queues and do not lock yet (only the tests use the helper).
 //!
 //! Rules held by `tests/guards.rs` and by the tests below:
 //!
@@ -50,8 +60,8 @@
 //!   after sending the reply; [`ServedApp::new`] makes it unpark this thread.
 //!   The 50 ms look stays as the fallback.
 //!
-//! Detached windows keep their fork (`window_detach.rs`): this thread is step 1
-//! of #475 and changes nothing they see.
+//! Detached windows keep their fork (`window_detach.rs`) in L0: nothing they see
+//! changes.
 //!
 //! # Without the thread
 //!
@@ -83,40 +93,62 @@ const BUSY_RETRY: Duration = Duration::from_millis(10);
 /// How long the exit waits for the thread (an autosave write in flight).
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(30);
 
-type SharedState = Arc<Mutex<AppState>>;
-type StateGuard = ArcMutexGuard<RawMutex, AppState>;
+/// The lock covers the whole application (#475, step 2): the server thread
+/// locks it but touches only `.state`; a viewport closure (from L1 on) locks it
+/// to paint and act in its own pass.
+type SharedApp = Arc<Mutex<StokesForgeApp>>;
+type AppGuard = ArcMutexGuard<RawMutex, StokesForgeApp>;
 
-/// The UI thread's side of the shared state: the owned guard, dereferencing to
-/// the [`AppState`].
-pub(super) struct StateSlot {
-    /// Declared first: dropped before the `Arc`.
-    guard: Option<StateGuard>,
-    shared: SharedState,
+// The application crosses to the thread behind the lock: every field is `Send`.
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<StokesForgeApp>();
+};
+
+thread_local! {
+    /// How many [`AppSlot`] guards this thread holds: a viewport closure that
+    /// runs inside such a pass (embedded viewports, a test) must not lock.
+    static UI_GUARDS_HELD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-impl StateSlot {
-    /// Puts `state` behind the lock, held.
-    pub(super) fn new(state: AppState) -> Self {
-        let shared = Arc::new(Mutex::new(state));
-        Self {
-            guard: Some(shared.lock_arc()),
+/// The UI thread's side of the shared application: the owned guard,
+/// dereferencing to the [`StokesForgeApp`].
+pub(super) struct AppSlot {
+    /// Declared first: dropped before the `Arc`.
+    guard: Option<AppGuard>,
+    shared: SharedApp,
+}
+
+impl AppSlot {
+    /// Puts `app` behind the lock, held.
+    pub(super) fn new(app: StokesForgeApp) -> Self {
+        let shared = Arc::new(Mutex::new(app));
+        // The windows reach the application through this handle, weak so that
+        // the application does not keep itself alive.
+        shared.lock().shared_self = Arc::downgrade(&shared);
+        let mut slot = Self {
+            guard: None,
             shared,
-        }
+        };
+        slot.acquire();
+        slot
     }
 
-    /// The state back, for a test that rebuilds an app on it. No thread may
+    /// The application back, for a test that rebuilds on it. No thread may
     /// share the lock.
     #[cfg(test)]
-    pub(super) fn into_state(mut self) -> AppState {
-        self.guard = None;
-        match Arc::try_unwrap(self.shared) {
+    pub(super) fn into_app(mut self) -> StokesForgeApp {
+        self.release();
+        let shared = self.shared.clone();
+        drop(self);
+        match Arc::try_unwrap(shared) {
             Ok(mutex) => mutex.into_inner(),
-            Err(_) => unreachable!("a thread still shares the state"),
+            Err(_) => unreachable!("a thread still shares the app"),
         }
     }
 
-    /// The lock, for the thread.
-    pub(super) fn shared(&self) -> SharedState {
+    /// The lock, for the thread and for the viewport closures.
+    pub(super) fn shared(&self) -> SharedApp {
         Arc::clone(&self.shared)
     }
 
@@ -124,50 +156,87 @@ impl StateSlot {
     pub(super) fn acquire(&mut self) {
         if self.guard.is_none() {
             self.guard = Some(self.shared.lock_arc());
+            UI_GUARDS_HELD.with(|held| held.set(held.get() + 1));
         }
     }
 
     /// Gives the lock back.
     pub(super) fn release(&mut self) {
-        self.guard = None;
+        if self.guard.take().is_some() {
+            UI_GUARDS_HELD.with(|held| held.set(held.get() - 1));
+        }
     }
 }
 
-impl std::ops::Deref for StateSlot {
-    type Target = AppState;
-    fn deref(&self) -> &AppState {
+impl Drop for AppSlot {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+impl std::ops::Deref for AppSlot {
+    type Target = StokesForgeApp;
+    fn deref(&self) -> &StokesForgeApp {
         match &self.guard {
             Some(guard) => guard,
-            None => unreachable!("the state is read between passes, without the lock"),
+            None => unreachable!("the app is read between passes, without the lock"),
         }
     }
 }
 
-impl std::ops::DerefMut for StateSlot {
-    fn deref_mut(&mut self) -> &mut AppState {
+impl std::ops::DerefMut for AppSlot {
+    fn deref_mut(&mut self) -> &mut StokesForgeApp {
         match &mut self.guard {
             Some(guard) => guard,
-            None => unreachable!("the state is written between passes, without the lock"),
+            None => unreachable!("the app is written between passes, without the lock"),
         }
     }
+}
+
+/// The single door for a viewport closure to take the application: it waits
+/// for the lock (only the server thread competes, for a tick). If this thread
+/// already holds the UI guard (an embedded viewport painted inside the pass
+/// that holds it) it panics at once with a clear message instead of hanging.
+pub(super) fn lock_app_from_viewport(shared: &SharedApp) -> AppGuard {
+    assert!(
+        UI_GUARDS_HELD.with(|held| held.get()) == 0,
+        "a viewport callback tried to lock the application while this thread's UI pass \
+         holds it (an embedded viewport is painted inside the pass): publish the window \
+         after the guard is released"
+    );
+    shared.lock_arc()
 }
 
 /// What wakes the windows. A trait so that the tests count the wakes.
 pub(super) trait Repaint: Send + 'static {
-    fn repaint_root(&self);
+    fn repaint(&self, window: egui::ViewportId);
 }
 
 impl Repaint for egui::Context {
-    fn repaint_root(&self) {
-        self.request_repaint_of(egui::ViewportId::ROOT);
+    fn repaint(&self, window: egui::ViewportId) {
+        self.request_repaint_of(window);
     }
 }
 
-/// The single rule that wakes the windows from the thread: only when the tick
-/// found that something they show changed (#475). Focus plays no part.
-pub(super) fn wake(repaint: &impl Repaint, changed: bool) {
-    if changed {
-        repaint.repaint_root();
+/// THE rule that wakes the windows (#475): when something they show changed,
+/// the root and every OPEN window in `open` are repainted, except `from` (the
+/// window that made the change and is painting). `open` lists only the windows
+/// that exist: a closed one is never woken. The thread calls it when its tick
+/// changed something, a window's pass calls it after a write. Focus plays no
+/// part.
+pub(super) fn wake(
+    repaint: &impl Repaint,
+    changed: bool,
+    open: &[egui::ViewportId],
+    from: Option<egui::ViewportId>,
+) {
+    if !changed {
+        return;
+    }
+    for window in std::iter::once(egui::ViewportId::ROOT).chain(open.iter().copied()) {
+        if Some(window) != from {
+            repaint.repaint(window);
+        }
     }
 }
 
@@ -203,7 +272,7 @@ fn record_for_real(paths: &[PathBuf]) {
 /// commands of a finished import without it, their record under the lock again,
 /// and the wake.
 pub(super) fn serve_once(
-    shared: &Mutex<AppState>,
+    shared: &Mutex<StokesForgeApp>,
     now: Instant,
     repaint: &impl Repaint,
     run: &RunJob,
@@ -214,8 +283,12 @@ pub(super) fn serve_once(
         server_stats::event("busy", false);
         return Pass::Busy;
     };
-    let tick = guard.server_tick(now);
-    let garbage = guard.take_garbage();
+    // The windows to wake if the tick changed something (a read of the list,
+    // nothing else of the application but its state is touched).
+    let open = guard.open_viewports();
+    let state = &mut guard.state;
+    let tick = state.server_tick(now);
+    let garbage = state.take_garbage();
     drop(guard);
     server_stats::since("tick", held, tick.changed);
     // Freed with the lock released (the previous snapshot's big columns).
@@ -251,7 +324,7 @@ pub(super) fn serve_once(
         }
         next = Some(Duration::ZERO);
     }
-    wake(repaint, changed);
+    wake(repaint, changed, &open, None);
     if changed {
         server_stats::event("wake", true);
     }
@@ -262,7 +335,7 @@ pub(super) fn serve_once(
 /// again every [`BUSY_RETRY`], also while the application quits (the exit
 /// releases the guard before it joins, and waits for this to end).
 fn with_lock_retry<R>(
-    shared: &Mutex<AppState>,
+    shared: &Mutex<StokesForgeApp>,
     body: impl FnOnce(&mut AppState) -> (R, stokesforge_app_state::state::Garbage),
 ) -> R {
     let mut body = Some(body);
@@ -270,7 +343,7 @@ fn with_lock_retry<R>(
         if let Some(mut guard) = shared.try_lock() {
             if let Some(body) = body.take() {
                 let held = server_stats::start();
-                let (result, garbage) = body(&mut guard);
+                let (result, garbage) = body(&mut guard.state);
                 drop(guard);
                 server_stats::since("finish", held, true);
                 garbage.dispose();
@@ -330,7 +403,7 @@ pub(super) struct ServerThread {
 }
 
 impl ServerThread {
-    pub(super) fn spawn(shared: SharedState, repaint: impl Repaint) -> Self {
+    pub(super) fn spawn(shared: SharedApp, repaint: impl Repaint) -> Self {
         Self::spawn_with(
             shared,
             repaint,
@@ -343,7 +416,7 @@ impl ServerThread {
     /// The write, the clock and the recent-files record are parameters so that
     /// a test can hold a write in flight, move time and keep the user's files.
     pub(super) fn spawn_with(
-        shared: SharedState,
+        shared: SharedApp,
         repaint: impl Repaint,
         run: Arc<RunJob>,
         clock: Arc<Clock>,
@@ -408,7 +481,7 @@ impl ServerThread {
     /// Stops the thread: the guard is RELEASED first (a write in flight needs
     /// the lock to record its end), then the thread is joined, for at most
     /// `wait`. Returns false if it did not end in time.
-    pub(super) fn shut_down(&mut self, slot: &mut StateSlot, wait: Duration) -> bool {
+    pub(super) fn shut_down(&mut self, slot: &mut AppSlot, wait: Duration) -> bool {
         self.stop.store(true, Ordering::Release);
         slot.release();
         self.unpark();
@@ -428,7 +501,7 @@ impl ServerThread {
 /// The application the binary runs: [`StokesForgeApp`] behind the lock, with the
 /// server thread (#475).
 pub struct ServedApp {
-    app: StokesForgeApp,
+    slot: AppSlot,
     thread: ServerThread,
     pass_hook: Option<PassHook>,
 }
@@ -437,18 +510,81 @@ pub struct ServedApp {
 /// gesture would be applied.
 pub type PassHook = Box<dyn FnMut(&mut AppState, &egui::Context) + Send>;
 
+/// The shared state as a bench thread sees it: the state of the locked
+/// application, for a change made from outside the passes.
+#[doc(hidden)]
+pub struct BenchState(SharedApp);
+
+impl BenchState {
+    /// Waits for the lock, like the thread does.
+    pub fn lock(&self) -> parking_lot::MappedMutexGuard<'_, AppState> {
+        parking_lot::MutexGuard::map(self.0.lock(), |app| &mut app.state)
+    }
+
+    /// A click on "Reattach" of the detached window of `graph`, as its header
+    /// button leaves it (#475, L4); the window acts on it at its next pass.
+    pub fn click_reattach(&self, graph: stokesforge_core::NodeId) {
+        if let Some(window) = self.0.lock().detached_graphs.get_mut(&graph) {
+            window.reattach = true;
+        }
+    }
+
+    /// Same for the detached workbook `book`.
+    pub fn click_reattach_book(&self, book: stokesforge_core::NodeId) {
+        if let Some(window) = self.0.lock().detached_books.get_mut(&book) {
+            window.reattach = true;
+        }
+    }
+
+    /// Same for the detached Project Manager.
+    pub fn click_reattach_project_manager(&self) {
+        let mut app = self.0.lock();
+        let index = super::panel_memory::panel_index(
+            stokesforge_app_state::panel_layout::PanelKind::Project,
+        );
+        app.panel_windows[index].reattach = true;
+    }
+
+    /// (detached into its own window, floating in the main window) for `book`.
+    pub fn book_places(&self, book: stokesforge_core::NodeId) -> (bool, bool) {
+        let app = self.0.lock();
+        (
+            app.detached_books.contains_key(&book),
+            app.floating_tabs.contains(&super::tab::Tab::Book(book)),
+        )
+    }
+
+    /// Is the Project Manager detached into its own window?
+    pub fn project_manager_detached(&self) -> bool {
+        self.0.lock().pm_detached
+    }
+
+    /// Where the tab of `graph` is: (detached into its own window, floating in
+    /// the main window), as the application's own lists say.
+    pub fn graph_places(&self, graph: stokesforge_core::NodeId) -> (bool, bool) {
+        let app = self.0.lock();
+        (
+            app.detached_graphs.contains_key(&graph),
+            app.floating_tabs.contains(&super::tab::Tab::Graph(graph)),
+        )
+    }
+}
+
 impl ServedApp {
     /// Starts the thread. `ctx` is the context the thread wakes.
-    pub fn new(mut app: StokesForgeApp, ctx: egui::Context) -> Self {
-        let thread = ServerThread::spawn(app.state.shared(), ctx);
+    pub fn new(app: StokesForgeApp, ctx: egui::Context) -> Self {
+        let mut slot = AppSlot::new(app);
+        let thread = ServerThread::spawn(slot.shared(), ctx);
         if let Some(server) = thread.waker() {
             // The end of a script wakes the thread at once; its 50 ms look
             // stays as the fallback.
-            app.state.set_waker(Arc::new(move || server.unpark()));
+            slot.state.set_waker(Arc::new(move || server.unpark()));
         }
-        app.server = Some(thread.status());
+        slot.server = Some(thread.status());
+        // The windows are published after the guard is released (see `ui`).
+        slot.defer_viewport_publication();
         Self {
-            app,
+            slot,
             thread,
             pass_hook: None,
         }
@@ -473,39 +609,43 @@ impl ServedApp {
 
     /// For the bench: the shared state, as the thread sees it.
     #[doc(hidden)]
-    pub fn shared_state(&self) -> Arc<Mutex<AppState>> {
-        self.app.state.shared()
+    pub fn shared_state(&self) -> Arc<BenchState> {
+        Arc::new(BenchState(self.slot.shared()))
     }
 }
 
 impl eframe::App for ServedApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let waited = server_stats::start();
-        self.app.state.acquire();
+        self.slot.acquire();
         server_stats::since("logic", waited, false);
-        self.app.logic(ctx, frame);
-        self.app.state.release();
+        self.slot.logic(ctx, frame);
+        self.slot.release();
         self.thread.unpark();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let waited = server_stats::start();
-        self.app.state.acquire();
+        self.slot.acquire();
         server_stats::since("ui", waited, false);
-        self.app.ui(ui, frame);
+        self.slot.ui(ui, frame);
         if let Some(hook) = &mut self.pass_hook {
-            hook(&mut self.app.state, ui.ctx());
+            hook(&mut self.slot.state, ui.ctx());
         }
-        self.app.state.release();
+        let pending = self.slot.take_pending_viewports();
+        self.slot.release();
+        // Published with the guard RELEASED: an embedded viewport paints inside
+        // this call, and the closures of the windows take the lock themselves.
+        super::window_detach::publish_viewports(ui.ctx(), pending);
         self.thread.unpark();
     }
 
     fn on_exit(&mut self) {
-        self.app.state.acquire();
-        self.app.on_exit();
+        self.slot.acquire();
+        self.slot.on_exit();
         // Guard released, then joined: a write in flight ends silently and the
         // normal slot removal follows it. All before `session.shutdown()`.
-        let _ended = self.thread.shut_down(&mut self.app.state, SHUTDOWN_WAIT);
+        let _ended = self.thread.shut_down(&mut self.slot, SHUTDOWN_WAIT);
         server_stats::event("exit", true);
         server_stats::bench_flush_stats();
     }
@@ -565,13 +705,14 @@ mod tests {
 
     const PERIOD: Duration = Duration::from_secs(300);
 
-    /// Counts the wakes.
+    /// Counts the wakes and remembers whom they went to.
     #[derive(Clone, Default)]
-    struct Counter(Arc<AtomicUsize>);
+    struct Counter(Arc<AtomicUsize>, Arc<StdMutex<Vec<egui::ViewportId>>>);
 
     impl Repaint for Counter {
-        fn repaint_root(&self) {
+        fn repaint(&self, window: egui::ViewportId) {
             self.0.fetch_add(1, Ordering::SeqCst);
+            self.1.lock().unwrap().push(window);
         }
     }
 
@@ -579,6 +720,15 @@ mod tests {
         fn count(&self) -> usize {
             self.0.load(Ordering::SeqCst)
         }
+
+        fn woken(&self) -> Vec<egui::ViewportId> {
+            self.1.lock().unwrap().clone()
+        }
+    }
+
+    /// The state of the locked application, as the thread touches it.
+    fn state_of(shared: &Mutex<StokesForgeApp>) -> parking_lot::MappedMutexGuard<'_, AppState> {
+        parking_lot::MutexGuard::map(shared.lock(), |app| &mut app.state)
     }
 
     fn no_record(_: &[PathBuf]) {}
@@ -589,12 +739,12 @@ mod tests {
 
     /// A slot on `project`, with the recovery folder `dir/recovery`, released:
     /// the lock is free, as between two passes.
-    fn free_slot(project: Project, dir: &Path) -> (Session, StateSlot) {
+    fn free_slot(project: Project, dir: &Path) -> (Session, AppSlot) {
         let session = Session::spawn(project, None).expect("session");
         let mut state = AppState::new(session.handle(), dir.join("a.stf").display().to_string())
             .expect("state");
         state.set_recovery_dir(Some(dir.join("recovery")));
-        let mut slot = StateSlot::new(state);
+        let mut slot = AppSlot::new(StokesForgeApp::new(state));
         slot.release();
         (session, slot)
     }
@@ -631,7 +781,7 @@ mod tests {
             serve_once(&shared, t0, &counter, real_run(), &no_record),
             Pass::Done(Some(PERIOD))
         );
-        shared.lock().dispatch(Action::AddGraph);
+        state_of(&shared).dispatch(Action::AddGraph);
         serve_once(&shared, t0 + PERIOD, &counter, real_run(), &no_record);
         assert_eq!(copies(dir.path()), 1);
     }
@@ -650,6 +800,26 @@ mod tests {
             Pass::Busy
         );
         assert_eq!(counter.count(), 0);
+    }
+
+    /// T12 (#475): the one wake rule. A change wakes the root and the OPEN
+    /// windows it is given, except the one that painted; no change, nobody.
+    /// Witness: wake the root only, or wake `from` too.
+    #[test]
+    fn a_change_wakes_the_root_and_the_other_open_windows_only() {
+        let (a, b) = (
+            egui::ViewportId::from_hash_of("a"),
+            egui::ViewportId::from_hash_of("b"),
+        );
+        let counter = Counter::default();
+        wake(&counter, false, &[a, b], None);
+        assert_eq!(counter.count(), 0, "nothing changed");
+        wake(&counter, true, &[a, b], Some(a));
+        assert_eq!(counter.woken(), vec![egui::ViewportId::ROOT, b]);
+        // The thread, which paints nothing, wakes everybody.
+        let counter = Counter::default();
+        wake(&counter, true, &[a, b], None);
+        assert_eq!(counter.woken(), vec![egui::ViewportId::ROOT, a, b]);
     }
 
     /// Nothing changes: no wake, however many ticks.
@@ -722,42 +892,89 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (_session, slot) = free_slot(heavy_formula_project(), dir.path());
         let shared = slot.shared();
-        shared.lock().dispatch(Action::AddGraph);
-        assert!(shared.lock().recalc_work().is_some(), "still running");
-        let before = shared.lock().tree().len();
+        state_of(&shared).dispatch(Action::AddGraph);
+        assert!(state_of(&shared).recalc_work().is_some(), "still running");
+        let before = state_of(&shared).tree().len();
         let counter = Counter::default();
         let deadline = Instant::now() + Duration::from_secs(120);
         let t0 = Instant::now();
-        while shared.lock().recalc_work().is_some() {
+        while state_of(&shared).recalc_work().is_some() {
             assert!(Instant::now() < deadline, "recalculation too long");
             serve_once(&shared, t0, &counter, real_run(), &no_record);
             std::thread::sleep(Duration::from_millis(5));
         }
         serve_once(&shared, t0, &counter, real_run(), &no_record);
         serve_once(&shared, t0, &counter, real_run(), &no_record);
-        let state = shared.lock();
+        let state = state_of(&shared);
         assert!(state.recalc_work().is_none());
         assert_eq!(state.tree().len(), before + 1, "the snapshot is fresh");
         assert_eq!(counter.count(), 1, "one wake for the end");
     }
 
-    /// Embedded viewports (the default context): a detached graph is painted
-    /// inside the root pass, on the thread that holds the guard. No window
-    /// callback may take the shared lock, or the pass never ends.
+    /// The same end of a recalculation, with a window open: the one wake goes to
+    /// the root and to that window (#475, L1: a detached graph reads the shared
+    /// state and has to look again). Witness: wake the root only.
     #[test]
-    fn a_pass_with_a_detached_graph_ends_while_the_thread_ticks() {
+    fn the_end_of_a_recalculation_wakes_the_open_windows_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, slot) = free_slot(heavy_formula_project(), dir.path());
+        let shared = slot.shared();
+        shared.lock().pm_detached = true;
+        state_of(&shared).dispatch(Action::AddGraph);
+        let counter = Counter::default();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let t0 = Instant::now();
+        while state_of(&shared).recalc_work().is_some() {
+            assert!(Instant::now() < deadline, "recalculation too long");
+            serve_once(&shared, t0, &counter, real_run(), &no_record);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        serve_once(&shared, t0, &counter, real_run(), &no_record);
+        assert_eq!(
+            counter.woken(),
+            vec![
+                egui::ViewportId::ROOT,
+                super::super::project_manager::viewport_id()
+            ]
+        );
+    }
+
+    /// Runs five root passes of a [`ServedApp`] on embedded viewports (the
+    /// default context) on a thread of its own, under a watchdog: the windows
+    /// are painted inside the pass, on the thread that publishes them. `probe`
+    /// is a window whose body takes the application through the one helper,
+    /// as the closures of L1 will; it must have run by the end.
+    fn passes_end_with(
+        embed: bool,
+        build: impl FnOnce() -> (Box<dyn std::any::Any>, StokesForgeApp, egui::Context) + Send + 'static,
+    ) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let (session, graph) = plotted_graph();
-            let state = AppState::new(session.handle(), String::new()).unwrap();
-            let mut app = StokesForgeApp::new(state);
-            app.detach_tab(Tab::Graph(graph));
-            let ctx = egui::Context::default();
-            ctx.set_fonts(stokesforge_render_egui::font_definitions());
-            crate::theme::install(&ctx);
+            let (_keep, app, ctx) = build();
+            ctx.set_embed_viewports(embed);
             let mut served = ServedApp::new(app, ctx.clone());
+            let shared = served.slot.shared();
+            let locked = Arc::new(AtomicUsize::new(0));
             let mut frame = eframe::Frame::_new_kittest();
             for pass in 0..5 {
+                let seen = Arc::clone(&locked);
+                let shared = Arc::clone(&shared);
+                served.slot.acquire();
+                served
+                    .slot
+                    .pending_viewports
+                    .as_mut()
+                    .expect("the served app queues its windows")
+                    .push(super::super::window_detach::PendingViewport {
+                        id: egui::ViewportId::from_hash_of("server_probe"),
+                        builder: crate::app_logo::viewport(),
+                        body: Box::new(move |_ui, _class| {
+                            drop(lock_app_from_viewport(&shared));
+                            seen.fetch_add(1, Ordering::SeqCst);
+                        }),
+                        repaint: false,
+                    });
+                served.slot.release();
                 let raw = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -768,14 +985,110 @@ mod tests {
                 };
                 let mut output = ctx.run_ui(raw, |ui| eframe::App::ui(&mut served, ui, &mut frame));
                 output.textures_delta.clear();
+                // Not embedded: the windows of this pass are painted one by
+                // one, each in a pass of its own, once the root has released
+                // the guard (the probe among them).
+                for (id, viewport) in &output.viewport_output {
+                    let Some(callback) = viewport.viewport_ui_cb.clone() else {
+                        continue;
+                    };
+                    let mut raw = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 600.0),
+                        )),
+                        time: Some(f64::from(pass) * 0.05 + 0.01),
+                        focused: true,
+                        viewport_id: *id,
+                        ..Default::default()
+                    };
+                    raw.viewports.insert(
+                        *id,
+                        egui::ViewportInfo {
+                            parent: Some(egui::ViewportId::ROOT),
+                            focused: Some(true),
+                            ..Default::default()
+                        },
+                    );
+                    let mut child = ctx.run_ui(raw, |ui| callback(ui));
+                    child.textures_delta.clear();
+                }
                 std::thread::sleep(Duration::from_millis(15));
             }
             eframe::App::on_exit(&mut served);
-            drop(session);
-            let _ = tx.send(());
+            let _ = tx.send(locked.load(Ordering::SeqCst));
         });
-        rx.recv_timeout(Duration::from_secs(60))
-            .expect("the passes ended: no callback takes the lock");
+        let locked = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the passes ended: nothing publishes a window while the guard is held");
+        assert!(locked > 0, "the probe window ran inside a pass and locked");
+    }
+
+    /// A detached graph, embedded viewports: the pass ends while the thread ticks.
+    #[test]
+    fn a_pass_with_a_detached_graph_ends_while_the_thread_ticks() {
+        passes_end_with(true, || {
+            let (session, graph) = plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            app.detach_tab(Tab::Graph(graph));
+            let ctx = egui::Context::default();
+            ctx.set_fonts(stokesforge_render_egui::font_definitions());
+            crate::theme::install(&ctx);
+            (Box::new(session), app, ctx)
+        });
+    }
+
+    /// T9 (#475, step 2): the same with EVERY detached window (graph,
+    /// workbook, Project Manager, Object Manager, console), each painted in a
+    /// pass of its own after the root's. Not embedded: egui refuses (debug
+    /// assert) two embedded windows that share widget ids, such as the resize
+    /// handles, so the embedded witness is the single-graph test above.
+    #[test]
+    fn a_pass_with_every_detached_window_ends_while_the_thread_ticks() {
+        passes_end_with(false, || {
+            let bench = super::super::test_support::bench::Bench::with_every_window();
+            let ctx = bench.ctx.clone();
+            let app = bench.app.into_app();
+            (Box::new((bench.session, bench.dir)), app, ctx)
+        });
+    }
+
+    /// A closure that locks the application while its own thread holds the UI
+    /// guard (an embedded viewport painted inside the pass) panics with a clear
+    /// message: it does not hang. Released, the helper locks.
+    #[test]
+    fn a_viewport_locking_inside_the_ui_pass_panics_instead_of_hanging() {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let dir = tempfile::tempdir().unwrap();
+            let (_session, mut slot) = free_slot(demo(), dir.path());
+            let shared = slot.shared();
+            slot.acquire();
+            let held = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                drop(lock_app_from_viewport(&shared));
+            }));
+            let message = held
+                .err()
+                .and_then(|payload| {
+                    payload.downcast_ref::<String>().cloned().or_else(|| {
+                        payload
+                            .downcast_ref::<&str>()
+                            .map(|text| (*text).to_string())
+                    })
+                })
+                .unwrap_or_default();
+            slot.release();
+            drop(lock_app_from_viewport(&shared));
+            let _ = tx.send(message);
+        });
+        let message = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the re-entry panics: it does not wait for its own guard");
+        assert!(
+            message.contains("viewport callback tried to lock"),
+            "{message}"
+        );
     }
 
     /// Exit: the guard is released, then the thread is joined; the thread has
@@ -811,7 +1124,7 @@ mod tests {
         while thread.status().ticks.load(Ordering::Relaxed) == 0 {
             std::thread::sleep(Duration::from_millis(2));
         }
-        shared.lock().dispatch(Action::AddGraph);
+        state_of(&shared).dispatch(Action::AddGraph);
         offset.store(PERIOD.as_secs() + 1, Ordering::SeqCst);
         thread.unpark();
         started
@@ -864,8 +1177,8 @@ mod tests {
             .map_or(0, |node| node.children().len())
     }
 
-    fn start_new_book_import(shared: &Mutex<AppState>, files: Vec<PathBuf>) {
-        shared.lock().dispatch(Action::StartImport {
+    fn start_new_book_import(shared: &Mutex<StokesForgeApp>, files: Vec<PathBuf>) {
+        state_of(shared).dispatch(Action::StartImport {
             destination: stokesforge_app_state::state::ImportDestination::NewBookPerFile,
             recipe: stokesforge_import::ImportRecipe::new("Serie"),
             paths: files,
@@ -873,11 +1186,11 @@ mod tests {
     }
 
     /// Passes of the thread until the import is over (analysis, application).
-    fn serve_until_import_done(shared: &Mutex<AppState>, counter: &Counter) {
+    fn serve_until_import_done(shared: &Mutex<StokesForgeApp>, counter: &Counter) {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             serve_once(shared, Instant::now(), counter, real_run(), &no_record);
-            let state = shared.lock();
+            let state = state_of(shared);
             if state.import_progress().is_none() && !state.import_is_applying() {
                 return;
             }
@@ -897,22 +1210,22 @@ mod tests {
         let (_session, slot) = free_slot(demo(), dir.path());
         let shared = slot.shared();
         let counter = Counter::default();
-        let before = root_children(&shared.lock());
+        let before = root_children(&state_of(&shared));
         start_new_book_import(&shared, csv_files(dir.path(), 2, 3));
         serve_until_import_done(&shared, &counter);
         {
-            let state = shared.lock();
+            let state = state_of(&shared);
             assert_eq!(root_children(&state), before + 2, "2 workbooks");
             assert!(counter.count() >= 1, "the windows are woken");
         }
         // The history holds one entry.
-        shared.lock().dispatch(Action::Undo);
-        assert_eq!(root_children(&shared.lock()), before);
-        assert!(!shared.lock().can_undo(), "one entry for the import");
-        shared.lock().dispatch(Action::Redo);
+        state_of(&shared).dispatch(Action::Undo);
+        assert_eq!(root_children(&state_of(&shared)), before);
+        assert!(!state_of(&shared).can_undo(), "one entry for the import");
+        state_of(&shared).dispatch(Action::Redo);
         drop(shared);
         // The next pass opens them.
-        let mut app = StokesForgeApp::new(slot.into_state());
+        let mut app = StokesForgeApp::new(slot.into_app().state);
         let ctx = egui::Context::default();
         let initial = app.floating_tabs.len();
         app.poll_background_jobs(&ctx);
@@ -946,7 +1259,7 @@ mod tests {
                 let mut seen = std::collections::BTreeSet::new();
                 while !over.load(Ordering::Acquire) {
                     if let Some(state) = shared.try_lock() {
-                        if state.import_is_applying() {
+                        if state.state.import_is_applying() {
                             if let Ok(snapshot) = handle.snapshot() {
                                 seen.insert(snapshot.revision);
                             }
@@ -978,11 +1291,11 @@ mod tests {
         )
         .expect("state");
         state.set_recovery_dir(None);
-        let mut app = StokesForgeApp::new(state);
+        let mut app = AppSlot::new(StokesForgeApp::new(state));
         // Test-only injection: the clock of the thread panics at the first pass.
         let clock: Arc<Clock> = Arc::new(|| panic!("injected failure of the server thread"));
         let thread = ServerThread::spawn_with(
-            app.state.shared(),
+            app.shared(),
             Counter::default(),
             Arc::new(run_for_real),
             clock,
@@ -1083,8 +1396,7 @@ mod tests {
             }),
         );
         let mut dice = Dice(seed | 1);
-        let sheet = shared
-            .lock()
+        let sheet = state_of(&shared)
             .tree()
             .resolve("[Book1]Sheet1")
             .expect("Sheet1");
@@ -1092,6 +1404,7 @@ mod tests {
             slot.acquire();
             for _ in 0..=dice.below(3) {
                 let columns: Vec<_> = slot
+                    .state
                     .visible_columns(sheet)
                     .into_iter()
                     .map(|(id, ..)| id)
@@ -1116,7 +1429,7 @@ mod tests {
                     11 => Some(Action::AddWorkbook),
                     12 => Some(Action::Save),
                     13 if step % 3 == 0 => {
-                        slot.dispatch(Action::StartImport {
+                        slot.state.dispatch(Action::StartImport {
                             destination:
                                 stokesforge_app_state::state::ImportDestination::NewBookPerFile,
                             recipe: stokesforge_import::ImportRecipe::new("Serie"),
@@ -1127,7 +1440,7 @@ mod tests {
                     _ => None,
                 };
                 if let Some(action) = action {
-                    slot.dispatch(action);
+                    slot.state.dispatch(action);
                 }
             }
             slot.release();
@@ -1141,14 +1454,14 @@ mod tests {
         }
         // A last change, so that a recovery copy of the final state must exist.
         slot.acquire();
-        slot.dispatch(Action::AddColumn { sheet });
+        slot.state.dispatch(Action::AddColumn { sheet });
         slot.release();
         // The work in progress ends (analysis, application, recalculation).
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             thread.unpark();
             let busy = {
-                let state = shared.lock();
+                let state = state_of(&shared);
                 state.import_progress().is_some()
                     || state.import_is_applying()
                     || state.recalc_work().is_some()
@@ -1166,12 +1479,12 @@ mod tests {
         slot.acquire();
         let final_tree = session_tree(&session);
         let mut undone = 0;
-        while undone < 20 && slot.can_undo() {
-            slot.dispatch(Action::Undo);
+        while undone < 20 && slot.state.can_undo() {
+            slot.state.dispatch(Action::Undo);
             undone += 1;
         }
         for _ in 0..undone {
-            slot.dispatch(Action::Redo);
+            slot.state.dispatch(Action::Redo);
         }
         let again = session_tree(&session);
         assert!(
@@ -1274,7 +1587,7 @@ mod tests {
         let mut served = ServedApp::new(app, egui::Context::default());
         // The state is held from `new()` on, like a test that drives `ui`
         // directly; between two passes the lock is free and the thread works.
-        served.app.state.release();
+        served.slot.release();
         let status = served.thread.status();
         let ticks = || status.ticks.load(Ordering::Relaxed);
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -1285,8 +1598,8 @@ mod tests {
         // Let the thread reach its park.
         std::thread::sleep(Duration::from_millis(200));
         let before = ticks();
-        served.app.state.acquire();
-        served.app.state.wake_server();
+        served.slot.acquire();
+        served.slot.state.wake_server();
         let deadline = Instant::now() + Duration::from_secs(5);
         while ticks() == before {
             assert!(
@@ -1295,10 +1608,10 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(2));
         }
-        served.app.state.acquire();
+        served.slot.acquire();
         let _ = served
             .thread
-            .shut_down(&mut served.app.state, Duration::from_secs(5));
+            .shut_down(&mut served.slot, Duration::from_secs(5));
     }
 
     /// What a tick defers is dropped after the lock is released (#475, M2): the
@@ -1306,7 +1619,7 @@ mod tests {
     #[test]
     fn the_garbage_of_a_tick_is_dropped_outside_the_lock() {
         struct Probe {
-            shared: SharedState,
+            shared: SharedApp,
             free_when_dropped: Arc<AtomicBool>,
         }
         impl Drop for Probe {
@@ -1320,7 +1633,7 @@ mod tests {
         let (_session, slot) = free_slot(demo(), dir.path());
         let shared = slot.shared();
         let free = Arc::new(AtomicBool::new(false));
-        shared.lock().stash_garbage(Probe {
+        state_of(&shared).stash_garbage(Probe {
             shared: Arc::clone(&shared),
             free_when_dropped: Arc::clone(&free),
         });
@@ -1335,7 +1648,7 @@ mod tests {
             free.load(Ordering::SeqCst),
             "the deferred value was dropped under the lock"
         );
-        assert!(shared.lock().take_garbage().is_empty());
+        assert!(state_of(&shared).take_garbage().is_empty());
     }
 
     /// Quit while the copy is being written: that write is the only one. The
@@ -1373,14 +1686,14 @@ mod tests {
         while thread.status().ticks.load(Ordering::Relaxed) == 0 {
             std::thread::sleep(Duration::from_millis(2));
         }
-        shared.lock().dispatch(Action::AddGraph);
+        state_of(&shared).dispatch(Action::AddGraph);
         offset.store(PERIOD.as_secs() + 1, Ordering::SeqCst);
         thread.unpark();
         started
             .recv_timeout(Duration::from_secs(10))
             .expect("the write is in flight");
         {
-            let mut state = shared.lock();
+            let mut state = state_of(&shared);
             state.set_quit_without_prompt(true);
             state.dispatch(Action::Quit {
                 pending_edits: false,
@@ -1389,7 +1702,7 @@ mod tests {
         go_tx.send(()).unwrap();
         // The window takes Quit as soon as the write has ended, then closes.
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !shared.lock().take_quit_ready() {
+        while !state_of(&shared).take_quit_ready() {
             assert!(Instant::now() < deadline, "quit never became ready");
             std::thread::sleep(Duration::from_millis(2));
         }

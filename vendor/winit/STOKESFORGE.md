@@ -56,11 +56,15 @@ winit: `src/platform/wayland.rs`, `src/platform_impl/linux/wayland/mod.rs`,
 `state.rs`, `event_loop/mod.rs` and the new `file_drop_bridge.rs`.
 The manifest and the seat handlers are the upstream ones.
 
-**#457** adds a second, independent patch to the same Wayland backend: the
-new `frame_starvation.rs` (pure) and, in `window/mod.rs` (`is_visible`,
-`WindowRequests::redraw_is_requested`), `window/state.rs` (time of the
-outstanding frame callback, starved flag), `event_loop/mod.rs` (the gate on
-the frame callback, `starvation_timeout`) and `mod.rs` (one `mod` line).
+The second patch of the same backend, **#457** (frame starvation: the report of
+`Occluded` for a window the compositor does not draw, opt-in through
+`WindowExtWayland::set_reports_occlusion`), was **removed in #475 (L5)**. It let
+a covered root keep running the actions of the detached windows; every detached
+window now serves itself in its own pass, so nothing needs a covered root to
+run. `window/mod.rs` and `window/state.rs` are upstream again and `frame_starvation.rs`
+is gone; the other files carry the drop patch only. What stays patched, and why:
+the Wayland file drop (#72) and, in `vendor/smithay-clipboard`, the shared drop
+receiver and the multi-format clipboard (#149).
 
 smithay-clipboard: `Cargo.toml` (winit and url, already in the graph),
 `src/lib.rs` (shared worker), `worker.rs` (callback), `state.rs` (wiring),
@@ -82,12 +86,11 @@ Both copies stay outside the workspace; a targeted `rustfmt` must complement
 Patch checks, from the root (Linux):
 
 ```sh
-cargo test -p stokesforge-app --test wayland_uri --test wayland_bridge \
-  --test wayland_frame_starvation
+cargo test -p stokesforge-app --test wayland_uri --test wayland_bridge
 cargo clippy -p winit -p smithay-clipboard --lib -- -D warnings
 rustfmt --edition 2021 --config-path /dev/null --config skip_children=true --check \
   vendor/winit/src/platform/wayland.rs \
-  vendor/winit/src/platform_impl/linux/wayland/{state,file_drop_bridge,frame_starvation}.rs \
+  vendor/winit/src/platform_impl/linux/wayland/{state,file_drop_bridge}.rs \
   vendor/winit/src/platform_impl/linux/wayland/event_loop/mod.rs
 rustfmt --edition 2024 --config-path /dev/null --config skip_children=true --check \
   vendor/smithay-clipboard/src/{file_drop,file_drop_uri,lib,state,worker}.rs
@@ -96,43 +99,6 @@ rustfmt --edition 2024 --config-path /dev/null --config skip_children=true --che
 The upstream smithay-clipboard configuration file contains nightly options;
 `/dev/null` selects the stable formatting for the modified files.
 `skip_children=true` leaves the unchanged upstream modules alone.
-
-## Frame starvation: Wayland tells nothing about occlusion (#457)
-
-winit gates `RedrawRequested` on the frame callback of the last present.
-A window the compositor does not draw (fully covered by another, on another
-workspace) never gets that callback, so its redraw is withheld for good, and
-with it everything the application runs in that pass. For StokesForge the
-root window runs the model actions of every detached window, so a detached
-window covering the root froze the whole application. eframe already knows
-what to do with an occluded window (it runs `logic` and `ui` unpainted,
-throttled to 100 ms, as long as a viewport is visible); it only has to be
-told. Wayland has no event for it, so the backend infers one.
-
-- Opt-in per window: `WindowExtWayland::set_reports_occlusion(true)`, default
-  off (upstream behaviour). Only the StokesForge root opts in (first `ui` pass).
-  eframe gives a reported window no pass and drops its raw input, which a
-  detached window, a false positive away, must not suffer; an unreported
-  covered window just repaints at its callback. No effect on X11.
-- A reporting window is **starved** when a redraw is pending and its callback has been
-  outstanding for 100 ms or more (`frame_starvation::assess`, pure). Never
-  while idle: no redraw pending, no verdict, no wake.
-- The first time it is, the loop emits `WindowEvent::Occluded(true)` and
-  `Window::is_visible()` answers `Some(false)` (upstream: always `None`).
-- The loop wakes once, at the deadline, only while a redraw is pending and the
-  verdict is open (`starvation_timeout`); no periodic wake (rule #104).
-- When the callback finally comes (uncovered), `Occluded(false)` is emitted
-  first, then `RedrawRequested`, whether or not the pending flag survived: the
-  compositor shows the buffer from before the cover.
-- A false positive (slow compositor, a root pass of 100 ms and more under CPU
-  load) only gives the root an unpainted pass, painted at the callback.
-
-Inert on X11 and the other platforms: the Wayland backend is not compiled
-there. It relies on eframe internals (`is_visible`/`Occluded` read in
-`eframe::native::wgpu_integration` and `run.rs`): recheck on any eframe bump.
-Proof on a real compositor: `stokesforge-app/tests/wayland_covered_root.rs`
-(manual, headless mutter; see `docs/tests.md`). Pure rule:
-`stokesforge-app/tests/wayland_frame_starvation.rs`.
 
 ## Interface and limits
 
@@ -202,10 +168,6 @@ When the chosen stable eframe version uses a winit with Wayland drop:
    `wayland_uri.rs` and `wayland_bridge.rs` and their `url`/`calloop`
    dev-dependencies.
 3. Regenerate `Cargo.lock`; check that a single winit version is used.
-   Also drop the starvation patch (#457), `set_reports_occlusion` and its call in
-   `StokesForgeApp::ui`, and its tests `wayland_frame_starvation.rs`
-   and `wayland_covered_root.rs` if the new winit reports occlusion itself;
-   otherwise port it.
 4. Re-examine `configure_window_backend`: the native choice must remain
    winit's; keep the `STOKESFORGE_X11=1` fallback if it is still useful.
 5. Replay the manual matrix and the workspace tests, then update
