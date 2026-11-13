@@ -445,3 +445,131 @@ fn x_prime_values_beyond_the_edge_create_columns() {
     );
     assert_eq!(s.state.column_meta(s.cols[0]).x_prime, Some(1.0));
 }
+
+fn set_x_primes(s: &mut Setup) {
+    for (column, x) in s.cols.clone().into_iter().zip(["1.5", "2.5", "3.5"]) {
+        s.set_header(column, HeaderField::XPrime, x);
+    }
+}
+
+/// Plain Ctrl+V: copied x' cells of 3 columns on a data cell are a ROW of 3
+/// values.
+#[test]
+fn plain_paste_writes_the_x_prime_row_as_a_row_of_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path(), false);
+    set_x_primes(&mut s);
+    s.state
+        .select_header_field(s.sheet, s.cols[0], HeaderField::XPrime);
+    s.state
+        .extend_header_field_selection(s.sheet, s.cols[2], HeaderField::XPrime);
+    let text = s.state.copy_selection(s.sheet).unwrap();
+    s.state.select_cell(s.sheet, s.cols[0], 1);
+    s.state.dispatch(Action::Paste {
+        sheet: s.sheet,
+        text,
+    });
+    assert_eq!(
+        [0, 1, 2].map(|column| s.float(s.cols[column], 1)),
+        [1.5, 2.5, 3.5]
+    );
+    assert_eq!(s.float(s.cols[0], 2), 3.0, "the other rows are untouched");
+}
+
+/// An x'-only header copy on an x' cell still goes header to header.
+#[test]
+fn an_x_prime_copy_on_an_x_prime_cell_stays_header_to_header() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path(), false);
+    set_x_primes(&mut s);
+    s.state
+        .select_header_field(s.sheet, s.cols[0], HeaderField::XPrime);
+    s.state
+        .extend_header_field_selection(s.sheet, s.cols[1], HeaderField::XPrime);
+    let text = s.state.copy_selection(s.sheet).unwrap();
+    s.state
+        .select_header_field(s.sheet, s.cols[1], HeaderField::XPrime);
+    s.state.dispatch(Action::Paste {
+        sheet: s.sheet,
+        text,
+    });
+    assert_eq!(s.state.column_meta(s.cols[1]).x_prime, Some(1.5));
+    assert_eq!(s.state.column_meta(s.cols[2]).x_prime, Some(2.5));
+}
+
+/// Header copy x' + long name on a data cell: the x' row only, one notice.
+#[test]
+fn a_header_copy_with_x_prime_pastes_only_the_x_prime_row_on_a_cell() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path(), false);
+    set_x_primes(&mut s);
+    s.state
+        .select_header_field(s.sheet, s.cols[0], HeaderField::XPrime);
+    s.state
+        .extend_header_field_selection(s.sheet, s.cols[2], HeaderField::LongName);
+    let text = s.state.copy_selection(s.sheet).unwrap();
+    s.state.select_cell(s.sheet, s.cols[0], 0);
+    s.state.dispatch(Action::Paste {
+        sheet: s.sheet,
+        text,
+    });
+    assert_eq!(
+        [0, 1, 2].map(|column| s.float(s.cols[column], 0)),
+        [1.5, 2.5, 3.5]
+    );
+    assert_eq!(s.status().0, StatusLevel::Warning);
+    assert!(
+        s.status().1.contains("One header row other than x'"),
+        "{:?}",
+        s.status()
+    );
+}
+
+/// Plain Ctrl+V of a row `1, x, 3` on the x' of A: A and C written, B kept,
+/// red message.
+#[test]
+fn plain_paste_of_a_row_on_an_x_prime_cell_fills_the_x_primes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path(), false);
+    s.set_header(s.cols[1], HeaderField::XPrime, "9");
+    s.state
+        .select_header_field(s.sheet, s.cols[0], HeaderField::XPrime);
+    s.state.dispatch(Action::Paste {
+        sheet: s.sheet,
+        text: "1\tx\t3".to_string(),
+    });
+    let x = |s: &Setup, column| s.state.column_meta(column).x_prime;
+    assert_eq!(x(&s, s.cols[0]), Some(1.0));
+    assert_eq!(x(&s, s.cols[1]), Some(9.0));
+    assert_eq!(x(&s, s.cols[2]), Some(3.0));
+    assert_eq!(s.status().0, StatusLevel::Error);
+}
+
+/// A 2-row block on x': the first row goes, the extra row is counted; a row of
+/// 4 on the second-to-last column creates 2 columns that carry x'.
+#[test]
+fn plain_paste_on_an_x_prime_cell_counts_extra_rows_and_creates_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path(), false);
+    s.state
+        .select_header_field(s.sheet, s.cols[0], HeaderField::XPrime);
+    s.state.dispatch(Action::Paste {
+        sheet: s.sheet,
+        text: "1\t2\n3\t4".to_string(),
+    });
+    assert_eq!(s.state.column_meta(s.cols[1]).x_prime, Some(2.0));
+    assert!(
+        s.status().1.contains("One header field did not fit"),
+        "{:?}",
+        s.status()
+    );
+    s.state
+        .select_header_field(s.sheet, s.cols[1], HeaderField::XPrime);
+    s.state.dispatch(Action::Paste {
+        sheet: s.sheet,
+        text: "1\t2\t3\t4".to_string(),
+    });
+    let order = s.order();
+    assert_eq!(order.len(), 5, "two columns created");
+    assert_eq!(s.state.column_meta(order[4]).x_prime, Some(4.0));
+}

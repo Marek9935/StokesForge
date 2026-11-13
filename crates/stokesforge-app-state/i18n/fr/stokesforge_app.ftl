@@ -393,13 +393,8 @@ status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
 status-paste-non-contiguous = Impossible de coller dans une sélection non contiguë
-status-paste-columns-dropped =
-    { $count ->
-        [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
-       *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
-    }
 status-paste-transposed-nothing = Rien à coller transposé : parmi les champs d'en-tête copiés, seul x' peut être collé
-status-paste-transposed-rows-dropped =
+status-paste-header-rows-dropped =
     { $count ->
         [one] Une ligne d'en-tête autre que x' n'a pas été collée
        *[other] { $count } lignes d'en-tête autres que x' n'ont pas été collées
@@ -415,7 +410,6 @@ status-paste-fields-dropped =
         [one] Un champ d'en-tête ne tenait pas dans la feuille et n'a pas été collé
        *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
     }
-status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
 status-formula-comma-rewritten = Lu comme la plage de { $from } à { $to } et réécrit { $rewritten }. Pour le nombre { $decimal }, l'écrire avec un point
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé

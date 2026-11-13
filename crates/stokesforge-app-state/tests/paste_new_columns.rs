@@ -1,11 +1,9 @@
 //! A paste that goes beyond the last column creates the missing columns
 //! (#495, replaces the #311 "dropped and counted" for columns), in the same
-//! single Undo entry, up to `MAX_PASTE_NEW_COLUMNS` per paste.
+//! single Undo entry, with no cap.
 
 use stokesforge_app_state::i18n::{self, Language};
-use stokesforge_app_state::state::{
-    Action, AppState, HeaderField, StatusLevel, MAX_PASTE_NEW_COLUMNS,
-};
+use stokesforge_app_state::state::{Action, AppState, HeaderField, StatusLevel};
 use stokesforge_core::{Cell, Column, NodeId, Project};
 use stokesforge_session::Session;
 
@@ -177,19 +175,19 @@ fn an_out_of_range_number_in_a_would_be_new_column_is_refused_whole() {
     assert!(s.state.status().unwrap().is_error());
 }
 
-/// More than the cap: the cap is created, the rest is dropped and counted in
-/// an orange that wins over the plain "added" notice.
+/// No cap (#495): a very wide paste creates every missing column, in one Undo,
+/// with a plain notice and no orange.
 #[test]
-fn a_paste_beyond_the_cap_creates_the_cap_and_counts_the_rest() {
+fn a_very_wide_paste_creates_every_column_in_one_undo() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
-    let wanted = MAX_PASTE_NEW_COLUMNS + 1 + 5;
+    let wanted = 1006;
     let row: Vec<String> = (0..wanted).map(|i| i.to_string()).collect();
     s.state.select_cell(s.sheet, s.cols[1], 0);
     s.paste(&row.join("\t"));
-    assert_eq!(s.order().len(), 2 + MAX_PASTE_NEW_COLUMNS);
+    assert_eq!(s.order().len(), 1 + wanted);
     let (level, text) = s.status();
-    assert_eq!(level, StatusLevel::Warning);
-    assert!(text.contains("5 columns"), "{text}");
+    assert_eq!(level, StatusLevel::Info);
+    assert!(text.contains("1005 columns were added"), "{text}");
     s.assert_one_undo_restores(2);
 }

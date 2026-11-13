@@ -391,13 +391,8 @@ status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable
 status-paste-non-contiguous = Cannot paste into a non-contiguous selection
-status-paste-columns-dropped =
-    { $count ->
-        [one] One column did not fit and was not pasted
-       *[other] { $count } columns did not fit and were not pasted
-    }
 status-paste-transposed-nothing = Nothing to paste transposed: of the copied header fields, only x' can be pasted
-status-paste-transposed-rows-dropped =
+status-paste-header-rows-dropped =
     { $count ->
         [one] One header row other than x' was not pasted
        *[other] { $count } header rows other than x' were not pasted
@@ -413,7 +408,6 @@ status-paste-fields-dropped =
         [one] One header field did not fit and was not pasted
        *[other] { $count } header fields did not fit and were not pasted
     }
-status-paste-columns-fields-dropped = { $columns } column(s) and { $fields } header field(s) did not fit and were not pasted
 status-formula-comma-rewritten = Read as the range from { $from } to { $to } and rewritten { $rewritten }. For the number { $decimal }, write it with a point
 status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared

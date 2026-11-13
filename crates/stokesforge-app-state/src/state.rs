@@ -124,14 +124,6 @@ pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
-/// Most columns ONE paste creates when it goes beyond the last column (#495).
-/// A paste is one frame-by-frame-visible gesture and one Undo entry: a TSV
-/// of a few thousand columns (a wide export, a transposed long column) would
-/// build as many columns, each one a command and a refresh, and a sheet the
-/// grid cannot draw at ease. What goes beyond is dropped and counted
-/// (`status-paste-columns-dropped`).
-pub const MAX_PASTE_NEW_COLUMNS: usize = 1000;
-
 /// How long a command waits for the formula recalculation it started to
 /// finish before handing control back to the interface (#239): a recalculation
 /// shorter than that stays invisible and synchronous.
@@ -10405,16 +10397,11 @@ impl AppState {
                 return;
             }
         }
-        match (&transposed, anchor) {
-            (
-                GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }),
-                GridCursor::Header(column, HeaderField::XPrime),
-            ) => self.paste_x_prime_row(sheet, column, rows),
-            _ => self.apply_paste(sheet, anchor, &transposed, false),
-        }
+        // An x' anchor takes the first row: the one branch of `apply_paste`.
+        self.apply_paste(sheet, anchor, &transposed, false);
         if dropped_rows > 0 {
             self.warn(tr!(
-                "status-paste-transposed-rows-dropped",
+                "status-paste-header-rows-dropped",
                 count = dropped_rows
             ));
         }
@@ -10435,9 +10422,8 @@ impl AppState {
             return;
         };
         let order_from_anchor = &order[position..];
-        let (created, dropped) =
-            Self::plan_paste_columns(order_from_anchor.len(), first.len(), MAX_PASTE_NEW_COLUMNS);
-        let grouped = first.len() - dropped > 1 || created > 0;
+        let created = Self::plan_paste_columns(order_from_anchor.len(), first.len());
+        let grouped = first.len() > 1 || created > 0;
         if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
             self.fail(tr!("error-paste-group"));
             return;
@@ -10450,7 +10436,7 @@ impl AppState {
             self.end_grouped_macro();
         }
         self.notice_columns_added(created);
-        self.warn_dropped(dropped, rows.len() - 1);
+        self.warn_dropped(rows.len() - 1);
     }
 
     /// The first number of an **external** text paste that a column reading
@@ -10498,10 +10484,7 @@ impl AppState {
                         };
                         kind
                     }
-                    None if first + offset - order.len() < MAX_PASTE_NEW_COLUMNS => {
-                        ColumnType::Numeric
-                    }
-                    None => break,
+                    None => ColumnType::Numeric,
                 };
                 if text.trim().is_empty()
                     || (kind == ColumnType::DateTime
@@ -10595,6 +10578,37 @@ impl AppState {
         clipboard: &GridClipboard,
         absolute: bool,
     ) {
+        // The x' row is a row of values (#495): a data block on an x' cell
+        // fills the x' of the successive columns; a header copy that holds the
+        // x' row, pasted on a data cell, writes that row as data and drops the
+        // other header rows with a notice. Paste in Place keeps its ranks.
+        if !absolute {
+            match (clipboard, anchor) {
+                (
+                    GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }),
+                    GridCursor::Header(column, HeaderField::XPrime),
+                ) => return self.paste_x_prime_row(sheet, column, rows),
+                (
+                    GridClipboard::Relative(RelativeCopy::HeaderFields {
+                        start: HeaderField::XPrime,
+                        rows,
+                    }),
+                    GridCursor::Data(..),
+                ) if !rows.is_empty() => {
+                    let as_data = GridClipboard::Relative(RelativeCopy::DataRows {
+                        start: 0,
+                        rows: vec![rows[0].clone()],
+                    });
+                    self.apply_paste(sheet, anchor, &as_data, false);
+                    let dropped = rows.len() - 1;
+                    if dropped > 0 {
+                        self.warn(tr!("status-paste-header-rows-dropped", count = dropped));
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         let order = self.column_order(sheet);
         let anchor_column = grid_cursor_column(anchor);
         let Some(anchor_index) = order.iter().position(|&id| id == anchor_column) else {
@@ -10702,32 +10716,22 @@ impl AppState {
         }
     }
 
-    /// Orange said when the copy overflows the sheet (#311): `columns` columns
-    /// beyond the right edge, `fields` header rows beyond Formula (field
-    /// paste anchored low). What overflows is dropped, never added: done, but
+    /// Orange said when the copy overflows the sheet (#311): `fields` header
+    /// rows beyond Formula (field paste anchored low, or a header row an x'
+    /// anchor has no place for). Missing columns are never an overflow: they
+    /// are created (#495). What overflows is dropped, never added: done, but
     /// not as asked, so it is an orange (S-R18, #453) that stays over the
     /// plain messages of the same paste. A red of the same paste still wins.
-    /// A single message if both overflow.
-    fn warn_dropped(&mut self, columns: usize, fields: usize) {
-        match (columns, fields) {
-            (0, 0) => {}
-            (columns, 0) => self.warn(tr!("status-paste-columns-dropped", count = columns)),
-            (0, fields) => self.warn(tr!("status-paste-fields-dropped", count = fields)),
-            (columns, fields) => self.warn(tr!(
-                "status-paste-columns-fields-dropped",
-                columns = columns,
-                fields = fields
-            )),
+    fn warn_dropped(&mut self, fields: usize) {
+        if fields > 0 {
+            self.warn(tr!("status-paste-fields-dropped", count = fields));
         }
     }
 
-    /// How a paste of `wanted` columns fits a sheet with `available` columns
-    /// from the anchor on (#495): `(created, dropped)`. The missing columns
-    /// are created, up to `cap` per paste; the rest is dropped.
-    fn plan_paste_columns(available: usize, wanted: usize, cap: usize) -> (usize, usize) {
-        let missing = wanted.saturating_sub(available);
-        let created = missing.min(cap);
-        (created, missing - created)
+    /// Columns to create for a paste of `wanted` columns on a sheet with
+    /// `available` columns from the anchor on (#495): all the missing ones.
+    fn plan_paste_columns(available: usize, wanted: usize) -> usize {
+        wanted.saturating_sub(available)
     }
 
     /// The columns a paste writes into: `order_from_anchor` plus the
@@ -10793,11 +10797,7 @@ impl AppState {
                 if order_from_anchor.is_empty() || column_count == 0 {
                     return;
                 }
-                let (created, dropped) = Self::plan_paste_columns(
-                    order_from_anchor.len(),
-                    column_count,
-                    MAX_PASTE_NEW_COLUMNS,
-                );
+                let created = Self::plan_paste_columns(order_from_anchor.len(), column_count);
                 let shift = if absolute {
                     0
                 } else {
@@ -10814,7 +10814,7 @@ impl AppState {
                             .then(|| (HeaderField::from_index(target as usize), cells))
                     })
                     .collect();
-                let target_count = column_count - dropped;
+                let target_count = column_count;
                 let grouped = writes.len() * target_count > 1 || created > 0;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail(tr!("error-paste-group"));
@@ -10837,7 +10837,7 @@ impl AppState {
                 // Header rows dropped: the low anchor pushes them beyond
                 // Formula (`writes` keeps only those that fit).
                 self.notice_columns_added(created);
-                self.warn_dropped(dropped, rows.len() - writes.len());
+                self.warn_dropped(rows.len() - writes.len());
                 // The refusal of a formula goes last: it wins over the
                 // overflow notice, the other fields are pasted.
                 self.fail_formula_paste(&refusals);
@@ -10847,13 +10847,9 @@ impl AppState {
                 if order_from_anchor.is_empty() || column_count == 0 || rows.is_empty() {
                     return;
                 }
-                let (created, dropped) = Self::plan_paste_columns(
-                    order_from_anchor.len(),
-                    column_count,
-                    MAX_PASTE_NEW_COLUMNS,
-                );
+                let created = Self::plan_paste_columns(order_from_anchor.len(), column_count);
                 let paste_row = if absolute { *start } else { anchor_row };
-                let grouped = column_count - dropped > 1;
+                let grouped = column_count > 1;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail(tr!("error-paste-group"));
                     return;
@@ -10876,7 +10872,7 @@ impl AppState {
                     self.end_grouped_macro();
                 }
                 self.notice_columns_added(created);
-                self.warn_dropped(dropped, 0);
+                self.warn_dropped(0);
             }
             // Copied fields + anchor on a data cell, or copied data rows +
             // anchor on a header field: different kinds, nothing is pasted
@@ -10900,12 +10896,8 @@ impl AppState {
         if order_from_anchor.is_empty() || columns.is_empty() {
             return;
         }
-        let (created, dropped) = Self::plan_paste_columns(
-            order_from_anchor.len(),
-            columns.len(),
-            MAX_PASTE_NEW_COLUMNS,
-        );
-        let target_count = columns.len() - dropped;
+        let created = Self::plan_paste_columns(order_from_anchor.len(), columns.len());
+        let target_count = columns.len();
         // Starting field of the header to write: all of them in absolute, from
         // the anchored field (nothing above) in relative if the anchor is a
         // field, none (header dropped) in relative if the anchor is a cell.
@@ -11010,7 +11002,7 @@ impl AppState {
             self.end_grouped_macro();
         }
         self.notice_columns_added(created);
-        self.warn_dropped(dropped, 0);
+        self.warn_dropped(0);
         // The other fields and the values are pasted, the status bar says what
         // is not.
         self.fail_formula_paste(&refusals);

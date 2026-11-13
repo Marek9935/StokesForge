@@ -135,9 +135,8 @@ sheet (left → right, top → bottom), never that of the clicks.
   field paste) adds Numeric columns at the end of the sheet, with the command
   of Add Column, inside the same `PasteCells` group (one Undo removes columns
   and values), BEFORE any header is written (a pasted formula reads letters of
-  the destination). At most `MAX_PASTE_NEW_COLUMNS` (1000) per paste: the rest
-  is dropped and counted (orange `status-paste-columns-dropped`), the
-  created ones are said by the plain `status-paste-columns-added`. An outside
+  the destination). There is no cap: the created ones are said by the plain
+  `status-paste-columns-added`. An outside
   text is range-checked for the columns it will create as Numeric
   (`external_paste_range_error`). Header rows beyond Formula are still dropped.
 - **Paste Transposed (#495)**: `Action::PasteTransposed { sheet, text }`,
@@ -154,7 +153,12 @@ sheet (left → right, top → bottom), never that of the clicks.
   cell, the first row goes into the x' of successive columns
   (`paste_x_prime_row`): a non-number is refused cell by cell, an empty one
   clears x'; anchored on another header field nothing is pasted. No new
-  `MacroKind`.
+  `MacroKind`. The x' row is a row of values for the plain Paste too (#495):
+  a data block on an x' cell takes that same branch (`apply_paste`), and a
+  header copy that holds the x' row, pasted on a data cell, writes the x' row
+  as data and drops the other copied header rows (orange
+  `status-paste-header-rows-dropped`). Paste in Place and a full-column copy
+  keep their ranks and are untouched.
 - **Clipboard format (#259)**: the system text is TSV in the
   Excel/LibreOffice format, written and read by `stokesforge_core::tsv` (`encode`,
   `decode`, `encode_cell`), without egui: a cell that holds a tab, a
