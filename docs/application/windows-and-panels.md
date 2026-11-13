@@ -380,7 +380,7 @@ its `sync_detached_*` / `adopt_detached_*` / `return_selection_*` plumbing, the
 `DetachedTab*` structures and the `detached-workbook-unavailable` text are gone
 (guard `no_detached_window_has_a_fork_of_the_state`). The pure-read free
 functions over a `&Tree` (`cell_text_in`, `visible_columns_in`, ...) stay for the
-panels, which still paint from a cloned snapshot. A note and a matrix never detach
+panels' pure reads. A note and a matrix never detach
 (#473), so `note_contents` and `matrix_contents` have a floating caller only.
 
 **The detached workbook serves itself (#475, L2).** Like the graph, its closure

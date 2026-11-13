@@ -11,7 +11,9 @@
 //!   everything; edits, a recalculation and an import come from a bench thread
 //!   that takes the lock like a hidden-window event would: M2, M3, M4, M5),
 //!   `quit` (M6), `reattach` (#475, L4: a graph detached and maximised over the
-//!   root, Reattach clicked from a bench thread; the window must close itself).
+//!   root, Reattach clicked from a bench thread; the window must close itself),
+//!   `covering` (#475, L5: the same for a graph, then a workbook, then the
+//!   Project Manager, one after the other, each maximised over the root).
 //! - `BENCH_SIZE`: `small` (about 10k cells) or `big` (1M rows x 10 columns).
 //! - `BENCH_DIR`: scratch folder (preferences, recovery copies, import files).
 //! - `BENCH_SECS`: duration. `BENCH_EDIT_AT`: seconds of the edits of `hidden`.
@@ -185,7 +187,7 @@ fn main() -> eframe::Result {
     };
     let t = Instant::now();
     let (mut project, column_a, column_d) = build_project(rows, data, formulas, terms);
-    let graph = (plan.scenario == "reattach").then(|| {
+    let graph = matches!(plan.scenario.as_str(), "reattach" | "covering").then(|| {
         let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
         panel
             .series
@@ -198,6 +200,14 @@ fn main() -> eframe::Result {
                 stokesforge_plot::PlotSpec::empty("Figure").with_panels(panel),
             )
             .expect("graph")
+    });
+    let book = (plan.scenario == "covering").then(|| {
+        let root = project.root();
+        project
+            .tree()
+            .child_by_name(root, "Book1")
+            .expect("read")
+            .expect("Book1")
     });
     let session = Session::spawn(project, None).expect("session");
     println!(
@@ -244,13 +254,26 @@ fn main() -> eframe::Result {
             if let Some(graph) = graph {
                 app.bench_detach_graph(graph);
             }
+            if let Some(book) = book {
+                app.bench_detach_book(book);
+                app.bench_detach_project_manager();
+            }
             let ctx = cc.egui_ctx.clone();
             let mut served = ServedApp::new(app, ctx.clone());
             let shared = served.shared_state();
             let waker = served.bench_waker();
             let end = Arc::new(AtomicBool::new(false));
             let continuous = matches!(plan.scenario.as_str(), "lock" | "quit" | "quit_idle");
-            if let Some(graph) = graph {
+            if let (Some(graph), Some(book)) = (graph, book) {
+                covering_thread(
+                    graph,
+                    book,
+                    Arc::clone(&shared),
+                    ctx.clone(),
+                    Arc::clone(&passes_for_app),
+                    started,
+                );
+            } else if let Some(graph) = graph {
                 reattach_thread(
                     graph,
                     Arc::clone(&shared),
@@ -424,7 +447,7 @@ fn start_threads(
     }
     if matches!(
         scenario.as_str(),
-        "quit" | "quit_idle" | "lock" | "reattach"
+        "quit" | "quit_idle" | "lock" | "reattach" | "covering"
     ) {
         return;
     }
@@ -609,6 +632,75 @@ fn reattach_thread(
             shared.graph_places(graph),
             passes.load(Relaxed) - root_at_gone
         );
+    });
+}
+
+/// `covering` (#475, L5): a graph, then a workbook, then the Project Manager,
+/// each detached, maximised over the root and reattached by a click made from
+/// here. Each window serves itself: it closes in its own pass, the tab floats (or
+/// the panel docks), and the root, covered, runs no pass until then. The root
+/// gets no frame callback while covered, and the vendored winit no longer hides
+/// that (the starvation patch of #457 is gone).
+fn covering_thread(
+    graph: NodeId,
+    book: NodeId,
+    shared: Arc<BenchState>,
+    ctx: egui::Context,
+    passes: Arc<AtomicU64>,
+    started: Instant,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs_f64(
+            (4.0 - started.elapsed().as_secs_f64()).max(0.0),
+        ));
+        type Click<'a> = Box<dyn Fn() + 'a>;
+        type Gone<'a> = Box<dyn Fn() -> bool + 'a>;
+        let stages: Vec<(&str, egui::ViewportId, Click, Gone)> = vec![
+            (
+                "graph",
+                stokesforge_app::app::StokesForgeApp::bench_graph_viewport(graph),
+                Box::new(|| shared.click_reattach(graph)),
+                Box::new(|| !shared.graph_places(graph).0),
+            ),
+            (
+                "book",
+                stokesforge_app::app::StokesForgeApp::bench_book_viewport(book),
+                Box::new(|| shared.click_reattach_book(book)),
+                Box::new(|| !shared.book_places(book).0),
+            ),
+            (
+                "project_manager",
+                stokesforge_app::app::StokesForgeApp::bench_project_manager_viewport(),
+                Box::new(|| shared.click_reattach_project_manager()),
+                Box::new(|| !shared.project_manager_detached()),
+            ),
+        ];
+        for (name, id, click, gone) in stages {
+            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Maximized(true));
+            ctx.request_repaint_of(id);
+            std::thread::sleep(Duration::from_secs(2));
+            let maximised = ctx.viewport_for(id, |viewport| viewport.input.viewport().maximized);
+            let root_before = passes.load(Relaxed);
+            let click_us = wall_us();
+            click();
+            ctx.request_repaint_of(id);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut gone_us = None;
+            while Instant::now() < deadline {
+                if gone() {
+                    gone_us = Some(wall_us());
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let root_at_gone = passes.load(Relaxed);
+            println!(
+                "bench: covering {name} maximised={maximised:?} click_to_gone_us {} root_ui_delta_until_gone {}",
+                gone_us.map_or(-1, |gone| (gone - click_us) as i64),
+                root_at_gone - root_before
+            );
+            std::thread::sleep(Duration::from_millis(1500));
+        }
     });
 }
 

@@ -483,8 +483,6 @@ pub struct StokesForgeApp {
     /// The window asked to close (cross, Alt+F4, Quit): to be posted to
     /// the state like `Action::Quit` (#229).
     close_requested: bool,
-    /// The root asked winit to report it occluded (Wayland, #457), once.
-    occlusion_reported: bool,
     /// The state released the closing: the next request is no longer held back.
     quit_confirmed: bool,
     /// Whether a dialog was open in the main window at the end of the previous
@@ -631,7 +629,6 @@ impl StokesForgeApp {
             autoquit,
             first_frame: None,
             close_requested: false,
-            occlusion_reported: false,
             quit_confirmed: false,
             dialog_was_open: false,
             dialog_opener: None,
@@ -1257,22 +1254,8 @@ impl eframe::App for StokesForgeApp {
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
-        // #457: a root covered by a detached window gets no frame callback and would
-        // freeze the actions of every window. Only the root opts in to the report:
-        // a reported window gets no pass and loses its input, which a detached
-        // window must not.
         if let Some(wayland) = detached_graph::native_wayland(frame) {
             self.windows_close_themselves = wayland;
-        }
-        #[cfg(target_os = "linux")]
-        if !self.occlusion_reported {
-            if let Some(window) = frame.winit_window() {
-                {
-                    use winit::platform::wayland::WindowExtWayland as _;
-                    window.set_reports_occlusion(true);
-                }
-                self.occlusion_reported = true;
-            }
         }
         self.sync_panel_layout(&mut actions);
         self.drain_layout_actions(&mut actions);
@@ -1302,9 +1285,8 @@ impl eframe::App for StokesForgeApp {
         if changed {
             // A command applied after publication wakes the viewports. The
             // detached windows get their snapshot and their wake-up now, not
-            // from the next root pass: when one of them covers the root, that
-            // pass runs only every 100 ms (`docs/windows.md`, #457), and the
-            // result of a click would wait for two of them.
+            // from the next root pass (a covered root gets none on native
+            // Wayland).
             ctx.request_repaint();
             // The windows read the shared state and only need to look again.
             server::wake(
@@ -1329,6 +1311,35 @@ impl StokesForgeApp {
             self.floating_tabs.push(tab);
         }
         self.detach_tab(tab);
+    }
+
+    /// For the bench: the workbook starts detached into its own window.
+    #[doc(hidden)]
+    pub fn bench_detach_book(&mut self, book: NodeId) {
+        let tab = Tab::Book(book);
+        if !self.floating_tabs.contains(&tab) {
+            self.floating_tabs.push(tab);
+        }
+        self.detach_tab(tab);
+    }
+
+    /// For the bench: the viewport of the detached window of `book`.
+    #[doc(hidden)]
+    pub fn bench_book_viewport(book: NodeId) -> egui::ViewportId {
+        detached_book::book_viewport(book)
+    }
+
+    /// For the bench: the Project Manager starts detached into its own window.
+    #[doc(hidden)]
+    pub fn bench_detach_project_manager(&mut self) {
+        self.pm_open = true;
+        self.detach_project_manager();
+    }
+
+    /// For the bench: the viewport of the detached Project Manager.
+    #[doc(hidden)]
+    pub fn bench_project_manager_viewport() -> egui::ViewportId {
+        detached_panel::panel_viewport_id(PanelKind::Project)
     }
 
     /// For the bench: the viewport of the detached window of `graph`.

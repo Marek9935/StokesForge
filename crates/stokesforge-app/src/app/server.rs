@@ -529,6 +529,36 @@ impl BenchState {
         }
     }
 
+    /// Same for the detached workbook `book`.
+    pub fn click_reattach_book(&self, book: stokesforge_core::NodeId) {
+        if let Some(window) = self.0.lock().detached_books.get_mut(&book) {
+            window.reattach = true;
+        }
+    }
+
+    /// Same for the detached Project Manager.
+    pub fn click_reattach_project_manager(&self) {
+        let mut app = self.0.lock();
+        let index = super::panel_memory::panel_index(
+            stokesforge_app_state::panel_layout::PanelKind::Project,
+        );
+        app.panel_windows[index].reattach = true;
+    }
+
+    /// (detached into its own window, floating in the main window) for `book`.
+    pub fn book_places(&self, book: stokesforge_core::NodeId) -> (bool, bool) {
+        let app = self.0.lock();
+        (
+            app.detached_books.contains_key(&book),
+            app.floating_tabs.contains(&super::tab::Tab::Book(book)),
+        )
+    }
+
+    /// Is the Project Manager detached into its own window?
+    pub fn project_manager_detached(&self) -> bool {
+        self.0.lock().pm_detached
+    }
+
     /// Where the tab of `graph` is: (detached into its own window, floating in
     /// the main window), as the application's own lists say.
     pub fn graph_places(&self, graph: stokesforge_core::NodeId) -> (bool, bool) {

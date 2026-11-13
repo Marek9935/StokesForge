@@ -8,13 +8,12 @@
 //! (`detached_graph.rs`, `detached_book.rs`): they paint the shared state with
 //! the very function of the floating window, apply the actions of their own
 //! gestures in the same pass, and the workbook's sender identity (#21) is
-//! swapped into the state for its paint. What remains in this file, the three
-//! panels (until L3), still works on a copy and queues its business actions for
-//! the root. That stays true when such a window covers the main one (#457): on
-//! native Wayland the covered root gets no frame callback, so the vendored winit
-//! reports it occluded after 100 ms and eframe runs its `logic` and `ui`
-//! unpainted about every 100 ms (`vendor/winit/STOKESFORGE.md`, "Frame
-//! starvation"). The viewport's request wakes the root and the root applies it.
+//! swapped into the state for its paint. What remains in this file is
+//! the shared frame of the detached panels, the publication of the viewports and
+//! the detach/reattach plumbing. Since L3 the three panels serve themselves too
+//! (`detached_panel.rs`), so a window covering the main one needs no root pass:
+//! on native Wayland the covered root gets no frame callback, and nothing waits
+//! for it (the starvation patch of #457 was removed in L5).
 //!
 //! Moving and resizing a detached window is handed to the OS through
 //! [`super::os_gesture`], the only path for `StartDrag` / `BeginResize`: the

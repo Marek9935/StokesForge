@@ -173,12 +173,11 @@ whose window is no longer the maximised one, which covers Restore, the Window me
 close, delete and project load). A detached window maximises its OS window the same way
 (`follow_mode_maximize`, unless it was maximised at entry), and its header's Restore leaves the mode;
 a restore done from outside the application (an OS shortcut) cannot be told from a maximise the
-compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because the
-vendored winit reports the root, the only window that opts in, as occluded when the compositor no
-longer serves it (frame starvation, #457; a detached window is never reported: it would lose its
-input, and a covered one repaints at its frame callback): the covered root still runs `logic` and `ui` unpainted about every 100 ms, so the actions
-of the detached window are drained, at the cost of about 100 ms between a command and its paint
-while the main window is covered. The saved window views report the state from before the mode
+compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because a
+detached window no longer needs the root (#475): it locks the application in its own pass,
+paints the shared state and applies its actions at once, so a root covered by it, which gets no
+frame callback, delays nothing. There is no occlusion report and no 100 ms throttle any more (the
+frame-starvation patch of #457 was removed in L5). The saved window views report the state from before the mode
 (`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at
 the start of the frame (`begin_layout_frame`) and at the top of a detached viewport, never
 inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard
@@ -251,14 +250,14 @@ and the manual say so.
   never sees the key: one press is one action on one history stack, nothing is
   undone twice, and a typed text stays as typed (Ctrl+Z undoes the last command,
   as in the main window).
-- **Queued after the window's own actions** (#398), through the window's
-  `requests.actions`: Ctrl+Z pressed in the frame of a click undoes that click.
-  The root drains them with the dialog refusal of #471, so a dialog open in the
-  main window refuses them, shows the band, and leaves the field untouched.
+- **Applied after the window's own actions** (#398), in the same pass:
+  Ctrl+Z pressed in the frame of a click undoes that click. The dialog refusal
+  of #471 applies, so a dialog open in the main window refuses them, shows the
+  band, and leaves the field untouched.
 - **Ctrl+Shift+S is consumed first and dropped**: Ctrl+S would match it and Save
   As would save silently.
-- **Ctrl+S with no file yet** queues `Action::Save`; the root opens the system
-  file picker (no band).
+- **Ctrl+S with no file yet** dispatches `Action::Save`; the system
+  file picker opens (no band).
 - **Ctrl+Q closes nothing.** egui closes the window where its built-in shortcut
   (`Options::quit_shortcuts`) is pressed, which lost a typed cell;
   `refuse_quit_in_detached` consumes it and the window shows the orange band

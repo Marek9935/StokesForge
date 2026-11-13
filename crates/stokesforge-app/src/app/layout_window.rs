@@ -27,15 +27,11 @@
 //!   in its own pass, paints from the shared state and applies its actions at once
 //!   (`detached_graph.rs`): a covered root, which on native Wayland gets no frame
 //!   callback, delays nothing the graph does. What still goes through the root is
-//!   Reattach and Close (a flag the root drains, until L4), the dialogs (painted by
-//!   the root, #472: the window shows a band) and the panels, which
-//!   keep their queues until L3 (the workbook serves itself like the graph since
-//!   L2); for those the vendored winit still reports the
-//!   ROOT (the only window that opts in) as occluded after 100 ms without a
-//!   callback while a redraw is wanted (`vendor/winit/STOKESFORGE.md`, "Frame
-//!   starvation"), so eframe keeps running its `logic` and `ui` unpainted about
-//!   every 100 ms; a detached window is never reported, as it would get no pass and
-//!   lose its input. The patch goes in L5.
+//!   Reattach and Close under X11 and on Windows (a flag the root drains) and the
+//!   dialogs (painted by the root, #472: the window shows a band). Every window
+//!   serves itself (the workbook and the panels like the graph, L2 and L3), so no
+//!   occlusion report is needed and none exists (the vendored winit patch of #457
+//!   was removed in L5).
 //! - **Keys.** The root reads them at the start of the frame, before any
 //!   window is painted ([`StokesForgeApp::begin_layout_frame`]); a detached
 //!   viewport reads them at the top of its own frame. Esc therefore reaches the

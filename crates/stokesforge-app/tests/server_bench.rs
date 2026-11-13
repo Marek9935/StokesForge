@@ -600,8 +600,7 @@ fn m6_quit_during_autosave_big_project() {
 /// reattaches itself from its own pass. Real application, GL, headless mutter.
 /// The window is gone from the application's list within 500 ms of the click
 /// and the tab floats in the main window; the root, covered, runs at most one
-/// pass until then (its own throttled passes, #457) and paints the floating tab
-/// once uncovered.
+/// pass until then and paints the floating tab once uncovered.
 #[test]
 #[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
 fn a_covering_detached_graph_reattaches_itself() {
@@ -653,4 +652,52 @@ fn a_covering_detached_graph_reattaches_itself() {
         "the covering window did not reattach itself:\n{}",
         r.out
     );
+}
+
+/// #475, step 2, L5: with the starvation patch of #457 gone, a graph, then a
+/// workbook, then the Project Manager, each maximised over the root, serve
+/// themselves: the Reattach click is applied by the window's own pass (gone
+/// within 500 ms) while the covered root runs no pass at all.
+#[test]
+#[ignore = "manual: needs mutter and dbus-run-session, see the module doc"]
+fn covering_windows_serve_themselves_with_the_root_left_alone() {
+    build_example();
+    let Some(r) = run_once(&Config {
+        scenario: "covering",
+        big: false,
+        secs: 20,
+        env: &[],
+    }) else {
+        return skip();
+    };
+    println!("{}", r.out);
+    assert!(r.finished, "the bench did not end:\n{}", r.out);
+    let mut all_ok = true;
+    for name in ["graph", "book", "project_manager"] {
+        let key = format!("covering {name} ");
+        let line = r
+            .out
+            .lines()
+            .find(|line| line.contains(&key))
+            .unwrap_or_else(|| panic!("no `{key}` line:\n{}", r.out));
+        let gone_us: i64 = line
+            .split("click_to_gone_us ")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|value| value.parse().ok())
+            .expect("a time");
+        let delta: u64 = line
+            .rsplit("root_ui_delta_until_gone ")
+            .next()
+            .and_then(|value| value.trim().parse().ok())
+            .expect("a count");
+        let ok = (0..500_000).contains(&gone_us) && delta == 0;
+        all_ok &= ok;
+        println!(
+            "server-bench: L5 covering {name} click_to_gone={:.1} ms root_ui_delta_until_gone={delta} {}",
+            gone_us as f64 / 1000.0,
+            verdict(ok)
+        );
+    }
+    assert!(all_ok, "a covering window needed the root:\n{}", r.out);
 }

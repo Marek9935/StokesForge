@@ -15,7 +15,6 @@ pub use output::{MonitorHandle, VideoModeHandle};
 pub use window::Window;
 
 pub(crate) mod file_drop_bridge;
-pub(crate) mod frame_starvation;
 mod event_loop;
 mod output;
 mod seat;

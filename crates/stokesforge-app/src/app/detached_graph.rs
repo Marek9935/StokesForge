@@ -35,7 +35,7 @@
 //! root (#472): this window shows the band that says where the dialog is. Not
 //! run in this pass, because they target the current viewport or belong to the
 //! root alone: `sync_window_title_and_status`, `poll_background_jobs`,
-//! `refresh_monitors`, the occlusion opt-in, the dialogs, the stack of the
+//! `refresh_monitors`, the dialogs, the stack of the
 //! floating windows.
 //!
 //! **Current-viewport traps.** In a child pass `request_repaint`,

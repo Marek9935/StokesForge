@@ -152,7 +152,7 @@ refusal path (the same message and status band as a write during a script), so i
 Import entry and Ctrl+Z of the import leaves later edits alone. `AppState::can_new_project` and a
 second import refuse meanwhile, and the autosave waits (its `save` reads `MacroOpen` as "busy"). Its
 requests wait for the actor like the interface's: a long recalculation delays them, and it
-holds no lock on the application state while it waits for the autosave write.
+holds no lock on the application state while it waits for the autosave write. The detached windows are not session clients of their own: each one locks the application in its own pass and uses the interface's handle (the detached workbook and the panels under their own sender identity, #21).
 
 ## The principle that governs refusals
 

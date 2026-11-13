@@ -2768,6 +2768,66 @@ fn the_fork_guard_sees_every_name_of_the_fork() {
     }
 }
 
+/// The patch of #457 (winit reporting the root occluded, so that a covered root
+/// kept running) in production code: `path:line` of each use. A detached window
+/// serves itself since #475 and nothing needs the root to run while it is covered.
+fn covered_root_patch_names(sources: &[SourceFile]) -> Vec<String> {
+    const FORBIDDEN: [&str; 2] = ["set_reports_occlusion", "frame_starvation"];
+    let mut found = Vec::new();
+    for file in sources {
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if (i == 0 || !is_ident(source.mask[i - 1]))
+                && FORBIDDEN
+                    .iter()
+                    .any(|name| starts_with_at(&source.mask, i, name))
+            {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn nothing_keeps_the_root_running_for_a_covering_window() {
+    let offenders = covered_root_patch_names(&sources::sources());
+    assert!(
+        offenders.is_empty(),
+        "a detached window serves itself in its own passes; the occlusion opt-in and the \
+         frame-starvation patch of #457 are gone (#475): {offenders:?}"
+    );
+}
+
+/// The witness: both names are seen; a comment, test code and a longer name pass.
+#[test]
+fn the_covered_root_guard_sees_both_names() {
+    for code in [
+        "fn f(w: &W) { w.set_reports_occlusion(true); }",
+        "use winit::platform::wayland::frame_starvation;",
+    ] {
+        assert_eq!(
+            covered_root_patch_names(&[file("app/a.rs", code)]).len(),
+            1,
+            "not seen: {code}"
+        );
+    }
+    for code in [
+        "fn f() {} // set_reports_occlusion(true)",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { w.set_reports_occlusion(true); } }",
+        "fn f() { my_frame_starvation_free(); }",
+    ] {
+        assert!(
+            covered_root_patch_names(&[file("app/a.rs", code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+}
+
 /// `APP_ID` is what ties a window to `stokesforge.desktop` and to its icon.
 #[test]
 fn the_application_id_is_the_desktop_name() {

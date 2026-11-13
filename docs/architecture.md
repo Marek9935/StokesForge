@@ -102,7 +102,7 @@ own pass (`app/detached_graph.rs`); so does the **detached workbook** (L2,
 sender identity per detached window swapped into the state for its paint (#21). So do the
 three **panels** (L3, `app/detached_panel.rs`): the Project Manager, the Object Manager and
 the console are painted from the shared state with the function of the docked panel, and
-no copy or request queue is left between a window and the application.
+no copy or request queue is left between a window and the application. A covered root, which gets no frame callback on native Wayland, delays nothing: the winit frame-starvation patch of #457 was removed in L5 (only the #72 drop patch remains in `vendor/winit`).
 Rules and tests: `.claude/rules/app.md`, `docs/application/shell-and-code.md`, `docs/tests.md`.
 
 ## The three separation lines
