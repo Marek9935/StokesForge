@@ -8,6 +8,7 @@
 
 use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::state::{Action, AppState, FullColumnsCopy, HeaderField};
+use stokesforge_commands::Command;
 use stokesforge_core::{Column, ColumnMeta, ColumnType, NodeId, Project};
 use stokesforge_session::Session;
 
@@ -2119,4 +2120,38 @@ fn a_red_of_an_earlier_gesture_does_not_make_the_next_one_a_failure() {
             .any(|m| m.text.contains("1.234") || m.text.contains("1,234")),
         "the decimal-comma notice was said"
     );
+}
+
+/// #494: a plain `T` calls a transposed sheet, and the field shows the real
+/// name, without quotes. Witness: the display quoting `ᵀ`, or a lookup without
+/// the fold (the text stays as typed).
+#[test]
+fn a_plain_t_calls_a_transposed_sheet_and_shows_its_real_name() {
+    let mut w = world();
+    let handle = w._session.handle();
+    handle
+        .execute(Command::AddWorksheet {
+            book: w.book1,
+            name: Some("Sheet1\u{1D40}".into()),
+        })
+        .unwrap();
+    let transposed = handle
+        .snapshot()
+        .unwrap()
+        .tree
+        .resolve("[Book1]Sheet1T")
+        .expect("the plain T finds the sheet");
+    for name in ["x", "y"] {
+        handle
+            .execute(Command::AddColumn {
+                sheet: transposed,
+                index: None,
+                name: Some(name.into()),
+                column: Column::from_f64(&[1.0, 2.0]),
+            })
+            .unwrap();
+    }
+    let column = w.formula_column(w.sheet1, "max(Sheet1T!B)");
+    assert_eq!(w.letters(column).as_deref(), Some("max(Sheet1\u{1D40}!B)"));
+    assert_eq!(w.values(column)[0], Some(2.0));
 }

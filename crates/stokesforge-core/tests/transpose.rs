@@ -184,6 +184,16 @@ fn refuses_a_text_column_but_not_a_mixed_one_without_text() {
     );
 }
 
+/// A user sheet `Sheet1T` (or `Sheet1t`) reserves the name `Sheet1ᵀ` (#494):
+/// the transposed sheet is `Sheet1ᵀ 2`, the creation is never blocked.
+#[test]
+fn a_sheet_named_with_a_plain_t_takes_the_name_of_the_transposed_sheet() {
+    let mut f = fixture();
+    f.project.add_worksheet(f.book, Some("Sheet1t")).unwrap();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    assert_eq!(name(&f.project, sheet), format!("Sheet1{TRANSPOSE_MARK} 2"));
+}
+
 #[test]
 fn a_taken_name_is_not_reused_unless_the_sheet_is_linked() {
     let mut f = fixture();
