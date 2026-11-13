@@ -97,7 +97,6 @@ impl eframe::App for Root {
                 PROBE_COVER_ROLE_WAKE.store(1, Relaxed);
                 start_cover_if_asked();
             }
-            return;
         }
     }
 }
