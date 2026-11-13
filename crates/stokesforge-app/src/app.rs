@@ -1670,7 +1670,13 @@ impl StokesForgeApp {
     /// A confirmation request also stops the remaining actions of the frame.
     fn dispatch_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         let origins = std::mem::take(&mut self.action_origins);
-        for (index, action) in actions.into_iter().enumerate() {
+        // An action that opens the Properties macro goes LAST of its pass (stable
+        // order otherwise): a rename that commits through an action of the same
+        // frame lands before the macro, never inside it (#533). The origin of
+        // each action follows its original index.
+        let mut ordered: Vec<(usize, Action)> = actions.into_iter().enumerate().collect();
+        ordered.sort_by_key(|(_, action)| action.opens_plot_macro());
+        for (index, action) in ordered {
             let origin = origins
                 .iter()
                 .find(|(range, _)| range.contains(&index))
@@ -2578,6 +2584,34 @@ mod tests {
         );
         assert!(app.state.unsaved_pending().is_none());
         assert_eq!(app.state.cell_text(column, 0), "42");
+        session.shutdown().unwrap();
+    }
+
+    /// #533: a rename that commits through an action of the same frame as the
+    /// click on Properties (a fast tap) lands BEFORE the macro opens, so Cancel
+    /// keeps the name. Witness: dispatch the actions in their collected order.
+    #[test]
+    fn a_rename_of_the_frame_lands_before_the_properties_macro() {
+        use stokesforge_app_state::state::PlotSettingsTab;
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let context = egui::Context::default();
+        app.dispatch_actions(
+            &context,
+            vec![
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Graph,
+                    axis: None,
+                },
+                Action::RenameObjects(vec![(book, "Renamed".into())]),
+            ],
+        );
+        assert!(app.state.plot_settings().is_some());
+        app.state.cancel_plot_settings();
+        assert_eq!(app.state.tree().node(book).unwrap().name(), "Renamed");
         session.shutdown().unwrap();
     }
 

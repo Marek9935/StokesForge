@@ -1514,6 +1514,20 @@ pub enum SaveTarget {
     User,
 }
 
+impl Action {
+    /// Whether this action opens the Properties macro (or a shape-edit macro).
+    /// The root pass dispatches such an action last, so an entry that commits
+    /// through an action of the same frame lands before the macro (#533).
+    pub fn opens_plot_macro(&self) -> bool {
+        matches!(
+            self,
+            Action::OpenPlotSettings { .. }
+                | Action::OpenObjectProperties { .. }
+                | Action::BeginShapeEdit
+        )
+    }
+}
+
 impl SaveTarget {
     /// Label of the choice.
     pub fn label(self) -> String {
@@ -6656,7 +6670,11 @@ impl AppState {
                 target,
                 shape,
             } => self.edit_annotations(graph, |spec| target.set(spec, *shape)),
-            Action::BeginShapeEdit => self.begin_plot_macro(),
+            Action::BeginShapeEdit => {
+                // An open entry becomes its own step before the macro (#533).
+                self.commit_open_entries();
+                self.begin_plot_macro();
+            }
             Action::EndShapeEdit { keep: true } => self.end_plot_macro(),
             Action::EndShapeEdit { keep: false } => self.abort_plot_macro(),
             Action::RemoveShape { graph, target } => {
@@ -6931,6 +6949,10 @@ impl AppState {
             self.end_plot_macro();
             self.plot_edit = None;
         }
+        // An entry still open (cell, header, note) becomes its own undo step
+        // BEFORE the macro opens: Cancel must never roll back what the user
+        // typed (#533). A refused value stays open, as on Save.
+        self.commit_open_entries();
         self.begin_plot_macro();
         self.begin_plot_edit(graph);
         let current_axis = self
@@ -8485,6 +8507,11 @@ impl AppState {
     }
 
     fn commit_open_entries_in_gesture(&mut self) -> bool {
+        // While the Properties macro is open a commit would join it and Cancel
+        // would roll it back: the entries stay open (#533).
+        if self.plot_macro_open {
+            return false;
+        }
         let mut committed = false;
         if self.editing.is_some() && self.cell_edit_refusal().is_none() {
             self.commit_edit();
@@ -9126,6 +9153,13 @@ impl AppState {
         self.refresh();
         if gesture == UnsavedGesture::NewProject && !self.can_new_project() {
             return;
+        }
+        // Properties (or a shape edit) open: behave like OK first, so the
+        // entries commit as their own step, never into its macro (#533).
+        if self.plot_settings.is_some() {
+            self.close_plot_settings();
+        } else {
+            self.end_plot_macro();
         }
         self.commit_open_entries();
         if self.has_unsaved_work(pending_edits) {

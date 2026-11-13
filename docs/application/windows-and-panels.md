@@ -407,7 +407,10 @@ root path elsewhere, `drain_detached_book_flags`). Two rules come with it:
   the duration of that paint only by an RAII guard (`WindowIdentity`, given back
   even on a panic), so a write made while the main window holds a macro open
   (the properties of a graph) is refused by the actor (`ForeignMacro`) instead of
-  being absorbed and undone with the macro. The actions a window returns are
+  being absorbed and undone with the macro. Beyond the identity (#533): opening
+  Properties commits the open entries first (own undo step), nothing commits an
+  entry while the macro is open (it stays open), and `dispatch_actions` runs the
+  actions that open the macro last in their pass. The actions a window returns are
   dispatched afterwards with the main identity, after the gate of the open
   dialog (`apply_pass_actions`), which stays the first barrier. The graph window
   writes through its actions only; its identity covers the entry a press in it
