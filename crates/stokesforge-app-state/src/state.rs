@@ -1920,7 +1920,9 @@ pub fn series_list_entry(
     let shown = crate::figure_texts::series_label_text(&label);
     let named = matches!(
         label,
-        stokesforge_core::SeriesLabel::Text(_) | stokesforge_core::SeriesLabel::Template { .. }
+        stokesforge_core::SeriesLabel::Text(_)
+            | stokesforge_core::SeriesLabel::Typed { .. }
+            | stokesforge_core::SeriesLabel::Template { .. }
     );
     // An empty text, or a template that does not compile or shows nothing.
     if series.row.is_none() && named && shown.trim().is_empty() {

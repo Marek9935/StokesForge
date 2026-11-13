@@ -60,8 +60,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use stokesforge_plot::{
-    template_source, ColorBarSpec, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec,
-    SeriesSpec,
+    ColorBarSpec, LegendField, LegendText, LegendTextFrom, PanelSpec, PlotSpec, SeriesSpec,
 };
 
 use crate::column::Column;
@@ -240,12 +239,20 @@ pub fn resolve_column(tree: &Tree, id: NodeId) -> Option<&Column> {
 pub enum SeriesLabel {
     /// A name: the spec's, the long name of the Y column, or its node name.
     Text(String),
-    /// A custom legend template (#499): the Typst source of the entry, the
-    /// variables of the column defined first, then the template as typed.
-    /// Drawn with the rich style, like a typed name. A list (Object Manager,
-    /// series list) shows the plain text the interface layer gets by
-    /// evaluating it (`stokesforge-render`, which core does not depend on).
-    Template { markup: String },
+    /// A custom legend template (#499): the template as typed and the
+    /// fields of the entry's column. The renderer binds the variables
+    /// (`stokesforge_render::variables::bind`, the one binder of #501, which
+    /// core does not depend on). Drawn with the rich style, like a typed
+    /// name. A list (Object Manager, series list) shows the plain text the
+    /// interface layer gets by evaluating it.
+    Template {
+        template: String,
+        fields: ColumnFields,
+    },
+    /// A typed name (`SeriesSpec::name`, #501): Typst markup as typed, and the
+    /// fields of the series' own column for its variables. A list shows the
+    /// typed source.
+    Typed { name: String, fields: ColumnFields },
     /// An unnamed "row" series (#166): the 0-based row (the interface shows
     /// `row + 1`, as the grid does).
     Row(usize),
@@ -388,7 +395,15 @@ pub fn text_context(tree: &Tree, spec: &PlotSpec, target: TextTarget) -> Option<
 /// row gives an **empty** text (no fallback), except for the default source.
 pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> SeriesLabel {
     if !series.name.is_empty() {
-        return SeriesLabel::Text(series.name.clone());
+        let fields = if series.row.is_some() {
+            ColumnFields::default()
+        } else {
+            column_fields(tree, series.y).unwrap_or_default()
+        };
+        return SeriesLabel::Typed {
+            name: series.name.clone(),
+            fields,
+        };
     }
     if let Some(row) = series.row {
         // "Row" series (#166): the row is its name, as in the grid, or the
@@ -436,7 +451,8 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree, text: &LegendText) -> Seri
             false,
         )),
         LegendTextFrom::Custom => SeriesLabel::Template {
-            markup: template_source(&text.template, field),
+            template: text.template.clone(),
+            fields,
         },
     }
 }
@@ -1214,7 +1230,10 @@ mod tests {
         };
         assert_eq!(
             series_label(&series, f.project.tree(), &LegendText::default()),
-            SeriesLabel::Text("My series".to_string())
+            SeriesLabel::Typed {
+                name: "My series".to_string(),
+                fields: column_fields(f.project.tree(), f.y).expect("column"),
+            }
         );
     }
 
@@ -1413,7 +1432,10 @@ mod tests {
         };
         assert_eq!(
             label_of(&project, &series, &from(LegendTextFrom::Comments)),
-            SeriesLabel::Text("mine".to_string())
+            SeriesLabel::Typed {
+                name: "mine".to_string(),
+                fields: column_fields(project.tree(), y).expect("column"),
+            }
         );
     }
 
@@ -1576,8 +1598,8 @@ mod tests {
         assert_eq!(label_of(&project, &series, &chosen), shown);
     }
 
-    /// Witness: a column text with `* # $ " \\` reaches the preamble as a
-    /// string literal, and the template is kept as typed after it.
+    /// Witness: core keeps the template as typed and the column text raw:
+    /// the renderer, not core, quotes it.
     #[test]
     fn a_custom_template_reads_the_column_text_through_variables() {
         let (project, _, y) = headers();
@@ -1587,17 +1609,17 @@ mod tests {
             template: "*#ln* #if u != \"\" [(#u)]".to_string(),
             row_column: None,
         };
-        let SeriesLabel::Template { markup } = label_of(&project, &series, &custom) else {
+        let SeriesLabel::Template { template, fields } = label_of(&project, &series, &custom)
+        else {
             panic!("a template label");
         };
-        assert!(
-            markup.contains("#let long-name = \"Abs *max* #1\"\n"),
-            "{markup}"
-        );
-        assert!(markup.contains("#let units = \"u.a.\"\n"));
-        assert!(markup.contains("#let short-name = \"Y\"\n"));
-        assert!(markup.contains("#let x-prime = \"57\"\n"));
-        assert!(markup.ends_with("*#ln* #if u != \"\" [(#u)]"));
+        // Core hands over the template as typed and the raw column fields: the
+        // renderer binds them (the one binder of #501), no preamble here.
+        assert_eq!(template, "*#ln* #if u != \"\" [(#u)]");
+        assert_eq!(fields.long_name, "Abs *max* #1");
+        assert_eq!(fields.units, "u.a.");
+        assert_eq!(fields.short_name, "Y");
+        assert_eq!(fields.x_prime, "57");
     }
 
     #[test]

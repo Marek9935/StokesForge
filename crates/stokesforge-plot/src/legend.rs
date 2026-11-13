@@ -293,20 +293,6 @@ pub fn typst_literal(text: &str) -> String {
     }
 }
 
-/// The Typst source of a custom template for one legend entry: a preamble
-/// that defines every variable of [`VARIABLES`] (long and short name) as a
-/// string of the entry's column, then the template as typed. `value` gives
-/// the text of each field.
-pub fn template_source(template: &str, mut value: impl FnMut(LegendField) -> String) -> String {
-    let mut source = String::new();
-    for (long, short, field) in VARIABLES {
-        let quoted = typst_string(&value(field));
-        source.push_str(&format!("#let {long} = {quoted}\n#let {short} = {long}\n"));
-    }
-    source.push_str(template);
-    source
-}
-
 impl LegendTextFrom {
     /// The custom template that gives the same text as this choice: what
     /// « Custom… » starts from. `None` for [`Self::Custom`] itself.
@@ -347,24 +333,13 @@ impl LegendText {
 mod tests {
     use super::*;
 
-    fn value(field: LegendField) -> String {
-        match field {
-            LegendField::LongName => "A \"*b*\" #c $d \\".to_string(),
-            LegendField::Units => "mM".to_string(),
-            LegendField::Comments => String::new(),
-            LegendField::ShortName => "B".to_string(),
-            LegendField::XPrime => "57".to_string(),
-        }
-    }
-
     /// Witness: no escape of `"` or `\` would end the string early.
     #[test]
-    fn the_variables_are_string_literals_that_hold_any_character() {
-        let source = template_source("#ln", value);
-        assert!(source.contains("#let long-name = \"A \\\"*b*\\\" #c $d \\\\\"\n"));
-        assert!(source.contains("#let ln = long-name\n"));
-        assert!(source.contains("#let u = units\n"));
-        assert!(source.ends_with("#ln"));
+    fn a_string_literal_holds_any_character() {
+        assert_eq!(
+            typst_string("A \"*b*\" #c $d \\"),
+            "\"A \\\"*b*\\\" #c $d \\\\\""
+        );
         assert_eq!(typst_literal(""), "");
         assert_eq!(typst_literal("a\"b\\c"), "#\"a\\\"b\\\\c\"");
     }

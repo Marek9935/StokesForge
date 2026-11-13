@@ -26,6 +26,7 @@ use stokesforge_plot::{AxisScale, PlotType, SeriesAxis, SeriesSpec};
 
 use crate::scale::forward;
 use crate::texts::FigureTexts;
+use crate::variables::{self, VariableValues};
 
 /// A point in plot space.
 pub type Point = (f64, f64);
@@ -164,10 +165,20 @@ impl Prepared<'_> {
     pub fn legend_text(&self, texts: &FigureTexts) -> String {
         let name = match &self.label {
             SeriesLabel::Missing => return texts.broken_reference.clone(),
-            // A template is Typst source with its preamble: a broken series
-            // cannot be annotated with it, so it says only that it is broken.
+            // A template is Typst source: a broken series cannot be annotated
+            // with it, so it says only that it is broken. Otherwise the
+            // variables of a template and of a typed name are bound by the one
+            // binder of #501, on the fields of the entry's column.
             SeriesLabel::Template { .. } if self.broken => return texts.broken_reference.clone(),
-            SeriesLabel::Text(name) | SeriesLabel::Template { markup: name } => name.clone(),
+            SeriesLabel::Template { template, fields } => {
+                variables::bind(template, &VariableValues::from(fields))
+            }
+            // A broken named series is annotated and drawn literally.
+            SeriesLabel::Typed { name, .. } if self.broken => name.clone(),
+            SeriesLabel::Typed { name, fields } => {
+                variables::bind(name, &VariableValues::from(fields))
+            }
+            SeriesLabel::Text(name) => name.clone(),
             SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
         };
         if self.broken {
@@ -184,7 +195,10 @@ impl Prepared<'_> {
     /// interface, which would be markup too, so it is all drawn literally.
     pub fn legend_is_typed(&self) -> bool {
         !self.broken
-            && (!self.spec.name.is_empty() || matches!(self.label, SeriesLabel::Template { .. }))
+            && matches!(
+                self.label,
+                SeriesLabel::Typed { .. } | SeriesLabel::Template { .. }
+            )
     }
 }
 

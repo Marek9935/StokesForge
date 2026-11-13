@@ -1370,6 +1370,105 @@ fn a_custom_template_agrees_and_leaves_the_column_text_literal() {
     );
 }
 
+/// The texts of the primitives `agree` drew on both backends for a legend
+/// that reads `text` (and a series named `name`, empty for none).
+fn legend_texts(text: stokesforge_plot::LegendText, name: &str, tag: &str) -> Vec<String> {
+    let mut fixture = legend_text_fixture(text);
+    fixture.spec.panels.get_mut(0).expect("panel").series[0].name = name.to_string();
+    let (primitives, _) = agree(fixture.project.tree(), &fixture.spec, SIZE, tag);
+    primitives
+        .iter()
+        .filter_map(|p| match p {
+            Primitive::Text(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #501: the legend template goes through the one binder, so `$ln(x)$` reaches
+/// Typst as typed and is the logarithm, not the long name. The drawn text of a
+/// formula is its source: the old always-on preamble put `#let ln = …` in front
+/// of it (a math identifier then read the variable, the #499 defect), which
+/// this exact comparison refuses. Witness: restore that preamble.
+#[test]
+fn a_legend_template_keeps_the_logarithm_in_math() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let drawn = legend_texts(
+        LegendText {
+            from: LegendTextFrom::Custom,
+            template: "$ln(x)$".to_string(),
+            ..LegendText::default()
+        },
+        "",
+        "template logarithm",
+    );
+    assert!(
+        drawn.iter().any(|text| text == "$ln(x)$"),
+        "the template did not reach Typst as typed: {drawn:?}"
+    );
+    assert!(!drawn.iter().any(|text| text.contains("the long name")));
+}
+
+/// #501: a template that fails shows what was typed, never the `#let` lines
+/// of a preamble. Witness: the old preamble was part of the fallback text.
+#[test]
+fn a_failed_legend_template_shows_the_typed_text() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let drawn = legend_texts(
+        LegendText {
+            from: LegendTextFrom::Custom,
+            template: "#ln #nope".to_string(),
+            ..LegendText::default()
+        },
+        "",
+        "failed template",
+    );
+    assert!(
+        drawn.iter().any(|text| text == "#ln #nope"),
+        "the typed text is not the fallback: {drawn:?}"
+    );
+    assert!(!drawn.iter().any(|text| text.contains("#let")));
+}
+
+/// #501: a typed series name `#ln` shows the long name of its own column in
+/// the legend, on screen (the legend cell has the width of the same name typed
+/// out) and in the SVG export (the text is there, `#ln` is not). Witness: a
+/// name that is not bound draws `#ln`, a much narrower entry with no long name
+/// in the document.
+#[test]
+fn a_typed_series_name_reads_the_variables_of_its_column() {
+    use stokesforge_plot::LegendText;
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let figure = |name: &str| {
+        let mut fixture = legend_text_fixture(LegendText::default());
+        fixture.spec.panels.get_mut(0).expect("panel").series[0].name = name.to_string();
+        fixture
+    };
+    let width_of = |name: &str| {
+        let fixture = figure(name);
+        let drawn = drawn_with_typst(fixture.project.tree(), &fixture.spec, SIZE);
+        drawn.panels[0].legend_rows[0].width
+    };
+    assert_eq!(width_of("#ln"), width_of("the long name"));
+    assert_ne!(width_of("#ln"), width_of("#nonexistent-entry"));
+    let fixture = figure("#ln");
+    let plot = resolve_spec(fixture.project.tree(), &fixture.spec);
+    let document = stokesforge_render_svg::export_bytes(
+        &plot,
+        SIZE,
+        &measurer,
+        &choice,
+        stokesforge_render_svg::ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    let document = String::from_utf8(document).expect("utf-8");
+    assert!(document.contains("thelongname"), "{document}");
+    assert!(!document.contains("#ln") && !document.contains("sf-vars"));
+}
+
 /// An empty chosen row gives an empty entry; the figure still agrees.
 #[test]
 fn an_empty_legend_entry_agrees_between_the_backends() {

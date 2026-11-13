@@ -329,7 +329,7 @@ The **Layout** section has **Columns**, **Row gap (pt)**, **Column gap (pt)** an
 
 Each entry shows the name of its series. To rename a series, double-click its entry in the legend and type the new name. An empty name goes back to the column name.
 
-**Text from** chooses which header row of the worksheet gives the text of every entry: **Long Name** (the default; an empty long name shows the short name), **Comments**, **x'**, **Units**, **Short Name**, **Long Name (Units)**, **Long Name, Comments**, or **Custom…**. The choice applies to all the series of the layer. A name you typed for a series still wins. If the chosen row is empty for a column, its entry is empty (its line or symbol stays). The lists (Object Manager, series list of Graph Properties) then show the column in grey, as `(empty) Sheet1 B`, so the row stays recognisable. A number taken from a column (x', or the value of a column on a row series) is written as the worksheet grid shows it (6 significant digits). The column picker of **Value of column…** lists each column as its letter and Long Name, for example `A — Wavelength`. With **Custom…** a **Template** field appears, filled with the Typst equivalent of the previous choice (what you already typed is never replaced). The template is Typst text that reads these variables, each with a long and a short name: `#long-name` (`#ln`), `#short-name` (`#sn`), `#units` (`#u`), `#comments` (`#c`) and `#x-prime` (`#xp`). Their text is shown exactly as it is written in the column, whatever characters it holds. For example `*#ln* #if u != "" [(#u)]` writes the Long Name in bold, then the Units in parentheses only when there are some. The names are the same in every interface language. The lists show the plain text of the result, without formatting; a template Typst cannot read turns the field red and shows the grey `(empty)` fallback in the lists. A Row series does not use the template.
+**Text from** chooses which header row of the worksheet gives the text of every entry: **Long Name** (the default; an empty long name shows the short name), **Comments**, **x'**, **Units**, **Short Name**, **Long Name (Units)**, **Long Name, Comments**, or **Custom…**. The choice applies to all the series of the layer. A name you typed for a series still wins. If the chosen row is empty for a column, its entry is empty (its line or symbol stays). The lists (Object Manager, series list of Graph Properties) then show the column in grey, as `(empty) Sheet1 B`, so the row stays recognisable. A number taken from a column (x', or the value of a column on a row series) is written as the worksheet grid shows it (6 significant digits). The column picker of **Value of column…** lists each column as its letter and Long Name, for example `A — Wavelength`. With **Custom…** a **Template** field appears, filled with the Typst equivalent of the previous choice (what you already typed is never replaced). The template is Typst text that reads the variables of the column of each entry (see Variables from the columns, under Titles and formulas), each with a long and a short name: `#long-name` (`#ln`), `#short-name` (`#sn`), `#units` (`#u`), `#comments` (`#c`) and `#x-prime` (`#xp`). Their text is shown exactly as it is written in the column, whatever characters it holds. For example `*#ln* #if u != "" [(#u)]` writes the Long Name in bold, then the Units in parentheses only when there are some. The names are the same in every interface language. The lists show the plain text of the result, without formatting; a template Typst cannot read turns the field red and shows the grey `(empty)` fallback in the lists. A Row series does not use the template.
 
 For a series made from a row of a worksheet, **Row series** chooses between **Row number** and **Value of column…**, which shows the cell of the column you pick on that row.
 
@@ -387,7 +387,30 @@ If a formula is not valid, the field shows a message after you leave it. The gra
 - **Several characters in an exponent or index**: put them in parentheses. `$"cm"^(-1)$` raises `-1`, not just `-`.
 - **Greek letters**: type their English name. `alpha`, `beta`, `mu`, `pi`, `theta`, `sigma` give lowercase letters. A capital first letter gives the capital: `Delta`, `Omega`.
 - **Special characters**: write `\$` for a dollar sign, `\_` for an underscore, `\*` for a star and `\#` for a hash. In plain text, `_`, `*`, `#` and `$` have a meaning in Typst.
-- **Series names**: a series name that you leave empty uses the column name exactly as written, so characters like `_` and `#` in the column name are safe. A name that you type is read as a formula.
+- **Series names**: a series name that you leave empty uses the column name exactly as written, so characters like `_` and `#` in the column name are safe. A name that you type is read as a formula, and can use the variables below.
+
+### Variables from the columns
+
+A title, an axis title, a text on the graph, a series name and the break labels of a color bar can use **variables**: names that the graph replaces by a field of a column. They follow the column, so renaming it or editing its **Long Name** or **Units** updates the graph by itself.
+
+| You type | You get |
+|---|---|
+| `#long-name` or `#ln` | the **Long Name** of the column |
+| `#short-name` or `#sn` | the **Short Name** of the column |
+| `#units` or `#u` | the **Units** of the column |
+| `#comments` or `#c` | the **Comments** of the column |
+| `#x-prime` or `#xp` | the **x'** of the column |
+
+The names are the same in every interface language. The help icon of each field lists them. For example, `#ln (#u)` as an axis title gives `Absorbance (a.u.)`, and `#if u != "" [(#u)]` writes the units in parentheses only when there are some. The value is shown exactly as it is written in the column, whatever characters it holds. A formula such as `$ln(x)$` is still the logarithm.
+
+Which column a text reads depends on where it is:
+
+- an axis title reads the X column (bottom and top axes) or the Y column (left and right axes) of the first series on that axis;
+- the graph title, a layer title and a text on the graph read the Y column of the first series of the layer;
+- a color bar break label reads the Y column of the first series of its group;
+- a legend entry reads its own series.
+
+If there is no such series, or its column was deleted, the variable shows **(broken reference)**. The fields and the editors always show what you typed, not the value. A name that is not a variable, such as `#nope`, turns the field red.
 
 ### Axis titles with units
 

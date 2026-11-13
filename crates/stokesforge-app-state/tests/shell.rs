@@ -9078,6 +9078,12 @@ fn a_custom_template_shows_its_plain_text_in_the_lists() {
         series_list_entry(tree, &SeriesSpec::new(b), &custom("#nope")),
         ("(empty) Sheet1 B".to_string(), true)
     );
+    // #501: a math identifier of the template is the logarithm, not the
+    // variable: the list shows ln(x) in math italics, never the long name.
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(a), &custom("$ln(x)$")),
+        ("ln(\u{1d465})".to_string(), false)
+    );
     // A typed name wins.
     let typed = SeriesSpec {
         name: "mine".into(),

@@ -14,7 +14,7 @@
 
 use std::borrow::Cow;
 
-use stokesforge_core::resolve::{column_fields, text_context, TextTarget};
+use stokesforge_core::resolve::{column_fields, text_context, ColumnFields, TextTarget};
 use stokesforge_core::Tree;
 use stokesforge_plot::{typst_string, AxisSpec, LegendField, PlotSpec};
 use typst::syntax::{parse, SyntaxKind, SyntaxNode};
@@ -47,6 +47,25 @@ impl VariableValues {
             LegendField::XPrime => &self.x_prime,
         }
     }
+}
+
+impl From<&ColumnFields> for VariableValues {
+    fn from(fields: &ColumnFields) -> Self {
+        Self {
+            long_name: fields.long_name.clone(),
+            short_name: fields.short_name.clone(),
+            units: fields.units.clone(),
+            comments: fields.comments.clone(),
+            x_prime: fields.x_prime.clone(),
+        }
+    }
+}
+
+/// The Typst error of a text typed in a field, `None` if it compiles (#501).
+/// The variables are defined (empty) first, so `#ln` is valid and `#nope` is
+/// not; a math identifier (`$ln(x)$`) is the logarithm, as when drawn.
+pub fn diagnose_text(text: &str) -> Option<String> {
+    crate::formula::diagnose(&bind(text, &VariableValues::default()))
 }
 
 /// Opens the preamble. A comment: it draws nothing.
@@ -146,13 +165,7 @@ pub fn bind_spec<'a>(tree: &Tree, spec: &'a PlotSpec, texts: &FigureTexts) -> Co
     let values = |target: TextTarget| match text_context(tree, spec, target)
         .and_then(|id| column_fields(tree, id))
     {
-        Some(fields) => VariableValues {
-            long_name: fields.long_name,
-            short_name: fields.short_name,
-            units: fields.units,
-            comments: fields.comments,
-            x_prime: fields.x_prime,
-        },
+        Some(fields) => VariableValues::from(&fields),
         None => {
             let broken = texts.broken_reference.clone();
             VariableValues {

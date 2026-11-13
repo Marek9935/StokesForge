@@ -1311,6 +1311,20 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
             "plot-math-footer",
             url = "typst.app/docs/reference/math"
         ));
+        // The variables of the graph texts (#501), built from the one table.
+        ui.add_space(crate::theme::SPACE_ITEM);
+        ui.label(table_header(tr!("plot-variables-memo-header")));
+        egui::Grid::new("plot_variable_help")
+            .num_columns(2)
+            .spacing([12.0, 2.0])
+            .show(ui, |ui| {
+                for (names, gives) in stokesforge_app_state::figure_texts::variable_help_rows() {
+                    ui.monospace(names);
+                    ui.weak(gives);
+                    ui.end_row();
+                }
+            });
+        ui.weak(tr!("plot-variables-note"));
     });
 }
 
@@ -1340,24 +1354,6 @@ pub(super) fn formula_field(
     hint: &str,
     value: &mut String,
 ) -> bool {
-    formula_field_with(
-        form,
-        label,
-        hint,
-        value,
-        &stokesforge_render_egui::formula::diagnose,
-    )
-}
-
-/// [`formula_field`] whose text is checked by `diagnose` (a template that reads
-/// variables needs them defined first).
-fn formula_field_with(
-    form: &mut Form<'_>,
-    label: &str,
-    hint: &str,
-    value: &mut String,
-    diagnose: &dyn Fn(&str) -> Option<String>,
-) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
@@ -1365,7 +1361,8 @@ fn formula_field_with(
         // on the field; the graph, for its part, falls back to the raw text. No red
         // while typing, where the markup is necessarily unfinished.
         if !response.has_focus() {
-            if let Some(error) = diagnose(value) {
+            // The variables are defined first (#501): `#ln` is valid, `#nope` is not.
+            if let Some(error) = stokesforge_render::variables::diagnose_text(value) {
                 field_state::show_issue(ui, &response, &FieldIssue::refused(error));
             }
         }
@@ -2294,19 +2291,11 @@ fn legend_text_editor(
         text.choose_custom();
     }
     if text.from == LegendTextFrom::Custom {
-        // The template reads variables: it is checked with them defined.
-        let diagnose = |template: &str| {
-            stokesforge_render_egui::formula::diagnose(&stokesforge_plot::template_source(
-                template,
-                |_| String::new(),
-            ))
-        };
-        commit |= formula_field_with(
+        commit |= formula_field(
             form,
             &tr!("plot-legend-template"),
             &tr!("plot-legend-template", "hint"),
             &mut text.template,
-            &diagnose,
         );
     }
     if !row_columns.is_empty() {
@@ -5513,6 +5502,33 @@ mod tests {
         assert_eq!(red_frames(&paint(&mut faulty)), 1);
     }
 
+    /// #501: a field of a graph text defines the variables before it
+    /// diagnoses: `#ln` is valid (no red frame), `#nope` is not, in an axis
+    /// title field as in the others. Witness: the plain Typst diagnosis of the
+    /// text finds no `ln` and turns the valid variable red.
+    #[test]
+    fn a_variable_is_valid_in_a_text_field_and_an_unknown_name_is_red() {
+        let context = test_support::context();
+        let paint = |value: &mut String| {
+            image(&context, vec![], |ui| {
+                form(ui, "trial", |form| {
+                    formula_field(
+                        form,
+                        &tr!("plot-axes-quantity"),
+                        &tr!("plot-axes-quantity", "hint"),
+                        value,
+                    )
+                });
+            })
+        };
+        let mut known = String::from("#ln (#u)");
+        let mut unknown = String::from("#nope");
+        paint(&mut known);
+        paint(&mut unknown);
+        assert_eq!(red_frames(&paint(&mut known)), 0);
+        assert_eq!(red_frames(&paint(&mut unknown)), 1);
+    }
+
     /// S-T3 in context: a faulty markup is typed, Enter leaves the field, the
     /// red frame appears.
     #[test]
@@ -5926,6 +5942,11 @@ mod tests {
         }
         assert!(is_painted(&painted, &footer));
         assert!(footer.contains("Typst"), "the reminder names Typst");
+        // #501: the variables, one line each, built from the one table.
+        for (names, gives) in stokesforge_app_state::figure_texts::variable_help_rows() {
+            assert!(is_painted(&painted, &names), "variables: {names:?} absent");
+            assert!(is_painted(&painted, &gives), "variables: {gives:?} absent");
+        }
     }
 
     /// Paints the formula help icon and returns its rectangle.

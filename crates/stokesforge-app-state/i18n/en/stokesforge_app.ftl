@@ -1051,7 +1051,7 @@ legend-text-from-long-name-comments = Long Name, Comments
 legend-text-from-custom = Custom…
 legend-text-from-unknown = Long Name (setting of a newer version)
 plot-legend-template = Template
-    .hint = Typst text. Variables: #long-name (#ln) the Long Name, #short-name (#sn) the Short Name, #units (#u) the Units, #comments (#c) the Comments, #x-prime (#xp) the x'. Their text is shown as is.
+    .hint = Typst text of each legend entry.
 plot-legend-row-text = Row series
 plot-legend-row-number = Row number
 plot-legend-row-column-value = Value of column…
@@ -1133,6 +1133,8 @@ plot-theme-note = Applies to all titles, axes, ticks and gridlines. Replaces col
 
 # Memo of the Typst syntax, under every title field
 
+plot-variables-memo-header = Variables
+plot-variables-note = Axis titles read the X or Y column of the first series, the other texts its Y column; a legend entry reads its own series.
 plot-math-memo-header = Math syntax
 plot-math-greek = Greek letters λ, Δ
 plot-math-subscript = Subscript

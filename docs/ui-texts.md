@@ -97,6 +97,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Column | Colonne | Series of values of one type | Champ, Variable | O |
+| Variable | Variable | A name typed in a graph text (`#long-name`, `#ln`, `#units`…) that the graph replaces by a field of a column, live (#501); the names are the same in every language, the help lists them from `VARIABLES` | Champ, Paramètre, Macro | G |
 | Row | Ligne | Row of cells of a sheet | Enregistrement | O |
 | Entry row | Ligne de saisie | Empty row the grid always shows below the last row of a sheet, marked `*` in the gutter (« Type here to add a row » / « Saisir ici pour ajouter une ligne »); typing in it creates the row. Not data: not saved, not plotted | Ligne vide, New row, Ligne d'ajout | O |
 | x' (x prime) | x' | Numeric value specific to a column (special header row), abscissa of a "line" series; is not translated | X2, Temps, Instant (le temps n'est qu'un cas d'usage) | — |

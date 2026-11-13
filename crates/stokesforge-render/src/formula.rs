@@ -1519,19 +1519,23 @@ mod tests {
         assert_eq!(diagnose("$ (unclosed"), diagnose("$ (unclosed"));
     }
 
-    /// #499: a custom legend template reads its variables; the values are
-    /// drawn literally and a smart `#if` drops empty parentheses. Witness: a
-    /// value in markup form would make `*b*` bold (text `Ab`), a template
+    /// #499, #501: a custom legend template reads its variables; the values
+    /// are drawn literally and a smart `#if` drops empty parentheses. Witness:
+    /// a value in markup form would make `*b*` bold (text `Ab`), a template
     /// without the `#if` would give `Abs ()`.
     #[test]
     fn a_legend_template_reads_its_variables_literally() {
-        use stokesforge_plot::{template_source, LegendField};
+        use crate::variables::{bind, VariableValues};
         let source = |template: &str, units: &str, name: &str| {
-            template_source(template, |field| match field {
-                LegendField::LongName | LegendField::ShortName => name.to_string(),
-                LegendField::Units => units.to_string(),
-                _ => String::new(),
-            })
+            bind(
+                template,
+                &VariableValues {
+                    long_name: name.to_string(),
+                    short_name: name.to_string(),
+                    units: units.to_string(),
+                    ..Default::default()
+                },
+            )
         };
         let template = "*#ln* #if u != \"\" [(#u)]";
         let hard = "A *b* # $ \" \\ \u{394}";

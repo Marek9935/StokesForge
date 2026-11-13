@@ -586,15 +586,6 @@ pub(crate) fn fix_frames(
     let _ = stokesforge_render_svg::fix_legacy_frames(&reference, spec, &measurer, &choice);
 }
 
-/// The spec graph `graph` has now in the session, if it is one.
-pub(crate) fn current_graph_spec(session: &SessionHandle, graph: NodeId) -> Option<PlotSpec> {
-    let snapshot = session.snapshot().ok()?;
-    match snapshot.tree.node(graph)?.kind() {
-        stokesforge_core::node::NodeKind::Graph { spec, .. } => Some(spec.clone()),
-        _ => None,
-    }
-}
-
 pub(crate) fn set_graph_spec(
     session: &SessionHandle,
     graph: NodeId,
