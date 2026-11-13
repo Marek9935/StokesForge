@@ -217,9 +217,11 @@ pub(super) fn serve_once(
     let tick = guard.server_tick(now);
     let garbage = guard.take_garbage();
     drop(guard);
-    // Freed with the lock released (the previous snapshot's big columns).
-    garbage.dispose();
     server_stats::since("tick", held, tick.changed);
+    // Freed with the lock released (the previous snapshot's big columns).
+    let freed = server_stats::start();
+    garbage.dispose();
+    server_stats::since("dispose", freed, false);
     let mut changed = tick.changed;
     let mut next = tick.next;
     if let Some(job) = tick.autosave {

@@ -254,6 +254,12 @@ fn lock_cost(big: bool) {
             .collect();
         let finish: Vec<u64> = r.of("finish").iter().map(|s| s.dur_us).collect();
         let busy = r.of("busy").len();
+        let dispose: Vec<u64> = r.of("dispose").iter().map(|s| s.dur_us).collect();
+        println!(
+            "server-bench: M2 {} run={run} dropped after unlocking: {}",
+            size_name(big),
+            summary(&dispose)
+        );
         let m1 = pct(&waits, 0.99) <= 0.5 && pct(&waits, 1.0) <= 4.0;
         let m2 = pct(&ticks, 0.99) <= 1.0 && pct(&ticks, 1.0) <= 8.0;
         let size = size_name(big);
