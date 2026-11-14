@@ -2026,6 +2026,10 @@ status-import-origin-left-wizard = { $count ->
     [one] The Origin file was
    *[other] { $count } Origin files were
 } moved from the Import window to the Import from Origin window
+status-import-origin-after-window = { $count ->
+    [one] The Origin file
+   *[other] The { $count } Origin files
+} will open after the Import window
 status-origin-drop-refused = Only Origin files can be added here. The other dropped files were not imported
 origin-import-title = Import from Origin
 origin-import-summary = To create: { $sheets ->
