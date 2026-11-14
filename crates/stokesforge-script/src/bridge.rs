@@ -681,7 +681,7 @@ pub(crate) fn remove_shape(
     set_graph_spec(session, id, spec)
 }
 
-/// Imports a file into a new workbook, one sheet per plane (an Origin `.opj`:
+/// Imports a file into a new workbook, one sheet per plane (an Origin `.opj` or `.opju`:
 /// one workbook per book, see [`import_origin_file`]). All the
 /// analysis and conversion stay those of the CLI and the application.
 /// File errors are detected before the first command; an

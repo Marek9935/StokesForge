@@ -280,6 +280,30 @@ fn a_truncated_origin_file_names_the_file_and_does_not_panic() {
 }
 
 #[test]
+fn a_truncated_opju_is_skipped_by_name_and_does_not_panic() {
+    let dir = isolated();
+    let bytes = std::fs::read(fixture("origin/synthetic.opju")).unwrap();
+    let cut = dir.path().join("cut.opju");
+    std::fs::write(
+        &cut,
+        &bytes[..stokesforge_import::origin::synthetic::FIRST_DATASET_OFFSET + 3],
+    )
+    .unwrap();
+    let error = run(&["import", cut.to_str().unwrap()]).0.unwrap_err();
+    assert!(error.contains("cut.opju"), "{error}");
+    let (result, output) = run(&[
+        "import",
+        cut.to_str().unwrap(),
+        &fixture("origin/synthetic.opju"),
+    ]);
+    result.unwrap();
+    assert!(
+        output.contains("skipped: ") && output.contains("cut.opju"),
+        "{output}"
+    );
+}
+
+#[test]
 fn an_opju_project_gives_the_same_workbooks_as_its_opj_twin() {
     let dir = isolated();
     let mut projects = Vec::new();

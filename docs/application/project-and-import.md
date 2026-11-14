@@ -119,8 +119,8 @@ of the last import replaced or merged a sheet. The File › Import › Reopen La
 Import… link reopens every file of the last import, each with its own recipe.
 
 **Origin projects (`.opj`, `.opju`, #490, #492), state side.** An `.opj` or `.opju` never goes to the
-text wizard. Routing is by extension only (`is_origin_path`, no I/O on the
-interface thread): the same background job as above reads it
+text wizard. Routing is by extension or by the first bytes, `CPYA`/`CPYUA`
+(`is_origin_file`, #509; the extension alone costs no I/O on the interface thread): the same background job as above reads it
 (`ImportReply::origin`, `read_origin_file`), and `apply_ready_import` hands the
 parsed projects (shared by `Arc`) to `AppState::add_origin_reads`, which opens
 the **chooser** (`state/origin_import.rs`: files, books, sheets with column and

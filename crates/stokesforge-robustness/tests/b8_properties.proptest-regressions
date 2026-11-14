@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 00d07ab85b0629ecf82dd117c788622eee83065c3080075175dd191a1685f453 # shrinks to colonnes = [[]], at = 0, count = 0
+cc 473fbe5da9ec36a06124067e94d949d6211f190d822d03fac4d6ef2fa0266b53 # shrinks to columns = []

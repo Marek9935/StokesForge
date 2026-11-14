@@ -18403,6 +18403,79 @@ mod origin_import {
     }
 
     #[test]
+    fn importing_a_partial_opju_is_one_undo_entry_and_no_error() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+        drop_paths(&mut state, vec![cut]);
+        assert!(state.origin_import_files()[0].partial);
+
+        let books_before = root_names(&state).len();
+        state.dispatch(Action::ImportOrigin);
+
+        no_red_message_ever(&state);
+        assert!(!same_tree(&state, &tree_before));
+        // The book the cut window section did not describe is still imported.
+        assert_eq!(root_names(&state).len(), books_before + 2);
+        assert_eq!(
+            state.undo_label().unwrap(),
+            tr!(
+                "history-undo-entry",
+                label = history_text(&HistoryLabel::Macro(MacroKind::Import))
+            )
+        );
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before));
+        assert_eq!(history_len_probe(&state), probe, "no second entry left");
+    }
+
+    #[test]
+    fn a_truncated_opju_gives_the_origin_sentence_and_no_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let cut = dir.path().join("cut.opju");
+        let bytes = synthetic::write_opju(&synthetic::Project {
+            books: standard_books(),
+            ..synthetic::Project::default()
+        });
+        std::fs::write(&cut, &bytes[..synthetic::FIRST_DATASET_OFFSET + 3]).unwrap();
+        let probe = history_len_probe(&state);
+
+        drop_paths(&mut state, vec![cut]);
+
+        assert!(!state.origin_import_open());
+        let status = state.status().unwrap();
+        assert!(status.is_error());
+        assert!(status.text.contains("cut.opju"), "{}", status.text);
+        assert!(
+            !status.text.to_lowercase().contains("offset"),
+            "the raw Display leaked: {}",
+            status.text
+        );
+        assert_eq!(history_len_probe(&state), probe, "no empty Import entry");
+    }
+
+    #[test]
+    fn an_opju_renamed_dat_is_dropped_into_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let renamed = dir.path().join("measure.dat");
+        write_opju(&renamed, standard_books(), None);
+
+        drop_paths(&mut state, vec![renamed]);
+
+        assert!(state.origin_import_open());
+        assert!(state.import_state().is_none(), "never the text wizard");
+        no_red_message_ever(&state);
+    }
+
+    #[test]
     fn cancelling_leaves_the_history_and_the_project_alone() {
         let _recipes = isolate_recipe_store();
         let dir = tempfile::tempdir().unwrap();
