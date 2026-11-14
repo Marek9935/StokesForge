@@ -842,6 +842,21 @@ fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new(("stokesforge_modal_shown", ctx.viewport_id()))
 }
 
+/// Memory key of the "a gesture outside the dialog was blocked" request of one
+/// viewport (#533).
+fn blocked_gesture_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_modal_blocked_gesture", ctx.viewport_id()))
+}
+
+/// A gesture the open modal refused without a click on its backdrop (the
+/// window's cross, #533): the modal of this viewport flashes at its next paint,
+/// exactly as for a blocked click.
+pub(super) fn flash_open_modal(ctx: &egui::Context) {
+    let id = blocked_gesture_id(ctx);
+    ctx.data_mut(|data| data.insert_temp(id, true));
+    ctx.request_repaint();
+}
+
 /// Records that a modal window is painted in this viewport, in this frame.
 pub(super) fn mark_modal_shown(ctx: &egui::Context) {
     // Ids read before the lock: `viewport_id` locks the context too.
@@ -943,8 +958,11 @@ fn modal_frame(
         .show(ctx, |ui| {
             ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
         });
-    let blocked_click =
-        backdrop.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
+    // A gesture refused elsewhere (the window's cross, #533) flashes the same way.
+    let blocked_gesture_id = blocked_gesture_id(ctx);
+    let blocked_gesture = ctx.data_mut(|data| data.remove_temp::<bool>(blocked_gesture_id));
+    let blocked_click = blocked_gesture.unwrap_or(false)
+        || backdrop.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
     let now = ctx.input(|input| input.time);
     if blocked_click {
         ctx.data_mut(|data| data.insert_temp(flash_id, now));

@@ -274,7 +274,14 @@ rollback, `.stf`). It is not a node.
 
 - The sheet is named "`<Source>ᵀ`" (`TRANSPOSE_MARK`), placed right after the
   source; the name taken by a sheet that is not linked to this source gives
-  "`<Source>ᵀ 2`", "… 3". It carries an "x'" column (the x' of the columns of the
+  "`<Source>ᵀ 2`", "… 3". A plain uppercase `T` calls it (#494): formula
+  `Sheet1T!B` and `pyst` path `[Book1]Sheet1T` find `Sheet1ᵀ`, never a lowercase
+  `t`. Formula lookup has two tiers (`same_name_ignoring_case_exact`, then
+  `same_name_folding_transpose_mark`; `AmbiguousName` only within a tier);
+  the sibling rule is broader (`same_name_ignoring_case`: `ᵀ` read as `T`, then
+  case ignored), so `Sheet1T` and `Sheet1t` are refused beside `Sheet1ᵀ`;
+  the loader stays exact (an older file with both still opens). A formula
+  shows the real name, unquoted (`sheet_token`). It carries an "x'" column (the x' of the columns of the
   source) then a "Row N" column per requested row, on demand; a row requested
   again reuses its column. Long names "Row N of Source"; the unit of the "Row N"
   columns is that of the columns of the source when it is common. The model has

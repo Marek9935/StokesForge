@@ -20,7 +20,10 @@ use crate::calc::{Calculation, CorrectionRecord};
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
-use crate::name::{check_name, natural_cmp, same_name_ignoring_case};
+use crate::name::{
+    check_name, natural_cmp, same_name_folding_transpose_mark_case_sensitive,
+    same_name_ignoring_case,
+};
 use crate::node::{containment_message, Node, NodeKind};
 use crate::path::{format_path, parse_path, ObjectPath};
 use crate::transpose::TransposeLink;
@@ -602,6 +605,20 @@ impl Tree {
         out
     }
 
+    /// Direct child of `parent` for a segment of a path of `pyst` (#494): the
+    /// exact name (case-sensitive) first; only if there is none, the first
+    /// whose name differs only by the transpose mark read as an uppercase `T`.
+    fn child_by_path_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
+        if let Some(found) = self.child_by_name(parent, name)? {
+            return Ok(Some(found));
+        }
+        Ok(self.get(parent)?.children().iter().copied().find(|child| {
+            self.node(*child).is_some_and(|node| {
+                same_name_folding_transpose_mark_case_sensitive(node.name(), name)
+            })
+        }))
+    }
+
     /// Direct child of `parent` with this name, or `None`.
     pub fn child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
         Ok(self
@@ -624,10 +641,18 @@ impl Tree {
     /// directly among the folder children makes the resolution of a path
     /// segment independent of that order.
     fn folder_child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
-        Ok(self.get(parent)?.children().iter().copied().find(|child| {
-            self.node(*child)
-                .is_some_and(|node| node.kind().is_folder() && node.name() == name)
-        }))
+        let folders = |same: fn(&str, &str) -> bool| {
+            self.get(parent).map(|node| {
+                node.children().iter().copied().find(|child| {
+                    self.node(*child)
+                        .is_some_and(|node| node.kind().is_folder() && same(node.name(), name))
+                })
+            })
+        };
+        match folders(|a, b| a == b)? {
+            Some(found) => Ok(Some(found)),
+            None => folders(same_name_folding_transpose_mark_case_sensitive),
+        }
     }
 
     /// Number of rows of a sheet: the maximum of the lengths of its
@@ -746,8 +771,10 @@ impl Tree {
     ///
     /// The canonical path is rooted, even for a window at the root.
     ///
-    /// Name comparison is that of `child_by_name` and `find_window`:
-    /// exact equality, hence **case-sensitive**.
+    /// Name comparison is **case-sensitive**: the exact name first, then,
+    /// only if nothing has it, the name whose transpose mark `ᵀ` reads as an
+    /// uppercase `T` (#494; `[Book1]Sheet1T` finds `Sheet1ᵀ`). The same rule
+    /// holds for folders, workbooks and sheets.
     pub fn resolve_parsed(&self, path: &ObjectPath) -> CoreResult<NodeId> {
         // Path without a window: a descent through folders from the root.
         // `folder_child_by_name` considers only folder children from the
@@ -773,7 +800,7 @@ impl Tree {
                     .folder_child_by_name(parent, segment)?
                     .ok_or_else(|| CoreError::Path(format!("folder not found: {segment}")))?;
             }
-            self.child_by_name(parent, window_name)?
+            self.child_by_path_name(parent, window_name)?
                 .filter(|id| self.node(*id).is_some_and(|n| n.kind().is_window()))
                 .ok_or_else(|| {
                     CoreError::Path(format!(
@@ -782,24 +809,36 @@ impl Tree {
                     ))
                 })?
         } else {
-            let mut found = None;
-            let mut ambiguous = false;
-            self.visit_windows(|id| {
-                if self.node(id).is_some_and(|n| n.name() == window_name) {
-                    if found.is_some() {
-                        ambiguous = true;
-                        return true;
+            // Exact name first; only if no window has it, the transpose mark
+            // read as an uppercase `T` (#494). Ambiguity is within one tier.
+            let mut result = None;
+            for same in [
+                (|a: &str, b: &str| a == b) as fn(&str, &str) -> bool,
+                same_name_folding_transpose_mark_case_sensitive,
+            ] {
+                let mut found = None;
+                let mut ambiguous = false;
+                self.visit_windows(|id| {
+                    if self.node(id).is_some_and(|n| same(n.name(), window_name)) {
+                        if found.is_some() {
+                            ambiguous = true;
+                            return true;
+                        }
+                        found = Some(id);
                     }
-                    found = Some(id);
+                    false
+                });
+                if ambiguous {
+                    return Err(CoreError::Path(format!(
+                        "ambiguous window name: [{window_name}]; use its folder path"
+                    )));
                 }
-                false
-            });
-            if ambiguous {
-                return Err(CoreError::Path(format!(
-                    "ambiguous window name: [{window_name}]; use its folder path"
-                )));
+                if found.is_some() {
+                    result = found;
+                    break;
+                }
             }
-            found.ok_or_else(|| CoreError::Path(format!("window not found: [{window_name}]")))?
+            result.ok_or_else(|| CoreError::Path(format!("window not found: [{window_name}]")))?
         };
 
         let Some(sheet_name) = path.sheet.as_deref() else {
@@ -812,9 +851,11 @@ impl Tree {
                 "[{window_name}] is not a workbook, it has no worksheet"
             )));
         }
-        let sheet = self.child_by_name(window, sheet_name)?.ok_or_else(|| {
-            CoreError::Path(format!("worksheet not found: [{window_name}]{sheet_name}"))
-        })?;
+        let sheet = self
+            .child_by_path_name(window, sheet_name)?
+            .ok_or_else(|| {
+                CoreError::Path(format!("worksheet not found: [{window_name}]{sheet_name}"))
+            })?;
 
         let Some(column_name) = path.column.as_deref() else {
             return Ok(sheet);
@@ -1469,6 +1510,27 @@ mod tests {
             panic!("expected Path, got {err:?}");
         };
         assert!(message.contains("folder not found"), "{message}");
+    }
+
+    /// #494: in a path, an uppercase `T` finds the transpose mark `ᵀ` of a
+    /// sheet, a workbook or a folder, when no exact name has it; case stays
+    /// respected. Witness: `child_by_path_name` replaced by `child_by_name`.
+    #[test]
+    fn resolve_reads_the_transpose_mark_as_an_uppercase_t() {
+        let mut f = Fixture::new();
+        let mark = f.add(f.book, "Sheet1\u{1D40}", worksheet_kind());
+        let book = f.add(f.root, "Calc\u{1D40}", workbook_kind());
+        let folder = f.add(f.root, "Dir\u{1D40}", folder_kind());
+        assert_eq!(f.tree.resolve("[Book1]Sheet1T").unwrap(), mark);
+        assert_eq!(f.tree.resolve("[Book1]Sheet1\u{1D40}").unwrap(), mark);
+        assert_eq!(f.tree.resolve("[CalcT]").unwrap(), book);
+        assert_eq!(f.tree.resolve("/DirT").unwrap(), folder);
+        for text in ["[Book1]Sheet1t", "[Book1]sheet1T", "[calcT]", "/DirT2"] {
+            assert!(
+                matches!(f.tree.resolve(text), Err(CoreError::Path(_))),
+                "{text}"
+            );
+        }
     }
 
     #[test]

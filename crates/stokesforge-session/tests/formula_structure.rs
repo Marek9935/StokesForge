@@ -2273,7 +2273,9 @@ fn a_non_ascii_sheet_name_is_quoted_on_display_and_round_trips() {
         assert_eq!(nums(&t, r_id), some(&[5.0; 3]), "{mode:?}");
         assert_eq!(
             t.formula_letters(r_id).as_deref(),
-            Some("max('Sheet1\u{1D40}'!A)"),
+            // #494: the transpose mark no longer needs quotes, the entry with
+            // quotes is still read.
+            Some("max(Sheet1\u{1D40}!A)"),
             "{mode:?}"
         );
         assert_round_trip(&t, r_id, "non-ascii");
@@ -3323,5 +3325,57 @@ fn recalculate_is_refused_while_a_kept_formula_reads_the_followed_sheet() {
         })
         .expect("formula removed");
         assert!(!link_state(&h, source).stale, "{mode:?}: follows alone");
+    }
+}
+
+/// #494: a formula kept as text from an older file (`Sheet1T!B`, which named
+/// nothing then) binds to the transposed sheet `Sheet1ᵀ` at the next command,
+/// and is shown with its real name. Witness: the lookup without the fold
+/// leaves the text unresolved.
+#[test]
+fn a_kept_formula_with_a_plain_t_binds_to_the_transposed_sheet() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s = first_sheet(&p, book);
+        add_col(&mut p, s, "A", &[1.0]);
+        let label = add_col(&mut p, s, "L", &[]);
+        let (kept, error) = p.tree().formula_keeping(label, "max(Sheet1T!B)");
+        assert!(error.is_some(), "no such sheet yet");
+        p.set_column_meta(
+            label,
+            ColumnMeta {
+                formula: Some(kept),
+                ..Default::default()
+            },
+        )
+        .expect("kept formula");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        h.execute(Command::AddWorksheet {
+            book: node(&t, "[Book1]"),
+            name: Some("Sheet1ᵀ".into()),
+        })
+        .expect("transposed sheet");
+        for (name, values) in [("x", [1.0, 2.0]), ("y", [5.0, 9.0])] {
+            let t = snap(&h).tree;
+            h.execute(Command::AddColumn {
+                sheet: node(&t, "[Book1]Sheet1ᵀ"),
+                index: None,
+                name: Some(name.into()),
+                column: Column::from_f64(&values),
+            })
+            .expect("column");
+        }
+        let t = snap(&h).tree;
+        let label = colat(&t, "[Book1]Sheet1", "L");
+        assert!(t.pending_bindings().is_empty(), "{mode:?}");
+        assert_eq!(
+            t.formula_letters(label).as_deref(),
+            Some("max(Sheet1ᵀ!B)"),
+            "{mode:?}"
+        );
+        assert_eq!(nums(&t, label)[0], Some(9.0), "{mode:?}");
     }
 }

@@ -34,7 +34,7 @@ A size or layout edit of a graph (#394) is an `EditPlotSpec` (`PlotEditKind::Res
 | persistence | `.stf` round trip (`stokesforge-persistence/tests/roundtrip.rs`); additive field → regenerate the witness file (`tests/witness_files.rs`) |
 | column data write | the gesture added to the draws of `b14` and `b22`; structural gestures (rename, move, remove, paste, type change) are drawn by `b23` |
 | memory | `stokesforge-commands/tests/memory_pinning.rs` |
-| interface | `stokesforge-app-state/tests/shell.rs` for the `Action` |
+| interface | `stokesforge-app-state/tests/shell.rs` for the `Action`; an action that opens a macro (Properties, shape edit) commits the open entries BEFORE `begin_plot_macro` and never during it (#533) |
 
 Extend the dedicated batteries rather than duplicating them: `b5` (macros), `b12` (accepted no-op commands), `b14` (random sweep), `b18` (open macro); index in `stokesforge-robustness/src/lib.rs`.
 

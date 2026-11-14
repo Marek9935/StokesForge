@@ -37,7 +37,7 @@ The five zones of the grid — data cell, header field of a single
 column, row of letters, row-number gutter, whole-field labels
 in that same gutter — carry the **same** editing block on right-click
 (`app::grid::grid_edit_menu`): a clipboard group (Cut, Copy,
-Copy with Header, Paste, Paste in Place), then Clear and Delete
+Copy with Header, Paste, Paste in Place, Paste Transposed), then Clear and Delete
 and Shift Up. Undo and Redo are no longer there (Edit and the keyboard, #158); each
 entry keeps its keyboard equivalent, a mirror of the shortcut block of
 `grid_contents`. The row of letters surrounds this block with what is specific
@@ -127,9 +127,38 @@ sheet (left → right, top → bottom), never that of the clicks.
   sheet; blocks of cells that share their rows (side by side) or their
   columns (stacked) — otherwise Copy and Cut are disabled (`GridMenu::copy_enabled`,
   `Selection::copy_layout`). Copy with Header follows the columns touched.
-- **Paste / Paste in Place**: disabled on a non-contiguous selection
+- **Paste / Paste in Place / Paste Transposed**: disabled on a non-contiguous selection
   (`GridMenu::paste_enabled`, ambiguous target); pasting with the keyboard is refused
   with a message.
+- **A paste wider than the sheet creates the missing columns (#495)**: any
+  paste that goes beyond the last column (Paste, Paste in Place, a header
+  field paste) adds Numeric columns at the end of the sheet, with the command
+  of Add Column, inside the same `PasteCells` group (one Undo removes columns
+  and values), BEFORE any header is written (a pasted formula reads letters of
+  the destination). There is no cap: the created ones are said by the plain
+  `status-paste-columns-added`. An outside
+  text is range-checked for the columns it will create as Numeric
+  (`external_paste_range_error`). Header rows beyond Formula are still dropped.
+- **Paste Transposed (#495)**: `Action::PasteTransposed { sheet, text }`,
+  Ctrl+Alt+V (egui sends it as the same `Event::Paste`: the grid reads
+  `modifiers.alt` BEFORE `shift`) and the right-click entry after Paste in
+  Place (gate `paste_enabled`, reads the system clipboard like Paste).
+  `AppState::paste_transposed` shares the prologue of Paste
+  (`paste_source`), rotates the block with the pure `transposed_clipboard`
+  (data rows transposed; a full-column copy gives each body as a row, header
+  and formula dropped, values frozen; an x' row of a header copy becomes a data
+  row, the other copied header rows are dropped and counted; a single value
+  stays a value), checks an outside text on the transposed block, then pastes
+  like Paste (`PasteCells`, columns created beyond the edge). Anchored on an x'
+  cell, the first row goes into the x' of successive columns
+  (`paste_x_prime_row`): a non-number is refused cell by cell, an empty one
+  clears x'; anchored on another header field nothing is pasted. No new
+  `MacroKind`. The x' row is a row of values for the plain Paste too (#495):
+  a data block on an x' cell takes that same branch (`apply_paste`), and a
+  header copy that holds the x' row, pasted on a data cell, writes the x' row
+  as data and drops the other copied header rows (orange
+  `status-paste-header-rows-dropped`). Paste in Place and a full-column copy
+  keep their ranks and are untouched.
 - **Clipboard format (#259)**: the system text is TSV in the
   Excel/LibreOffice format, written and read by `stokesforge_core::tsv` (`encode`,
   `decode`, `encode_cell`), without egui: a cell that holds a tab, a
@@ -544,8 +573,8 @@ Two deliberate differences between the menu and the keyboard:
   try on click, and show a notice if it gives nothing. "Paste in Place", for its part, can be disabled at no cost — it replays the **internal**
   clipboard, whose state is known.
 
-Finally, the five constants `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
-`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE` are **purely
+Finally, the six constants `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
+`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE`/`SHORTCUT_PASTE_TRANSPOSED` are **purely
 decorative**: they exist only to write the shortcut reminder on the
 right of a menu entry. Nothing consumes them, and one must not try —
 `egui-winit` intercepts Ctrl+C/X/V when translating the window events

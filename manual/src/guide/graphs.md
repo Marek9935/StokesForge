@@ -333,7 +333,7 @@ Each entry shows the name of its series. To rename a series, double-click its en
 
 For a series made from a row of a worksheet, **Row series** chooses between **Row number** and **Value of column…**, which shows the cell of the column you pick on that row.
 
-New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**.
+New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**, including a **Custom…** template: it is typed once there, and every new graph starts with it.
 
 Drag the legend to move it anywhere on the figure. Right-click it and choose **Reset Position** to put it back. A series with **Show in legend** cleared does not appear.
 
