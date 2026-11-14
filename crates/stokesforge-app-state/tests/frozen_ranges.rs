@@ -180,3 +180,29 @@ fn a_y2_layer_created_by_the_gesture_is_frozen_too() {
     let (low, high) = bounds(&spec.panels[1].left);
     assert!(low <= -0.01 && high >= 1.1, "{low} {high}");
 }
+
+/// A file opened at startup gets the same note as `File > Open`: the project
+/// is modified and the orange line counts the graphs written; zero graphs
+/// leaves a clean project and no message.
+#[test]
+fn ranges_written_at_opening_mark_the_project_modified() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, _sheet, _columns) = start(dir.path(), TOP_10);
+    state.mark_loaded(&stokesforge_session::LoadReport {
+        discarded_calculations: Vec::new(),
+        discarded_corrections: Vec::new(),
+    });
+    state.mark_ranges_written(0);
+    assert!(
+        !state.window_title().contains('•'),
+        "clean when nothing was written"
+    );
+    state.mark_ranges_written(2);
+    assert!(state.window_title().contains('•'));
+    let status = state.status().expect("the orange message");
+    assert_eq!(
+        status.level,
+        stokesforge_app_state::state::StatusLevel::Warning
+    );
+    assert!(status.text.contains("2 graphs"), "{}", status.text);
+}

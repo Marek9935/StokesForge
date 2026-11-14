@@ -3882,6 +3882,16 @@ impl AppState {
         }
     }
 
+    /// #529: `count` graphs had their automatic axis ranges written while a
+    /// file was opened (outside the history): the project is modified, and the
+    /// orange line says so. Nothing when no axis was written.
+    pub fn mark_ranges_written(&mut self, count: usize) {
+        if count > 0 {
+            self.saved_revision = None;
+            self.warn(tr!("status-ranges-written", count = count));
+        }
+    }
+
     /// Records the geometry of content window `node` with the
     /// actor. This view setting does not go through the history: moving
     /// a window must not add a step to undo.
@@ -9204,11 +9214,7 @@ impl AppState {
                 self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), &report);
                 // #529: modified only when an axis was written; a file with no
                 // Auto axis opens clean, with no message.
-                let written = frozen.load(std::sync::atomic::Ordering::Relaxed);
-                if written > 0 {
-                    self.saved_revision = None;
-                    self.warn(tr!("status-ranges-written", count = written));
-                }
+                self.mark_ranges_written(frozen.load(std::sync::atomic::Ordering::Relaxed));
                 true
             }
             Err(err) => {
