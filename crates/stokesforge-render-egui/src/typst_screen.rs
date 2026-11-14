@@ -18,7 +18,8 @@
 //! (`architecture-choisie.md` §11.1): a visible, localized defect, never a
 //! panic that bubbles up.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
 use plotters_backend::{text_anchor::Pos, FontTransform};
@@ -77,6 +78,61 @@ impl FormulaTexture {
     }
 }
 
+/// The formula textures a set of shapes points to, held by whoever stores
+/// those shapes (#508): a texture lives exactly as long as some
+/// `Arc<FormulaTexture>` does, so nothing frees one a mesh still draws.
+#[derive(Default)]
+pub struct TextureSet {
+    held: Mutex<HashMap<egui::TextureId, Arc<FormulaTexture>>>,
+}
+
+impl TextureSet {
+    /// Holds `texture` under its id.
+    pub fn insert(&self, texture: Arc<FormulaTexture>) {
+        self.held
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .insert(texture.id(), texture);
+    }
+
+    /// The held texture with this id, if any.
+    pub fn get(&self, id: egui::TextureId) -> Option<Arc<FormulaTexture>> {
+        self.held
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .get(&id)
+            .cloned()
+    }
+
+    /// Number of textures held.
+    pub fn len(&self) -> usize {
+        self.held
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Lets go of every texture (the shapes they served are being replaced).
+    pub(crate) fn clear(&self) {
+        self.held
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clear();
+    }
+}
+
+impl std::fmt::Debug for TextureSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextureSet")
+            .field("held", &self.len())
+            .finish()
+    }
+}
+
 /// What is needed to draw a Typst label on screen — built once per
 /// [`crate::GraphView`], reused at every frame.
 pub struct TypstScreen<'a> {
@@ -85,6 +141,9 @@ pub struct TypstScreen<'a> {
     choice: &'a FontChoice,
     sans: Font,
     math: Font,
+    /// Where the textures this screen hands out are also held: the owner of
+    /// the shapes built with it (#508).
+    held: Option<&'a TextureSet>,
 }
 
 impl<'a> TypstScreen<'a> {
@@ -117,7 +176,16 @@ impl<'a> TypstScreen<'a> {
             choice,
             sans,
             math,
+            held: None,
         }
+    }
+
+    /// Every texture [`Self::render`] hands out is also stored in `set`,
+    /// which the owner of the resulting shapes keeps for as long as they
+    /// live (#508).
+    pub fn holding(mut self, set: &'a TextureSet) -> Self {
+        self.held = Some(set);
+        self
     }
 
     /// The real `pixels_per_point` of the `Context` — the one at which
@@ -157,7 +225,8 @@ impl<'a> TypstScreen<'a> {
     ) -> Option<Arc<FormulaTexture>> {
         let context = self.context;
         let owned_text = text.to_owned();
-        self.cache
+        let texture = self
+            .cache
             .get_or_try_insert(
                 text,
                 size_pt,
@@ -168,7 +237,11 @@ impl<'a> TypstScreen<'a> {
                 self.math.clone(),
                 move |compiled| Ok(rasterize(context, compiled, pixels_per_point, &owned_text)),
             )
-            .ok()
+            .ok()?;
+        if let Some(held) = self.held {
+            held.insert(Arc::clone(&texture));
+        }
+        Some(texture)
     }
 }
 
