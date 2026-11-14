@@ -153,6 +153,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::ColorBar => tr!("history-plot-color-bar"),
             PlotEditKind::FitPage => tr!("history-plot-fit-page"),
             PlotEditKind::FitLayout => tr!("history-plot-fit-layout"),
+            PlotEditKind::WidenRanges => tr!("history-plot-widen-ranges"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::SortFolder { name: None } => tr!("history-sort-folder"),

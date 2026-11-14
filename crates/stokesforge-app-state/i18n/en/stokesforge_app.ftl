@@ -1502,6 +1502,7 @@ history-plot-legend-text = Change Legend Text
 history-plot-color-bar = Change Color Bar
 history-plot-fit-page = Fit Page to Layout
 history-plot-fit-layout = Fit Layout to Page
+history-plot-widen-ranges = Widen Axis Ranges
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
@@ -2306,6 +2307,20 @@ status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
 status-page-edge-reached = Page edge reached: drag a corner to enlarge the page
 status-figure-grew = The image grew beyond the room kept by the Fixed figure size. The plot area kept its size
+status-ranges-written =
+    { $count ->
+        [one] The axis range of { $count } graph was written from the data. Save to keep it
+       *[other] The axis ranges of { $count } graphs were written from the data. Save to keep them
+    }
+status-axes-widened =
+    { $count ->
+        [one] { $axes } axis widened to show the new series. Ctrl+Z undoes the new range
+       *[other] { $axes } axes widened to show the new series. Ctrl+Z undoes the new ranges
+    }
+widen-axis-x = X
+widen-axis-y = Y
+widen-axis-top-x = top X
+widen-axis-right-y = right Y
 status-recalc-stopped = Recalculation stopped. The change was undone
 
 analysis-baseline-constant = Constant…

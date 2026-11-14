@@ -60,3 +60,4 @@ pub mod state;
 pub mod text_format;
 pub mod tree_drop;
 pub mod user_colors;
+pub mod widen;

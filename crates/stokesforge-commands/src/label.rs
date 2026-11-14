@@ -323,9 +323,12 @@ pub enum PlotEditKind {
     FitPage,
     /// The layout of a graph fitted to its page (#505, K1).
     FitLayout,
+    /// The written axis ranges widened to show a series just added (#529):
+    /// its own history step, after the add.
+    WidenRanges,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -355,6 +358,7 @@ impl PlotEditKind {
         Self::ColorBar,
         Self::FitPage,
         Self::FitLayout,
+        Self::WidenRanges,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -389,6 +393,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::ColorBar => "Change Color Bar",
             Self::FitPage => "Fit Page to Layout",
             Self::FitLayout => "Fit Layout to Page",
+            Self::WidenRanges => "Widen Axis Ranges",
         })
     }
 }

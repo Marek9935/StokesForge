@@ -27,6 +27,15 @@ fn bench() -> Bench {
     project
         .add_column(sheet, None, Some("B"), Column::from_f64(&[4.0, 5.0, 6.0]))
         .unwrap();
+    // Far above B: a curve that goes beyond the ranges written for it (#529).
+    project
+        .add_column(
+            sheet,
+            None,
+            Some("T"),
+            Column::from_f64(&[40.0, 50.0, 60.0]),
+        )
+        .unwrap();
     let actor = Session::spawn(project, None).unwrap();
     let session = actor.handle();
     let prefix = std::env::var_os(interpreter::HOME_ENV)
@@ -1026,4 +1035,29 @@ fn the_total_size_cannot_be_combined_with_a_plot_area_size() {
         );
     }
     assert_eq!(graph_spec(&b), spec);
+}
+
+/// #529: a script that adds a curve to an existing graph never widens its
+/// written ranges (only the application's gestures do), and adds no step of
+/// its own.
+#[test]
+fn pyst_adding_a_curve_beyond_the_ranges_leaves_them_alone() {
+    let b = bench();
+    run(&b, GRAPH);
+    let before = graph_spec(&b).panels[0].clone();
+    run(
+        &b,
+        "t = pyst.resolve('[Book1]Sheet1!T')\na = pyst.resolve('[Book1]Sheet1!A')\ng = pyst.resolve('[G]')\npyst.plot(t, a, graph=g)",
+    );
+    let after = graph_spec(&b).panels[0].clone();
+    assert_eq!(after.series.len(), 2, "the curve is added");
+    assert_eq!(after.left, before.left, "the ranges did not move");
+    assert_eq!(after.bottom, before.bottom);
+    assert_ne!(
+        b.session.snapshot().unwrap().history.undo_label,
+        Some(stokesforge_commands::HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::WidenRanges
+        )),
+        "no widening step"
+    );
 }

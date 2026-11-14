@@ -6395,7 +6395,12 @@ impl AppState {
                 panel,
                 columns,
                 plot_type,
-            } => self.add_series_to_graph(graph, panel, columns, plot_type),
+            } => {
+                let before = self.plot_spec(graph);
+                if self.add_series_to_graph(graph, panel, columns, plot_type) {
+                    self.widen_after_add(graph, before);
+                }
+            }
             Action::AddLayer {
                 graph,
                 panel,
@@ -6421,7 +6426,12 @@ impl AppState {
                 sheet,
                 rows,
                 axis,
-            } => self.add_rows_to_graph(graph, panel, sheet, rows, axis),
+            } => {
+                let before = self.plot_spec(graph);
+                if self.add_rows_to_graph(graph, panel, sheet, rows, axis) {
+                    self.widen_after_add(graph, before);
+                }
+            }
             Action::ConfirmRowDrop(choice) => self.confirm_row_drop(choice),
             Action::PlotRows {
                 sheet,
@@ -9160,7 +9170,18 @@ impl AppState {
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         let limits = self.object_manager_preferences.load_limits();
-        match self.handle.load_with_limits(&path, limits) {
+        // #529: an old file's Auto axes are written once, with the user's
+        // margins, after the formulas were recalculated; no history.
+        let frozen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let normaliser: stokesforge_session::LoadNormaliser = {
+            let frozen = std::sync::Arc::clone(&frozen);
+            let margins = self.auto_margins();
+            Box::new(move |project| {
+                let count = crate::frame_sizes::freeze_loaded_graphs(project, margins);
+                frozen.store(count, std::sync::atomic::Ordering::Relaxed);
+            })
+        };
+        match self.handle.load_normalised(&path, limits, Some(normaliser)) {
             Ok((_, report)) => {
                 // The identifiers of the file have nothing to do with those of
                 // the previous tree: the selection must be revalidated, which
@@ -9181,6 +9202,13 @@ impl AppState {
                 self.autosave_remove_slot();
                 self.autosave_mark_clean();
                 self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), &report);
+                // #529: modified only when an axis was written; a file with no
+                // Auto axis opens clean, with no message.
+                let written = frozen.load(std::sync::atomic::Ordering::Relaxed);
+                if written > 0 {
+                    self.saved_revision = None;
+                    self.warn(tr!("status-ranges-written", count = written));
+                }
                 true
             }
             Err(err) => {
@@ -11976,18 +12004,75 @@ impl AppState {
         panel: usize,
         columns: Vec<NodeId>,
         plot_type: Option<PlotType>,
-    ) {
+    ) -> bool {
         if columns.is_empty() {
-            return;
+            return false;
         }
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
-            return;
+            return false;
         };
         match self.add_columns_to_spec(&mut spec, panel, &columns, plot_type) {
-            Ok(()) => self.execute(Command::SetPlotSpec { graph, spec }),
-            Err(message) => self.fail(message),
+            Ok(()) => {
+                self.execute(Command::SetPlotSpec { graph, spec });
+                true
+            }
+            Err(message) => {
+                self.fail(message);
+                false
+            }
         }
+    }
+
+    /// The second step of an add (#529, L5): the series just added goes
+    /// beyond the written ranges, so the exceeded sides widen at once, with the
+    /// margins, as a history entry of their own ([`PlotEditKind::WidenRanges`]).
+    /// The first Ctrl+Z restores the old ranges and keeps the series, the second
+    /// removes it. Nothing exceeded: no step, no message. Sent only after the
+    /// add is done and closed (never inside a macro: it would join the entry of
+    /// the add), and not while a recalculation runs: the values may be stale.
+    /// `pyst` adds a series without it.
+    pub(crate) fn widen_after_add(&mut self, graph: NodeId, before: Option<PlotSpec>) {
+        if self.gesture_failed()
+            || self.snapshot.history.in_macro
+            || (self.recalc_since.is_some() && self.handle.recalc_running().is_some())
+        {
+            return;
+        }
+        let Some(spec) = self.plot_spec(graph) else {
+            return;
+        };
+        let before = before.unwrap_or_else(|| spec.clone());
+        let Some(widened) =
+            crate::widen::widen_to_data(&self.snapshot.tree, &before, &spec, self.auto_margins())
+        else {
+            return;
+        };
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec: widened.spec,
+            kind: PlotEditKind::WidenRanges,
+        });
+        if self.gesture_failed() {
+            return;
+        }
+        use crate::widen::WidenedAxis;
+        let axes = widened
+            .axes
+            .iter()
+            .map(|axis| match axis {
+                WidenedAxis::X => tr!("widen-axis-x"),
+                WidenedAxis::Y => tr!("widen-axis-y"),
+                WidenedAxis::TopX => tr!("widen-axis-top-x"),
+                WidenedAxis::RightY => tr!("widen-axis-right-y"),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.warn(tr!(
+            "status-axes-widened",
+            count = widened.axes.len(),
+            axes = axes
+        ));
     }
 
     /// The body of [`Self::add_series_to_graph`], on a spec: plans the series
@@ -12518,25 +12603,25 @@ impl AppState {
         sheet: NodeId,
         rows: Vec<usize>,
         axis: RowAxis,
-    ) {
+    ) -> bool {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
-            return;
+            return false;
         };
         if spec.panels.get(panel).is_none() {
             self.fail(tr!("error-layer-gone"));
-            return;
+            return false;
         }
         let Some(&anchor) = x_prime_columns(&self.snapshot.tree, sheet).first() else {
             self.fail(crate::tr!("status-row-no-x-prime"));
-            return;
+            return false;
         };
         let row_count = self.row_count(sheet);
         let mut rows: Vec<usize> = rows.into_iter().filter(|row| *row < row_count).collect();
         rows.sort_unstable();
         rows.dedup();
         if rows.is_empty() {
-            return;
+            return false;
         }
         let axis = match axis {
             RowAxis::Ask if spec_has_x(&spec) => {
@@ -12546,7 +12631,7 @@ impl AppState {
                     sheet,
                     rows,
                 });
-                return;
+                return false;
             }
             RowAxis::Ask => RowAxis::Present,
             chosen => chosen,
@@ -12555,7 +12640,7 @@ impl AppState {
             RowAxis::New => {
                 let base = overlay_base(&spec, panel);
                 let Some(base_panel) = spec.panels.get(base).cloned() else {
-                    return;
+                    return false;
                 };
                 spec.panels
                     .push(PanelSpec::overlay_on(&base_panel, OverlaySpec::TOP_X));
@@ -12568,7 +12653,7 @@ impl AppState {
             .get(panel)
             .map_or(PlotType::Line, panel_plot_type);
         let Some(layer) = spec.panels.get_mut(target) else {
-            return;
+            return false;
         };
         let start = layer.series.len();
         layer.push_series_batch(row_series(
@@ -12580,6 +12665,7 @@ impl AppState {
         ));
         cell_sides::switch_off_mirrors_under_overlays(&mut spec);
         self.execute(Command::SetPlotSpec { graph, spec });
+        true
     }
 
     /// [`Action::PlotRows`]: a new graph, in the folder of the workbook of
@@ -12627,13 +12713,16 @@ impl AppState {
             return;
         };
         if let Some(axis) = choice.filter(|axis| *axis != RowAxis::Ask) {
-            self.add_rows_to_graph(
+            let before = self.plot_spec(pending.graph);
+            if self.add_rows_to_graph(
                 pending.graph,
                 pending.panel,
                 pending.sheet,
                 pending.rows,
                 axis,
-            );
+            ) {
+                self.widen_after_add(pending.graph, before);
+            }
         }
     }
 

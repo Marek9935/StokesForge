@@ -512,6 +512,7 @@ impl AppState {
         if self.handle.begin_macro(MacroKind::AnalysisToGraph).is_err() {
             return;
         }
+        let spec_before = current_plot_spec(&self.snapshot.tree, graph);
         let before: Vec<NodeId> = self.snapshot.tree.calculations().keys().copied().collect();
         self.execute(command);
         if self.gesture_failed() {
@@ -549,13 +550,23 @@ impl AppState {
             self.refresh();
             return;
         }
-        match self.handle.end_macro() {
-            Ok(_) => self.notice(history_text(&HistoryLabel::Macro(
-                MacroKind::AnalysisToGraph,
-            ))),
-            Err(err) => self.fail(errors::session::error_message(&err)),
-        }
+        let closed = match self.handle.end_macro() {
+            Ok(_) => {
+                self.notice(history_text(&HistoryLabel::Macro(
+                    MacroKind::AnalysisToGraph,
+                )));
+                true
+            }
+            Err(err) => {
+                self.fail(errors::session::error_message(&err));
+                false
+            }
+        };
         self.refresh();
+        // #529: after the macro is closed, or the widening would join its entry.
+        if closed {
+            self.widen_after_add(graph, spec_before);
+        }
     }
 
     /// The result joins exactly the layer and the group of its source,

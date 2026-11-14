@@ -147,6 +147,11 @@ pub(crate) enum Request {
         path: PathBuf,
         /// Read caps: size (A2) and cells (B1), #316.
         limits: stokesforge_persistence::LoadLimits,
+        /// Opaque normaliser of the loaded project (#529): run once, with no
+        /// history, after the formulas of the file were recalculated and
+        /// before the reply. Built by the client, so the session keeps no
+        /// rendering dependency. `None` for a plain load.
+        normaliser: Option<LoadNormaliser>,
         /// Reply: new revision, or error (persistence, or
         /// `Command(MacroOpen)` if a macro is open).
         reply: Sender<SessionResult<(Revision, LoadReport)>>,
@@ -526,6 +531,7 @@ pub(crate) fn run(
             Request::Load {
                 path,
                 limits,
+                mut normaliser,
                 reply,
             } => {
                 let outcome = load_project(
@@ -556,6 +562,14 @@ pub(crate) fn run(
                     // persistence, and is rerun on demand.
                     formulas.forget();
                     formulas.run_after_load(&mut project);
+                    // #529: the normaliser of the client reads the values the
+                    // recalculation has just written (invariant 11), not the
+                    // cache of the file. No command, no history: the load
+                    // exception of invariant 1 (the history was cleared and
+                    // nobody holds a copy of the project yet).
+                    if let Some(normalise) = normaliser.as_mut() {
+                        normalise(&mut project);
+                    }
                     // A3 — the project's identity changes: a handle
                     // (`stokesforge_script::surface::Handle`) that memorized
                     // the old epoch must no longer be able to name a `NodeId`
@@ -630,6 +644,10 @@ pub(crate) fn run(
 
     project
 }
+
+/// What a client runs over a freshly loaded project (#529): the freezing of
+/// the automatic axis ranges, built by the application state.
+pub type LoadNormaliser = Box<dyn FnMut(&mut Project) + Send>;
 
 /// Loads a complete project from `path` and substitutes it for `*project`;
 /// clears the history and entirely replaces `*geometries` with the geometry

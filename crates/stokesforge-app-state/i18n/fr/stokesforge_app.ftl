@@ -1501,6 +1501,7 @@ history-plot-legend-text = Changer le texte de la légende
 history-plot-color-bar = Changer la barre de couleurs
 history-plot-fit-page = Ajuster la page à la disposition
 history-plot-fit-layout = Ajuster la disposition à la page
+history-plot-widen-ranges = Élargir les plages des axes
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -2304,7 +2305,21 @@ busy-stop = Arrêter
 status-import-stopped = Import arrêté. Rien n'a été importé
 status-page-edge-reached = Bord de la page atteint : tirez un coin pour agrandir la page
 status-figure-grew = L'image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
+status-ranges-written =
+    { $count ->
+        [one] La plage des axes de { $count } graphique a été écrite d'après les données. Enregistrez pour la conserver
+       *[other] Les plages des axes de { $count } graphiques ont été écrites d'après les données. Enregistrez pour les conserver
+    }
 status-recalculating = Recalcul en cours…
+status-axes-widened =
+    { $count ->
+        [one] Axe { $axes } élargi pour montrer la nouvelle série. Ctrl+Z annule la nouvelle plage
+       *[other] Axes { $axes } élargis pour montrer la nouvelle série. Ctrl+Z annule les nouvelles plages
+    }
+widen-axis-x = X
+widen-axis-y = Y
+widen-axis-top-x = X du haut
+widen-axis-right-y = Y de droite
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée
 
 analysis-baseline-constant = Constante…

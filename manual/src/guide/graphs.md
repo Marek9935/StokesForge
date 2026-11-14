@@ -287,6 +287,8 @@ In the **Scale** section:
 
 A new graph does the same when it is created: its ranges are written once, so they never move by themselves.
 
+When you add a series that goes beyond the range (by dragging columns onto the graph, with **Add rows**, or with an analysis result), the axis widens at once on the side that is exceeded, with the same margins, and an orange message tells you so. It is a step of its own in the history: **Ctrl+Z** once gives the old range back and keeps the series, **Ctrl+Z** a second time removes the series. When you open a project made with an earlier version, the ranges that were left on automatic are written once in the same way, the figures may be reframed slightly, and the project is marked as modified: save it to keep them.
+
 <img src="../images/graphs-axes-log-scale.png" alt="The Bottom axis with Log scale ticked, the axes listed at the left." width="480">
 
 ### Display and ticks

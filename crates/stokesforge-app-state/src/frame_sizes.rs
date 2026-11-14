@@ -73,6 +73,32 @@ pub fn freeze_ranges(
         .unwrap_or(false)
 }
 
+/// The normaliser of a loaded project (#529): every graph with an axis still on
+/// Auto and data gets its ranges written, with the user's `margins`. The
+/// project is not installed yet and nobody holds a copy: the load exception of
+/// invariant 1, no command and no history. Returns how many graphs were
+/// written (one draw per graph that has an Auto axis).
+pub fn freeze_loaded_graphs(
+    project: &mut stokesforge_core::Project,
+    margins: stokesforge_render_svg::AutoMargins,
+) -> usize {
+    let mut written = 0;
+    for id in project.tree().walk_all() {
+        let Some(stokesforge_core::NodeKind::Graph { spec, .. }) =
+            project.tree().node(id).map(|n| n.kind())
+        else {
+            continue;
+        };
+        let mut frozen = spec.clone();
+        if freeze_ranges(project.tree(), &mut frozen, margins)
+            && project.set_plot_spec(id, frozen).is_ok()
+        {
+            written += 1;
+        }
+    }
+    written
+}
+
 /// The layout of the figure of `spec`, computed now with the measurement of the
 /// exports (Typst titles included): for the surfaces that cannot rely on a
 /// painted view, like the size fields of Graph Properties when the graph is not
