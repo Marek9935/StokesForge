@@ -327,6 +327,23 @@ fn graph_contents(
     graph_view_contents(ui, view, state.snapshot(), graph_id, actions);
 }
 
+fn auto_margins_id() -> egui::Id {
+    egui::Id::new("stokesforge_auto_margins")
+}
+
+/// Publishes the user's margins of the automatic framing (#529), every frame by
+/// the root, so that a detached window (no `AppState`) draws with them too.
+pub(super) fn publish_auto_margins(ctx: &egui::Context, margins: stokesforge_render::AutoMargins) {
+    ctx.data_mut(|data| data.insert_temp(auto_margins_id(), margins));
+}
+
+/// The margins [`publish_auto_margins`] published; the defaults before the
+/// first frame of the root.
+pub(super) fn published_auto_margins(ctx: &egui::Context) -> stokesforge_render::AutoMargins {
+    ctx.data(|data| data.get_temp(auto_margins_id()))
+        .unwrap_or_default()
+}
+
 /// Body of [`graph_contents`], factored over a [`GraphView`] and a
 /// [`Snapshot`] already in hand rather than over `&AppState`/the table
 /// [`StokesForgeApp::graph_views`](crate::app::StokesForgeApp::graph_views): this is what lets
@@ -381,6 +398,12 @@ pub(super) fn graph_view_contents(
     // `retours-2026-09-24-bugs.md`). The child Ui bounds the
     // interactions without growing the parent window.
     publish_figure_area(ui.ctx(), graph_id, area.size());
+    // The user's margins of the automatic framing (#529), before the layout
+    // is read: the last tick label can move the right margin.
+    view.set_figure_texts(
+        &stokesforge_app_state::figure_texts::figure_texts()
+            .with_margins(published_auto_margins(ui.ctx())),
+    );
     let layout = view.figure_layout(ui.ctx(), snapshot, graph_id).ok();
     let (fig_w, fig_h) = layout.as_ref().map_or(DEFAULT_FIGURE_SIZE, |l| l.size);
     if let Some(layout) = layout.clone() {
@@ -413,7 +436,6 @@ pub(super) fn graph_view_contents(
     if let Some(backdrop) = display_backdrop(&background) {
         figure_ui.painter().rect_filled(rect, 0.0, backdrop);
     }
-    view.set_figure_texts(&stokesforge_app_state::figure_texts::figure_texts());
     // The box the number fields of the layout strip edit: read before the
     // canvas is painted, because a click on another box there selects it in
     // this very frame and the typed number must go to the box it was typed
@@ -3513,8 +3535,8 @@ pub(super) mod tests {
             "the computed upper bound is displayed: {:?}",
             painted.iter().map(|t| &t.text).collect::<Vec<_>>()
         );
-        // The Auto button, already active: grayed out, and hovering says why.
-        let reason = tr!("plot-axes-from-auto", "disabled");
+        // The Auto button stays enabled (#529) and hovering says what it does.
+        let reason = tr!("plot-axes-from-auto", "hint");
         assert!(
             !painted.iter().any(|t| t.text == reason),
             "witness: without hovering, no explanation"
@@ -3530,7 +3552,7 @@ pub(super) mod tests {
         }
         assert!(
             seen.iter().any(|t| t.text == reason),
-            "hovering the grayed button says why: {:?}",
+            "hovering the Auto button says what it does: {:?}",
             seen.iter().map(|t| &t.text).collect::<Vec<_>>()
         );
         assert_eq!(

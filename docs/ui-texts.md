@@ -210,7 +210,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Own scale | Échelle propre | Box on the Top and Right tabs of an overlaid layer: it has its own scale on that side; unticked, it follows the layer it covers (#396) | Independent scale, Échelle indépendante | G |
 | Reciprocal† | Inverse | 1/x scale (spectra in wavenumber) | Réciproque | O |
 | Range | Plage | Interval of values shown on the axis | Bornes, Étendue | O |
-| Auto range | Plage auto | Range computed from the data; **no checkbox** since #344: « De » and « À » follow the data as long as nothing has been typed, and the « Auto » button of the row brings them back to it | Bornes automatiques | O |
+| Auto range | Plage auto | Range computed from the data; **no checkbox** since #344. A new graph writes its ranges into « De » and « À » once (#529); the « Auto » button of the row, always enabled, computes the range once with the margins of Preferences › Display › Graphs and writes it, it no longer switches tracking back on | Bornes automatiques | O |
 | Graphs (Preferences sub-tab) | Graphiques | Display sub-tab after New (#529): the preferences of how graphs are framed | Charts, Plots | G |
 | Automatic axis range (group) | Plage automatique des axes | Group of Display › Graphs: Left / Right / Bottom / Top (Gauche / Droite / Bas / Haut), empty space around the data in % of the data extent; tooltip « A new graph writes its ranges once ». Not "Rescale" / "Recadrer" (refused) (#529) | Rescale, Recadrer, Margins | G |
 | Min / Max | Min / Max | Ends of the range | De / À | O |

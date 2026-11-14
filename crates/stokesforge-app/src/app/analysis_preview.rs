@@ -55,8 +55,7 @@ use stokesforge_core::{Computed, Tree};
 use stokesforge_plot::{AxisScale, AxisSpec};
 use stokesforge_render::scale::{axis_ticks, AxisDirection};
 use stokesforge_render::{
-    axis_frame, fit_range, snap_to_curve, snap_to_curve_zone, AutoMargins, AxisRole, Gesture,
-    PanelTransform,
+    axis_frame, fit_range, snap_to_curve, snap_to_curve_zone, AxisRole, Gesture, PanelTransform,
 };
 
 use crate::theme;
@@ -568,8 +567,8 @@ pub(super) fn preview(
                     all_y.extend(c.iter().copied());
                 }
             }
-            // The preferences will give these (#529); the defaults for now.
-            let margins = AutoMargins::default();
+            // The user's margins (#529), as the graph draws them.
+            let margins = super::graph_window::published_auto_margins(ui.ctx());
             match axes {
                 Some((x, y)) => (
                     axis_frame(&xs, x, AxisRole::Horizontal, margins),
@@ -1269,6 +1268,47 @@ mod zone_tests {
     fn dragging_draws_a_polynomial_zone() {
         let form = drag(None, Preset::BaselinePolynomial);
         assert_eq!(form.setup.baseline.zones.len(), 1);
+    }
+
+    /// #529: the preview frames its axes with the user's margins, as the
+    /// graph does. The data run 0..1 on X: 0 % on each side by default, 20 %
+    /// on the left once the preference says so.
+    #[test]
+    fn the_preview_frames_with_the_users_margins() {
+        let frame_with = |left: f64| {
+            let mut project = stokesforge_core::Project::new("Margins").unwrap();
+            let (x, y) = xy_columns(&mut project);
+            let tree = project.tree().clone();
+            let series = vec![SeriesRef {
+                x: Some(x),
+                y,
+                sigma: None,
+            }];
+            let mut form = AnalysisForm::new(&Preset::BaselineConstant, series, false);
+            let context = context();
+            super::super::graph_window::publish_auto_margins(
+                &context,
+                stokesforge_render::AutoMargins {
+                    left,
+                    ..Default::default()
+                },
+            );
+            let id = egui::Id::new("margins");
+            for _ in 0..3 {
+                image(&context, vec![], |ui| {
+                    preview(ui, id, &mut form, &tree, 0);
+                });
+            }
+            context
+                .data(|d| d.get_temp::<StoredView>(id.with("view")))
+                .expect("the frame is remembered")
+                .frame
+        };
+        let default = frame_with(0.0).0;
+        let widened = frame_with(20.0).0;
+        assert!(default.0.abs() < 1e-9 && (default.1 - 1.0).abs() < 1e-9);
+        assert!((widened.0 + 0.2).abs() < 1e-9, "{widened:?}");
+        assert!((widened.1 - 1.0).abs() < 1e-9);
     }
 
     /// Places a point with a left click then removes it with a right click at

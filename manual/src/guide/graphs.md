@@ -283,9 +283,9 @@ In the **Scale** section:
 
 - Tick **Log scale** for a base-10 logarithmic axis. Without it the axis is linear. Zero and negative values are not drawn on a log axis.
 - Type two values in **From** and **to** to fix the range. The order is free: if the first value is larger than the second, the axis is reversed. This is useful for spectra plotted in wavenumbers.
-- Click **Auto** to let the range follow the data again. The axis keeps its direction.
+- Click **Auto** to compute the range from the data once and write it in **From** and **to**, with the margins of Preferences (**Display** > **Graphs**). The range does not follow the data afterwards, and the axis keeps its direction.
 
-While the range is automatic, the two fields show the range StokesForge computed.
+A new graph does the same when it is created: its ranges are written once, so they never move by themselves.
 
 <img src="../images/graphs-axes-log-scale.png" alt="The Bottom axis with Log scale ticked, the axes listed at the left." width="480">
 
