@@ -936,11 +936,29 @@ impl<V> FormulaCache<V> {
         }
         let compiled = compile(text, size_pt, ink, sans, math)?;
         let value = Arc::new(build(&compiled)?);
-        self.entries
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .insert(key, Arc::clone(&value));
-        Ok(value)
+        // `or_insert`, never a plain `insert`: if the build re-entered this
+        // cache (or another thread raced us) for the same key, the entry
+        // already stored is the one already handed out; replacing it would
+        // drop it while its holder still draws it (#508).
+        let stored = Arc::clone(
+            self.entries
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .entry(key)
+                .or_insert(value),
+        );
+        Ok(stored)
+    }
+
+    /// Drops the entries nobody else holds (`Arc::strong_count == 1`) and
+    /// returns how many were dropped. The cache only memoizes compilation
+    /// and rasterization; whoever draws an artifact holds its own `Arc`, so
+    /// an entry still displayed is never touched (#508).
+    pub fn evict_unshared(&self) -> usize {
+        let mut entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+        let before = entries.len();
+        entries.retain(|_, value| Arc::strong_count(value) > 1);
+        before - entries.len()
     }
 
     /// Number of artifacts currently cached — for tests.
@@ -1625,6 +1643,76 @@ mod tests {
                 .expect("compilation/insertion failed");
         }
         assert_eq!(cache.len(), 2);
+    }
+
+    /// #508: a build that re-enters the cache for the same key must not see
+    /// its entry replaced when the outer insert lands: the artifact already
+    /// handed out stays the stored one.
+    #[test]
+    fn a_reentrant_insert_keeps_the_artifact_already_handed_out() {
+        let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
+        let choice = FontChoice::default();
+        let inner = std::cell::RefCell::new(None);
+        let (sans, math) = noto();
+        let (sans2, math2) = (sans.clone(), math.clone());
+        let outer = cache
+            .get_or_try_insert(
+                "$lambda$",
+                12.0,
+                BLACK_INK,
+                &choice,
+                1.0,
+                sans,
+                math,
+                |compiled| {
+                    let handed_out = cache
+                        .get_or_try_insert(
+                            "$lambda$",
+                            12.0,
+                            BLACK_INK,
+                            &choice,
+                            1.0,
+                            sans2,
+                            math2,
+                            |compiled| Ok(compiled.size_pt()),
+                        )
+                        .expect("inner insertion failed");
+                    *inner.borrow_mut() = Some(handed_out);
+                    Ok(compiled.size_pt())
+                },
+            )
+            .expect("outer insertion failed");
+        let inner = inner.into_inner().expect("inner build did not run");
+        assert!(Arc::ptr_eq(&outer, &inner));
+        assert_eq!(cache.len(), 1);
+    }
+
+    /// #508: `evict_unshared` drops only the entries nobody else holds.
+    #[test]
+    fn evict_unshared_keeps_what_someone_holds() {
+        let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
+        let choice = FontChoice::default();
+        let mut get = |text: &str| {
+            let (sans, math) = noto();
+            cache
+                .get_or_try_insert(
+                    text,
+                    12.0,
+                    BLACK_INK,
+                    &choice,
+                    1.0,
+                    sans,
+                    math,
+                    |compiled| Ok(compiled.size_pt()),
+                )
+                .expect("compilation/insertion failed")
+        };
+        let held = get("$lambda$");
+        drop(get("$mu$"));
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.evict_unshared(), 1);
+        assert_eq!(cache.len(), 1);
+        assert!(Arc::ptr_eq(&held, &get("$lambda$")));
     }
 
     /// Sanity measurement on the **real pipeline** — not R0's throwaway spike.
