@@ -6676,4 +6676,277 @@ mod tests {
             "{layer:?}"
         );
     }
+    // ---- #534: cost of a frame on a wide worksheet (bench, run by hand) ----
+
+    /// Median, in milliseconds, of `frames` frames after two warm-up frames.
+    fn median_frame_ms(bench: &mut Bench, frames: usize) -> f64 {
+        let position = egui::pos2(400.0, 300.0);
+        for _ in 0..2 {
+            bench.image(vec![egui::Event::PointerMoved(position)]);
+        }
+        let mut times: Vec<f64> = (0..frames)
+            .map(|index| {
+                let moved = position + egui::vec2(index as f32 % 2.0, 0.0);
+                let start = std::time::Instant::now();
+                bench.image(vec![egui::Event::PointerMoved(moved)]);
+                start.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        times[times.len() / 2]
+    }
+
+    /// Widgets registered by the last pass of the bench's viewport.
+    fn widgets_in_last_pass(bench: &Bench) -> usize {
+        bench.context.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .layers()
+                .map(|(_, rects)| rects.len())
+                .sum()
+        })
+    }
+
+    /// Selection variants of the #534 bench.
+    #[derive(Clone, Copy, Debug)]
+    enum WideSelection {
+        Nothing,
+        OneCell,
+        CellRectangle,
+        Columns,
+        CtrlA,
+        Rows,
+    }
+
+    fn apply_wide_selection(bench: &mut Bench, selection: WideSelection) {
+        let (sheet, first, last) = (
+            bench.sheet,
+            bench.columns[0],
+            *bench.columns.last().unwrap(),
+        );
+        match selection {
+            WideSelection::Nothing => {}
+            WideSelection::OneCell => bench.state.select_cell(sheet, first, 3),
+            WideSelection::CellRectangle => {
+                bench.state.select_cell(sheet, first, 3);
+                bench.state.extend_selection(sheet, last, 20);
+            }
+            WideSelection::Columns => {
+                bench.state.select_column(sheet, first);
+                bench.state.extend_column_selection(sheet, last);
+            }
+            WideSelection::CtrlA => bench.state.select_all(sheet),
+            WideSelection::Rows => {
+                bench.state.select_row(sheet, 0);
+                bench.state.extend_row_selection(sheet, 150);
+            }
+        }
+        bench.image(Vec::new());
+    }
+
+    fn wide_bench(columns: u32, all_header_rows: bool) -> Bench {
+        let mut bench = Bench::with_shape(columns, 200, |c, r| f64::from(c * 100 + r));
+        bench.size = egui::vec2(1920.0, 1080.0);
+        set_header_rows(
+            &bench.context,
+            bench.book,
+            HeaderRows {
+                metadata: all_header_rows,
+                x_prime: all_header_rows,
+            },
+        );
+        bench.image(Vec::new());
+        bench
+    }
+
+    /// #534: frame cost of the workbook grid by width and selection. Run with
+    /// `cargo test --release -p stokesforge-app wide_sheet_frame_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "bench: #534 wide sheet frame cost"]
+    fn wide_sheet_frame_cost() {
+        use WideSelection::*;
+        println!("variant | header rows | frame ms at 10 / 100 / 1000 columns | widgets at 1000");
+        for (name, selection) in [
+            ("none", Nothing),
+            ("one cell", OneCell),
+            ("cell rectangle", CellRectangle),
+            ("columns 1..n", Columns),
+            ("Ctrl+A", CtrlA),
+            ("whole rows", Rows),
+        ] {
+            for all_header_rows in [true, false] {
+                let mut line = Vec::new();
+                let mut widgets = 0;
+                for columns in [10, 100, 1000] {
+                    let mut bench = wide_bench(columns, all_header_rows);
+                    apply_wide_selection(&mut bench, selection);
+                    line.push(format!("{:.2}", median_frame_ms(&mut bench, 10)));
+                    widgets = widgets_in_last_pass(&bench);
+                }
+                println!(
+                    "{name} | {} | {} | {widgets}",
+                    if all_header_rows { "all" } else { "off" },
+                    line.join(" / ")
+                );
+            }
+        }
+    }
+
+    /// #534: egui-only twin: `TableBuilder` of 1000 columns by 30 rows, empty cells
+    /// against one label per cell, with the widgets of the pass.
+    #[test]
+    #[ignore = "bench: #534 wide sheet frame cost"]
+    fn wide_table_builder_alone_cost() {
+        for columns in [10usize, 100, 1000] {
+            for labels in [false, true] {
+                let context = egui::Context::default();
+                context.set_fonts(stokesforge_render_egui::font_definitions());
+                let frame = || {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1920.0, 1080.0),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut output = context.run_ui(input, |ui| {
+                        egui::ScrollArea::horizontal().show(ui, |ui| {
+                            TableBuilder::new(ui)
+                                .columns(TableColumn::initial(80.0).at_least(40.0), columns)
+                                .auto_shrink([false, false])
+                                .header(20.0, |mut header| {
+                                    for _ in 0..columns {
+                                        header.col(|ui| {
+                                            if labels {
+                                                ui.label("A");
+                                            }
+                                        });
+                                    }
+                                })
+                                .body(|body| {
+                                    body.rows(20.0, 30, |mut row| {
+                                        for _ in 0..columns {
+                                            row.col(|ui| {
+                                                if labels {
+                                                    ui.label("1.5");
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                        });
+                    });
+                    output.textures_delta.clear();
+                };
+                for _ in 0..3 {
+                    frame();
+                }
+                let mut times: Vec<f64> = (0..10)
+                    .map(|_| {
+                        let start = std::time::Instant::now();
+                        frame();
+                        start.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                times.sort_by(f64::total_cmp);
+                let widgets: usize = context.viewport(|viewport| {
+                    viewport
+                        .prev_pass
+                        .widgets
+                        .layers()
+                        .map(|(_, rects)| rects.len())
+                        .sum()
+                });
+                println!(
+                    "table {columns} cols x 30 rows, {}: {:.2} ms, {widgets} widgets",
+                    if labels {
+                        "label per cell"
+                    } else {
+                        "empty cells"
+                    },
+                    times[5]
+                );
+            }
+        }
+    }
+
+    /// #534: the state queries the grid makes per cell, 30 rows by 1000 columns.
+    #[test]
+    #[ignore = "bench: #534 wide sheet frame cost"]
+    fn wide_sheet_state_queries_cost() {
+        use WideSelection::*;
+        let time = |label: &str, work: &mut dyn FnMut()| {
+            work();
+            let start = std::time::Instant::now();
+            for _ in 0..5 {
+                work();
+            }
+            println!(
+                "  {label}: {:.3} ms",
+                start.elapsed().as_secs_f64() * 1000.0 / 5.0
+            );
+        };
+        for (name, selection) in [
+            ("none", Nothing),
+            ("one cell", OneCell),
+            ("cell rectangle", CellRectangle),
+            ("columns 1..n", Columns),
+            ("Ctrl+A", CtrlA),
+            ("whole rows", Rows),
+        ] {
+            let mut bench = wide_bench(1000, true);
+            apply_wide_selection(&mut bench, selection);
+            let (state, sheet, columns) = (&bench.state, bench.sheet, bench.columns.clone());
+            println!("selection {name}, 30 rows x 1000 columns:");
+            time("is_selected", &mut || {
+                let mut hits = 0;
+                for row in 0..30 {
+                    for column in &columns {
+                        hits += usize::from(state.is_selected(sheet, *column, row));
+                    }
+                }
+                std::hint::black_box(hits);
+            });
+            if matches!(selection, Nothing) {
+                time("cell_display", &mut || {
+                    for row in 0..30 {
+                        for column in &columns {
+                            std::hint::black_box(state.cell_display(*column, row));
+                        }
+                    }
+                });
+                time("cell_is_numeric", &mut || {
+                    for row in 0..30 {
+                        for column in &columns {
+                            std::hint::black_box(state.cell_is_numeric(*column, row));
+                        }
+                    }
+                });
+                time(
+                    "column_staleness (1000 columns, once per header)",
+                    &mut || {
+                        for column in &columns {
+                            std::hint::black_box(state.column_staleness(*column));
+                        }
+                    },
+                );
+                time("visible_columns", &mut || {
+                    std::hint::black_box(state.visible_columns(sheet));
+                });
+                time("layout_key build", &mut || {
+                    let ids: Vec<NodeId> = state
+                        .visible_columns(sheet)
+                        .iter()
+                        .map(|(id, _, _)| *id)
+                        .collect();
+                    let widths: Vec<Option<u32>> = ids
+                        .iter()
+                        .map(|id| state.column_width(*id).map(f32::to_bits))
+                        .collect();
+                    std::hint::black_box((state.snapshot().epoch, ids.clone(), widths));
+                });
+            }
+        }
+    }
 }
