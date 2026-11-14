@@ -2783,6 +2783,93 @@ fn a_grid_page_corner_pushed_past_the_edge_zooms_out_and_keeps_growing() {
     assert!(slack.right > 300.0, "{}", slack.right);
 }
 
+/// #512: the raw motion that comes with the frame that starts the drag (the
+/// pointer travelled to the handle before the press was recognised) is not the
+/// drag's: only the absolute movement counts for that frame. Witness: the first
+/// frame's motion used (the page jumps by the 3000 points).
+#[test]
+fn the_motion_of_the_frame_that_starts_a_drag_is_not_counted() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let page = view.layout_page().expect("page");
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let none = egui::Modifiers::NONE;
+    let mut run = |events, time| {
+        frame_in(
+            &context,
+            &mut view,
+            &fixture,
+            events,
+            time,
+            none,
+            1.0,
+            Some(contain),
+        )
+    };
+    run(
+        vec![egui::Event::PointerMoved(from), button(from, true, none)],
+        0.1,
+    );
+    let to = from + egui::vec2(0.0, 8.0);
+    run(
+        vec![
+            egui::Event::MouseMoved(egui::vec2(3000.0, 3000.0)),
+            egui::Event::PointerMoved(to),
+        ],
+        0.15,
+    );
+    run(vec![], 0.2);
+    let signals = run(vec![button(to, false, none)], 0.25).events;
+    let (_, new_page) = edited(&signals);
+    let new_page = new_page.expect("a page");
+    assert!(
+        (new_page.width - page.width).abs() < 1.0
+            && (new_page.height - page.height - 8.0).abs() < 1.0,
+        "{new_page:?} vs {page:?}"
+    );
+}
+
+/// #512: pushed against the graphs with the snap on, the page stays exactly at
+/// the graphs, in both placements: the snap never rounds the edge up to the next
+/// line. Witness: the clamped length given to the geometry as it is (the Regular
+/// page grows by 2 points, the Free page ends on the grid line above the graphs).
+#[test]
+fn a_page_corner_pushed_against_the_graphs_does_not_snap_outward() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    view.set_layout_grid(Some(50.0));
+    let before = layout_of(&context, &mut view, &fixture);
+    let corner = Pos2::new(before.size.0 as f32 + 4.0, before.size.1 as f32 + 4.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner - egui::vec2(40.0, 40.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(signals.is_empty(), "{signals:?}");
+
+    let pulled_in = |grid: Option<f64>| {
+        let fixture = Fixture::free_two_layers();
+        let (context, mut view) = in_mode(&fixture);
+        view.set_layout_grid(grid);
+        let (from, contain) = free_corner_and_area(&view, 40.0);
+        let (signals, _, _) = drag_pushed(
+            &context,
+            &mut view,
+            &fixture,
+            contain,
+            from,
+            egui::vec2(0.0, 8.0),
+            &[egui::vec2(-3000.0, 0.0)],
+            egui::Modifiers::NONE,
+        );
+        edited(&signals).1.expect("a page").width
+    };
+    assert_eq!(pulled_in(Some(50.0)), pulled_in(None));
+}
+
 /// #512, a near corner (top-left) of a grid: the title band is part of the
 /// figure that must stay in the area, the corner moves with the opposite
 /// (bottom-right) corner fixed on both axes.

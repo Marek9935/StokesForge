@@ -270,6 +270,9 @@ struct CornerFollow {
     band: f32,
     /// Raw relative motion arrived in this drag (see [`pointer_step`]).
     raw_seen: bool,
+    /// A frame of this drag was already followed (the first one has no raw
+    /// motion of its own).
+    started: bool,
     /// The absolute pointer of the previous frame of this drag.
     last_abs: Pos2,
 }
@@ -277,9 +280,21 @@ struct CornerFollow {
 impl CornerFollow {
     /// The pointer delta, in points, that the geometry of the drag gets: how
     /// far the page corner was pulled outward, per axis.
+    ///
+    /// An axis held at the shortest page (the graphs) is pulled "far inward":
+    /// the geometry clamps it to the graphs exactly. The real, clamped length
+    /// would let the snap round the edge up to the next grid line, and the page
+    /// would grow when it is pushed against the graphs.
     fn delta(&self) -> (f64, f64) {
+        const FAR_INWARD: f32 = 1.0e6;
         let pulled = |i: usize| {
-            f64::from(self.axes[i].sign) * f64::from(self.axes[i].length - self.start[i])
+            let axis = &self.axes[i];
+            let length = if axis.length <= axis.min + 1.0e-3 {
+                self.start[i] - FAR_INWARD
+            } else {
+                axis.length
+            };
+            f64::from(axis.sign) * f64::from(length - self.start[i])
         };
         (pulled(0), pulled(1))
     }
@@ -1465,6 +1480,7 @@ impl GraphView {
             far: corner,
             band,
             raw_seen: false,
+            started: false,
             last_abs: press,
         })
     }
@@ -1483,6 +1499,10 @@ impl GraphView {
         } else {
             Vec2::ZERO
         };
+        // The frame that starts the drag holds the motion made before the
+        // press was recognised: its absolute movement is the true one.
+        let motion = if follow.started { motion } else { None };
+        follow.started = true;
         let step = pointer_step(&mut follow.raw_seen, motion, absolute);
         if let Some(contain) = contain {
             follow.axes[0].bounds = (contain.min.x, contain.max.x);
