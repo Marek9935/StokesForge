@@ -7,7 +7,7 @@ Read from `stokesforge-rendering` when the task touches the drawing order, layer
 Each step depends on what the previous one learnt (`docs/rendering.md` § The order in which a panel is plotted):
 
 1. prepare each series as geometry (axis scale applied); framing and drawing read **the same** geometry;
-2. frame the axes on it;
+2. frame the axes on it (data plus the margins of `framing::AutoMargins`, one rule `framing::auto_frame` shared with `interact::fit_range`: `docs/rendering.md` § Automatic framing);
 3. build the plotting area — the pixel width exists only here;
 4. decimate (LTTB), which needs that width;
 5. paint in pixels;

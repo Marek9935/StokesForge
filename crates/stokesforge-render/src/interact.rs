@@ -30,6 +30,7 @@
 //! derivation (and the direction of the resulting drag) is verified by this
 //! module's tests rather than asserted in a comment.
 
+use crate::framing::{auto_frame, AutoMargins, AxisRole};
 use crate::pipeline::DrawnPanel;
 use crate::scale::{forward, inverse};
 use crate::series;
@@ -310,25 +311,36 @@ pub fn nearest_on_curve(
 /// increasing direction.
 ///
 /// Values with no image on the scale ([`forward`]: non-finite, or ≤ 0 on a
-/// logarithmic scale) are ignored. The 5% margin is taken in the
-/// **transformed** space — hence proportionally on a log axis —, a frame of
-/// zero extent widens by 0.5 on each side, and with no values the frame is
-/// `(0, 1)` transformed (`(1, 10)` on log). This is the initial frame of the
-/// analysis window preview (#261).
-pub fn fit_range(values: &[f64], scale: AxisScale) -> (f64, f64) {
+/// logarithmic scale) are ignored. The margins are taken in the
+/// **transformed** space (#529), by the **same** rule as the graph
+/// ([`crate::framing::auto_frame`], #269): `role` picks the pair of margins, a
+/// logarithmic axis snaps to whole decades, a constant extent widens by 5 %
+/// of its value, and with no values the frame is `(0, 1)` transformed
+/// (`(1, 10)` on log). This is the initial frame of the analysis window
+/// preview (#261).
+pub fn fit_range(
+    values: &[f64],
+    scale: AxisScale,
+    role: AxisRole,
+    margins: AutoMargins,
+) -> (f64, f64) {
+    fit_range_inverted(values, scale, role, margins, false)
+}
+
+fn fit_range_inverted(
+    values: &[f64],
+    scale: AxisScale,
+    role: AxisRole,
+    margins: AutoMargins,
+    inverted: bool,
+) -> (f64, f64) {
     let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
     for t in values.iter().filter_map(|&value| forward(scale, value)) {
         low = low.min(t);
         high = high.max(t);
     }
-    let (low, high) = if low > high {
-        (0.0, 1.0)
-    } else if low == high {
-        (low - 0.5, high + 0.5)
-    } else {
-        let margin = (high - low) * 0.05;
-        (low - margin, high + margin)
-    };
+    let data = (low <= high).then_some((low, high));
+    let (low, high) = auto_frame(scale, role, margins, inverted, data, None);
     (inverse(scale, low), inverse(scale, high))
 }
 
@@ -337,16 +349,25 @@ pub fn fit_range(values: &[f64], scale: AxisScale) -> (f64, f64) {
 /// automatic, then put in display direction (`(top, bottom)` if the axis is
 /// inverted). Same rule as the graph (`pipeline::axis_range`, #269): a single
 /// flip, whether the axis is inverted by the "Inverted" checkbox, by
-/// bounds `min > max`, or by both.
-pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
-    let mut range = fit_range(values, axis.scale);
+/// bounds `min > max`, or by both. `Bottom` and `Top` stay the edges of the
+/// frame on an inverted axis, as in the graph.
+pub fn axis_frame(
+    values: &[f64],
+    axis: &AxisSpec,
+    role: AxisRole,
+    margins: AutoMargins,
+) -> (f64, f64) {
     let mut reversed = false;
+    let mut explicit = None;
     if !axis.auto_range {
         if let (Some(low), Some(high)) = (axis.range_min, axis.range_max) {
             reversed = low > high;
-            range = (low.min(high), low.max(high));
+            explicit = Some((low.min(high), low.max(high)));
         }
     }
+    let mut range = explicit.unwrap_or_else(|| {
+        fit_range_inverted(values, axis.scale, role, margins, axis.inverted || reversed)
+    });
     if axis.inverted || reversed {
         range = (range.1, range.0);
     }
@@ -949,50 +970,60 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_surrounds_the_finite_values_with_a_margin() {
+    fn the_frame_surrounds_the_finite_values_with_the_margins() {
+        use AxisRole::{Horizontal, Vertical};
         let close = |got: (f64, f64), want: (f64, f64)| {
             assert!(
                 (got.0 - want.0).abs() < 1e-12 && (got.1 - want.1).abs() < 1e-12,
                 "{got:?} instead of {want:?}"
             );
         };
+        let m = AutoMargins::default();
+        let lin = AxisScale::Linear;
         close(
-            fit_range(&[0.0, 10.0, f64::NAN], AxisScale::Linear),
-            (-0.5, 10.5),
+            fit_range(&[0.0, 10.0, f64::NAN], lin, Horizontal, m),
+            (0.0, 10.0),
         );
-        close(fit_range(&[1.0, 3.0], AxisScale::Linear), (0.9, 3.1));
-        close(fit_range(&[2.0, 2.0], AxisScale::Linear), (1.5, 2.5));
-        close(fit_range(&[], AxisScale::Linear), (0.0, 1.0));
+        close(fit_range(&[10.0, 30.0], lin, Vertical, m), (9.8, 31.0));
+        // A constant series: the graph's rule, 5 % of the value.
+        close(fit_range(&[2.0, 2.0], lin, Vertical, m), (1.9, 2.1));
+        close(fit_range(&[], lin, Vertical, m), (0.0, 1.0));
+        // Log: whole decades, like the graph.
         close(
-            fit_range(&[1.0, 10.0, 100.0], AxisScale::Log),
-            (10f64.powf(-0.1), 10f64.powf(2.1)),
+            fit_range(&[1.0, 10.0, 100.0], AxisScale::Log, Vertical, m),
+            (1.0, 100.0),
         );
-        // Only the positives count in log; without them, one decade.
         close(
-            fit_range(&[-5.0, 0.0, 1.0, 100.0], AxisScale::Log),
-            (10f64.powf(-0.1), 10f64.powf(2.1)),
+            fit_range(&[-5.0, 0.0, 1.0, 100.0], AxisScale::Log, Vertical, m),
+            (1.0, 100.0),
         );
-        close(fit_range(&[-5.0, 0.0], AxisScale::Log), (1.0, 10.0));
+        close(
+            fit_range(&[-5.0, 0.0], AxisScale::Log, Vertical, m),
+            (1.0, 10.0),
+        );
     }
 
     #[test]
     fn an_axis_frame_follows_its_framing_and_direction() {
+        let m = AutoMargins::default();
+        let v = AxisRole::Vertical;
         let mut axis = AxisSpec::default();
-        assert_eq!(axis_frame(&[0.0, 10.0], &axis).0, -0.5);
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis, v, m).0, -0.1);
         axis.inverted = true;
-        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (10.5, -0.5));
+        // Inverted: the bottom margin (1 %) is on the high bound.
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis, v, m), (10.1, -0.5));
         axis.auto_range = false;
         axis.range_min = Some(2.0);
         axis.range_max = Some(8.0);
-        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (8.0, 2.0));
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis, v, m), (8.0, 2.0));
         // Non-automatic explicit framing but incomplete: keep the data.
         axis.range_max = None;
-        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (10.5, -0.5));
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis, v, m), (10.1, -0.5));
         // Explicit framing ignored as long as the framing is automatic.
         axis.range_max = Some(8.0);
         axis.auto_range = true;
         axis.inverted = false;
-        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (-0.5, 10.5));
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis, v, m), (-0.1, 10.5));
     }
 
     /// #269: the four combinations "bounds in order or not" ×
@@ -1012,7 +1043,15 @@ mod tests {
             axis.range_min = Some(min);
             axis.range_max = Some(max);
             axis.inverted = inverted;
-            assert_eq!(axis_frame(&[500.0, 3000.0], &axis), expected);
+            assert_eq!(
+                axis_frame(
+                    &[500.0, 3000.0],
+                    &axis,
+                    AxisRole::Vertical,
+                    AutoMargins::default()
+                ),
+                expected
+            );
         }
     }
 

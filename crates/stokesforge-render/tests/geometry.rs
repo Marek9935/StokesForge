@@ -160,19 +160,19 @@ fn the_framing_follows_the_data_with_a_margin() {
         &[("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])],
         |ids| one_panel(SeriesSpec::new_xy(ids[0], ids[1]), |_| {}),
     );
-    // 5% margin on both sides.
+    // #529: X edge to edge, Y 1 % below and 5 % above.
     assert!(
-        (drawn.x_range().0 - -0.1).abs() < 1e-9,
+        (drawn.x_range().0 - 0.0).abs() < 1e-9,
         "{:?}",
         drawn.x_range()
     );
     assert!(
-        (drawn.x_range().1 - 2.1).abs() < 1e-9,
+        (drawn.x_range().1 - 2.0).abs() < 1e-9,
         "{:?}",
         drawn.x_range()
     );
     assert!(
-        (drawn.y_range().0 - 9.0).abs() < 1e-9,
+        (drawn.y_range().0 - 9.8).abs() < 1e-9,
         "{:?}",
         drawn.y_range()
     );
@@ -182,6 +182,30 @@ fn the_framing_follows_the_data_with_a_margin() {
         drawn.y_range()
     );
     assert_eq!(drawn.drawn_series, 1);
+}
+
+/// #269, #529: the analysis preview frames linear data like the graph does.
+#[test]
+fn the_analysis_preview_frames_like_the_graph() {
+    use stokesforge_plot::AxisSpec;
+    use stokesforge_render::{axis_frame, AutoMargins, AxisRole};
+    let xs = vec![0.0, 1.0, 2.0];
+    let ys = vec![10.0, 20.0, 30.0];
+    let drawn = geometry(&[("X", xs.clone()), ("Y", ys.clone())], |ids| {
+        one_panel(SeriesSpec::new_xy(ids[0], ids[1]), |_| {})
+    });
+    let axis = AxisSpec::default();
+    let m = AutoMargins::default();
+    let x = axis_frame(&xs, &axis, AxisRole::Horizontal, m);
+    let y = axis_frame(&ys, &axis, AxisRole::Vertical, m);
+    for (got, want) in [
+        (drawn.x_range().0, x.0),
+        (drawn.x_range().1, x.1),
+        (drawn.y_range().0, y.0),
+        (drawn.y_range().1, y.1),
+    ] {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+    }
 }
 
 #[test]
@@ -255,9 +279,9 @@ fn a_mixed_column_draws_only_its_numeric_cells() {
          as rows, they do not shift the index of the following ones"
     );
     // And the framing comes only from the two numbers: neither "n/a" nor the
-    // empty cell produced a point (5% margin on both sides of
-    // [10, 30]).
-    assert!((a.y_range().0 - 9.0).abs() < 1e-9, "{:?}", a.y_range());
+    // empty cell produced a point (1 % below and 5 % above
+    // [10, 30], #529).
+    assert!((a.y_range().0 - 9.8).abs() < 1e-9, "{:?}", a.y_range());
     assert!((a.y_range().1 - 31.0).abs() < 1e-9, "{:?}", a.y_range());
 }
 

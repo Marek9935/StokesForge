@@ -1370,10 +1370,10 @@ fn double_clicking_an_axis_or_a_curve_opens_its_properties() {
 }
 
 /// #385: the line of an axis (strip inside the plot area) opens the axis
-/// properties like its numbers, and it beats a curve lying on the edge; the
-/// framing is kept (no zoom reset).
+/// properties like its numbers, but a click that lands on a curve lying on the
+/// edge takes the curve (#529, A4); the framing is kept (no zoom reset).
 #[test]
-fn double_clicking_the_axis_line_opens_the_axis_even_under_a_curve() {
+fn double_clicking_the_axis_line_opens_the_axis_except_on_a_curve() {
     use stokesforge_render::{AxisSide, PlotComponent};
     use stokesforge_render_egui::GraphEvent;
     let fixture = Fixture::curve_on_the_edges();
@@ -1440,14 +1440,8 @@ fn double_clicking_the_axis_line_opens_the_axis_even_under_a_curve() {
         .expect("a point of the axis line lying on the curve");
     let signals = double_click(&context, &mut view, &fixture, rect, on_curve);
     assert!(
-        matches!(
-            signals.as_slice(),
-            [GraphEvent::OpenAxisProperties {
-                side: AxisSide::Bottom,
-                ..
-            }]
-        ),
-        "the axis beats the curve: {signals:?}"
+        matches!(signals.as_slice(), [GraphEvent::OpenSeriesProperties(_)]),
+        "the curve beats the axis where it is hit: {signals:?}"
     );
     assert_eq!(view.view().generation(), 0, "the framing is kept");
 }

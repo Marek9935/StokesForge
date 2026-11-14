@@ -55,7 +55,8 @@ use stokesforge_core::{Computed, Tree};
 use stokesforge_plot::{AxisScale, AxisSpec};
 use stokesforge_render::scale::{axis_ticks, AxisDirection};
 use stokesforge_render::{
-    axis_frame, fit_range, snap_to_curve, snap_to_curve_zone, Gesture, PanelTransform,
+    axis_frame, fit_range, snap_to_curve, snap_to_curve_zone, AutoMargins, AxisRole, Gesture,
+    PanelTransform,
 };
 
 use crate::theme;
@@ -567,11 +568,16 @@ pub(super) fn preview(
                     all_y.extend(c.iter().copied());
                 }
             }
+            // The preferences will give these (#529); the defaults for now.
+            let margins = AutoMargins::default();
             match axes {
-                Some((x, y)) => (axis_frame(&xs, x), axis_frame(&all_y, y)),
+                Some((x, y)) => (
+                    axis_frame(&xs, x, AxisRole::Horizontal, margins),
+                    axis_frame(&all_y, y, AxisRole::Vertical, margins),
+                ),
                 None => (
-                    fit_range(&xs, AxisScale::Linear),
-                    fit_range(&all_y, AxisScale::Linear),
+                    fit_range(&xs, AxisScale::Linear, AxisRole::Horizontal, margins),
+                    fit_range(&all_y, AxisScale::Linear, AxisRole::Vertical, margins),
                 ),
             }
         });

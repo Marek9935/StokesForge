@@ -76,6 +76,7 @@ use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, composite, over_white, parse_hex, rgba_or};
 use crate::decimate;
 use crate::formula::literal_style_font;
+use crate::framing::{self, AutoMargins, AxisRole};
 use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
@@ -2822,6 +2823,7 @@ fn draw_panel<DB: DrawingBackend>(
             .any(|series| series.axis == SeriesAxis::Right);
 
     // 2 — framing, in the transformed space.
+    let margins = figure_texts.margins;
     let x_range = match base {
         Some(base) if !x_own => base.x_range,
         _ => {
@@ -2830,6 +2832,8 @@ fn draw_panel<DB: DrawingBackend>(
                 x_scale,
                 extent_of(&prepared, series::x_extent, None),
                 false,
+                AxisRole::Horizontal,
+                margins,
             );
             join_to_base(
                 &spec.bottom,
@@ -2847,6 +2851,8 @@ fn draw_panel<DB: DrawingBackend>(
                 y_scale,
                 extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
                 needs_baseline(&prepared, SeriesAxis::Left),
+                AxisRole::Vertical,
+                margins,
             );
             join_to_base(
                 &spec.left,
@@ -2862,6 +2868,8 @@ fn draw_panel<DB: DrawingBackend>(
             y2_scale,
             extent_of(&prepared, series::y_extent, Some(SeriesAxis::Right)),
             needs_baseline(&prepared, SeriesAxis::Right),
+            AxisRole::Vertical,
+            margins,
         )
     });
 
@@ -4371,6 +4379,8 @@ fn axis_range(
     scale: AxisScale,
     data: Option<(f64, f64)>,
     with_baseline: bool,
+    role: AxisRole,
+    margins: AutoMargins,
 ) -> (f64, f64) {
     let mut reversed = false;
     let explicit = spec
@@ -4390,7 +4400,14 @@ fn axis_range(
 
     let (min, max) = match explicit {
         Some(range) => range,
-        None => padded(scale, data, with_baseline),
+        None => padded(
+            scale,
+            data,
+            with_baseline,
+            role,
+            margins,
+            spec.inverted || reversed,
+        ),
     };
     if spec.inverted || reversed {
         (max, min)
@@ -4421,35 +4438,25 @@ fn join_to_base(
     }
 }
 
-/// The extent of the data, widened by what it takes to be a framing.
-fn padded(scale: AxisScale, data: Option<(f64, f64)>, with_baseline: bool) -> (f64, f64) {
-    // No data: `0..1`, which is worth "one decade" on a logarithmic scale
-    // since the interval there is already that of the exponents.
-    let Some((mut min, mut max)) = data else {
-        return (0.0, 1.0);
+/// The extent of the data, widened by what it takes to be a framing: the
+/// one rule of [`framing::auto_frame`] (#529), shared with the analysis
+/// preview. `inverted` says the axis is drawn reversed, so that `Bottom` and
+/// `Top` stay the edges of the frame.
+fn padded(
+    scale: AxisScale,
+    data: Option<(f64, f64)>,
+    with_baseline: bool,
+    role: AxisRole,
+    margins: AutoMargins,
+    inverted: bool,
+) -> (f64, f64) {
+    // A bar that does not show where it starts lies about its height.
+    let baseline = if with_baseline {
+        scale::forward(scale, 0.0)
+    } else {
+        None
     };
-    if with_baseline {
-        // A bar that does not show where it starts lies about its height.
-        if let Some(baseline) = scale::forward(scale, 0.0) {
-            min = min.min(baseline);
-            max = max.max(baseline);
-        }
-    }
-    if matches!(scale, AxisScale::Log) {
-        // The decades stand in for a margin: widening before snapping to them
-        // would change nothing most of the time, and would add an empty
-        // decade the rest of the time.
-        return scale::snap_to_decades((min, max));
-    }
-    if min == max {
-        // A constant series, or a single point: without this spreading,
-        // `build_cartesian_2d` would receive an empty interval and Plotters
-        // would divide by zero when projecting.
-        let pad = if min == 0.0 { 1.0 } else { min.abs() * 0.05 };
-        return (min - pad, max + pad);
-    }
-    let pad = (max - min) * 0.05;
-    (min - pad, max + pad)
+    framing::auto_frame(scale, role, margins, inverted, data, baseline)
 }
 
 /// Puts a transformed interval back into the data space, to be reported to
@@ -4793,25 +4800,141 @@ mod tests {
             ..AxisSpec::default()
         };
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (800.0, 400.0)
         );
         axis.range_min = Some(400.0);
         axis.range_max = Some(800.0);
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (400.0, 800.0)
         );
         axis.inverted = true;
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (800.0, 400.0)
         );
         axis.range_min = Some(800.0);
         axis.range_max = Some(400.0);
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (800.0, 400.0)
+        );
+    }
+
+    fn auto(
+        scale: AxisScale,
+        data: Option<(f64, f64)>,
+        baseline: bool,
+        role: AxisRole,
+        inverted: bool,
+    ) -> (f64, f64) {
+        let axis = AxisSpec {
+            inverted,
+            ..AxisSpec::default()
+        };
+        axis_range(&axis, scale, data, baseline, role, AutoMargins::default())
+    }
+
+    fn near(actual: (f64, f64), expected: (f64, f64)) {
+        assert!(
+            (actual.0 - expected.0).abs() < 1e-9 && (actual.1 - expected.1).abs() < 1e-9,
+            "{actual:?} != {expected:?}"
+        );
+    }
+
+    /// #529: the horizontal axis runs edge to edge, the vertical ones leave
+    /// 1 % below and 5 % above; `Bottom` is the bottom of the frame.
+    #[test]
+    fn the_automatic_framing_follows_the_axis_role() {
+        use AxisScale::Linear;
+        near(
+            auto(Linear, Some((0.0, 2.0)), false, AxisRole::Horizontal, false),
+            (0.0, 2.0),
+        );
+        near(
+            auto(Linear, Some((10.0, 30.0)), false, AxisRole::Vertical, false),
+            (9.8, 31.0),
+        );
+        // Inverted: the axis is returned high bound first, with the bottom
+        // margin (1 %) on the high bound.
+        near(
+            auto(Linear, Some((10.0, 30.0)), false, AxisRole::Vertical, true),
+            (30.2, 9.0),
+        );
+        // Constant series: still a non-empty spread.
+        let (low, high) = auto(Linear, Some((4.0, 4.0)), false, AxisRole::Horizontal, false);
+        assert!(low < high);
+        // Positive bars sit on the frame whatever the bottom margin is.
+        let bars = auto(Linear, Some((3.0, 7.0)), true, AxisRole::Vertical, false);
+        assert_eq!(bars.0, 0.0);
+        // Log: decades, margins ignored.
+        assert_eq!(
+            auto(
+                AxisScale::Log,
+                Some((0.0, 3.0)),
+                false,
+                AxisRole::Vertical,
+                false
+            ),
+            scale::snap_to_decades((0.0, 3.0))
+        );
+        assert_eq!(
+            auto(Linear, None, false, AxisRole::Vertical, false),
+            (0.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn x_error_bars_and_bar_edges_enter_the_horizontal_extent() {
+        let curve = Geometry::Curve {
+            points: vec![(0.0, 1.0), (2.0, 1.0)],
+            whiskers: vec![((1.0, 1.0), (3.0, 1.0))],
+        };
+        assert_eq!(series::x_extent(&curve), Some((0.0, 3.0)));
+        let bars = Geometry::Bars {
+            bars: vec![(-0.5, 0.5, 1.0), (1.5, 2.5, 1.0)],
+            whiskers: Vec::new(),
+        };
+        let x = series::x_extent(&bars).expect("extent");
+        near(
+            framing::auto_frame(
+                AxisScale::Linear,
+                AxisRole::Horizontal,
+                AutoMargins::default(),
+                false,
+                Some(x),
+                None,
+            ),
+            (-0.5, 2.5),
         );
     }
 

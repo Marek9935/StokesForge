@@ -36,9 +36,10 @@ applies `HIT_RADIUS` and returns a `PointHit` as a `Pos2`), putting down the
 | `scale` | the axis scales, including the logarithmic one |
 | `paint` | the pixel primitives: sub-pixel strokes, markers, bars, whiskers |
 | `clip` | geometric clipping of a polyline against the plot rectangle |
+| `framing` | the margins of the automatic framing (`AutoMargins`) and the one rule that applies them (`auto_frame`, #529): see § Automatic framing |
 | `legend` | the legend, laid out by hand |
 | `decimate` | LTTB |
-| `interact` | pixel ↔ data mapping of a plotted panel (`PanelTransform`, `Gesture`) and the point nearest the cursor (`nearest_point`, cursor as `(f64, f64)`, #262). For a caller that paints by itself (analysis preview, #261): `PanelTransform::new` (fractional area in `f64`, bounds in display order), `fit_range` / `axis_frame` (initial frame: 5 % margin in the transformed space, remembered bounds, inversion) and `snap_to_curve` (nearest point in X, average over *n* points; `snap_to_curve_zone` also returns the averaged zone, min and max abscissas and the real number of points, #334). `scale::axis_ticks` gives the ticks and their label through the pipeline path (`linear_key_points` + `label_count` + `TickFormat`) |
+| `interact` | pixel ↔ data mapping of a plotted panel (`PanelTransform`, `Gesture`) and the point nearest the cursor (`nearest_point`, cursor as `(f64, f64)`, #262). For a caller that paints by itself (analysis preview, #261): `PanelTransform::new` (fractional area in `f64`, bounds in display order), `fit_range` / `axis_frame` (initial frame: the same rule and margins as the graph, `framing::auto_frame`, #529, #269; remembered bounds, inversion) and `snap_to_curve` (nearest point in X, average over *n* points; `snap_to_curve_zone` also returns the averaged zone, min and max abscissas and the real number of points, #334). `scale::axis_ticks` gives the ticks and their label through the pipeline path (`linear_key_points` + `label_count` + `TickFormat`) |
 | `view` | the view state — zoom and pan (`ViewState`, `Framing`) — and the framing a gesture gives (`commit_gesture`, `commit_axis_gesture`), without egui (#262) |
 | `hit` | component (title, plot area, axis, axis title) under a pixel, on the geometry allocated by Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `series_selection` | series under a pixel, on its actually plotted pixels, and handles of the selected series (#98) |
@@ -504,6 +505,10 @@ movement. A backend that drew into a `Painter` would replay the whole
 Plotters pipeline at **every frame**, even a still one. With a collector, the
 result is cached and a frame without change costs one
 `painter.extend(...)`.
+
+### Automatic framing (#529)
+
+An axis without an explicit range takes the extent of the data plus margins, in percent of that extent (`framing::AutoMargins`, `framing::auto_frame`; `pipeline::padded` and `interact::fit_range` both call it, so the graph and the analysis preview agree, #269). The margins are per edge of the frame: defaults left 0, right 0, bottom 1, top 5. The horizontal axis takes left and right, the vertical axes (left and Y2) bottom and top. On an inverted axis (Inverted, or From > To) bottom and top stay the edges of the frame, so `bottom` applies to the high bound. A bound that lands on the zero baseline of positive bars takes no margin (the bars sit on the frame); a constant series or a single point widens by 5 % of its value (1 at zero); a logarithmic axis snaps to whole decades and ignores the margins; no data gives `0..1`; a margin that would overflow leaves the bound where it is (invariant 10). X error bars and bar edges are part of the horizontal extent, Y error bars of the vertical one. The overlay alignment (#174) applies after the margins. The margins reach the pipeline in `FigureTexts::margins` (`FigureTexts::with_margins`), never in the `PlotSpec`; `GraphView::set_figure_texts` drops the screen cache when they change, and an export must be given the same ones as the screen.
 
 ### The cache key has exactly four terms
 
