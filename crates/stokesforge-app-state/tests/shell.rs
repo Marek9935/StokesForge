@@ -8911,12 +8911,13 @@ fn the_color_bar_is_a_section_of_the_legend_tab() {
     );
 }
 
-/// #499: a new graph takes the « Text from » default of the Preferences, a
-/// graph that exists keeps its own. Witness: ignoring the preference leaves
-/// the long name.
+/// #499, #502: a new graph takes the « Text from » default of the Preferences
+/// (and, under Custom, its template), a graph that exists keeps its own.
+/// Witness: ignoring the preference leaves the long name; copying only `from`
+/// leaves the template empty.
 #[test]
 fn new_graphs_take_the_legend_text_preference() {
-    use stokesforge_plot::LegendTextFrom;
+    use stokesforge_plot::{LegendText, LegendTextFrom};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (session, _state, sheet, columns) = kinetics(dir.path());
     let file = dir.path().join("preferences.json");
@@ -8929,30 +8930,86 @@ fn new_graphs_take_the_legend_text_preference() {
             .and_then(|node| node.children().last().copied())
             .expect("graph")
     };
+    let text_of = |state: &AppState, graph| {
+        let text = &state.plot_spec(graph).unwrap().panels[0].legend.text;
+        (text.from.clone(), text.template.clone())
+    };
+    let choice = |from: LegendTextFrom, template: &str| LegendText {
+        from,
+        template: template.to_string(),
+        row_column: None,
+    };
     state.dispatch(Action::AddGraph);
     let old = last_graph(&state);
-    state.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Units));
+    state.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Units,
+        "",
+    )));
     state.dispatch(Action::AddGraph);
-    let from = |state: &AppState, graph| {
-        state.plot_spec(graph).unwrap().panels[0]
-            .legend
-            .text
-            .from
-            .clone()
-    };
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    assert_eq!(
+        text_of(&state, last_graph(&state)),
+        (LegendTextFrom::Units, String::new())
+    );
     state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: columns.clone(),
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&state, last_graph(&state)).0, LegendTextFrom::Units);
+    assert_eq!(text_of(&state, old).0, LegendTextFrom::LongName);
+    // Remembered, and Custom is a default now (#502).
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Units);
+    let template = "*#ln* (#u)";
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Custom,
+        template,
+    )));
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Custom);
+    let wanted = (LegendTextFrom::Custom, template.to_string());
+    next.dispatch(Action::AddGraph);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotColumns {
         sheet,
         columns,
         plot_type: PlotType::Line,
     });
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
-    assert_eq!(from(&state, old), LegendTextFrom::LongName);
-    // Remembered; a custom template is not a default.
-    let mut next = state_on_preferences(&session, dir.path(), &file);
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::Units);
-    next.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Custom));
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    assert_eq!(
+        text_of(&next, old).0,
+        LegendTextFrom::LongName,
+        "older graph"
+    );
+    // Another choice keeps the template; Custom finds it again.
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Comments,
+        template,
+    )));
+    next.dispatch(Action::AddGraph);
+    assert_eq!(
+        text_of(&next, last_graph(&next)),
+        (LegendTextFrom::Comments, template.to_string())
+    );
+    // An invalid and an empty template are saved and copied unchanged.
+    for odd in ["#(", ""] {
+        next.dispatch(Action::SetNewGraphLegendText(choice(
+            LegendTextFrom::Custom,
+            odd,
+        )));
+        next.dispatch(Action::AddGraph);
+        assert_eq!(
+            text_of(&next, last_graph(&next)),
+            (LegendTextFrom::Custom, odd.to_string())
+        );
+        let again = state_on_preferences(&session, dir.path(), &file);
+        assert_eq!(again.new_graph_legend_text().template, odd);
+    }
 }
 
 /// #499 F2: with « Text from » on an empty header row, the legend entry stays
