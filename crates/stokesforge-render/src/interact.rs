@@ -151,6 +151,11 @@ impl PanelTransform {
         Some(transform)
     }
 
+    /// The plot area as `(origin, size)`, in pixels.
+    pub fn frame(&self) -> ((f64, f64), (f64, f64)) {
+        (self.origin, self.size)
+    }
+
     /// True if the given pixel falls inside this panel's plot area.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         let ((ox, oy), (w, h)) = (self.origin, self.size);
