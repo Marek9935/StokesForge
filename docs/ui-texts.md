@@ -118,6 +118,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Numeric / Text / Mixed / Date/Time | Numérique / Texte / Mixte / Date et heure | Values of the types | Nombres, Date-heure | O |
 | Cut / Copy / Paste | Couper / Copier / Coller | Clipboard | — | G |
 | Paste in Place | Coller à l'identique | Paste at the original position of the copy | Coller en absolu | G |
+| Paste Transposed | Coller transposé | Paste the copied block with rows and columns swapped, values only (#495) | Transposer, Coller en transposition | — |
 | Copy with Header | Copier avec l'en-tête | Copy the values and the column header | — | O |
 | Clipboard | Presse-papiers | System copy memory | Presse-papier, Tampon | G |
 | Add | Ajouter | Create an object **at the end** (column, sheet, text, folder) | Nouveau, Créer | O |

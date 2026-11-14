@@ -2484,16 +2484,20 @@ fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
     assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
-/// #311: more columns copied than the sheet has from the anchor:
-/// those that fit are written, the status counts the others.
+/// #495 (replaces #311 "dropped and counted"): more columns pasted than the
+/// sheet has from the anchor: the missing column is created, holds its
+/// values, the notice is plain, and one Undo removes the column and values.
 #[test]
-fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
+fn a_paste_wider_than_the_sheet_creates_the_missing_columns_in_one_undo() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
 
     state.select_cell(sheet1, signal, 0);
     state.dispatch(Action::Paste {
@@ -2503,13 +2507,24 @@ fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
     assert_eq!(cell(&state, signal, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 0), Cell::Float(2.0));
     assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "one column created");
+    let created = columns[3].0;
+    assert_eq!(cell(&state, created, 0), Cell::Float(3.0));
+    assert_eq!(cell(&state, created, 1), Cell::Float(6.0));
     let status = state.status().expect("a message");
     assert!(!status.is_error());
+    assert_eq!(status.level, StatusLevel::Info);
     assert!(
-        status.text.contains("One column"),
+        status.text.contains("One column was added"),
         "unexpected status: {}",
         status.text
     );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.visible_columns(sheet1).len(), 3, "column removed");
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
 /// #311: a paste that fits the width sets no overflow status.
@@ -2966,9 +2981,10 @@ fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
     );
 }
 
-/// #311 (E4): columns and fields that overflow together: a single message.
+/// #495: a header paste beyond the last column creates the column; the
+/// fields beyond Formula are still dropped, counted in their own notice.
 #[test]
-fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
+fn a_header_paste_beyond_the_edge_creates_the_column_and_counts_the_dropped_fields() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2991,11 +3007,15 @@ fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
     let status = state.status().expect("a status");
     assert!(!status.is_error(), "{}", status.text);
     assert!(
-        status
-            .text
-            .contains("1 column(s) and 1 header field(s) did not fit"),
+        status.text.contains("One header field did not fit"),
         "unexpected status: {}",
         status.text
+    );
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "the column was created");
+    assert!(
+        state.column_meta(columns[3].0).formula.is_some(),
+        "the created column received the pasted Formula field"
     );
 }
 
@@ -8911,12 +8931,13 @@ fn the_color_bar_is_a_section_of_the_legend_tab() {
     );
 }
 
-/// #499: a new graph takes the « Text from » default of the Preferences, a
-/// graph that exists keeps its own. Witness: ignoring the preference leaves
-/// the long name.
+/// #499, #502: a new graph takes the « Text from » default of the Preferences
+/// (and, under Custom, its template), a graph that exists keeps its own.
+/// Witness: ignoring the preference leaves the long name; copying only `from`
+/// leaves the template empty.
 #[test]
 fn new_graphs_take_the_legend_text_preference() {
-    use stokesforge_plot::LegendTextFrom;
+    use stokesforge_plot::{LegendText, LegendTextFrom};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (session, _state, sheet, columns) = kinetics(dir.path());
     let file = dir.path().join("preferences.json");
@@ -8929,30 +8950,86 @@ fn new_graphs_take_the_legend_text_preference() {
             .and_then(|node| node.children().last().copied())
             .expect("graph")
     };
+    let text_of = |state: &AppState, graph| {
+        let text = &state.plot_spec(graph).unwrap().panels[0].legend.text;
+        (text.from.clone(), text.template.clone())
+    };
+    let choice = |from: LegendTextFrom, template: &str| LegendText {
+        from,
+        template: template.to_string(),
+        row_column: None,
+    };
     state.dispatch(Action::AddGraph);
     let old = last_graph(&state);
-    state.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Units));
+    state.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Units,
+        "",
+    )));
     state.dispatch(Action::AddGraph);
-    let from = |state: &AppState, graph| {
-        state.plot_spec(graph).unwrap().panels[0]
-            .legend
-            .text
-            .from
-            .clone()
-    };
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    assert_eq!(
+        text_of(&state, last_graph(&state)),
+        (LegendTextFrom::Units, String::new())
+    );
     state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: columns.clone(),
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&state, last_graph(&state)).0, LegendTextFrom::Units);
+    assert_eq!(text_of(&state, old).0, LegendTextFrom::LongName);
+    // Remembered, and Custom is a default now (#502).
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Units);
+    let template = "*#ln* (#u)";
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Custom,
+        template,
+    )));
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Custom);
+    let wanted = (LegendTextFrom::Custom, template.to_string());
+    next.dispatch(Action::AddGraph);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotColumns {
         sheet,
         columns,
         plot_type: PlotType::Line,
     });
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
-    assert_eq!(from(&state, old), LegendTextFrom::LongName);
-    // Remembered; a custom template is not a default.
-    let mut next = state_on_preferences(&session, dir.path(), &file);
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::Units);
-    next.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Custom));
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    assert_eq!(
+        text_of(&next, old).0,
+        LegendTextFrom::LongName,
+        "older graph"
+    );
+    // Another choice keeps the template; Custom finds it again.
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Comments,
+        template,
+    )));
+    next.dispatch(Action::AddGraph);
+    assert_eq!(
+        text_of(&next, last_graph(&next)),
+        (LegendTextFrom::Comments, template.to_string())
+    );
+    // An invalid and an empty template are saved and copied unchanged.
+    for odd in ["#(", ""] {
+        next.dispatch(Action::SetNewGraphLegendText(choice(
+            LegendTextFrom::Custom,
+            odd,
+        )));
+        next.dispatch(Action::AddGraph);
+        assert_eq!(
+            text_of(&next, last_graph(&next)),
+            (LegendTextFrom::Custom, odd.to_string())
+        );
+        let again = state_on_preferences(&session, dir.path(), &file);
+        assert_eq!(again.new_graph_legend_text().template, odd);
+    }
 }
 
 /// #499 F2: with « Text from » on an empty header row, the legend entry stays
