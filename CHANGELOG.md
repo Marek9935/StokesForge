@@ -26,6 +26,12 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Origin detection by content (#509): the application recognises an Origin
+  project by its extension or by its first bytes (`CPYA`/`CPYUA`), like the
+  CLI and `pyst`, so a renamed Origin file opens the Import from Origin
+  window instead of a "not a text file" refusal. A drop of a text file that
+  needs a look and an Origin file opens the Import window first and the status
+  bar says that the Origin file will open after it.
 - Preferences > Display > New > Legend text from offers Custom… (#502): a
   Template row (the Legend tab's own field and validation) sets the template
   that every new graph starts with. An empty template is flagged but kept.

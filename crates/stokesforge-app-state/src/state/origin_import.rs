@@ -2,8 +2,10 @@
 //! workbooks and sheets of one or several Origin `.opj` projects and creates
 //! the ticked ones.
 //!
-//! The routing is by extension only ([`stokesforge_importer::is_origin_path`],
-//! no I/O on the interface thread): an `.opj` reached by a drop, by the
+//! The routing is by extension or by the five-byte signature
+//! ([`stokesforge_importer::is_origin_file`]; the interface-thread sites read
+//! at most five bytes, the Import window's detector already reads whole
+//! files there): an Origin file reached by a drop, by the
 //! Import window or by a menu import is read on the background import thread
 //! (`start_import`), and its parsed project (shared by `Arc`) comes back to
 //! [`AppState::add_origin_reads`]. The chooser holds one entry per file, with
@@ -274,7 +276,7 @@ impl AppState {
         }
         let (origin, others): (Vec<PathBuf>, Vec<PathBuf>) = paths
             .into_iter()
-            .partition(|path| stokesforge_importer::is_origin_path(path));
+            .partition(|path| stokesforge_importer::is_origin_file(path));
         if origin.is_empty() {
             return (others, false);
         }

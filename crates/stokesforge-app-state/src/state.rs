@@ -7225,7 +7225,7 @@ impl AppState {
             let (origin, others): (Vec<PathBuf>, Vec<PathBuf>) = plan
                 .data
                 .into_iter()
-                .partition(|path| stokesforge_importer::is_origin_path(path));
+                .partition(|path| stokesforge_importer::is_origin_file(path));
             if !others.is_empty() {
                 self.warn(tr!("status-origin-drop-refused"));
             }
@@ -7287,7 +7287,7 @@ impl AppState {
                 // An Origin project has no recipe: the chooser takes it.
                 let (origin_paths, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths
                     .into_iter()
-                    .partition(|path| stokesforge_importer::is_origin_path(path));
+                    .partition(|path| stokesforge_importer::is_origin_file(path));
                 for path in origin_paths {
                     let read = stokesforge_importer::read_origin_file(&path).map(Arc::new);
                     reply.origin.push((path, read));
@@ -7530,15 +7530,23 @@ impl AppState {
         for_window: Vec<PathBuf>,
         origin: Vec<origin_import::OriginRead>,
     ) {
+        let mut waiting = 0;
         if let Some(target_book) = dropped {
             if !for_window.is_empty() {
                 if self.import_state.is_none() {
                     self.open_import(target_book);
                 }
                 self.add_import_paths(for_window);
+                // The chooser waits behind the window the drop just opened.
+                if self.import_state.is_some() {
+                    waiting = origin.iter().filter(|read| read.1.is_ok()).count();
+                }
             }
         }
         self.add_origin_reads(origin);
+        if waiting > 0 {
+            self.notice(tr!("status-import-origin-after-window", count = waiting));
+        }
     }
 
     /// Files imported successfully since the last call, for the
@@ -11477,7 +11485,7 @@ impl AppState {
         // to the chooser through the background import (#490).
         let (origin, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths
             .into_iter()
-            .partition(|path| stokesforge_importer::is_origin_path(path));
+            .partition(|path| stokesforge_importer::is_origin_file(path));
         self.route_origin_paths(origin);
         if paths.is_empty() {
             return;

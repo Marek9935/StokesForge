@@ -18506,6 +18506,12 @@ mod origin_import {
         drop_paths(&mut state, vec![csv, opj]);
 
         sheet_named(state.tree(), "Raw Data");
+        assert!(
+            !state
+                .status_history()
+                .any(|message| message.text.contains("will open after")),
+            "a sure CSV leaves no window to wait for"
+        );
         assert!(state.origin_import_open());
         assert!(state.import_state().is_none());
         state.dispatch(Action::ImportOrigin);
@@ -18515,6 +18521,194 @@ mod origin_import {
         assert_eq!(root_names(&state).len(), 2);
         state.dispatch(Action::Undo);
         assert!(same_tree(&state, &tree_before));
+    }
+
+    fn after_window_line(state: &AppState, count: usize) -> usize {
+        let line = tr!("status-import-origin-after-window", count = count);
+        state
+            .status_history()
+            .filter(|message| message.text == line)
+            .count()
+    }
+
+    fn left_wizard_lines(state: &AppState) -> usize {
+        let line = tr!("status-import-origin-left-wizard", count = 1);
+        state
+            .status_history()
+            .filter(|message| message.text == line)
+            .count()
+    }
+
+    #[test]
+    fn a_mixed_drop_with_an_unsure_csv_says_the_chooser_waits_for_the_window() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let csv = dir.path().join("measure.csv");
+        // A point to check (#488): the Import window opens for it.
+        std::fs::write(&csv, JASCO_DOUBTS).unwrap();
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+
+        drop_paths(&mut state, vec![csv.clone(), opj]);
+
+        assert_eq!(state.import_state().unwrap().paths, vec![csv]);
+        assert!(!state.origin_import_open(), "one dialog at a time");
+        assert_eq!(state.open_dialog(), Some(OpenDialog::ImportWizard));
+        assert_eq!(after_window_line(&state, 1), 1);
+        assert_eq!(left_wizard_lines(&state), 0);
+        no_red_message_ever(&state);
+        state.cancel_import();
+        assert!(state.origin_import_open());
+        assert_eq!(state.origin_import_files().len(), 1);
+    }
+
+    #[test]
+    fn the_waiting_notice_counts_the_origin_files() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let csv = dir.path().join("measure.csv");
+        // A point to check (#488): the Import window opens for it.
+        std::fs::write(&csv, JASCO_DOUBTS).unwrap();
+        let first = standard_opj(dir.path(), "first.opj");
+        let second = standard_opj(dir.path(), "second.opj");
+
+        drop_paths(&mut state, vec![csv, first, second]);
+
+        assert_eq!(after_window_line(&state, 2), 1);
+        assert_eq!(after_window_line(&state, 1), 0);
+        state.cancel_import();
+        assert_eq!(state.origin_import_files().len(), 2);
+    }
+
+    #[test]
+    fn an_unreadable_opj_in_a_mixed_drop_is_a_red_message_in_the_window_and_no_waiting_notice() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let csv = dir.path().join("measure.csv");
+        // A point to check (#488): the Import window opens for it.
+        std::fs::write(&csv, JASCO_DOUBTS).unwrap();
+        let opj = dir.path().join("cut.opj");
+        let bytes = synthetic::write_project(&synthetic::Project {
+            books: standard_books(),
+            ..synthetic::Project::default()
+        });
+        std::fs::write(&opj, &bytes[..synthetic::FIRST_DATASET_OFFSET + 3]).unwrap();
+
+        drop_paths(&mut state, vec![csv, opj]);
+
+        assert!(state.import_state().is_some());
+        assert_eq!(after_window_line(&state, 1), 0);
+        assert!(
+            !state
+                .status_history()
+                .any(|message| message.text.contains("will open after")),
+            "no waiting notice for a file that cannot be read"
+        );
+        // The Import window is open: the red message is in its footer.
+        let footer = state.dialog_error().expect("a red message");
+        assert!(footer.contains("cut.opj"), "{footer}");
+    }
+
+    /// Origin content under a name the extension does not give away.
+    fn renamed_opj(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        write_opj(&path, standard_books());
+        path
+    }
+
+    #[test]
+    fn an_origin_file_renamed_dat_is_dropped_into_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let renamed = renamed_opj(dir.path(), "measure.dat");
+
+        drop_paths(&mut state, vec![renamed]);
+
+        assert!(state.origin_import_open());
+        assert!(state.import_state().is_none(), "never the text wizard");
+        no_red_message_ever(&state);
+    }
+
+    #[test]
+    fn a_renamed_origin_file_added_to_the_wizard_leaves_it_for_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let csv = dir.path().join("measure.csv");
+        std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+        let renamed = renamed_opj(dir.path(), "measure.dat");
+
+        state.open_import(None);
+        state.add_import_paths(vec![csv.clone(), renamed.clone()]);
+        assert_eq!(state.import_state().unwrap().paths, vec![csv.clone()]);
+        wait_import(&mut state);
+        state.cancel_import();
+        assert!(state.origin_import_open());
+        assert_eq!(state.origin_import_files()[0].path, renamed);
+        state.dispatch(Action::CancelOriginImport);
+
+        state.open_import(None);
+        state.set_import_paths(vec![csv.clone(), renamed]);
+        assert_eq!(state.import_state().unwrap().paths, vec![csv]);
+        wait_import(&mut state);
+        state.cancel_import();
+        assert!(state.origin_import_open());
+        no_red_message_ever(&state);
+    }
+
+    #[test]
+    fn a_renamed_origin_file_dropped_on_the_open_chooser_joins_it() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj]);
+        let renamed = renamed_opj(dir.path(), "other.bin");
+
+        drop_paths(&mut state, vec![renamed]);
+
+        assert_eq!(state.origin_import_files().len(), 2);
+        assert!(!state
+            .status_history()
+            .any(|message| message.text == tr!("status-origin-drop-refused")));
+    }
+
+    #[test]
+    fn importing_a_renamed_origin_file_by_the_menu_opens_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let tree_before = state.tree().clone();
+        let renamed = renamed_opj(dir.path(), "measure.dat");
+
+        state.dispatch(Action::ImportFiles {
+            destination: ImportDestination::NewBookPerFile,
+            recipe: stokesforge_import::ImportRecipe::new("x"),
+            paths: vec![renamed],
+        });
+        wait_import(&mut state);
+
+        assert!(state.origin_import_open());
+        assert!(same_tree(&state, &tree_before));
+        no_red_message_ever(&state);
+    }
+
+    #[test]
+    fn a_binary_file_that_is_not_origin_still_gets_the_binary_refusal() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let blob = dir.path().join("blob.dat");
+        std::fs::write(&blob, [0u8, 0xFF, 0x10, 0x80, 0, 0, 0x9F]).unwrap();
+
+        drop_paths(&mut state, vec![blob.clone()]);
+
+        assert!(!state.origin_import_open());
+        assert_eq!(state.import_state().unwrap().paths, vec![blob]);
+        assert!(!state.import_has_readable_file());
     }
 
     #[test]
