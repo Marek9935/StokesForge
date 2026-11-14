@@ -397,6 +397,17 @@ pub(super) fn graph_view_contents(
         contain.center(),
         egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale),
     );
+    // #512: while a page corner is dragged, the figure is drawn anchored at the
+    // opposite corner of the page, at the scale of the drag, so the corner stays
+    // under the cursor; the display zooms out at the edge of `contain`. The
+    // centred fit above comes back at the release.
+    let rect = if layout_mode {
+        view.set_layout_contain(contain);
+        view.page_corner_rect((fig_w as f32, fig_h as f32))
+            .unwrap_or(rect)
+    } else {
+        rect
+    };
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     // The page corner handles of the Page Layout Mode sit in the margin the
     // mode leaves inside `outer` (#426).

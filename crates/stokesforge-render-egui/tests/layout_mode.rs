@@ -160,6 +160,8 @@ struct Out {
     cursor: egui::CursorIcon,
     shapes: Vec<egui::epaint::ClippedShape>,
     cached: bool,
+    /// The viewport commands the frame asked for, in order.
+    commands: Vec<egui::ViewportCommand>,
 }
 
 /// One frame with the figure shown at `scale` times its own size.
@@ -175,7 +177,8 @@ fn frame_with(
     frame_in(context, view, fixture, events, time, modifiers, scale, None)
 }
 
-/// [`frame_with`] in a window of the given size (default: egui's huge one).
+/// [`frame_with`] with the drawing area the host contains the figure in
+/// (#512; none: nothing stops a page corner).
 #[allow(clippy::too_many_arguments)]
 fn frame_in(
     context: &egui::Context,
@@ -190,16 +193,19 @@ fn frame_in(
     let layout = view
         .figure_layout(context, &fixture.snapshot(), fixture.graph)
         .expect("layout");
-    let rect = Rect::from_min_size(
-        Pos2::ZERO,
-        egui::vec2(layout.size.0 as f32, layout.size.1 as f32) * scale,
-    );
+    let size = egui::vec2(layout.size.0 as f32, layout.size.1 as f32);
+    let rect = Rect::from_min_size(Pos2::ZERO, size * scale);
+    // What the application does (#512): it feeds the drawing area, and draws
+    // the figure in the rectangle of a page-corner drag while there is one.
+    if let Some(window) = window {
+        view.set_layout_contain(window);
+    }
+    let rect = view.page_corner_rect((size.x, size.y)).unwrap_or(rect);
     let mut events = events;
     events.insert(0, egui::Event::ModifiersChanged(modifiers));
     let input = egui::RawInput {
         events,
         time: Some(time),
-        screen_rect: window,
         ..Default::default()
     };
     let mut cached = false;
@@ -209,7 +215,13 @@ fn frame_in(
             .expect("painting");
     });
     output.textures_delta.clear();
+    let commands = output
+        .viewport_output
+        .values()
+        .flat_map(|viewport| viewport.commands.iter().cloned())
+        .collect();
     Out {
+        commands,
         events: view.take_events(),
         cursor: output.platform_output.cursor_icon,
         shapes: output.shapes,
@@ -290,49 +302,62 @@ fn drag(
     signals
 }
 
-/// A drag that ends stuck at the window edge (#512): press at `from`, move to
-/// `edge`, then `frames` frames where the absolute pointer stays put and the
-/// raw motion is `motion`; released at `edge`.
+/// A page-corner drag with raw motion (#512), the way a locked mouse sends
+/// it: press at `from`, a first absolute move by `kick` (egui starts a drag
+/// only once the pointer has moved; the lock comes with it), then one frame per entry of `motions` with a
+/// `MouseMoved` and the absolute pointer left where it is, one frame with
+/// nothing to let the display catch up, and the release. `contain` is the
+/// drawing area of the host. Returns the events of the release, the rectangle
+/// the figure was drawn in after each frame and the cursor icon of the last
+/// frame of the drag.
 #[allow(clippy::too_many_arguments)]
-fn drag_stuck(
+fn drag_pushed(
     context: &egui::Context,
     view: &mut GraphView,
     fixture: &Fixture,
-    window: Rect,
+    contain: Rect,
     from: Pos2,
-    edge: Pos2,
-    motion: egui::Vec2,
-    frames: usize,
-) -> Vec<GraphEvent> {
-    let none = egui::Modifiers::NONE;
+    kick: egui::Vec2,
+    motions: &[egui::Vec2],
+    modifiers: egui::Modifiers,
+) -> (Vec<GraphEvent>, Vec<Rect>, egui::CursorIcon) {
     let mut time = 0.1;
-    let mut run = |events: Vec<egui::Event>, time: f64| {
-        frame_in(
+    let run = |view: &mut GraphView, events: Vec<egui::Event>, time: f64| {
+        let out = frame_in(
             context,
             view,
             fixture,
             events,
             time,
-            none,
+            modifiers,
             1.0,
-            Some(window),
-        )
-        .events
+            Some(contain),
+        );
+        (out.events, out.cursor)
     };
     run(
-        vec![egui::Event::PointerMoved(from), button(from, true, none)],
+        view,
+        vec![
+            egui::Event::PointerMoved(from),
+            button(from, true, modifiers),
+        ],
         time,
     );
     time += 0.05;
-    run(vec![egui::Event::PointerMoved(edge)], time);
-    for _ in 0..frames {
+    run(view, vec![egui::Event::PointerMoved(from + kick)], time);
+    let mut shown = Vec::new();
+    for motion in motions {
         time += 0.05;
-        run(vec![egui::Event::MouseMoved(motion)], time);
+        run(view, vec![egui::Event::MouseMoved(*motion)], time);
+        shown.push(view.display_rect().expect("drawn"));
     }
     time += 0.05;
-    let mut signals = run(vec![button(edge, false, none)], time);
+    let (_, cursor) = run(view, vec![], time);
+    shown.push(view.display_rect().expect("drawn"));
+    time += 0.05;
+    let (mut signals, _) = run(view, vec![button(from + kick, false, modifiers)], time);
     signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
-    signals
+    (signals, shown, cursor)
 }
 
 fn click(
@@ -2652,109 +2677,410 @@ fn the_drop_bands_stick_to_the_grid_outline_when_the_page_has_slack() {
     assert!(view.drop_place(under_last_row, None).is_some());
 }
 
-/// #512: a Free page corner stuck at the window edge keeps growing with the raw
-/// motion (here 4 frames x 50 = 200 points), a second drag starts from zero.
-/// Witness: the page read from `interact_pointer_pos` (stops at the edge delta);
-/// the accumulator kept outside the drag (the second drag starts with 200).
+// ---------------------------------------------------------------------------
+// #512: a page corner stays under the cursor and the display zooms out
+// ---------------------------------------------------------------------------
+
+const PUSH: egui::Vec2 = egui::vec2(50.0, 0.0);
+
+/// The press point of the bottom-right page corner of a Free figure, the
+/// figure drawn at the origin at scale 1, and a drawing area that leaves
+/// `room` points to its right.
+fn free_corner_and_area(view: &GraphView, room: f32) -> (Pos2, Rect) {
+    let page = view.layout_page().expect("page");
+    let from = screen(
+        view,
+        page.left + page.width + 4.0,
+        page.top + page.height + 4.0,
+    );
+    let drawn = view.display_rect().expect("drawn");
+    (
+        from,
+        Rect::from_min_max(
+            Pos2::new(0.0, 0.0),
+            Pos2::new(drawn.max.x + room, drawn.max.y + 400.0),
+        ),
+    )
+}
+
+/// #512, Free: the corner reaches the edge of the drawing area, the cursor
+/// stays on it, pushing further grows the page and the display zooms out: the
+/// corner is at the edge, the opposite corner did not move, the other
+/// corner moved toward it, and the page is more than the motion (the scale
+/// fell while pushing). The cursor icon is none (we draw our own).
+/// Witness: the figure drawn centred in the area at the press scale (the
+/// accessor returning `None`) puts the corner far beyond the edge.
 #[test]
-fn a_free_page_corner_stuck_at_the_window_edge_keeps_growing() {
+fn a_free_page_corner_pushed_past_the_edge_zooms_out_and_keeps_growing() {
     let fixture = Fixture::free_two_layers();
     let (context, mut view) = in_mode(&fixture);
     let page = view.layout_page().expect("page");
-    let from = screen(
-        &view,
-        page.left + page.width + 4.0,
-        page.top + page.height + 4.0,
-    );
-    let edge = from + egui::vec2(60.0, 0.0);
-    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(edge.x, edge.y + 500.0));
-    let scale = view.display_scale().expect("scale");
-    let motion = egui::vec2(50.0, 0.0);
-    let signals = drag_stuck(&context, &mut view, &fixture, window, from, edge, motion, 4);
-    let (_, new_page) = edited(&signals);
-    let grown = new_page.expect("a page").width - page.width;
-    let expected = f64::from((60.0 + 200.0) / scale);
-    assert!((grown - expected).abs() < 0.05, "{grown} vs {expected}");
-    // The second drag, on the page as it now is, starts from zero.
-    fixture.replace({
-        let mut spec = spec_of(&fixture);
-        spec.free_page = new_page;
-        spec
-    });
-    let (context, mut view) = in_mode(&fixture);
-    let page = view.layout_page().expect("page");
-    let from = screen(
-        &view,
-        page.left + page.width + 4.0,
-        page.top + page.height + 4.0,
-    );
-    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(from.x + 60.0, from.y + 500.0));
-    let signals = drag_stuck(
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let at_press = view.display_rect().expect("drawn");
+    let (signals, shown, cursor) = drag_pushed(
         &context,
         &mut view,
         &fixture,
-        window,
+        contain,
         from,
-        from + egui::vec2(60.0, 0.0),
-        motion,
-        0,
+        egui::vec2(0.0, 8.0),
+        &[PUSH; 6],
+        egui::Modifiers::NONE,
     );
-    let (_, again) = edited(&signals);
-    let grown = again.expect("a page").width - page.width;
-    assert!((grown - f64::from(60.0 / scale)).abs() < 0.05, "{grown}");
+    let last = *shown.last().expect("frames");
+    assert!(
+        (last.max.x - contain.max.x).abs() < 1.0,
+        "{last:?} in {contain:?}"
+    );
+    assert_eq!(last.min, at_press.min, "the opposite corner did not move");
+    assert!(
+        last.max.y < at_press.max.y,
+        "the other corner went toward it"
+    );
+    assert_eq!(cursor, egui::CursorIcon::None);
+    let (_, new_page) = edited(&signals);
+    let grown = new_page.expect("a page").width - page.width;
+    assert!(grown > 300.0, "{grown}: more than the 6 x 50 of motion");
 }
 
-/// #512: the Regular Grid twin: the figure corner on the `grid_slack` right.
-/// Witness: the same two as the Free one.
+/// #512, Regular Grid: same as the Free one, on the figure corner. The page
+/// top (the anchor of a bottom corner) does not move either.
+/// Witness: the same (centred fit).
 #[test]
-fn a_grid_page_corner_stuck_at_the_window_edge_keeps_growing() {
+fn a_grid_page_corner_pushed_past_the_edge_zooms_out_and_keeps_growing() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let band = layout.title_band as f32;
+    let from = Pos2::new(w + 4.0, h + 4.0);
+    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 400.0));
+    let (signals, shown, _) = drag_pushed(
+        &context,
+        &mut view,
+        &fixture,
+        contain,
+        from,
+        egui::vec2(0.0, 8.0),
+        &[PUSH; 6],
+        egui::Modifiers::NONE,
+    );
+    let last = *shown.last().expect("frames");
+    assert!((last.max.x - contain.max.x).abs() < 1.0, "{last:?}");
+    let scale = view.display_scale().expect("scale");
+    assert!(scale < 1.0, "zoomed out: {scale}");
+    let top_of_page = last.min.y + band * scale;
+    assert!(
+        (top_of_page - band).abs() < 1.0,
+        "the page top stays at {band}, is at {top_of_page}"
+    );
+    let [GraphEvent::GridFramesEdited {
+        slack: Some(slack), ..
+    }] = signals.as_slice()
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    assert!(slack.right > 300.0, "{}", slack.right);
+}
+
+/// #512, a near corner (top-left) of a grid: the title band is part of the
+/// figure that must stay in the area, the corner moves with the opposite
+/// (bottom-right) corner fixed on both axes.
+#[test]
+fn a_top_left_page_corner_pushed_past_the_edge_keeps_the_opposite_corner() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let band = layout.title_band as f32;
+    let from = Pos2::new(-4.0, band - 4.0);
+    let contain = Rect::from_min_max(Pos2::new(-30.0, -30.0), Pos2::new(w + 50.0, h + 50.0));
+    let (signals, shown, _) = drag_pushed(
+        &context,
+        &mut view,
+        &fixture,
+        contain,
+        from,
+        egui::vec2(-8.0, -8.0),
+        &[egui::vec2(-50.0, -50.0); 4],
+        egui::Modifiers::NONE,
+    );
+    let last = *shown.last().expect("frames");
+    assert!(
+        (last.max.x - w).abs() < 1.0 && (last.max.y - h).abs() < 1.0,
+        "the bottom-right corner stays at ({w}, {h}): {last:?}"
+    );
+    assert!(
+        last.min.x >= contain.min.x - 1.0 && last.min.y >= contain.min.y - 1.0,
+        "{last:?} stays in {contain:?}"
+    );
+    assert!(
+        (last.min.x - contain.min.x).abs() < 1.0 || (last.min.y - contain.min.y).abs() < 1.0,
+        "{last:?} reaches the edge on an axis"
+    );
+    let [GraphEvent::GridFramesEdited {
+        slack: Some(slack), ..
+    }] = signals.as_slice()
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    assert!(slack.left >= 199.0 && slack.top >= 199.0, "{slack:?}");
+}
+
+/// #512: coming back inward right after an overflow, the corner follows the
+/// cursor at once (no dead zone) and the display does not zoom back in.
+/// Witness: the corner left beyond the edge by the overflow (no zoom-out) gives
+/// a corner still past the edge after the 10 points back.
+#[test]
+fn coming_back_in_after_the_edge_moves_the_corner_at_once() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let mut motions = vec![PUSH; 4];
+    let pushed = motions.len() - 1;
+    motions.push(egui::vec2(-10.0, 0.0));
+    let (_, shown, _) = drag_pushed(
+        &context,
+        &mut view,
+        &fixture,
+        contain,
+        from,
+        egui::vec2(0.0, 8.0),
+        &motions,
+        egui::Modifiers::NONE,
+    );
+    // The figure is drawn one frame after the pointer moved it.
+    assert!((shown[pushed + 1].max.x - contain.max.x).abs() < 1.0);
+    let back = shown[pushed + 2].max.x;
+    assert!(
+        (back - (contain.max.x - 10.0)).abs() < 1.5,
+        "{back} vs {}",
+        contain.max.x - 10.0
+    );
+}
+
+/// #512: inward, the page stops at the graphs and the way back out grows at
+/// once. Witness: the inward motion not clamped (the 200 points inward are
+/// repaid before the page grows again).
+#[test]
+fn the_inward_stop_at_the_graphs_leaves_no_dead_zone() {
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
     let layout = layout_of(&context, &mut view, &fixture);
     let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
     let from = Pos2::new(w + 4.0, h + 4.0);
-    let edge = from + egui::vec2(60.0, 0.0);
-    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(edge.x, edge.y + 500.0));
-    let signals = drag_stuck(
+    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 400.0));
+    let (_, shown, _) = drag_pushed(
         &context,
         &mut view,
         &fixture,
-        window,
+        contain,
         from,
-        edge,
-        egui::vec2(50.0, 0.0),
-        4,
+        egui::vec2(0.0, 8.0),
+        &[
+            egui::vec2(-100.0, 0.0),
+            egui::vec2(-100.0, 0.0),
+            egui::vec2(10.0, 0.0),
+        ],
+        egui::Modifiers::NONE,
     );
-    let [GraphEvent::GridFramesEdited {
-        figure: true,
-        slack: Some(slack),
-        ..
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert_eq!(slack.right, 260.0, "60 of pointer + 4 x 50 of motion");
+    assert!((shown[2].max.x - w).abs() < 0.5, "stopped at the graphs");
+    assert!(
+        (shown[3].max.x - shown[2].max.x - 10.0).abs() < 0.5,
+        "grows at once: {shown:?}"
+    );
 }
 
-/// #512: moving a graph (`MoveCell`) keeps the absolute pointer: stuck at the
-/// window edge, the raw motion changes nothing. Witness: the virtual pointer
-/// applied to every kind (the target would leave the grid).
+/// #512: Ctrl keeps the ratio AND the snap: the leading side lands on the grid
+/// step, the other follows the ratio; Shift + Ctrl keeps the ratio with no
+/// snap. Witness: the old `!keep_ratio` filter on the grid (the leading side
+/// then lands off the step).
 #[test]
-fn moving_a_cell_stuck_at_the_window_edge_ignores_the_raw_motion() {
+fn ctrl_on_an_l_corner_keeps_the_ratio_and_the_snap() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (
+        f64::from(before.size.0),
+        f64::from(before.size.1 - before.title_band),
+    );
+    let corner = Pos2::new(before.size.0 as f32 + 4.0, before.size.1 as f32 + 4.0);
+    let grown = |modifiers: egui::Modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        view.set_layout_grid(Some(50.0));
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            corner,
+            corner + egui::vec2(60.0, 10.0),
+            modifiers,
+        );
+        let [GraphEvent::GridFramesEdited {
+            slack: Some(slack), ..
+        }] = signals.as_slice()
+        else {
+            panic!("one figure event expected, got {signals:?}");
+        };
+        (w + slack.right, h + slack.bottom)
+    };
+    let ctrl = egui::Modifiers {
+        ctrl: true,
+        ..egui::Modifiers::NONE
+    };
+    let (new_w, new_h) = grown(ctrl);
+    let leading = if 60.0 / w >= 10.0 / h { new_w } else { new_h };
+    assert_eq!(leading % 50.0, 0.0, "{new_w} x {new_h}");
+    assert!(
+        (new_w / new_h - w / h).abs() < 0.01,
+        "{new_w} x {new_h} vs {}",
+        w / h
+    );
+    let both = egui::Modifiers {
+        ctrl: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    };
+    let (free_w, free_h) = grown(both);
+    let scale = ((w + 60.0) / w).max((h + 10.0) / h);
+    assert_eq!(
+        (free_w, free_h),
+        (
+            w + ((scale - 1.0) * w).round(),
+            h + ((scale - 1.0) * h).round()
+        )
+    );
+}
+
+/// #512: the mouse is locked for the gesture only. The first frame of the drag
+/// asks for the lock and hides the cursor; the release sends the cursor
+/// position THEN the unlock, in the same frame. Witness: the order swapped, or
+/// the lock never requested.
+#[test]
+fn a_page_corner_drag_locks_the_mouse_and_releases_it_with_the_position() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let none = egui::Modifiers::NONE;
+    let mut run = |events, time| {
+        frame_in(
+            &context,
+            &mut view,
+            &fixture,
+            events,
+            time,
+            none,
+            1.0,
+            Some(contain),
+        )
+    };
+    let press = run(
+        vec![egui::Event::PointerMoved(from), button(from, true, none)],
+        0.1,
+    );
+    assert!(
+        press.commands.is_empty(),
+        "no drag before the pointer moves"
+    );
+    let started = run(
+        vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0))],
+        0.12,
+    );
+    assert!(started
+        .commands
+        .contains(&egui::ViewportCommand::CursorGrab(egui::CursorGrab::Locked)));
+    assert_eq!(started.cursor, egui::CursorIcon::None);
+    let held = run(vec![egui::Event::MouseMoved(PUSH)], 0.15);
+    assert!(
+        !held.commands.iter().any(|command| matches!(
+            command,
+            egui::ViewportCommand::CursorGrab(_) | egui::ViewportCommand::CursorPosition(_)
+        )),
+        "the lock is asked once: {:?}",
+        held.commands
+    );
+    run(vec![], 0.2);
+    let release = run(vec![button(from + egui::vec2(0.0, 8.0), false, none)], 0.25);
+    let position = release
+        .commands
+        .iter()
+        .position(|c| matches!(c, egui::ViewportCommand::CursorPosition(_)))
+        .expect("the corner position");
+    let unlock = release
+        .commands
+        .iter()
+        .position(|c| *c == egui::ViewportCommand::CursorGrab(egui::CursorGrab::None))
+        .expect("the unlock");
+    assert!(position < unlock, "{:?}", release.commands);
+    // Nothing locks any more.
+    let after = run(vec![], 0.3);
+    assert!(after.commands.is_empty(), "{:?}", after.commands);
+}
+
+/// #512: a drag dropped with no release event (the mode is left) gives the
+/// mouse back at the next pass: the lease was not renewed. Witness: the
+/// plugin not registered (or the renewal always true): no unlock ever comes.
+#[test]
+fn a_dropped_page_corner_drag_unlocks_at_the_next_pass() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let none = egui::Modifiers::NONE;
+    let run = |view: &mut GraphView, events, time| {
+        frame_in(
+            &context,
+            view,
+            &fixture,
+            events,
+            time,
+            none,
+            1.0,
+            Some(contain),
+        )
+    };
+    run(
+        &mut view,
+        vec![egui::Event::PointerMoved(from), button(from, true, none)],
+        0.1,
+    );
+    run(
+        &mut view,
+        vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0))],
+        0.12,
+    );
+    run(&mut view, vec![egui::Event::MouseMoved(PUSH)], 0.15);
+    view.set_layout_mode(false);
+    let next = run(&mut view, vec![], 0.2);
+    assert!(
+        next.commands
+            .contains(&egui::ViewportCommand::CursorGrab(egui::CursorGrab::None)),
+        "{:?}",
+        next.commands
+    );
+    let later = run(&mut view, vec![], 0.25);
+    assert!(later.commands.is_empty(), "sent once: {:?}", later.commands);
+}
+
+/// #512: moving a graph (`MoveCell`) keeps the absolute pointer: raw motion
+/// changes nothing. Witness: the corner-follow rules applied to every kind.
+#[test]
+fn moving_a_cell_ignores_the_raw_motion() {
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
     let from = middle(&view, 0);
     let target = middle(&view, 3);
-    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(target.x, target.y + 500.0));
-    let signals = drag_stuck(
-        &context,
-        &mut view,
-        &fixture,
-        window,
-        from,
-        target,
-        egui::vec2(5000.0, 0.0),
-        3,
-    );
-    assert_eq!(moved(&signals), (0, MoveTarget::Cell { row: 1, column: 1 }));
+    let none = egui::Modifiers::NONE;
+    let mut time = 0.1;
+    let mut events = Vec::new();
+    for step in [
+        vec![egui::Event::PointerMoved(from), button(from, true, none)],
+        vec![egui::Event::PointerMoved(target)],
+        vec![egui::Event::MouseMoved(egui::vec2(5000.0, 0.0))],
+        vec![egui::Event::MouseMoved(egui::vec2(5000.0, 0.0))],
+        vec![button(target, false, none)],
+    ] {
+        time += 0.05;
+        events.extend(frame(&context, &mut view, &fixture, step, time, none));
+    }
+    assert_eq!(moved(&events), (0, MoveTarget::Cell { row: 1, column: 1 }));
 }
