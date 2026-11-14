@@ -2142,6 +2142,17 @@ preferences-display = Affichage
 preferences-display-interface = Interface
 preferences-display-object-manager = Gestionnaire d'objets
 preferences-display-new = Nouveaux
+preferences-display-graphs = Graphiques
+preferences-graphs-auto-range = Plage automatique des axes
+preferences-graphs-auto-range-note = Espace laissé autour des données quand un axe est automatique, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois avec ces valeurs ; les graphiques existants gardent les leurs. Les axes logarithmiques ne sont pas concernés.
+preferences-graphs-margin-left = Gauche (%)
+    .hint = Espace au bord gauche de la zone de tracé, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois. Par défaut 0.
+preferences-graphs-margin-right = Droite (%)
+    .hint = Espace au bord droit de la zone de tracé, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois. Par défaut 0.
+preferences-graphs-margin-bottom = Bas (%)
+    .hint = Espace au bord bas de la zone de tracé, en % de l'étendue des données, même sur un axe inversé. Un nouveau graphique écrit ses plages une fois. Par défaut 1.
+preferences-graphs-margin-top = Haut (%)
+    .hint = Espace au bord haut de la zone de tracé, en % de l'étendue des données, même sur un axe inversé. Un nouveau graphique écrit ses plages une fois. Par défaut 5.
 preferences-show-formula-help = Afficher l'aide de syntaxe des formules
     .hint = Affiche l'icône « ? » à côté des champs de texte qui acceptent une formule (titres, étiquettes, unités). Masquée, les champs gardent leur propre rappel.
 preferences-show-column-formula-help = Afficher l'aide de F(x)=

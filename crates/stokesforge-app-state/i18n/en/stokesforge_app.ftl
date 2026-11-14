@@ -2145,6 +2145,17 @@ preferences-display = Display
 preferences-display-interface = Interface
 preferences-display-object-manager = Object Manager
 preferences-display-new = New
+preferences-display-graphs = Graphs
+preferences-graphs-auto-range = Automatic axis range
+preferences-graphs-auto-range-note = Empty space left around the data when an axis is automatic, in % of the data extent. A new graph writes its ranges once with these values; graphs that already exist keep theirs. Logarithmic axes are not affected.
+preferences-graphs-margin-left = Left (%)
+    .hint = Empty space at the left edge of the plot area, in % of the data extent. A new graph writes its ranges once. Default 0.
+preferences-graphs-margin-right = Right (%)
+    .hint = Empty space at the right edge of the plot area, in % of the data extent. A new graph writes its ranges once. Default 0.
+preferences-graphs-margin-bottom = Bottom (%)
+    .hint = Empty space at the bottom edge of the plot area, in % of the data extent, even on a reversed axis. A new graph writes its ranges once. Default 1.
+preferences-graphs-margin-top = Top (%)
+    .hint = Empty space at the top edge of the plot area, in % of the data extent, even on a reversed axis. A new graph writes its ranges once. Default 5.
 preferences-show-formula-help = Show formula syntax help
     .hint = Shows the "?" icon next to the text fields that accept a formula (titles, labels, units). Hidden, the fields keep their own reminder.
 preferences-show-column-formula-help = Show F(x)= help

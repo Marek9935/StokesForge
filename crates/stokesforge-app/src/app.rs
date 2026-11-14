@@ -1850,7 +1850,17 @@ impl StokesForgeApp {
             self.commit_view_entries(ctx);
         }
         let action = self.prepare_new_project_action(ctx, action);
-        self.dispatch_action(ctx, action)
+        // The margins of the automatic framing (#529) change what every open
+        // graph draws: the root and each detached window look again.
+        let margins_changed = matches!(action, Action::SetAutoMargins(_));
+        let stop = self.dispatch_action(ctx, action);
+        if margins_changed {
+            ctx.request_repaint();
+            for viewport in self.open_viewports() {
+                ctx.request_repaint_of(viewport);
+            }
+        }
+        stop
     }
 
     /// Captures the presentation effects before the command, then applies them to its result.

@@ -1306,6 +1306,9 @@ pub enum Action {
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
+    /// Margins of the automatic axis framing, a user preference (#529); the
+    /// application repaints the open graphs.
+    SetAutoMargins(stokesforge_render::AutoMargins),
     /// The « Text from » and custom template given to the legend of new
     /// graphs (#499, #502); the graphs that exist keep their own.
     SetNewGraphLegendText(stokesforge_plot::LegendText),
@@ -6940,6 +6943,14 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetAutoMargins(margins) => {
+                if let Err(error) = self.object_manager_preferences.save_auto_margins(margins) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetAnalysisKeepResults(keep) => {
                 if let Err(error) = self
                     .object_manager_preferences
@@ -8772,6 +8783,12 @@ impl AppState {
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// Margins of the automatic axis framing (#529), in percent of the data
+    /// extent. A user preference, never in the project.
+    pub fn auto_margins(&self) -> stokesforge_render::AutoMargins {
+        self.object_manager_preferences.auto_margins()
     }
 
     /// « Text from » and custom template of the legend of new graphs (#499,

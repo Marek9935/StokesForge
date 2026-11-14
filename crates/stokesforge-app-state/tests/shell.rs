@@ -19771,3 +19771,33 @@ fn editing_the_frames_never_stores_a_bound_text() {
     assert_eq!(draft.title, "#ln");
     assert_eq!(draft.panels[0].left.label, "#ln");
 }
+
+/// #529: the margins of the automatic framing are a preference of the user:
+/// 0 / 0 / 1 / 5 by default, remembered across sessions, held to 0..=100.
+#[test]
+fn the_auto_margins_are_a_remembered_preference_with_defaults() {
+    use stokesforge_render::AutoMargins;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, _sheet, _columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(
+        state.auto_margins(),
+        AutoMargins {
+            left: 0.0,
+            right: 0.0,
+            bottom: 1.0,
+            top: 5.0
+        }
+    );
+    state.dispatch(Action::SetAutoMargins(AutoMargins {
+        left: 2.0,
+        right: 3.0,
+        bottom: 0.5,
+        top: 150.0,
+    }));
+    assert_eq!(state.auto_margins().top, 100.0, "held to 0..=100");
+    let next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.auto_margins().left, 2.0);
+    assert_eq!(next.auto_margins().bottom, 0.5);
+}
