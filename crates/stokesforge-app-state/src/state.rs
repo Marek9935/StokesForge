@@ -1306,9 +1306,9 @@ pub enum Action {
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
-    /// The « Text from » given to the legend of new graphs (#499); the graphs
-    /// that exist keep their own.
-    SetNewGraphLegendText(stokesforge_plot::LegendTextFrom),
+    /// The « Text from » and custom template given to the legend of new
+    /// graphs (#499, #502); the graphs that exist keep their own.
+    SetNewGraphLegendText(stokesforge_plot::LegendText),
     /// The default of "Keep in Results" for the analyses (M5, #148); the choice
     /// of an operation already run is remembered apart.
     SetAnalysisKeepResults(bool),
@@ -6914,10 +6914,10 @@ impl AppState {
                     ));
                 }
             }
-            Action::SetNewGraphLegendText(from) => {
+            Action::SetNewGraphLegendText(text) => {
                 if let Err(error) = self
                     .object_manager_preferences
-                    .save_new_graph_legend_text(from)
+                    .save_new_graph_legend_text(text)
                 {
                     self.fail(tr!(
                         "error-preferences-not-saved",
@@ -8770,8 +8770,9 @@ impl AppState {
         self.object_manager_preferences.new_graph_decimal_comma()
     }
 
-    /// « Text from » of the legend of new graphs (#499).
-    pub fn new_graph_legend_text(&self) -> stokesforge_plot::LegendTextFrom {
+    /// « Text from » and custom template of the legend of new graphs (#499,
+    /// #502).
+    pub fn new_graph_legend_text(&self) -> stokesforge_plot::LegendText {
         self.object_manager_preferences
             .new_graph_legend_text()
             .clone()
@@ -8781,9 +8782,10 @@ impl AppState {
     /// (#499): the setting rides in the creation command itself. A new graph
     /// also has no legend frame (#507, D6); an opened file keeps its own.
     fn with_new_graph_legend(&self, mut spec: PlotSpec) -> PlotSpec {
-        let from = self.new_graph_legend_text();
+        let text = self.new_graph_legend_text();
         for panel in spec.panels.iter_mut() {
-            panel.legend.text.from = from.clone();
+            panel.legend.text.from = text.from.clone();
+            panel.legend.text.template = text.template.clone();
             panel.legend.frame = false;
         }
         spec
