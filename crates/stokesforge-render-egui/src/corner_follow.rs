@@ -37,6 +37,12 @@ pub(crate) const PLAUSIBLE_RATIO: (f32, f32) = (0.2, 5.0);
 /// rest of the drag falls back to the absolute pointer, so the page never jumps.
 pub(crate) const OUTLIER_FACTOR: f32 = 50.0;
 
+/// The bound never falls below this raw motion in one frame (points): a slow,
+/// careful grab followed by a fast flick is a hand movement, not corrupt input.
+/// The corrupt values seen are absolute coordinates, hundreds to tens of
+/// thousands of units in every frame.
+pub(crate) const OUTLIER_FLOOR: f32 = 400.0;
+
 /// Time constant, in seconds, of the glide of the page to a new snapped size.
 pub(crate) const GLIDE_TIME_CONSTANT: f32 = 0.06;
 
@@ -110,7 +116,7 @@ pub(crate) fn pointer_step(
                 let ratio = raw / travelled;
                 if (PLAUSIBLE_RATIO.0..=PLAUSIBLE_RATIO.1).contains(&ratio) {
                     PointerSource::Relative {
-                        bound: OUTLIER_FACTOR * raw / frames as f32,
+                        bound: (OUTLIER_FACTOR * raw / frames as f32).max(OUTLIER_FLOOR),
                     }
                 } else {
                     PointerSource::Absolute
@@ -468,6 +474,18 @@ mod tests {
         assert_eq!(source, PointerSource::Absolute);
         let step = pointer_step(&mut source, Some(Vec2::new(5.0, 0.0)), Vec2::new(0.0, 2.0));
         assert_eq!(step, Vec2::new(0.0, 2.0));
+    }
+
+    /// A slow probe then a fast flick is a hand movement: the floor keeps it.
+    /// Witness: the bound without its floor (50 x 1) rejects the flick.
+    #[test]
+    fn a_fast_flick_after_a_slow_probe_is_kept() {
+        let slow = (Some(Vec2::new(1.0, 0.0)), Vec2::new(1.0, 0.0));
+        let (mut source, _) = run(&[slow; 8]);
+        assert!(source.locks());
+        let flick = Vec2::new(120.0, 0.0);
+        assert_eq!(pointer_step(&mut source, Some(flick), Vec2::ZERO), flick);
+        assert!(source.locks());
     }
 
     /// Non-finite values count as no movement, whatever the source.
