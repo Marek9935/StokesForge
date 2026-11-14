@@ -36,7 +36,7 @@
 use crate::edge_band::{edge_drop_side, DropAnchor, DropPlace};
 use egui::{
     Color32, Context, CursorIcon, FontId, Painter, PointerButton, Pos2, Rect, Response, Shape,
-    Stroke, StrokeKind, Visuals,
+    Stroke, StrokeKind, Vec2, Visuals,
 };
 use stokesforge_core::compose::{CellSide, MoveTarget};
 use stokesforge_plot::{FreeFrame, FreePage, GridSlack, LayerPlacement, LengthUnit, PlotSpec};
@@ -192,6 +192,12 @@ pub(crate) struct LayoutDrag {
     moving_band: Option<(CellSide, usize)>,
     /// The page-edge message was already signalled in this drag (#505, F3).
     bumped: bool,
+    /// The pointer a page-corner drag follows (#512): the absolute pointer, plus
+    /// the raw motion once it is stuck at the edge of the window. Born with the
+    /// drag, so a second drag never inherits it.
+    virtual_pos: Pos2,
+    /// The absolute pointer of the previous frame of this drag.
+    last_abs: Pos2,
 }
 
 /// A burst of arrow-key nudges not yet committed.
@@ -232,6 +238,79 @@ impl LayoutState {
             .filter(|step| step.is_finite() && *step > 0.0)
             .unwrap_or_else(|| default_step(self.unit))
     }
+}
+
+/// How many screen points one unit of raw mouse motion adds to the virtual
+/// pointer of a page-corner drag stuck at the screen edge (#512). 1.0 for now;
+/// tuned at the trial on the user's screen.
+const EDGE_MOTION_GAIN: f32 = 1.0;
+
+/// How close to the window edge (points) the pointer counts as stuck on it.
+const EDGE_TOLERANCE: f32 = 1.0;
+
+/// The kinds that resize the page by an L-shaped corner (#505): the page
+/// corner of a Regular Grid and the page corner of a Free figure.
+fn is_page_corner(kind: &DragKind) -> bool {
+    matches!(
+        kind,
+        DragKind::Figure { .. }
+            | DragKind::Free {
+                handle: LayoutHandle::Page { .. },
+                ..
+            }
+    )
+}
+
+/// One step of the pointer a page-corner drag follows (#512). The pointer hits
+/// the edge of the screen and cannot enlarge the page further, so per axis: the
+/// absolute movement is always added; and when the absolute pointer did not
+/// move on that axis because it sits at or beyond the window edge, the raw
+/// relative motion pushing outward is added instead. No cursor grab, lock or
+/// warp: a refused lock is invisible to the application and a Wayland lock is
+/// persistent. Coming back inward moves the absolute pointer, so the virtual
+/// one follows its deltas again, without a jump. Non-finite motion is ignored
+/// (invariant 10).
+fn virtual_pointer_step(
+    virtual_pos: Pos2,
+    last_abs: Pos2,
+    abs: Pos2,
+    motion: Vec2,
+    bounds: Rect,
+) -> Pos2 {
+    fn axis(virt: f32, last: f32, abs: f32, motion: f32, low: f32, high: f32) -> f32 {
+        let moved = abs - last;
+        if !moved.is_finite() {
+            return virt;
+        }
+        if moved != 0.0 {
+            return virt + moved;
+        }
+        let pushes_out = (motion > 0.0 && abs >= high - EDGE_TOLERANCE)
+            || (motion < 0.0 && abs <= low + EDGE_TOLERANCE);
+        if motion.is_finite() && pushes_out {
+            virt + motion * EDGE_MOTION_GAIN
+        } else {
+            virt
+        }
+    }
+    Pos2::new(
+        axis(
+            virtual_pos.x,
+            last_abs.x,
+            abs.x,
+            motion.x,
+            bounds.min.x,
+            bounds.max.x,
+        ),
+        axis(
+            virtual_pos.y,
+            last_abs.y,
+            abs.y,
+            motion.y,
+            bounds.min.y,
+            bounds.max.y,
+        ),
+    )
 }
 
 fn differs(a: FreeFrame, b: FreeFrame) -> bool {
@@ -1120,10 +1199,30 @@ impl GraphView {
         {
             return;
         }
-        let Some(drag) = self.layout.drag.clone() else {
+        let Some(mut drag) = self.layout.drag.clone() else {
             return;
         };
-        let delta = (pos - drag.press) / drag.scale;
+        // #512: only the page corners follow the pointer past the screen edge.
+        let followed = if is_page_corner(&drag.kind) {
+            let motion = context.input(|input| input.pointer.motion());
+            let bounds = context.content_rect();
+            let next = virtual_pointer_step(
+                drag.virtual_pos,
+                drag.last_abs,
+                pos,
+                motion.unwrap_or(Vec2::ZERO),
+                bounds,
+            );
+            if let Some(active) = self.layout.drag.as_mut() {
+                active.virtual_pos = next;
+                active.last_abs = pos;
+            }
+            drag.virtual_pos = next;
+            next
+        } else {
+            pos
+        };
+        let delta = (followed - drag.press) / drag.scale;
         let delta = (f64::from(delta.x), f64::from(delta.y));
         let shift = context.input(|input| input.modifiers.shift);
         match &drag.kind {
@@ -1286,6 +1385,8 @@ impl GraphView {
                         moving: None,
                         moving_band: None,
                         bumped: false,
+                        virtual_pos: origin,
+                        last_abs: origin,
                     });
                     return true;
                 };
@@ -1372,6 +1473,8 @@ impl GraphView {
             moving: None,
             moving_band: None,
             bumped: false,
+            virtual_pos: origin,
+            last_abs: origin,
         });
         true
     }
@@ -1874,6 +1977,57 @@ fn paint_page_corners(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const WINDOW: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1000.0, 800.0));
+
+    /// The virtual movement of one frame, from a press at (500, 400) where the
+    /// absolute pointer went from `last` to `abs`.
+    fn stepped(last: Pos2, abs: Pos2, motion: Vec2) -> Vec2 {
+        let origin = Pos2::new(500.0, 400.0);
+        virtual_pointer_step(origin, last, abs, motion, WINDOW) - origin
+    }
+
+    /// #512: the raw motion is added only when the absolute pointer is stuck at
+    /// the window edge, per axis, pushing outward.
+    /// Witnesses: always adding motion gives +20; ignoring motion gives 0; the
+    /// whole-vector rule gives (0, 5); no edge condition gives 30.
+    #[test]
+    fn the_virtual_pointer_adds_motion_only_when_stuck_at_the_edge() {
+        let mid = Pos2::new(500.0, 400.0);
+        let edge = Pos2::new(1000.0, 400.0);
+        let ten = stepped(mid, mid + Vec2::new(10.0, 0.0), Vec2::new(10.0, 0.0));
+        assert_eq!(ten, Vec2::new(10.0, 0.0), "the absolute move wins");
+        assert_eq!(
+            stepped(edge, edge, Vec2::new(30.0, 0.0)),
+            Vec2::new(30.0, 0.0)
+        );
+        let corner = Pos2::new(1000.0, 400.0);
+        assert_eq!(
+            stepped(corner, corner + Vec2::new(0.0, 5.0), Vec2::new(25.0, 5.0)),
+            Vec2::new(25.0, 5.0),
+            "per axis"
+        );
+        assert_eq!(
+            stepped(mid, mid, Vec2::new(30.0, 0.0)),
+            Vec2::ZERO,
+            "mid-window"
+        );
+        assert_eq!(
+            stepped(edge, edge, Vec2::new(-30.0, 0.0)),
+            Vec2::ZERO,
+            "pushing back inward while stuck is not outward"
+        );
+        let left = Pos2::new(0.0, 400.0);
+        assert_eq!(
+            stepped(left, left, Vec2::new(-30.0, 0.0)),
+            Vec2::new(-30.0, 0.0)
+        );
+        assert_eq!(stepped(edge, edge, Vec2::new(f32::NAN, 0.0)), Vec2::ZERO);
+        assert_eq!(
+            stepped(edge, edge, Vec2::new(f32::INFINITY, 0.0)),
+            Vec2::ZERO
+        );
+    }
 
     /// Selected graphs are solid, the hovered one faint, and no faint handle
     /// shows during a drag. Witness: the drag condition dropped.

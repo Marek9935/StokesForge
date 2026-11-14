@@ -172,6 +172,21 @@ fn frame_with(
     modifiers: egui::Modifiers,
     scale: f32,
 ) -> Out {
+    frame_in(context, view, fixture, events, time, modifiers, scale, None)
+}
+
+/// [`frame_with`] in a window of the given size (default: egui's huge one).
+#[allow(clippy::too_many_arguments)]
+fn frame_in(
+    context: &egui::Context,
+    view: &mut GraphView,
+    fixture: &Fixture,
+    events: Vec<egui::Event>,
+    time: f64,
+    modifiers: egui::Modifiers,
+    scale: f32,
+    window: Option<Rect>,
+) -> Out {
     let layout = view
         .figure_layout(context, &fixture.snapshot(), fixture.graph)
         .expect("layout");
@@ -184,6 +199,7 @@ fn frame_with(
     let input = egui::RawInput {
         events,
         time: Some(time),
+        screen_rect: window,
         ..Default::default()
     };
     let mut cached = false;
@@ -270,6 +286,51 @@ fn drag(
         modifiers,
     ));
     // The page-edge message has its own test.
+    signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
+    signals
+}
+
+/// A drag that ends stuck at the window edge (#512): press at `from`, move to
+/// `edge`, then `frames` frames where the absolute pointer stays put and the
+/// raw motion is `motion`; released at `edge`.
+#[allow(clippy::too_many_arguments)]
+fn drag_stuck(
+    context: &egui::Context,
+    view: &mut GraphView,
+    fixture: &Fixture,
+    window: Rect,
+    from: Pos2,
+    edge: Pos2,
+    motion: egui::Vec2,
+    frames: usize,
+) -> Vec<GraphEvent> {
+    let none = egui::Modifiers::NONE;
+    let mut time = 0.1;
+    let mut run = |events: Vec<egui::Event>, time: f64| {
+        frame_in(
+            context,
+            view,
+            fixture,
+            events,
+            time,
+            none,
+            1.0,
+            Some(window),
+        )
+        .events
+    };
+    run(
+        vec![egui::Event::PointerMoved(from), button(from, true, none)],
+        time,
+    );
+    time += 0.05;
+    run(vec![egui::Event::PointerMoved(edge)], time);
+    for _ in 0..frames {
+        time += 0.05;
+        run(vec![egui::Event::MouseMoved(motion)], time);
+    }
+    time += 0.05;
+    let mut signals = run(vec![button(edge, false, none)], time);
     signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
     signals
 }
@@ -2589,4 +2650,111 @@ fn the_drop_bands_stick_to_the_grid_outline_when_the_page_has_slack() {
     assert!(view.drop_place(in_slack, None).is_none());
     let under_last_row = Pos2::new(100.0, outline_bottom as f32 - 4.0);
     assert!(view.drop_place(under_last_row, None).is_some());
+}
+
+/// #512: a Free page corner stuck at the window edge keeps growing with the raw
+/// motion (here 4 frames x 50 = 200 points), a second drag starts from zero.
+/// Witness: the page read from `interact_pointer_pos` (stops at the edge delta);
+/// the accumulator kept outside the drag (the second drag starts with 200).
+#[test]
+fn a_free_page_corner_stuck_at_the_window_edge_keeps_growing() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let page = view.layout_page().expect("page");
+    let from = screen(
+        &view,
+        page.left + page.width + 4.0,
+        page.top + page.height + 4.0,
+    );
+    let edge = from + egui::vec2(60.0, 0.0);
+    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(edge.x, edge.y + 500.0));
+    let scale = view.display_scale().expect("scale");
+    let motion = egui::vec2(50.0, 0.0);
+    let signals = drag_stuck(&context, &mut view, &fixture, window, from, edge, motion, 4);
+    let (_, new_page) = edited(&signals);
+    let grown = new_page.expect("a page").width - page.width;
+    let expected = f64::from((60.0 + 200.0) / scale);
+    assert!((grown - expected).abs() < 0.05, "{grown} vs {expected}");
+    // The second drag, on the page as it now is, starts from zero.
+    fixture.replace({
+        let mut spec = spec_of(&fixture);
+        spec.free_page = new_page;
+        spec
+    });
+    let (context, mut view) = in_mode(&fixture);
+    let page = view.layout_page().expect("page");
+    let from = screen(
+        &view,
+        page.left + page.width + 4.0,
+        page.top + page.height + 4.0,
+    );
+    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(from.x + 60.0, from.y + 500.0));
+    let signals = drag_stuck(
+        &context,
+        &mut view,
+        &fixture,
+        window,
+        from,
+        from + egui::vec2(60.0, 0.0),
+        motion,
+        0,
+    );
+    let (_, again) = edited(&signals);
+    let grown = again.expect("a page").width - page.width;
+    assert!((grown - f64::from(60.0 / scale)).abs() < 0.05, "{grown}");
+}
+
+/// #512: the Regular Grid twin: the figure corner on the `grid_slack` right.
+/// Witness: the same two as the Free one.
+#[test]
+fn a_grid_page_corner_stuck_at_the_window_edge_keeps_growing() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let from = Pos2::new(w + 4.0, h + 4.0);
+    let edge = from + egui::vec2(60.0, 0.0);
+    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(edge.x, edge.y + 500.0));
+    let signals = drag_stuck(
+        &context,
+        &mut view,
+        &fixture,
+        window,
+        from,
+        edge,
+        egui::vec2(50.0, 0.0),
+        4,
+    );
+    let [GraphEvent::GridFramesEdited {
+        figure: true,
+        slack: Some(slack),
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    assert_eq!(slack.right, 260.0, "60 of pointer + 4 x 50 of motion");
+}
+
+/// #512: moving a graph (`MoveCell`) keeps the absolute pointer: stuck at the
+/// window edge, the raw motion changes nothing. Witness: the virtual pointer
+/// applied to every kind (the target would leave the grid).
+#[test]
+fn moving_a_cell_stuck_at_the_window_edge_ignores_the_raw_motion() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let from = middle(&view, 0);
+    let target = middle(&view, 3);
+    let window = Rect::from_min_max(Pos2::ZERO, Pos2::new(target.x, target.y + 500.0));
+    let signals = drag_stuck(
+        &context,
+        &mut view,
+        &fixture,
+        window,
+        from,
+        target,
+        egui::vec2(5000.0, 0.0),
+        3,
+    );
+    assert_eq!(moved(&signals), (0, MoveTarget::Cell { row: 1, column: 1 }));
 }
