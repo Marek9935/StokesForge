@@ -312,6 +312,9 @@ action-paste = Paste
 action-paste-in-place = Paste in Place
     .hint = Pastes at the position the cells were copied from
     .disabled = Copy from the grid first. Text from elsewhere has no original position
+action-paste-transposed = Paste Transposed
+    .hint = Pastes the copied cells with rows and columns swapped, as values
+    .disabled = Select a single block of cells or contiguous columns to paste into
 action-clear = Clear
     .hint = Empties the selected cells
 action-remove-formula-keep-data = Remove Formula, Keep Data
@@ -388,10 +391,16 @@ status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable
 status-paste-non-contiguous = Cannot paste into a non-contiguous selection
-status-paste-columns-dropped =
+status-paste-transposed-nothing = Nothing to paste transposed: of the copied header fields, only x' can be pasted
+status-paste-header-rows-dropped =
     { $count ->
-        [one] One column did not fit and was not pasted
-       *[other] { $count } columns did not fit and were not pasted
+        [one] One header row other than x' was not pasted
+       *[other] { $count } header rows other than x' were not pasted
+    }
+status-paste-columns-added =
+    { $count ->
+        [one] One column was added to fit the paste
+       *[other] { $count } columns were added to fit the paste
     }
 status-cell-decimal-comma = "{ $text }" was read as { $value } (decimal comma)
 status-paste-fields-dropped =
@@ -399,7 +408,6 @@ status-paste-fields-dropped =
         [one] One header field did not fit and was not pasted
        *[other] { $count } header fields did not fit and were not pasted
     }
-status-paste-columns-fields-dropped = { $columns } column(s) and { $fields } header field(s) did not fit and were not pasted
 status-formula-comma-rewritten = Read as the range from { $from } to { $to } and rewritten { $rewritten }. For the number { $decimal }, write it with a point
 status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
@@ -871,13 +879,9 @@ plot-area-gridlines-horizontal = Horizontal (Y ticks)
 
 # Axes tab
 
-plot-axes-title-section = Axis title
-plot-axes-quantity =
-    Quantity
-    .hint = Name or symbol, e.g. Wavenumber
-plot-axes-units =
-    Units
-    .hint = Shown after the quantity, in parentheses
+plot-axes-title =
+    Axis title
+    .hint = Free text, drawn as typed. Variables read the column: #ln long name, #sn short name, #u units. A new graph starts with Long name / Units.
 plot-axes-scale-section = Scale
 plot-axes-log-scale =
     Log scale
@@ -1051,7 +1055,8 @@ legend-text-from-long-name-comments = Long Name, Comments
 legend-text-from-custom = Custom…
 legend-text-from-unknown = Long Name (setting of a newer version)
 plot-legend-template = Template
-    .hint = Typst text. Variables: #long-name (#ln) the Long Name, #short-name (#sn) the Short Name, #units (#u) the Units, #comments (#c) the Comments, #x-prime (#xp) the x'. Their text is shown as is.
+    .hint = Typst text of each legend entry.
+plot-legend-template-empty = The template is empty: legend entries have no text.
 plot-legend-row-text = Row series
 plot-legend-row-number = Row number
 plot-legend-row-column-value = Value of column…
@@ -1133,6 +1138,9 @@ plot-theme-note = Applies to all titles, axes, ticks and gridlines. Replaces col
 
 # Memo of the Typst syntax, under every title field
 
+plot-variables-memo-header = Variables
+plot-variables-col = The same, read from column A of the sheet
+plot-variables-note = Axis titles read the X or Y column of the first series, the other texts its Y column; a legend entry reads its own series.
 plot-math-memo-header = Math syntax
 plot-math-greek = Greek letters λ, Δ
 plot-math-subscript = Subscript
@@ -2151,7 +2159,7 @@ preferences-new-graphs-note = Starting point of the graphs you create. Each grap
 preferences-new-graph-decimal-comma = Decimal comma on tick labels
     .hint = New graphs write 1,5 instead of 1.5 on every axis, on screen and in exports. Graphs that already exist and graphs made by scripts keep their own setting.
 preferences-new-graph-legend-text = Legend text from
-    .hint = The header row new graphs read for their legend entries. Each graph then keeps its own setting, in Graph Properties > Legend. Graphs that already exist and graphs made by scripts are not changed.
+    .hint = The header row new graphs read for their legend entries, or, with Custom, your own template. Each graph then keeps its own setting, in Graph Properties > Legend. Graphs that already exist and graphs made by scripts are not changed.
 preferences-analysis-values = Values
 preferences-analysis-values-note = What an analysis window offers the first time you use that analysis. Each analysis then remembers its own last choice.
 preferences-export-graph = Export Graph
@@ -2259,6 +2267,7 @@ help-copy-full-columns = Copy the whole columns
 help-cut = Cut
 help-paste = Paste
 help-paste-absolute = Paste at the same place
+help-paste-transposed = Paste with rows and columns swapped
 help-clear-cells = Clear the selected cells, then delete them
 help-duplicate-sheet = Duplicate the sheet
 help-copy-graph = Copy the graph as an image (nothing selected)

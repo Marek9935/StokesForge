@@ -32,6 +32,9 @@ without a message, see `docs/persistence.md`).
   window instead of a "not a text file" refusal. A drop of a text file that
   needs a look and an Origin file opens the Import window first and the status
   bar says that the Origin file will open after it.
+- Preferences > Display > New > Legend text from offers Custom… (#502): a
+  Template row (the Legend tab's own field and validation) sets the template
+  that every new graph starts with. An empty template is flagged but kept.
 
 - Legend text source (#499): Graph Properties > Legend has a « Text from »
   setting that chooses which worksheet header row gives every legend entry
@@ -85,6 +88,17 @@ without a message, see `docs/persistence.md`).
   its long name, with the Horiba information in the columns' metadata. Only
   workbooks are read: graphs and matrices are left out. `.opju` is not read
   yet. The CLI and `pyst.import_file` import the `Data` sheets of an `.opj`.
+
+### Changed
+
+- Axis title (#506): Graph Properties > Axes has one free field, **Axis title**;
+  the Units field is gone. A new graph fills its axis titles with a formula that
+  reads the column (long name, else short name, then ` / units` only when there
+  are some), and typed text replaces it. A file made with an older version keeps
+  its look: a title and a unit are joined into one text at load. In-place
+  editing keeps the whole text. `.stf` unchanged; `pyst` API 0.7: `set_graph`
+  loses `x_unit` and `y_unit` (the titles take the whole text), and `plot()`
+  titles the axes of a new graph like the application.
 
 ## [1.1.0] - 2026-11-11
 

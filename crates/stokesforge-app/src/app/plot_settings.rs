@@ -254,6 +254,8 @@ fn plot_settings_contents(
     let mut size_lock = state.size_lock(settings.graph);
     let size_lock_before = size_lock;
     let published = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
+    // #501: the draft's size is measured on the texts as drawn, variables bound.
+    let (bind_tree, revision) = (state.tree().clone(), state.revision());
     let mut gradient_actions: Vec<Action> = Vec::new();
     let row_columns = legend_row_columns(state, settings.graph);
     // Saved colors, read before borrowing the draft; the
@@ -337,14 +339,20 @@ fn plot_settings_contents(
                 .auto_shrink([false, false])
                 .show(ui, |ui| match chosen_tab {
                     PlotSettingsTab::Graph => {
-                        let layout = dialog_layout(ui.ctx(), settings.graph, spec, published);
+                        let layout = dialog_layout(
+                            ui.ctx(),
+                            settings.graph,
+                            spec,
+                            published,
+                            (&bind_tree, revision),
+                        );
                         commit |= graph_settings_page(
                             ui,
+                            (&bind_tree, layout.as_ref()),
                             spec,
                             edit.selected_panel,
                             &mut size_lock,
                             &mut env,
-                            layout.as_ref(),
                             unit,
                         );
                     }
@@ -426,6 +434,7 @@ fn dialog_layout(
     graph: NodeId,
     draft: &PlotSpec,
     published: Option<FigureLayout>,
+    (tree, revision): (&stokesforge_core::Tree, stokesforge_session::Revision),
 ) -> Option<FigureLayout> {
     let stored = !draft.frame_widths.is_empty() || !draft.frame_heights.is_empty();
     // A free graph is always measured from the draft: the origin of the image
@@ -441,24 +450,35 @@ fn dialog_layout(
         return Some(layout);
     }
     let id = egui::Id::new(("graph_size_layout", graph));
-    if let Some((cached, layout)) = ctx.data(|data| data.get_temp::<(PlotSpec, FigureLayout)>(id)) {
-        if cached == *draft {
+    // The revision and the language are in the memo: a renamed column changes
+    // the bound texts, and the language the text of a broken reference.
+    let language = stokesforge_app_state::i18n::language().tag();
+    type Memo = (
+        PlotSpec,
+        stokesforge_session::Revision,
+        &'static str,
+        FigureLayout,
+    );
+    if let Some((cached, at, tag, layout)) = ctx.data(|data| data.get_temp::<Memo>(id)) {
+        if cached == *draft && at == revision && tag == language {
             return Some(layout);
         }
     }
-    let layout = stokesforge_app_state::frame_sizes::figure_layout(draft)?;
-    ctx.data_mut(|data| data.insert_temp(id, (draft.clone(), layout.clone())));
+    let layout = stokesforge_app_state::frame_sizes::figure_layout_in(tree, draft)?;
+    ctx.data_mut(|data| {
+        data.insert_temp::<Memo>(id, (draft.clone(), revision, language, layout.clone()))
+    });
     Some(layout)
 }
 
 /// Graph page: title and background, as a two-column form (#227).
 fn graph_settings_page(
     ui: &mut egui::Ui,
+    (tree, layout): (&Tree, Option<&FigureLayout>),
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
     env: &mut PickerEnv,
-    layout: Option<&FigureLayout>,
     unit: LengthUnit,
 ) -> bool {
     form(ui, "plot_graph_page", |form| {
@@ -489,7 +509,7 @@ fn graph_settings_page(
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
-        commit |= size_section(form, spec, panel, size_lock, layout, unit, env);
+        commit |= size_section(form, (tree, layout), spec, panel, size_lock, unit, env);
         // S-L8 (#405, #426): "When axes are added" has an Auto default ("Grows
         // with the axes"), almost never changed; the plot area rows are the
         // written exception of S-L8 (they have no Auto) and sit here too, so the
@@ -564,15 +584,15 @@ fn figure_size_row(
 /// it is drawn with, so only the edited one changes.
 fn size_section(
     form: &mut Form<'_>,
+    (tree, layout): (&Tree, Option<&FigureLayout>),
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
-    layout: Option<&FigureLayout>,
     unit: LengthUnit,
     env: &mut PickerEnv,
 ) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
-        return free_size_section(form, spec, panel, size_lock, layout, unit, env);
+        return free_size_section(form, (tree, layout), spec, panel, size_lock, unit, env);
     }
     let (drawn_widths, drawn_heights) = drawn_frames(spec, layout);
     if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
@@ -589,9 +609,16 @@ fn size_section(
         || (frames.0.iter().sum(), frames.1.iter().sum()),
         |layout| layout.size_with_frames(&frames.0, &frames.1),
     );
-    let mut commit = total_row(form, spec, size_lock, (total_width, total_height), unit);
+    let mut commit = total_row(
+        form,
+        tree,
+        spec,
+        size_lock,
+        (total_width, total_height),
+        unit,
+    );
     form.note_dimmed(tr!("plot-size-figure-note"));
-    commit |= placement_row(form, spec);
+    commit |= placement_row(form, tree, spec);
     form.note(tr!("plot-size-note"));
     commit
 }
@@ -664,6 +691,7 @@ fn plot_area_rows(
 /// ([`SizeLock::follow`]).
 fn total_row(
     form: &mut Form<'_>,
+    tree: &Tree,
     spec: &mut PlotSpec,
     size_lock: &mut Option<SizeLock>,
     image: (f64, f64),
@@ -683,7 +711,7 @@ fn total_row(
             let mut shown = round_to_unit(unit.from_points(points), unit);
             let response = number_field(ui, ("graph_total", index), &mut shown, &quantity);
             if response.changed {
-                commit |= type_total(ui, spec, size_lock, axis, unit.to_points(shown), unit);
+                commit |= type_total(ui, tree, spec, size_lock, axis, unit.to_points(shown), unit);
                 ui.ctx().request_repaint();
             }
         }
@@ -710,6 +738,7 @@ fn total_row(
 /// flags the field(s) the value was brought back in.
 fn type_total(
     ui: &egui::Ui,
+    tree: &Tree,
     spec: &mut PlotSpec,
     size_lock: &mut Option<SizeLock>,
     axis: SizeAxis,
@@ -718,7 +747,7 @@ fn type_total(
 ) -> bool {
     let before = spec.clone();
     let ratio = size_lock.map(|lock| lock.ratio);
-    let Some(fit) = set_total_in_draft(spec, axis, target, ratio) else {
+    let Some(fit) = set_total_in_draft(tree, spec, axis, target, ratio) else {
         return false;
     };
     if let Some(lock) = size_lock.as_mut() {
@@ -739,23 +768,22 @@ fn type_total(
     flag_total(ui, typed, &fit, target, unit);
     if fit.raised {
         let raised = target < fit.range.0;
-        set_total_in_draft(spec, axis, shown_end(fit.range, raised), ratio);
+        set_total_in_draft(tree, spec, axis, shown_end(fit.range, raised), ratio);
     }
     if let Some(((low, high), true)) = fit.other {
         let other_axis = match axis {
             SizeAxis::Width => SizeAxis::Height,
             SizeAxis::Height => SizeAxis::Width,
         };
-        let applied =
-            stokesforge_app_state::frame_sizes::figure_extent(spec).map(
-                |extent| match other_axis {
-                    SizeAxis::Width => extent.0,
-                    SizeAxis::Height => extent.1,
-                },
-            );
+        let applied = stokesforge_app_state::frame_sizes::figure_extent(tree, spec).map(|extent| {
+            match other_axis {
+                SizeAxis::Width => extent.0,
+                SizeAxis::Height => extent.1,
+            }
+        });
         let below = applied.is_some_and(|size| (size - low).abs() <= (size - high).abs());
         flag_total_bound(ui, 1 - typed, below, (low, high), unit);
-        set_total_in_draft(spec, other_axis, shown_end((low, high), below), None);
+        set_total_in_draft(tree, spec, other_axis, shown_end((low, high), below), None);
     }
     *spec != before
 }
@@ -832,7 +860,7 @@ fn round_down_in_unit(points: f64, unit: LengthUnit) -> f64 {
 /// goes through the draft like every field of the window; going free leaves
 /// every plot area where it is drawn, going back applies the grid rules of the
 /// model.
-fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
+fn placement_row(form: &mut Form<'_>, tree: &Tree, spec: &mut PlotSpec) -> bool {
     let options = [
         ChoiceOption::new(false, tr!("plot-size-placement-grid")),
         ChoiceOption::new(true, tr!("plot-size-placement-free")),
@@ -841,7 +869,7 @@ fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
     let changed = form.row(tr!("plot-size-placement"), |ui| {
         choice(ui, "plot_layer_placement", &mut free, &options)
     });
-    changed && set_placement_in_draft(spec, free)
+    changed && set_placement_in_draft(tree, spec, free)
 }
 
 /// General › Size of a free graph (#398, #426): the Figure size first, the
@@ -849,24 +877,31 @@ fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
 /// plot area rows are in Advanced ([`free_plot_area_rows`]).
 fn free_size_section(
     form: &mut Form<'_>,
+    (tree, layout): (&Tree, Option<&FigureLayout>),
     spec: &mut PlotSpec,
     panel: usize,
     size_lock: &mut Option<SizeLock>,
-    layout: Option<&FigureLayout>,
     unit: LengthUnit,
     env: &mut PickerEnv,
 ) -> bool {
     form.section(tr!("plot-size"));
     let Some(layout) = layout else {
-        return placement_row(form, spec);
+        return placement_row(form, tree, spec);
     };
     // The extent as frames and bands add up, not the whole-point size: a total
     // typed and reached reads back as typed (#407).
     let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
         .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
-    let mut commit = total_row(form, spec, size_lock, (total_width, total_height), unit);
+    let mut commit = total_row(
+        form,
+        tree,
+        spec,
+        size_lock,
+        (total_width, total_height),
+        unit,
+    );
     form.note_dimmed(tr!("plot-size-figure-note"));
-    commit |= placement_row(form, spec);
+    commit |= placement_row(form, tree, spec);
     if free_fields(spec, panel).is_none() {
         return commit;
     }
@@ -1276,6 +1311,20 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
             "plot-math-footer",
             url = "typst.app/docs/reference/math"
         ));
+        // The variables of the graph texts (#501), built from the one table.
+        ui.add_space(crate::theme::SPACE_ITEM);
+        ui.label(table_header(tr!("plot-variables-memo-header")));
+        egui::Grid::new("plot_variable_help")
+            .num_columns(2)
+            .spacing([12.0, 2.0])
+            .show(ui, |ui| {
+                for (names, gives) in stokesforge_app_state::figure_texts::variable_help_rows() {
+                    ui.monospace(names);
+                    ui.weak(gives);
+                    ui.end_row();
+                }
+            });
+        ui.weak(tr!("plot-variables-note"));
     });
 }
 
@@ -1305,24 +1354,6 @@ pub(super) fn formula_field(
     hint: &str,
     value: &mut String,
 ) -> bool {
-    formula_field_with(
-        form,
-        label,
-        hint,
-        value,
-        &stokesforge_render_egui::formula::diagnose,
-    )
-}
-
-/// [`formula_field`] whose text is checked by `diagnose` (a template that reads
-/// variables needs them defined first).
-fn formula_field_with(
-    form: &mut Form<'_>,
-    label: &str,
-    hint: &str,
-    value: &mut String,
-    diagnose: &dyn Fn(&str) -> Option<String>,
-) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
@@ -1330,13 +1361,26 @@ fn formula_field_with(
         // on the field; the graph, for its part, falls back to the raw text. No red
         // while typing, where the markup is necessarily unfinished.
         if !response.has_focus() {
-            if let Some(error) = diagnose(value) {
+            // The variables are defined first (#501): `#ln` is valid, `#nope` is not.
+            if let Some(error) = stokesforge_render::variables::diagnose_text(value) {
                 field_state::show_issue(ui, &response, &FieldIssue::refused(error));
             }
         }
         formula_help(ui, hint);
         response.lost_focus()
     })
+}
+
+/// The one validation of a custom legend template (S-T3), shared by the
+/// Legend tab of Graph Properties and the Preferences (#502): a later fix
+/// applies to both. The template reads variables, so it is checked with them
+/// defined; an empty template is reported (the entries have no text) but is
+/// allowed.
+pub(crate) fn legend_template_issue(template: &str) -> Option<String> {
+    if template.is_empty() {
+        return Some(tr!("plot-legend-template-empty"));
+    }
+    stokesforge_render::variables::diagnose_text(template)
 }
 
 /// Edits a mirror axis (#176): it takes the scale of the opposite axis and has neither
@@ -1551,8 +1595,8 @@ fn tick_direction_row(
     })
 }
 
-/// Edits an [`AxisSpec`], in four groups: the axis title (label,
-/// unit), its scale (logarithmic, From/To bounds: the axis direction is read
+/// Edits an [`AxisSpec`], in four groups: the axis title (one free text and
+/// its colour, #506), its scale (logarithmic, From/To bounds: the axis direction is read
 /// from their order), its display (axis, numbers, grid, color) and its
 /// ticks (tick marks, direction, minor ticks, "Advanced" block). Returns `true` if the draft must be committed — see the head doc
 /// of [`plot_settings_window`].
@@ -1564,18 +1608,13 @@ fn axis_editor(
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
-    form.section(tr!("plot-axes-title-section"));
+    // No section heading: it would read « Axis title » above « Axis title »
+    // (#506); the group only holds the title and its colour.
     commit |= formula_field(
         form,
-        &tr!("plot-axes-quantity"),
-        &tr!("plot-axes-quantity", "hint"),
+        &tr!("plot-axes-title"),
+        &tr!("plot-axes-title", "hint"),
         &mut axis.label,
-    );
-    commit |= formula_field(
-        form,
-        &tr!("plot-axes-units"),
-        &tr!("plot-axes-units", "hint"),
-        &mut axis.unit,
     );
     commit |= form.color(
         &tr!("plot-title-color"),
@@ -2259,20 +2298,11 @@ fn legend_text_editor(
         text.choose_custom();
     }
     if text.from == LegendTextFrom::Custom {
-        // The template reads variables: it is checked with them defined.
-        let diagnose = |template: &str| {
-            stokesforge_render_egui::formula::diagnose(&stokesforge_plot::template_source(
-                template,
-                |_| String::new(),
-            ))
-        };
-        commit |= formula_field_with(
-            form,
-            &tr!("plot-legend-template"),
-            &tr!("plot-legend-template", "hint"),
-            &mut text.template,
-            &diagnose,
-        );
+        if let Some(template) = legend_template_field(form, "plot_legend_template", &text.template)
+        {
+            text.template = template;
+            commit = true;
+        }
     }
     if !row_columns.is_empty() {
         #[derive(Clone, Copy, PartialEq)]
@@ -2322,6 +2352,34 @@ fn legend_text_editor(
         }
     }
     commit
+}
+
+/// The « Template » row of a custom legend, with its help icon and the shared
+/// validation ([`legend_template_issue`]): the one field of the Legend tab and
+/// of the Preferences (#502). It is the standard text field
+/// ([`field_state::edit_text`]): a draft while focused, committed on leave or
+/// Enter (which is consumed, S-N3), given back on Escape (S-F7). A template is
+/// never refused; once the field is left, its issue is painted on it (S-T3).
+/// Returns the template committed this frame.
+pub(super) fn legend_template_field(
+    form: &mut Form<'_>,
+    id_salt: &str,
+    current: &str,
+) -> Option<String> {
+    form.row(tr!("plot-legend-template"), |ui| {
+        let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
+        let edited = field_state::edit_text(ui, id_salt, width, current, |text| {
+            field_state::Verdict::Valid(text.to_owned())
+        });
+        if !edited.response.has_focus() {
+            let shown = edited.value.as_deref().unwrap_or(current);
+            if let Some(error) = legend_template_issue(shown) {
+                field_state::show_issue(ui, &edited.response, &FieldIssue::refused(error));
+            }
+        }
+        formula_help(ui, &tr!("plot-legend-template", "hint"));
+        edited.value
+    })
 }
 
 /// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of
@@ -2963,12 +3021,12 @@ mod tests {
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &tr!("plot-axes-show-mirror")));
         assert!(is_painted(&painted, &tr!("plot-axes-show-tick-labels")));
-        assert!(!is_painted(&painted, &tr!("plot-axes-quantity")));
+        assert!(!is_painted(&painted, &tr!("plot-axes-title")));
         assert!(!is_painted(&painted, &tr!("plot-axes-color")));
 
         harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
         let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(&painted, &tr!("plot-axes-quantity")));
+        assert!(is_painted(&painted, &tr!("plot-axes-title")));
         assert!(!is_painted(&painted, &tr!("plot-axes-show-mirror")));
     }
 
@@ -3291,6 +3349,7 @@ mod tests {
     fn minimum_width(spec: &PlotSpec) -> f64 {
         let mut probe = spec.clone();
         stokesforge_app_state::frame_sizes::set_total_in_draft(
+            stokesforge_core::Project::new("t").unwrap().tree(),
             &mut probe,
             super::SizeAxis::Width,
             1.0,
@@ -3509,9 +3568,12 @@ mod tests {
             "the raise must bend the ratio for this test to prove anything: {w1} x {h1}"
         );
         let shown = total_text(
-            stokesforge_app_state::frame_sizes::figure_extent(&harness.model())
-                .unwrap()
-                .0,
+            stokesforge_app_state::frame_sizes::figure_extent(
+                stokesforge_core::Project::new("t").unwrap().tree(),
+                &harness.model(),
+            )
+            .unwrap()
+            .0,
         );
         type_into(&context, &mut harness, &shown, "20");
         let (width, height) = image_size(&harness.model());
@@ -3664,7 +3726,9 @@ mod tests {
         spec.frame_heights = vec![250.0];
         if free {
             assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
-                spec, true
+                stokesforge_core::Project::new("t").unwrap().tree(),
+                spec,
+                true
             ));
             for index in 0..2 {
                 let panel = spec.panels.get_mut(index).unwrap();
@@ -4978,6 +5042,102 @@ mod tests {
         );
     }
 
+    /// A graph whose legend text is a custom template `#ln`, on its Legend tab.
+    fn custom_template_harness() -> Harness {
+        let mut harness = harness(|spec| {
+            let text = &mut first_panel(spec).legend.text;
+            text.from = stokesforge_plot::LegendTextFrom::Custom;
+            text.template = "#ln".to_owned();
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        harness
+    }
+
+    /// #502, S-F7: Escape in the Legend tab's template field gives the old
+    /// template back and the dialog stays open. Witness: a field that keeps
+    /// what was typed (plain text edit) leaves `zzz` in the draft.
+    #[test]
+    fn escape_gives_back_the_legend_template() {
+        let mut harness = custom_template_harness();
+        let context = test_support::context();
+        focus_field(&context, &mut harness.state, "#ln");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("zzz".into())],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Escape)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        assert!(harness.state.plot_settings().is_some(), "dialog stays open");
+        assert_eq!(harness.draft().panels[0].legend.text.template, "#ln");
+    }
+
+    /// #502, S-N3: Enter in the template field commits it and does not close
+    /// Graph Properties. Witness: an Enter that is not consumed closes it.
+    #[test]
+    fn enter_in_the_legend_template_commits_and_keeps_the_window_open() {
+        let mut harness = custom_template_harness();
+        let context = test_support::context();
+        focus_field(&context, &mut harness.state, "#ln");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("zzz".into())],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        assert!(harness.state.plot_settings().is_some(), "dialog stays open");
+        assert!(harness.draft().panels[0]
+            .legend
+            .text
+            .template
+            .contains("zzz"));
+    }
+
+    /// #502, S-T3: a template that cannot be read says why once the field is
+    /// left, not while typing. Witness: dropping the issue on the field.
+    #[test]
+    fn a_broken_legend_template_is_red_once_left() {
+        let mut harness = custom_template_harness();
+        let context = test_support::context();
+        let center = focus_field(&context, &mut harness.state, "#ln");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("#(".into())],
+        );
+        let message = super::legend_template_issue("#(").expect("the template is broken");
+        let hovered = paint_window(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::PointerMoved(center)],
+        );
+        assert!(
+            hovered.iter().all(|t| !t.text.contains(&message)),
+            "no red bubble from the draft while typing"
+        );
+        click_label(&context, &mut harness.state, &tr!("plot-legend-text-from"));
+        paint_window(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::PointerMoved(center)],
+        );
+        let painted = paint_window(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::PointerMoved(center)],
+        );
+        assert!(
+            painted.iter().any(|t| t.text.contains(&message)),
+            "the bubble says why: {message}"
+        );
+        assert!(harness.draft().panels[0]
+            .legend
+            .text
+            .template
+            .contains("#("));
+    }
+
     /// Enter in a Graph Properties number field (S-N3): commits the field into
     /// the model, the window stays open; a second Enter with no field focused
     /// is the dialog's OK and keeps the change.
@@ -5472,6 +5632,33 @@ mod tests {
         assert_eq!(red_frames(&paint(&mut faulty)), 1);
     }
 
+    /// #501: a field of a graph text defines the variables before it
+    /// diagnoses: `#ln` is valid (no red frame), `#nope` is not, in an axis
+    /// title field as in the others. Witness: the plain Typst diagnosis of the
+    /// text finds no `ln` and turns the valid variable red.
+    #[test]
+    fn a_variable_is_valid_in_a_text_field_and_an_unknown_name_is_red() {
+        let context = test_support::context();
+        let paint = |value: &mut String| {
+            image(&context, vec![], |ui| {
+                form(ui, "trial", |form| {
+                    formula_field(
+                        form,
+                        &tr!("plot-axes-title"),
+                        &tr!("plot-axes-title", "hint"),
+                        value,
+                    )
+                });
+            })
+        };
+        let mut known = String::from("#ln (#u)");
+        let mut unknown = String::from("#nope");
+        paint(&mut known);
+        paint(&mut unknown);
+        assert_eq!(red_frames(&paint(&mut known)), 0);
+        assert_eq!(red_frames(&paint(&mut unknown)), 1);
+    }
+
     /// S-T3 in context: a faulty markup is typed, Enter leaves the field, the
     /// red frame appears.
     #[test]
@@ -5885,6 +6072,11 @@ mod tests {
         }
         assert!(is_painted(&painted, &footer));
         assert!(footer.contains("Typst"), "the reminder names Typst");
+        // #501: the variables, one line each, built from the one table.
+        for (names, gives) in stokesforge_app_state::figure_texts::variable_help_rows() {
+            assert!(is_painted(&painted, &names), "variables: {names:?} absent");
+            assert!(is_painted(&painted, &gives), "variables: {gives:?} absent");
+        }
     }
 
     /// Paints the formula help icon and returns its rectangle.

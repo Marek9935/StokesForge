@@ -888,6 +888,16 @@ file again drops the bar without a message. Witness
 `tests/witnesses/v1/project.stf` regenerated with a two-segment chained bar;
 unit test `a_color_bar_round_trips_and_keeps_unknown_choices` in `convert.rs`.
 
+## Axis title: one text, folded at load (#506)
+
+The axis title is one free text. `AxisSpecRecord` keeps its `label` and `unit`
+fields (no version change: a file written by this version still opens in v1.1).
+Writing puts the label and an always empty unit. **Reading folds** a non-empty
+unit into the label with the rule of `AxisSpec::display_label`: `Abs` + `a.u.`
+reads `Abs (a.u.)`, a unit alone reads `(s)`, and the unit of the loaded axis is
+empty. An empty title stays empty: nothing is filled at load, so an old graph
+keeps its look. Tests: `convert.rs` and `tests/witness_files.rs`.
+
 ## Accepted limits (2026-10-20, after #302-#305)
 
 Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).

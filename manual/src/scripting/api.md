@@ -312,7 +312,7 @@ The options are:
 | `symbol_size` | A positive number |
 | `label` | The legend text. A list gives one text per series. |
 | `group_name` | The name of the group, when `y` is a list |
-| `title`, `x_title`, `y_title` | Titles. They accept the same formatting as the graph properties. |
+| `title`, `x_title`, `y_title` | Titles. They accept the same formatting as the graph properties. A new graph whose axis title you do not give gets the same default as the application: the column's long name, then ` / units` when it has some. |
 | `x_scale`, `y_scale` | `"linear"` or `"log"` |
 | `x_from`, `x_to`, `y_from`, `y_to` | Axis range. Give both bounds of an axis together. A reversed range (`from` greater than `to`) reverses the axis. |
 | `axis` | `"left"` or `"right"`: which Y axis the series uses |
@@ -341,7 +341,7 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 
 | Option | Value |
 |---|---|
-| `title`, `panel_title`, `x_title`, `y_title`, `x_unit`, `y_unit` | Text |
+| `title`, `panel_title`, `x_title`, `y_title` | Text |
 | `title_visible`, `stale_warning`, `decimal_comma` | `True` or `False` |
 | `title_color`, `background` | `"#RRGGBB"` or `"#RRGGBBAA"`. An empty text means automatic (title) or white (background). |
 | `x_scale`, `y_scale` | `"linear"` or `"log"` |

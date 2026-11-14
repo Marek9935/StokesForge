@@ -288,6 +288,8 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
                 }
             }
         }
+        // The fallback shows what the user typed, never the variable preamble.
+        let text = stokesforge_render::formula::fallback_text(text);
         match &self.font {
             // Ticks as outlines: composed by Typst, like a literal
             // (escaped) text, in the graph's font.
@@ -354,6 +356,10 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
                 }
             }
         }
-        Ok(estimate(self.measurer, text, style))
+        Ok(estimate(
+            self.measurer,
+            stokesforge_render::formula::fallback_text(text),
+            style,
+        ))
     }
 }

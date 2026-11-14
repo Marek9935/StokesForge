@@ -141,7 +141,7 @@ pub use stokesforge_render::{
     component_at_with_tolerance, nearest_on_curve, AxisSide, Gesture, PanelTransform,
     PlotComponent, AXIS_LINE_TOLERANCE_POINTS,
 };
-pub use typst_screen::{formula_label, FormulaTexture, TypstScreen};
+pub use typst_screen::{formula_label, FormulaTexture, TextureSet, TypstScreen};
 // Typst on the text model side (compilation, escaping): the interface needs
 // it to check what it offers to write (property syntax memo), without
 // declaring an edge to `stokesforge-render`.
@@ -627,7 +627,10 @@ pub struct GraphView {
     cache: ShapeCache,
     /// The Typst formulas already rasterized (issue #29): lives as long as
     /// the view, so that a rebuild of the figure (zoom, revision) does not
-    /// recompile unchanged titles. Bounded by [`FORMULA_CACHE_LIMIT`].
+    /// recompile unchanged titles. It only memoizes: what is displayed is
+    /// held by the owner of the shapes (`ShapeCache::textures`,
+    /// `ScaledShapes`), and the cache evicts only entries nobody holds, when
+    /// it grows beyond [`FORMULA_CACHE_LIMIT`] (#508).
     formulas: FormulaCache<FormulaTexture>,
     /// The font choice of the formulas — the default value, like the view's
     /// [`TextMeasurer`].
@@ -767,14 +770,14 @@ impl Default for GraphView {
 /// tell them apart.
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Number of formulas beyond which [`GraphView`] empties its texture cache
-/// before rebuilding the figure.
+/// Number of formulas beyond which [`GraphView`] evicts, after a rebuild of
+/// the figure, the cache entries nobody holds (#508).
 ///
 /// Each keystroke in a formula title creates an entry (and a texture) that
 /// will not be used again. A real figure has a few dozen texts at most — a
 /// title, three axis titles, twenty-four legend entries
 /// (`legend::MAX_ENTRIES`) —, so the limit only triggers after a long edit,
-/// and then costs a recompilation of what is displayed (0.7 ms per formula).
+/// and never touches what is displayed: those entries are held by the shapes.
 pub const FORMULA_CACHE_LIMIT: usize = 256;
 
 impl GraphView {
@@ -1669,6 +1672,9 @@ impl GraphView {
         if let Some(preview) = &self.frame_preview {
             preview.apply(&mut spec);
         }
+        // #501: the variables are bound before measuring, so the size is that
+        // of the text drawn.
+        let spec = stokesforge_render::bind_spec(&snapshot.tree, &spec, &self.figure_texts);
         let text = ScreenText::new(context, &self.measurer);
         let mut shapes = Vec::new();
         let probe_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(1.0, 1.0));
@@ -1806,7 +1812,7 @@ impl GraphView {
         let font_choice = &self.font_choice;
         let figure_texts = &self.figure_texts;
         let typst_fonts = &self.typst_fonts;
-        let outcome = self.cache.get_or_build(key, |shapes| {
+        let outcome = self.cache.get_or_build(key, |shapes, held| {
             // R7.1: the framing override lives on a clone, never on the
             // original `PlotSpec` — see `crate::view` for the reason.
             let mut framed = spec.clone();
@@ -1832,17 +1838,15 @@ impl GraphView {
                     target.set_font(&mut framed, font);
                 }
             }
+            // #501: the variables of the texts, before the resolution.
+            let framed = stokesforge_render::bind_spec(&tree, &framed, figure_texts);
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
             let Some(fonts) = typst_fonts.clone() else {
                 return collect_shapes_with_texts(shapes, logical_rect, &text, &plot, figure_texts);
             };
-            // Cleared here only: the shapes this cache designated are
-            // precisely being replaced (see `FormulaCache::clear`).
-            if formulas.len() > FORMULA_CACHE_LIMIT {
-                formulas.clear();
-            }
-            let typst = TypstScreen::with_fonts(&context, formulas, font_choice, fonts);
+            let typst =
+                TypstScreen::with_fonts(&context, formulas, font_choice, fonts).holding(held);
             collect_shapes_with_typst_and_texts(
                 shapes,
                 logical_rect,
@@ -1852,6 +1856,7 @@ impl GraphView {
                 figure_texts,
             )
         })?;
+        let rebuilt = outcome.built.is_some();
         if let Some(drawn) = outcome.built {
             self.last = Some(drawn);
         }
@@ -1869,6 +1874,7 @@ impl GraphView {
             let scaled_key = scaled::ScaledKey {
                 source: key,
                 display: display_rect,
+                build: self.cache.misses(),
             };
             painter.extend(
                 self.scaled
@@ -1877,11 +1883,18 @@ impl GraphView {
                         scaled_key,
                         self.cache.shapes(),
                         transform,
-                        &self.formulas,
+                        self.cache.textures(),
                     )
                     .iter()
                     .cloned(),
             );
+        }
+
+        // Evicted only now, after the scaled shapes of this frame hold their
+        // own textures: what the shapes designate is held, the rest is
+        // what no figure displays any more (#508).
+        if rebuilt && self.formulas.len() > FORMULA_CACHE_LIMIT {
+            self.formulas.evict_unshared();
         }
 
         // R7.2/7.3: crosshair, point designation and rubber-band rectangle,

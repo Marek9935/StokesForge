@@ -329,8 +329,8 @@ impl TextTarget {
 
     /// The title text as displayed — `None` for the legend (its
     /// texts are the series names) or if the panel does not exist. For an
-    /// axis title, the unit is included (`Signal (a.u.)`,
-    /// [`crate::AxisSpec::display_label`]).
+    /// axis title, the whole label
+    /// ([`crate::AxisSpec::display_label`], which joins a legacy unit).
     pub fn text(&self, spec: &PlotSpec) -> Option<String> {
         match *self {
             Self::Title => Some(spec.title.clone()),
@@ -348,10 +348,8 @@ impl TextTarget {
     }
 
     /// Replaces the title text. Returns `false` without changing anything for the
-    /// legend or an absent panel. For an axis title, `text` is the **displayed**
-    /// text ([`Self::text`]): if it still ends with the unit in
-    /// parentheses, that stays the unit of the axis and the rest becomes the title;
-    /// otherwise the unit is cleared (the typed text is all that is displayed).
+    /// legend or an absent panel. An axis title is one free text (#506): `text`
+    /// becomes the whole label, nothing is split off.
     pub fn set_text(&self, spec: &mut PlotSpec, text: String) -> bool {
         match *self {
             Self::Title => {
@@ -376,17 +374,9 @@ impl TextTarget {
                     return false;
                 };
                 let axis = panel.axis_mut(side);
-                let suffix = format!(" ({})", axis.unit);
-                if axis.unit.is_empty() {
-                    axis.label = text;
-                } else if let Some(label) = text.strip_suffix(suffix.as_str()) {
-                    axis.label = label.to_owned();
-                } else if text == format!("({})", axis.unit) {
-                    axis.label.clear();
-                } else {
-                    axis.label = text;
-                    axis.unit.clear();
-                }
+                axis.label = text;
+                // A legacy unit was part of the displayed text: it is in `text`.
+                axis.unit.clear();
                 true
             }
             Self::Legend { .. } | Self::ColorBar { .. } => false,
@@ -505,12 +495,10 @@ mod tests {
         assert!(axis.set_text(&mut spec, "t".into()));
         assert_eq!(spec.title, "B");
         assert_eq!(spec.panels[0].bottom.label, "t");
-        // The unit is displayed with the title: keep it or clear it on edit.
-        spec.panels.get_mut(0).expect("panel").bottom.unit = "s".into();
-        assert_eq!(axis.text(&spec).as_deref(), Some("t (s)"));
-        assert!(axis.set_text(&mut spec, "time (s)".into()));
-        assert_eq!(spec.panels[0].bottom.label, "time");
-        assert_eq!(spec.panels[0].bottom.unit, "s");
+        // One free text (#506): the whole edited text is the label.
+        assert!(axis.set_text(&mut spec, "duration (s)".into()));
+        assert_eq!(spec.panels[0].bottom.label, "duration (s)");
+        assert_eq!(axis.text(&spec).as_deref(), Some("duration (s)"));
         assert!(axis.set_text(&mut spec, "duration".into()));
         assert_eq!(spec.panels[0].bottom.label, "duration");
         assert_eq!(spec.panels[0].bottom.unit, "");

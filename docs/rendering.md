@@ -117,25 +117,85 @@ system font → Noto Sans Math (fallback). Tests: `formula.rs`
 (`an_areas_font_is_set_in_the_source_with_its_math`), `geometry.rs`
 (`the_font_size_of_a_text_box_changes_its_size`), `stokesforge-render-svg/tests/typst.rs`.
 
+### Text variables and the legend text (#501, #499)
+
 Legend text (#499): the text of each entry is `core::series_label(series, tree,
 &panel.legend.text)`, the single function the legend and the series lists read
 (#25). `LegendText` (`stokesforge-plot/src/legend.rs`) says which header row
 gives it; a typed name still wins; an empty chosen row is an empty entry (only
 the default Long Name source falls back to the short name). A custom template is
-pure Typst that reads string variables (`VARIABLES`, the one table:
-`long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`,
-`x-prime`/`xp`, same names in every language). `template_source` puts a
-preamble of `#let` lines (values as Typst string literals, `typst_string`:
-only `\` and `"` escaped, so they draw literally, #33) before the template; the
-label is `SeriesLabel::Template { markup }` and is drawn with the rich style
-(`Prepared::legend_is_typed`), every other label literally. A broken series
-with a template says only that it is broken. The lists (Object Manager,
-series list) show `formula::plain_text(markup)`, the text of the laid-out page
-(core cannot call Typst), memoized; an empty text or a template that does not
-compile gives the grey fallback of the lists. The Template field is checked
-(`diagnose`) with the preamble. « Custom… » starts from
-`LegendTextFrom::template()` of the previous choice (`LegendText::choose_custom`,
-never over a typed template). A row series ignores the template. compile). Test: `stokesforge-render-egui/tests/agreement.rs` (`#499` section).
+Typst that reads the text variables below. `SeriesLabel::Template { template,
+fields }` and `SeriesLabel::Typed { name, fields }` carry the text **as typed**
+and the raw fields of the entry's own column (core never builds Typst); the
+renderer binds them (`Prepared::legend_text`) and draws them with the rich style
+(`Prepared::legend_is_typed`), every other label literally. A broken series with
+a template says only that it is broken. The lists (Object Manager, series list)
+show `formula::plain_text` of the bound template (memoized; an empty text or a
+template that does not compile gives the grey fallback of the lists) and a typed
+name as typed. « Custom… » starts from `LegendTextFrom::template()` of the
+previous choice (`LegendText::choose_custom`, never over a typed template). A
+row series ignores the template. Test: `stokesforge-render-egui/tests/agreement.rs`
+(`#499` and `#501` sections).
+
+Text variables (#501): **one binder** gives the variables to every Typst text of
+a graph, the legend included. `VARIABLES` (`stokesforge-plot/src/legend.rs`, the
+one table: `long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`,
+`x-prime`/`xp`, the same names in every language; the help of every Typst field
+lists them from it, `figure_texts::variable_help_rows`). `variables::bind(text,
+values)` (`stokesforge-render/src/variables.rs`) puts in front of the text one
+`#let name = "value";` per variable it **uses as code** (`#ln`, `#if u != ""
+[…]`), the values as Typst string literals (`typst_string`: only `\` and `"`
+escaped, so they draw literally, #33), on one line framed by two comments that
+draw nothing. A math identifier (`$ln(x)$`) is never a variable, so the
+logarithm stays the logarithm; a text that uses no variable comes back
+byte-identical (same cache entry, same pixels); a `#let` of the user comes after
+the preamble and wins. `variables::bind_spec(tree, spec, texts)` binds the
+whole spec — graph and layer titles, axis titles (label and unit composed
+first), free texts, colour-bar title and break labels — and **every entry point
+calls it before `resolve_spec` and `figure_layout`** (screen, the three exports,
+the copy, `pyst`, `frame_sizes`), so the size is measured on what is drawn. The
+stored spec is never changed; Ctrl+Z restores the text.
+
+Which column a text reads (`core::resolve::text_context`, Origin-like): a
+bottom or top axis title the X column of the first series of the layer; a left
+or right axis title the Y column of the first series on that side; a graph or
+layer title and a free text the Y column of the first series of the layer (the
+graph title: of the first layer that has one); a colour-bar break label the Y
+column of the first series of its group, its title the first group of the bar;
+a legend entry its own series. A hidden series counts, a row series does not.
+`core::resolve::column_fields` gives the fields (the same for the legend). A
+reference with no column (no series, column deleted) makes every variable the
+translated « (broken reference) » of `FigureTexts`, on screen and in export.
+
+Explicit column (#501, lot 4, syntax of lot 5): `col` is a Typst dictionary,
+`#col.A.ln` (any of the ten names: `.long-name`, `.u`, `.xp`…) reads column `A`,
+whatever the context column; a name that is not a Typst identifier uses the
+standard `#col.at("Abs 1").ln`. `A` is the **Short Name**, looked up in the
+worksheet of the text's context column (a legend entry: of its series' column);
+no other sheet. The binder (`used_in`) parses the text (code only, never math,
+never a `.col` field) and collects the names it reads: the field accesses
+`col.<ident>` and the literal `col.at("<name>")`. The one-line preamble then
+holds `#let col = ("A": (long-name: "…", ln: "…", …), …);`, one dictionary per
+collected name, every value a `typst_string`. A collected name that is no
+column of the sheet (unknown, deleted, no context column) is still in the
+dictionary with every field « (broken reference) », so the text compiles (no
+red frame). Any other use (`#col.at(x)`, a bare `#col`, a method) puts **the
+whole sheet** in. Core attaches the sheet (`ColumnFields::sheet`,
+`resolve::with_sheet`) only when the text contains `col`, so the other texts are
+byte-identical and borrowed. `strip_preamble` walks any `#let …;` to the `;`
+outside a string. Renaming a Short Name breaks the references to it. The help
+row of every field: `#col.A.ln`.
+
+When Typst refuses a bound text, the `epaint` fallback (invariant 10) draws and
+measures what the user typed: `formula::fallback_text` strips the preamble, so a
+failed template shows `#ln #nope`, never the `#let` lines. The editors (the
+Graph Properties fields, the in-place editor, the Object Manager) show the
+typed source, never the value. A field diagnoses `variables::diagnose_text`
+(the text bound to empty values): `#ln` is valid, `#nope` is red. Tests:
+`variables.rs` (binder, `bind_spec` by text kind, broken reference, `col`), `resolve.rs`
+(`text_context`), `frame_sizes` in `shell.rs`, `agreement.rs` (legend template,
+typed name, variable title on screen and in the SVG, `col` in an axis title and a typed name), `plot_settings.rs`
+(`a_variable_is_valid_in_a_text_field_and_an_unknown_name_is_red`).
 
 Legend box (#507): `LegendSpec` carries the frame (shown, colour, thickness in
 pt), the background (empty = the panel's, else `#RRGGBB[AA]`), the number of
@@ -922,8 +982,11 @@ not composed by Typst.
 resolves the Typst fonts **once**, at its creation (`TypstScreen::with_fonts`);
 if this resolution fails, everything stays plain text. It holds a
 `FormulaCache<FormulaTexture>` between two rebuilds of the figure, bounded by
-`FORMULA_CACHE_LIMIT` (256): beyond it, the cache is emptied **before** the next
-rebuild. Textures are therefore recompiled only if the text
+`FORMULA_CACHE_LIMIT` (256): beyond it, once the figure is rebuilt, the cache
+drops the entries nobody holds (`evict_unshared`), never an entry a displayed
+mesh needs: the cache only memoizes, the owner of the shapes holds the textures
+(`ShapeCache::textures`, filled through `TypstScreen::holding`; `ScaledShapes`
+holds its own, originals included; #508). Textures are therefore recompiled only if the text
 of a formula, its size, its color (issue #30) or the `pixels_per_point`
 changes, not at every rebuild.
 
@@ -1197,7 +1260,11 @@ the same formula rasterized at `pixels_per_point × échelle` by
 `FormulaTexture::rerender` from the already compiled document (issue #31) — no
 recompilation, no new measurement. These enlarged textures live in
 `ScaledShapes`, outside the view's `FormulaCache` (they do not count in
-`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change. An
+`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change.
+`ScaledShapes` holds an `Arc` of every texture its meshes point to, the
+originals of scale 1 included, and its key carries `build` (the miss counter of
+the shape cache): a rebuild of the figure under the same display key never
+serves stale scaled shapes (#508). An
 image never exceeds `max_texture_side`: beyond it, the resolution is
 capped. Rasterizing directly at the displayed scale during collection was
 ruled out: the displayed rectangle would have entered the main cache key, hence

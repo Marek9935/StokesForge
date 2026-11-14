@@ -2484,16 +2484,20 @@ fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
     assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
-/// #311: more columns copied than the sheet has from the anchor:
-/// those that fit are written, the status counts the others.
+/// #495 (replaces #311 "dropped and counted"): more columns pasted than the
+/// sheet has from the anchor: the missing column is created, holds its
+/// values, the notice is plain, and one Undo removes the column and values.
 #[test]
-fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
+fn a_paste_wider_than_the_sheet_creates_the_missing_columns_in_one_undo() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
 
     state.select_cell(sheet1, signal, 0);
     state.dispatch(Action::Paste {
@@ -2503,13 +2507,24 @@ fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
     assert_eq!(cell(&state, signal, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 0), Cell::Float(2.0));
     assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "one column created");
+    let created = columns[3].0;
+    assert_eq!(cell(&state, created, 0), Cell::Float(3.0));
+    assert_eq!(cell(&state, created, 1), Cell::Float(6.0));
     let status = state.status().expect("a message");
     assert!(!status.is_error());
+    assert_eq!(status.level, StatusLevel::Info);
     assert!(
-        status.text.contains("One column"),
+        status.text.contains("One column was added"),
         "unexpected status: {}",
         status.text
     );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.visible_columns(sheet1).len(), 3, "column removed");
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
 /// #311: a paste that fits the width sets no overflow status.
@@ -2966,9 +2981,10 @@ fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
     );
 }
 
-/// #311 (E4): columns and fields that overflow together: a single message.
+/// #495: a header paste beyond the last column creates the column; the
+/// fields beyond Formula are still dropped, counted in their own notice.
 #[test]
-fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
+fn a_header_paste_beyond_the_edge_creates_the_column_and_counts_the_dropped_fields() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2991,11 +3007,15 @@ fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
     let status = state.status().expect("a status");
     assert!(!status.is_error(), "{}", status.text);
     assert!(
-        status
-            .text
-            .contains("1 column(s) and 1 header field(s) did not fit"),
+        status.text.contains("One header field did not fit"),
         "unexpected status: {}",
         status.text
+    );
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "the column was created");
+    assert!(
+        state.column_meta(columns[3].0).formula.is_some(),
+        "the created column received the pasted Formula field"
     );
 }
 
@@ -8246,7 +8266,7 @@ fn plot_rows_and_empty_graph_names() {
 /// #507, D6: a graph created by `AddGraph`, `PlotColumns` or `PlotRows` has no
 /// legend frame, while a graph that is loaded keeps its own (the model
 /// default is the frame). Witness: a creation path that forgets
-/// `with_new_graph_legend` leaves the frame on.
+/// `with_new_graph_defaults` leaves the frame on.
 #[test]
 fn new_graphs_have_no_legend_frame() {
     let dir = tempfile::tempdir().expect("temporary directory");
@@ -8285,6 +8305,110 @@ fn new_graphs_have_no_legend_frame() {
     // The model default is still today's look: a spec that did not go
     // through a creation path keeps its frame.
     assert!(stokesforge_plot::LegendSpec::default().frame);
+}
+
+/// #506: a new graph titles its axes with the Typst template that reads the
+/// column, only where a column exists at creation; the fill rides in the
+/// creation command (one undo entry).
+#[test]
+fn new_graphs_title_their_axes_from_the_columns() {
+    use stokesforge_plot::AXIS_TITLE_TEMPLATE as TEMPLATE;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    let last_graph = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    let titles = |state: &AppState| {
+        let spec = state.plot_spec(last_graph(state)).unwrap();
+        spec.panels
+            .iter()
+            .map(|panel| (panel.bottom.label.clone(), panel.left.label.clone()))
+            .collect::<Vec<_>>()
+    };
+    let empty = || (String::new(), String::new());
+    let before = state.tree().len();
+
+    // An empty graph has no column to read: no title.
+    state.dispatch(Action::AddGraph);
+    assert_eq!(titles(&state), [empty()]);
+
+    // Y only: the X axis is the row number, no column, no title.
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![columns[1]],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(titles(&state), [(String::new(), TEMPLATE.to_owned())]);
+
+    // X + Y: both axes read their column. One undo removes the graph.
+    let (x, y) = (columns[0], columns[1]);
+    state.dispatch(Action::SetColumnRole {
+        column: x,
+        role: ColumnRole::X,
+    });
+    let count = state.tree().len();
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![y],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(titles(&state), [(TEMPLATE.to_owned(), TEMPLATE.to_owned())]);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().len(), count, "one entry removes the graph");
+
+    // Rows: a row series has no column context, no title.
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(titles(&state), [empty()]);
+    assert!(state.tree().len() > before);
+}
+
+/// #506: an overlaid layer (Y2) fills its Y axis; its X axis, drawn on top,
+/// stays empty.
+#[test]
+fn an_overlay_layer_titles_its_y_axis_only() {
+    use stokesforge_plot::AXIS_TITLE_TEMPLATE as TEMPLATE;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    // The X2 sits left of its Y2, as the pairing rule wants.
+    let y2 = column_id(&state, sheet, "D");
+    for (column, role) in [
+        (columns[0], ColumnRole::X),
+        (columns[1], ColumnRole::Y),
+        (columns[2], ColumnRole::X2),
+        (y2, ColumnRole::Y2),
+    ] {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![columns[0], columns[1], columns[2], y2],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph");
+    let spec = state.plot_spec(graph).unwrap();
+    assert_eq!(spec.panels.len(), 2);
+    assert_eq!(spec.panels[0].bottom.label, TEMPLATE);
+    assert_eq!(spec.panels[0].left.label, TEMPLATE);
+    assert_eq!(spec.panels[1].left.label, TEMPLATE);
+    assert!(
+        spec.panels[1].series[0].x.is_some(),
+        "the overlay has its X"
+    );
+    assert_eq!(spec.panels[1].bottom.label, "");
 }
 
 /// Plot of a row selection (#166): a fresh graph where each row is
@@ -8911,12 +9035,13 @@ fn the_color_bar_is_a_section_of_the_legend_tab() {
     );
 }
 
-/// #499: a new graph takes the « Text from » default of the Preferences, a
-/// graph that exists keeps its own. Witness: ignoring the preference leaves
-/// the long name.
+/// #499, #502: a new graph takes the « Text from » default of the Preferences
+/// (and, under Custom, its template), a graph that exists keeps its own.
+/// Witness: ignoring the preference leaves the long name; copying only `from`
+/// leaves the template empty.
 #[test]
 fn new_graphs_take_the_legend_text_preference() {
-    use stokesforge_plot::LegendTextFrom;
+    use stokesforge_plot::{LegendText, LegendTextFrom};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (session, _state, sheet, columns) = kinetics(dir.path());
     let file = dir.path().join("preferences.json");
@@ -8929,30 +9054,86 @@ fn new_graphs_take_the_legend_text_preference() {
             .and_then(|node| node.children().last().copied())
             .expect("graph")
     };
+    let text_of = |state: &AppState, graph| {
+        let text = &state.plot_spec(graph).unwrap().panels[0].legend.text;
+        (text.from.clone(), text.template.clone())
+    };
+    let choice = |from: LegendTextFrom, template: &str| LegendText {
+        from,
+        template: template.to_string(),
+        row_column: None,
+    };
     state.dispatch(Action::AddGraph);
     let old = last_graph(&state);
-    state.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Units));
+    state.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Units,
+        "",
+    )));
     state.dispatch(Action::AddGraph);
-    let from = |state: &AppState, graph| {
-        state.plot_spec(graph).unwrap().panels[0]
-            .legend
-            .text
-            .from
-            .clone()
-    };
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    assert_eq!(
+        text_of(&state, last_graph(&state)),
+        (LegendTextFrom::Units, String::new())
+    );
     state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: columns.clone(),
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&state, last_graph(&state)).0, LegendTextFrom::Units);
+    assert_eq!(text_of(&state, old).0, LegendTextFrom::LongName);
+    // Remembered, and Custom is a default now (#502).
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Units);
+    let template = "*#ln* (#u)";
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Custom,
+        template,
+    )));
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Custom);
+    let wanted = (LegendTextFrom::Custom, template.to_string());
+    next.dispatch(Action::AddGraph);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotColumns {
         sheet,
         columns,
         plot_type: PlotType::Line,
     });
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
-    assert_eq!(from(&state, old), LegendTextFrom::LongName);
-    // Remembered; a custom template is not a default.
-    let mut next = state_on_preferences(&session, dir.path(), &file);
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::Units);
-    next.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Custom));
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    assert_eq!(
+        text_of(&next, old).0,
+        LegendTextFrom::LongName,
+        "older graph"
+    );
+    // Another choice keeps the template; Custom finds it again.
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Comments,
+        template,
+    )));
+    next.dispatch(Action::AddGraph);
+    assert_eq!(
+        text_of(&next, last_graph(&next)),
+        (LegendTextFrom::Comments, template.to_string())
+    );
+    // An invalid and an empty template are saved and copied unchanged.
+    for odd in ["#(", ""] {
+        next.dispatch(Action::SetNewGraphLegendText(choice(
+            LegendTextFrom::Custom,
+            odd,
+        )));
+        next.dispatch(Action::AddGraph);
+        assert_eq!(
+            text_of(&next, last_graph(&next)),
+            (LegendTextFrom::Custom, odd.to_string())
+        );
+        let again = state_on_preferences(&session, dir.path(), &file);
+        assert_eq!(again.new_graph_legend_text().template, odd);
+    }
 }
 
 /// #499 F2: with « Text from » on an empty header row, the legend entry stays
@@ -9077,6 +9258,12 @@ fn a_custom_template_shows_its_plain_text_in_the_lists() {
     assert_eq!(
         series_list_entry(tree, &SeriesSpec::new(b), &custom("#nope")),
         ("(empty) Sheet1 B".to_string(), true)
+    );
+    // #501: a math identifier of the template is the logarithm, not the
+    // variable: the list shows ln(x) in math italics, never the long name.
+    assert_eq!(
+        series_list_entry(tree, &SeriesSpec::new(a), &custom("$ln(x)$")),
+        ("ln(\u{1d465})".to_string(), false)
     );
     // A typed name wins.
     let typed = SeriesSpec {
@@ -11575,6 +11762,87 @@ fn exporting_a_zoomed_graph_does_not_touch_the_model() {
     assert_eq!(state.snapshot().revision, before.1, "a command was emitted");
 }
 
+/// #501: an axis title `#ln (#u)` is exported with the column's long name and
+/// unit, live: a header edit changes the next export, and Ctrl+Z brings the
+/// first one back byte for byte. Witness: binding outside the closure that
+/// sees the current tree (a stale tree) leaves the second export unchanged.
+#[test]
+fn an_axis_title_with_variables_follows_the_column_header_and_its_undo() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let mut spec = graph_spec(&state, graph);
+    spec.panels.get_mut(0).expect("panel").left.label = "#ln (#u)".to_owned();
+    let spec = Box::new(spec);
+    let signal = state
+        .tree()
+        .child_by_name(sheet_named(state.tree(), "Sheet1"), "Signal")
+        .expect("readable")
+        .expect("Signal");
+    let exported = |state: &mut AppState, name: &str| {
+        let path = dir.path().join(name);
+        state.dispatch(Action::ExportGraph {
+            path: path.clone(),
+            spec: spec.clone(),
+        });
+        let status = state.status().expect("a message");
+        assert!(!status.is_error(), "{}", status.text);
+        std::fs::read_to_string(path).expect("exported file")
+    };
+    let squeezed = |svg: &str| svg.split_whitespace().collect::<String>();
+    let first = exported(&mut state, "first.svg");
+    assert!(!first.contains("#ln") && !first.contains("sf-vars"));
+
+    set_header_field(&mut state, signal, HeaderField::LongName, "Intensity");
+    set_header_field(&mut state, signal, HeaderField::Unit, "mM");
+    let second = exported(&mut state, "second.svg");
+    assert_ne!(first, second, "the export did not follow the header");
+    assert!(squeezed(&second).contains("Intensity"), "{second}");
+    assert!(squeezed(&second).contains("(mM)"), "{second}");
+
+    state.dispatch(Action::Undo);
+    state.dispatch(Action::Undo);
+    assert_eq!(exported(&mut state, "third.svg"), first, "undo restores");
+}
+
+/// #501: a title whose column was deleted shows the translated « broken
+/// reference », in the title colour (no error colour), in the export.
+/// Witness: empty values give a title with no text at all.
+#[test]
+fn a_variable_title_of_a_deleted_column_shows_the_broken_reference() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let mut spec = graph_spec(&state, graph);
+    spec.title = "#ln".to_owned();
+    let spec = Box::new(spec);
+    let signal = state
+        .tree()
+        .child_by_name(sheet_named(state.tree(), "Sheet1"), "Signal")
+        .expect("readable")
+        .expect("Signal");
+    // The column goes with its workbook: the series reference is broken.
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    assert!(state.tree().node(signal).is_none(), "the column is deleted");
+    let path = dir.path().join("broken.svg");
+    state.dispatch(Action::ExportGraph {
+        path: path.clone(),
+        spec,
+    });
+    let svg = std::fs::read_to_string(path).expect("exported file");
+    // The title is the first drawn group, before the legend (which names the
+    // broken series with the same words).
+    let text = svg
+        .split("</svg></g>")
+        .next()
+        .expect("the title group")
+        .to_owned();
+    assert!(text.contains("(brokenreference)"), "{text}");
+    assert!(
+        text.contains("fill=\"#202020\""),
+        "not the title colour: {text}"
+    );
+}
+
 /// S-F3 (#229): the native picker asks before overwriting the typed name;
 /// the `.svg` extension added afterwards targets another file, which it has not
 /// seen. If it exists, the export waits for confirmation: Cancel leaves it
@@ -12161,8 +12429,7 @@ fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
     let mut project = Project::new("Objets").unwrap();
     let mut first = PanelSpec::at(0, 0);
     first.title = "Layer A".into();
-    first.bottom.label = "Time".into();
-    first.bottom.unit = "s".into();
+    first.bottom.label = "Time (s)".into();
     first.left.label = "Signal".into();
     for name in ["A", "B", "C"] {
         let mut series = SeriesSpec::new(NodeId::from_raw(900));
@@ -16366,7 +16633,8 @@ fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let before = graph_spec(&state, graph);
-    let (width, height) = stokesforge_app_state::frame_sizes::figure_extent(&before).unwrap();
+    let (width, height) =
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &before).unwrap();
     state.dispatch(Action::SetFigureTotal {
         graph,
         axis: SizeAxis::Width,
@@ -16374,7 +16642,8 @@ fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
         ratio: Some(height / width),
     });
     let (new_width, new_height) =
-        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(&state, graph))
+            .unwrap();
     assert!((new_width - (width + 100.0)).abs() < 1.0, "{new_width}");
     assert!(
         (new_height / new_width - height / width).abs() < 0.003,
@@ -16397,7 +16666,8 @@ fn a_figure_total_typed_in_the_strip_is_one_undo_step_and_follows_the_lock() {
         ratio: None,
     });
     let (_, kept) =
-        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(&state, graph))
+            .unwrap();
     assert!((kept - height).abs() < 1.0);
     state.dispatch(Action::Undo);
 
@@ -16439,7 +16709,7 @@ fn the_size_lock_is_session_state() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let spec = graph_spec(&state, graph);
-    let image = stokesforge_app_state::frame_sizes::figure_extent(&spec).unwrap();
+    let image = stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &spec).unwrap();
     let lock = stokesforge_app_state::frame_sizes::SizeLock::close(image).expect("lock");
     let revision = state.snapshot().revision;
     state.dispatch(Action::SetSizeLock {
@@ -16459,7 +16729,8 @@ fn the_size_lock_is_session_state() {
         slack: None,
     });
     let new_image =
-        stokesforge_app_state::frame_sizes::figure_extent(&graph_spec(&state, graph)).unwrap();
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(&state, graph))
+            .unwrap();
     let mut followed = state.size_lock(graph).expect("still closed");
     followed.follow(new_image);
     assert!((followed.ratio - lock.ratio).abs() < 1e-12, "ratio kept");
@@ -16613,7 +16884,9 @@ fn the_warning_of_a_fixed_figure_that_grew_survives_the_window_closing() {
 fn go_free(state: &mut AppState, graph: NodeId) {
     let mut spec = graph_spec(state, graph);
     assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
-        &mut spec, true
+        state.tree(),
+        &mut spec,
+        true
     ));
     state.dispatch(Action::SetPlotSpec { graph, spec });
 }
@@ -17034,7 +17307,7 @@ fn fitting_the_total_of_a_free_graph_with_a_page_writes_the_page() {
     });
     go_free(&mut state, graph);
     let mut without = graph_spec(&state, graph);
-    set_total_in_draft(&mut without, SizeAxis::Width, 700.0, None).expect("fit");
+    set_total_in_draft(state.tree(), &mut without, SizeAxis::Width, 700.0, None).expect("fit");
     assert_eq!(without.free_page, None);
 
     let mut spec = graph_spec(&state, graph);
@@ -17045,7 +17318,7 @@ fn fitting_the_total_of_a_free_graph_with_a_page_writes_the_page() {
         height: 600.0,
     });
     let before = spec.panels[1].sanitized_free_frame();
-    set_total_in_draft(&mut spec, SizeAxis::Width, 600.0, None).expect("fit");
+    set_total_in_draft(state.tree(), &mut spec, SizeAxis::Width, 600.0, None).expect("fit");
     let page = spec.free_page.expect("page");
     assert_eq!((page.width, page.height), (600.0, 600.0));
     assert!(spec.panels[1].sanitized_free_frame().left < before.left);
@@ -17158,6 +17431,7 @@ fn set_layer_placement_is_one_step_with_the_draft_result() {
     let grid = graph_spec(&state, graph);
     let mut expected = grid.clone();
     assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+        state.tree(),
         &mut expected,
         true
     ));
@@ -19581,4 +19855,113 @@ fn quit_during_an_autosave_write_hands_out_no_second_copy() {
         state.server_tick(later).autosave.is_none(),
         "a second copy was handed out while the window closes"
     );
+}
+
+/// #501 bench: the graph of `cell_bench`, its Y column given a long name, a
+/// title and a left axis title that are the variable `#ln`.
+fn variable_text_bench(dir: &Path) -> (Session, AppState, NodeId) {
+    let (session, mut state, graph, columns) = cell_bench(dir);
+    for column in [columns[0], columns[1]] {
+        session
+            .handle()
+            .execute(stokesforge_commands::Command::SetColumnMeta {
+                column,
+                meta: ColumnMeta {
+                    long_name: "Absorbance of a very long named sample, measured twice, ".repeat(6),
+                    ..ColumnMeta::default()
+                },
+            })
+            .expect("meta");
+    }
+    state.refresh();
+    let mut spec = graph_spec(&state, graph);
+    spec.title = "#ln".into();
+    spec.title_visible = true;
+    spec.panels.get_mut(0).expect("panel").left.label = "#ln".into();
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    (session, state, graph)
+}
+
+/// #501: the size typed in the strip is fitted on the text as drawn (the long
+/// name of `#ln`), so the image is the typed size once the variables are bound.
+/// Witness: `fit_and_apply` on the raw spec measures `#ln` and the bound image
+/// is another size.
+#[test]
+fn a_figure_total_is_fitted_on_the_bound_texts() {
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph) = variable_text_bench(dir.path());
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Height,
+        target: 420.0,
+        ratio: None,
+    });
+    let spec = graph_spec(&state, graph);
+    let (_, height) = stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &spec)
+        .expect("bound extent");
+    assert!((height - 420.0).abs() < 0.1, "{height}");
+    let raw = stokesforge_app_state::frame_sizes::figure_layout(&spec).expect("raw layout");
+    assert_ne!(
+        raw.size.1,
+        stokesforge_app_state::frame_sizes::figure_layout_in(state.tree(), &spec)
+            .expect("bound layout")
+            .size
+            .1,
+        "witness: the raw `#ln` measures like another text, the test proves nothing"
+    );
+}
+
+/// #501, P1: a bound spec never reaches the model. Every edit that measures
+/// the figure (size typed, placement switch, fit page, a new cell, undo) leaves
+/// the stored texts as typed.
+/// Witness: committing the bound spec stores the long name or the preamble.
+#[test]
+fn editing_the_frames_never_stores_a_bound_text() {
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_render::pipeline::SizeAxis;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph) = variable_text_bench(dir.path());
+    let stored = |state: &AppState| {
+        let spec = graph_spec(state, graph);
+        assert_eq!(spec.title, "#ln", "title");
+        assert_eq!(spec.panels[0].left.label, "#ln", "axis title");
+        assert!(!format!("{spec:?}").contains("sf-vars"), "preamble stored");
+    };
+    state.dispatch(Action::SetFigureTotal {
+        graph,
+        axis: SizeAxis::Width,
+        target: 640.0,
+        ratio: Some(0.75),
+    });
+    stored(&state);
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    stored(&state);
+    state.dispatch(Action::SetLayerPlacement { graph, free: true });
+    stored(&state);
+    state.dispatch(Action::FitPageToLayout { graph });
+    stored(&state);
+    state.dispatch(Action::FitLayoutToPage { graph });
+    stored(&state);
+    state.dispatch(Action::Undo);
+    stored(&state);
+    state.dispatch(Action::Redo);
+    stored(&state);
+    // The drafts of Graph Properties: the helpers write frames only.
+    let mut draft = graph_spec(&state, graph);
+    stokesforge_app_state::frame_sizes::set_total_in_draft(
+        state.tree(),
+        &mut draft,
+        SizeAxis::Height,
+        500.0,
+        None,
+    )
+    .expect("fit");
+    assert_eq!(draft.title, "#ln");
+    assert_eq!(draft.panels[0].left.label, "#ln");
 }

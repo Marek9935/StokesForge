@@ -1038,7 +1038,9 @@ fn background_menu(
             .unwrap_or_else(|| view.active_panel(spec));
         sections.section(ui, true, |ui| {
             ui.menu_button(tr!("menu-layout"), |ui| {
-                super::menus::layout_menu_contents(ui, graph_id, spec, active, &extra, actions);
+                super::menus::layout_menu_contents(
+                    ui, tree, graph_id, spec, active, &extra, actions,
+                );
             });
         });
     }

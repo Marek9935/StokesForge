@@ -109,12 +109,9 @@ See [Plot columns from a workbook](../guide/graphs.md#plot-columns-from-a-workbo
 
 Double-click the numbers of the X axis, under the graph, or the line of the axis (the bottom edge of the plot). The **Graph Properties** window opens on the **Axes** tab, on the **Bottom** axis.
 
-In the section **Axis title**:
+In the **Axis title** field, type `$lambda$ / nm`.
 
-1. Type `$lambda$` in **Quantity**.
-2. Type `nm` in **Units**.
-
-The title of the axis becomes λ (nm). Text between dollar signs is math, and `lambda` is the Greek letter. The change shows on the graph at once.
+The title of the axis becomes λ / nm. Text between dollar signs is math, and `lambda` is the Greek letter. The change shows on the graph at once.
 
 Do not click **OK** yet.
 
@@ -124,10 +121,9 @@ See [Axis title](../guide/graphs.md#axis-title) and [Titles and formulas](../gui
 
 In the same window, pick the **Left** axis at the top of the **Axes** tab.
 
-1. Type `Absorbance of $"Ru(bpy)"_3$` in **Quantity**. The `_3` makes a subscript. The quotes keep `Ru(bpy)` in upright letters.
-2. Type `a.u.` in **Units**.
+Type `Absorbance of $"Ru(bpy)"_3$ / a.u.` in **Axis title**. The `_3` makes a subscript. The quotes keep `Ru(bpy)` in upright letters.
 
-The title becomes Absorbance of Ru(bpy)₃ (a.u.). If a field shows a red frame after you leave it, the formula has a mistake. Check the dollar signs and the quotes.
+The title becomes Absorbance of Ru(bpy)₃ / a.u. If a field shows a red frame after you leave it, the formula has a mistake. Check the dollar signs and the quotes.
 
 Click **OK**. All your changes count as one step for **Edit ▸ Undo**.
 

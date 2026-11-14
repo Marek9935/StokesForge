@@ -47,7 +47,7 @@ action-add-graph = Ajouter un graphique
 action-add-folder = Ajouter un dossier
     .hint = Ajoute un dossier vide, puis permet de le nommer
 action-sort-folder = Trier
-    .hint = Remet ce dossier en tri automatique : dossiers d’abord, puis par nom
+    .hint = Remet ce dossier en tri automatique : dossiers d'abord, puis par nom
     .disabled = Déjà trié. Glisser une ligne entre deux autres la range à la main
     .hint = Ajouter un dossier, Coller et Trier, appliqués au niveau supérieur du projet
 unsaved-title = Modifications non enregistrées
@@ -248,10 +248,10 @@ action-layout-distribute-vertically = Répartir verticalement
     .hint = Répartit les calques de haut en bas avec des écarts égaux ; les deux extrêmes restent en place
     .disabled = Il faut au moins trois calques
 action-layout-fit-page = Ajuster la page à la disposition
-    .hint = Redimensionne la page à l’espace qu’utilisent les calques, marges comprises. Les calques ne bougent pas
+    .hint = Redimensionne la page à l'espace qu'utilisent les calques, marges comprises. Les calques ne bougent pas
     .disabled = La page est déjà ajustée à la disposition
 action-layout-fit-layout = Ajuster la disposition à la page
-    .hint = Redimensionne les calques pour qu’ils remplissent la page. La page ne change pas
+    .hint = Redimensionne les calques pour qu'ils remplissent la page. La page ne change pas
     .disabled = Les calques remplissent déjà la page
 action-delete-layer = Supprimer le calque
     .hint = Supprime le calque actif
@@ -314,6 +314,9 @@ action-paste = Coller
 action-paste-in-place = Coller à l'identique
     .hint = Colle à la position d'origine de la copie
     .disabled = Copier d'abord depuis la grille. Un texte venu d'ailleurs n'a pas de position d'origine
+action-paste-transposed = Coller transposé
+    .hint = Colle les cellules copiées en échangeant lignes et colonnes, en valeurs
+    .disabled = Sélectionner un seul bloc de cellules ou des colonnes contiguës pour coller
 action-clear = Effacer
     .hint = Vide les cellules sélectionnées
 action-remove-formula-keep-data = Retirer la formule, garder les données
@@ -390,10 +393,16 @@ status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
 status-paste-non-contiguous = Impossible de coller dans une sélection non contiguë
-status-paste-columns-dropped =
+status-paste-transposed-nothing = Rien à coller transposé : parmi les champs d'en-tête copiés, seul x' peut être collé
+status-paste-header-rows-dropped =
     { $count ->
-        [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
-       *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
+        [one] Une ligne d'en-tête autre que x' n'a pas été collée
+       *[other] { $count } lignes d'en-tête autres que x' n'ont pas été collées
+    }
+status-paste-columns-added =
+    { $count ->
+        [one] Une colonne a été ajoutée pour contenir le collage
+       *[other] { $count } colonnes ont été ajoutées pour contenir le collage
     }
 status-cell-decimal-comma = « { $text } » a été lu { $value } (virgule décimale)
 status-paste-fields-dropped =
@@ -401,7 +410,6 @@ status-paste-fields-dropped =
         [one] Un champ d'en-tête ne tenait pas dans la feuille et n'a pas été collé
        *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
     }
-status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
 status-formula-comma-rewritten = Lu comme la plage de { $from } à { $to } et réécrit { $rewritten }. Pour le nombre { $decimal }, l'écrire avec un point
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
@@ -683,7 +691,7 @@ error-formula-unknown-column = La colonne { $letter } n'existe pas dans cette fe
 error-formula-self-reference = Une formule ne peut pas faire référence à sa propre colonne ({ $letter })
 error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne
 error-formula-cycle = Des formules se renvoient l'une à l'autre en boucle. Retirer l'une des références
-error-formula-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d’abord Recalculer automatiquement sur { $sheet }
+error-formula-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d'abord Recalculer automatiquement sur { $sheet }
 error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)
 error-formula-unknown-function = Fonction { $name } inconnue. Vérifier son orthographe
 error-formula-unknown-function-suggestion = Fonction { $name } inconnue. Vouliez-vous écrire { $suggestion } ?
@@ -846,16 +854,16 @@ plot-size-left = Zone de tracé, depuis le bord gauche ({ $unit })
 plot-size-top = Zone de tracé, depuis le bord haut ({ $unit })
 plot-size-left-raised = Les axes demandent au moins { $minimum } ({ $unit }) à gauche : la valeur a été remontée à ce minimum
 plot-size-top-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) en haut : la valeur a été remontée à ce minimum
-plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit la figure, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille. Saisir une taille de figure redimensionne toutes les zones de tracé en proportion ; les axes et le titre gardent la leur. Les tailles des zones de tracé sont dans Avancé.
+plot-size-note = Les axes et le titre s'ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit la figure, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille. Saisir une taille de figure redimensionne toutes les zones de tracé en proportion ; les axes et le titre gardent la leur. Les tailles des zones de tracé sont dans Avancé.
 plot-size-placement = Placement des calques
 plot-size-placement-grid = Grille régulière
 plot-size-placement-free = Libre
 plot-size-position-left = Position, gauche ({ $unit })
 plot-size-position-top = Position, haut ({ $unit })
-plot-size-free-note = Les valeurs de la zone de tracé dans Avancé sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. La figure grandit ou rétrécit autour des calques. Saisir une taille de figure met à l’échelle chaque calque et sa position, depuis le coin en haut à gauche.
+plot-size-free-note = Les valeurs de la zone de tracé dans Avancé sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. La figure grandit ou rétrécit autour des calques. Saisir une taille de figure met à l'échelle chaque calque et sa position, depuis le coin en haut à gauche.
 
 plot-figure-size = Quand on ajoute des axes
-    .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l’image. Fixe : la place de quatre axes est gardée d’avance, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
+    .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l'image. Fixe : la place de quatre axes est gardée d'avance, donc ajouter un axe laisse l'image et la zone de tracé telles quelles
 plot-figure-size-grows = Grandit avec les axes
 plot-figure-size-fixed = Fixe
 
@@ -870,13 +878,9 @@ plot-area-gridlines-horizontal = Horizontales (graduations Y)
 
 # Onglet Axes
 
-plot-axes-title-section = Titre de l'axe
-plot-axes-quantity =
-    Grandeur
-    .hint = Nom ou symbole, p. ex. Nombre d'onde
-plot-axes-units =
-    Unités
-    .hint = Affichées après la grandeur, entre parenthèses
+plot-axes-title =
+    Titre de l'axe
+    .hint = Texte libre, dessiné tel quel. Les variables lisent la colonne : #ln nom long, #sn nom court, #u unités. Un nouveau graphe commence par « Nom long / Unités ».
 plot-axes-scale-section = Échelle
 plot-axes-log-scale =
     Échelle log
@@ -1050,7 +1054,8 @@ legend-text-from-long-name-comments = Nom long, Commentaires
 legend-text-from-custom = Personnalisé…
 legend-text-from-unknown = Nom long (réglage d'une version plus récente)
 plot-legend-template = Modèle
-    .hint = Texte Typst. Variables : #long-name (#ln) le Nom long, #short-name (#sn) le Nom court, #units (#u) les Unités, #comments (#c) les Commentaires, #x-prime (#xp) le x'. Leur texte s'affiche tel quel.
+    .hint = Texte Typst de chaque entrée de légende.
+plot-legend-template-empty = Le modèle est vide : les entrées de légende n'ont pas de texte.
 plot-legend-row-text = Série de ligne
 plot-legend-row-number = Numéro de ligne
 plot-legend-row-column-value = Valeur de la colonne…
@@ -1081,22 +1086,22 @@ plot-color-bar-group-break = Étiquette de rupture
 plot-color-bar-group-on = Sur la barre
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
 plot-color-bar-range = Plage
-plot-color-bar-no-series-groups = Cette couche n’a aucun groupe de séries. Groupez d’abord ses courbes, dans la fenêtre Séries.
+plot-color-bar-no-series-groups = Cette couche n'a aucun groupe de séries. Groupez d'abord ses courbes, dans la fenêtre Séries.
 plot-color-bar-chain =
     Enchaîner les segments
     .hint = Chaque segment commence où le précédent finit : des groupes de 0 à 57 et de 0 à 25 sont tracés de 0 à 57 et de 57 à 82. Les couleurs ne changent pas.
 plot-color-bar-value-section = Valeur
 plot-color-bar-value-from = Valeur depuis
-    .hint = La ligne d’en-tête de la feuille qui donne la valeur de chaque courbe. Une valeur avec une unité ou du texte (« 57 min ») n’a pas de valeur.
+    .hint = La ligne d'en-tête de la feuille qui donne la valeur de chaque courbe. Une valeur avec une unité ou du texte (« 57 min ») n'a pas de valeur.
 plot-color-bar-row-none = Aucune valeur
 plot-color-bar-scale = Échelle
 plot-color-bar-scale-linear = Linéaire
 plot-color-bar-scale-log = Log
-    .hint = Une valeur nulle ou négative n’a pas de couleur sur une échelle log.
+    .hint = Une valeur nulle ou négative n'a pas de couleur sur une échelle log.
 plot-color-bar-no-value =
     { $count ->
-        [one] { $count } courbe n’a pas de valeur
-       *[other] { $count } courbes n’ont pas de valeur
+        [one] { $count } courbe n'a pas de valeur
+       *[other] { $count } courbes n'ont pas de valeur
     }
 plot-color-bar-layout-section = Emplacement
 plot-color-bar-position = Position
@@ -1112,8 +1117,8 @@ plot-color-bar-ticks-breaks = Extrémités et ruptures
 plot-color-bar-ticks-auto = Automatiques
 plot-color-bar-title = Titre
     .hint = Texte Typst écrit sous la barre. Laisser vide pour aucun.
-plot-color-bar-unknown = Par défaut (réglage d’une version plus récente)
-disabled-color-bar-off = Activez d’abord « Afficher la barre de couleurs »
+plot-color-bar-unknown = Par défaut (réglage d'une version plus récente)
+disabled-color-bar-off = Activez d'abord « Afficher la barre de couleurs »
 curve-on-color-bar =
     Sur la barre de couleurs
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
@@ -1132,6 +1137,9 @@ plot-theme-note = S'applique à tous les titres, axes, graduations et quadrillag
 
 # Mémo de la syntaxe Typst, sous chaque champ de titre
 
+plot-variables-memo-header = Variables
+plot-variables-col = Pareil, lu dans la colonne A de la feuille
+plot-variables-note = Les titres d'axe lisent la colonne X ou Y de la première série, les autres textes sa colonne Y ; une entrée de légende lit sa propre série.
 plot-math-memo-header = Syntaxe mathématique
 plot-math-greek = Lettres grecques λ, Δ
 plot-math-subscript = Indice
@@ -1160,14 +1168,14 @@ plot-view-reset-zoom = Réinitialiser le zoom
 menu-layout-page-mode = Mode mise en page
     .hint = Modifie la taille de la figure ainsi que la position et la taille de chaque graphique, avec des règles, une grille et des poignées (Échap quitte)
 layout-mode-placement = Mode de grille :
-    .hint = Régulier : les graphiques sont rangés en colonnes et en lignes qui partagent leurs tailles. Libre : chaque graphique a sa position et sa taille. Cliquer pour basculer (une étape d’annulation à part)
+    .hint = Régulier : les graphiques sont rangés en colonnes et en lignes qui partagent leurs tailles. Libre : chaque graphique a sa position et sa taille. Cliquer pour basculer (une étape d'annulation à part)
 layout-mode-placement-regular = Régulier
 layout-mode-placement-free = Libre
 layout-mode-snap = Aimantation
-    .hint = Aimante ce qu’on déplace à la grille (G). Maintenir Maj pendant le déplacement pour s’en passer
+    .hint = Aimante ce qu'on déplace à la grille (G). Maintenir Maj pendant le déplacement pour s'en passer
 layout-mode-step =
     .hint = Pas de la grille. Large : 5 mm, 10 pt ou 1/4 po. Fin : 1 mm, 1 pt ou 1/16 po. Cliquer pour basculer
-    .disabled = Le pas de la grille compte quand l’aimantation est active : activer l’aimantation pour le choisir
+    .disabled = Le pas de la grille compte quand l'aimantation est active : activer l'aimantation pour le choisir
 layout-mode-step-coarse = Large
 layout-mode-step-fine = Fin
 layout-mode-layer = Graphique {{ $n }}
@@ -1435,7 +1443,7 @@ format-size = Taille
     .hint = Règle la taille, en points, du texte sélectionné
 format-color = Couleur du texte
 
-action-object-manager = Gestionnaire d’objets
+action-object-manager = Gestionnaire d'objets
     .hint = Afficher ou masquer les objets du graphique actif.
 object-manager-no-graph = Aucun graphique actif. Cliquer un graphique pour voir ses objets
 object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
@@ -1443,13 +1451,13 @@ object-manager-layer = Calque { $index }
 object-manager-group = Séries
 object-manager-axes = Axes
 object-manager-show-axes = Afficher les axes
-    .hint = Liste les axes de chaque calque dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
+    .hint = Liste les axes de chaque calque dans le gestionnaire d'objets. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
 
 object-manager-show-objects = Afficher les objets
-    .hint = Liste les objets libres de chaque calque (textes libres, formes) dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Listés par défaut.
+    .hint = Liste les objets libres de chaque calque (textes libres, formes) dans le gestionnaire d'objets. Ne modifie pas leur visibilité sur le graphique. Listés par défaut.
 
 menu-selected-content = Sélection
-    .disabled = Sélectionnez d’abord une courbe, un texte ou un objet
+    .disabled = Sélectionnez d'abord une courbe, un texte ou un objet
 action-rename-series = Renommer
 action-rename-group = Renommer
 action-ungroup-series =
@@ -1536,16 +1544,16 @@ error-clipboard-empty = Il n'y a rien à copier
 error-clipboard-unsupported = Cet affichage ne peut pas recevoir un graphique copié ({ $display })
 error-clipboard-backend = Impossible de copier le graphique : { $detail }
 
-# Réglages de vue de l’Object Manager (#139).
+# Réglages de vue de l'Object Manager (#139).
 object-manager-default-expansion = Déplier par défaut
-    .hint = Définit seulement l’état initial des nouveaux groupes ; les groupes déjà dépliés ou repliés gardent leur état
+    .hint = Définit seulement l'état initial des nouveaux groupes ; les groupes déjà dépliés ou repliés gardent leur état
 object-manager-expand-layers = Calques
 object-manager-expand-plots = Groupes de tracés
 object-manager-objects = Objets
 object-manager-reset = Réinitialiser les réglages
-    .hint = Rétablit les réglages par défaut du gestionnaire d’objets sans changer le repli courant des groupes
+    .hint = Rétablit les réglages par défaut du gestionnaire d'objets sans changer le repli courant des groupes
 
-project-manager-selection-needed = Sélectionnez d’abord au moins un objet
+project-manager-selection-needed = Sélectionnez d'abord au moins un objet
 
 history-add-calculation = Ajouter un calcul : { $kind }
 history-edit-calculation = Modifier le calcul : { $kind }
@@ -1561,10 +1569,10 @@ analysis-kind-peaks = Décomposition en pics
 analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Déconvolution directe
 error-model-calculated-column-read-only = Cette colonne est produite par un calcul. La détacher du calcul pour modifier ses valeurs
-error-model-transpose-no-x-prime = La colonne { $letter } ({ $name }) n’a pas de x'. Lui en donner un pour analyser une ligne
+error-model-transpose-no-x-prime = La colonne { $letter } ({ $name }) n'a pas de x'. Lui en donner un pour analyser une ligne
 error-model-transpose-source-reads-it = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour suivre
-error-model-calculation-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d’abord Recalculer automatiquement sur { $sheet }
-error-model-transpose-not-numeric = La colonne { $letter } ({ $name }) contient du texte. Seules des colonnes numériques permettent d’analyser une ligne
+error-model-calculation-reads-following-sheet = { $sheet } suit { $source } : { $source } ne peut donc rien calculer depuis elle. Décocher d'abord Recalculer automatiquement sur { $sheet }
+error-model-transpose-not-numeric = La colonne { $letter } ({ $name }) contient du texte. Seules des colonnes numériques permettent d'analyser une ligne
 
 ## Analysis — names of the columns an operation produces (#181)
 analysis-output-baseline-corrected = { $name } ({ $column }-corr.)
@@ -1870,7 +1878,7 @@ analysis-warning-irf-truncated = La réponse est coupée au-dessus de 1 % de so
 analysis-warning-bridged-reference-gap = { $count } point(s) ont été interpolés à travers une cellule vide de la colonne de référence
 analysis-warning-division-by-zero = { $count } division(s) par zéro ont été laissées vides
 analysis-warning-shifted-x = Le polynôme contraint a été ajusté sur des X loin de 0 : la précision peut être faible. Soustrayez d'abord la moyenne de X
-stale-series-hint = Pas à jour : son calcul doit être refait
+stale-series-hint = Pas à jour : son calcul doit être refait
 stale-export-title = Données pas à jour
 stale-export-message = Ce graphique montre { $count } calcul(s) pas à jour.
 stale-export-anyway = Exporter quand même
@@ -2148,7 +2156,7 @@ preferences-new-graphs-note = Point de départ des graphiques que vous créez. C
 preferences-new-graph-decimal-comma = Virgule décimale sur les graduations
     .hint = Les nouveaux graphiques écrivent 1,5 au lieu de 1.5 sur tous les axes, à l'écran et dans les exports. Les graphiques existants et ceux créés par des scripts gardent leur réglage.
 preferences-new-graph-legend-text = Texte de légende issu de
-    .hint = La ligne d'en-tête que les nouveaux graphiques lisent pour les entrées de leur légende. Chaque graphique garde ensuite son réglage, dans Propriétés du graphique > Légende. Les graphiques existants et ceux créés par des scripts ne changent pas.
+    .hint = La ligne d'en-tête que les nouveaux graphiques lisent pour les entrées de leur légende, ou, avec Personnalisé, votre propre modèle. Chaque graphique garde ensuite son réglage, dans Propriétés du graphique > Légende. Les graphiques existants et ceux créés par des scripts ne changent pas.
 preferences-analysis-values = Valeurs
 preferences-analysis-values-note = Ce que propose la fenêtre d'une analyse la première fois que vous l'utilisez. Chaque analyse retient ensuite son dernier choix.
 preferences-export-graph = Exporter le graphique
@@ -2258,6 +2266,7 @@ help-copy-full-columns = Copier les colonnes entières
 help-cut = Couper
 help-paste = Coller
 help-paste-absolute = Coller au même endroit
+help-paste-transposed = Coller en échangeant lignes et colonnes
 help-clear-cells = Vider les cellules sélectionnées, puis les supprimer
 help-duplicate-sheet = Dupliquer la feuille
 help-copy-graph = Copier le graphique comme image (rien de sélectionné)
@@ -2265,8 +2274,8 @@ help-delete-object = Supprimer l'objet sélectionné
 help-move-series-up = Monter la série sélectionnée
 help-move-series-down = Descendre la série sélectionnée
 help-zoom = Zoomer
-help-layout-snap = Activer ou désactiver l’aimantation (mode mise en page)
-help-layout-nudge = Décaler les graphiques sélectionnés ou, sur une grille régulière, déplacer le graphique sélectionné d’une cellule (mode mise en page)
+help-layout-snap = Activer ou désactiver l'aimantation (mode mise en page)
+help-layout-nudge = Décaler les graphiques sélectionnés ou, sur une grille régulière, déplacer le graphique sélectionné d'une cellule (mode mise en page)
 help-layout-nudge-ten = Décaler de dix pas (mode mise en page)
 help-layout-leave = Quitter le mode mise en page
 help-rename = Renommer
@@ -2288,15 +2297,15 @@ busy-stop = Arrêter
     .hint = Arrête le travail en cours
 status-import-stopped = Import arrêté. Rien n'a été importé
 status-page-edge-reached = Bord de la page atteint : tirez un coin pour agrandir la page
-status-figure-grew = L’image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
+status-figure-grew = L'image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
 status-recalculating = Recalcul en cours…
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée
 
 analysis-baseline-constant = Constante…
-    .hint = Retirer un fond plat à partir d’un point ou de la moyenne d’une zone
+    .hint = Retirer un fond plat à partir d'un point ou de la moyenne d'une zone
 analysis-baseline-shape-constant = Constante (point)
 analysis-baseline-shape-constant-zone = Constante (moyenne de zone)
-analysis-baseline-hint-constant = Cliquez un point. Maj l’aimante sur la courbe avec la moyenne locale. Modifiez X et Y ci-dessous.
+analysis-baseline-hint-constant = Cliquez un point. Maj l'aimante sur la courbe avec la moyenne locale. Modifiez X et Y ci-dessous.
 analysis-baseline-hint-constant-zone = Glissez une plage de X. Sa moyenne Y définit un fond plat ; une nouvelle plage remplace la précédente.
 
 history-replace-analysis-data = Remplacer les données originales ({ $kind })
@@ -2344,9 +2353,9 @@ full-copy-formulas = Formules
     .hint = Copie aussi les formules
 
 ## Feuilles transposées (#253)
-analysis-needs-same-curves = L’analyse demande des courbes de même nature : toutes tracées depuis des colonnes, ou toutes depuis des lignes
+analysis-needs-same-curves = L'analyse demande des courbes de même nature : toutes tracées depuis des colonnes, ou toutes depuis des lignes
 status-analysis-mixed-curves = Sélectionnez des courbes toutes tracées depuis des colonnes, ou toutes depuis des lignes
-status-transpose-not-linked = Cette feuille n’est pas une feuille transposée
+status-transpose-not-linked = Cette feuille n'est pas une feuille transposée
 transpose-banner = Transposée de { $source }
 transpose-state-stale = Pas à jour
 transpose-state-modified = Valeurs modifiées
@@ -2357,7 +2366,7 @@ transpose-relink-hint = Réécrit les colonnes liées depuis { $source } et effa
 transpose-relink-title = Relier de nouveau la feuille transposée
 transpose-relink-confirm = Les valeurs modifiées dans les colonnes liées de { $sheet } seront effacées. Annuler les rétablit
 transpose-auto = Recalculer automatiquement
-    .hint = Met { $sheet } à jour dès que { $source } change. Une valeur saisie dedans arrête les mises à jour jusqu’à Relier de nouveau
+    .hint = Met { $sheet } à jour dès que { $source } change. Une valeur saisie dedans arrête les mises à jour jusqu'à Relier de nouveau
     .disabled = La colonne { $letter } de { $source } calcule depuis { $sheet }. Retirer cette formule pour cocher cette case
 transpose-state-stuck = Pas à jour : { $reason }
 transpose-stuck-lost-x-prime = { $source } n'a plus de valeurs x'. Recalculer pour utiliser les numéros de colonne 1, 2, 3… comme x'
@@ -2380,10 +2389,10 @@ analysis-value-window = Largeur utilisée (points)
 analysis-smooth-adjacent = Moyenne adjacente…
     .hint = Remplace chaque point par la moyenne de ses voisins
 analysis-smooth-savitzky-golay = Savitzky-Golay…
-    .hint = Ajuste un polynôme sur une fenêtre glissante ; garde mieux la hauteur des pics qu’une moyenne
+    .hint = Ajuste un polynôme sur une fenêtre glissante ; garde mieux la hauteur des pics qu'une moyenne
 analysis-smooth-median = Médiane glissante…
     .hint = Remplace chaque point par la médiane de ses voisins ; supprime les pointes isolées
-analysis-smooth-hint = Chaque point est reconstruit depuis ses voisins dans l’ordre des X ; les extrémités de la courbe sont reflétées
+analysis-smooth-hint = Chaque point est reconstruit depuis ses voisins dans l'ordre des X ; les extrémités de la courbe sont reflétées
 analysis-smooth-choice-adjacent = Moyenne adjacente
 analysis-smooth-choice-savitzky-golay = Savitzky-Golay
 analysis-smooth-choice-median = Médiane glissante
@@ -2488,7 +2497,7 @@ import-check-xunit = Unité de X : { $c0 }, lue dans { $key } (ligne { $line })
 import-check-yunit = Unité de Y : { $c0 }, lue dans { $key } (ligne { $line })
 import-check-xunit-line = Unité de X : { $c0 }, ligne { $line }
 import-check-yunit-line = Unité de Y : { $c0 }, ligne { $line }
-import-check-unit-unused = Unité de { $axis } : le fichier donne { $text } ({ $key }, ligne { $line }), mais ce modèle ne l’utilise pas
+import-check-unit-unused = Unité de { $axis } : le fichier donne { $text } ({ $key }, ligne { $line }), mais ce modèle ne l'utilise pas
 import-check-missing-xunit = Unité de X : pas dans le fichier
 import-check-missing-yunit = Unité de Y : pas dans le fichier
 import-check-missing-xpunit = Unité de x′ : pas dans le fichier
@@ -2633,13 +2642,13 @@ import-template-forget-button = Oublier le modèle…
     .hint = Retire ce modèle de la liste, après confirmation
 import-template-forget-yes = Oublier le modèle
     .hint = Retire le modèle. Cette action est irréversible
-import-template-forget-confirm = Oublier le modèle « { $name } » ? Les fichiers qu’il reconnaissait repassent en Auto. Cette action est irréversible.
+import-template-forget-confirm = Oublier le modèle « { $name } » ? Les fichiers qu'il reconnaissait repassent en Auto. Cette action est irréversible.
 import-found-group-data = Données
 import-found-group-columns = Colonnes
 import-found-group-sheet = Feuille
-import-guide-1 = Cliquer sur un numéro de ligne pour dire ce qu’est la ligne : nom long, unités, x', début des données.
-import-guide-2 = Cliquer sur une valeur pour l’utiliser, par exemple NANOMETERS comme unités de X.
-import-guide-3 = Survoler une phrase à gauche pour voir d’où elle vient.
+import-guide-1 = Cliquer sur un numéro de ligne pour dire ce qu'est la ligne : nom long, unités, x', début des données.
+import-guide-2 = Cliquer sur une valeur pour l'utiliser, par exemple NANOMETERS comme unités de X.
+import-guide-3 = Survoler une phrase à gauche pour voir d'où elle vient.
 import-guide-done = Terminé
 import-guide-next = Suivant
 import-guide-dont = Ne plus afficher
@@ -2648,11 +2657,11 @@ import-help-title = Comment chacun a été trouvé
 import-help-sep = { $sep } découpe les { $rows } lignes de données en { $cols } cellules
 import-help-decimal = Décimal : { $sample }. « { $sep } » est le séparateur, donc la virgule ne peut être que décimale.
 import-help-decimal-point = Décimal : { $sample }
-import-help-encoding = « { $ch } » à la ligne { $line } n’est pas de l’UTF-8, le texte est donc lu en { $name }.
+import-help-encoding = « { $ch } » à la ligne { $line } n'est pas de l'UTF-8, le texte est donc lu en { $name }.
 import-help-encoding-plain = Texte simple : lu en { $name }.
 import-template-manage-danger = Retirer
-import-template-manage-empty = Aucun modèle pour l’instant. Enregistrer un modèle depuis le bouton Modèle de l’import.
-import-template-manage-title = Modèles d’import
+import-template-manage-empty = Aucun modèle pour l'instant. Enregistrer un modèle depuis le bouton Modèle de l'import.
+import-template-manage-title = Modèles d'import
 import-template-menu-manage = Gérer les modèles…
 import-template-menu-save = Enregistrer comme modèle…
 import-template-offer-later = Pas maintenant
@@ -2663,16 +2672,16 @@ import-template-offer-title = Enregistrer ces réglages pour les fichiers { $nam
 import-template-save-button = Enregistrer
     .hint = Enregistre le modèle (Entrée)
 import-template-save-name = Nom
-import-template-save-note = Le nombre de lignes d’en-tête n’a pas d’importance.
+import-template-save-note = Le nombre de lignes d'en-tête n'a pas d'importance.
 import-template-save-reason-name = Saisir un nom
 import-template-save-reason-trigger = Garder au moins une condition
 import-template-save-replaces = Remplace le modèle du même nom
 import-template-save-unchecked =
     { $count ->
-        [one] 1 point reste à vérifier. Il sera enregistré tel qu’il est maintenant.
-       *[other] { $count } points restent à vérifier. Ils seront enregistrés tels qu’ils sont maintenant.
+        [one] 1 point reste à vérifier. Il sera enregistré tel qu'il est maintenant.
+       *[other] { $count } points restent à vérifier. Ils seront enregistrés tels qu'ils sont maintenant.
     }
-import-template-save-sets = Ce qu’il règle
+import-template-save-sets = Ce qu'il règle
 import-template-save-title = Enregistrer comme modèle
 import-template-warn-data-count =
     { $count ->
@@ -2686,8 +2695,8 @@ import-template-warn-data-tail =
     }
 import-template-warn-header =
     { $count ->
-        [one] En-tête : toujours 1 ligne. Un fichier à l’en-tête plus long sera mal lu.
-       *[other] En-tête : toujours { $count } lignes. Un fichier à l’en-tête plus long sera mal lu.
+        [one] En-tête : toujours 1 ligne. Un fichier à l'en-tête plus long sera mal lu.
+       *[other] En-tête : toujours { $count } lignes. Un fichier à l'en-tête plus long sera mal lu.
     }
 import-template-warn-skip-rows =
     { $count ->
@@ -2699,7 +2708,7 @@ import-template-warn-footer =
         [one] Fin de fichier : la dernière ligne de chaque fichier est ignorée. Dans un fichier à la fin plus longue, une partie sera lue comme des données.
        *[other] Fin de fichier : les { $count } dernières lignes de chaque fichier sont ignorées. Dans un fichier à la fin plus longue, une partie sera lue comme des données.
     }
-import-template-warn-role-line = { $role } : ligne { $line } du fichier. Si l’en-tête change de longueur, cette ligne se déplace.
+import-template-warn-role-line = { $role } : ligne { $line } du fichier. Si l'en-tête change de longueur, cette ligne se déplace.
 import-template-not-automatic = Pas automatique
 import-template-not-automatic-note = Conservé d'une version précédente. Ce modèle n'est jamais appliqué de lui-même ; ses conditions ci-dessous ne sont pas actives. Vous pouvez toujours le choisir dans le menu Modèle.
 import-template-use-automatically = Utiliser automatiquement
@@ -2727,12 +2736,12 @@ import-condition-columns-min = ont au moins { $n } colonnes
 import-condition-key-eq = ont la ligne { $key } égale à { $value }
 import-condition-key-has = ont la ligne { $key } contenant { $value }
 import-condition-name = ont un nom de fichier contenant { $text }
-import-condition-ext = ont l’extension .{ $ext }
+import-condition-ext = ont l'extension .{ $ext }
 import-condition-add = Ajouter une condition
 import-condition-add-columns = Nombre de colonnes
 import-condition-add-name = Nom de fichier contient
 import-condition-add-ext = Extension
-import-condition-pick-key = Choisir une ligne d’en-tête
+import-condition-pick-key = Choisir une ligne d'en-tête
 import-condition-equals = égal à
 import-condition-atleast = au moins
 import-condition-contains = contient
@@ -2744,12 +2753,12 @@ import-condition-remove = Retirer cette condition
 import-condition-yours = Vos conditions
 import-answers-title = Réponses mémorisées
 import-answers-note = Quand vous avez répondu à un point à vérifier, StokesForge garde la réponse pour ce type de fichier et ne la redemande plus.
-import-answers-empty = Aucune réponse mémorisée pour l’instant.
+import-answers-empty = Aucune réponse mémorisée pour l'instant.
 import-answers-forget = Oublier
     .hint = Reposer cette question au prochain fichier de ce type
 import-check-mark-checked = Marquer comme vérifié
     .hint = Régler celui-ci sans la vérification
-import-check-tag-check-go = Montrer d’où ça vient dans le fichier
+import-check-tag-check-go = Montrer d'où ça vient dans le fichier
 import-tie-use = Utiliser { $name }
     .hint = Lire ce fichier avec ce modèle à la place
 import-auto-pick-why-title = Choisi automatiquement
@@ -2766,7 +2775,7 @@ import-files-other = Type différent
 import-files-refused = Refusés
 import-files-none = Aucun fichier ne correspond.
 
-# --- L’écran d’import : à vérifier, modèles, réglages avancés, guide (#488) ---
+# --- L'écran d'import : à vérifier, modèles, réglages avancés, guide (#488) ---
 import-condition-start = commencent par le texte { $text }
 import-guide-show = Afficher le guide
     .hint = Affiche de nouveau le court guide de cette fenêtre
@@ -2819,16 +2828,16 @@ import-doubt-several-blocks = Le fichier contient { $count } blocs de nombres ({
 import-doubt-several-blocks-split = Le fichier contient { $count } blocs de nombres ({ $rows } lignes). Chacun devient son propre tableau.
 import-doubt-decimal-or-separator = La ligne { $line } écrit peut-être ses décimales avec une virgule, mais la virgule sépare aussi les colonnes. Vérifier les nombres.
 import-doubt-jcamp-npoints = Bloc { $block } : le fichier annonce { $declared } points, { $decoded } ont été lus.
-import-doubt-jcamp-ntuples-not-read = Bloc { $block } : ce tableau NTUPLES n’est pas lu.
-import-doubt-jcamp-unreadable-table = Bloc { $block } : le tableau de données a une forme qui n’est pas lue.
-import-doubt-jcamp-bad-lines = Bloc { $block } : { $count } lignes de données n’ont pas pu être lues et sont ignorées.
+import-doubt-jcamp-ntuples-not-read = Bloc { $block } : ce tableau NTUPLES n'est pas lu.
+import-doubt-jcamp-unreadable-table = Bloc { $block } : le tableau de données a une forme qui n'est pas lue.
+import-doubt-jcamp-bad-lines = Bloc { $block } : { $count } lignes de données n'ont pas pu être lues et sont ignorées.
 import-doubt-jcamp-dup-capped = Bloc { $block } : un nombre de répétitions était trop grand et a été coupé.
 import-doubt-jcamp-points-capped = Bloc { $block } : le fichier a plus de points que ce qui est lu ; le reste est laissé de côté.
-import-doubt-jcamp-nmr-left-out = { $count } blocs RMN de ce fichier sont laissés de côté (la RMN n’est pas prise en charge).
+import-doubt-jcamp-nmr-left-out = { $count } blocs RMN de ce fichier sont laissés de côté (la RMN n'est pas prise en charge).
 import-doubt-template-tie = { $chosen } est utilisé, mais { $others } conviennent aussi à ce fichier.
 import-doubt-name-check-separator = Le délimiteur
 import-doubt-name-check-decimal = Le séparateur décimal
-import-doubt-name-check-encoding = L’encodage du texte
+import-doubt-name-check-encoding = L'encodage du texte
 import-doubt-name-check-data = Les lignes de données
 import-doubt-name-check-points = Le nombre de points
 import-doubt-name-check-x-prime = La ligne des temps (x′)
@@ -2846,16 +2855,16 @@ import-doubt-name-several-blocks = Plusieurs blocs de nombres
 import-doubt-name-several-blocks-split = Plusieurs blocs, lus comme des tableaux séparés
 import-doubt-name-decimal-or-separator = Une virgule qui est peut-être décimale
 import-doubt-name-jcamp-npoints = Un nombre de points différent de celui du fichier
-import-doubt-name-jcamp-ntuples-not-read = Un tableau NTUPLES qui n’est pas lu
-import-doubt-name-jcamp-unreadable-table = Un tableau dans une forme qui n’est pas lue
+import-doubt-name-jcamp-ntuples-not-read = Un tableau NTUPLES qui n'est pas lu
+import-doubt-name-jcamp-unreadable-table = Un tableau dans une forme qui n'est pas lue
 import-doubt-name-jcamp-bad-lines = Des lignes de données illisibles
 import-doubt-name-jcamp-dup-capped = Un nombre de répétitions coupé
 import-doubt-name-jcamp-points-capped = Des points laissés de côté
 import-doubt-name-jcamp-nmr-left-out = Des blocs RMN laissés de côté
 import-doubt-name-template-tie = Deux modèles conviennent : { $names }
 import-doubt-name-template-pick = Deux modèles conviennent : { $names }. Vous avez choisi { $chosen }
-error-choose-unknown-template = Il n’y a pas de modèle nommé « { $name } »
-error-choose-unreadable = Le fichier n’a pas pu être lu : { $detail }
-error-choose-no-numbers = Aucune ligne de nombres n’a été trouvée dans le fichier
+error-choose-unknown-template = Il n'y a pas de modèle nommé « { $name } »
+error-choose-unreadable = Le fichier n'a pas pu être lu : { $detail }
+error-choose-no-numbers = Aucune ligne de nombres n'a été trouvée dans le fichier
 error-choose-nmr = Ce fichier contient des données RMN, que StokesForge ne lit pas
 error-template-save-no-condition = Garder au moins une condition : un modèle sans condition ne serait jamais choisi

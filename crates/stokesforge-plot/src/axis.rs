@@ -39,7 +39,14 @@ pub enum TickDirection {
     Both,
 }
 
-/// An axis: title, unit, scale, limits.
+/// The Typst template a new graph gives its axis titles (#506): the column's
+/// long name, else its short name, then ` / units` only when the column has
+/// units (the IUPAC slash). The units go through a code string, never markup:
+/// a `/ ` at the start of a content block may parse as a Typst term list.
+pub const AXIS_TITLE_TEMPLATE: &str =
+    "#if ln != \"\" [#ln] else [#sn]#if u != \"\" { \" / \" + u }";
+
+/// An axis: title, scale, limits.
 ///
 /// [`AxisSpec::auto_range`] takes precedence over `range_min`/`range_max`: the bounds
 /// stay remembered when switching back to automatic, so that a round trip
@@ -49,11 +56,15 @@ pub enum TickDirection {
 /// entered.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AxisSpec {
-    /// Title of the axis, without the unit.
+    /// Title of the axis: one free Typst text (#506), possibly reading the
+    /// column variables (see [`AXIS_TITLE_TEMPLATE`]).
     pub label: String,
     /// Visibility of the title, independent of its content (#85).
     pub title_visible: bool,
-    /// Unit shown in parentheses after the title.
+    /// Legacy (#506): the unit of an old file, shown in parentheses after the
+    /// title. Loading folds it into [`AxisSpec::label`], so it is empty after
+    /// a load and nothing writes it any more; the field stays so the file
+    /// format does not change.
     pub unit: String,
     /// Scale.
     pub scale: AxisScale,
@@ -126,7 +137,8 @@ impl AxisSpec {
         }
     }
 
-    /// Displayed title: `label (unit)`, without empty parentheses.
+    /// Displayed title: `label (unit)`, without empty parentheses. It joins a
+    /// legacy pair (#506); with the unit always empty it is the label.
     pub fn display_label(&self) -> String {
         match (self.label.is_empty(), self.unit.is_empty()) {
             (false, false) => format!("{} ({})", self.label, self.unit),
