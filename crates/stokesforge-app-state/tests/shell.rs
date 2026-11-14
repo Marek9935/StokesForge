@@ -12497,7 +12497,12 @@ fn object_manager_deletes_a_curve_without_touching_the_data() {
     let drawn = layout_of(&before);
     after.frame_widths = drawn.frame_widths;
     after.frame_heights = drawn.frame_heights;
-    assert_eq!(graph_spec(&state, graph), after);
+    // The edit also writes the Auto ranges that have data (#529).
+    let written = graph_spec(&state, graph);
+    assert!(!written.panels[0].bottom.auto_range && !written.panels[0].left.auto_range);
+    after.panels.get_mut(0).unwrap().bottom = written.panels[0].bottom.clone();
+    after.panels.get_mut(0).unwrap().left = written.panels[0].left.clone();
+    assert_eq!(written, after);
     let model = object_tree(state.tree(), graph, None).unwrap();
     assert_eq!(model.layers[0].series.len(), 1);
     assert_eq!(model.layers[0].series[0].label, "Second series");

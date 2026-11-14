@@ -127,10 +127,25 @@ pub const MAX_CELLS: usize = 256;
 pub use stokesforge_plot::{DEFAULT_FIGURE_SIZE, FALLBACK_FRAME, MIN_CELL};
 use stokesforge_plot::{MAX_FRAME_SIZE, MIN_FRAME_SIZE};
 
+/// Which axes of a drawn layer had data to frame, see [`DrawnPanel::has_data`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AxesWithData {
+    /// Bottom axis.
+    pub x: bool,
+    /// Left axis.
+    pub y: bool,
+    /// Right axis.
+    pub y2: bool,
+}
+
 /// What a panel ended up drawing — enough to write a test without rereading
 /// pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawnPanel {
+    /// Which axes had data to frame (#529): an axis without any is framed on
+    /// `0..1`, a placeholder that a caller freezing the automatic ranges must
+    /// not write.
+    pub has_data: AxesWithData,
     /// Index of the layer in [`PlotSpec::panels`]: the identity of a layer
     /// (several layers can be superimposed in the same cell).
     pub index: usize,
@@ -2824,13 +2839,16 @@ fn draw_panel<DB: DrawingBackend>(
 
     // 2 — framing, in the transformed space.
     let margins = figure_texts.margins;
+    let x_data = extent_of(&prepared, series::x_extent, None);
+    let y_data = extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left));
+    let y2_data = extent_of(&prepared, series::y_extent, Some(SeriesAxis::Right));
     let x_range = match base {
         Some(base) if !x_own => base.x_range,
         _ => {
             let own = axis_range(
                 &spec.bottom,
                 x_scale,
-                extent_of(&prepared, series::x_extent, None),
+                x_data,
                 false,
                 AxisRole::Horizontal,
                 margins,
@@ -2849,7 +2867,7 @@ fn draw_panel<DB: DrawingBackend>(
             let own = axis_range(
                 &spec.left,
                 y_scale,
-                extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
+                y_data,
                 needs_baseline(&prepared, SeriesAxis::Left),
                 AxisRole::Vertical,
                 margins,
@@ -2866,7 +2884,7 @@ fn draw_panel<DB: DrawingBackend>(
         axis_range(
             &spec.right,
             y2_scale,
-            extent_of(&prepared, series::y_extent, Some(SeriesAxis::Right)),
+            y2_data,
             needs_baseline(&prepared, SeriesAxis::Right),
             AxisRole::Vertical,
             margins,
@@ -3563,6 +3581,11 @@ fn draw_panel<DB: DrawingBackend>(
         overlay,
         row: spec.row,
         column: spec.column,
+        has_data: AxesWithData {
+            x: x_data.is_some(),
+            y: y_data.is_some(),
+            y2: y2_data.is_some(),
+        },
         x_range: data_range(x_scale, x_range),
         y_range: data_range(y_scale, y_range),
         y2_range: y2_range.map(|range| data_range(y2_scale, range)),

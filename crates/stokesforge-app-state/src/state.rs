@@ -8408,6 +8408,7 @@ impl AppState {
                 if let Some(current) = self.plot_spec(graph) {
                     crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
+                self.freeze_auto_ranges(&mut spec);
                 Command::SetPlotSpec { graph, spec }
             }
             Command::EditPlotSpec {
@@ -8418,6 +8419,7 @@ impl AppState {
                 if let Some(current) = self.plot_spec(graph) {
                     crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
+                self.freeze_auto_ranges(&mut spec);
                 Command::EditPlotSpec { graph, spec, kind }
             }
             Command::AddGraph {
@@ -8426,10 +8428,26 @@ impl AppState {
                 mut spec,
             } => {
                 crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
+                self.freeze_auto_ranges(&mut spec);
                 Command::AddGraph { parent, name, spec }
             }
             other => other,
         }
+    }
+
+    /// The one door of the automatic axis ranges (#529): a spec written by a
+    /// command carries, for every axis still on Auto that has data, the range
+    /// drawn now with the user's margins, so that a graph never moves
+    /// afterwards. The ranges ride in the very command of the gesture: no
+    /// history step of their own. The snapshot is read as it is (invariant
+    /// 11, #239): while a recalculation runs it may hold the old values of a
+    /// formula column, so nothing is frozen then and the axes stay Auto, to
+    /// freeze at the next command.
+    fn freeze_auto_ranges(&self, spec: &mut PlotSpec) {
+        if self.recalc_since.is_some() && self.handle.recalc_running().is_some() {
+            return;
+        }
+        crate::frame_sizes::freeze_ranges(&self.snapshot.tree, spec, self.auto_margins());
     }
 
     /// Waits [`RECALC_WAIT`] for the end of the recalculation that the command
@@ -8785,6 +8803,13 @@ impl AppState {
         self.object_manager_preferences.new_graph_decimal_comma()
     }
 
+    /// The texts of a figure with the user's margins of the automatic axis
+    /// framing (#529): what every draw of the application (export, copy,
+    /// screen) is given, so that all of them agree (invariant 5).
+    pub fn figure_texts(&self) -> stokesforge_render::FigureTexts {
+        crate::figure_texts::figure_texts().with_margins(self.auto_margins())
+    }
+
     /// Margins of the automatic axis framing (#529), in percent of the data
     /// extent. A user preference, never in the project.
     pub fn auto_margins(&self) -> stokesforge_render::AutoMargins {
@@ -9004,7 +9029,7 @@ impl AppState {
             return;
         };
         // #501: the variables of the texts, before the resolution and the size.
-        let texts = crate::figure_texts::figure_texts();
+        let texts = self.figure_texts();
         let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
@@ -9034,7 +9059,7 @@ impl AppState {
         use crate::preferences::CopyFormat;
         use stokesforge_render_svg::ExportFormat;
 
-        let texts = crate::figure_texts::figure_texts();
+        let texts = self.figure_texts();
         let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();

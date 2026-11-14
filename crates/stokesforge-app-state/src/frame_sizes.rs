@@ -58,6 +58,21 @@ pub fn fix_new(tree: &Tree, spec: &mut PlotSpec) {
     fix_from(tree, &reference, spec);
 }
 
+/// Freezes the automatic axis ranges of `spec` (#529): see
+/// [`stokesforge_render_svg::freeze_auto_ranges`]. Measured like the exports,
+/// on the spec as drawn (variables bound in `tree`); only ranges are written.
+/// Returns `false` when nothing was on Auto or had data.
+pub fn freeze_ranges(
+    tree: &Tree,
+    spec: &mut PlotSpec,
+    margins: stokesforge_render_svg::AutoMargins,
+) -> bool {
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    stokesforge_render_svg::freeze_auto_ranges(tree, spec, margins, &measurer, &choice)
+        .unwrap_or(false)
+}
+
 /// The layout of the figure of `spec`, computed now with the measurement of the
 /// exports (Typst titles included): for the surfaces that cannot rely on a
 /// painted view, like the size fields of Graph Properties when the graph is not
