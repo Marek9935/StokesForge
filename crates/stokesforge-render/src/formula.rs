@@ -1692,7 +1692,7 @@ mod tests {
     fn evict_unshared_keeps_what_someone_holds() {
         let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
         let choice = FontChoice::default();
-        let mut get = |text: &str| {
+        let get = |text: &str| {
             let (sans, math) = noto();
             cache
                 .get_or_try_insert(

@@ -1869,6 +1869,7 @@ impl GraphView {
             let scaled_key = scaled::ScaledKey {
                 source: key,
                 display: display_rect,
+                build: self.cache.misses(),
             };
             painter.extend(
                 self.scaled
@@ -1877,7 +1878,7 @@ impl GraphView {
                         scaled_key,
                         self.cache.shapes(),
                         transform,
-                        &self.formulas,
+                        self.cache.textures(),
                     )
                     .iter()
                     .cloned(),

@@ -329,11 +329,14 @@ fn screen_text_cost() {
         let measurer = TextMeasurer::default();
         let choice = FontChoice::default();
         let formulas: FormulaCache<_> = FormulaCache::new();
+        let held = stokesforge_render_egui::TextureSet::default();
         let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(688.0, 400.0));
         let mut source = Vec::new();
         let mut output = context.run_ui(egui::RawInput::default(), |_| {
             let text = ScreenText::new(&context, &measurer);
-            let typst = TypstScreen::new(&context, &formulas, &choice).expect("fonts");
+            let typst = TypstScreen::new(&context, &formulas, &choice)
+                .expect("fonts")
+                .holding(&held);
             collect_shapes_with_typst(&mut source, rect, &text, typst, &plot).expect("drawing");
         });
         output.textures_delta.clear();
@@ -343,7 +346,6 @@ fn screen_text_cost() {
             pixels_per_point: 1.0,
             view_generation: 0,
         };
-        let formulas = &formulas;
         let mut scaled = ScaledShapes::default();
         let mut times = Vec::new();
         for step in 0..30 {
@@ -351,10 +353,11 @@ fn screen_text_cost() {
             let key = ScaledKey {
                 source: key0,
                 display: Rect::from_min_size(Pos2::ZERO, rect.size() * scale),
+                build: 0,
             };
             let transform = egui::emath::TSTransform::new(egui::Vec2::ZERO, scale);
             let started = Instant::now();
-            let _ = scaled.get(&context, key, &source, transform, formulas);
+            let _ = scaled.get(&context, key, &source, transform, &held);
             times.push(started.elapsed().as_secs_f64() * 1000.0);
         }
         let (n, bytes) = textures(&context);
