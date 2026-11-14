@@ -101,15 +101,15 @@ pub mod text_font;
 pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
-pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection};
+pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection, AXIS_TITLE_TEMPLATE};
 pub use color_bar::{
     value_color, ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment,
     ColorBarSpec, ColorBarTicks, ColorBarValue,
 };
 pub use gradient::{gradient_at, gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{
-    template_source, typst_literal, typst_string, LegendField, LegendPosition, LegendSpec,
-    LegendText, LegendTextFrom, VARIABLES,
+    typst_literal, typst_string, LegendField, LegendPosition, LegendSpec, LegendText,
+    LegendTextFrom, VARIABLES,
 };
 pub use length_unit::LengthUnit;
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};

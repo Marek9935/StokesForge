@@ -30,6 +30,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Answers remembered | Réponses mémorisées |
 | Axes | Axes |
 | Axes… | Axes… |
+| Axis title | Titre de l'axe |
 | Below | En dessous |
 | Bottom | Bas |
 | Bring to Front | Amener devant |
@@ -85,7 +86,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Import | Importer |
 | Import from Origin | Importer depuis Origin |
 | Import Template | Importer un modèle |
-| Import Templates | Modèles d’import |
+| Import Templates | Modèles d'import |
 | Import… | Importer… |
 | Insert Object | Insérer un objet |
 | Integrate | Intégrer |
@@ -113,7 +114,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | New Layer Beside | Calque à côté |
 | New Project | Nouveau projet |
 | No x' Values | Pas de valeurs x' |
-| Object Manager | Gestionnaire d’objets |
+| Object Manager | Gestionnaire d'objets |
 | Object Properties | Propriétés de l'objet |
 | One name for every curve? | Un seul nom pour toutes les courbes ? |
 | Open Project | Ouvrir un projet |
@@ -123,6 +124,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Page Layout Mode | Mode mise en page |
 | Paste | Coller |
 | Paste in Place | Coller à l'identique |
+| Paste Transposed | Coller transposé |
 | Peaks and Deconvolution | Pics et déconvolution |
 | Peaks and Deconvolution… | Pics et déconvolution… |
 | Plot Area | Zone de tracé |

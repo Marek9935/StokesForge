@@ -206,7 +206,11 @@ fn a_grid_slack_is_exported_and_survives_the_switch_to_free_placement() {
     // The switch to free placement keeps the image.
     let mut spec = sample.spec.clone();
     assert!(stokesforge_render_svg::set_layer_placement(
-        &mut spec, true, &measurer, &choice
+        &mut spec,
+        true,
+        &measurer,
+        &choice,
+        &stokesforge_render_svg::as_stored,
     ));
     assert_eq!(figure_size(&spec, &measurer, &choice), size);
     assert_eq!(spec.grid_slack, None);

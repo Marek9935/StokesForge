@@ -1504,7 +1504,9 @@ mod tests {
         });
         let mut spec = current_plot_spec(bench.app.state.tree(), bench.graph).expect("spec");
         assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
-            &mut spec, true
+            stokesforge_core::Project::new("t").unwrap().tree(),
+            &mut spec,
+            true
         ));
         bench.app.state.dispatch(Action::SetPlotSpec {
             graph: bench.graph,
@@ -1579,7 +1581,9 @@ mod tests {
             });
             let mut spec = current_plot_spec(bench.app.state.tree(), bench.graph).expect("spec");
             assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
-                &mut spec, true
+                stokesforge_core::Project::new("t").unwrap().tree(),
+                &mut spec,
+                true
             ));
             bench.app.state.dispatch(Action::SetPlotSpec {
                 graph: bench.graph,

@@ -600,7 +600,10 @@ fn a_non_trivial_plot_spec_round_trips_intact() {
 
     let node = loaded.tree().node(graph).expect("graph present");
     match node.kind() {
-        NodeKind::Graph { spec: reloaded, .. } => assert_eq!(*reloaded, spec),
+        NodeKind::Graph { spec: reloaded, .. } => {
+            // An axis unit of the fixture reads back folded into its title (#506).
+            assert_eq!(*reloaded, common::as_read_back(spec));
+        }
         other => panic!("expected Graph, got {other:?}"),
     }
 }

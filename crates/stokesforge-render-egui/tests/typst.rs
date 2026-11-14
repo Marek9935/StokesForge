@@ -540,12 +540,15 @@ fn every_text_of_a_figure_keeps_a_live_texture_at_every_scale() {
     let measurer = TextMeasurer::default();
     let choice = FontChoice::default();
     let cache: FormulaCache<_> = FormulaCache::new();
+    let held = stokesforge_render_egui::TextureSet::default();
     let plot = resolve_spec(project.tree(), &spec);
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(480.0, 360.0));
     let mut shapes = Vec::new();
     let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| {
         let text = ScreenText::new(&ctx, &measurer);
-        let typst = TypstScreen::new(&ctx, &cache, &choice).expect("fonts");
+        let typst = TypstScreen::new(&ctx, &cache, &choice)
+            .expect("fonts")
+            .holding(&held);
         collect_shapes_with_typst(&mut shapes, rect, &text, typst, &plot).expect("drawing");
     });
     output.textures_delta.clear();
@@ -585,9 +588,10 @@ fn every_text_of_a_figure_keeps_a_live_texture_at_every_scale() {
                 view_generation: 0,
             },
             display: Rect::from_min_size(Pos2::ZERO, rect.size() * scale),
+            build: 0,
         };
         let transform = TSTransform::new(egui::Vec2::ZERO, scale);
-        let drawn = scaled.get(&ctx, key, &shapes, transform, &cache);
+        let drawn = scaled.get(&ctx, key, &shapes, transform, &held);
         let mut found = Vec::new();
         meshes(drawn, &mut found);
         assert_eq!(found.len(), expected, "scale {scale}: texts on screen");

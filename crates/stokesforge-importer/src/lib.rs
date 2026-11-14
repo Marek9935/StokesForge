@@ -16,7 +16,7 @@
 
 pub mod origin;
 pub use origin::{
-    default_origin_selection, is_origin_bytes, is_origin_path, make_origin_column,
+    default_origin_selection, is_origin_bytes, is_origin_file, is_origin_path, make_origin_column,
     origin_book_name, plan_origin_import, read_origin_file, OriginBookPlan, OriginSelection,
     OriginSheetPlan,
 };

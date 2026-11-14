@@ -29,6 +29,12 @@
 //! scaled version that points to them. A texture already made at the right
 //! resolution is carried over from one version to the next (moving the graph
 //! without resizing it rasterizes nothing).
+//!
+//! Ownership (#508): [`ScaledShapes`] holds an `Arc` of **every** texture its
+//! meshes point to, the originals of scale 1 included, so it never depends on
+//! the `FormulaCache` (which may evict) nor on the cached shapes it was made
+//! from (which may be rebuilt). Its key follows the rebuild of the cached
+//! shapes (`ScaledKey::build`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,9 +42,8 @@ use std::sync::Arc;
 use egui::emath::TSTransform;
 use egui::epaint::TextShape;
 use egui::{Shape, TextureId};
-use stokesforge_render::formula::FormulaCache;
 
-use crate::typst_screen::FormulaTexture;
+use crate::typst_screen::{FormulaTexture, TextureSet};
 
 /// Transforms `shape` by `transform` (uniform scaling + offset), with the
 /// text rasterized again at the displayed size.
@@ -161,6 +166,10 @@ pub struct ScaledKey {
     pub source: crate::cache::CacheKey,
     /// Displayed rectangle (scale **and** position).
     pub display: egui::Rect,
+    /// Number of rebuilds of the cached shapes at the time (#508): the same
+    /// logical key can designate other shapes and other textures after a
+    /// rebuild, which must never be served stale shapes.
+    pub build: u64,
 }
 
 /// Scaled shapes, kept from one frame to the next as long as the figure and
@@ -169,8 +178,9 @@ pub struct ScaledKey {
 pub struct ScaledShapes {
     key: Option<ScaledKey>,
     shapes: Vec<Shape>,
-    /// The formulas rasterized at the displayed scale, by original texture
-    /// (the one of the cached mesh) — see the module header.
+    /// The textures the meshes of `shapes` point to, by original texture
+    /// (the one of the cached mesh): the enlarged ones, or the original
+    /// itself at scale 1 — see the module header.
     formulas: HashMap<TextureId, Arc<FormulaTexture>>,
 }
 
@@ -186,37 +196,30 @@ impl std::fmt::Debug for ScaledShapes {
 
 impl ScaledShapes {
     /// The shapes of `source` at the scale of `key.display`, recomputed if the
-    /// key changed. `formulas` is the cache that produced the textures of the
-    /// formulas of `source`: it is where the document of a formula to
-    /// rasterize again is found.
+    /// key changed. `textures` holds the textures of the formulas of
+    /// `source` (`ShapeCache::textures`): it is where the document of a
+    /// formula to rasterize again is found.
     pub fn get(
         &mut self,
         context: &egui::Context,
         key: ScaledKey,
         source: &[Shape],
         transform: TSTransform,
-        formulas: &FormulaCache<FormulaTexture>,
+        textures: &TextureSet,
     ) -> &[Shape] {
         if self.key != Some(key) {
             let pixels_per_point = key.source.pixels_per_point * transform.scaling;
             let unscaled = (transform.scaling - 1.0).abs() < f32::EPSILON;
             let previous = std::mem::take(&mut self.formulas);
             let mut kept = HashMap::new();
-            // Built at the first mesh met only: a figure without formulas
-            // does not walk the cache.
-            let mut by_id: Option<HashMap<TextureId, Arc<FormulaTexture>>> = None;
             let mut retexture = |id: TextureId| -> Option<TextureId> {
-                let by_id = by_id.get_or_insert_with(|| {
-                    formulas
-                        .values()
-                        .into_iter()
-                        .map(|texture| (texture.id(), texture))
-                        .collect()
-                });
+                let original = textures.get(id)?;
                 if unscaled {
                     // No new texture, but the formula is recognized: its
-                    // mesh is snapped to the pixels (#86).
-                    return by_id.contains_key(&id).then_some(id);
+                    // mesh is snapped to the pixels (#86). Held all the
+                    // same: this set must outlive the cached shapes.
+                    kept.insert(id, original);
+                    return Some(id);
                 }
                 // `kept` first: several meshes can point to one texture
                 // (same text, same cache entry, #500). Rasterizing again for
@@ -226,7 +229,15 @@ impl ScaledShapes {
                     Some(texture) if texture.pixels_per_point() == pixels_per_point => {
                         Arc::clone(texture)
                     }
-                    _ => Arc::new(by_id.get(&id)?.rerender(context, pixels_per_point)?),
+                    _ => match original.rerender(context, pixels_per_point) {
+                        Some(texture) => Arc::new(texture),
+                        None => {
+                            // Nothing to rasterize again (empty formula): the
+                            // mesh keeps the original, so this set holds it.
+                            kept.insert(id, original);
+                            return None;
+                        }
+                    },
                 };
                 let sharp_id = sharp.id();
                 kept.insert(id, sharp);
@@ -248,6 +259,7 @@ impl ScaledShapes {
 mod tests {
     use super::*;
     use egui::{Color32, FontId, Pos2};
+    use stokesforge_render::formula::FormulaCache;
 
     fn context() -> egui::Context {
         let context = egui::Context::default();
@@ -321,6 +333,7 @@ mod tests {
                 view_generation: 0,
             },
             display: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(display, display)),
+            build: 0,
         }
     }
 
@@ -330,17 +343,13 @@ mod tests {
         let source = [text_shape(&context, 12.0)];
         let key = key_for(200.0);
         let transform = TSTransform::new(egui::Vec2::ZERO, 2.0);
-        let formulas = FormulaCache::new();
+        let held = TextureSet::default();
         let mut cache = ScaledShapes::default();
-        let first = cache
-            .get(&context, key, &source, transform, &formulas)
-            .as_ptr();
-        let second = cache
-            .get(&context, key, &source, transform, &formulas)
-            .as_ptr();
+        let first = cache.get(&context, key, &source, transform, &held).as_ptr();
+        let second = cache.get(&context, key, &source, transform, &held).as_ptr();
         assert_eq!(first, second, "no recomputation with an identical key");
         assert!(
-            (font_size(&cache.get(&context, key, &source, transform, &formulas)[0]) - 24.0).abs()
+            (font_size(&cache.get(&context, key, &source, transform, &held)[0]) - 24.0).abs()
                 < 1e-4
         );
     }
@@ -350,10 +359,12 @@ mod tests {
     fn formula(
         context: &egui::Context,
         cache: &FormulaCache<FormulaTexture>,
+        held: &TextureSet,
     ) -> (Arc<FormulaTexture>, Shape) {
         let choice = stokesforge_render::FontChoice::default();
         let screen = crate::typst_screen::TypstScreen::new(context, cache, &choice)
-            .expect("font resolution failed");
+            .expect("font resolution failed")
+            .holding(held);
         let texture = screen
             .render("$lambda$", 14.0, [0, 0, 0, 255], 1.0)
             .expect("rendering");
@@ -384,13 +395,14 @@ mod tests {
     fn an_enlarged_formula_is_rasterized_at_the_displayed_size() {
         let context = context();
         let formulas = FormulaCache::new();
-        let (base, source) = formula(&context, &formulas);
+        let held = TextureSet::default();
+        let (base, source) = formula(&context, &formulas, &held);
         let transform = TSTransform::new(egui::vec2(5.0, 7.0), 2.0);
 
         let mut stretched = source.clone();
         stretched.transform(transform);
         let mut cache = ScaledShapes::default();
-        let enlarged = &cache.get(&context, key_for(200.0), &[source], transform, &formulas)[0];
+        let enlarged = &cache.get(&context, key_for(200.0), &[source], transform, &held)[0];
 
         let (before, after) = (mesh_of(&stretched), mesh_of(enlarged));
         // The mesh is snapped to the pixels (#86): the box moves by less than
@@ -428,7 +440,8 @@ mod tests {
     fn moving_without_enlarging_rasterizes_nothing() {
         let context = context();
         let formulas = FormulaCache::new();
-        let (base, source) = formula(&context, &formulas);
+        let held = TextureSet::default();
+        let (base, source) = formula(&context, &formulas, &held);
         let mut cache = ScaledShapes::default();
 
         let moved = TSTransform::new(egui::vec2(30.0, 0.0), 1.0);
@@ -437,7 +450,7 @@ mod tests {
             key_for(100.0),
             std::slice::from_ref(&source),
             moved,
-            &formulas,
+            &held,
         );
         assert_eq!(mesh_of(&shapes[0]).texture_id, base.id());
 
@@ -448,7 +461,7 @@ mod tests {
                 key_for(200.0),
                 std::slice::from_ref(&source),
                 double,
-                &formulas,
+                &held,
             )[0],
         )
         .texture_id;
@@ -456,7 +469,7 @@ mod tests {
         let mut elsewhere = key_for(200.0);
         elsewhere.display = elsewhere.display.translate(egui::vec2(40.0, 0.0));
         let second =
-            mesh_of(&cache.get(&context, elsewhere, &[source], shifted, &formulas)[0]).texture_id;
+            mesh_of(&cache.get(&context, elsewhere, &[source], shifted, &held)[0]).texture_id;
         assert_eq!(
             first, second,
             "same scale: the enlarged texture is carried over"
@@ -471,11 +484,12 @@ mod tests {
     fn identical_formulas_share_one_enlarged_texture() {
         let context = context();
         let formulas = FormulaCache::new();
-        let (_, first) = formula(&context, &formulas);
+        let held = TextureSet::default();
+        let (_, first) = formula(&context, &formulas, &held);
         let source = [first.clone(), first.clone(), first];
         let transform = TSTransform::new(egui::Vec2::ZERO, 2.0);
         let mut cache = ScaledShapes::default();
-        let shapes = cache.get(&context, key_for(200.0), &source, transform, &formulas);
+        let shapes = cache.get(&context, key_for(200.0), &source, transform, &held);
         for shape in shapes {
             let id = mesh_of(shape).texture_id;
             assert!(
@@ -485,6 +499,82 @@ mod tests {
         }
     }
 
+    /// #508: at scale 1 the scaled set still holds the textures of its
+    /// meshes: once the cache and the set the shapes came from are gone,
+    /// the texture lives on. Witness: dropping the `kept.insert` of the
+    /// unscaled branch frees it.
+    #[test]
+    fn a_set_at_scale_one_holds_the_textures_of_its_meshes() {
+        let context = context();
+        let (id, mut scaled) = {
+            let formulas = FormulaCache::new();
+            let held = TextureSet::default();
+            let (_, source) = formula(&context, &formulas, &held);
+            let mut scaled = ScaledShapes::default();
+            let moved = TSTransform::new(egui::vec2(30.0, 0.0), 1.0);
+            let shapes = scaled.get(
+                &context,
+                key_for(100.0),
+                std::slice::from_ref(&source),
+                moved,
+                &held,
+            );
+            (mesh_of(&shapes[0]).texture_id, scaled)
+        };
+        assert!(
+            context.tex_manager().read().meta(id).is_some(),
+            "the texture was freed with the cache and the set it came from"
+        );
+        scaled.key = None;
+        scaled.shapes.clear();
+        scaled.formulas.clear();
+        assert!(context.tex_manager().read().meta(id).is_none());
+    }
+
+    /// #508: the same logical key after a rebuild of the cached shapes
+    /// (`build` differs) designates other shapes: it must not be served the
+    /// scaled version of the earlier ones. Witness: leaving `build` out of
+    /// the comparison serves the first set's texture.
+    #[test]
+    fn a_rebuild_of_the_source_shapes_is_never_served_stale() {
+        let context = context();
+        let formulas = FormulaCache::new();
+        let held_a = TextureSet::default();
+        let (_, mesh_a) = formula(&context, &formulas, &held_a);
+        let held_b = TextureSet::default();
+        let choice = stokesforge_render::FontChoice::default();
+        let other = crate::typst_screen::TypstScreen::new(&context, &formulas, &choice)
+            .expect("fonts")
+            .holding(&held_b)
+            .render("$mu$", 14.0, [0, 0, 0, 255], 1.0)
+            .expect("rendering");
+        let anchor = plotters_backend::text_anchor::Pos::new(
+            plotters_backend::text_anchor::HPos::Left,
+            plotters_backend::text_anchor::VPos::Top,
+        );
+        let mesh_b = crate::typst_screen::mesh(
+            &other,
+            Pos2::new(10.0, 20.0),
+            anchor,
+            plotters_backend::FontTransform::None,
+        );
+        let transform = TSTransform::new(egui::Vec2::ZERO, 2.0);
+        let mut scaled = ScaledShapes::default();
+        let mut key = key_for(200.0);
+        key.build = 1;
+        let from_a =
+            mesh_of(&scaled.get(&context, key, &[mesh_a], transform, &held_a)[0]).texture_id;
+        key.build = 2;
+        let from_b =
+            mesh_of(&scaled.get(&context, key, &[mesh_b], transform, &held_b)[0]).texture_id;
+        assert_ne!(from_a, from_b, "the scaled shapes of the earlier build");
+        let size = |id| context.tex_manager().read().meta(id).expect("texture").size;
+        assert_eq!(size(from_b), {
+            let base = other.size_pixels();
+            [base[0] * 2, base[1] * 2]
+        });
+    }
+
     /// Issue #86: on screen, a formula's mesh lands on a whole physical pixel
     /// and measures exactly its texture, including when the figure is reduced
     /// to a scale that does not fit exactly.
@@ -492,10 +582,11 @@ mod tests {
     fn a_reduced_formula_is_snapped_to_the_pixels() {
         let context = context();
         let formulas = FormulaCache::new();
-        let (_, source) = formula(&context, &formulas);
+        let held = TextureSet::default();
+        let (_, source) = formula(&context, &formulas, &held);
         let transform = TSTransform::new(egui::vec2(5.3, 7.7), 0.63);
         let mut cache = ScaledShapes::default();
-        let shapes = cache.get(&context, key_for(63.0), &[source], transform, &formulas);
+        let shapes = cache.get(&context, key_for(63.0), &[source], transform, &held);
         let bounds = mesh_of(&shapes[0]).calc_bounds();
         let ppp = context.pixels_per_point();
         let whole = |v: f32| ((v * ppp) - (v * ppp).round()).abs() < 1e-3;

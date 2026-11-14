@@ -464,7 +464,7 @@ impl StokesForgeApp {
             };
             let active = published_active_panel(ctx, graph);
             let extra = published_layer_selection(ctx, graph);
-            layout_menu_contents(ui, graph, &spec, active, &extra, actions);
+            layout_menu_contents(ui, self.state.tree(), graph, &spec, active, &extra, actions);
         })
         .response
     }
@@ -1043,6 +1043,7 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
 /// are selected ([`arrange_targets`]).
 pub(super) fn layout_menu_contents(
     ui: &mut egui::Ui,
+    tree: &stokesforge_core::Tree,
     graph: NodeId,
     spec: &stokesforge_plot::PlotSpec,
     active: usize,
@@ -1067,7 +1068,7 @@ pub(super) fn layout_menu_contents(
     });
     // #505: fit the page to the layers, greyed out when it already does.
     sections.section(ui, true, |ui| {
-        let available = fit_page_available(ui.ctx(), graph, spec);
+        let available = fit_page_available(ui.ctx(), tree, graph, spec);
         if ui
             .add_enabled(available, egui::Button::new(tr!("action-layout-fit-page")))
             .on_hover_text(tr!("action-layout-fit-page", "hint"))
@@ -1205,6 +1206,7 @@ pub(super) fn layout_menu_contents(
 /// computed for while the menu stays open.
 fn fit_page_available(
     ctx: &egui::Context,
+    tree: &stokesforge_core::Tree,
     graph: NodeId,
     spec: &stokesforge_plot::PlotSpec,
 ) -> bool {
@@ -1219,7 +1221,7 @@ fn fit_page_available(
             return answer;
         }
     }
-    let answer = stokesforge_app_state::frame_sizes::spec_fitted_to_layers(spec).is_some();
+    let answer = stokesforge_app_state::frame_sizes::spec_fitted_to_layers(tree, spec).is_some();
     ctx.data_mut(|data| data.insert_temp(id, (spec.clone(), answer)));
     answer
 }

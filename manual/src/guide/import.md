@@ -18,7 +18,7 @@ A few things to know:
 - An empty file is refused, and so is a file with no line of numbers.
 - A refused file never stops the others: in a batch, it is marked **Refused** on its tab, skipped, and listed in the message at the end.
 - A column that mixes numbers and text is **not** an error. StokesForge keeps it, with the type **Mixed**.
-- Origin projects (`.opj`) are not text files. They open their own window, described in [Origin projects (.opj)](#origin-projects-opj).
+- Origin projects (`.opj`, even renamed) are not text files. They open their own window, described in [Origin projects (.opj)](#origin-projects-opj).
 - Project files (`.stf`) are never imported. If you drop one on the window, it opens as a project in a new window.
 
 ## Open the Import window
@@ -195,7 +195,7 @@ The values are rewritten in place. The columns keep their identity, so graphs th
 
 StokesForge reads the **workbooks** of an Origin project saved as `.opj`. Graphs and matrices of the project are left out.
 
-An `.opj` never goes through the text import. Drop it on the window, choose it with **Add Files…** in the **Import** window, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the **Import** window is open, the file moves to the new window and the **Import** window closes when nothing else is left in it.
+An `.opj` never goes through the text import. StokesForge recognises an Origin project by its extension or by the start of its content, so a file renamed (for example `measure.dat`) is still taken as an Origin project. Drop it on the window, choose it with **Add Files…** in the **Import** window, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the **Import** window is open, the file moves to the new window and the **Import** window closes when nothing else is left in it. If you drop a text file that needs a look together with an Origin file, the **Import** window opens for the text file and the status bar says "The Origin file will open after the Import window"; the **Import from Origin** window appears when you close the **Import** window.
 
 ### The Import from Origin window
 

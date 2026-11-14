@@ -457,6 +457,13 @@ pub fn escape(text: &str) -> String {
     stokesforge_plot::typst_literal(text)
 }
 
+/// What the user typed: `text` without the variable preamble
+/// ([`crate::variables::bind`]). The `epaint` fallback draws and measures this,
+/// never the `#let`s (invariants 4 and 10). Identity when there is no preamble.
+pub fn fallback_text(text: &str) -> &str {
+    crate::variables::strip_preamble(text)
+}
+
 /// Typst's standard library, built once for the whole process.
 ///
 /// It depends on no font choice (`Library` carries only the language
@@ -936,11 +943,29 @@ impl<V> FormulaCache<V> {
         }
         let compiled = compile(text, size_pt, ink, sans, math)?;
         let value = Arc::new(build(&compiled)?);
-        self.entries
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .insert(key, Arc::clone(&value));
-        Ok(value)
+        // `or_insert`, never a plain `insert`: if the build re-entered this
+        // cache (or another thread raced us) for the same key, the entry
+        // already stored is the one already handed out; replacing it would
+        // drop it while its holder still draws it (#508).
+        let stored = Arc::clone(
+            self.entries
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .entry(key)
+                .or_insert(value),
+        );
+        Ok(stored)
+    }
+
+    /// Drops the entries nobody else holds (`Arc::strong_count == 1`) and
+    /// returns how many were dropped. The cache only memoizes compilation
+    /// and rasterization; whoever draws an artifact holds its own `Arc`, so
+    /// an entry still displayed is never touched (#508).
+    pub fn evict_unshared(&self) -> usize {
+        let mut entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+        let before = entries.len();
+        entries.retain(|_, value| Arc::strong_count(value) > 1);
+        before - entries.len()
     }
 
     /// Number of artifacts currently cached — for tests.
@@ -953,30 +978,6 @@ impl<V> FormulaCache<V> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// The artifacts currently cached, in any order — to find the artifact of
-    /// an already built shape (`stokesforge_render_egui::scaled`, issue #31,
-    /// which rasterizes a formula again at the displayed size).
-    pub fn values(&self) -> Vec<Arc<V>> {
-        self.entries
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .values()
-            .cloned()
-            .collect()
-    }
-
-    /// Empties the cache — to bound its size in a long-lived caller
-    /// (`stokesforge_render_egui::GraphView`, where each keystroke in a title
-    /// creates an entry). To be called only **before** rebuilding everything
-    /// that references the removed artifacts: a texture freed while a cached
-    /// shape still points to it would display empty.
-    pub fn clear(&self) {
-        self.entries
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .clear();
     }
 }
 
@@ -1512,19 +1513,23 @@ mod tests {
         assert_eq!(diagnose("$ (unclosed"), diagnose("$ (unclosed"));
     }
 
-    /// #499: a custom legend template reads its variables; the values are
-    /// drawn literally and a smart `#if` drops empty parentheses. Witness: a
-    /// value in markup form would make `*b*` bold (text `Ab`), a template
+    /// #499, #501: a custom legend template reads its variables; the values
+    /// are drawn literally and a smart `#if` drops empty parentheses. Witness:
+    /// a value in markup form would make `*b*` bold (text `Ab`), a template
     /// without the `#if` would give `Abs ()`.
     #[test]
     fn a_legend_template_reads_its_variables_literally() {
-        use stokesforge_plot::{template_source, LegendField};
+        use crate::variables::{bind, VariableValues};
         let source = |template: &str, units: &str, name: &str| {
-            template_source(template, |field| match field {
-                LegendField::LongName | LegendField::ShortName => name.to_string(),
-                LegendField::Units => units.to_string(),
-                _ => String::new(),
-            })
+            bind(
+                template,
+                &VariableValues {
+                    long_name: name.to_string(),
+                    short_name: name.to_string(),
+                    units: units.to_string(),
+                    ..Default::default()
+                },
+            )
         };
         let template = "*#ln* #if u != \"\" [(#u)]";
         let hard = "A *b* # $ \" \\ \u{394}";
@@ -1625,6 +1630,76 @@ mod tests {
                 .expect("compilation/insertion failed");
         }
         assert_eq!(cache.len(), 2);
+    }
+
+    /// #508: a build that re-enters the cache for the same key must not see
+    /// its entry replaced when the outer insert lands: the artifact already
+    /// handed out stays the stored one.
+    #[test]
+    fn a_reentrant_insert_keeps_the_artifact_already_handed_out() {
+        let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
+        let choice = FontChoice::default();
+        let inner = std::cell::RefCell::new(None);
+        let (sans, math) = noto();
+        let (sans2, math2) = (sans.clone(), math.clone());
+        let outer = cache
+            .get_or_try_insert(
+                "$lambda$",
+                12.0,
+                BLACK_INK,
+                &choice,
+                1.0,
+                sans,
+                math,
+                |compiled| {
+                    let handed_out = cache
+                        .get_or_try_insert(
+                            "$lambda$",
+                            12.0,
+                            BLACK_INK,
+                            &choice,
+                            1.0,
+                            sans2,
+                            math2,
+                            |compiled| Ok(compiled.size_pt()),
+                        )
+                        .expect("inner insertion failed");
+                    *inner.borrow_mut() = Some(handed_out);
+                    Ok(compiled.size_pt())
+                },
+            )
+            .expect("outer insertion failed");
+        let inner = inner.into_inner().expect("inner build did not run");
+        assert!(Arc::ptr_eq(&outer, &inner));
+        assert_eq!(cache.len(), 1);
+    }
+
+    /// #508: `evict_unshared` drops only the entries nobody else holds.
+    #[test]
+    fn evict_unshared_keeps_what_someone_holds() {
+        let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
+        let choice = FontChoice::default();
+        let get = |text: &str| {
+            let (sans, math) = noto();
+            cache
+                .get_or_try_insert(
+                    text,
+                    12.0,
+                    BLACK_INK,
+                    &choice,
+                    1.0,
+                    sans,
+                    math,
+                    |compiled| Ok(compiled.size_pt()),
+                )
+                .expect("compilation/insertion failed")
+        };
+        let held = get("$lambda$");
+        drop(get("$mu$"));
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.evict_unshared(), 1);
+        assert_eq!(cache.len(), 1);
+        assert!(Arc::ptr_eq(&held, &get("$lambda$")));
     }
 
     /// Sanity measurement on the **real pipeline** — not R0's throwaway spike.

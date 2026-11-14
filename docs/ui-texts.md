@@ -29,7 +29,7 @@ but its word is already fixed.
 | R3 | **Title Case**: menus, commands, buttons, tabs, window titles. **Sentence case**: fields, checkboxes, options (radio buttons, lists), tooltips, messages. Linking words in lowercase in Title Case (*of, and, to, in*). French: capital on the first word only, never Title Case. |
 | R4 | **Command = verb** (*Add Column*, *Export Graph…*). "…" only if a window still asks for something. An entry that opens a settings page carries the name of the page (*Axes…*). |
 | R5 | **Visibility = "Show X"** (*Show legend*), never « X affichée » nor « Présente dans… ». |
-| R6 | **Units.** Interface field: unit in parentheses, SI symbol, after a space (*Line width (pt)*). **Axis title: quantity / unit** (IUPAC), symbol or name: *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹*; a title taken from a column is written *Long name / Units*. Superscripts in Unicode in the interface (`cm⁻¹`); in an axis title (Typst), `$"cm"^(-1)$`. |
+| R6 | **Units.** Interface field: unit in parentheses, SI symbol, after a space (*Line width (pt)*). **Axis title: quantity / unit** (IUPAC), symbol or name: *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹*; a title taken from a column is written *Long name / Units*; a new graph's axis titles are filled with the Typst template `AXIS_TITLE_TEMPLATE` that writes it (#506). The interface field is one free text, « Axis title » (no Units field); an old file's parentheses are kept as written. Superscripts in Unicode in the interface (`cm⁻¹`); in an axis title (Typst), `$"cm"^(-1)$`. |
 | R7 | **Short label, precise tooltip.** Label: 1 to 3 words. Tooltip: the effect **in the 3rd person** ("Adds a workbook", never "Add a workbook"), the default value if it matters, the shortcut; never a repetition of the label. A gesture is written as a gesture ("Right-click to remove"). |
 | R8 | **No final period** on a single sentence. Period between two sentences. |
 | R9 | **Message = what happened, then what to do.** No "please", no apology, no exclamation mark. Never internal jargon: *session, node, tree, id, thread, spec, command, history entry, token, recipe*. Never `{err}`: the cause of an `io::Error` is put into a sentence by `errors::io` and enters the message as a variable (`{ $cause }`). |
@@ -97,6 +97,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Column | Colonne | Series of values of one type | Champ, Variable | O |
+| Variable | Variable | A name typed in a graph text (`#long-name`, `#ln`, `#units`…) that the graph replaces by a field of a column, live (#501); the names are the same in every language, the help lists them from `VARIABLES` | Champ, Paramètre, Macro | G |
 | Row | Ligne | Row of cells of a sheet | Enregistrement | O |
 | Entry row | Ligne de saisie | Empty row the grid always shows below the last row of a sheet, marked `*` in the gutter (« Type here to add a row » / « Saisir ici pour ajouter une ligne »); typing in it creates the row. Not data: not saved, not plotted | Ligne vide, New row, Ligne d'ajout | O |
 | x' (x prime) | x' | Numeric value specific to a column (special header row), abscissa of a "line" series; is not translated | X2, Temps, Instant (le temps n'est qu'un cas d'usage) | — |
@@ -118,6 +119,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Numeric / Text / Mixed / Date/Time | Numérique / Texte / Mixte / Date et heure | Values of the types | Nombres, Date-heure | O |
 | Cut / Copy / Paste | Couper / Copier / Coller | Clipboard | — | G |
 | Paste in Place | Coller à l'identique | Paste at the original position of the copy | Coller en absolu | G |
+| Paste Transposed | Coller transposé | Paste the copied block with rows and columns swapped, values only (#495) | Transposer, Coller en transposition | — |
 | Copy with Header | Copier avec l'en-tête | Copy the values and the column header | — | O |
 | Clipboard | Presse-papiers | System copy memory | Presse-papier, Tampon | G |
 | Add | Ajouter | Create an object **at the end** (column, sheet, text, folder) | Nouveau, Créer | O |
@@ -199,7 +201,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Bottom / Left / Right / Top | Bas / Gauche / Droite / Haut | The four axes of an area, named by their place (#358); composed texts are phrased by a selector, never by gluing: « Axe du bas », « Titre de l'axe de gauche » | X (bottom), Y2, Secondary Y, Axe X (bas) | G |
 | Y axis | Axe Y | Series field: the vertical axis the series is drawn against, Left or Right (#358); grayed out on an overlaid layer | Axe secondaire | G |
 | Y error / X error | Erreur Y / Erreur X | Series fields (#360): the column drawn as error bars on the series, whatever its plot type; first choice None. Not the role Y Error / X Error of the column, which only decides the pairing at plot time | Incertitude, Écart-type | G |
-| Axis title | Titre de l'axe | Text that names the quantity of the axis | Libellé, Label | G |
+| Axis title | Titre de l'axe | One free Typst text that names the axis (#506): quantity and unit together, it may read the column variables. Not « Quantity » / « Units » fields | Libellé, Label | G |
 | Tick | Graduation | Mark on the axis | Repère, Coche | I |
 | Tick label | Étiquette de graduation | Value written next to a tick | Libellé de graduation | G (Q11) |
 | Gridlines | Quadrillage | Lines that extend the ticks | Grille | G (Q12) |

@@ -31,6 +31,29 @@ pub fn is_origin_bytes(bytes: &[u8]) -> bool {
     bytes.starts_with(b"CPYA") || bytes.starts_with(b"CPYUA")
 }
 
+/// `true` for an Origin file by extension ([`is_origin_path`]) or by content
+/// ([`is_origin_bytes`] on the first five bytes). Reads at most five bytes;
+/// any I/O error means `false`.
+pub fn is_origin_file(path: &Path) -> bool {
+    if is_origin_path(path) {
+        return true;
+    }
+    use std::io::Read;
+    let mut head = [0u8; 5];
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut len = 0;
+    let mut file = file.take(5);
+    while len < head.len() {
+        match file.read(&mut head[len..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => len += n,
+        }
+    }
+    is_origin_bytes(&head[..len])
+}
+
 /// Reads an Origin project from disk.
 pub fn read_origin_file(path: &Path) -> Result<OriginProject, ImportFailure> {
     let fail = |cause| ImportFailure {
@@ -423,6 +446,25 @@ mod tests {
         );
         let missing = read_origin_file(&dir.join("absent.opj")).unwrap_err();
         assert!(matches!(missing.cause, ImportFailureCause::Read(_)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn origin_file_is_recognised_by_extension_or_content() {
+        let dir = std::env::temp_dir().join(format!("sf-origin-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        assert!(is_origin_file(&write("measure.dat", b"CPYA 4.2673 rest")));
+        assert!(is_origin_file(&write("unicode.bin", b"CPYUA 5.0")));
+        assert!(is_origin_file(&write("text.opj", b"1,2\n3,4\n")));
+        assert!(!is_origin_file(&write("text.dat", b"1,2\n3,4\n")));
+        assert!(!is_origin_file(&dir.join("absent.dat")));
+        assert!(!is_origin_file(&write("empty.dat", b"")));
+        assert!(!is_origin_file(&write("short.dat", b"CPY")));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -423,11 +423,26 @@ impl From<&AxisSpec> for AxisSpecRecord {
     }
 }
 
+/// The axis title of a file (#506): the old label and unit pair joined into
+/// one text, the same way [`AxisSpec::display_label`] draws it, so an old file
+/// keeps its look. An empty title stays empty.
+fn folded_axis_title(label: String, unit: String) -> String {
+    if unit.is_empty() {
+        return label;
+    }
+    AxisSpec {
+        label,
+        unit,
+        ..AxisSpec::default()
+    }
+    .display_label()
+}
+
 impl From<AxisSpecRecord> for AxisSpec {
     fn from(value: AxisSpecRecord) -> Self {
         Self {
-            label: value.label,
-            unit: value.unit,
+            label: folded_axis_title(value.label, value.unit),
+            unit: String::new(),
             scale: value.scale.into(),
             auto_range: value.auto_range,
             range_min: value.range_min,
@@ -1390,6 +1405,33 @@ impl From<WindowGeometryRecord> for crate::WindowGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An axis as an old file holds it, read back (#506).
+    fn loaded_axis(label: &str, unit: &str) -> AxisSpec {
+        let old = AxisSpec {
+            label: label.to_owned(),
+            unit: unit.to_owned(),
+            ..AxisSpec::default()
+        };
+        AxisSpec::from(AxisSpecRecord::from(&old))
+    }
+
+    /// An old label + unit pair is joined into one title at load, the way it
+    /// was drawn; an empty title stays empty (nothing is filled at load).
+    /// Witness: filling the empty title with the template at load.
+    #[test]
+    fn an_old_axis_title_is_folded_at_load() {
+        for (label, unit, folded) in [
+            ("Abs", "a.u.", "Abs (a.u.)"),
+            ("", "s", "(s)"),
+            ("Abs", "", "Abs"),
+            ("", "", ""),
+        ] {
+            let axis = loaded_axis(label, unit);
+            assert_eq!(axis.label, folded, "{label:?} + {unit:?}");
+            assert!(axis.unit.is_empty());
+        }
+    }
 
     #[test]
     fn check_rows_refuses_only_beyond_the_limit() {

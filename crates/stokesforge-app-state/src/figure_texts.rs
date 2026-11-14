@@ -28,14 +28,46 @@ pub fn figure_texts() -> FigureTexts {
 pub fn series_label_text(label: &SeriesLabel) -> String {
     match label {
         SeriesLabel::Text(text) => text.clone(),
-        // The plain text Typst produces; empty if the template does not
-        // compile (the lists then show the grey fallback of an empty text).
-        SeriesLabel::Template { markup } => {
-            stokesforge_render::formula::plain_text(markup).unwrap_or_default()
+        // A typed name shows as typed (#501), like the editors.
+        SeriesLabel::Typed { name, .. } => name.clone(),
+        // The plain text Typst produces from the bound template; empty if it
+        // does not compile (the lists then show the grey fallback of an empty
+        // text).
+        SeriesLabel::Template { template, fields } => {
+            let values = stokesforge_render::variables::VariableValues {
+                unknown: tr!("graph-series-broken-reference"),
+                ..fields.into()
+            };
+            let bound = stokesforge_render::variables::bind(template, &values);
+            stokesforge_render::formula::plain_text(&bound).unwrap_or_default()
         }
         SeriesLabel::Row(row) => tr!("graph-row-series", number = row.saturating_add(1)),
         SeriesLabel::Missing => tr!("graph-series-broken-reference"),
     }
+}
+
+/// The rows of the variable reminder (#501), one per entry of
+/// [`stokesforge_render::variables::VARIABLES`]: what is typed (the two names,
+/// identical in every language) and what it gives (the field, as the header
+/// row is named on screen). Built from the table, so a new variable reaches
+/// every help; the last row is `#col.A.ln`, the explicit column (#501).
+pub fn variable_help_rows() -> Vec<(String, String)> {
+    use stokesforge_plot::LegendField;
+    let named = ("#col.A.ln".to_owned(), tr!("plot-variables-col"));
+    stokesforge_render::variables::VARIABLES
+        .iter()
+        .map(|(long, short, field)| {
+            let gives = match field {
+                LegendField::LongName => tr!("legend-text-from-long-name"),
+                LegendField::ShortName => tr!("legend-text-from-short-name"),
+                LegendField::Units => tr!("legend-text-from-units"),
+                LegendField::Comments => tr!("legend-text-from-comments"),
+                LegendField::XPrime => tr!("legend-text-from-x-prime"),
+            };
+            (format!("#{long}  #{short}"), gives)
+        })
+        .chain(std::iter::once(named))
+        .collect()
 }
 
 /// The displayed name of the predefined theme `index` of
@@ -61,5 +93,54 @@ pub fn legend_text_from_label(from: &stokesforge_plot::LegendTextFrom) -> String
         From::LongNameComments => tr!("legend-text-from-long-name-comments"),
         From::Custom => tr!("legend-text-from-custom"),
         From::Unknown(_) => tr!("legend-text-from-unknown"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #501: every variable of the table appears in the help, with both names
+    /// and what it gives (English catalog). Witness: drop a row of
+    /// `variable_help_rows` (or build it from a hand-written list that lags
+    /// the table) and the entry is missing.
+    #[test]
+    fn every_variable_appears_in_the_help() {
+        let rows = variable_help_rows();
+        assert_eq!(
+            rows.len(),
+            stokesforge_render::variables::VARIABLES.len() + 1
+        );
+        for (long, short, _) in stokesforge_render::variables::VARIABLES {
+            let line = rows
+                .iter()
+                .find(|(names, _)| *names == format!("#{long}  #{short}"))
+                .unwrap_or_else(|| panic!("#{long} is missing from the help: {rows:?}"));
+            assert!(!line.1.is_empty());
+        }
+        let gives: Vec<&str> = rows.iter().map(|(_, gives)| gives.as_str()).collect();
+        assert_eq!(
+            gives,
+            [
+                "Long Name",
+                "Short Name",
+                "Units",
+                "Comments",
+                "x'",
+                "The same, read from column A of the sheet"
+            ]
+        );
+    }
+
+    /// #501 lot 4: the help names the explicit column. Witness: drop the row.
+    #[test]
+    fn the_help_lists_the_explicit_column() {
+        let rows = variable_help_rows();
+        assert!(
+            rows.iter()
+                .any(|(names, gives)| names == "#col.A.ln"
+                    && gives.contains("column A of the sheet")),
+            "{rows:?}"
+        );
     }
 }
