@@ -372,13 +372,19 @@ fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
             .iter()
             .map(|x| (1.0 + 0.2 * rank as f64) * (1.0 - (-x / tau).exp()))
             .collect();
-        families_y.push(titled_column(
+        let column = titled_column(
             project,
             families,
             &y,
             ("Conversion", "mol/L"),
             ColumnRole::Y,
-        )?);
+        )?;
+        // Prototype #510: a value per curve (x', in minutes), so that the
+        // Groups graph can show a color bar.
+        apply_meta(project, column, |meta| {
+            meta.x_prime = Some(10.0 * (rank as f64 + 1.0));
+        })?;
+        families_y.push(column);
     }
     Ok(Measures {
         time,
