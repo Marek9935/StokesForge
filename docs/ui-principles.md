@@ -97,4 +97,4 @@ variable of the shell. Detail: [`application/`](application/README.md),
 | write a visible text | [`ui-texts.md`](ui-texts.md) |
 | add an icon | [`icons.md`](icons.md) |
 | touch the main window, the grid | [`application/`](application/README.md) |
-| know the conventions per domain | `.claude/conventions.md`, section "Application" |
+| know the conventions per domain | `.claude/rules/app.md`, section "Application" |

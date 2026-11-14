@@ -12,7 +12,7 @@ One file holds the whole project:
 - **The analyses:** the calculations you ran, with their settings and their results. The result columns are ordinary columns of the workbook, so opening a file does not recalculate them. Only columns with a formula are computed again.
 - **Final corrections:** the record of a baseline or correction that replaced data, and the original data it replaced, so that **Restore Original Data** still works after you reopen the project.
 - **Where the data came from:** for imported columns, the source file, the import template and the file metadata, so that **Refresh from Source** works after you reopen the project.
-- **The look of your workspace:** position, size, open or closed state and stacking order of the windows, and the width of the columns you resized.
+- **The look of your workspace:** position, size, open, maximised, collapsed or closed state and stacking order of the windows (they come back when you open the project, including from **Recover Projects**; a project saved by an older version opens with every window closed; open them from the Project Manager), and the width of the columns you resized.
 - **Colors saved in the project** (the choice **Saved in project** in the color picker).
 
 The file does **not** contain:
@@ -35,6 +35,8 @@ On macOS, use <kbd>Cmd</kbd> instead of <kbd>Ctrl</kbd>.
 The first **Save** of a new project asks for a file name. The following ones use the same file. A dot after the project name in the title bar means unsaved changes.
 
 If you start a new project, open another one or quit with unsaved changes, StokesForge asks whether to save first. **Discard Changes** loses them for good.
+
+While a dialog is open, the close button of the main window only makes the dialog flash: finish or cancel the dialog first.
 
 ### Open from the command line
 

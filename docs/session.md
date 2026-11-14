@@ -95,11 +95,15 @@ crate). Two `.clone()`s of the same handle remain **the same** sender — a scri
 that clones its handle for a thread stays "itself". Two **independent** calls to
 `Session::handle()` are two **distinct** senders, even in the same process.
 `SessionHandle::with_new_identity()` gives a handle to the same session with a
-**new** identity. This is what the detached views
-(`AppState::fork_for_detached_view`, in `stokesforge-app-state`) and the script
-engine use, so that their writes are refused (`ForeignMacro`) while a macro is
-open by the interface — instead of being absorbed into it and then undone with
-it (issue #21).
+**new** identity. This is what the detached windows and the script engine use, so
+that their writes are refused (`ForeignMacro`) while a macro is open by the
+interface — instead of being absorbed into it and then undone with it (issue #21).
+A detached window shares the application's single `AppState` (#475, L2): it owns
+a handle with its own identity (`AppState::new_session_identity`) and the shell
+puts it into the state for the length of the window's paint only
+(`AppState::replace_session_identity`, paired with a guard that gives the
+previous one back, even on a panic); the actions a window returns are dispatched
+with the main identity.
 
 This identity exists for a precise reason: without it, one client's work leaked
 into another's macro, and an `abort_macro` could silently undo someone else's
@@ -115,6 +119,17 @@ already approved work.
 | `Save` / `Load` / `NewProject` | refused for anyone — writing the intermediate state of a macro that someone could still abort stays forbidden to all |
 | `Snapshot` | always served: pure read |
 | `Shutdown` | undoes (rather than commits) any macro still open, level by level |
+
+An entry that is still open (cell, header, note, a rename, a graph text editor)
+never joins the Properties macro (#533, an application rule on top of the
+sender identity): opening Properties (or a shape edit) first commits every open
+entry as its own undo step, a refused value staying open; while the macro is
+open nothing commits an entry (`commit_open_entries` does nothing); the root
+pass dispatches the actions that open the macro last, so a rename pushed in the
+same frame lands before it; and the cross of the main window only flashes the
+open dialog (`AppState::open_dialog`, checked in `logic`), as in most
+applications, so nothing quits in the middle of the macro. Cancel of Properties
+therefore never rolls back what the user typed.
 
 The last point deserves detail: a macro never prevents `Project` from being
 mutated — it only **defers the history entry**. Without a guard, a `Shutdown`
@@ -134,6 +149,21 @@ The full table, with what it fixes and why, is at the top of
 2. **No non-`Send` object crosses the channel.** Requests and responses are
    pure Rust, `Send + 'static` — checked by a compile-time assertion
    (`assert_send`).
+
+## A third client: the server thread (#475)
+
+Besides the interface thread and the script thread, the application's server thread
+(`stokesforge-app/src/app/server.rs`) holds a clone of the interface's `SessionHandle`. It calls `save` for the
+autosave (the interface's own sender: `save` only reads, creates no history entry), `snapshot` and
+`recalc_running` when it collects a recalculation, `actor_alive`. It executes commands only to apply
+a finished import: one `Import` macro of ordinary undoable commands, one history entry, with the
+application lock released, on a handle with `with_new_identity()` like a script's (#21). While that
+macro is open, a write of the interface is refused with `MacroOpen` and shown by the usual
+refusal path (the same message and status band as a write during a script), so it never joins the
+Import entry and Ctrl+Z of the import leaves later edits alone. `AppState::can_new_project` and a
+second import refuse meanwhile, and the autosave waits (its `save` reads `MacroOpen` as "busy"). Its
+requests wait for the actor like the interface's: a long recalculation delays them, and it
+holds no lock on the application state while it waits for the autosave write. The detached windows are not session clients of their own: each one locks the application in its own pass and uses the interface's handle (the detached workbook and the panels under their own sender identity, #21).
 
 ## The principle that governs refusals
 
@@ -193,6 +223,7 @@ the growth of its source is undone.
 | | |
 |---|---|
 | where the memo lives | in the actor, next to the `Project` (`Recalculator`): neither history nor `.stf` |
+| followed transposed sheets (#463) | the pass has a follow step (`run_follows`) between the formulas and the calculations, inside the same rounds: a checked sheet catches up with its source by content, outside the history; `follow_hold` keeps a sheet that was out of date in the file as it is until its source really changes |
 | what empties it | `Load` (the values of a file are not taken on trust, except that analysis calculations are trusted on the first pass after it, #316; a transposed link over a formula column stays up to date because the pass keeps the version of a column recomputed to the same content, #439) and `NewProject` |
 | the economy witness | `Snapshot::formula_evaluations`: monotonic count of the formula columns the passes computed (one per column the pass decided to compute, a `NaN` block of a cycle or unreadable formula included; none for a clean one). The versions cannot play that part since #439 |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |

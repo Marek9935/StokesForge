@@ -195,6 +195,42 @@ pub fn graph_boxes(spec: &PlotSpec, layout: &FigureLayout) -> Vec<GraphBox> {
         .collect()
 }
 
+/// Extra room kept around the graph boxes by [`page_fitted_to_layers`], in
+/// points, on top of the margin every box already carries in its bands (#505,
+/// decision S3: the margin of a new figure, so none more).
+pub const FIT_PAGE_EXTRA_MARGIN: f64 = 0.0;
+
+/// The page that fits the graph boxes (#505): the bounding box of their outer
+/// rectangles (frame, axis bands and the margin they keep), grown by
+/// [`FIT_PAGE_EXTRA_MARGIN`] and brought into `[MIN_PAGE_EXTENT,
+/// MAX_FIGURE_EXTENT]`. The boxes do not move: the page is what changes.
+/// `None` without a box, or if a number is not finite.
+pub fn page_fitted_to_layers(boxes: &[GraphBox]) -> Option<FreePage> {
+    if boxes.is_empty() {
+        return None;
+    }
+    let (mut left, mut top) = (f64::INFINITY, f64::INFINITY);
+    let (mut right, mut bottom) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for graph in boxes {
+        let o = graph.outer;
+        left = left.min(o.left);
+        top = top.min(o.top);
+        right = right.max(o.left + o.width);
+        bottom = bottom.max(o.top + o.height);
+    }
+    let all = [left, top, right, bottom];
+    if all.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let margin = FIT_PAGE_EXTRA_MARGIN;
+    Some(FreePage {
+        left: left - margin,
+        top: top - margin,
+        width: (right - left + 2.0 * margin).clamp(MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT),
+        height: (bottom - top + 2.0 * margin).clamp(MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT),
+    })
+}
+
 /// Every box mapped affinely from the page `from` to the page `to`: its outer
 /// rectangle follows, the frame is [`GraphBox::frame_for`] of it. `(base,
 /// frame)` per box, in the order given.
@@ -1054,38 +1090,34 @@ pub fn moved_boundary(
 }
 
 /// The page after dragging its `corner` (`(right, bottom)`) by `delta`
-/// points, the boxes scaled with it: the dragged corner moves, the opposite
-/// one stays. Each axis has **one** scale factor (the new extent over the old
-/// one), applied to the outer rectangles of every box with the bands frozen at
-/// the press (see [`scaled_to_page`]); it is bounded so that every frame stays
-/// in `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and the page extent in
-/// `[MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT]`, so the boxes keep their proportions
-/// all the way to the stop (a per-frame clamp would not). With `snap.enabled`
-/// and a grid, the dragged corner snaps to the grid lines of the page origin
-/// before the bound. Rounded to a hundredth of a point.
-pub fn resized_page(
+/// points (#505, K1): the two page edges that meet there move, the opposite
+/// corner stays, and **the graph boxes are not touched**: the page gains or
+/// loses empty space. Inward it stops at the bounding box of the outer
+/// rectangles of the `boxes` (a page already smaller than the graphs is never
+/// pushed further in); the extent stays in `[MIN_PAGE_EXTENT,
+/// MAX_FIGURE_EXTENT]`. With `snap.enabled` and a grid, the dragged edge snaps
+/// to the grid lines of the page origin before the bounds. Rounded to a
+/// hundredth of a point.
+pub fn moved_page_corner(
     boxes: &[GraphBox],
     start: FreePage,
     corner: (bool, bool),
     delta: (f64, f64),
     snap: Snap,
 ) -> FreePage {
-    let (right, bottom) = corner;
     let (dx, dy) = (round_hundredth(delta.0), round_hundredth(delta.1));
-    // `(low, high)` factors that keep every frame in range along one axis.
-    let factor_bounds = |extent_of: &dyn Fn(&GraphBox) -> (f64, f64)| -> (f64, f64) {
-        let (mut low, mut high) = (0.0_f64, f64::INFINITY);
-        for graph in boxes {
-            let (outer, gutters) = extent_of(graph);
-            if outer > 0.0 {
-                low = low.max((MIN_FRAME_SIZE + gutters) / outer);
-                high = high.min((MAX_FRAME_SIZE + gutters) / outer);
-            }
-        }
-        (low, high)
-    };
-    let axis = |origin: f64, extent: f64, d: f64, far: bool, bounds: (f64, f64)| -> (f64, f64) {
-        if extent.is_nan() || extent <= 0.0 {
+    let (mut left, mut top) = (f64::INFINITY, f64::INFINITY);
+    let (mut right, mut bottom) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for graph in boxes {
+        let o = graph.outer;
+        left = left.min(o.left);
+        top = top.min(o.top);
+        right = right.max(o.left + o.width);
+        bottom = bottom.max(o.top + o.height);
+    }
+    // `(near, far)` limits the dragged edge may not cross going inward.
+    let axis = |origin: f64, extent: f64, d: f64, far: bool, bbox: (f64, f64)| -> (f64, f64) {
+        if extent.is_nan() || extent <= 0.0 || !d.is_finite() {
             return (origin, extent);
         }
         let (mut low, mut high) = (origin, origin + extent);
@@ -1104,18 +1136,14 @@ pub fn resized_page(
                 }
             }
         }
-        let wanted = high - low;
-        let mut min_extent = MIN_PAGE_EXTENT;
-        let mut max_extent = MAX_FIGURE_EXTENT;
-        if bounds.0 <= bounds.1 {
-            min_extent = min_extent.max(bounds.0 * extent);
-            max_extent = max_extent.min(bounds.1 * extent);
+        if bbox.0 <= bbox.1 {
+            if far {
+                high = high.max(bbox.1.min(origin + extent));
+            } else {
+                low = low.min(bbox.0.max(origin));
+            }
         }
-        let new_extent = if min_extent <= max_extent {
-            wanted.clamp(min_extent, max_extent)
-        } else {
-            extent
-        };
+        let new_extent = (high - low).clamp(MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT);
         let low = if far {
             origin
         } else {
@@ -1123,18 +1151,40 @@ pub fn resized_page(
         };
         (round_hundredth(low), round_hundredth(new_extent))
     };
-    let x_bounds = factor_bounds(&|g| (g.outer.width, g.gutters.0 + g.gutters.2));
-    let y_bounds = factor_bounds(&|g| (g.outer.height, g.gutters.1 + g.gutters.3));
-    // The dragged edge is `origin + extent` for the far corner, and the
-    // near corner keeps the far edge, so the grid is read from the page origin.
-    let (left, width) = axis(start.left, start.width, dx, right, x_bounds);
-    let (top, height) = axis(start.top, start.height, dy, bottom, y_bounds);
+    let (left, width) = axis(start.left, start.width, dx, corner.0, (left, right));
+    let (top, height) = axis(start.top, start.height, dy, corner.1, (top, bottom));
     FreePage {
         left,
         top,
         width,
         height,
     }
+}
+
+/// The frames of **Fit Layout to Page** in Free (#505, K1), the inverse of
+/// [`page_fitted_to_layers`]: the graph boxes are mapped affinely from their
+/// bounding box to the `page` ([`scaled_to_page`]), bands frozen, one factor
+/// per axis (the Figure size padlock plays no part). `None` without a box, or
+/// when the boxes already fill the page (nothing to do, no undo step).
+pub fn boxes_fitted_to_page(boxes: &[GraphBox], page: FreePage) -> Option<Vec<(usize, FreeFrame)>> {
+    let from = page_fitted_to_layers(boxes)?;
+    if from.width <= 0.0 || from.height <= 0.0 {
+        return None;
+    }
+    let frames = scaled_to_page(boxes, from, page);
+    let unchanged = frames.iter().all(|(base, frame)| {
+        boxes
+            .iter()
+            .find(|graph| graph.base == *base)
+            .is_some_and(|graph| {
+                let old = graph.frame;
+                (old.left - frame.left).abs() < 0.005
+                    && (old.top - frame.top).abs() < 0.005
+                    && (old.width - frame.width).abs() < 0.005
+                    && (old.height - frame.height).abs() < 0.005
+            })
+    });
+    (!unchanged).then_some(frames)
 }
 
 #[cfg(test)]
@@ -1168,6 +1218,7 @@ mod tests {
             placement: LayerPlacement::Free,
             free_cells: cells,
             free_origin: (0.0, 0.0),
+            grid_slack: [0; 4],
         }
     }
 
@@ -1479,15 +1530,15 @@ mod tests {
     #[test]
     fn dragging_a_page_corner_moves_it_and_keeps_the_opposite_one() {
         let p = page(10.0, 20.0, 800.0, 600.0);
-        let r = resized_page(&[], p, (true, true), (50.0, -30.0), no_snap());
+        let r = moved_page_corner(&[], p, (true, true), (50.0, -30.0), no_snap());
         assert_eq!(r, page(10.0, 20.0, 850.0, 570.0));
-        let r = resized_page(&[], p, (false, false), (40.0, 25.0), no_snap());
+        let r = moved_page_corner(&[], p, (false, false), (40.0, 25.0), no_snap());
         assert_eq!((r.left, r.top), (50.0, 45.0));
         assert_eq!((r.left + r.width, r.top + r.height), (810.0, 620.0));
         // Minimum 72 each way, opposite corner kept.
-        let r = resized_page(&[], p, (true, true), (-5000.0, -5000.0), no_snap());
+        let r = moved_page_corner(&[], p, (true, true), (-5000.0, -5000.0), no_snap());
         assert_eq!((r.width, r.height), (72.0, 72.0));
-        let r = resized_page(&[], p, (false, true), (5000.0, 0.0), no_snap());
+        let r = moved_page_corner(&[], p, (false, true), (5000.0, 0.0), no_snap());
         assert_eq!(r.left + r.width, 810.0);
         assert_eq!(r.width, 72.0);
         // Grid: the dragged corner lands on a line from the page origin.
@@ -1496,14 +1547,14 @@ mod tests {
             threshold: 0.0,
             enabled: true,
         };
-        let r = resized_page(&[], p, (true, true), (47.0, 3.0), g);
+        let r = moved_page_corner(&[], p, (true, true), (47.0, 3.0), g);
         assert_eq!((r.width, r.height), (850.0, 600.0));
         let off = Snap {
             enabled: false,
             ..g
         };
         assert_eq!(
-            resized_page(&[], p, (true, true), (47.0, 3.0), off).width,
+            moved_page_corner(&[], p, (true, true), (47.0, 3.0), off).width,
             847.0
         );
     }
@@ -2112,66 +2163,90 @@ mod page_corner_tests {
         }
     }
 
-    /// Dragging a page corner far inward scales every box by one factor and
-    /// stops where the smallest frame reaches its minimum, with the
-    /// proportions the boxes had at the press. Witness: the per-frame clamp of
-    /// `frame_for` doing the stopping (the small frame sticks at 36 while the
-    /// others keep shrinking).
-    #[test]
-    fn a_page_corner_far_inward_stops_with_the_same_proportions() {
-        let page = FreePage {
-            left: 0.0,
-            top: 0.0,
-            width: 800.0,
-            height: 400.0,
-        };
-        // Frame widths 100 and 600: the small one stops the scale at 0.36.
-        let boxes = [
-            boxed(0, 0.0, 0.0, 160.0, 400.0),
-            boxed(1, 160.0, 0.0, 640.0, 400.0),
-        ];
-        let snap = Snap {
+    fn no_snap_at_all() -> Snap {
+        Snap {
             grid: None,
             threshold: 0.0,
             enabled: false,
-        };
-        let stopped = resized_page(&boxes, page, (true, true), (-100_000.0, 0.0), snap);
-        let frames = scaled_to_page(&boxes, page, stopped);
-        let (a, b) = (frames[0].1, frames[1].1);
-        assert!((a.width - MIN_FRAME_SIZE).abs() < 0.2, "{a:?}");
-        // Outer widths scale together, so the frames keep the press ratio of
-        // outer rectangles: outer a = 160 s, outer b = 640 s.
-        let s = stopped.width / page.width;
-        assert!((a.width + 60.0 - 160.0 * s).abs() < 0.02);
-        assert!((b.width + 60.0 - 640.0 * s).abs() < 0.02, "{b:?}");
-        // The opposite corner stayed.
-        assert_eq!((stopped.left, stopped.top), (0.0, 0.0));
-        // A far corner on the near side keeps the far edge.
-        let near = resized_page(&boxes, page, (false, false), (100_000.0, 0.0), snap);
-        assert!((near.left + near.width - 800.0).abs() < 1e-9);
+        }
     }
 
-    /// The maximum holds as well: one factor, so the largest frame stops all.
+    /// K1: a page corner pulled inward stops at the bounding box of the graphs
+    /// (outer rectangles), on both sides; outward it grows freely. The boxes
+    /// are not an output. Witness: no bounding box limit (the page goes to the
+    /// 72 point minimum).
     #[test]
-    fn a_page_corner_far_outward_stops_at_the_largest_frame() {
+    fn a_page_corner_pulled_inward_stops_at_the_graphs() {
         let page = FreePage {
             left: 0.0,
             top: 0.0,
             width: 800.0,
             height: 400.0,
         };
+        // The graphs occupy x 100..700, y 50..300.
         let boxes = [
-            boxed(0, 0.0, 0.0, 160.0, 400.0),
-            boxed(1, 160.0, 0.0, 640.0, 400.0),
+            boxed(0, 100.0, 50.0, 300.0, 250.0),
+            boxed(1, 400.0, 50.0, 300.0, 250.0),
         ];
-        let snap = Snap {
-            grid: None,
-            threshold: 0.0,
-            enabled: false,
+        let snap = no_snap_at_all();
+        let far = moved_page_corner(&boxes, page, (true, true), (-100_000.0, -100_000.0), snap);
+        assert_eq!(
+            (far.left, far.top, far.width, far.height),
+            (0.0, 0.0, 700.0, 300.0)
+        );
+        let near = moved_page_corner(&boxes, page, (false, false), (100_000.0, 100_000.0), snap);
+        assert_eq!(
+            (
+                near.left,
+                near.top,
+                near.left + near.width,
+                near.top + near.height
+            ),
+            (100.0, 50.0, 800.0, 400.0)
+        );
+        let out = moved_page_corner(&boxes, page, (false, true), (-40.0, 25.0), snap);
+        assert_eq!(
+            (out.left, out.top, out.width, out.height),
+            (-40.0, 0.0, 840.0, 425.0)
+        );
+        // A page already smaller than the graphs is not pushed further in.
+        let small = FreePage {
+            left: 0.0,
+            top: 0.0,
+            width: 500.0,
+            height: 400.0,
         };
-        let grown = resized_page(&boxes, page, (true, true), (1e9, 0.0), snap);
-        let frames = scaled_to_page(&boxes, page, grown);
-        assert!((frames[1].1.width - MAX_FRAME_SIZE).abs() < 0.2);
-        assert!(frames[0].1.width > MIN_FRAME_SIZE);
+        let same = moved_page_corner(&boxes, small, (true, true), (-50.0, 0.0), snap);
+        assert_eq!(same.width, 500.0);
+    }
+
+    /// K1: Fit Layout to Page maps the bounding box of the graphs to the page,
+    /// one factor per axis; nothing to do gives `None`.
+    #[test]
+    fn the_boxes_fill_the_page_with_one_factor_per_axis() {
+        let boxes = [boxed(0, 100.0, 50.0, 300.0, 200.0)];
+        let page = FreePage {
+            left: 0.0,
+            top: 0.0,
+            width: 800.0,
+            height: 500.0,
+        };
+        // The bounding box (100, 50, 300 x 200) fills the whole page.
+        let frames = boxes_fitted_to_page(&boxes, page).expect("something to do");
+        let scaled = frames[0].1;
+        // Outer 300 x 200, bands 60 across and 40 down: frame = outer - bands.
+        let (sx, sy) = (800.0 / 300.0, 500.0 / 200.0);
+        assert!(
+            (scaled.width - (300.0 * sx - 60.0)).abs() < 0.02,
+            "{scaled:?}"
+        );
+        assert!(
+            (scaled.height - (200.0 * sy - 40.0)).abs() < 0.02,
+            "{scaled:?}"
+        );
+        // Already filling the page: nothing to do.
+        let exact = page_fitted_to_layers(&boxes).expect("a box");
+        assert!(boxes_fitted_to_page(&boxes, exact).is_none());
+        assert!(boxes_fitted_to_page(&[], page).is_none());
     }
 }

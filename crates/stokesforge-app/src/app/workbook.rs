@@ -23,7 +23,7 @@ use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::grid::{
     columns_menu_contents, forget_gutter_width, grid_contents, plot_menu, plot_rows_menu,
     reset_sheet_widths_entry, show_grid_horizontal_bar, show_grid_vertical_bar,
-    show_horizontally_scrollable_grid, toggle_header_row_menu,
+    show_horizontally_scrollable_grid, take_follow_scroll, toggle_header_row_menu,
 };
 use super::menu_sections::MenuSections;
 use super::results_pane;
@@ -218,7 +218,8 @@ pub(super) fn book_contents(
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height - results_height);
     // The banner of a linked transposed sheet (#253) takes the top of the grid.
     let banner_height = if state.transpose_info(selected).is_some() {
-        super::transpose_ui::BANNER_HEIGHT.min(grid_with_banner.height())
+        super::transpose_ui::banner_height(ui, state, selected, grid_with_banner.width())
+            .min(grid_with_banner.height())
     } else {
         0.0
     };
@@ -298,6 +299,17 @@ pub(super) fn book_contents(
             show_horizontally_scrollable_grid(&mut grid_ui, pending_horizontal_offset, |ui| {
                 grid_contents(ui, state, actions, selected, pending_offset)
             });
+        // #534: the grid asked to follow its keyboard cursor: the offsets go through
+        // the on-hold slots of the mirrored bars, applied by the next frame.
+        let (follow_horizontal, follow_vertical) = take_follow_scroll(grid_ui.ctx(), selected);
+        grid_ui.memory_mut(|memory| {
+            if let Some(offset) = follow_horizontal {
+                memory.data.insert_temp(horizontal_bar_id, offset);
+            }
+            if let Some(offset) = follow_vertical {
+                memory.data.insert_temp(vertical_bar_id, offset);
+            }
+        });
         let overflows = scroll.content_size.x > scroll.inner_rect.width() + 0.5;
         if overflows != horizontal_bar_present {
             grid_ui.memory_mut(|memory| {
@@ -321,7 +333,12 @@ pub(super) fn book_contents(
     }
     ui.advance_cursor_after_rect(area);
     if let Some(id) = chosen_sheet {
-        state.dispatch(Action::SelectSheet(id));
+        // A dialog is open in the main window: the open entry could not be
+        // written, so the sheet stays and the entry with it (#471, #524).
+        let pending = state.editing().is_some() || state.header_editing().is_some();
+        if !(pending && super::window_band::refuse_entry(ui.ctx())) {
+            state.dispatch(Action::SelectSheet(id));
+        }
     }
     if add_sheet {
         actions.push(Action::AddWorksheet { book });

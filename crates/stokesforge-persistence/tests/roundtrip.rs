@@ -600,7 +600,10 @@ fn a_non_trivial_plot_spec_round_trips_intact() {
 
     let node = loaded.tree().node(graph).expect("graph present");
     match node.kind() {
-        NodeKind::Graph { spec: reloaded, .. } => assert_eq!(*reloaded, spec),
+        NodeKind::Graph { spec: reloaded, .. } => {
+            // An axis unit of the fixture reads back folded into its title (#506).
+            assert_eq!(*reloaded, common::as_read_back(spec));
+        }
         other => panic!("expected Graph, got {other:?}"),
     }
 }
@@ -1209,6 +1212,52 @@ fn column_import_source_survives_save_and_load() {
     assert_eq!(column.meta().import_source, Some(source));
     let column = loaded.tree().node(b).unwrap().as_column().unwrap();
     assert_eq!(column.meta().import_source, None);
+}
+
+/// #488: a source whose recipe was written before `join_lines` keeps the old
+/// reading (first line of a range) through a save and a load; the recipe
+/// itself, with the field on, round-trips (see the test above).
+#[test]
+fn a_source_recipe_without_join_lines_keeps_the_old_reading() {
+    use stokesforge_core::ImportSource;
+    let mut recipe = recipe_non_default();
+    recipe.subheader_roles.join_lines = false;
+    // The JSON of a recipe written before the field: the key is not there.
+    let written = recipe.to_json();
+    assert!(written.contains("\"join_lines\""));
+    let old_json = written.replace("\"join_lines\"", "\"former_key\"");
+    let mut project = Project::new("Demo").expect("valid project");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("B"))
+        .expect("workbook");
+    let sheet = project.add_worksheet(book, Some("S")).expect("sheet");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .unwrap();
+    project
+        .set_column_meta(
+            a,
+            ColumnMeta {
+                import_source: Some(ImportSource {
+                    path: "/data/old.csv".into(),
+                    recipe_json: old_json,
+                    column: 0,
+                    block: 0,
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("old.plyx");
+    save(&project, &path).unwrap();
+    let loaded = load(&path).unwrap();
+    let column = loaded.tree().node(a).unwrap().as_column().unwrap();
+    let back = column.meta().import_source.clone().expect("source kept");
+    let reread = stokesforge_import::ImportRecipe::from_json(&back.recipe_json).unwrap();
+    assert!(!reread.subheader_roles.join_lines);
+    assert_eq!(reread, recipe);
 }
 
 /// A file that carries the `STKF` signature but cannot be read (interrupted

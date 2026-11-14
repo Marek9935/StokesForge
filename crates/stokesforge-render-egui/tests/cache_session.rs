@@ -991,6 +991,61 @@ fn a_click_selects_a_title_or_the_legend() {
     assert_eq!(view.selected_text(), Some(legend));
 }
 
+/// #499 step C: the colour bar is picked by a click anywhere on its box, and
+/// a drag that starts on it moves it (one `TextMoved` on its target), like the
+/// legend. Witness: without the bar target in the picking, no box, no event.
+#[test]
+fn a_colour_bar_is_selected_by_a_click_and_moved_by_a_drag() {
+    use stokesforge_plot::{ColorBarPosition, ColorBarSegment, ColorBarSpec};
+    use stokesforge_render_egui::{GraphEvent, TextTarget};
+    let fixture = Fixture::with_panel("Bar", |panel| {
+        panel.series[0].group = Some(1);
+        panel.color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment {
+                from: Some(0.0),
+                to: Some(57.0),
+                ..ColorBarSegment::new(1)
+            }],
+            position: ColorBarPosition::BottomLeft,
+            ..ColorBarSpec::default()
+        });
+    });
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+
+    let bar = TextTarget::ColorBar { panel: 0 };
+    let (center, size, _) = view.text_screen_box(bar).expect("the bar is drawn");
+    // On the strip, left of the center.
+    let on_strip = center + egui::vec2(-size.x / 4.0, 0.0);
+    assert_eq!(view.text_target_at(on_strip), Some(bar));
+    for (pressed, time) in [(true, 1.0), (false, 1.5)] {
+        let mut events = vec![button_event(on_strip, pressed)];
+        if pressed {
+            events.insert(0, egui::Event::PointerMoved(on_strip));
+        }
+        frame_with(&context, &mut view, &fixture, rect, events, time);
+    }
+    assert_eq!(view.selected_text(), Some(bar));
+
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        rect,
+        on_strip,
+        on_strip + egui::vec2(80.0, -60.0),
+        10.0,
+    );
+    assert!(
+        signals
+            .iter()
+            .any(|s| matches!(s, GraphEvent::TextMoved { target, .. } if *target == bar)),
+        "{signals:?}"
+    );
+}
+
 // -- Issue #76: graphic objects (rectangle, ellipse, line, arrow) --
 
 /// A fixture whose panel carries a **filled** rectangle in the middle of the
@@ -1579,4 +1634,436 @@ fn a_new_figure_text_language_rebuilds_the_figure_and_the_same_one_does_not() {
         "a new language tag must rebuild the shapes"
     );
     assert_eq!(view.cache().misses(), 2);
+}
+
+/// #499: a double-click on the colour bar opens its tab (it has no text to
+/// edit). Witness: the former `return` for the bar emits nothing.
+#[test]
+fn double_clicking_the_color_bar_asks_to_open_its_tab() {
+    use stokesforge_render_egui::{GraphEvent, TextTarget};
+    let fixture = Fixture::with_panel("Bar", |panel| {
+        panel.series[0].group = Some(1);
+        panel.color_bar = Some(stokesforge_plot::ColorBarSpec {
+            segments: vec![stokesforge_plot::ColorBarSegment {
+                from: Some(0.0),
+                to: Some(10.0),
+                ..stokesforge_plot::ColorBarSegment::new(1)
+            }],
+            position: stokesforge_plot::ColorBarPosition::TopRight,
+            ..Default::default()
+        });
+    });
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+    let (center, _, _) = view
+        .text_screen_box(TextTarget::ColorBar { panel: 0 })
+        .expect("the bar is drawn");
+    let signals = double_click(&context, &mut view, &fixture, rect, center);
+    assert!(
+        signals.contains(&GraphEvent::OpenColorBarProperties { panel: 0 }),
+        "{signals:?}"
+    );
+}
+
+/// A graph with a colour bar in the bottom right corner of its frame (#499).
+fn bar_fixture(position: stokesforge_plot::ColorBarPosition) -> Fixture {
+    use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+    Fixture::with_panel("", |panel| {
+        panel.series[0].group = Some(1);
+        panel
+            .group_gradients
+            .insert(1, vec!["#0000ff".to_string(), "#ff0000".to_string()]);
+        panel.color_bar = Some(ColorBarSpec {
+            segments: vec![ColorBarSegment {
+                from: Some(0.0),
+                to: Some(10.0),
+                ..ColorBarSegment::new(1)
+            }],
+            position,
+            orientation: stokesforge_plot::ColorBarOrientation::Horizontal,
+            ..ColorBarSpec::default()
+        });
+    })
+}
+
+/// Selects the bar (a click), then pulls the handle at `(hx, hy)` of its box
+/// by `by`; returns the signals of the whole gesture and the preview seen
+/// mid-way.
+fn pull_bar_handle(
+    fixture: &Fixture,
+    view: &mut GraphView,
+    context: &egui::Context,
+    handle: (f32, f32),
+    by: egui::Vec2,
+) -> (Vec<stokesforge_render_egui::GraphEvent>, Option<egui::Vec2>) {
+    use stokesforge_render_egui::TextTarget;
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let target = TextTarget::ColorBar { panel: 0 };
+    frame_with(context, view, fixture, rect, vec![], 0.0);
+    let (center, _, _) = view.text_screen_box(target).expect("bar drawn");
+    frame_with(
+        context,
+        view,
+        fixture,
+        rect,
+        vec![
+            egui::Event::PointerMoved(center),
+            button_event(center, true),
+        ],
+        0.1,
+    );
+    frame_with(
+        context,
+        view,
+        fixture,
+        rect,
+        vec![button_event(center, false)],
+        0.2,
+    );
+    assert_eq!(view.selected_text(), Some(target), "the bar is selected");
+    let (center, size, _) = view.text_screen_box(target).expect("bar drawn");
+    let start = center
+        + egui::vec2(
+            handle.0 * (size.x / 2.0 + 3.0),
+            handle.1 * (size.y / 2.0 + 3.0),
+        );
+    let mut signals = frame_with(
+        context,
+        view,
+        fixture,
+        rect,
+        vec![egui::Event::PointerMoved(start), button_event(start, true)],
+        0.3,
+    );
+    let mut seen = None;
+    for step in 1..=5 {
+        signals.extend(frame_with(
+            context,
+            view,
+            fixture,
+            rect,
+            vec![egui::Event::PointerMoved(start + by * (step as f32 / 5.0))],
+            0.3 + 0.05 * step as f64,
+        ));
+        assert!(signals.is_empty(), "a signal before the release");
+        seen = view.text_screen_box(target).map(|(_, size, _)| size);
+    }
+    signals.extend(frame_with(
+        context,
+        view,
+        fixture,
+        rect,
+        vec![button_event(start + by, false)],
+        0.6,
+    ));
+    let before = size;
+    (signals, seen.map(|after| after - before))
+}
+
+/// Pulling the top-left handle of a bar in a corner makes it longer and
+/// thicker; the preview shows it during the gesture, **one** signal comes out
+/// on release, none changes the model before, and the sides against the
+/// corner offer no handle. Witness: the length/thickness swapped, a signal per
+/// frame, or the handles of a pinned side make the assertions fail.
+#[test]
+fn pulling_a_corner_handle_of_the_bar_changes_its_length_and_thickness() {
+    use stokesforge_render_egui::GraphEvent;
+    let fixture = bar_fixture(stokesforge_plot::ColorBarPosition::BottomRight);
+    let context = new_context();
+    let mut view = GraphView::new();
+    let revision = fixture.snapshot().revision;
+    let (signals, growth) = pull_bar_handle(
+        &fixture,
+        &mut view,
+        &context,
+        (-1.0, -1.0),
+        egui::vec2(-40.0, -10.0),
+    );
+    let [GraphEvent::ColorBarResized {
+        panel,
+        length,
+        thickness,
+        anchor,
+    }] = &signals[..]
+    else {
+        panic!("a single signal expected: {signals:?}")
+    };
+    assert_eq!(*panel, 0);
+    let length = length.expect("a length");
+    let thickness = thickness.expect("a thickness");
+    assert!((thickness - 22.0).abs() < 0.6, "thickness {thickness}");
+    assert!(length > 100.0, "length {length}");
+    assert!(anchor.is_none(), "a bar in a corner keeps no anchor");
+    let growth = growth.expect("box");
+    assert!(
+        (growth.x - 40.0).abs() < 1.5 && (growth.y - 10.0).abs() < 1.5,
+        "the box grew by {growth:?}"
+    );
+    assert_eq!(fixture.snapshot().revision, revision, "the model moved");
+}
+
+/// Below the frame only the thickness handle exists: pulling the middle of
+/// the bottom edge sends a thickness and no length; the other sides do
+/// nothing. Witness: a length in the signal.
+#[test]
+fn a_bar_below_the_frame_only_offers_its_thickness() {
+    use stokesforge_render_egui::GraphEvent;
+    let fixture = bar_fixture(stokesforge_plot::ColorBarPosition::Below);
+    let context = new_context();
+    let mut view = GraphView::new();
+    let (signals, _) = pull_bar_handle(
+        &fixture,
+        &mut view,
+        &context,
+        (0.0, 1.0),
+        egui::vec2(0.0, 8.0),
+    );
+    let [GraphEvent::ColorBarResized {
+        length, thickness, ..
+    }] = &signals[..]
+    else {
+        panic!("a single signal expected: {signals:?}")
+    };
+    assert!(length.is_none(), "the length follows the frame");
+    assert!(
+        (thickness.expect("thickness") - 20.0).abs() < 0.6,
+        "{thickness:?}"
+    );
+
+    let fixture = bar_fixture(stokesforge_plot::ColorBarPosition::Below);
+    let mut view = GraphView::new();
+    let context = new_context();
+    let (signals, _) = pull_bar_handle(
+        &fixture,
+        &mut view,
+        &context,
+        (1.0, 0.0),
+        egui::vec2(30.0, 0.0),
+    );
+    assert!(
+        !signals
+            .iter()
+            .any(|s| matches!(s, GraphEvent::ColorBarResized { .. })),
+        "a side handle does not exist below the frame: {signals:?}"
+    );
+}
+
+/// Dragging the **body** of a selected bar moves it, even when a handle of
+/// the moving bar passes under the point where the button went down: a handle
+/// is grabbed by the press only. Witness: looking for a handle at every frame
+/// of the gesture turns this move into a resize (found by hand in the real
+/// application).
+#[test]
+fn a_handle_sliding_under_the_press_does_not_take_over_a_move() {
+    use stokesforge_render_egui::{GraphEvent, TextTarget};
+    let fixture = bar_fixture(stokesforge_plot::ColorBarPosition::Below);
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let target = TextTarget::ColorBar { panel: 0 };
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+    let (center, _, _) = view.text_screen_box(target).expect("bar drawn");
+    frame_with(
+        &context,
+        &mut view,
+        &fixture,
+        rect,
+        vec![
+            egui::Event::PointerMoved(center),
+            button_event(center, true),
+        ],
+        0.1,
+    );
+    frame_with(
+        &context,
+        &mut view,
+        &fixture,
+        rect,
+        vec![button_event(center, false)],
+        0.2,
+    );
+    assert_eq!(view.selected_text(), Some(target));
+    let mut signals = frame_with(
+        &context,
+        &mut view,
+        &fixture,
+        rect,
+        vec![
+            egui::Event::PointerMoved(center),
+            button_event(center, true),
+        ],
+        0.3,
+    );
+    for step in 1..=12 {
+        signals.extend(frame_with(
+            &context,
+            &mut view,
+            &fixture,
+            rect,
+            vec![egui::Event::PointerMoved(
+                center + egui::vec2(0.0, -6.0 * step as f32),
+            )],
+            0.3 + 0.05 * step as f64,
+        ));
+    }
+    signals.extend(frame_with(
+        &context,
+        &mut view,
+        &fixture,
+        rect,
+        vec![button_event(center + egui::vec2(0.0, -72.0), false)],
+        1.0,
+    ));
+    assert!(
+        matches!(&signals[..], [GraphEvent::TextMoved { .. }]),
+        "a move expected, got {signals:?}"
+    );
+}
+
+/// #501: a graph title `#ln` is hit where the **bound** title is drawn. The
+/// long name is much wider than the source `#ln`: a point far to one side of
+/// the center is on the drawn title and off the raw source. Witness: the
+/// painted figure built from the unbound spec leaves that point to the void.
+#[test]
+fn a_variable_title_is_hit_where_the_bound_text_is_drawn() {
+    use stokesforge_render_egui::TextTarget;
+    let fixture = Fixture::with_title("#ln");
+    fixture
+        .handle()
+        .execute(Command::SetColumnMeta {
+            column: fixture.column,
+            meta: ColumnMeta {
+                long_name: "Absorbance of a very long named sample, measured twice".to_owned(),
+                ..ColumnMeta::default()
+            },
+        })
+        .expect("meta");
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+    let (center, size, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("title drawn");
+    assert!(size.x > 150.0, "the bound title is wide: {size:?}");
+    let off_center = center + egui::vec2(size.x * 0.4, 0.0);
+    assert_eq!(
+        view.text_target_at(off_center),
+        Some(TextTarget::Title),
+        "a point of the drawn long title"
+    );
+    // The stored title is still the source.
+    let stored = match fixture
+        .snapshot()
+        .tree
+        .get(fixture.graph)
+        .expect("graph")
+        .kind()
+    {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.title.clone(),
+        _ => panic!("not a graph"),
+    };
+    assert_eq!(stored, "#ln");
+}
+
+// -- #508: one owner per screen formula texture --
+
+/// Every textured mesh of `shapes`, at any depth.
+fn meshes_of<'a>(
+    shapes: impl IntoIterator<Item = &'a egui::Shape>,
+    out: &mut Vec<egui::TextureId>,
+) {
+    for shape in shapes {
+        match shape {
+            egui::Shape::Mesh(mesh) => out.push(mesh.texture_id),
+            egui::Shape::Vec(inner) => meshes_of(inner, out),
+            _ => {}
+        }
+    }
+}
+
+/// #508: 300 title revisions, a legend repeating one text three times, and at
+/// every frame every mesh handed to egui points to a live texture, whether the
+/// figure is painted as is or scaled; the formula cache stays bounded. Witness:
+/// without the eviction the bound fails; if `TypstScreen::render` stops
+/// inserting into the held set, the first eviction frees textures the cached
+/// shapes still draw.
+fn every_painted_mesh_has_a_live_texture(scaled: bool) {
+    let fixture = Fixture::with_panel("Title 0", |panel| {
+        let first = panel.series[0].clone();
+        for _ in 0..3 {
+            let mut series = first.clone();
+            series.name = "Same legend text $alpha$".to_owned();
+            panel.series.push(series);
+        }
+    });
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let mut spec = match fixture
+        .snapshot()
+        .tree
+        .node(fixture.graph)
+        .expect("graph")
+        .kind()
+    {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("not a graph"),
+    };
+    for revision in 0..300 {
+        spec.title = format!("Title {revision} $alpha_{revision}$");
+        fixture
+            .handle()
+            .execute(Command::SetPlotSpec {
+                graph: fixture.graph,
+                spec: spec.clone(),
+            })
+            .expect("spec set");
+        let snapshot = fixture.snapshot();
+        // Twice: the rebuild frame, then a pure repaint.
+        for _ in 0..2 {
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                if scaled {
+                    let (w, h) = view
+                        .figure_layout(ui.ctx(), &snapshot, fixture.graph)
+                        .expect("layout")
+                        .size;
+                    let display =
+                        Rect::from_min_size(Pos2::ZERO, egui::vec2(w as f32, h as f32) * 1.37);
+                    view.paint_scaled(ui, display, &snapshot, fixture.graph)
+                        .expect("painting");
+                } else {
+                    view.paint(ui, rect, &snapshot, fixture.graph)
+                        .expect("painting");
+                }
+            });
+            let mut ids = Vec::new();
+            meshes_of(output.shapes.iter().map(|clipped| &clipped.shape), &mut ids);
+            assert!(!ids.is_empty(), "no formula painted at revision {revision}");
+            for id in ids {
+                assert!(
+                    context.tex_manager().read().meta(id).is_some(),
+                    "revision {revision}: a mesh paints the freed texture {id:?}"
+                );
+            }
+            consume(std::mem::take(&mut output));
+        }
+    }
+    assert!(
+        view.formula_count() <= stokesforge_render_egui::FORMULA_CACHE_LIMIT + 16,
+        "the formula cache grew to {}",
+        view.formula_count()
+    );
+}
+
+#[test]
+fn a_long_edit_never_paints_a_freed_texture() {
+    every_painted_mesh_has_a_live_texture(false);
+}
+
+#[test]
+fn a_long_edit_never_paints_a_freed_texture_when_scaled() {
+    every_painted_mesh_has_a_live_texture(true);
 }

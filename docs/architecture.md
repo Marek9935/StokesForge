@@ -67,7 +67,7 @@ guards.
 | `stokesforge-commands` | the commands, the hybrid undo stack, the macros | [commands](commands-and-history.md) |
 | `stokesforge-persistence` | `save`/`load`, transport schema, `.stf` format | [persistence](persistence.md) |
 | `stokesforge-session` | the actor, the `Snapshot`s, the `revision` | [session](session.md) |
-| `stokesforge-import` | reading of instrument files (CSV/TXT/ASC), recipes, preview; independent of core/UI | [application](application/project-and-import.md) |
+| `stokesforge-import` | reading of instrument files (CSV/TXT/ASC, JCAMP-DX), the detector (`sniff`, `instrument`, `jcamp`, `thousands`, `props`), recipes, templates with conditions (`templates`, `recipe_for_file`), preview; independent of core/UI | [application](application/project-and-import.md) |
 | `stokesforge-render` | text measurement, Plotters pipeline, **all the rendering** | [rendering](rendering.md) |
 | `stokesforge-render-egui` | screen backend (`DrawingBackend` → `egui::Shape`), shape cache, reading of egui inputs (wheel, drag), feathering; the computation of zoom/pan and of the nearest point is in `stokesforge-render` (#262) | [rendering](rendering.md) |
 | `stokesforge-render-svg` | SVG export, and PDF and PNG on top of it | [rendering](rendering.md) |
@@ -81,6 +81,29 @@ guards.
 | `stokesforge-robustness` | 23 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
 | `stokesforge-arch-guard` | shared reading of the `Cargo.toml` files for the dependency guards (dev-dependency) | [tests](tests.md) |
 | `stokesforge-logo-gen` | release tool (#388): checks the framing of the two icon SVG (transparent margin, centred on the visual weight across, no tile, no `feDisplacementMap`/`feImage`) and writes the PNG trees (16 to 512 px) and the two `.ico`; reproducible bytes; depends on no workspace crate, never linked into the application | [application](application/shell-and-code.md) |
+
+## The server thread (#475)
+
+One background thread (`stokesforge-server`, `stokesforge-app/src/app/server.rs`) owns the
+follow-up of the work that does not depend on painting: autosave, the end of a script run,
+the end of a recalculation, the progress of an import. It shares **one** `AppState` with the
+interface through one lock (`parking_lot::Mutex`, owned guard `AppSlot` over the whole `StokesForgeApp`): the interface
+holds the guard during a pass (`logic`, `ui`, `on_exit`) and gives it back after, the thread
+only `try_lock`s between two passes (busy: again in 10 ms). The tick itself is pure
+(`AppState::server_tick(now)` in `stokesforge-app-state/src/state/server.rs`, injected clock);
+the blocking autosave write runs with the lock released. Windows are woken by one function
+(`wake()`: the root and every OPEN window, never a closed one, except the window that
+painted), only when something they show changed. Applying a finished import
+stays in the paint pass. Step 2 (L0, L1): the windows are published after the guard is
+released, and the **detached graph** locks the application itself
+(`lock_app_from_viewport`), paints from the shared state and applies its actions in its
+own pass (`app/detached_graph.rs`); so does the **detached workbook** (L2,
+`app/detached_book.rs`): no fork of the state, one cell entry in the application, and a
+sender identity per detached window swapped into the state for its paint (#21). So do the
+three **panels** (L3, `app/detached_panel.rs`): the Project Manager, the Object Manager and
+the console are painted from the shared state with the function of the docked panel, and
+no copy or request queue is left between a window and the application. A covered root, which gets no frame callback on native Wayland, delays nothing: the winit frame-starvation patch of #457 was removed in L5 (only the #72 drop patch remains in `vendor/winit`).
+Rules and tests: `.claude/rules/app.md`, `docs/application/shell-and-code.md`, `docs/tests.md`.
 
 ## The three separation lines
 

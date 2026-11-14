@@ -43,7 +43,7 @@ whose default value is a class:
   the default class of the nature, another class, or a **free size**
   (`InteractiveSize::Free`) that requires `// FREE-SIZE(#300): <justification>`
   in the twelve lines before it (15 characters at least). Free sizes
-  today: the analysis (1000 x 660), the import wizard (1000 x 620) and the
+  today: the analysis (1000 x 660), the import window (1000 x 620) and the
   `preferences_proto` bench (560 x 470, reference screenshots).
 - **Window without rich interaction** (choice, read-only, confirmation,
   save, alert: `PlainSize`): may take the **size of its
@@ -100,13 +100,13 @@ They are always painted by the root, whatever window the gesture came from
 
 | Window | Nature | Size | Pages or content | Opened from | Identifier, file |
 |---|---|---|---|---|---|
-| Graph properties | `Settings` | Medium | 5 tabs (`tab_strip`): Graph, Plot Area, Axes, Legend, Theme; on Axes, the sides Bottom, Left, Right, Top are always the four vertical tabs at the left (fixed strip, the page of the axis scrolls, S-L9); a side held by another layer of the cell is greyed with its reason, an overlaid layer edits its X axis on Top and its Y axis on Right with an "Own scale" box (#396, `cell_sides`) | right-click on a graph component, Graph menu, Properties button of the toolbar (`Action::OpenPlotSettings`) | `stokesforge_plot_settings` (built), `plot_settings.rs` |
+| Graph properties | `Settings` | Medium | 5 tabs (`tab_strip`): Graph, Plot Area, Axes, Legend (its last section, a folded « Color bar », is `color_bar_settings.rs`, #499), Theme; on Axes, the sides Bottom, Left, Right, Top are always the four vertical tabs at the left (fixed strip, the page of the axis scrolls, S-L9); a side held by another layer of the cell is greyed with its reason, an overlaid layer edits its X axis on Top and its Y axis on Right with an "Own scale" box (#396, `cell_sides`) | right-click on a graph component, Graph menu, Properties button of the toolbar (`Action::OpenPlotSettings`) | `stokesforge_plot_settings` (built), `plot_settings.rs` |
 | Series properties | `Settings` | Large | list of series on the left, editor on the right (`curve_settings_page`) | double-click on a curve, Object Manager, Graph menu (`Action::OpenObjectProperties` on a series or a group) | `stokesforge_curve_settings` (built), `plot_settings.rs` (window), `curve_settings.rs` (page) |
 | Properties of an object (rectangle, arrow…) | `Settings` | Medium | coordinates X1 Y1 X2 Y2, line and fill colors | double-click on the object, Object Manager (`open_shape_properties`) | derived from the object, `graph_window.rs` |
 | Analysis (new or edit) | `Draft` | free 1000 x 660 | two columns: settings (330 wide, scrolling) and clickable preview with tools and values | Analysis menu, right-click, results panel (`Action::OpenAnalysis`) | `stokesforge_analysis` (built), `analysis_dialog.rs`, `analysis_forms.rs`, `analysis_preview.rs` |
-| Import wizard | `Wizard` | free 1000 x 620 | 6 steps: Files, Format, Header, Columns, Metadata, Destination; file preview on the right at every step | File > Import, Ctrl+3 (`open_import_dialog`) | `stokesforge_import_wizard`, `import_wizard.rs` |
-| Import from Origin | `Draft` | Large | scrolling tree file, workbooks (collapsible, three-state box), sheets (box and "N columns, M rows"); footer Check All, Check None, Cancel, Import (greyed out with its reason while nothing is checked); summary line under the list; shown only while the Import Wizard is closed (#490) | an `.opj` dropped, File > Import or Add Files of the wizard (read in the background, `AppState::origin_import_open`); Reopen Last Import after an Origin import | `stokesforge_origin_import`, `origin_import.rs` |
-| Preferences | `LiveSettings` (immediate settings) | Large | 4 rubrics as tabs on top (`TabStripSide::Top`): General (language, maximum file size at opening, autosave: checkbox and period in minutes, disabled if the checkbox is unchecked, #317; analysis: default of Values Show / Keep in Results, low R2 warning), Display with vertical sub-tabs at the left (S-L9) Interface (formula syntax help icon) · Object Manager (lists, expand-by-default groups, Reset) · New (rows of new workbooks, decimal comma of new graphs), Export (SVG text, PNG resolution, Copy Graph formats), Folders (the configuration folder with Open Folder and its files, the recovery copies folder, and the default folders Open and Save, Import, Export, each typed or picked with Browse…, with a "Folder not found" note #148) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences_rubrics`, `preferences_window.rs` |
+| Import | `Draft` | free 1320 x 840 (a smaller screen shrinks it) | one screen that creates (#488): file tabs, the format sentence, the points to check (Check Now, Mark as Checked), what was found, the Advanced fold (closed by default) at the left; the file as a grid with its File / Result tabs at the right, a short guide (Show Guide) over the grid; footer Destination and Template menus, Cancel, Import (never greyed out by a doubt: a warning in the footer). Three windows nested over it: Save as Template (`Draft`, default size), Import Templates (`LiveSettings`, Large: templates, their conditions, remembered answers) and the confirmation of Forget Template (`Confirm`) | File > Import, Ctrl+3 (`open_import_dialog`), a file dropped on the window | `stokesforge_import_wizard`, `stokesforge_import_template_save`, `stokesforge_import_templates`, `stokesforge_import_template_forget`; `import_wizard.rs`, `import_wizard/templates.rs` |
+| Import from Origin | `Draft` | Large | scrolling tree file, workbooks (collapsible, three-state box), sheets (box and "N columns, M rows"); footer Check All, Check None, Cancel, Import (greyed out with its reason while nothing is checked); summary line under the list; shown only while the Import window is closed (#490) | an Origin file (extension `.opj`/`.opju`, or the `CPYA`/`CPYUA` signature in the first bytes, so a renamed file counts) dropped, File > Import or Add Files of the Import window (read in the background, `AppState::origin_import_open`); Reopen Last Import after an Origin import | `stokesforge_origin_import`, `origin_import.rs` |
+| Preferences | `LiveSettings` (immediate settings) | Large | 4 rubrics as tabs on top (`TabStripSide::Top`): General (language, maximum file size at opening, autosave: checkbox and period in minutes, disabled if the checkbox is unchecked, #317; analysis: default of Values Show / Keep in Results, low R2 warning), Display with vertical sub-tabs at the left (S-L9) Interface (formula syntax help icon) · Object Manager (lists, expand-by-default groups, Reset) · New (rows of new workbooks, decimal comma of new graphs, legend text from, with a Template row under Custom: the Legend tab's own field and validation, committed when left, Esc gives the saved template back, #502), Export (SVG text, PNG resolution, Copy Graph formats), Folders (the configuration folder with Open Folder and its files, the recovery copies folder, and the default folders Open and Save, Import, Export, each typed or picked with Browse…, with a "Folder not found" note #148) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences_rubrics`, `preferences_window.rs` |
 | Keyboard shortcuts | `ReadOnly` | content 480 x 460 | scrolling list by area, generated from `shortcuts::HELP` | Help > Keyboard Shortcuts (`Action::OpenKeyboardShortcuts`) | `stokesforge_keyboard_shortcuts`, `keyboard_shortcuts_window.rs` |
 | Formula Functions | `ReadOnly` | content 900 x 560 (wide: each description on one to three lines) | the functions of an `F(x)=` formula, one family at a time (#402): families as fixed vertical tabs at the left (`TabStripSide::Left`, S-L9), at the right a scrolling table Function · Example · What it does; the intro line on top; state (open, chosen family) in `AppState` | the "?" of the `F(x)=` cell while it is edited (`Action::OpenFormulaFunctions`) | `stokesforge_formula_functions`, `formula_functions_window.rs` |
 | About | `ReadOnly` | content 360 x 140, 360 x 252 with the logo | the logo (96 pt, centred, only in an official build, #388), version, license, project page link, Copy button (version, system and architecture line for bug reports) | Help > About StokesForge (`Action::OpenAbout`) | `stokesforge_about`, `about_window.rs` |
@@ -120,7 +120,6 @@ They are always painted by the root, whatever window the gesture came from
 | Project recovery | `ReadOnly` | content 560 x 230 | one row per backup copy (name or Untitled, UTC date) with Open, Ignore, Delete; introduction message; scrolling list | at startup, if copies from vanished processes remain that are newer than their `.stf` (`AppState::scan_recovery`, #317); closes by itself when the list is empty | `stokesforge_recovery`, `recovery.rs` |
 | Replacing a shared analysis | `Confirm` | Small | a message | applying an analysis whose source feeds other curves | `stokesforge_replace_analysis`, `analysis_dialog.rs` |
 | Refreshing a modified transposed sheet | `Confirm` | Small | a message | Relink (band of the linked transposed sheet) when a value of a column created by the link has been edited (#253) | `stokesforge_transpose_relink`, `transpose_ui.rs` |
-| Deleting an import template | `Confirm` | Small | a message | delete button of a template, at the Files step; painted **inside** the wizard | `stokesforge_import_template_delete`, `import_wizard.rs` |
 
 The "built" identifiers are chosen before the call (a `&str`, not a
 literal in its arguments): the catalog guard looks for them as
@@ -138,6 +137,7 @@ emptied (`blocking_confirmations`). All of Small class (480 x 170).
 | Unsaved project | `SaveChanges` | `stokesforge_unsaved` | New Project, Open…, Quit, closing the window (`AppState::unsaved_pending`) |
 | Save / open failure | `Alert` | `stokesforge_alert` | a save or an open that fails (`AlertKind::SaveFailed`, `OpenFailed`) |
 | Low R² (warning), lost session | `ReadOnly` (Small) | `stokesforge_alert` | end of a calculation whose R² is low, if the preference allows it (`AlertKind::LowRSquared`); dead session (`AlertKind::SessionLost`) |
+| No x' Values (warning, #493) | `ReadOnly` (Small) with a secondary "Cancel Analysis" | `stokesforge_alert` | every row analysis that runs on the column numbers 1, 2, 3... because no Y column has an x', over the analysis window (`AlertKind::NoXPrime`); and the Recalculate of a transposed sheet whose source lost all its x' (Close alone, no analysis window) |
 | Overwrite a file | `Confirm` | `stokesforge_overwrite` | export whose added extension targets an existing file (`pending_overwrite`) |
 | Overwrite a file read with discrepancies | `Confirm` | `stokesforge_discarded_save` | Save that would overwrite the source file of a load that discarded calculations or traces not yet saved (`pending_discarded_save`, #309); not for Save As elsewhere |
 | Delete a backup copy | `Confirm` | `stokesforge_recovery_delete` | Delete on a row of the recovery window (`pending_recovery_delete`, #317); the recovery window stays underneath |
@@ -158,7 +158,8 @@ imposed initial focus. Default sizes (`window_placement.rs`): workbook
 373 x 420 (two thirds of 560), graph 560 x 460, matrix and note 560 x 420;
 minimum 220 x 140. Opening: `open_tab` (`window_stack.rs`), from the Project Manager; a
 second opening on the same entry brings the window to the front without
-duplicating it. Each new window is offset in a cascade.
+duplicating it. Opening a project (startup, File > Open, Recover Projects) restores
+its saved windows (#513). Each new window is offset in a cascade.
 
 **Graph in the Page Layout Mode (#426).** The same window, same code
 (`graph_view_contents`), with two ruler strips (`RULER_WIDTH`) around the figure and
@@ -173,12 +174,11 @@ whose window is no longer the maximised one, which covers Restore, the Window me
 close, delete and project load). A detached window maximises its OS window the same way
 (`follow_mode_maximize`, unless it was maximised at entry), and its header's Restore leaves the mode;
 a restore done from outside the application (an OS shortcut) cannot be told from a maximise the
-compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because the
-vendored winit reports the root, the only window that opts in, as occluded when the compositor no
-longer serves it (frame starvation, #457; a detached window is never reported: it would lose its
-input, and a covered one repaints at its frame callback): the covered root still runs `logic` and `ui` unpainted about every 100 ms, so the actions
-of the detached window are drained, at the cost of about 100 ms between a command and its paint
-while the main window is covered. The saved window views report the state from before the mode
+compositor has not applied yet, so it leaves the mode alone. This is safe on Wayland because a
+detached window no longer needs the root (#475): it locks the application in its own pass,
+paints the shared state and applies its actions at once, so a root covered by it, which gets no
+frame callback, delays nothing. There is no occlusion report and no 100 ms throttle any more (the
+frame-starvation patch of #457 was removed in L5). The saved window views report the state from before the mode
 (`reported_maximized_tab`). Esc and the other keys of the mode are read by the root at
 the start of the frame (`begin_layout_frame`) and at the top of a detached viewport, never
 inside the contents: with a modal open (`modal_shown`) or a text field that had the keyboard
@@ -251,14 +251,14 @@ and the manual say so.
   never sees the key: one press is one action on one history stack, nothing is
   undone twice, and a typed text stays as typed (Ctrl+Z undoes the last command,
   as in the main window).
-- **Queued after the window's own actions** (#398), through the window's
-  `requests.actions`: Ctrl+Z pressed in the frame of a click undoes that click.
-  The root drains them with the dialog refusal of #471, so a dialog open in the
-  main window refuses them, shows the band, and leaves the field untouched.
+- **Applied after the window's own actions** (#398), in the same pass:
+  Ctrl+Z pressed in the frame of a click undoes that click. The dialog refusal
+  of #471 applies, so a dialog open in the main window refuses them, shows the
+  band, and leaves the field untouched.
 - **Ctrl+Shift+S is consumed first and dropped**: Ctrl+S would match it and Save
   As would save silently.
-- **Ctrl+S with no file yet** queues `Action::Save`; the root opens the system
-  file picker (no band).
+- **Ctrl+S with no file yet** dispatches `Action::Save`; the system
+  file picker opens (no band).
 - **Ctrl+Q closes nothing.** egui closes the window where its built-in shortcut
   (`Options::quit_shortcuts`) is pressed, which lost a typed cell;
   `refuse_quit_in_detached` consumes it and the window shows the orange band
@@ -344,7 +344,7 @@ standard):
 | Live settings | `plot_settings_window` (`plot_settings.rs`); `shape_properties_ui` (`graph_window.rs`) for the smallest | draft, single confirmation, tabs |
 | Creation on a draft | `analysis_window` (`analysis_dialog.rs`) | button verb, disable reason, preview |
 | Choice | `stale_export_window` (`stale_export.rs`) | secondary + main, the shortest |
-| Wizard | `import_window` (`import_wizard.rs`) | the only one; Back · Next · Finish |
+| Wizard | `modal_wizard` (`dialogs.rs`) | none today: the import became a `Draft` (#488); the nature waits for the next multi-step window |
 | Live settings | `preferences_window.rs` (tabs, immediate settings) | Close only, focus on the first field |
 | Read-only | `keyboard_shortcuts_window.rs` (the simplest) | Close only |
 | Confirmation | `analysis_replace_window` (`analysis_dialog.rs`); `confirmations.rs` for the blocking ones | Cancel by default |
@@ -371,3 +371,7 @@ comparing it to the twin. English is the reference language: switch back to Engl
 after a trial in French (the language is saved in the preferences).
 For a layout alone, the test benches (`egui_kittest`, see
 `preferences_proto.rs`) render the window without launching the application.
+
+## Platforms
+
+Requirements stay GNOME (Wayland) and Windows. X11 is not supported: say "it works, but is untested" (user decision, #475). No card, trial entry or probe is written for X11.

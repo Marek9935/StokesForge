@@ -318,6 +318,7 @@ impl Project {
             &name,
             NodeKind::Worksheet {
                 columns: Vec::new(),
+                raw: None,
             },
         )
     }
@@ -415,6 +416,13 @@ impl Project {
                             })?
                     };
                     let mut kind = source.kind().clone();
+                    // A copied or duplicated sheet is no longer the untouched
+                    // import; a whole book keeps the marks of its sheets (#488).
+                    if source.id() == copy.root().id() {
+                        if let NodeKind::Worksheet { raw, .. } = &mut kind {
+                            *raw = None;
+                        }
+                    }
                     // A version coming from another project must never be
                     // reassigned later to other content of this column:
                     // `insert_node`, below, moves the counter past it.
@@ -852,7 +860,63 @@ impl Project {
             return Ok(previous);
         }
         let tree = Arc::make_mut(&mut self.tree);
-        tree.rename(id, name)
+        let previous = tree.rename(id, name)?;
+        // A sheet renamed by hand, or by its own automatic rename, is no
+        // longer the untouched import (#488).
+        if let Ok(node) = tree.node_mut(id) {
+            if let NodeKind::Worksheet { raw, .. } = node.kind_mut() {
+                *raw = None;
+            }
+        }
+        Ok(previous)
+    }
+
+    /// Mark of an untouched import on `sheet` (#488), if it carries one.
+    pub fn raw_mark(&self, sheet: NodeId) -> Option<&crate::RawSheetMark> {
+        match self.tree.node(sheet)?.kind() {
+            NodeKind::Worksheet { raw, .. } => raw.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Sets or clears the untouched-import mark of a sheet (#488). Returns the
+    /// previous mark. `Err(Structure)` if `sheet` is not a worksheet.
+    pub fn set_raw_mark(
+        &mut self,
+        sheet: NodeId,
+        mark: Option<crate::RawSheetMark>,
+    ) -> CoreResult<Option<crate::RawSheetMark>> {
+        let node = self.tree.get(sheet)?;
+        if !node.kind().is_worksheet() {
+            return Err(CoreError::Structure(format!(
+                "{sheet} is not a worksheet but {}",
+                node.kind().with_article()
+            )));
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        match tree.node_mut(sheet)?.kind_mut() {
+            NodeKind::Worksheet { raw, .. } => Ok(std::mem::replace(raw, mark)),
+            _ => Err(CoreError::Structure(format!("{sheet} is not a worksheet"))),
+        }
+    }
+
+    /// First free `<base>N` (N from 1) among the sheets of `book`, compared
+    /// ignoring case (#488). Unlike a new sheet's name it does not start at the
+    /// sheet count: "Sheet1" is wanted even in a book of three sheets.
+    pub fn first_free_sheet_name(&self, book: NodeId, base: &str) -> CoreResult<String> {
+        let sheets = self.tree.children(book)?;
+        let mut n: u64 = 1;
+        loop {
+            let candidate = format!("{base}{n}");
+            let taken = sheets
+                .iter()
+                .filter_map(|sheet| self.tree.node(*sheet))
+                .any(|node| same_name_ignoring_case(node.name(), &candidate));
+            if !taken {
+                return Ok(candidate);
+            }
+            n += 1;
+        }
     }
 
     /// Moves `id` under `new_parent` at `index`. Returns `(old parent, old index)`.

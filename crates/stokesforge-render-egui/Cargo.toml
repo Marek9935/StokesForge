@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-render-egui"
-version = "1.0.0"
+version = "1.1.0"
 edition.workspace = true
 license.workspace = true
 description = "egui backend for plotters: collects egui::Shape values in a Vec, cache keyed on (revision, rect, pixels_per_point)."

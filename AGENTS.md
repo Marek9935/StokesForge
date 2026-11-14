@@ -42,15 +42,15 @@ confirmation on the usual choices covered by the request.
   `docs/archive/` does not prove that a feature exists or remains to be done.
 - When a work package installs a new rule (interface standard, pattern to
   follow, boundary), update as needed the skills concerned
-  (`.claude/skills/`) and `CLAUDE.md` or `.claude/conventions.md` in the same
+  (`.claude/skills/`) and `CLAUDE.md` or the matching `.claude/rules/<domain>.md` in the same
   commit as the code.
 - The project skills in `.agents/skills/` point to the sources maintained
   in `.claude/skills/`. Consult the relevant skill following the table in
   `.codex/README.md` and its useful references, without loading the whole collection.
   The links also share the reference files and scripts: an update by
   Claude applies directly to Codex, with no copy to synchronize.
-- The detailed conventions are shared in `.claude/conventions.md`:
-  read the section of the domain before writing code (table in `CLAUDE.md`).
+- The detailed conventions are shared in `.claude/rules/<domain>.md` (path-scoped files):
+  read the one of the domain before writing code (routing in `.claude/rules.md`).
   `.claude/rules.md` specifies the reading scope. The skill `run-stokesforge`
   drives and captures the real application on Linux for interactive checks;
   its X11 path under Xwayland validates neither native Wayland,

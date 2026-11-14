@@ -505,6 +505,11 @@ const INPUTS: &[Input] = &[
         refusal: true,
     },
     Input {
+        name: "legend_text_from",
+        body: "pyst.set_graph(g, legend_text_from=v)",
+        refusal: true,
+    },
+    Input {
         name: "length_unit",
         body: "pyst.graph_size(g, unit=v)",
         refusal: true,

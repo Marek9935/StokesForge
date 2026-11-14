@@ -141,10 +141,10 @@ pub fn component_at_with_tolerance(
             .iter()
             .any(|text| matches!(text.target, TextTarget::Legend { .. }) && text.contains(x, y));
         if on_legend {
-            let row = drawn
-                .legend_rows
-                .iter()
-                .find(|row| (y - row.center_y).abs() <= row.height / 2.0);
+            let row = drawn.legend_rows.iter().find(|row| {
+                (y - row.center_y).abs() <= row.height / 2.0
+                    && (x - row.center_x).abs() <= row.width / 2.0
+            });
             return Some(match row {
                 Some(row) => PlotComponent::LegendEntry {
                     panel,
@@ -508,6 +508,84 @@ mod tests {
         );
     }
 
+    /// #499 step C: a colour bar below the frame, outside the plot area, is
+    /// picked on its box; next to it nothing is. Witness: dropping the generic
+    /// text search gives the background there.
+    #[test]
+    fn a_colour_bar_outside_the_frame_is_picked_on_its_box() {
+        use crate::pipeline::DrawnText;
+        let mut plot = figure();
+        let bar = TextTarget::ColorBar { panel: 0 };
+        // The frame ends at y = 280; the bar sits under it.
+        plot.panels[0].texts = vec![DrawnText {
+            target: bar,
+            center: (260.0, 335.0),
+            size: (360, 60),
+            rotation: 0.0,
+            anchored: false,
+        }];
+        assert_eq!(
+            component_at(&plot, 260.0, 335.0),
+            Some(PlotComponent::Text(bar))
+        );
+        assert_ne!(
+            component_at(&plot, 260.0, 400.0),
+            Some(PlotComponent::Text(bar))
+        );
+        assert_ne!(
+            component_at(&plot, 50.0, 335.0),
+            Some(PlotComponent::Text(bar))
+        );
+    }
+
+    /// #507: in a legend with two columns a click picks the entry of the cell
+    /// under it, not the first row at that height. Witness: a pick that ignores
+    /// x returns series 0 on the right column.
+    #[test]
+    fn the_second_legend_column_picks_its_own_series() {
+        use crate::pipeline::{DrawnLegendRow, DrawnText};
+        let mut plot = figure();
+        plot.panels[0].texts = vec![DrawnText {
+            target: TextTarget::Legend { panel: 0 },
+            center: (380.0, 100.0),
+            size: (200, 60),
+            rotation: 0.0,
+            anchored: false,
+        }];
+        let cell = |series, center_x, center_y| DrawnLegendRow {
+            series,
+            center_x,
+            width: 100.0,
+            center_y,
+            height: 20.0,
+        };
+        plot.panels[0].legend_rows = vec![
+            cell(0, 330.0, 90.0),
+            cell(1, 330.0, 110.0),
+            cell(2, 430.0, 90.0),
+        ];
+        let at = |x, y| component_at(&plot, x, y);
+        assert_eq!(
+            at(330.0, 90.0),
+            Some(PlotComponent::LegendEntry {
+                panel: 0,
+                series: 0
+            })
+        );
+        assert_eq!(
+            at(430.0, 90.0),
+            Some(PlotComponent::LegendEntry {
+                panel: 0,
+                series: 2
+            })
+        );
+        assert_eq!(
+            at(430.0, 112.0),
+            Some(PlotComponent::Text(TextTarget::Legend { panel: 0 })),
+            "the empty cell under the second column is the frame"
+        );
+    }
+
     /// Issue #53: a title, a rotated axis title or a legend are picked
     /// on their (rotated) rectangle, before the plot area that they cover,
     /// and a legend row before the whole frame.
@@ -540,11 +618,15 @@ mod tests {
         plot.panels[0].legend_rows = vec![
             DrawnLegendRow {
                 series: 0,
+                center_x: 380.0,
+                width: 100.0,
                 center_y: 85.0,
                 height: 20.0,
             },
             DrawnLegendRow {
                 series: 3,
+                center_x: 380.0,
+                width: 100.0,
                 center_y: 110.0,
                 height: 20.0,
             },

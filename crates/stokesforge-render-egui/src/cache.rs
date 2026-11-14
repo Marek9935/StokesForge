@@ -46,6 +46,8 @@
 use egui::{Rect, Shape};
 use stokesforge_session::Revision;
 
+use crate::typst_screen::TextureSet;
+
 /// What identifies an already computed figure.
 ///
 /// `PartialEq` on `f32`s: this is intended, and safe here. The two float
@@ -73,6 +75,9 @@ pub struct CacheKey {
 pub struct ShapeCache {
     key: Option<CacheKey>,
     shapes: Vec<Shape>,
+    /// The formula textures `shapes` point to: held for as long as the
+    /// shapes live, so nothing frees one a mesh still draws (#508).
+    textures: TextureSet,
     hits: u64,
     misses: u64,
 }
@@ -86,6 +91,11 @@ impl ShapeCache {
     /// The cached shapes. Empty as long as nothing has been built.
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
+    }
+
+    /// The textures the cached shapes point to.
+    pub fn textures(&self) -> &TextureSet {
+        &self.textures
     }
 
     /// The key of the cached shapes, if any.
@@ -111,6 +121,7 @@ impl ShapeCache {
     pub fn invalidate(&mut self) {
         self.key = None;
         self.shapes.clear();
+        self.textures.clear();
     }
 
     /// Returns the shapes of `key`, building them if necessary.
@@ -121,7 +132,7 @@ impl ShapeCache {
     pub fn get_or_build<T, E>(
         &mut self,
         key: CacheKey,
-        build: impl FnOnce(&mut Vec<Shape>) -> Result<T, E>,
+        build: impl FnOnce(&mut Vec<Shape>, &TextureSet) -> Result<T, E>,
     ) -> Result<Outcome<T>, E> {
         if self.key == Some(key) {
             self.hits += 1;
@@ -134,7 +145,8 @@ impl ShapeCache {
         self.misses += 1;
         self.key = None;
         self.shapes.clear();
-        match build(&mut self.shapes) {
+        self.textures.clear();
+        match build(&mut self.shapes, &self.textures) {
             Ok(value) => {
                 self.key = Some(key);
                 Ok(Outcome {
@@ -145,6 +157,7 @@ impl ShapeCache {
             }
             Err(error) => {
                 self.shapes.clear();
+                self.textures.clear();
                 Err(error)
             }
         }
@@ -184,7 +197,7 @@ mod tests {
         }
     }
 
-    fn one_shape(shapes: &mut Vec<Shape>) -> Result<usize, ()> {
+    fn one_shape(shapes: &mut Vec<Shape>, _: &TextureSet) -> Result<usize, ()> {
         shapes.push(Shape::Noop);
         Ok(shapes.len())
     }
@@ -219,7 +232,7 @@ mod tests {
     #[test]
     fn a_failure_leaves_no_half_built_figure() {
         let mut cache = ShapeCache::new();
-        let failure = cache.get_or_build::<(), &str>(key(1, 200.0, 1.0), |shapes| {
+        let failure = cache.get_or_build::<(), &str>(key(1, 200.0, 1.0), |shapes, _| {
             shapes.push(Shape::Noop);
             shapes.push(Shape::Noop);
             Err("the pipeline refused")

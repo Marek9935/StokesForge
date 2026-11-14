@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Tests of scripts/cargo-queue.py (#476): stdlib unittest, no user bus, no real cargo.
 
-A fake `cargo`, `systemd-run`, `systemctl`, `gdbus` and `busctl` sit on PATH behind a copy of the shim
+A fake `cargo`, `systemd-run`, `systemctl`, `gdbus` (default: user present, idle 0) and `busctl` sit on PATH behind a copy of the shim
 named `cargo`. The flocks are real. NOTHING here may reach the real power profile (#477): every test has a
 canary `busctl` whose log must stay empty unless the test opts in (`enable_bus`), and the state folder is
 always a temporary one. Run: python3 scripts/cargo-queue-test.py
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import pty
@@ -115,6 +117,7 @@ class Base(unittest.TestCase):
         script(os.path.join(self.fakedir, "cargo"), FAKE_CARGO)
         script(os.path.join(self.fakedir, "systemd-run"), FAKE_SYSTEMD_RUN)
         script(os.path.join(self.fakedir, "systemctl"), FAKE_SYSTEMCTL)
+        script(os.path.join(self.fakedir, "gdbus"), '#!/bin/sh\necho "(uint64 0,)"\n')   # default: user present (#482)
         script(os.path.join(self.fakedir, "busctl"), FAKE_BUSCTL)      # the canary: first on PATH, logs every call
         self.log, self.sdlog, self.ctllog = (os.path.join(t, x) for x in ("fake.log", "sd.log", "ctl.log"))
         self.buslog, self.busstate = os.path.join(t, "bus.log"), os.path.join(t, "bus.state")
@@ -508,6 +511,268 @@ class TestQueue(Base):
         self.assertEqual(len([e for e in self.events() if e["ev"] == "end"]), 0)
 
 
+def effective_background(case):
+    with mock.patch.dict(os.environ, case.env):
+        return cq.effective_mode()
+
+
+class TestPriority(Base):
+    """Classes, the small lane, ageing, waits.tsv and the waiting messages (#517)."""
+    SMALL = ("build", "-p", "x")
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.qdir)
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": "background", "effective": "background"}, f)
+        self.meminfo = os.path.join(self.tmp, "meminfo")
+        self.set_mem(8 * 1024 * 1024)
+        self.env["SF_CARGO_QUEUE_MEMINFO"] = self.meminfo
+        self.env.pop("SF_CARGO_QUEUE_CLASS", None)
+
+    def set_mem(self, kb):
+        with open(self.meminfo, "w") as f:
+            f.write("MemTotal: 16000000 kB\nMemAvailable: %d kB\n" % kb)
+
+    def go(self, *args, tag, root, gate=None, **kw):
+        """Start a shim with its own build root (CARGO_TARGET_DIR), so that roots never collide by accident."""
+        extra = dict(kw.pop("extra", {}), CARGO_TARGET_DIR=os.path.join(self.tmp, "t-" + root))
+        return self.start(*args, tag=tag, gate=gate or "g" + tag, extra=extra, **kw)
+
+    def started(self, tag):
+        return bool(self.seen("start", tag))
+
+    def tsv(self):
+        try:
+            with open(os.path.join(self.qdir, "waits.tsv")) as f:
+                return [x.rstrip("\n").split("\t") for x in f]
+        except OSError:
+            return []
+
+    def test_classify_table(self):
+        small = [["+nightly", "build", "-p", "x"], ["check", "--package=x"], ["clippy", "-px", "-p", "y"],
+                 ["test", "-p", "x", "foo"], ["test", "-p", "x", "--", "name"], ["t", "-p", "x", "--test", "t1"],
+                 ["test", "-p", "x", "--lib"], ["nextest", "run", "-p", "x", "-E", "test(a)"],
+                 ["build", "-p", "x", "--profile", "dev"], ["run", "-p", "x", "--", "--arg", "v"],
+                 ["build", "-p", "x", "--all-targets"]]
+        big = [["test", "-p", "x"], ["clippy", "--workspace", "--all-targets"], ["build", "-p", "x", "--release"],
+               ["build", "-p", "x", "--profile", "release"], ["build"], ["build", "-p", "a", "-p", "b", "-p", "c"],
+               ["bench", "-p", "x"], ["doc", "-p", "x"], ["install", "-p", "x"], ["build", "-p", "x", "--frob", "v"],
+               ["test", "--workspace", "-p", "x", "foo"], ["build", "-p", "x", "--exclude", "y"],
+               ["nextest", "list", "-p", "x"], ["build", "--all"], ["test", "foo"]]
+        with mock.patch.dict(os.environ):
+            os.environ.pop("SF_CARGO_QUEUE_CLASS", None)
+            for a in small:
+                self.assertEqual(cq.classify(a), "small", a)
+            for a in big:
+                self.assertEqual(cq.classify(a), "big", a)
+            os.environ["SF_CARGO_QUEUE_CLASS"] = "big"
+            self.assertEqual(cq.classify(self.SMALL), "big")
+            os.environ["SF_CARGO_QUEUE_CLASS"] = "small"
+            self.assertEqual(cq.classify(["test"]), "small")
+            os.environ["SF_CARGO_QUEUE_CLASS"] = "low"
+            self.assertEqual(cq.classify(["test"]), "low")
+            os.environ["SF_CARGO_QUEUE_CLASS"] = "huge"
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(cq.classify(["test"]), "big")
+            self.assertIn("ignored", err.getvalue())
+
+    def test_small_build_passes_a_busy_big_queue(self):
+        self.go("test", tag="a", root="a")
+        self.assertTrue(self.until(lambda: self.started("a")))
+        self.go("test", tag="b", root="b")
+        self.idle(0.2)
+        c = self.go(*self.SMALL, tag="c", root="c")
+        self.assertTrue(self.until(lambda: self.started("c")), self.output(c))
+        self.idle(0.3)
+        self.assertFalse(self.started("b"))
+        self.assertEqual([r[3] for r in self.tsv()], ["normal", "extra"])
+        self.open_gate("gc")
+
+    def test_lane_needs_memory(self):
+        self.set_mem(2 * 1024 * 1024)
+        self.go("test", tag="a", root="a")
+        self.assertTrue(self.until(lambda: self.started("a")))
+        self.go(*self.SMALL, tag="c", root="c")
+        self.idle(0.5)
+        self.assertFalse(self.started("c"), "started with 2 GiB available")
+        self.set_mem(8 * 1024 * 1024)
+        self.assertTrue(self.until(lambda: self.started("c")), "should start once memory is back")
+
+    def test_lane_refuses_the_root_of_a_running_build(self):
+        self.go("test", tag="a", root="same")
+        self.assertTrue(self.until(lambda: self.started("a")))
+        self.go(*self.SMALL, tag="c", root="same")
+        self.idle(0.5)
+        self.assertFalse(self.started("c"), "shared a build root with a running build")
+
+    def test_lane_is_for_background_mode_only(self):
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": "dev", "effective": "dev"}, f)
+        assert cq.MODES["dev"]["slots"] == 2
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go(*self.SMALL, tag="c", root="c")
+        self.idle(0.5)
+        self.assertFalse(self.started("c"), "no lane in dev mode")
+
+    def test_small_before_big_when_a_slot_frees(self):
+        self.go("test", tag="a", root="a")
+        self.assertTrue(self.until(lambda: self.started("a")))
+        self.go(*self.SMALL, tag="x", root="x")             # takes the lane
+        self.assertTrue(self.until(lambda: self.started("x")))
+        self.go("test", tag="b", root="b")
+        self.idle(0.15)
+        self.go(*self.SMALL, tag="c", root="c")             # lane busy: waits, although later than b
+        self.idle(0.3)
+        self.assertFalse(self.started("b") or self.started("c"))
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("c")))
+        self.idle(0.3)
+        self.assertFalse(self.started("b"))
+
+    def test_a_big_waiter_ages_into_rank_one(self):
+        ageing = {"SF_CARGO_QUEUE_AGE": "0.5"}
+        self.go("test", tag="a", root="a", extra=ageing)
+        self.assertTrue(self.until(lambda: self.started("a")))
+        self.go(*self.SMALL, tag="x", root="x", extra=ageing)
+        self.assertTrue(self.until(lambda: self.started("x")))
+        self.go("test", tag="b", root="b", extra=ageing)
+        self.idle(0.9)
+        self.go(*self.SMALL, tag="c", root="c", extra=ageing)
+        self.idle(0.3)
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("b")))
+        self.idle(0.3)
+        self.assertFalse(self.started("c"), "the aged big build should go first")
+
+    def set_mode_file(self, mode):
+        with open(os.path.join(self.qdir, "mode.json"), "w") as f:
+            json.dump({"selected": mode, "effective": mode}, f)
+
+    LOW = {"SF_CARGO_QUEUE_CLASS": "low"}
+
+    def test_low_ticket_name_and_class_in_the_ticket(self):
+        self.set_mode_file("dev")
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go("test", tag="l", root="l", extra=self.LOW)
+        self.assertTrue(self.until(lambda: any(n.startswith("w-3-") for n in self.tickets())), self.tickets())
+        with mock.patch.dict(os.environ, self.env):
+            run, wait = cq.snapshot()
+        self.assertEqual([w["class"] for w in wait], ["low"])
+        self.assertEqual(wait[0]["prio"], 3)
+
+    def test_low_waits_behind_every_other_waiter(self):
+        self.set_mode_file("dev")
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go("test", tag="l", root="l", extra=self.LOW)
+        self.idle(0.2)
+        self.go("test", tag="b", root="b")
+        self.idle(0.2)
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("b")))
+        self.idle(0.4)
+        self.assertFalse(self.started("l"), "a low build started although a big one was still running or waiting")
+        self.open_gate("gb")
+        self.open_gate("ga2")
+        self.assertTrue(self.until(lambda: self.started("l")))
+
+    def test_aged_low_waiter_still_starts_after_a_later_big(self):
+        self.set_mode_file("dev")
+        ageing = {"SF_CARGO_QUEUE_AGE": "0.5"}
+        self.go("test", tag="a", root="a", extra=ageing)
+        self.go("test", tag="a2", root="a2", extra=ageing)
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        self.go("test", tag="l", root="l", extra=dict(ageing, **self.LOW))
+        self.idle(0.9)
+        self.go("test", tag="b", root="b", extra=ageing)
+        self.idle(0.3)
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("l") or self.started("b")))
+        self.idle(0.3)
+        self.assertTrue(self.started("l"), "the aged low waiter should go first (earlier arrival, same rank)")
+        self.assertFalse(self.started("b"))
+
+    def test_low_runs_with_two_jobs_in_full_mode(self):
+        self.set_mode_file("full")
+        self.assertIsNone(cq.MODES["full"]["jobs"])
+        self.assertEqual(self.start("test", tag="l", extra=self.LOW).wait(10), 0)
+        self.assertEqual(self.jobs_env("l"), ["2", "2", "2"])
+        self.assertEqual(self.start("test", tag="k", extra=dict(self.LOW, CARGO_BUILD_JOBS="5")).wait(10), 0)
+        self.assertEqual(self.jobs_env("k"), ["5", "2", "2"])
+
+    def jobs_env(self, tag):
+        return self.seen("start", tag)[0]["jobs"]
+
+    def test_low_typed_at_a_tty_is_still_rank_three_and_waits(self):
+        self.set_mode_file("dev")
+        self.go("test", tag="a", root="a")
+        self.go("test", tag="a2", root="a2")
+        self.assertTrue(self.until(lambda: self.started("a2")))
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.go("test", tag="l", root="l", extra=self.LOW, stderr=slave)
+        os.close(slave)
+        self.assertTrue(self.until(lambda: any(n.startswith("w-3-") for n in self.tickets())), self.tickets())
+        self.idle(0.3)
+        self.assertFalse(self.started("l"), "a low build typed at a tty skipped the wait")
+
+    def test_low_never_starts_in_background_mode(self):
+        self.assertEqual(effective_background(self), "background")
+        self.go("test", tag="l", root="l", extra=self.LOW)
+        self.idle(0.8)
+        self.assertFalse(self.started("l"), "a low build started in background mode with a free slot")
+        self.set_mode_file("dev")
+        self.assertTrue(self.until(lambda: self.started("l")), "should start once the mode leaves background")
+
+    def test_waits_tsv_lines(self):
+        self.assertEqual(self.start("test", tag="z", gate="gz", extra={"CARGO_TARGET_DIR": self.tmp + "/tz"}).poll(), None)
+        self.assertTrue(self.until(lambda: self.started("z")))
+        self.open_gate("gz")
+        self.assertTrue(self.until(lambda: len(self.tsv()) == 1))
+        row = self.tsv()[0]
+        self.assertEqual(len(row), 10, row)
+        self.assertEqual((row[2], row[3], row[4], row[5], row[6]), ("started", "normal", "big", "background", "0"))
+        self.assertRegex(row[0], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertRegex(row[1], r"^\d+\.\d$")
+        self.assertEqual(row[9], "cargo test")
+        # a lane start, then a give-up while waiting, then a passthrough that writes nothing
+        self.go("test", tag="a", root="a")
+        self.assertTrue(self.until(lambda: self.started("a")))
+        self.go(*self.SMALL, tag="c", root="c")
+        self.assertTrue(self.until(lambda: len(self.tsv()) == 3))
+        self.assertEqual(self.tsv()[2][3], "extra")
+        b = self.go("test", tag="b", root="b")
+        self.idle(0.4)
+        b.terminate()
+        b.wait(10)
+        self.assertTrue(self.until(lambda: len(self.tsv()) == 4))
+        row = self.tsv()[3]
+        self.assertEqual((row[2], row[6]), ("gave-up", "2"), row)
+        n = len(self.tsv())
+        self.assertEqual(self.start("fmt", tag="p").wait(10), 0)
+        self.assertEqual(len(self.tsv()), n, "a passthrough must write no line")
+
+    def test_waiting_message_repeats_and_started_after(self):
+        self.go("test", tag="a", root="a")
+        self.assertTrue(self.until(lambda: self.started("a")))
+        b = self.go("test", tag="b", root="b", extra={"SF_CARGO_QUEUE_PRINT": "0.3"})
+        self.idle(1.3)
+        out = self.output(b)
+        lines = [x for x in out.splitlines() if "waiting" in x and "ahead (position" in x]
+        self.assertGreaterEqual(len(lines), 2, out)
+        self.assertEqual(len([x for x in out.splitlines() if x.startswith("  - pid")]), 1, "ahead list only on change")
+        self.assertIn("class big, mode background, 1 at a time + 1 small lane", lines[0])
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: "started after" in self.output(b)), self.output(b))
+        self.assertIn("(lane normal)", self.output(b))
+
+
 class TestModes(Base):
     def setUp(self):
         super().setUp()
@@ -698,6 +963,15 @@ class TestProfile(Base):
         cq.auto_tick()
         self.assertEqual(self.bus_calls(), [])
         self.assertIsNone(self.record())
+
+    def test_fake_gdbus_shadows_the_real_one(self):
+        self.assertTrue(shutil.which("gdbus", path=self.env["PATH"]).startswith(self.fakedir))
+
+    def test_auto_with_dev_selected_stays_dev_and_calls_no_busctl(self):
+        cq.set_mode(selected="dev", auto=True)
+        cq.auto_tick()
+        self.assertEqual(cq.read_state()["effective"], "dev")
+        self.assertEqual(self.bus_calls(), [])
 
     def test_repeating_full_and_ticking_writes_once(self):
         for _ in range(3):

@@ -47,7 +47,7 @@ StokesForge has no list of recent projects. Use **File ▸ Open…**.
 
 ### Recovery copies
 
-By default, StokesForge writes a recovery copy of your project every 5 minutes while it has unsaved changes. The copy goes to a separate recovery folder. It never overwrites your file.
+By default, StokesForge writes a recovery copy of your project every 5 minutes while it has unsaved changes. The copy goes to a separate recovery folder. It never overwrites your file. While a window such as Graph Properties is open, the copy waits for it to close.
 
 If StokesForge does not close properly (a crash, a power cut), the next start offers the copies that are newer than the saved file in a **Recover Projects** window. For each copy:
 
@@ -57,7 +57,9 @@ If StokesForge does not close properly (a crash, a power cut), the next start of
 - **Ignore** keeps the copy. It is offered again at the next start.
 - **Delete** removes the copy. It asks for confirmation.
 
-The copy is deleted when you save or quit normally.
+The copy is deleted when you save or quit normally. If you quit while a copy is being written, the window stays open for a moment and the status bar says "Writing the recovery copy before closing…"; it closes by itself when the copy is done.
+
+If the status bar says "Background tasks stopped after an internal error; the main window now runs them.", StokesForge keeps working, but save your project and restart when convenient.
 
 To change this, choose **File ▸ Preferences… ▸ General**: **Save a recovery copy automatically** turns it on or off, and **Copy every (min)** sets the period.
 
@@ -125,6 +127,8 @@ When there are more tabs than fit, **<** and **>** buttons appear at the left of
 The same commands are in **Workbook ▸ Sheet**.
 
 <img src="../images/workbooks-workbook-menu.png" alt="The Workbook menu of the menu bar: Sheet and Columns (submenus), Plot (greyed out), and the check boxes Show Metadata Row (checked) and Show x' Row." width="156">
+
+A sheet that comes from an import into **One Workbook per File** is called **Raw Data** until you change a value of an imported column; it then becomes **Sheet1** (see [Importing data](import.md)).
 
 A sheet name cannot be empty and must be unique inside the workbook. A workbook always keeps at least one sheet: **Delete** is greyed out on the last one.
 
@@ -239,7 +243,7 @@ To restore the default, right-click the letter and choose **Reset Width**. Chang
 2. Type the new value, or press <kbd>F2</kbd> or double-click to edit the current value.
 3. Press <kbd>Enter</kbd> to confirm, or <kbd>Esc</kbd> to cancel.
 
-Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row moves to the entry row.
+Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row moves to the entry row. When the active cell leaves the visible part of the sheet, the sheet scrolls just enough to show it; a click never scrolls.
 
 ### Add a row
 
@@ -272,6 +276,7 @@ The right-click menu has **Clear** and **Delete and Shift Up**. **Delete and Shi
 | **Copy with Header** | | Copies the values and the column header |
 | **Paste** | <kbd>Ctrl</kbd>+<kbd>V</kbd> | Pastes at the selected cell |
 | **Paste in Place** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> | Pastes at the position the cells were copied from |
+| **Paste Transposed** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | Pastes the copied cells with rows and columns swapped |
 
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> copies the whole columns that the selection touches.
 
@@ -282,7 +287,11 @@ A few rules:
 - **Paste** needs a single block of cells or a run of contiguous columns as its target.
 - **Copy** and **Cut** work on several blocks only if they share their rows (side by side) or their columns (stacked). Otherwise they are greyed out.
 - Pasting over a **Mixed** column that ends up with only numbers turns it back to **Numeric**.
-- If part of the pasted data does not fit, the status bar says how many columns or header fields were left out.
+- If the pasted data reaches past the last column, the missing columns are added at the end of the sheet. The status bar says how many were added, and how many header fields below the last header field were left out.
+
+**Paste Transposed** turns the copied block a quarter turn: a copied column becomes a row, a row becomes a column, a block of 2 rows by 3 columns becomes 3 rows by 2 columns. It works on cells copied in StokesForge and on a table copied from a spreadsheet. The result is a plain copy of the values: it does not follow the source, and a column with a formula is pasted as its values. From **Copy with Header**, only the values of each column are used (name, unit and comment are left out). A long column pasted this way adds the columns it needs, like any paste.
+
+The x' row pastes like a row of data. Copy x' cells and paste them (<kbd>Ctrl</kbd>+<kbd>V</kbd>) onto a cell: the x' values land in a row; with **Paste Transposed**, in a column. Pasted onto an x' cell, the first row of a block fills the x' of the successive columns (a value that is not a number is refused and the others are written; an empty cell clears the x'), and the other rows are left out. When the copied header fields include the x' row, only that row is pasted onto a cell and the status bar says how many other header rows were left out.
 
 A paste is one action for Undo.
 
@@ -363,8 +372,9 @@ A whole-column function can read a column of **another sheet**, or of **another 
 
 The reference is one value of the function, so the range stays on the right: `at(Sheet3!B, 340)`, `integral(Sheet3!B, 10, 100)`, `max([Book2]Sheet5!B, 330, 350)`, and `B / max(Sheet3!B)` to normalize a column by the maximum of another sheet. The functions that accept it are `at`, `max`, `min`, `mean`, `sum`, `std` and `integral`. `Sheet3!B + 1`, `sqrt(Sheet3!B)` and `max(Sheet3!B, C)` (the row-by-row maximum) are refused: such a reference is read by a whole-column function only.
 
-- **Quotes.** A sheet name that holds anything other than ASCII letters and digits (a space, `_`, an accent, `ᵀ`), or that starts with a digit, is written between single quotes: `'Blanc 2'!B`. A quote inside the name is doubled: `'it''s'!B`. A workbook name between brackets needs no quotes.
+- **Quotes.** A sheet name that holds anything other than ASCII letters, digits and the transposed mark `ᵀ` (a space, `_`, an accent), or that starts with a digit, is written between single quotes: `'Blanc 2'!B`. A quote inside the name is doubled: `'it''s'!B`. A workbook name between brackets needs no quotes.
 - **Case.** Sheet and workbook names are read without regard to case: `sheet3!b` is `Sheet3!B`, and the field shows the real name. For the same reason, two objects next to each other can no longer differ only by case: `SHEET1` is refused beside `sheet1` (sheets, workbooks, folders, graphs, notes). Column names are not concerned. A project saved earlier that holds such names still opens; a formula that names one of them is refused as ambiguous.
+- **The transposed mark.** A transposed sheet is named `Sheet1ᵀ`, and you can call it with a plain capital `T`: `max(Sheet1T!B)` and `max([Book2]Sheet5T!B)` read `Sheet1ᵀ` and `Sheet5ᵀ`, and the field shows the real name, `max(Sheet1ᵀ!B)`, without quotes (`Sheet1ᵀ!B` typed without quotes works too). Only a capital `T` stands for `ᵀ`, never a small `t`: `Sheet1t!B` does not read `Sheet1ᵀ`. The same holds for workbook and folder names. A name that also holds a space still needs its quotes: `'Sheet1T 2'!B` reads `Sheet1ᵀ 2`. If an exact name exists, it wins: a sheet of your own named `Sheet1T` is read as itself. For this reason, a sheet, a workbook or a folder named `Sheet1T` or `Sheet1t` is refused beside `Sheet1ᵀ`, and the other way round; transposing `Sheet1` while your own `Sheet1T` exists names the new sheet `Sheet1ᵀ 2`.
 - **Which workbook.** `[Book2]` is looked up in the folder of the workbook that holds the formula first, then in the whole project. If several workbooks outside that folder carry the name, StokesForge asks for the path from the project root: `[Mesures/Book2]Sheet5!B` (`[/Book2]Sheet5!B` for a workbook at the root). The field always shows the shortest form that is not ambiguous.
 - **The X column.** The X of a column of another sheet is the one paired with it **in its own sheet**. In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3` and `x` is calculated in this sheet, row by row; an X column written with its own prefix (`at(B, x, Sheet3!D)`) is refused.
 - **The result.** The result column has the length of its own sheet, whatever the length of the column read. A sheet that holds only formulas of this kind (or constants such as `1+2`) has one row, so the result shows; it takes the length of the sheet as soon as the sheet has data columns.
@@ -424,9 +434,9 @@ Some sheets are created for you from another sheet.
 
 When you analyse the rows of a sheet (see [Analysis](analysis.md)), StokesForge creates a transposed sheet named after its source, for example `Sheet1ᵀ`. It holds the x' values and one column per row analysed.
 
-A band at the top of this sheet tells you where it comes from. It is a snapshot of the source, not a live link:
+A band at the top of this sheet tells you where it comes from, and holds the box **Recalculate automatically**, checked by default: the sheet then follows its source by itself. Uncheck it to keep a snapshot of the source:
 
-- **Out of date** appears when the source has changed since.
+- **Out of date** appears when the source has changed since (or, with the box checked, when a column of the source cannot be followed, because it has no x' value, has text, or has a formula that reads this sheet: the band names it in full on a second line, in orange, under the first one; the line goes away once the column is fixed).
 - **Values edited** appears when you changed a value of the linked columns.
 - **Recalculate** rewrites the linked columns from the source. If you have edited values, the button is **Relink** and asks for confirmation, because it erases your edits. Undo brings them back.
 

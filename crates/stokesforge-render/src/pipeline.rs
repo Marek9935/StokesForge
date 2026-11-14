@@ -101,6 +101,12 @@ pub const X_LABEL_AREA: u32 = 52;
 pub const Y_LABEL_AREA: u32 = 64;
 /// Tick area of a mirror axis without labels (#176): the tick marks alone.
 pub const BARE_LABEL_AREA: u32 = 12;
+/// Depth of the tick marks and tick labels of the bottom axis inside its
+/// area; the rest is the title zone. A colour bar under a frame whose axis
+/// has no title starts here (#499).
+const X_TICKS_DEPTH: u32 = 30;
+/// Same for a right axis: width of its tick marks and labels.
+const Y_TICKS_DEPTH: u32 = 46;
 /// Font family requested from Plotters. It is translated into
 /// [`epaint::FontFamily::Proportional`] by [`crate::text::font_id`]; what
 /// Plotters does with it by itself does not matter, its fonts being
@@ -237,6 +243,10 @@ impl DrawnText {
 pub struct DrawnLegendRow {
     /// Rank of the series in `PanelSpec::series`.
     pub series: usize,
+    /// Horizontal middle of the entry's cell, in backend pixels (#507).
+    pub center_x: f64,
+    /// Width of the cell: the whole frame for a lone column.
+    pub width: f64,
     /// Vertical middle of the row, in backend pixels.
     pub center_y: f64,
     /// Height of the row.
@@ -478,7 +488,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // that superimposed layers (#167) share an identical plot area. `bases`
     // keeps, per cell, the last ordinary layer drawn: the one a superimposed
     // layer covers. The ranks of the superimposed layers come with them.
-    let (plans, ranks) = cell_plans(spec, &layout);
+    let (plans, ranks, bar_offsets) = cell_plans(spec, &layout, &area)?;
 
     // Free placement (#398): every cell is its stored frame plus its own
     // gutters, placed where the frame says. `cells` is indexed by the cell key
@@ -656,6 +666,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             plan,
             padding,
             ranks.get(index).copied().unwrap_or_default(),
+            bar_offsets.get(index).copied().unwrap_or_default(),
             bases.get(&cell_index),
             &overlay_panels,
             plot.spec.decimal_comma,
@@ -818,36 +829,59 @@ impl CellPlan {
         let area = |visible: bool, wanted: u32| if visible { wanted } else { 0 };
         Gutters {
             left: MARGIN + area(self.left, Y_LABEL_AREA),
-            right: MARGIN + area(self.right, self.right_wanted()),
+            right: MARGIN + area(self.right, self.right_wanted()) + self.bar_right
+                - self.tuck_right(self.right_wanted_area()),
             top: MARGIN + area(self.top, self.top_wanted()),
-            bottom: MARGIN + area(self.bottom, X_LABEL_AREA),
+            bottom: MARGIN + area(self.bottom, X_LABEL_AREA) + self.bar_bottom
+                - self.tuck_bottom(area(self.bottom, X_LABEL_AREA)),
             band,
         }
     }
 }
 
+/// What [`cell_plans`] returns: the plan of each cell, the rank of each layer
+/// among the superimposed ones, and where the band of its colour bar starts.
+type CellPlans = (
+    std::collections::HashMap<usize, CellPlan>,
+    Vec<(u32, u32)>,
+    Vec<(u32, u32)>,
+);
+
 /// The plans of the cells (union of what their layers ask for) and the rank of
 /// each layer among the superimposed ones of its cell, from the spec alone.
-fn cell_plans(
+fn cell_plans<DB: DrawingBackend>(
     spec: &PlotSpec,
     layout: &Layout,
-) -> (std::collections::HashMap<usize, CellPlan>, Vec<(u32, u32)>) {
+    probe: &DrawingArea<DB, Shift>,
+) -> Result<CellPlans, DrawingAreaErrorKind<DB::ErrorType>> {
     let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
     // The rank of each superimposed layer among those of its cell that show an
     // axis on the same side (#168): 0 against the plot area. It comes from the
     // order of the layers, never from a stored level: a deleted layer
     // therefore leaves no empty band.
     let mut ranks: Vec<(u32, u32)> = Vec::with_capacity(spec.panels.len());
+    // The bands of the colour bars of the earlier layers of the cell: where
+    // the band of this layer's bar starts (bottom, right), #499.
+    let mut offsets: Vec<(u32, u32)> = Vec::with_capacity(spec.panels.len());
     for (index, panel) in spec.panels.iter().enumerate() {
         if let Some(cell) = layout.cells.get(index) {
             let plan = plans.entry(*cell).or_default();
             ranks.push((plan.top_levels, plan.right_levels));
-            plan.add(panel);
+            offsets.push((plan.bar_bottom, plan.bar_right));
+            plan.add(
+                panel,
+                crate::color_bar::band(
+                    panel.color_bar_in_order().as_deref(),
+                    &panel.legend.font,
+                    probe,
+                )?,
+            );
         } else {
             ranks.push((0, 0));
+            offsets.push((0, 0));
         }
     }
-    (plans, ranks)
+    Ok((plans, ranks, offsets))
 }
 
 /// Measures a title: `(text, font, default size, figure width)` to the height
@@ -917,6 +951,9 @@ struct ExplicitGrid {
     min_left: u32,
     /// Smallest Top the axes of the first row and the graph title allow.
     min_top: u32,
+    /// Empty space kept outside the outer cells (#505), `[left, top, right,
+    /// bottom]`, already part of the outer gutters.
+    slack: [u32; 4],
 }
 
 /// How the figure is placed around its frames (#405): the "Fixed" figure size
@@ -990,6 +1027,16 @@ impl ExplicitGrid {
             overflow |= place.fixed && (slot.0 > left_floor || slot.1 > right_floor);
             *slot = (slot.0.max(left_floor), slot.1.max(right_floor));
         }
+        // #505: the empty space the page keeps around the grid is part of the
+        // outer gutters, after the floors: the frames do not move for it.
+        let slack = spec.sanitized_grid_slack().unwrap_or_default();
+        let slack = [slack.left, slack.top, slack.right, slack.bottom].map(|v| v.round() as u32);
+        if let Some(first) = column_gutters.first_mut() {
+            first.0 += slack[0];
+        }
+        if let Some(last) = column_gutters.last_mut() {
+            last.1 += slack[2];
+        }
         let width = width.unwrap_or_else(|| {
             frame_widths
                 .iter()
@@ -1045,6 +1092,12 @@ impl ExplicitGrid {
             }
         }
         let min_top = title_band + natural_top.first().copied().unwrap_or(MARGIN);
+        if let Some(first) = row_gutters.first_mut() {
+            first.0 += slack[1];
+        }
+        if let Some(last) = row_gutters.last_mut() {
+            last.1 += slack[3];
+        }
         Ok(Self {
             frame_widths,
             frame_heights,
@@ -1056,6 +1109,7 @@ impl ExplicitGrid {
             overflow,
             min_left,
             min_top,
+            slack,
         })
     }
 
@@ -1379,6 +1433,13 @@ pub struct FigureLayout {
     /// title band, in points (free placement; `(0, 0)` on the grid). A stored
     /// `left` is `left - free_origin.0` from the image edge.
     pub free_origin: (f64, f64),
+    /// Empty space between the outer cells of a regular grid and the edge of
+    /// the image (#505), in points `[left, top, right, bottom]`; all zero
+    /// without any, in free placement and for a legacy graph. It is **part of**
+    /// `column_gutters` / `row_gutters` and of the outer cells of
+    /// [`FigureLayout::cell_rect`]: [`FigureLayout::grid_outline`] is the grid
+    /// without it.
+    pub grid_slack: [u32; 4],
 }
 
 /// A cell of a free figure (#398) in figure coordinates, in pixels.
@@ -1458,6 +1519,24 @@ impl FigureLayout {
         Some((x0, y0 + self.title_band, x1 - x0, y1 - y0))
     }
 
+    /// The rectangle the grid occupies without its [`FigureLayout::grid_slack`]:
+    /// `(left, top, right, bottom)` in figure coordinates, the title band
+    /// included in `top` and `bottom` (#505). The whole image when there is no
+    /// slack. `None` for a layout without a grid.
+    pub fn grid_outline(&self) -> Option<(u32, u32, u32, u32)> {
+        let band = self.title_band;
+        let [left, top, right, bottom] = self.grid_slack;
+        Some((
+            self.column_breaks.first()? + left,
+            self.row_breaks.first()? + band + top,
+            self.column_breaks.last()?.saturating_sub(right),
+            self.row_breaks
+                .last()?
+                .saturating_add(band)
+                .saturating_sub(bottom),
+        ))
+    }
+
     /// The frame (plot area) shared by the cells of `(row, column)`, in figure
     /// coordinates: `(x, y, width, height)`. `None` for a legacy graph or a
     /// cell outside the grid. The frames of a column share `x` and `width`,
@@ -1487,7 +1566,7 @@ pub fn figure_layout<DB: DrawingBackend>(
 ) -> Result<FigureLayout, DrawingAreaErrorKind<DB::ErrorType>> {
     if spec.layer_placement == LayerPlacement::Free {
         let layout = free_layout_of(spec);
-        let (plans, _) = cell_plans(spec, &layout);
+        let (plans, _, _) = cell_plans(spec, &layout, probe)?;
         let free = FreeLayout::build(
             spec,
             &layout,
@@ -1543,6 +1622,7 @@ pub fn figure_layout<DB: DrawingBackend>(
             placement: LayerPlacement::Free,
             free_cells,
             free_origin: free.origin,
+            grid_slack: [0; 4],
         });
     }
     let layout = grid_of(spec, spec.panels.len());
@@ -1569,9 +1649,10 @@ pub fn figure_layout<DB: DrawingBackend>(
             placement: LayerPlacement::Grid,
             free_cells: Vec::new(),
             free_origin: (0.0, 0.0),
+            grid_slack: [0; 4],
         });
     };
-    let (plans, _) = cell_plans(spec, &layout);
+    let (plans, _, _) = cell_plans(spec, &layout, probe)?;
     let grid = ExplicitGrid::build(
         spec,
         &layout,
@@ -1598,6 +1679,7 @@ pub fn figure_layout<DB: DrawingBackend>(
         placement: LayerPlacement::Grid,
         free_cells: Vec::new(),
         free_origin: (0.0, 0.0),
+        grid_slack: grid.slack,
     })
 }
 
@@ -2154,6 +2236,10 @@ pub enum BesideSide {
     Right,
     /// Below: same left, same frame size.
     Below,
+    /// To the left: same top, same frame size.
+    Left,
+    /// Above: same left, same frame size.
+    Above,
 }
 
 /// The frame of a layer added beside the cell of `panel` in a **free** graph
@@ -2202,7 +2288,7 @@ pub fn place_beside<DB: DrawingBackend>(
     let frame = spec.panels[spec.cell_bases()[panel]].sanitized_free_frame();
     // The bands a new, default layer asks for around its frame.
     let mut plan = CellPlan::default();
-    plan.add(&PanelSpec::default());
+    plan.add(&PanelSpec::default(), (0, 0));
     let new = plan.gutters(0);
     let (new_left, new_top) = (f64::from(new.left), f64::from(new.top));
     let (width, height) = (
@@ -2213,6 +2299,8 @@ pub fn place_beside<DB: DrawingBackend>(
     let mut candidate = match side {
         BesideSide::Right => (base_outer.2, frame.top - new_top),
         BesideSide::Below => (frame.left - new_left, base_outer.3),
+        BesideSide::Left => (base_outer.0 - width, frame.top - new_top),
+        BesideSide::Above => (frame.left - new_left, base_outer.1 - height),
     };
     for _ in 0..=outers.len() {
         let taken = outers.iter().find(|(_, _, o)| {
@@ -2225,6 +2313,8 @@ pub fn place_beside<DB: DrawingBackend>(
         match side {
             BesideSide::Right => candidate.0 = o.2,
             BesideSide::Below => candidate.1 = o.3,
+            BesideSide::Left => candidate.0 = o.0 - width,
+            BesideSide::Above => candidate.1 = o.1 - height,
         }
     }
     Ok(Some(FreeFrame {
@@ -2270,7 +2360,7 @@ fn drawn_legacy_frames<DB: DrawingBackend>(
     let band = graph_title_band(spec, probe, width)?;
     let column_breaks = fit_breaks(None, layout.columns, width);
     let row_breaks = fit_breaks(None, layout.rows, total_height.saturating_sub(band));
-    let (plans, _) = cell_plans(spec, &layout);
+    let (plans, _, _) = cell_plans(spec, &layout, probe)?;
     let bands = panel_bands(spec, &layout, width, &mut |text, font, size, width| {
         text_band(probe, text, font, size, width)
     })?;
@@ -2405,7 +2495,7 @@ impl Projection {
 /// Draws `text` (Typst) centered on `pixel`, rotated by `rotation` degrees
 /// (counterclockwise), and returns the size of the **straight** text,
 /// measured by the same path as everything else.
-fn draw_centered_text<DB: DrawingBackend>(
+pub(crate) fn draw_centered_text<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     text: &str,
     style: &TextStyle<'static>,
@@ -2518,10 +2608,25 @@ struct CellPlan {
     right_labels: bool,
     /// A series is attached to the right axis: it is a real axis.
     right_data: bool,
+    /// Bands a colour bar of the cell asks under / right of the frame, past
+    /// the axis areas (#499); the largest of its layers.
+    bar_bottom: u32,
+    bar_right: u32,
+    /// A layer of the cell writes a title for its bottom / right axis: the
+    /// title zone of the axis area is then used, else a colour bar is tucked
+    /// right after the tick labels (#499).
+    bottom_title: bool,
+    right_title: bool,
 }
 
 impl CellPlan {
-    fn add(&mut self, spec: &PanelSpec) {
+    fn add(&mut self, spec: &PanelSpec, (bar_bottom, bar_right): (u32, u32)) {
+        // The bands of the bars of the cell stack, in the order of the layers
+        // (a layer draws its bar after the bands of the previous ones).
+        self.bar_bottom += bar_bottom;
+        self.bar_right += bar_right;
+        self.bottom_title |= spec.bottom.title_visible && !spec.bottom.display_label().is_empty();
+        self.right_title |= spec.right.title_visible && !spec.right.display_label().is_empty();
         match spec.overlay {
             Some(overlay) => {
                 self.top_overlay |= overlay.x_top && spec.bottom.visible;
@@ -2557,6 +2662,35 @@ impl CellPlan {
 }
 
 impl CellPlan {
+    /// How far a bar under the frame climbs into the bottom axis area: the
+    /// part meant for the axis title when none is written. Never more than
+    /// the area given.
+    fn tuck_bottom(&self, area: u32) -> u32 {
+        if self.bar_bottom > 0 && self.bottom && !self.bottom_title {
+            X_LABEL_AREA.saturating_sub(X_TICKS_DEPTH).min(area)
+        } else {
+            0
+        }
+    }
+
+    /// Same for a bar right of the frame and the right axis area.
+    fn tuck_right(&self, area: u32) -> u32 {
+        if self.bar_right > 0 && self.right && !self.right_title && area == Y_LABEL_AREA {
+            Y_LABEL_AREA.saturating_sub(Y_TICKS_DEPTH).min(area)
+        } else {
+            0
+        }
+    }
+
+    /// The right area as `gutters` reserves it.
+    fn right_wanted_area(&self) -> u32 {
+        if self.right {
+            self.right_wanted()
+        } else {
+            0
+        }
+    }
+
     /// Bands of the right area when superimposed layers show an axis there:
     /// one per layer, plus that of the right data axis (#168).
     fn right_slots(&self) -> u32 {
@@ -2623,6 +2757,7 @@ fn draw_panel<DB: DrawingBackend>(
     plan: CellPlan,
     padding: Option<Padding>,
     rank: (u32, u32),
+    bar_offset: (u32, u32),
     base: Option<&BaseFrame<DB>>,
     legend_overlays: &[&ResolvedPanel<'_>],
     decimal_comma: bool,
@@ -2652,6 +2787,7 @@ fn draw_panel<DB: DrawingBackend>(
     // nor framed, nor in the legend.
     // `source` keeps the rank of each series in `PanelSpec::series`: the
     // legend designates its rows by this rank (issue #53).
+    let value_colors = crate::color_bar::value_colors(panel);
     let (source, mut prepared): (Vec<usize>, Vec<Prepared<'_>>) = panel
         .series
         .iter()
@@ -2663,7 +2799,9 @@ fn draw_panel<DB: DrawingBackend>(
             } else {
                 y_scale
             };
-            (rank, series::prepare(series, x_scale, scale))
+            let mut prepared = series::prepare(series, x_scale, scale);
+            prepared.value_color.clone_from(&value_colors[rank]);
+            (rank, prepared)
         })
         .unzip();
     // A superimposed layer has no secondary ordinate: everything is drawn on
@@ -2817,6 +2955,17 @@ fn draw_panel<DB: DrawingBackend>(
         .top_x_label_area_size(top_label_area)
         .y_label_area_size(y_label_area)
         .right_y_label_area_size(right_label_area);
+    // The band of the colour bars of the cell (#499) comes after the axis
+    // areas, inside the margin; a bar under an axis without a title climbs
+    // into the title zone. In a legacy layout (no stored frames) the band
+    // takes its share of the fixed canvas, so the frame gives way.
+    let tuck = (
+        plan.tuck_bottom(x_label_area),
+        plan.tuck_right(right_label_area),
+    );
+    builder
+        .margin_bottom(MARGIN + plan.bar_bottom - tuck.0)
+        .margin_right(MARGIN + plan.bar_right - tuck.1);
     // The length of the axes in pixels (#397), before any range matters: the
     // plot area only depends on the margins and the fixed label bands. The
     // tick count of each axis is chosen once, here, and given to everything
@@ -3651,11 +3800,17 @@ fn draw_panel<DB: DrawingBackend>(
             } else {
                 y_scale
             };
+            let colors = crate::color_bar::value_colors(layer);
             layer
                 .series
                 .iter()
-                .filter(|series| series.spec.visible)
-                .map(move |series| series::prepare(series, x, y))
+                .zip(colors)
+                .filter(|(series, _)| series.spec.visible)
+                .map(move |(series, color)| {
+                    let mut prepared = series::prepare(series, x, y);
+                    prepared.value_color = color;
+                    prepared
+                })
         })
         .collect();
     let entries: Vec<&Prepared<'_>> = prepared
@@ -3684,7 +3839,12 @@ fn draw_panel<DB: DrawingBackend>(
             ),
         },
         figure_texts,
-        legend::LegendColors { background, ink },
+        legend::LegendColors {
+            // Automatic background = the panel's (#507).
+            background: rgba_or(&spec.legend.background, background),
+            ink,
+            frame: crate::color::rgb_or(&spec.legend.frame_color, ink),
+        },
         legend_center,
     )?;
     drawn.legend_entries = inscribed.entries;
@@ -3703,12 +3863,64 @@ fn draw_panel<DB: DrawingBackend>(
             .rows
             .iter()
             .zip(&entry_ranks)
-            .map(|(&(center_y, height), &series)| DrawnLegendRow {
+            .map(|(cell, &series)| DrawnLegendRow {
                 series,
-                center_y,
-                height,
+                center_x: cell.center_x,
+                width: cell.width,
+                center_y: cell.center_y,
+                height: cell.height,
             })
             .collect();
+    }
+
+    // The colour bar (#499), after the legend.
+    if let Some(bar) = spec.color_bar_in_order().filter(|bar| bar.visible) {
+        let bar = &*bar;
+        let segments = crate::color_bar::bar_segments(panel);
+        let bar_ink = opaque(ink);
+        let placed = crate::color_bar::draw(
+            canvas,
+            bar,
+            &spec.legend.font,
+            &segments,
+            &crate::color_bar::BarFrame {
+                frame: (origin, size),
+                outside: (
+                    origin.0 + size.0 as i32 + right_label_area as i32 - tuck.1 as i32
+                        + bar_offset.1 as i32,
+                    origin.1 + size.1 as i32 + x_label_area as i32 - tuck.0 as i32
+                        + bar_offset.0 as i32,
+                ),
+                reserved: true,
+                center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
+            },
+            &{
+                let (small, tick) = crate::color_bar::label_styles(&spec.legend.font, bar_ink);
+                crate::color_bar::BarStyles {
+                    rich: font_style(
+                        &spec.legend.font,
+                        LABEL_SIZE,
+                        bar_ink,
+                        canvas.dim_in_pixel().0,
+                    ),
+                    small,
+                    tick,
+                    ink,
+                }
+            },
+        )?;
+        if let Some(((left, top), (width, height))) = placed {
+            texts.push(DrawnText {
+                target: TextTarget::ColorBar { panel: index },
+                center: (
+                    left as f64 + width as f64 / 2.0,
+                    top as f64 + height as f64 / 2.0,
+                ),
+                size: (width, height),
+                rotation: 0.0,
+                anchored: usable_anchor(bar.anchor).is_some(),
+            });
+        }
     }
 
     // The moved titles, placed on their anchor (issue #53): on top of the
@@ -3907,15 +4119,15 @@ fn paint_whiskers<DB: DrawingBackend>(
     if whiskers.is_empty() {
         return Ok(());
     }
-    let spec = series.spec;
+    let line = series.line();
     let segments: Vec<_> = whiskers
         .iter()
         .map(|(from, to)| (map(*from), map(*to)))
         .collect();
     if series.stale {
-        paint::whiskers(screen, &segments, &paint::grayed(&spec.line))?;
+        paint::whiskers(screen, &segments, &paint::grayed(&line))?;
     } else {
-        paint::whiskers(screen, &segments, &spec.line)?;
+        paint::whiskers(screen, &segments, &line)?;
     }
     for (a, b) in segments {
         match bounds {
@@ -3948,6 +4160,8 @@ fn paint_series<DB: DrawingBackend>(
 ) -> Result<(usize, crate::series_selection::DrawnSeries), DrawingAreaErrorKind<DB::ErrorType>> {
     let mut geometry = crate::series_selection::DrawnSeries::default();
     let spec = series.spec;
+    let line = series.line();
+    let symbol = series.symbol();
     match &series.geometry {
         Geometry::Nothing => Ok((0, geometry)),
         Geometry::Bars { bars, whiskers } => {
@@ -3960,9 +4174,9 @@ fn paint_series<DB: DrawingBackend>(
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
                 .collect();
             if series.stale {
-                paint::bars(screen, &rects, &paint::grayed(&spec.line), ink)?;
+                paint::bars(screen, &rects, &paint::grayed(&line), ink)?;
             } else {
-                paint::bars(screen, &rects, &spec.line, ink)?;
+                paint::bars(screen, &rects, &line, ink)?;
             }
             // `a` is the corner on the value side, `b` the corner on the
             // baseline side: the free end of the bar (the place of its
@@ -4032,12 +4246,12 @@ fn paint_series<DB: DrawingBackend>(
                 match bounds {
                     Some(bounds) => {
                         for run in clip::clip_polyline_f64(bounds, &precise) {
-                            paint::polyline_f64(screen, &run, &spec.line, series.stale)?;
+                            paint::polyline_f64(screen, &run, &line, series.stale)?;
                             geometry.paths.push(quantized_path(&run));
                         }
                     }
                     None => {
-                        paint::polyline_f64(screen, &precise, &spec.line, series.stale)?;
+                        paint::polyline_f64(screen, &precise, &line, series.stale)?;
                         geometry.paths.push(quantized_path(&precise));
                     }
                 }
@@ -4047,7 +4261,7 @@ fn paint_series<DB: DrawingBackend>(
                 && spec.symbol.shape != stokesforge_plot::SymbolShape::None
             {
                 let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
-                paint::symbols(screen, &mapped, &spec.symbol, series.stale)?;
+                paint::symbols(screen, &mapped, &symbol, series.stale)?;
                 geometry.points = mapped
                     .into_iter()
                     .filter(|&(x, y)| {
@@ -4256,7 +4470,7 @@ fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
 /// The style of the **ticks**, at the given size and in the given color
 /// (opacity included): laid out by `epaint`, never by Typst. Titles, axis
 /// titles and legend take [`rich_style`] (issue #32).
-fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
+pub(crate) fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 

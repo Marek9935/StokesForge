@@ -264,18 +264,6 @@ fn pasteable_graph_in_its_project_and_embeds_its_data_in_another() {
 }
 
 #[test]
-fn sheet_rename_passed_to_the_detached_view() {
-    let (_session, mut state, book, _, _) = fixture();
-    let sheet = state.tree().children(book).unwrap()[0];
-    state.dispatch(Action::BeginRenameSheet(sheet));
-    let mut view = state.fork_for_detached_view().unwrap();
-    assert_eq!(view.renaming_sheet(), Some(sheet));
-    state.dispatch(Action::CancelRenameSheet);
-    view.sync_detached_sheet_editor(&state);
-    assert_eq!(view.renaming_sheet(), None);
-}
-
-#[test]
 fn renaming_several_objects_is_a_single_gesture_and_a_failure_is_atomic() {
     let (_session, mut state, book, graph, _) = fixture();
     let before = state.tree().clone();

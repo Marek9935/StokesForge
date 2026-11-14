@@ -414,7 +414,12 @@ fn build_spec(
                 "parent must be a folder handle".into(),
             ));
         }
-        PlotSpec::default()
+        // A new graph has no legend frame (#507, D6), like the application's.
+        let mut fresh = PlotSpec::default();
+        for panel in fresh.panels.iter_mut() {
+            panel.legend.frame = false;
+        }
+        fresh
     };
     if let Some(title) = &request.title {
         spec.title.clone_from(title);
@@ -491,6 +496,20 @@ fn build_spec(
             panel.rename_group(group, name);
         }
     }
+    if request.graph.is_none() {
+        // A new graph titles its axes from the columns, like the
+        // application's (#506); a title given to `plot()` (even empty) wins.
+        let filled =
+            stokesforge_core::resolve::with_default_axis_titles(&snapshot.tree, spec.clone());
+        if let (Some(from), Some(to)) = (filled.panels.get(0), spec.panels.get_mut(0)) {
+            if request.x_title.is_none() {
+                to.bottom.label.clone_from(&from.bottom.label);
+            }
+            if request.y_title.is_none() {
+                to.left.label.clone_from(&from.left.label);
+            }
+        }
+    }
     Ok(spec)
 }
 
@@ -509,7 +528,7 @@ fn plot_native(context: &ScriptContext, request: Request) -> Result<Target, Host
         bridge::set_graph_spec(session, graph, spec)?;
         Ok((graph, epoch))
     } else {
-        bridge::fix_frames(None, &mut spec);
+        bridge::fix_frames(&snapshot.tree, None, &mut spec);
         let id = bridge::add_created_node(
             session,
             parent.0,

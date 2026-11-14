@@ -103,6 +103,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::SetWindowMeta { name: Some(name) } => {
             tr!("history-set-window-meta-named", name = name.as_str())
         }
+        HistoryLabel::SetSheetRawMark { name: None } => tr!("history-set-sheet-raw-mark"),
+        HistoryLabel::SetSheetRawMark { name: Some(name) } => {
+            tr!("history-set-sheet-raw-mark-named", name = name.as_str())
+        }
         HistoryLabel::SetNoteText { name: None } => tr!("history-set-note-text"),
         HistoryLabel::SetNoteText { name: Some(name) } => {
             tr!("history-set-note-text-named", name = name.as_str())
@@ -117,6 +121,8 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         }
         HistoryLabel::TransposeRows => tr!("history-transpose-rows"),
         HistoryLabel::RecalculateTranspose => tr!("history-recalculate-transpose"),
+        HistoryLabel::SetTransposeAuto { auto: true } => tr!("history-transpose-auto-on"),
+        HistoryLabel::SetTransposeAuto { auto: false } => tr!("history-transpose-auto-off"),
         HistoryLabel::EditPlotSpec(kind) => match kind {
             PlotEditKind::Visibility => tr!("history-plot-visibility"),
             PlotEditKind::RenameSeries => tr!("history-plot-rename-series"),
@@ -143,6 +149,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::MatchLayerSize => tr!("history-plot-match-layer-size"),
             PlotEditKind::DistributeLayers => tr!("history-plot-distribute-layers"),
             PlotEditKind::LayerPlacement => tr!("history-plot-layer-placement"),
+            PlotEditKind::LegendText => tr!("history-plot-legend-text"),
+            PlotEditKind::ColorBar => tr!("history-plot-color-bar"),
+            PlotEditKind::FitPage => tr!("history-plot-fit-page"),
+            PlotEditKind::FitLayout => tr!("history-plot-fit-layout"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::SortFolder { name: None } => tr!("history-sort-folder"),

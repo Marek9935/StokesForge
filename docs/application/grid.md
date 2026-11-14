@@ -37,7 +37,7 @@ The five zones of the grid — data cell, header field of a single
 column, row of letters, row-number gutter, whole-field labels
 in that same gutter — carry the **same** editing block on right-click
 (`app::grid::grid_edit_menu`): a clipboard group (Cut, Copy,
-Copy with Header, Paste, Paste in Place), then Clear and Delete
+Copy with Header, Paste, Paste in Place, Paste Transposed), then Clear and Delete
 and Shift Up. Undo and Redo are no longer there (Edit and the keyboard, #158); each
 entry keeps its keyboard equivalent, a mirror of the shortcut block of
 `grid_contents`. The row of letters surrounds this block with what is specific
@@ -127,9 +127,38 @@ sheet (left → right, top → bottom), never that of the clicks.
   sheet; blocks of cells that share their rows (side by side) or their
   columns (stacked) — otherwise Copy and Cut are disabled (`GridMenu::copy_enabled`,
   `Selection::copy_layout`). Copy with Header follows the columns touched.
-- **Paste / Paste in Place**: disabled on a non-contiguous selection
+- **Paste / Paste in Place / Paste Transposed**: disabled on a non-contiguous selection
   (`GridMenu::paste_enabled`, ambiguous target); pasting with the keyboard is refused
   with a message.
+- **A paste wider than the sheet creates the missing columns (#495)**: any
+  paste that goes beyond the last column (Paste, Paste in Place, a header
+  field paste) adds Numeric columns at the end of the sheet, with the command
+  of Add Column, inside the same `PasteCells` group (one Undo removes columns
+  and values), BEFORE any header is written (a pasted formula reads letters of
+  the destination). There is no cap: the created ones are said by the plain
+  `status-paste-columns-added`. An outside
+  text is range-checked for the columns it will create as Numeric
+  (`external_paste_range_error`). Header rows beyond Formula are still dropped.
+- **Paste Transposed (#495)**: `Action::PasteTransposed { sheet, text }`,
+  Ctrl+Alt+V (egui sends it as the same `Event::Paste`: the grid reads
+  `modifiers.alt` BEFORE `shift`) and the right-click entry after Paste in
+  Place (gate `paste_enabled`, reads the system clipboard like Paste).
+  `AppState::paste_transposed` shares the prologue of Paste
+  (`paste_source`), rotates the block with the pure `transposed_clipboard`
+  (data rows transposed; a full-column copy gives each body as a row, header
+  and formula dropped, values frozen; an x' row of a header copy becomes a data
+  row, the other copied header rows are dropped and counted; a single value
+  stays a value), checks an outside text on the transposed block, then pastes
+  like Paste (`PasteCells`, columns created beyond the edge). Anchored on an x'
+  cell, the first row goes into the x' of successive columns
+  (`paste_x_prime_row`): a non-number is refused cell by cell, an empty one
+  clears x'; anchored on another header field nothing is pasted. No new
+  `MacroKind`. The x' row is a row of values for the plain Paste too (#495):
+  a data block on an x' cell takes that same branch (`apply_paste`), and a
+  header copy that holds the x' row, pasted on a data cell, writes the x' row
+  as data and drops the other copied header rows (orange
+  `status-paste-header-rows-dropped`). Paste in Place and a full-column copy
+  keep their ranks and are untouched.
 - **Clipboard format (#259)**: the system text is TSV in the
   Excel/LibreOffice format, written and read by `stokesforge_core::tsv` (`encode`,
   `decode`, `encode_cell`), without egui: a cell that holds a tab, a
@@ -197,9 +226,43 @@ takes the default width. No fit-to-content by double-click.
 The width is pushed only at the **end of a resize done by hand**
 (`finished_column_resizes`: handle released, width read from the extent of the
 header): pushing the rendered width on every frame would mark the project
-as modified on every opening. The detached view has its own `AppState`; its
-width also goes through the actor, and the main state rereads it on its
-refresh.
+as modified on every opening. The detached workbook paints and writes the
+application's own state (#475, L2): its width goes through the actor like any
+other, and a write made under the window's session identity (a cell entry closed
+by a click elsewhere, #524) is in the one snapshot at once, with nothing to pull
+back.
+
+**The table holds only the visible columns (#534).** A worksheet of 1000
+columns cost 0.2-0.3 s per frame, an empty `TableBuilder` of 1000 columns alone
+27 ms: egui_extras lays out every column of every visible row, and nothing
+culls columns. `grid_contents` therefore gives the table only the gutter, a
+**left spacer**, the columns that meet the horizontal viewport plus one margin
+column on each side, and a **right spacer** (`column_window`, `ColumnWindow`).
+A spacer is an exact, non-resizable column (`TableColumn::exact`) as wide as
+the columns it stands for with their spacings, so the content width, the
+horizontal bar and the scroll offset are those of the whole sheet. The geometry
+comes from the stored widths (`NodeId`, `DEFAULT_COLUMN_WIDTH`) and the viewport
+from the clip rectangle of the horizontal scroll area, never from what was
+painted. There is no cap on the number of columns.
+
+What follows from it: (1) the layout key and the `reset()` follow the **painted**
+columns (the table keeps its widths by position, a window that moves is a new
+list); widths come back from `TableColumn::initial` and the gutter from
+`gutter_width_id`, so nothing is lost. (2) The handle of a data column is
+`table_rank = first_rank + index in the window` (`ColumnWindow::first_rank`, the
+only place: `finished_column_resizes`). (3) While a resize handle is dragged the
+window of the previous frame is kept (`visible_column_window`), so ranks cannot
+move under the pointer. (4) Extents exist only for painted columns: the grip
+bands (`column_grip_bands`) know whether the block continues past the window and
+draw no edge there, the free area after the last column (`last_column_right`)
+exists only when the last column is painted, the "?" of the formula cell is
+omitted when its column is off-window. (5) `grid_rect` is the **viewport**, not
+the content rectangle of the scroll area (which starts left of the viewport once
+scrolled, so a click no longer took the keyboard focus). (6) A cell or header field being
+edited that scrolls out of the painted window, horizontally or vertically, stays
+editable (see "An entry scrolled out of view" below).
+Not seen: a column whose content widens it beyond its stored width is painted
+wider than the spacers assume; the margin column covers a small difference.
 
 **Same default width floating / maximized (#337).** Reported under
 #330: maximized, the workbook window made the never-set columns go from 57 to 62 px of spacing between letters. Cause: the first frame of an
@@ -495,6 +558,40 @@ the tests of `app/grid.rs` (`app::grid::tests`). egui's focus does not show in a
 (`STOKESFORGE_APP_SCREENSHOT`): to be confirmed on a real window
 (`run-stokesforge` on X11 helps, without being worth native Wayland).
 
+### The grid follows the keyboard cursor (#534)
+
+When the active cell (data cell or header field) moves after an arrow, Tab or
+Enter, and leaves the viewport, the grid scrolls, on both axes, just enough to
+show it (`follow_offset`: the least movement; a cell wider than the view is
+aligned on its start; the first column also brings the row-number gutter back).
+The decision "which cell is active" stays in `AppState`; the grid watches
+`Selection::grid_cursor`: a navigation key arms the follow for 30 frames
+(`arm_follow`, so that a column added by Tab, created a few frames later, is
+followed too), the first change of cursor while armed asks for the scroll
+(`follow_cursor`, once), and any press or release of the mouse disarms: **a click
+never scrolls**. The offsets are not applied by a second path: they are handed
+to the workbook (`take_follow_scroll`) which stores them in the same on-hold
+slots as the mirrored bars (`pending_offset`, `pending_vertical_offset`),
+applied by the next frame. The row geometry is `row * ROW_HEIGHT` (no vertical
+spacing), the column geometry the stored widths.
+
+**An entry scrolled out of view.** The table cannot build a row or a column that
+is outside its window, and egui drops the focus of a widget that is not
+registered for a frame, so an editor that scrolled away used to lose the typing.
+`paint_unpainted_edit` (called after the table, before the keyboard) draws the
+open editor anyway when the table did not (`mark_edit_painted` tells), by the
+**same** code (`cell_widget` / `header_field_widget`, so one text-editing
+implementation), in a child `Ui` whose clip is empty: nothing is drawn, no
+tint or bubble, and the `TextEdit` skips its scroll-to-cursor (it only does so
+for a visible rectangle), so **typing never moves the grid**. Characters,
+Backspace, Enter, Tab, Shift+Enter/Tab and Escape act as in a visible editor; Enter,
+Tab and the other cursor moves then scroll to the new cell through the follow
+above (Escape moves nothing and does not scroll). A click elsewhere ends the
+entry as ever (S-T4, `FocusLoss::Ends`). The editor's identifier comes from the
+cell or field (`stable_edit_id`), not from the table cell's (which holds the
+column index of the window), so focus, caret and selection survive a scroll out
+and back.
+
 ### Body alignment: numbers right, text left
 
 `cell_widget` aligns each cell of the **body** of the grid like a
@@ -542,8 +639,8 @@ Two deliberate differences between the menu and the keyboard:
   try on click, and show a notice if it gives nothing. "Paste in Place", for its part, can be disabled at no cost — it replays the **internal**
   clipboard, whose state is known.
 
-Finally, the five constants `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
-`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE` are **purely
+Finally, the six constants `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
+`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE`/`SHORTCUT_PASTE_TRANSPOSED` are **purely
 decorative**: they exist only to write the shortcut reminder on the
 right of a menu entry. Nothing consumes them, and one must not try —
 `egui-winit` intercepts Ctrl+C/X/V when translating the window events
@@ -569,10 +666,15 @@ fired).
   tabs (see "Generic detaching of content tabs") —
   a technical constraint of the `'static` closure of `show_viewport_deferred`,
   not a deliberate extension of the limit.
-- **Open windows and their mode are not restored**: startup
-  opens the first workbook and the first graph. The saved positions
-  and sizes are reused for the contents, but maximization and
-  detachment are not a persisted layout plan.
+- **The grid is virtualized on both axes (#534)**: rows by
+  `TableBuilder::body().rows()`, columns by the window and spacers of
+  "Column width", so a frame costs what is visible, not the size of the sheet.
+  Nothing caps the number of columns.
+- **Open windows and their mode are restored** at startup and on every Open
+  or Recover (#513): open, maximised, collapsed, stacking order and floating
+  geometry. Detachment is not part of the plan: a detached window comes back
+  docked and open. An old file without window states opens no window (the
+  in-memory demo still opens its first workbook and graph).
 
 ### A detail that looks like a detail
 

@@ -88,18 +88,23 @@ pub use formula::{
     FormulaPart, RemoteRef, SheetAddress, SheetDirectory, SheetScope, REF_TOKEN,
 };
 pub use id::{IdAllocator, NodeId};
-pub use name::{check_name, natural_cmp, same_name_ignoring_case, RESERVED_NAME_CHARS};
-pub use node::{Node, NodeKind, WindowMeta};
+pub use name::{
+    check_name, natural_cmp, same_name_folding_transpose_mark,
+    same_name_folding_transpose_mark_case_sensitive, same_name_ignoring_case,
+    same_name_ignoring_case_exact, RESERVED_NAME_CHARS,
+};
+pub use node::{Node, NodeKind, RawSheetMark, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::{spreadsheet_name, Project};
 pub use resolve::{
-    bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec,
-    series_label, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
-    SeriesLabel,
+    bar_width, column_fields, histogram, resolve_column, resolve_panel, resolve_series,
+    resolve_series_in, resolve_spec, series_label, series_value, text_context, with_sheet,
+    ColumnFields, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+    SeriesLabel, TextTarget,
 };
 pub use sheet_refs::{FormulaInput, FormulaInputs};
 pub use transpose::{
-    content_stamp, transposed_name, TransposeLink, TransposeSourceColumn, TransposeState,
-    TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
+    content_stamp, transposed_name, unfollowable_column, TransposeLink, TransposeSourceColumn,
+    TransposeState, TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
 };
 pub use tree::Tree;

@@ -37,6 +37,8 @@ pub(super) fn clickable(response: egui::Response) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// Up and down together (a vertical splitter; mockup E, #488).
+pub(super) const RESIZE_VERTICAL: egui::CursorIcon = egui::CursorIcon::ResizeVertical;
 pub(super) const RESIZE_NORTH: egui::CursorIcon = egui::CursorIcon::ResizeNorth;
 pub(super) const RESIZE_SOUTH: egui::CursorIcon = egui::CursorIcon::ResizeSouth;
 pub(super) const RESIZE_WEST: egui::CursorIcon = egui::CursorIcon::ResizeWest;

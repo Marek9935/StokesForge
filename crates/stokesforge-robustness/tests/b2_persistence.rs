@@ -8,6 +8,8 @@ use stokesforge_core::{
 use stokesforge_persistence::{load, save};
 use tempfile::TempDir;
 
+mod common;
+
 const MAGIC: &[u8; 4] = b"STKF";
 
 fn write_file(dir: &TempDir, name: &str, body: &[u8], version: u32) -> PathBuf {
@@ -276,4 +278,115 @@ fn b2_extreme_folder_depth() {
     // And the canonical path of the deepest one.
     let canonical_path = reloaded.path_of(parent).unwrap();
     assert!(canonical_path.ends_with("/d4999"));
+}
+
+// -- sweep over the real witness file (#522) ---------------------------------
+//
+// The 3-cell projects above never reach the series, transpose links or page
+// layouts. The witness file of the persistence crate holds every node and
+// series type: it is truncated and bit-flipped at evenly spaced positions
+// (about 300 per unit of `SF_PROPTEST_SCALE`).
+
+/// Every committed witness `vN/project.stf`.
+fn witness_files() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../stokesforge-persistence/tests/witnesses");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&root)
+        .expect("witness folder")
+        .map(|e| e.expect("entry").path().join("project.stf"))
+        .filter(|p| p.is_file())
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no witness file under {root:?}");
+    files
+}
+
+/// Positions to hit in a file of `len` bytes: 300 per unit of scale, evenly
+/// spaced and always including the last byte; every byte once the samples
+/// reach the length (a 31 KB witness at scale 104, never in the weekly run
+/// at scale 8, which costs about a minute).
+fn sweep_positions(len: usize, scale: u32) -> Vec<usize> {
+    let samples = 300 * scale as usize;
+    if len <= samples {
+        return (0..len).collect();
+    }
+    let mut positions: Vec<usize> = (0..samples).map(|k| k * len / samples).collect();
+    positions.push(len - 1);
+    positions
+}
+
+#[test]
+fn b2_sample_positions_cover_the_whole_file() {
+    let positions = sweep_positions(31_000, 1);
+    assert!(positions.len() <= 301 && positions.len() >= 300);
+    assert_eq!(positions.first(), Some(&0));
+    assert_eq!(positions.last(), Some(&30_999));
+    // The spacing itself reaches the last tenth, not only the forced last byte.
+    assert!(positions[positions.len() - 2] >= 31_000 * 9 / 10);
+    assert!(positions.windows(2).all(|w| w[0] < w[1]));
+    assert_eq!(sweep_positions(31_000, 8).len(), 2401);
+    assert_eq!(sweep_positions(31_000, 104).len(), 31_000);
+}
+
+#[test]
+fn b2_truncations_of_the_witness_file_are_refused_without_panic() {
+    let dir = TempDir::new().unwrap();
+    let scale = common::env_scale();
+    for file in witness_files() {
+        let bytes = std::fs::read(&file).unwrap();
+        for n in sweep_positions(bytes.len(), scale) {
+            let path = dir.path().join("t.stf");
+            std::fs::write(&path, &bytes[..n]).unwrap();
+            let r = std::panic::catch_unwind(|| load(&path));
+            assert!(r.is_ok(), "panic on {file:?} truncated at {n} bytes");
+            if let Ok(Ok(_)) = r {
+                panic!(
+                    "{file:?} truncated at {n}/{} bytes was ACCEPTED",
+                    bytes.len()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn b2_bit_flips_of_the_witness_file_never_panic_and_survive_a_save() {
+    let dir = TempDir::new().unwrap();
+    let scale = common::env_scale();
+    let mut accepted = 0usize;
+    for file in witness_files() {
+        let bytes = std::fs::read(&file).unwrap();
+        for i in sweep_positions(bytes.len(), scale) {
+            let bits: &[u8] = if scale > 1 { &[0x01, 0x80] } else { &[0x01] };
+            for &bit in bits {
+                let mut copy = bytes.clone();
+                copy[i] ^= bit;
+                let path = dir.path().join("mut.stf");
+                std::fs::write(&path, &copy).unwrap();
+                let r = std::panic::catch_unwind(|| load(&path));
+                assert!(
+                    r.is_ok(),
+                    "panic on {file:?}, bit {bit:#04x} flipped at {i}"
+                );
+                let Ok(Ok(project)) = r else { continue };
+                accepted += 1;
+                // A flipped file that loads is a project like any other: it
+                // saves, reloads, and saves the same bytes again.
+                let first = dir.path().join("again1.stf");
+                let second = dir.path().join("again2.stf");
+                save(&project, &first)
+                    .unwrap_or_else(|e| panic!("save after flip {bit:#04x} at {i}: {e}"));
+                let reloaded = load(&first)
+                    .unwrap_or_else(|e| panic!("reload after flip {bit:#04x} at {i}: {e}"));
+                assert_eq!(project.tree().len(), reloaded.tree().len(), "flip at {i}");
+                save(&reloaded, &second).unwrap();
+                assert_eq!(
+                    std::fs::read(&first).unwrap(),
+                    std::fs::read(&second).unwrap(),
+                    "flip {bit:#04x} at {i}: the second save differs"
+                );
+            }
+        }
+    }
+    println!("{accepted} flipped witness files accepted");
 }

@@ -42,7 +42,7 @@ mechanics.
 |---|---|---|
 | S-N1 | `champ-nombre-unique` | A single numeric field, the "number" building block; `▼` only if the quantities table offers values. |
 | S-N2 | `molette-champ-a-liste` | The mouse wheel changes only a list field, on hover; a field without a list is never changed by the wheel. |
-| S-N3 | `nombre-applique-a-la-validation` | A number applies on Enter or when leaving the field; one history entry per validation. |
+| S-N3 | `nombre-applique-a-la-validation` | A number applies on Enter or when leaving the field, to the field's own target even when another target is clicked; one history entry per validation. |
 | S-N4 | `virgule-decimale-acceptee` | "," and "." are accepted in a field that holds a single number; the interface always writes the dot. |
 | S-N5 | `virgule-decimale-cellules` | The same reading applies in Numeric (and Mixed) cells. |
 | S-N6 | `saisie-illisible-refusee` | An unreadable input is refused: red frame, tooltip that states the rule, the old value comes back. |
@@ -214,7 +214,14 @@ entry) too (S-N9).
   The number field applies it, including the editable text size list of
   the format bar.
 - **Application** (S-N3): on Enter or when leaving the field; Esc gives back
-  the old value; one history entry per validation.
+  the old value; one history entry per validation. The value applies to the
+  field's **own target**, even when the leaving click is on another target (an
+  axis side tab, a series row, a group header, a main tab): the click frame
+  validates on the old target, then the pick is applied. An unreadable draft
+  blocks that switch: the field stays open in red with the rule, as on Enter
+  (fix it or Esc, then click again). A draft never outlives its focus: a field
+  that is no longer drawn, or whose target changed, forgets it, and it is
+  never committed elsewhere (#498).
 - **One quantity, one definition** (S-N8): a single table gives bounds, step,
   large step, decimals, unit and offered values (the wheel follows these
   values, #233; the step serves the keyboard arrows). Thickness: 0 to 20 pt,
@@ -348,6 +355,14 @@ History: #219; wiring: #220, #224, #240 (S-N11, S-T3).
   columns of which 2 are faulty counts 2); the types follow the fixed order of
   `OperationKind::ALL`, their names come from the glossary (keys
   `low-r2-count-*`, plurals fr+en). No series names and no scrolling list.
+- **Twin: "No x' Values"** (#493, `AlertKind::NoXPrime`): same shape (warning,
+  not failure, `gesture_failed` ignores it, Enter, Esc and the cross close it).
+  Raised after every row analysis that uses the column numbers as x' and after
+  the Recalculate that switches a sheet to them. Cancel Analysis is the one
+  secondary button, offered only while the analysis window is open: it aborts
+  the `AnalyzeRows` group like that window's Cancel. It takes the single alert
+  slot over a low R² box (the badge below keeps saying the R²) but never over a
+  failure.
 - **Status bar badge** (#290): "⚠ 13 low R²", on the right of the
   bar, in R² red (`theme::r_squared_color`), with a tooltip. It is a
   **state** recomputed at each snapshot (`AppState::low_r2_groups`,
@@ -416,7 +431,7 @@ History: #223.
   (1×10⁻⁵), `e` notation in the grid and fields. Ticks stay in
   `e` notation (they do not go through Typst): the typographic exponent of the
   ticks is not delivered.
-- **Pasting data rows**: an **absent** cell (row shorter than the target column) keeps the existing value and never lengthens the column; a **present and empty** cell (`3<tab>`) is a missing value. If the copy has more columns than the sheet has from the anchor, the extra columns are dropped (none is added) and the status bar says so (`status-paste-columns-dropped`). For a paste of **header fields** anchored at the bottom, the rows that go beyond Formula are dropped and counted the same way (`status-paste-fields-dropped`); if columns and fields overflow together, a single message gives both (`status-paste-columns-fields-dropped`). Ctrl+Shift+V of whole columns rewrites the whole header at its original rank (intended matrix).
+- **Pasting data rows**: an **absent** cell (row shorter than the target column) keeps the existing value and never lengthens the column; a **present and empty** cell (`3<tab>`) is a missing value. If the copy has more columns than the sheet has from the anchor, the missing columns are created, with no limit (#495, `status-paste-columns-added`). For a paste of **header fields** anchored at the bottom, the rows that go beyond Formula are dropped and counted (`status-paste-fields-dropped`). Ctrl+Shift+V of whole columns rewrites the whole header at its original rank (intended matrix).
 - **Dates** (S-D4): ISO 8601 (`2026-10-10 14:05`); input forms (#218, in place): ISO `2026-10-10 14:30` and `JJ/MM/AAAA [HH:MM[:SS]]` (`10/10/2026 14:30`), **day first**, never month first; a bare number stays a POSIX timestamp in **seconds** ("2026" becomes 1970-01-01 00:33:46, not the year 2026: decided, #311); anything else promotes the column to Mixed, like any non-numeric text. Single reader and formatter: `stokesforge_core::datetime` (grid, paste, Mixed → Date/Time conversion); `stokesforge-import` keeps a copy, matched by a test of `stokesforge-importer`.
 - **Paths** (S-D5): file name alone in messages, full path in a
   tooltip.
@@ -756,7 +771,7 @@ How it is held:
   Guard `no_literal_add_space_outside_the_theme` (`tests/guards.rs`), without
   exemption; a computed gap passes.
 - Migrated: graph properties (all pages, series editor shared
-  with the series window), analysis form, import wizard
+  with the series window), analysis form, import window
   (files, format, header, metadata, destination; the rules between
   blocks became headings). The series window (group, scope,
   color gradient — `curve_settings.rs`) is migrated, as are the tools of

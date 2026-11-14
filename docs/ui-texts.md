@@ -29,7 +29,7 @@ but its word is already fixed.
 | R3 | **Title Case**: menus, commands, buttons, tabs, window titles. **Sentence case**: fields, checkboxes, options (radio buttons, lists), tooltips, messages. Linking words in lowercase in Title Case (*of, and, to, in*). French: capital on the first word only, never Title Case. |
 | R4 | **Command = verb** (*Add Column*, *Export Graph…*). "…" only if a window still asks for something. An entry that opens a settings page carries the name of the page (*Axes…*). |
 | R5 | **Visibility = "Show X"** (*Show legend*), never « X affichée » nor « Présente dans… ». |
-| R6 | **Units.** Interface field: unit in parentheses, SI symbol, after a space (*Line width (pt)*). **Axis title: quantity / unit** (IUPAC), symbol or name: *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹*; a title taken from a column is written *Long name / Units*. Superscripts in Unicode in the interface (`cm⁻¹`); in an axis title (Typst), `$"cm"^(-1)$`. |
+| R6 | **Units.** Interface field: unit in parentheses, SI symbol, after a space (*Line width (pt)*). **Axis title: quantity / unit** (IUPAC), symbol or name: *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹*; a title taken from a column is written *Long name / Units*; a new graph's axis titles are filled with the Typst template `AXIS_TITLE_TEMPLATE` that writes it (#506). The interface field is one free text, « Axis title » (no Units field); an old file's parentheses are kept as written. Superscripts in Unicode in the interface (`cm⁻¹`); in an axis title (Typst), `$"cm"^(-1)$`. |
 | R7 | **Short label, precise tooltip.** Label: 1 to 3 words. Tooltip: the effect **in the 3rd person** ("Adds a workbook", never "Add a workbook"), the default value if it matters, the shortcut; never a repetition of the label. A gesture is written as a gesture ("Right-click to remove"). |
 | R8 | **No final period** on a single sentence. Period between two sentences. |
 | R9 | **Message = what happened, then what to do.** No "please", no apology, no exclamation mark. Never internal jargon: *session, node, tree, id, thread, spec, command, history entry, token, recipe*. Never `{err}`: the cause of an `io::Error` is put into a sentence by `errors::io` and enters the message as a variable (`{ $cause }`). |
@@ -97,6 +97,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Column | Colonne | Series of values of one type | Champ, Variable | O |
+| Variable | Variable | A name typed in a graph text (`#long-name`, `#ln`, `#units`…) that the graph replaces by a field of a column, live (#501); the names are the same in every language, the help lists them from `VARIABLES` | Champ, Paramètre, Macro | G |
 | Row | Ligne | Row of cells of a sheet | Enregistrement | O |
 | Entry row | Ligne de saisie | Empty row the grid always shows below the last row of a sheet, marked `*` in the gutter (« Type here to add a row » / « Saisir ici pour ajouter une ligne »); typing in it creates the row. Not data: not saved, not plotted | Ligne vide, New row, Ligne d'ajout | O |
 | x' (x prime) | x' | Numeric value specific to a column (special header row), abscissa of a "line" series; is not translated | X2, Temps, Instant (le temps n'est qu'un cas d'usage) | — |
@@ -106,6 +107,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Long Name | Nom long | Description of a column, shown in the header | Libellé, Description | O |
 | Units | Unités | Unit of the values of a column, shown in the header | Unité (singulier) | O (Q13) |
 | Comments | Commentaires | Free text of a column | Remarques, Notes | O |
+| Short Name | Nom court | Name of a column, the letter or the name in the header (#499) | Étiquette | O |
+| Text from | Texte issu de | Legend setting: the header row that gives the text of each legend entry (#499) | Source du texte | O |
 | Metadata | Métadonnées | Key-value pairs read from the imported file | Infos, En-tête du fichier | O |
 | Role | Rôle | Function of a column in a plot | Désignation, Type | O (Q8) |
 | X / Y / Z | X / Y / Z | Roles: abscissa, ordinate, third axis | — | O |
@@ -116,6 +119,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Numeric / Text / Mixed / Date/Time | Numérique / Texte / Mixte / Date et heure | Values of the types | Nombres, Date-heure | O |
 | Cut / Copy / Paste | Couper / Copier / Coller | Clipboard | — | G |
 | Paste in Place | Coller à l'identique | Paste at the original position of the copy | Coller en absolu | G |
+| Paste Transposed | Coller transposé | Paste the copied block with rows and columns swapped, values only (#495) | Transposer, Coller en transposition | — |
 | Copy with Header | Copier avec l'en-tête | Copy the values and the column header | — | O |
 | Clipboard | Presse-papiers | System copy memory | Presse-papier, Tampon | G |
 | Add | Ajouter | Create an object **at the end** (column, sheet, text, folder) | Nouveau, Créer | O |
@@ -136,7 +140,9 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 <!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
-| Import Wizard | Assistant d'import | Six-step window that sets up the import | Importateur | O |
+| Import (window) | Importer | Title of the one-screen window that sets up the import (#488: file tabs, left panel, file grid; no steps). Was « Import Wizard » / « Assistant d'import ». In sentences: « the Import window » / « la fenêtre d'import » | Import Wizard, Assistant d'import, Importateur | O |
+| Not automatic / Use Automatically | Pas automatique / Utiliser automatiquement | An import template kept from an older version with its conditions, never applied by itself; the button in Manage Templates makes the conditions active (F1 of #488) | Disabled, Enable | O |
+| Sheet name (import) | Nom de la feuille | Advanced setting of the import: the sheet takes **Title from the file** (« Titre du fichier ») when the file has one, or always the **File name** (« Nom du fichier ») (F2 of #488) | Worksheet name | O |
 | Delimiter | Séparateur | Character that separates the values of a line | Délimiteur | O |
 | Decimal separator | Séparateur décimal | Character between the integer and decimal parts | Virgule (pour le nom) | O |
 | Thousands separator | Séparateur de milliers | Character that groups digits | Milliers | O |
@@ -155,6 +161,15 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Source file | Fichier source | File a column comes from | Origine | O |
 | Header key | Clé d'en-tête | Name of a header metadata item | — | — |
 | Destination | Destination | Where the import writes its columns | Cible | O |
+| To check | À vérifier | Tag and block of the import screen: what the detector is not sure of, listed as sentences (« Check Now » walks through them). Never « Warnings » | Avertissements, Alertes | O |
+| Mark as Checked | Marquer comme vérifié | Button beside a point to check: the user looked and accepts it; the answer is remembered for that kind of file, the recipe is not touched | Valider, Ignorer, OK | O |
+| Check Now | Vérifier maintenant | Button of the To check block: reviews the points one at a time | Revoir, Lancer | O |
+| Template (import) | Modèle | Saved settings with the **conditions** a file must meet to be read with them (« Used for files that »). Never « recipe » or « preset » on screen | Recette, Préréglage | O |
+| Save as Template / Manage Templates | Enregistrer comme modèle / Gérer les modèles | Footer Template menu and the offer « Save these settings for JASCO files? » | Sauvegarder le modèle | O |
+| Condition | Condition | What triggers a template: instrument, data type, number of columns, a header line, file name, extension | Critère, Déclencheur | O |
+| Answers remembered | Réponses mémorisées | List in Manage Templates of the points already answered per kind of file, each with **Forget** | Historique | O |
+| Advanced (import) | Avancé | Fold, closed by default, at the bottom of the left panel: date order, leading characters removed, blocks, missing values, comment prefix, skipped data lines | Options, Expert | O |
+| Show Guide / Don't show again | Afficher le guide / Ne plus afficher | The three-step first-use guide over the grid; shown every time until « Don't show again » is ticked | Tutoriel, Aide | O |
 
 ### 2.5 Graph
 
@@ -171,6 +186,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Bring to Front / Send to Back (layer) | Amener devant / Envoyer derrière | Entries of a layer in Free (#398; keys `action-layer-bring-to-front`, `action-layer-send-to-back`, distinct from the object ones): the layer under the right-click or its Object Manager node; grayed out « The layer is already in front » / « The layer is already at the back ». History: « Bring Layer to Front » / « Mettre le calque au premier plan », « Send Layer to Back » / « Mettre le calque à l'arrière-plan » | Move Up, Forward | O |
 | Layer Background | Fond du calque | Color field of General › Size in Free (#398), **Auto** by default: « Auto (only over another layer) » / « Auto (seulement sur un autre calque) ». Distinct from the graph's « Background »: two color fields with the same label share one widget id (the picker of the first opens with the second). History « Change Layer Background » / « Modifier le fond du calque » | Fill | O |
 | Move Layer / Resize Layer | Déplacer le calque / Redimensionner le calque | History entries of the layer gestures of the Page Layout Mode (#398, #426; keys `history-plot-move-layer`, `history-plot-resize-layer`): a graph moved, or resized by an edge or a corner | Drag | O |
+| Fit Layout to Page | Ajuster la disposition à la page | Layout menu entry and button after Fit Page to Layout in the strip of the Page Layout Mode (#505, K1, keys `action-layout-fit-layout`, `history-plot-fit-layout`): the inverse of Fit Page to Layout, scales the layers to fill the page; the page does not change. Greyed out « The layers already fill the page » / « Les calques remplissent déjà la page ». History label: `Fit Layout to Page` | Fit Layout to Page Size, Stretch to Page | O |
+| Fit Page to Layout | Ajuster la page à la disposition | Layout menu entry and button beside the Figure size of the Page Layout Mode strip (#505, keys `action-layout-fit-page`, `history-plot-fit-page`): resizes the page to the space the layers use (Regular Grid: clears the empty space around the grid; Free: the page becomes the bounding box of the layers), margins included, layers unmoved. Greyed out « The page already fits the layout » / « La page est déjà ajustée à la disposition ». Origin: Fit Page to Layers | Fit to Content, Resize Page | O |
 | Layout | Disposition | Menu-bar menu after Graph (#398, key `menu-layout`): where the layers sit on the page. Entries: **Page Layout Mode** (#426, first, check mark while on), **Layer Placement ▸** (« Regular Grid » / « Grille régulière », « Free » / « Libre »), **New Layer Beside ▸**, **Align ▸** (« Bottom » / « Bas », « Top » / « Haut », « Vertical Center » / « Centre vertical », « Left » / « Gauche », « Right » / « Droite », « Horizontal Center » / « Centre horizontal »), « Same Width » / « Même largeur », « Same Height » / « Même hauteur », « Distribute Horizontally » / « Répartir horizontalement », « Distribute Vertically » / « Répartir verticalement », Bring to Front, Send to Back, « Delete Layer » / « Supprimer le calque » (keys `menu-layout-*`, `action-layout-*`, `action-delete-layer`). Greyed out « Needs at least two layers » / « Il faut au moins deux calques » and « Needs at least three layers » / « Il faut au moins trois calques » | Arrange, Format, Position | O |
 | Layer Placement | Placement des calques | Choice in Graph Properties › General › Size and in the Layout menu (#398); the Page Layout Mode strip shows it as the **Grid mode** toggle (#426): **Regular grid** / **Grille régulière** (layers in columns and rows that share their sizes, default) or **Free** / **Libre** (each layer has its own plot area: « Position, left » / « Position, gauche », « Position, top » / « Position, haut » are page coordinates, kept when another layer moves and possibly negative, then Plot area width and height). « Frame » / « Cell » / « Case » stay off the interface | Layout mode (the Page Layout Mode is a view, not this choice), Custom, Perso | O |
 | Length unit | Unité de longueur | Preference: Centimeters (default), Millimeters, Points, Inches; the file keeps points (#394) | Unit of measure | O |
@@ -184,7 +201,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Bottom / Left / Right / Top | Bas / Gauche / Droite / Haut | The four axes of an area, named by their place (#358); composed texts are phrased by a selector, never by gluing: « Axe du bas », « Titre de l'axe de gauche » | X (bottom), Y2, Secondary Y, Axe X (bas) | G |
 | Y axis | Axe Y | Series field: the vertical axis the series is drawn against, Left or Right (#358); grayed out on an overlaid layer | Axe secondaire | G |
 | Y error / X error | Erreur Y / Erreur X | Series fields (#360): the column drawn as error bars on the series, whatever its plot type; first choice None. Not the role Y Error / X Error of the column, which only decides the pairing at plot time | Incertitude, Écart-type | G |
-| Axis title | Titre de l'axe | Text that names the quantity of the axis | Libellé, Label | G |
+| Axis title | Titre de l'axe | One free Typst text that names the axis (#506): quantity and unit together, it may read the column variables. Not « Quantity » / « Units » fields | Libellé, Label | G |
 | Tick | Graduation | Mark on the axis | Repère, Coche | I |
 | Tick label | Étiquette de graduation | Value written next to a tick | Libellé de graduation | G (Q11) |
 | Gridlines | Quadrillage | Lines that extend the ticks | Grille | G (Q12) |

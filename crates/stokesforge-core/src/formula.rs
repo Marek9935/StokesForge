@@ -157,6 +157,16 @@ pub enum FormulaError {
     /// the orchestrator ([`topological_order`]), never by a loop that
     /// would run forever.
     Cycle,
+    /// The formula makes a sheet calculate from its own followed transposed
+    /// sheet (#463): while the box "Recalculate automatically" of
+    /// `transposed` is checked, `source` cannot calculate from it. Kept and
+    /// uncomputed like a loop when typed; refused by the strict entries.
+    ReadsFollowingSheet {
+        /// Name of the followed transposed sheet.
+        transposed: String,
+        /// Name of its source sheet.
+        source: String,
+    },
     /// The formula tree exceeds [`MAX_DEPTH`] (parentheses, signs or
     /// operator chain too long): refused at parse rather than letting
     /// parser, evaluation and `Drop` recurse until the process is
@@ -252,6 +262,10 @@ impl std::fmt::Display for FormulaError {
                 )
             }
             FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
+            FormulaError::ReadsFollowingSheet { transposed, source } => write!(
+                f,
+                "{transposed} follows {source}, so {source} cannot calculate from it"
+            ),
             FormulaError::TooDeep => write!(f, "formula nested too deeply"),
             FormulaError::UnknownFunction { name, suggestion } => {
                 write!(f, "unknown function {name}")?;
@@ -1204,12 +1218,18 @@ pub struct SheetScope<'a> {
     pub directory: &'a dyn SheetDirectory,
 }
 
+/// True for a character a bare sheet name may hold after its first letter:
+/// an ASCII letter or digit, or the transpose mark `ᵀ` (#494).
+fn is_bare_sheet_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == crate::transpose::TRANSPOSE_MARK
+}
+
 /// A sheet name written in a formula: bare if it is made of ASCII letters and
-/// digits and does not start with a digit, single-quoted otherwise, a `'`
-/// inside written `''` (#403).
+/// digits (and the transpose mark `ᵀ`) and does not start with a digit,
+/// single-quoted otherwise, a `'` inside written `''` (#403).
 pub fn sheet_token(name: &str) -> String {
     let bare = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && name.chars().all(|c| c.is_ascii_alphanumeric());
+        && name.chars().all(is_bare_sheet_char);
     if bare {
         name.to_string()
     } else {
@@ -1245,14 +1265,14 @@ fn quoted_at(chars: &[char], start: usize) -> Result<(String, usize), FormulaErr
     Err(FormulaError::Parse("missing closing quote".to_string()))
 }
 
-/// The sheet name that starts at `start`, quoted or made of ASCII letters and
-/// digits, and the index after it. `None` if there is none.
+/// The sheet name that starts at `start`, quoted or made of ASCII letters,
+/// digits and the transpose mark, and the index after it. `None` if there is none.
 fn sheet_name_at(chars: &[char], start: usize) -> Result<Option<(String, usize)>, FormulaError> {
     match chars.get(start) {
         Some('\'') => quoted_at(chars, start).map(Some),
         Some(c) if c.is_ascii_alphabetic() => {
             let mut end = start;
-            while end < chars.len() && chars[end].is_ascii_alphanumeric() {
+            while end < chars.len() && is_bare_sheet_char(chars[end]) {
                 end += 1;
             }
             Ok(Some((chars[start..end].iter().collect(), end)))

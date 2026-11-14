@@ -7,9 +7,8 @@
 //! and applied after rendering by the main loop — [`AppState::dispatch`]
 //! guarantees they do not block.
 //!
-//! A single content reads AppState in attached mode and `ScriptConsoleModel`
-//! in detached mode (#100): no engine migrates into the callback. The input
-//! buffer goes up before the actions, the output stays the root's.
+//! One content reads the shared AppState, docked or detached (#100, #475): the
+//! detached console paints it from its own window's pass.
 
 use eframe::egui;
 
@@ -40,27 +39,6 @@ pub(super) fn script_header(
     header
 }
 
-/// Reading of the console for the deferred callback; the engine and its work
-/// stay in AppState at the root. Only the input goes up as a request.
-#[derive(Clone, PartialEq, Eq)]
-pub(super) struct ScriptConsoleModel {
-    pub(super) source: String,
-    pub(super) output: Option<ScriptOutput>,
-    pub(super) running: bool,
-    pub(super) available: bool,
-}
-
-impl ScriptConsoleModel {
-    pub(super) fn from_state(state: &AppState) -> Self {
-        Self {
-            source: state.script_source().to_owned(),
-            output: state.script_output().cloned(),
-            running: state.script_running(),
-            available: state.script_available(),
-        }
-    }
-}
-
 pub(super) fn script_contents(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -82,25 +60,7 @@ pub(super) fn script_contents(
     }
 }
 
-pub(super) fn script_model_contents(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    model: &mut ScriptConsoleModel,
-    actions: &mut Vec<Action>,
-) {
-    script_fields_contents(
-        ui,
-        ctx,
-        &mut model.source,
-        model.output.as_ref(),
-        model.running,
-        model.available,
-        actions,
-    );
-}
-
-/// The attached console borrows the output: no copy of a whole result on
-/// every frame. The detached reading already owns its published copy.
+/// The console borrows the output: no copy of a whole result on every frame.
 fn script_fields_contents(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -222,12 +182,7 @@ impl StokesForgeApp {
         {
             self.script_collapsed = false;
         }
-        self.drain_script_console(ctx, actions);
-        if !self.script_open {
-            return;
-        }
-        if self.script_detached {
-            self.show_detached_script_console(ctx);
+        if !self.script_open || self.script_detached {
             return;
         }
         let collapsed = self.script_collapsed;

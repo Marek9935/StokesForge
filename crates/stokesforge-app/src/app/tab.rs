@@ -74,8 +74,8 @@ pub(super) fn tab_title(state: &AppState, tab: Tab) -> String {
 
 /// [`tab_title`], from a `Tree` already at hand rather than a live
 /// `&AppState` — for the header painted by a detached window, which only has
-/// the [`Snapshot`](stokesforge_session::Snapshot) resynchronized in `DetachedTabViewModel`
-/// (see `window_detach.rs`, § "reading the model is factored out").
+/// the [`Snapshot`](stokesforge_session::Snapshot) (the detached panels, and a
+/// window painting from the snapshot it just cloned).
 pub(super) fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
     match tab {
         Tab::Book(id) => node_title_in(tree, id, || tr!("window-kind-workbook")),

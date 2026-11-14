@@ -70,6 +70,12 @@ pub enum TextTarget {
         /// Index of the layer in [`PlotSpec::panels`].
         panel: usize,
     },
+    /// The colour bar of a panel (the whole bar with its ticks and labels,
+    /// #499).
+    ColorBar {
+        /// Index of the layer in [`PlotSpec::panels`].
+        panel: usize,
+    },
 }
 
 impl TextTarget {
@@ -77,9 +83,10 @@ impl TextTarget {
     pub fn panel_index_of(&self) -> Option<usize> {
         match *self {
             Self::Title => None,
-            Self::PanelTitle { panel } | Self::AxisTitle { panel, .. } | Self::Legend { panel } => {
-                Some(panel)
-            }
+            Self::PanelTitle { panel }
+            | Self::AxisTitle { panel, .. }
+            | Self::Legend { panel }
+            | Self::ColorBar { panel } => Some(panel),
         }
     }
 
@@ -100,6 +107,13 @@ impl TextTarget {
                     .title_visible
             }
             Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.visible,
+            Self::ColorBar { .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .color_bar
+                    .as_ref()?
+                    .visible
+            }
         })
     }
 
@@ -123,6 +137,11 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_visible = visible,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_visible = visible,
             Self::Legend { .. } => panel.legend.visible = visible,
+            Self::ColorBar { .. } => {
+                if let Some(bar) = panel.color_bar.as_mut() {
+                    bar.visible = visible;
+                }
+            }
         }
         true
     }
@@ -139,6 +158,13 @@ impl TextTarget {
                     .title_anchor
             }
             Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.anchor,
+            Self::ColorBar { .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .color_bar
+                    .as_ref()?
+                    .anchor
+            }
         }
     }
 
@@ -180,6 +206,17 @@ impl TextTarget {
                 panel.legend.anchor = anchor;
                 true
             }
+            Self::ColorBar { .. } => {
+                let Some(bar) = self
+                    .panel_index(spec)
+                    .and_then(|index| spec.panels.get_mut(index))
+                    .and_then(|panel| panel.color_bar.as_mut())
+                else {
+                    return false;
+                };
+                bar.anchor = anchor;
+                true
+            }
         }
     }
 
@@ -201,6 +238,12 @@ impl TextTarget {
                 .legend
                 .font
                 .clone(),
+            // The bar shares the legend's font (#507, D7).
+            Self::ColorBar { .. } => {
+                let panel = spec.panels.get(self.panel_index(spec)?)?;
+                panel.color_bar.as_ref()?;
+                panel.legend.font.clone()
+            }
         })
     }
 
@@ -222,6 +265,12 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_font = font,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_font = font,
             Self::Legend { .. } => panel.legend.font = font,
+            Self::ColorBar { .. } => {
+                if panel.color_bar.is_none() {
+                    return false;
+                }
+                panel.legend.font = font;
+            }
         }
         true
     }
@@ -248,6 +297,10 @@ impl TextTarget {
                 .legend
                 .color
                 .clone(),
+            Self::ColorBar { .. } => {
+                spec.panels.get(self.panel_index(spec)?)?;
+                String::new()
+            }
         })
     }
 
@@ -269,14 +322,15 @@ impl TextTarget {
             Self::PanelTitle { .. } => panel.title_color = color,
             Self::AxisTitle { side, .. } => panel.axis_mut(side).title_color = color,
             Self::Legend { .. } => panel.legend.color = color,
+            Self::ColorBar { .. } => return false,
         }
         true
     }
 
     /// The title text as displayed — `None` for the legend (its
     /// texts are the series names) or if the panel does not exist. For an
-    /// axis title, the unit is included (`Signal (a.u.)`,
-    /// [`crate::AxisSpec::display_label`]).
+    /// axis title, the whole label
+    /// ([`crate::AxisSpec::display_label`], which joins a legacy unit).
     pub fn text(&self, spec: &PlotSpec) -> Option<String> {
         match *self {
             Self::Title => Some(spec.title.clone()),
@@ -289,15 +343,13 @@ impl TextTarget {
                     .axis(side)
                     .display_label(),
             ),
-            Self::Legend { .. } => None,
+            Self::Legend { .. } | Self::ColorBar { .. } => None,
         }
     }
 
     /// Replaces the title text. Returns `false` without changing anything for the
-    /// legend or an absent panel. For an axis title, `text` is the **displayed**
-    /// text ([`Self::text`]): if it still ends with the unit in
-    /// parentheses, that stays the unit of the axis and the rest becomes the title;
-    /// otherwise the unit is cleared (the typed text is all that is displayed).
+    /// legend or an absent panel. An axis title is one free text (#506): `text`
+    /// becomes the whole label, nothing is split off.
     pub fn set_text(&self, spec: &mut PlotSpec, text: String) -> bool {
         match *self {
             Self::Title => {
@@ -322,20 +374,12 @@ impl TextTarget {
                     return false;
                 };
                 let axis = panel.axis_mut(side);
-                let suffix = format!(" ({})", axis.unit);
-                if axis.unit.is_empty() {
-                    axis.label = text;
-                } else if let Some(label) = text.strip_suffix(suffix.as_str()) {
-                    axis.label = label.to_owned();
-                } else if text == format!("({})", axis.unit) {
-                    axis.label.clear();
-                } else {
-                    axis.label = text;
-                    axis.unit.clear();
-                }
+                axis.label = text;
+                // A legacy unit was part of the displayed text: it is in `text`.
+                axis.unit.clear();
                 true
             }
-            Self::Legend { .. } => false,
+            Self::Legend { .. } | Self::ColorBar { .. } => false,
         }
     }
 }
@@ -405,6 +449,31 @@ mod tests {
         assert_eq!(spec.reset_text_anchors(), 0);
     }
 
+    /// #507 (D7): the bar's font is the legend's; without a bar there is
+    /// nothing to set. Witness: the bar writing a font of its own.
+    #[test]
+    fn the_color_bar_font_is_set_and_read() {
+        let mut spec = PlotSpec::empty("T");
+        let bar = TextTarget::ColorBar { panel: 0 };
+        let font = crate::TextFont {
+            size: Some(14.0),
+            ..Default::default()
+        };
+        assert!(!bar.set_font(&mut spec, font.clone()));
+        spec.panels.get_mut(0).expect("panel").color_bar = Some(crate::ColorBarSpec::default());
+        assert_eq!(bar.font(&spec), Some(crate::TextFont::default()));
+        assert!(bar.set_font(&mut spec, font.clone()));
+        assert_eq!(bar.font(&spec), Some(font.clone()));
+        assert_eq!(spec.panels[0].legend.font, font);
+        let legend = TextTarget::Legend { panel: 0 };
+        let other = crate::TextFont {
+            size: Some(9.0),
+            ..Default::default()
+        };
+        assert!(legend.set_font(&mut spec, other.clone()));
+        assert_eq!(bar.font(&spec), Some(other));
+    }
+
     #[test]
     fn an_absent_panel_changes_nothing() {
         let mut spec = PlotSpec::empty("T");
@@ -426,12 +495,10 @@ mod tests {
         assert!(axis.set_text(&mut spec, "t".into()));
         assert_eq!(spec.title, "B");
         assert_eq!(spec.panels[0].bottom.label, "t");
-        // The unit is displayed with the title: keep it or clear it on edit.
-        spec.panels.get_mut(0).expect("panel").bottom.unit = "s".into();
-        assert_eq!(axis.text(&spec).as_deref(), Some("t (s)"));
-        assert!(axis.set_text(&mut spec, "time (s)".into()));
-        assert_eq!(spec.panels[0].bottom.label, "time");
-        assert_eq!(spec.panels[0].bottom.unit, "s");
+        // One free text (#506): the whole edited text is the label.
+        assert!(axis.set_text(&mut spec, "duration (s)".into()));
+        assert_eq!(spec.panels[0].bottom.label, "duration (s)");
+        assert_eq!(axis.text(&spec).as_deref(), Some("duration (s)"));
         assert!(axis.set_text(&mut spec, "duration".into()));
         assert_eq!(spec.panels[0].bottom.label, "duration");
         assert_eq!(spec.panels[0].bottom.unit, "");

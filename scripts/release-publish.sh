@@ -21,7 +21,8 @@
 # then publishes the manual of the release on GitLab Pages (#362). The tag
 # pipeline that GitLab starts at push time must not do it: the site goes live
 # only once the release and its packages exist. The token's role must be
-# allowed to run pipelines on the protected tags `v*` (else Maintainer).
+# allowed to create the protected tags `v*`: GitLab requires it both for the
+# release and for the pipeline (docs/tests.md, "Settings outside the repository").
 #
 # An -rcN tag is a TRIAL: the release is created and deleted at once (the
 # tag stays). This tests the create call before the real tag, without leaving

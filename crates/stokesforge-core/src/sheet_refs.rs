@@ -9,10 +9,12 @@
 //! workbook first**, then in the whole project. Several candidates outside that
 //! folder are refused ([`FormulaError::AmbiguousWorkbook`]): the user writes the
 //! path from the project root, `[Mesures/Book2]Sheet5!B` (`[/Book2]` for a
-//! workbook at the root). Case is ignored everywhere
-//! ([`crate::name::same_name_ignoring_case`], the comparison of the sibling
-//! rule): two siblings that differ only by case (an older file) are refused as
-//! ambiguous ([`FormulaError::AmbiguousName`]).
+//! workbook at the root). Case is ignored everywhere, in two tiers (#494): first
+//! [`crate::name::same_name_ignoring_case_exact`]; only if nothing matches,
+//! [`crate::name::same_name_folding_transpose_mark`], which also reads the
+//! transpose mark `ᵀ` as an uppercase `T` (`Sheet1T!B` finds `Sheet1ᵀ`). Two
+//! candidates within one tier (an older file) are refused as ambiguous
+//! ([`FormulaError::AmbiguousName`]).
 //!
 //! # Inputs and membership
 //!
@@ -30,7 +32,7 @@ use crate::formula::{
     ColumnFormula, Formula, FormulaError, FormulaPart, SheetAddress, SheetDirectory, SheetScope,
 };
 use crate::id::NodeId;
-use crate::name::same_name_ignoring_case;
+use crate::name::{same_name_folding_transpose_mark, same_name_ignoring_case_exact};
 use crate::node::NodeKind;
 use crate::tree::Tree;
 
@@ -75,6 +77,28 @@ fn is_workbook(tree: &Tree, id: NodeId) -> bool {
         .is_some_and(|node| matches!(node.kind(), NodeKind::Workbook { .. }))
 }
 
+/// The candidates whose name matches `name`: those of the exact tier if any,
+/// else those of the tier that reads `ᵀ` as `T` (#494).
+fn tiered<'a>(
+    candidates: &[NodeId],
+    name: &str,
+    name_of: impl Fn(NodeId) -> Option<&'a str>,
+) -> Vec<NodeId> {
+    let pick = |same: fn(&str, &str) -> bool| -> Vec<NodeId> {
+        candidates
+            .iter()
+            .copied()
+            .filter(|id| name_of(*id).is_some_and(|n| same(n, name)))
+            .collect()
+    };
+    let found = pick(same_name_ignoring_case_exact);
+    if found.is_empty() {
+        pick(same_name_folding_transpose_mark)
+    } else {
+        found
+    }
+}
+
 impl Tree {
     /// The directory scope of the formulas of the sheet of `column`; `None` if
     /// `column` has no parent.
@@ -86,23 +110,24 @@ impl Tree {
         })
     }
 
-    /// The children of `parent` whose name is `name` up to case and that satisfy `keep`.
+    /// The children of `parent` whose name is `name` up to case and that
+    /// satisfy `keep`: the first tier that matches (#494), see the module doc.
     fn named_children(
         &self,
         parent: NodeId,
         name: &str,
         keep: impl Fn(&Tree, NodeId) -> bool,
     ) -> Vec<NodeId> {
-        self.children(parent)
+        let candidates: Vec<NodeId> = self
+            .children(parent)
             .unwrap_or_default()
             .iter()
             .copied()
             .filter(|child| keep(self, *child))
-            .filter(|child| {
-                self.node(*child)
-                    .is_some_and(|node| same_name_ignoring_case(node.name(), name))
-            })
-            .collect()
+            .collect();
+        tiered(&candidates, name, |id| {
+            self.node(id).map(|node| node.name())
+        })
     }
 
     /// The single element of `found`, or the matching refusal.
@@ -146,13 +171,12 @@ impl Tree {
                 return Self::only(found, unknown(), spec);
             }
         }
-        let anywhere: Vec<NodeId> = self
+        let books: Vec<NodeId> = self
             .iter()
-            .filter(|(id, node)| {
-                is_workbook(self, *id) && same_name_ignoring_case(node.name(), spec)
-            })
+            .filter(|(id, _)| is_workbook(self, *id))
             .map(|(id, _)| id)
             .collect();
+        let anywhere = tiered(&books, spec, |id| self.node(id).map(|node| node.name()));
         match anywhere.as_slice() {
             [one] => Ok(*one),
             [] => Err(unknown()),
@@ -212,6 +236,9 @@ impl Tree {
         if self.formula_loop(column, &formula) {
             return Err(FormulaError::Cycle);
         }
+        if let Some(refusal) = self.formula_follow_error(column, Some(&formula)) {
+            return Err(refusal);
+        }
         Ok(formula)
     }
 
@@ -235,8 +262,11 @@ impl Tree {
         if error.is_some() {
             return (formula, error);
         }
-        let cycle = self.formula_loop(column, &formula);
-        (formula, cycle.then_some(FormulaError::Cycle))
+        if self.formula_loop(column, &formula) {
+            return (formula, Some(FormulaError::Cycle));
+        }
+        let follow = self.formula_follow_error(column, Some(&formula));
+        (formula, follow)
     }
 
     /// The kept formulas that can **now** be read (#433, Q3): a formula the
@@ -400,6 +430,153 @@ impl Tree {
             }
         }
         false
+    }
+}
+
+/// What a column reads, for the question "does the source of a followed sheet
+/// read that sheet" (#463).
+impl Tree {
+    /// The columns a column depends on, across the three kinds of edge: the
+    /// columns its formula names (and the X paired with them), the input
+    /// columns of the calculation that produced it, and, for a column that a
+    /// followed transposed sheet keeps up to date, the Y columns of its source
+    /// (the link). `over` replaces the formula of one column (a candidate being
+    /// entered); `assume` counts that transposed sheet as followed even if its
+    /// box is unchecked (rule 3: "could I check it?").
+    fn column_dependencies(
+        &self,
+        id: NodeId,
+        over: Option<(NodeId, &ColumnFormula)>,
+        assume: Option<NodeId>,
+    ) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let Some(column) = self.node(id).and_then(crate::node::Node::as_column) else {
+            return out;
+        };
+        let formula = match over {
+            Some((target, candidate)) if target == id => Some(candidate),
+            _ => column.meta().formula.as_ref(),
+        };
+        if let Some(formula) = formula {
+            if let Ok(compiled) = formula.compile() {
+                out.extend(self.formula_inputs(id, formula, &compiled).dependencies());
+            }
+        } else if let Some(calc) = self
+            .calculation_of_column(id)
+            .and_then(|(calc, _)| self.calculation(calc))
+        {
+            out.extend(calc.input_columns());
+        }
+        for (sheet, link) in self.transposes() {
+            let followed = link.auto_recalc || assume == Some(*sheet);
+            if followed && (link.x_column == id || link.rows.iter().any(|r| r.column == id)) {
+                if let Ok(children) = self.children(link.source) {
+                    out.extend(children.iter().copied().filter(|c| {
+                        self.node(*c)
+                            .and_then(crate::node::Node::as_column)
+                            .is_some_and(|c| c.meta().role == crate::column::ColumnRole::Y)
+                    }));
+                }
+            }
+        }
+        out
+    }
+
+    /// The columns of the source of each followed transposed sheet that
+    /// calculate, in whatever way, from that sheet (E1 of #463), each with the
+    /// transposed sheet it reads. Directly, through another sheet, whatever the
+    /// role of the column, or as the output of an analysis fed by the sheet.
+    /// Another sheet reading the followed sheet is not a reader as long as
+    /// nothing comes back into the source. Empty (and free) when no sheet is
+    /// followed.
+    pub fn columns_reading_followed_sheet(&self) -> BTreeMap<NodeId, NodeId> {
+        self.readers_of_followed(None, None)
+    }
+
+    fn readers_of_followed(
+        &self,
+        over: Option<(NodeId, &ColumnFormula)>,
+        assume: Option<NodeId>,
+    ) -> BTreeMap<NodeId, NodeId> {
+        let mut readers = BTreeMap::new();
+        for (sheet, link) in self.transposes() {
+            if !(link.auto_recalc || assume == Some(*sheet)) {
+                continue;
+            }
+            let Ok(columns) = self.children(link.source) else {
+                continue;
+            };
+            for &start in columns {
+                let mut stack = self.column_dependencies(start, over, assume);
+                let mut seen = HashSet::new();
+                while let Some(id) = stack.pop() {
+                    if self.parent(id).ok().flatten() == Some(*sheet) {
+                        readers.insert(start, *sheet);
+                        break;
+                    }
+                    if seen.insert(id) {
+                        stack.extend(self.column_dependencies(id, over, assume));
+                    }
+                }
+            }
+        }
+        readers
+    }
+
+    /// Rule 3 of #463: the refusal to check the box of `sheet`, naming the
+    /// first column of its source that calculates from it; `None` if the box
+    /// can be checked.
+    pub fn transpose_check_refusal(&self, sheet: NodeId) -> Option<crate::error::CoreError> {
+        let link = self.transpose_link(sheet)?;
+        let reader = *self
+            .readers_of_followed(None, Some(sheet))
+            .iter()
+            .find(|(_, t)| **t == sheet)?
+            .0;
+        Some(crate::error::CoreError::TransposeSourceReadsIt {
+            letter: self.column_letters(reader).unwrap_or_default(),
+            source_sheet: self.node(link.source)?.name().to_string(),
+            transposed: self.node(sheet)?.name().to_string(),
+        })
+    }
+
+    /// #484: the refusal of an explicit Recalculate, Relink or Analyze Rows on
+    /// `sheet`: `None` unless its box is checked, otherwise
+    /// [`Self::transpose_check_refusal`]. Same predicate as the follow pass
+    /// uses to skip a checked sheet; an unchecked sheet with such a reader
+    /// stays legal.
+    pub fn transpose_loop_refusal(&self, sheet: NodeId) -> Option<crate::error::CoreError> {
+        if !self.transpose_link(sheet)?.auto_recalc {
+            return None;
+        }
+        self.transpose_check_refusal(sheet)
+    }
+
+    /// Rule 2 of #463 for one column: the error to show when the stored
+    /// formula of `column` (or `candidate`, a formula being entered) makes the
+    /// source of a followed sheet calculate from that sheet. A candidate is
+    /// refused when it adds a reader or makes `column` one.
+    pub fn formula_follow_error(
+        &self,
+        column: NodeId,
+        candidate: Option<&ColumnFormula>,
+    ) -> Option<FormulaError> {
+        let current = self.readers_of_followed(None, None);
+        let hit = match candidate {
+            None => current.get(&column).copied(),
+            Some(formula) => {
+                let after = self.readers_of_followed(Some((column, formula)), None);
+                after
+                    .iter()
+                    .find(|(reader, _)| **reader == column || !current.contains_key(reader))
+                    .map(|(_, sheet)| *sheet)
+            }
+        }?;
+        let source = self.transpose_link(hit)?.source;
+        Some(FormulaError::ReadsFollowingSheet {
+            transposed: self.node(hit)?.name().to_string(),
+            source: self.node(source)?.name().to_string(),
+        })
     }
 }
 
@@ -749,7 +926,8 @@ mod tests {
             ("Blanc 2", "max('Blanc 2'!B)"),
             ("it's", "max('it''s'!B)"),
             ("my_sheet", "max('my_sheet'!B)"),
-            ("Sheet1ᵀ", "max('Sheet1ᵀ'!B)"),
+            ("Sheet1ᵀ", "max(Sheet1ᵀ!B)"),
+            ("Sheet1ᵀ 2", "max('Sheet1ᵀ 2'!B)"),
             ("2nd", "max('2nd'!B)"),
             ("Été", "max('Été'!B)"),
             ("Plain9", "max(Plain9!B)"),
@@ -1186,6 +1364,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(6)],
+                    raw: None,
                 },
             ),
             node(
@@ -1194,6 +1373,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(7)],
+                    raw: None,
                 },
             ),
             node(
@@ -1202,6 +1382,7 @@ mod tests {
                 Some(2),
                 NodeKind::Worksheet {
                     columns: vec![id(8)],
+                    raw: None,
                 },
             ),
             node(6, "A", Some(3), NodeKind::Column(Column::from_f64(&[1.0]))),
@@ -1219,5 +1400,160 @@ mod tests {
                 .unwrap_err(),
             FormulaError::AmbiguousName("BLANC".to_string())
         );
+    }
+
+    /// A transposed sheet `Sheet1ᵀ` is called with a plain uppercase `T`
+    /// (#494), and displayed with its real name, without quotes. Witness: a
+    /// bare-name reader that stops at `ᵀ`, or a display that quotes it.
+    #[test]
+    fn a_plain_t_calls_a_transposed_sheet() {
+        let mut fx = Fx::new();
+        let t = fx.project.add_worksheet(fx.book1, Some("Sheet1ᵀ")).unwrap();
+        let tc = columns(&mut fx.project, t, 2);
+        let t2 = fx
+            .project
+            .add_worksheet(fx.book1, Some("Sheet1ᵀ 2"))
+            .unwrap();
+        let t2c = columns(&mut fx.project, t2, 2);
+        let at = fx.s3[3];
+        for (typed, shown) in [
+            ("max(Sheet1T!B)", "max(Sheet1ᵀ!B)"),
+            ("max(sheet1T!b)", "max(Sheet1ᵀ!B)"),
+            ("max(Sheet1ᵀ!B)", "max(Sheet1ᵀ!B)"),
+        ] {
+            fx.set(at, typed).unwrap();
+            let formula = fx.tree().formula_from_letters(at, typed).unwrap();
+            assert_eq!(formula.columns(), BTreeSet::from([tc[1]]), "{typed}");
+            assert_eq!(fx.shown(at), shown, "{typed}");
+        }
+        // A lowercase t does not read as the mark.
+        assert!(matches!(
+            fx.set(at, "max(Sheet1t!B)"),
+            Err(FormulaError::UnknownSheet(_))
+        ));
+        // A name with a space needs its quotes.
+        let formula = fx
+            .tree()
+            .formula_from_letters(at, "max('Sheet1T 2'!B)")
+            .unwrap();
+        assert_eq!(formula.columns(), BTreeSet::from([t2c[1]]));
+        // Same for a workbook of another book.
+        let t5 = fx.project.add_worksheet(fx.book2, Some("Sheet5ᵀ")).unwrap();
+        let t5c = columns(&mut fx.project, t5, 2);
+        let formula = fx
+            .tree()
+            .formula_from_letters(at, "max([Book2]Sheet5T!B)")
+            .unwrap();
+        assert_eq!(formula.columns(), BTreeSet::from([t5c[1]]));
+    }
+
+    /// The workbook name folds too: `[Book1ᵀ]` is called `[Book1T]`.
+    #[test]
+    fn a_plain_t_calls_a_workbook_with_the_mark() {
+        let mut fx = Fx::new();
+        let root = fx.project.root();
+        let book = fx.project.add_empty_workbook(root, Some("Calcᵀ")).unwrap();
+        let sheet = fx.project.add_worksheet(book, Some("Sheet1")).unwrap();
+        let cols = columns(&mut fx.project, sheet, 2);
+        let formula = fx
+            .tree()
+            .formula_from_letters(fx.s1[2], "max([CalcT]Sheet1!B)")
+            .unwrap();
+        assert_eq!(formula.columns(), BTreeSet::from([cols[1]]));
+    }
+
+    /// An older file holds `Sheet1T` and `Sheet1ᵀ`: the exact tier wins, so
+    /// each formula keeps its meaning, and the displayed text reads back to the
+    /// same ids (invariant 11). Witness: one folded tier gives `AmbiguousName`.
+    #[test]
+    fn the_exact_name_wins_over_the_folded_one() {
+        let id = NodeId::from_raw;
+        let node = |raw: u64, name: &str, parent: Option<u64>, kind: NodeKind| {
+            Node::with_parent(id(raw), name, parent.map(id), kind).unwrap()
+        };
+        let sheet = |raw: u64, name: &str, col: u64| {
+            node(
+                raw,
+                name,
+                Some(2),
+                NodeKind::Worksheet {
+                    columns: vec![id(col)],
+                    raw: None,
+                },
+            )
+        };
+        let nodes = vec![
+            node(
+                1,
+                "Project",
+                None,
+                NodeKind::Folder {
+                    children: vec![id(2)],
+                },
+            ),
+            node(
+                2,
+                "Book1",
+                Some(1),
+                NodeKind::Workbook {
+                    sheets: vec![id(3), id(4), id(5)],
+                    meta: WindowMeta::default(),
+                },
+            ),
+            sheet(3, "Sheet1T", 6),
+            sheet(4, "Sheet1ᵀ", 7),
+            sheet(5, "Own", 8),
+            node(6, "A", Some(3), NodeKind::Column(Column::from_f64(&[1.0]))),
+            node(7, "A", Some(4), NodeKind::Column(Column::from_f64(&[1.0]))),
+            node(8, "A", Some(5), NodeKind::Column(Column::from_f64(&[1.0]))),
+        ];
+        let tree = Tree::from_nodes(id(1), nodes).expect("both names load");
+        let user = tree.formula_from_letters(id(8), "max(Sheet1T!A)").unwrap();
+        assert_eq!(user.columns(), BTreeSet::from([id(6)]));
+        let mark = tree.formula_from_letters(id(8), "max(Sheet1ᵀ!A)").unwrap();
+        assert_eq!(mark.columns(), BTreeSet::from([id(7)]));
+        // Round trip: the displayed text reads back to the same ids.
+        let mut meta = tree
+            .node(id(8))
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        for formula in [user, mark] {
+            let ids = formula.columns();
+            meta.formula = Some(formula);
+            let mut tree = tree.clone();
+            tree.column_mut(id(8)).unwrap().set_meta(meta.clone());
+            let shown = tree.formula_letters(id(8)).unwrap();
+            let again = tree.formula_for_entry(id(8), &shown).unwrap();
+            assert_eq!(again.columns(), ids, "{shown}");
+        }
+    }
+
+    /// A name that differs from `Sheet1ᵀ` only by the mark read as `T`, in any
+    /// case, is refused as a sibling, both ways; the generator skips it.
+    #[test]
+    fn siblings_may_not_differ_only_by_the_transpose_mark() {
+        let mut fx = Fx::new();
+        fx.project.add_worksheet(fx.book1, Some("Sheet1ᵀ")).unwrap();
+        for name in ["Sheet1T", "Sheet1t", "SHEET1T"] {
+            assert!(
+                matches!(
+                    fx.project.add_worksheet(fx.book1, Some(name)),
+                    Err(CoreError::DuplicateName(_))
+                ),
+                "{name}"
+            );
+        }
+        fx.project.add_worksheet(fx.book2, Some("Sheet1ᵀ")).unwrap();
+        assert!(matches!(
+            fx.project.add_worksheet(fx.book2, Some("Sheet1T")),
+            Err(CoreError::DuplicateName(_))
+        ));
+        let other = fx.project.add_worksheet(fx.book1, Some("Other")).unwrap();
+        assert!(matches!(
+            fx.project.rename(other, "sheet1ᵀ"),
+            Err(CoreError::DuplicateName(_))
+        ));
     }
 }

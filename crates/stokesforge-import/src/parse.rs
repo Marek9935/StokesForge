@@ -197,6 +197,18 @@ pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTab
         return Err(ImportError::Empty);
     }
     let text = crate::decode::decode_with(bytes, recipe.encoding)?;
+    if recipe.format == crate::recipe::FileFormat::Jcamp {
+        let (tables, nmr_only) = jcamp_tables(&text, recipe);
+        if !tables.is_empty() {
+            return Ok(tables);
+        }
+        if nmr_only {
+            // NMR is out of scope: never read its numbers as a plain table.
+            return Err(ImportError::NoDataRows);
+        }
+        // Not a JCAMP-DX file (a template applied to another file): read it
+        // as a table.
+    }
     let mut tables = Vec::new();
     let mut last_error = ImportError::Empty;
     for block in crate::layout::split_blocks(&text, &recipe.block_split) {
@@ -210,6 +222,64 @@ pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTab
     } else {
         Ok(tables)
     }
+}
+
+/// One two-column table (x then y) per JCAMP-DX block that has points. The
+/// y column carries the block title as its long name; the units come from
+/// `XUNITS` / `YUNITS`; the header records of the block are kept so that
+/// [`ParsedTable::header_value`] and the metadata work.
+fn jcamp_tables(text: &str, recipe: &ImportRecipe) -> (Vec<ParsedTable>, bool) {
+    let separator = EffectiveSeparator::Char('=');
+    let file = crate::jcamp::read(text);
+    let nmr_only = file.nmr_blocks > 0 && file.blocks.iter().all(|b| b.points() == 0);
+    let tables = file
+        .blocks
+        .into_iter()
+        .filter(|block| block.points() > 0)
+        .map(|block| {
+            let n = block.points();
+            let unit = |raw: &Option<String>| raw.as_deref().map(crate::props::short_unit);
+            let title = Some(block.title.clone()).filter(|t| !t.is_empty());
+            let x = ParsedColumn {
+                name: None,
+                values: block.x[..n].to_vec(),
+                texts: vec![None; n],
+                long_name: None,
+                unit: unit(&block.xunits),
+                comment: None,
+                x_prime: None,
+                datetime: false,
+            };
+            let y = ParsedColumn {
+                name: None,
+                values: block.y[..n].to_vec(),
+                texts: vec![None; n],
+                long_name: title,
+                unit: unit(&block.yunits),
+                comment: block.data_type.clone(),
+                x_prime: None,
+                datetime: false,
+            };
+            let metadata = crate::metadata::split_lines(
+                block
+                    .header
+                    .iter()
+                    .filter(|_| recipe.keep_header_metadata)
+                    .map(String::as_str),
+                &separator,
+                recipe,
+            );
+            ParsedTable {
+                columns: vec![x, y],
+                warnings: Vec::new(),
+                header_lines: block.header,
+                footer_lines: Vec::new(),
+                metadata,
+                separator: separator.clone(),
+            }
+        })
+        .collect();
+    (tables, nmr_only)
 }
 
 /// Builds the table of a [`crate::layout::Layout`]: columns, sub-headers,
@@ -226,17 +296,54 @@ pub(crate) fn table_from_layout(
         .iter()
         .map(|&i| layout.raw[i].to_string())
         .collect();
-    // Roles of the sub-header lines ("Long Names"/"Units"/"Comments"),
-    // resolved once: each role points at the **first** line of its range (a
-    // multi-line range is not spread across columns; documented limit).
+    // Roles of the sub-header lines ("Long Names"/"Units"/"Comments"/x').
+    // Long Name and Comments join the lines of their range when the recipe
+    // says so (`join_lines`, #488); Units and x' read their `from` line only,
+    // and so does a recipe written before (`join_lines` false).
     let subheader_lines = &header_lines[layout.subheader_start..];
-    let role_line = |range: Option<crate::recipe::SubheaderLineRange>| {
-        range.and_then(|r| subheader_lines.get(r.from.checked_sub(1)?))
-    };
-    let long_name_line = role_line(recipe.subheader_roles.long_name);
-    let unit_line = role_line(recipe.subheader_roles.unit);
-    let comment_line = role_line(recipe.subheader_roles.comment);
-    let x_prime_line = role_line(recipe.subheader_roles.x_prime);
+    let join = recipe.subheader_roles.join_lines;
+    let role_values =
+        |range: Option<crate::recipe::SubheaderLineRange>, joined: bool| -> Option<Vec<String>> {
+            let range = range?;
+            let first = range.from.checked_sub(1)?;
+            // `to` may overshoot the sub-header block: `take` stops at its end.
+            let count = if joined {
+                range.last_joined() - range.from + 1
+            } else {
+                1
+            };
+            let rows: Vec<Vec<String>> = subheader_lines
+                .iter()
+                .skip(first)
+                .take(count)
+                .map(|line| {
+                    separator
+                        .tokenize(line.as_str())
+                        .into_iter()
+                        .map(|t| t.trim().to_string())
+                        .collect()
+                })
+                .collect();
+            if rows.is_empty() {
+                return None;
+            }
+            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+            Some(
+                (0..width)
+                    .map(|c| {
+                        rows.iter()
+                            .filter_map(|row| row.get(c).map(String::as_str))
+                            .filter(|token| !token.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect(),
+            )
+        };
+    let long_name_line = recipe.subheader_roles.long_name;
+    let unit_line = recipe.subheader_roles.unit;
+    let comment_line = recipe.subheader_roles.comment;
+    let x_prime_line = recipe.subheader_roles.x_prime;
 
     // Column header line, if any.
     let column_names: Option<Vec<String>> = layout.column_header.map(|i| {
@@ -247,51 +354,53 @@ pub(crate) fn table_from_layout(
             .collect()
     });
 
-    // One value per data column, in the same order, for each sub-header line
-    // assigned to a role.
-    let role_values = |line: Option<&String>| -> Option<Vec<String>> {
-        line.map(|l| {
-            separator
-                .tokenize(l.as_str())
-                .into_iter()
-                .map(|t| t.trim().to_string())
-                .collect()
-        })
+    let long_names = role_values(long_name_line, join);
+    // `name/unit` tokens (Netzsch) are split at the first `/`.
+    let split_token = |token: &str| {
+        if recipe.name_unit_slash {
+            crate::props::split_name_unit_slash(token)
+        } else {
+            crate::props::split_name_unit(token)
+        }
     };
-    let long_names = role_values(long_name_line);
     let units = if recipe.subheader_roles.same_line_name_unit {
-        // Same line as `long_name`: each token has the form "Name (unit)".
-        // Without recognized parentheses, the whole token stays the long name
-        // and the unit stays empty.
+        // Same line as `long_name`: each token has the form "Name (unit)" or
+        // "Name [unit]". Without recognized brackets, the whole token stays the
+        // long name and the unit stays empty.
         long_names.as_ref().map(|names| {
             names
                 .iter()
-                .map(|n| match (n.find('('), n.find(')')) {
-                    (Some(open), Some(close)) if open < close => {
-                        n[open + 1..close].trim().to_string()
-                    }
-                    _ => String::new(),
-                })
+                .map(|n| split_token(n).1.unwrap_or_default())
                 .collect()
         })
     } else {
-        role_values(unit_line)
+        role_values(unit_line, false).map(|units: Vec<String>| {
+            if recipe.strip_unit_brackets {
+                units
+                    .iter()
+                    .map(|u| crate::props::strip_square_brackets(u))
+                    .collect()
+            } else {
+                units
+            }
+        })
     };
     let long_names = if recipe.subheader_roles.same_line_name_unit {
         long_names.map(|names| {
             names
                 .into_iter()
-                .map(|n| match n.find('(') {
-                    Some(open) => n[..open].trim().to_string(),
-                    None => n,
+                .map(|n| match split_token(&n) {
+                    (name, Some(_)) => name,
+                    (name, None) if recipe.name_unit_slash => name,
+                    _ => n,
                 })
                 .collect()
         })
     } else {
         long_names
     };
-    let comments = role_values(comment_line);
-    let x_primes = role_values(x_prime_line);
+    let comments = role_values(comment_line, join);
+    let x_primes = role_values(x_prime_line, false);
 
     // Tokenizes and parses each data line, keeping the original token next to
     // the value: this is what `texts` returns for a cell that is not a number
@@ -312,7 +421,7 @@ pub(crate) fn table_from_layout(
         .collect();
 
     let num_cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let columns: Vec<ParsedColumn> = (0..num_cols)
+    let mut columns: Vec<ParsedColumn> = (0..num_cols)
         .map(|c| {
             let name = column_names
                 .as_ref()
@@ -344,7 +453,7 @@ pub(crate) fn table_from_layout(
                 x_prime: x_primes
                     .as_ref()
                     .and_then(|v| v.get(c))
-                    .map(|token| numbers.parse(token))
+                    .map(|token| numbers.first_number(token))
                     .filter(|value| value.is_finite()),
                 datetime: recipe.column_kind(c) == crate::recipe::ColumnKind::DateTime,
             }
@@ -358,6 +467,33 @@ pub(crate) fn table_from_layout(
         .map(|line| (*line).to_string())
         .collect();
 
+    // Header properties fill the fields the sub-header left empty.
+    for prop in &recipe.header_props {
+        let value = crate::props::find_value(
+            header_lines
+                .iter()
+                .chain(footer_lines.iter())
+                .map(String::as_str),
+            &prop.key,
+        );
+        let Some(text) = value.and_then(|v| crate::props::prop_text(prop, &v)) else {
+            continue;
+        };
+        for (index, column) in columns.iter_mut().enumerate() {
+            if !crate::props::applies_to(prop.target, index) {
+                continue;
+            }
+            let slot = match prop.field {
+                crate::recipe::PropField::LongName => &mut column.long_name,
+                crate::recipe::PropField::Units => &mut column.unit,
+                crate::recipe::PropField::Comment => &mut column.comment,
+            };
+            if slot.is_none() {
+                *slot = Some(text.clone());
+            }
+        }
+    }
+
     let mut warnings = Vec::new();
     if let Some(declared) = lookup_header_value(&header_lines, separator, "NPOINTS") {
         if let Ok(declared_n) = declared.trim().parse::<i64>() {
@@ -370,9 +506,16 @@ pub(crate) fn table_from_layout(
         }
     }
 
+    // A sub-header line that carries a role (Long Name, Units, Comments, x')
+    // is read as such, not as metadata (#488); the roles are the preview's
+    // (`layout.subheader_roles`), so both agree. The column names line is
+    // not part of `header_lines` at all.
     let metadata = crate::metadata::split_lines(
         header_lines
             .iter()
+            .zip(&layout.header)
+            .filter(|(_, &raw_index)| layout.subheader_roles[raw_index].is_empty())
+            .map(|(line, _)| line)
             .filter(|_| recipe.keep_header_metadata)
             .chain(footer_lines.iter().filter(|_| recipe.keep_footer_metadata))
             .map(String::as_str),
@@ -489,6 +632,252 @@ pub fn resolve_series_name(recipe: &ImportRecipe, table: &ParsedTable, file_stem
 mod tests {
     use super::*;
     use crate::recipe::{HeaderSkip, ImportRecipe};
+
+    #[test]
+    fn one_subheader_line_feeds_two_overlapping_roles() {
+        use crate::recipe::{HeaderLayout, SubheaderLineRange, SubheaderRoles};
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: 1,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = SubheaderRoles {
+            long_name: Some(SubheaderLineRange::single(1)),
+            x_prime: Some(SubheaderLineRange::single(1)),
+            ..SubheaderRoles::default()
+        };
+        let table = parse(b"12.5,13\n1,2\n", &recipe).unwrap();
+        assert_eq!(table.columns[0].long_name.as_deref(), Some("12.5"));
+        assert_eq!(table.columns[1].long_name.as_deref(), Some("13"));
+        assert_eq!(table.columns[0].x_prime, Some(12.5));
+        assert_eq!(table.columns[1].x_prime, Some(13.0));
+    }
+
+    /// Recipe with `lines` sub-header lines (no main header) and `roles`.
+    fn recipe_with_roles(lines: usize, roles: crate::recipe::SubheaderRoles) -> ImportRecipe {
+        let mut recipe = ImportRecipe::new("default");
+        recipe.header_layout = crate::recipe::HeaderLayout {
+            main_header_lines: 0,
+            subheader_lines: lines,
+            auto_detect: false,
+        };
+        recipe.subheader_roles = roles;
+        recipe
+    }
+
+    fn range(from: usize, to: usize) -> Option<crate::recipe::SubheaderLineRange> {
+        Some(crate::recipe::SubheaderLineRange { from, to })
+    }
+
+    fn long_names(table: &ParsedTable) -> Vec<Option<&str>> {
+        table
+            .columns
+            .iter()
+            .map(|c| c.long_name.as_deref())
+            .collect()
+    }
+
+    #[test]
+    fn long_name_joins_the_lines_of_its_range_with_a_space() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, 2),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"A,B\na,b\n1,2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [Some("A a"), Some("B b")]);
+    }
+
+    #[test]
+    fn a_recipe_without_join_lines_reads_the_first_line_only() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, 2),
+                join_lines: false,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"A,B\na,b\n1,2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [Some("A"), Some("B")]);
+    }
+
+    #[test]
+    fn an_empty_token_is_skipped_when_joining() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, 2),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"A,B\n,b\n1,2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [Some("A"), Some("B b")]);
+    }
+
+    #[test]
+    fn a_range_past_the_sub_header_block_reads_the_existing_lines_only() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, usize::MAX),
+                comment: range(2, 9),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        // The second sub-header line is shorter: it adds nothing to column 2.
+        let table = parse(b"A,B\na\n1,2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [Some("A a"), Some("B")]);
+        assert_eq!(table.columns[0].comment.as_deref(), Some("a"));
+        // `from` past the block: no role, no panic.
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(5, 6),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"A,B\na,b\n1,2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [None, None]);
+    }
+
+    #[test]
+    fn a_to_before_from_means_the_single_line_from() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(2, 1),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"A,B\na,b\n1,2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [Some("a"), Some("b")]);
+    }
+
+    #[test]
+    fn comments_join_their_lines_but_units_and_x_prime_read_one_line() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            4,
+            SubheaderRoles {
+                comment: range(1, 2),
+                unit: range(3, 4),
+                x_prime: range(3, 4),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"c1,c2\nd1,d2\nt,2\n9,9\n5,6\n", &recipe).unwrap();
+        assert_eq!(table.columns[0].comment.as_deref(), Some("c1 d1"));
+        assert_eq!(table.columns[1].comment.as_deref(), Some("c2 d2"));
+        // Line 3 only, although the stored range runs to 4.
+        assert_eq!(table.columns[0].unit.as_deref(), Some("t"));
+        assert_eq!(table.columns[0].x_prime, None);
+        assert_eq!(table.columns[1].x_prime, Some(2.0));
+    }
+
+    #[test]
+    fn x_prime_takes_the_first_number_of_the_token() {
+        use crate::recipe::{DecimalStyle, SubheaderRoles};
+        let roles = SubheaderRoles {
+            x_prime: range(1, 1),
+            join_lines: true,
+            ..SubheaderRoles::default()
+        };
+        let recipe = recipe_with_roles(1, roles);
+        let table = parse(b"t=12.5 s;abc;-3e-2min\n1;2;3\n", &recipe).unwrap();
+        let x: Vec<Option<f64>> = table.columns.iter().map(|c| c.x_prime).collect();
+        assert_eq!(x, [Some(12.5), None, Some(-0.03)]);
+        let mut comma = recipe_with_roles(1, roles);
+        comma.decimal = DecimalStyle::Comma;
+        let table = parse(b"t=12,5 s;7\n1;2\n", &comma).unwrap();
+        assert_eq!(table.columns[0].x_prime, Some(12.5));
+        assert_eq!(table.columns[1].x_prime, Some(7.0));
+    }
+
+    #[test]
+    fn the_combined_line_splits_the_joined_text() {
+        use crate::recipe::SubheaderRoles;
+        let recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, 2),
+                same_line_name_unit: true,
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        let table = parse(b"Absorbance;Time\n(AU);(s)\n1;2\n", &recipe).unwrap();
+        assert_eq!(long_names(&table), [Some("Absorbance"), Some("Time")]);
+        assert_eq!(table.columns[0].unit.as_deref(), Some("AU"));
+        assert_eq!(table.columns[1].unit.as_deref(), Some("s"));
+    }
+
+    fn metadata_pairs(table: &ParsedTable) -> Vec<(&str, &str)> {
+        table
+            .metadata()
+            .iter()
+            .map(|m| (m.key.as_str(), m.value.as_str()))
+            .collect()
+    }
+
+    /// #488: the lines read as Long Name / Units are not metadata.
+    #[test]
+    fn sub_header_lines_with_a_role_are_not_metadata() {
+        use crate::recipe::SubheaderRoles;
+        let mut recipe = recipe_with_roles(
+            2,
+            SubheaderRoles {
+                long_name: range(1, 1),
+                unit: range(2, 2),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        recipe.header_layout.main_header_lines = 2;
+        recipe.separator = crate::recipe::Separator::Semicolon;
+        let table = parse(
+            b"Instrument;Demo\nSample;S-12\nWavelength;Absorbance\nnm;AU\n1;2\n",
+            &recipe,
+        )
+        .unwrap();
+        assert_eq!(
+            metadata_pairs(&table),
+            [("Instrument", "Demo"), ("Sample", "S-12")]
+        );
+        assert_eq!(table.columns[0].unit.as_deref(), Some("nm"));
+    }
+
+    /// #488: a sub-header line without any role stays metadata.
+    #[test]
+    fn a_sub_header_line_without_a_role_stays_metadata() {
+        use crate::recipe::SubheaderRoles;
+        let mut recipe = recipe_with_roles(
+            3,
+            SubheaderRoles {
+                long_name: range(1, 1),
+                unit: range(3, 3),
+                join_lines: true,
+                ..SubheaderRoles::default()
+            },
+        );
+        recipe.separator = crate::recipe::Separator::Semicolon;
+        let table = parse(b"Name;Name2\nnote;kept\nnm;AU\n1;2\n", &recipe).unwrap();
+        assert_eq!(metadata_pairs(&table), [("note", "kept")]);
+    }
 
     #[test]
     fn binary_file_gives_not_text_without_panicking() {

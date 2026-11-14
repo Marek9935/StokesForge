@@ -108,7 +108,7 @@ impl StokesForgeApp {
         let Some(tab @ Tab::Graph(graph)) = active_tab else {
             return;
         };
-        if self.detached_tabs.contains_key(&tab) || !copy_event_pending(ctx) {
+        if self.is_tab_detached(tab) || !copy_event_pending(ctx) {
             return;
         }
         let tree = self.state.snapshot().tree.clone();
@@ -131,9 +131,23 @@ impl StokesForgeApp {
         });
     }
 
+    /// Captures, once, what offers a figure to the system clipboard, from the
+    /// window of the root (the only pass that has the `Frame`). A detached
+    /// window's pass has none: it offers through this capture (#475).
+    pub(super) fn capture_figure_offer(&mut self, frame: &eframe::Frame) {
+        if self.figure_offer_captured {
+            return;
+        }
+        self.figure_offer_captured = true;
+        self.figure_offer = stokesforge_clipboard::Offerer::capture(frame)
+            .ok()
+            .map(|offerer| Box::new(offerer) as Box<dyn FigureOffer>);
+    }
+
     /// Offers to the system the representations that [`Action::CopyGraphFigure`]
-    /// has just prepared. A refusal replaces the "copied" message with its cause.
-    pub(super) fn offer_figure(&mut self, frame: &eframe::Frame) {
+    /// has just prepared, from whichever window's pass applied the action. A
+    /// refusal replaces the "copied" message with its cause.
+    pub(super) fn offer_figure(&mut self) {
         let Some(figures) = self.state.take_figure_clipboard() else {
             return;
         };
@@ -141,10 +155,35 @@ impl StokesForgeApp {
             .into_iter()
             .map(|figure| Representation::new(mime_of(figure.format), figure.bytes))
             .collect();
-        if let Err(error) = stokesforge_clipboard::offer(frame, &representations) {
+        let offered = match &self.figure_offer {
+            Some(offer) => offer.offer(&representations),
+            None => Err(ClipboardError::Backend(
+                "the display was not captured".to_owned(),
+            )),
+        };
+        if let Err(error) = offered {
             self.state
                 .figure_clipboard_failed(clipboard_error_message(&error));
         }
+    }
+
+    /// Replaces the offer to the system clipboard (tests: a fake).
+    #[cfg(test)]
+    pub(super) fn set_figure_offer(&mut self, offer: Box<dyn FigureOffer>) {
+        self.figure_offer = Some(offer);
+        self.figure_offer_captured = true;
+    }
+}
+
+/// Offers representations of a figure to the system clipboard: the capture of
+/// the root's display, or a fake in the tests.
+pub(super) trait FigureOffer: Send {
+    fn offer(&self, representations: &[Representation]) -> Result<(), ClipboardError>;
+}
+
+impl FigureOffer for stokesforge_clipboard::Offerer {
+    fn offer(&self, representations: &[Representation]) -> Result<(), ClipboardError> {
+        stokesforge_clipboard::Offerer::offer(self, representations)
     }
 }
 

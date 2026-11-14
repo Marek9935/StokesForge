@@ -20,7 +20,8 @@
 //!   full recalculation of a twin session (`b22`), then (#412) the same oracle
 //!   for the structural gestures (renames, moves, removals, pastes, transposes,
 //!   column type changes), with an independent re-evaluation after reload
-//!   (`b23`);
+//!   (`b23`), then (#522) every analysis operation on hostile series (`b24`),
+//!   and `b2` also truncates and bit-flips the committed witness `.stf`;
 //! - `src/bin/alloc_probe.rs` and `src/bin/stack_probe.rs`: two out-of-process
 //!   probes, because the cases they test end in an `abort()` that nothing
 //!   catches: an allocation failure for the first, a stack overflow for the

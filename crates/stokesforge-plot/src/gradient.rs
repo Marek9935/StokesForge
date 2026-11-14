@@ -65,34 +65,64 @@ pub const GRADIENT_PRESETS: [GradientPreset; 8] = [
 /// - the opacity of a `#RRGGBBAA` stop is ignored: a color gradient colors, it does not
 ///   make transparent.
 pub fn gradient_colors<S: AsRef<str>>(stops: &[S], count: usize) -> Vec<String> {
-    let stops: Vec<[u8; 3]> = stops
+    let stops = readable_stops(stops);
+    if stops.is_empty() {
+        return Vec::new();
+    }
+    (0..count)
+        .map(|index| {
+            if count == 1 {
+                hex(stops[0])
+            } else {
+                hex(rgb_at(&stops, index as f64 / (count - 1) as f64))
+            }
+        })
+        .collect()
+}
+
+/// The color of a color gradient at the position `t` (0 = first stop, 1 =
+/// last stop), by linear interpolation of the RGB components (#499). `t` is
+/// clamped to `[0, 1]`; a `NaN` reads as 0. `None` if no stop is readable.
+///
+/// [`gradient_colors`] is this function at `i / (count - 1)`: the colors
+/// painted by position and by value are the same.
+pub fn gradient_at<S: AsRef<str>>(stops: &[S], t: f64) -> Option<String> {
+    let stops = readable_stops(stops);
+    if stops.is_empty() {
+        return None;
+    }
+    let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
+    Some(hex(rgb_at(&stops, t)))
+}
+
+fn readable_stops<S: AsRef<str>>(stops: &[S]) -> Vec<[u8; 3]> {
+    stops
         .iter()
         .filter_map(|stop| parse_hex(stop.as_ref()))
         .map(|[r, g, b, _]| [r, g, b])
-        .collect();
-    let Some(first) = stops.first() else {
-        return Vec::new();
-    };
-    (0..count)
-        .map(|index| {
-            let rgb = if count == 1 || stops.len() == 1 {
-                *first
-            } else {
-                let position = index as f64 / (count - 1) as f64 * (stops.len() - 1) as f64;
-                let lower = (position.floor() as usize).min(stops.len() - 2);
-                let t = position - lower as f64;
-                let mix = |channel: usize| {
-                    let (a, b) = (
-                        f64::from(stops[lower][channel]),
-                        f64::from(stops[lower + 1][channel]),
-                    );
-                    (a + (b - a) * t).round().clamp(0.0, 255.0) as u8
-                };
-                [mix(0), mix(1), mix(2)]
-            };
-            format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
-        })
         .collect()
+}
+
+/// The color at `t` in `[0, 1]` of a non-empty list of stops.
+fn rgb_at(stops: &[[u8; 3]], t: f64) -> [u8; 3] {
+    if stops.len() == 1 {
+        return stops[0];
+    }
+    let position = t * (stops.len() - 1) as f64;
+    let lower = (position.floor() as usize).min(stops.len() - 2);
+    let fraction = position - lower as f64;
+    let mix = |channel: usize| {
+        let (a, b) = (
+            f64::from(stops[lower][channel]),
+            f64::from(stops[lower + 1][channel]),
+        );
+        (a + (b - a) * fraction).round().clamp(0.0, 255.0) as u8
+    };
+    [mix(0), mix(1), mix(2)]
+}
+
+fn hex(rgb: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
 }
 
 #[cfg(test)]
@@ -112,6 +142,46 @@ mod tests {
     fn an_intermediate_stop_is_reached_exactly() {
         let colors = gradient_colors(&["#000000", "#ffffff", "#ff0000"], 3);
         assert_eq!(colors, ["#000000", "#ffffff", "#ff0000"]);
+    }
+
+    /// Position and value share one interpolation: no preset drifts.
+    #[test]
+    fn gradient_at_agrees_with_gradient_colors_for_every_preset() {
+        for preset in GRADIENT_PRESETS {
+            for count in 2..=11 {
+                let by_rank = gradient_colors(preset.stops, count);
+                for (index, expected) in by_rank.iter().enumerate() {
+                    let t = index as f64 / (count - 1) as f64;
+                    assert_eq!(
+                        gradient_at(preset.stops, t).as_deref(),
+                        Some(expected.as_str()),
+                        "{} {index}/{count}",
+                        preset.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gradient_at_clamps_and_refuses_unreadable_stops() {
+        let soft = ["#102030", "#506070"];
+        assert_eq!(gradient_at(&soft, 9.0).as_deref(), Some("#506070"));
+        assert_eq!(gradient_at(&soft, -9.0).as_deref(), Some("#102030"));
+        assert_eq!(
+            gradient_at(&["#000000", "#ff0000"], -3.0).as_deref(),
+            Some("#000000")
+        );
+        assert_eq!(
+            gradient_at(&["#000000", "#ff0000"], 9.0).as_deref(),
+            Some("#ff0000")
+        );
+        assert_eq!(
+            gradient_at(&["#000000", "#ff0000"], f64::NAN).as_deref(),
+            Some("#000000")
+        );
+        assert_eq!(gradient_at(&["#102030"], 0.7).as_deref(), Some("#102030"));
+        assert_eq!(gradient_at(&["nope"], 0.5), None);
     }
 
     #[test]

@@ -254,6 +254,10 @@ pub(crate) fn run(
                     let _ = reply.send(Err(CommandError::ForeignMacro("execute")));
                     continue;
                 }
+                // #488 — what the imported columns of the untouched import
+                // sheets hold before the command, to see whether it changes
+                // a value. Owned data: no `Arc<Tree>` is kept (D3).
+                let raw_watch = RawWatch::capture(project.tree(), &history);
                 let recorded = match history.execute_recorded(&mut project, command) {
                     Ok(recorded) => recorded,
                     Err(err) => {
@@ -261,6 +265,14 @@ pub(crate) fn run(
                         continue;
                     }
                 };
+                // The first change to the value of an imported column renames
+                // its sheet, inside the history entry of the command (one undo
+                // gives the name back), before the binding of the kept
+                // formulas (they may wait for the new name) and before the
+                // recalculation pass.
+                if recorded {
+                    raw_watch.rename_changed(&mut project, &mut history);
+                }
                 // #433 (Q3) — a kept formula whose missing column or sheet this
                 // command made appear is bound **now**, inside the history
                 // entry of the command (one undo unbinds), before the reply and
@@ -660,6 +672,89 @@ fn load_project(
 /// and tells `bound`. Fixed point: `Tree::pending_bindings` is empty
 /// afterwards. A refused command (a calculation's output column cannot hold a
 /// formula) stops the scan rather than looping.
+/// The imported columns of the sheets that still carry the mark of an
+/// untouched import (#488), as they were before a command: identifier, version
+/// (type and values), x' and formula. Empty, and free, when no sheet is marked.
+#[derive(Default)]
+struct RawWatch {
+    sheets: Vec<(NodeId, Vec<RawColumn>)>,
+}
+
+struct RawColumn {
+    id: NodeId,
+    version: u64,
+    x_prime: Option<f64>,
+    formula: Option<stokesforge_core::ColumnFormula>,
+}
+
+impl RawWatch {
+    /// Nothing is captured inside an `Import` or `RefreshFromSource` macro:
+    /// those write the values and never rename.
+    fn capture(tree: &stokesforge_core::Tree, history: &History) -> Self {
+        if history
+            .open_macro_kinds()
+            .any(|kind| matches!(kind, MacroKind::Import | MacroKind::RefreshFromSource))
+        {
+            return Self::default();
+        }
+        let sheets = tree
+            .raw_sheets()
+            .into_iter()
+            .map(|sheet| {
+                let columns = tree
+                    .children(sheet)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|id| {
+                        let column = tree.node(*id)?.as_column()?;
+                        column.meta().import_source.as_ref()?;
+                        Some(RawColumn {
+                            id: *id,
+                            version: column.version(),
+                            x_prime: column.meta().x_prime,
+                            formula: column.meta().formula.clone(),
+                        })
+                    })
+                    .collect();
+                (sheet, columns)
+            })
+            .collect();
+        Self { sheets }
+    }
+
+    fn changed(tree: &stokesforge_core::Tree, columns: &[RawColumn]) -> bool {
+        columns.iter().any(|before| {
+            let Some(column) = tree.node(before.id).and_then(|node| node.as_column()) else {
+                return true;
+            };
+            column.version() != before.version
+                || column.meta().x_prime != before.x_prime
+                || column.meta().formula != before.formula
+        })
+    }
+
+    /// Renames, in the entry just recorded, every watched sheet whose imported
+    /// columns changed: `<base>N`, first free number from 1.
+    fn rename_changed(&self, project: &mut Project, history: &mut History) {
+        for (sheet, columns) in &self.sheets {
+            if !Self::changed(project.tree(), columns) {
+                continue;
+            }
+            // The command itself may have deleted or renamed the sheet.
+            let Some(base) = project.raw_mark(*sheet).map(|m| m.modified_base.clone()) else {
+                continue;
+            };
+            let Ok(Some(book)) = project.tree().parent(*sheet) else {
+                continue;
+            };
+            let Ok(name) = project.first_free_sheet_name(book, &base) else {
+                continue;
+            };
+            let _ = history.absorb_into_last(project, Command::Rename { id: *sheet, name });
+        }
+    }
+}
+
 fn bind_kept_formulas(
     project: &mut Project,
     history: &mut History,

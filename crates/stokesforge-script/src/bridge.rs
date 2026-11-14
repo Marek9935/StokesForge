@@ -85,9 +85,15 @@ impl HostError {
             CoreError::CalculatedColumnReadOnly { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
-            // #253: a row transposes only if all the columns of
-            // its sheet are numeric and carry an x'.
+            // #253: a row transposes only if all the Y columns of its sheet
+            // are numeric and carry an x' (or none does, #493: column numbers).
             CoreError::TransposeNoXPrime { .. } | CoreError::TransposeNotNumeric { .. } => {
+                HostError::InvalidValue(error.to_string())
+            }
+            // #463, #484: a formula or a calculation that would read the checked
+            // transposed sheet of its own source (a loop) is refused as a value.
+            CoreError::TransposeSourceReadsIt { .. }
+            | CoreError::CalculationReadsFollowingSheet { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
         }
@@ -448,6 +454,12 @@ pub(crate) fn export_graph(
     }
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let spec = graph_spec(&snapshot, id, epoch)?;
+    // #501: the variables of the texts, before the resolution and the size.
+    let spec = stokesforge_render_svg::bind_spec(
+        &snapshot.tree,
+        &spec,
+        &stokesforge_render_svg::FigureTexts::default(),
+    );
     let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
@@ -553,22 +565,25 @@ pub(crate) fn graph_spec(
 /// areas. `current` is the graph as it is, `None` for a graph being created,
 /// which fixes itself (a new graph is exactly 480 x 360 pt and explicit). The
 /// frames ride in the very command of the edit: no history step of their own.
-pub(crate) fn fix_frames(current: Option<&PlotSpec>, spec: &mut PlotSpec) {
+///
+/// #501: measured on the spec as drawn (variables bound in `tree`); only the
+/// frames are written into `spec`, which stays the stored text.
+pub(crate) fn fix_frames(
+    tree: &stokesforge_core::Tree,
+    current: Option<&PlotSpec>,
+    spec: &mut PlotSpec,
+) {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
     let reference = current.cloned().unwrap_or_else(|| spec.clone());
     // A failed measurement (it practically cannot) leaves the spec legacy,
     // which draws as before.
+    let reference = stokesforge_render_svg::bind_spec(
+        tree,
+        &reference,
+        &stokesforge_render_svg::FigureTexts::default(),
+    );
     let _ = stokesforge_render_svg::fix_legacy_frames(&reference, spec, &measurer, &choice);
-}
-
-/// The spec graph `graph` has now in the session, if it is one.
-pub(crate) fn current_graph_spec(session: &SessionHandle, graph: NodeId) -> Option<PlotSpec> {
-    let snapshot = session.snapshot().ok()?;
-    match snapshot.tree.node(graph)?.kind() {
-        stokesforge_core::node::NodeKind::Graph { spec, .. } => Some(spec.clone()),
-        _ => None,
-    }
 }
 
 pub(crate) fn set_graph_spec(
@@ -576,7 +591,12 @@ pub(crate) fn set_graph_spec(
     graph: NodeId,
     mut spec: PlotSpec,
 ) -> Result<(), HostError> {
-    fix_frames(current_graph_spec(session, graph).as_ref(), &mut spec);
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let current = match snapshot.tree.node(graph).map(|node| node.kind()) {
+        Some(stokesforge_core::node::NodeKind::Graph { spec, .. }) => Some(spec.clone()),
+        _ => None,
+    };
+    fix_frames(&snapshot.tree, current.as_ref(), &mut spec);
     session
         .execute(Command::SetPlotSpec { graph, spec })
         .map(|_| ())
@@ -692,9 +712,11 @@ pub(crate) fn import_file(
             .find(|r| r.name == name)
             .cloned()
             .ok_or_else(|| HostError::InvalidValue(format!("unknown template \"{name}\"")))?,
-        None => stokesforge_import::choose_recipe(store.recipes(), path, &bytes)
-            .cloned()
-            .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Untitled")),
+        None => {
+            stokesforge_import::recipe_for_file(&store, path, &bytes, None)
+                .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?
+                .recipe
+        }
     };
     let items = stokesforge_importer::import_items(path, &recipe);
     if let Some(error) = items.iter().find_map(|item| item.table.as_ref().err()) {

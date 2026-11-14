@@ -1989,3 +1989,82 @@ mod graph_names {
         assert_eq!(graph_name(&mut project, root, spec_of(&[col])), "Graph1");
     }
 }
+
+// -- sheet mark of an untouched import (#488) --
+
+mod raw_sheet_mark {
+    use super::*;
+    use stokesforge_core::{NodeCopy, RawSheetMark};
+
+    fn mark() -> Option<RawSheetMark> {
+        Some(RawSheetMark {
+            modified_base: "Sheet".into(),
+        })
+    }
+
+    #[test]
+    fn rename_clears_the_mark() {
+        let mut demo = Demo::new();
+        demo.project.rename(demo.sheet, "Raw Data").unwrap();
+        demo.project.set_raw_mark(demo.sheet, mark()).unwrap();
+        assert_eq!(demo.project.raw_mark(demo.sheet), mark().as_ref());
+        demo.project.rename(demo.sheet, "Mine").unwrap();
+        assert_eq!(demo.project.raw_mark(demo.sheet), None);
+    }
+
+    #[test]
+    fn set_raw_mark_refuses_a_column_and_returns_the_previous_mark() {
+        let mut demo = Demo::new();
+        assert!(demo.project.set_raw_mark(demo.time, mark()).is_err());
+        assert_eq!(demo.project.set_raw_mark(demo.sheet, mark()).unwrap(), None);
+        assert_eq!(demo.project.set_raw_mark(demo.sheet, None).unwrap(), mark());
+    }
+
+    #[test]
+    fn first_free_name_starts_at_one_whatever_the_sheet_count() {
+        let mut demo = Demo::new();
+        demo.project.rename(demo.sheet, "Data").unwrap();
+        demo.project
+            .add_worksheet(demo.book, Some("Other"))
+            .unwrap();
+        demo.project
+            .add_worksheet(demo.book, Some("Third"))
+            .unwrap();
+        assert_eq!(
+            demo.project
+                .first_free_sheet_name(demo.book, "Sheet")
+                .unwrap(),
+            "Sheet1"
+        );
+        demo.project
+            .add_worksheet(demo.book, Some("sheet1"))
+            .unwrap();
+        assert_eq!(
+            demo.project
+                .first_free_sheet_name(demo.book, "Sheet")
+                .unwrap(),
+            "Sheet2"
+        );
+    }
+
+    #[test]
+    fn a_duplicated_sheet_loses_the_mark_a_copied_book_keeps_it() {
+        let mut demo = Demo::new();
+        demo.project.set_raw_mark(demo.sheet, mark()).unwrap();
+        let copy = demo
+            .project
+            .duplicate_worksheet(demo.sheet, "Copy")
+            .unwrap();
+        assert_eq!(demo.project.raw_mark(copy), None);
+        assert_eq!(demo.project.raw_mark(demo.sheet), mark().as_ref());
+
+        let book_copy = NodeCopy::capture(demo.project.tree(), demo.book).unwrap();
+        let pasted = demo
+            .project
+            .insert_copy(demo.folder, &book_copy, "Pasted")
+            .unwrap();
+        let sheets = demo.project.tree().children(pasted).unwrap().to_vec();
+        assert_eq!(demo.project.raw_mark(sheets[0]), mark().as_ref());
+        assert_eq!(demo.project.raw_mark(sheets[1]), None);
+    }
+}

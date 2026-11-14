@@ -269,6 +269,65 @@ pub struct PlotSpec {
     /// figure is the bounding box of the cells). Read only in `Free`; read
     /// through [`PlotSpec::sanitized_free_page`].
     pub free_page: Option<FreePage>,
+    /// Empty space the page keeps around the grid (#505): what remains when
+    /// the outer edge of a row or column was pulled inward in the Page Layout
+    /// Mode and the page did not follow. `None` = no empty space (the figure
+    /// hugs the grid). Read only on the regular grid, through
+    /// [`PlotSpec::sanitized_grid_slack`].
+    pub grid_slack: Option<GridSlack>,
+}
+
+/// The empty space between the outer cells of a regular grid and the edge of
+/// the image, on each side, in points (#505). Plain data (invariant 3).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GridSlack {
+    /// Space left of the first column.
+    pub left: f64,
+    /// Space above the first row (under the graph title band).
+    pub top: f64,
+    /// Space right of the last column.
+    pub right: f64,
+    /// Space below the last row.
+    pub bottom: f64,
+}
+
+impl GridSlack {
+    /// This slack made usable: a non-finite or negative side reads `0`, each
+    /// side is brought into `[0, MAX_FRAME_SIZE]` and the two sides of an
+    /// axis are scaled down together if their sum goes beyond
+    /// [`MAX_FRAME_SIZE`], so the image stays bounded (invariant 10).
+    pub fn sanitized(self) -> GridSlack {
+        let side = |v: f64| {
+            if v.is_finite() && v > 0.0 {
+                v.min(MAX_FRAME_SIZE)
+            } else {
+                0.0
+            }
+        };
+        let pair = |a: f64, b: f64| {
+            let (a, b) = (side(a), side(b));
+            let sum = a + b;
+            if sum > MAX_FRAME_SIZE {
+                let factor = MAX_FRAME_SIZE / sum;
+                (a * factor, b * factor)
+            } else {
+                (a, b)
+            }
+        };
+        let (left, right) = pair(self.left, self.right);
+        let (top, bottom) = pair(self.top, self.bottom);
+        GridSlack {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    /// True if no side holds any space.
+    pub fn is_zero(&self) -> bool {
+        self.left == 0.0 && self.top == 0.0 && self.right == 0.0 && self.bottom == 0.0
+    }
 }
 
 /// A stored size made usable: a missing, non-finite or non-positive entry
@@ -311,6 +370,14 @@ impl PlotSpec {
     pub fn sanitized_frame_widths(&self) -> Option<Vec<f64>> {
         (!self.frame_widths.is_empty())
             .then(|| sanitized_sizes(&self.frame_widths, self.columns(), FALLBACK_FRAME.0))
+    }
+
+    /// [`PlotSpec::grid_slack`] made usable (see [`GridSlack::sanitized`]);
+    /// `None` when there is none or it is all zero.
+    pub fn sanitized_grid_slack(&self) -> Option<GridSlack> {
+        self.grid_slack
+            .map(GridSlack::sanitized)
+            .filter(|slack| !slack.is_zero())
     }
 
     /// [`PlotSpec::free_page`] made usable (see [`FreePage::sanitized`]).
@@ -504,6 +571,7 @@ impl Default for PlotSpec {
             figure_top: None,
             layer_placement: LayerPlacement::Grid,
             free_page: None,
+            grid_slack: None,
         }
     }
 }

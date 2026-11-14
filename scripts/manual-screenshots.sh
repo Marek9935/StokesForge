@@ -11,12 +11,19 @@
 # it is not part of the CI. Isolated from the real profile (temporary
 # configuration folder).
 #
-# Usage: scripts/manual-screenshots.sh [name-filter]
+# Usage: scripts/manual-screenshots.sh [--no-python] [name-filter]
 #   name-filter: only the shots whose name contains it (e.g. import-wizard)
+#   --no-python: skip the Python console pass (scripts/deliver.sh uses it, #515)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+no_python=0
+if [ "${1:-}" = "--no-python" ]; then
+    no_python=1
+    shift
+fi
 
 if [ -n "${1:-}" ]; then
     export STOKESFORGE_SHOT="$1"
@@ -30,7 +37,9 @@ cargo test -p stokesforge-app --release --lib render_manual_screenshots \
 # build, so everything compiles twice the first time). Skipped, with a notice,
 # if the vendored interpreter is not there (scripts/python-vendor.sh).
 PREFIX="$REPO_ROOT/vendor/python/extracted/python"
-if [ -n "${1:-}" ] && [[ "scripting-console" != *"$1"* ]]; then
+if [ "$no_python" = 1 ]; then
+    echo "[manual-screenshots] --no-python: scripting-console.png not rendered" >&2
+elif [ -n "${1:-}" ] && [[ "scripting-console" != *"$1"* ]]; then
     : # a filter that selects no Python shot
 elif [ -x "$PREFIX/bin/python3" ]; then
     PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"

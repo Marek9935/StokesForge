@@ -12,19 +12,29 @@ use std::sync::Arc;
 
 use crate::{ClipboardError, Representation};
 
-/// Offers `representations` through the shared worker of the `wl_display` `display`.
+/// The shared worker of the `wl_display` `display`: held, it keeps the worker
+/// alive and lets any thread offer through it.
+///
+/// # Safety contract
+///
+/// `display` must be a live `wl_display`; the caller drops the result before
+/// the display goes away (the root does it in `on_exit`).
+pub(crate) fn open(display: NonNull<c_void>) -> smithay_clipboard::Clipboard {
+    // SAFETY: `display` comes from a `DisplayHandle` borrowed by the caller, so
+    // valid at this call; the shared worker we join (or create) is egui-winit's
+    // for this same display.
+    unsafe { smithay_clipboard::Clipboard::new(display.as_ptr()) }
+}
+
+/// Offers `representations` through the worker.
 pub(crate) fn offer(
-    display: NonNull<c_void>,
+    clipboard: &smithay_clipboard::Clipboard,
     representations: &[Representation],
 ) -> Result<(), ClipboardError> {
     let formats: Vec<(String, Arc<[u8]>)> = representations
         .iter()
         .map(|rep| (rep.mime.to_owned(), Arc::clone(&rep.bytes)))
         .collect();
-    // SAFETY: `display` comes from a `DisplayHandle` borrowed by `offer`, so
-    // valid during this whole call; the shared worker we join (or create)
-    // is egui-winit's for this same display.
-    let clipboard = unsafe { smithay_clipboard::Clipboard::new(display.as_ptr()) };
     clipboard.store_formats(formats);
     Ok(())
 }

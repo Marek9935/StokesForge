@@ -76,6 +76,15 @@ pub(crate) const KEY_LAYOUT_SNAP: egui::KeyboardShortcut =
 pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
 
+/// 1, 2, 3 — the first, second and third answer of a question of the Import
+/// Wizard review (Enter takes the first).
+pub(crate) const KEY_ANSWER_1: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num1);
+pub(crate) const KEY_ANSWER_2: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num2);
+pub(crate) const KEY_ANSWER_3: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Num3);
+
 /// Ctrl+Z — undo.
 pub(super) const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -173,7 +182,7 @@ pub(super) const SHORTCUT_NEW_PROJECT: egui::KeyboardShortcut =
 /// when the active tab is not a graph.
 pub(super) const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
-/// Ctrl+" — open the import wizard. On an AZERTY keyboard, `"` is the digit 3
+/// Ctrl+" — open the import window. On an AZERTY keyboard, `"` is the digit 3
 /// key **without** Shift: egui has no `"` key and falls back to the physical
 /// key, so the shortcut is consumed as Ctrl+3. On a QWERTY keyboard, `"` is
 /// Shift+apostrophe ([`SHORTCUT_IMPORT_QWERTY`]).
@@ -250,6 +259,11 @@ pub(super) const SHORTCUT_PASTE: egui::KeyboardShortcut =
 /// Ctrl+Shift+V — paste in place (decorative, see [`SHORTCUT_COPY`]).
 pub(super) const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::V,
+);
+/// Ctrl+Alt+V — paste transposed (decorative, see [`SHORTCUT_COPY`]).
+pub(super) const SHORTCUT_PASTE_TRANSPOSED: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::ALT),
     egui::Key::V,
 );
 
@@ -392,6 +406,7 @@ pub(super) const HELP: &[HelpEntry] = &[
     entry!(Workbook, "help-cut", shortcut SHORTCUT_CUT),
     entry!(Workbook, "help-paste", shortcut SHORTCUT_PASTE),
     entry!(Workbook, "help-paste-absolute", shortcut SHORTCUT_PASTE_ABSOLUTE),
+    entry!(Workbook, "help-paste-transposed", shortcut SHORTCUT_PASTE_TRANSPOSED),
     entry!(Workbook, "help-clear-cells", text shortcut_text_delete),
     entry!(Workbook, "help-duplicate-sheet", shortcut SHORTCUT_DUPLICATE_SHEET),
     entry!(Graph, "help-copy-graph", shortcut SHORTCUT_COPY),

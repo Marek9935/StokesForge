@@ -125,7 +125,11 @@ pub fn read_dirs(dirs: &[(&Path, &str)]) -> Vec<SourceFile> {
     let mut files: Vec<SourceFile> = paths
         .into_iter()
         .map(|(full, path)| {
-            let text = std::fs::read_to_string(full).expect("readable source");
+            // A Windows checkout has CRLF line ends: the guards search for
+            // `\n` markers, so they read LF on every platform (#532).
+            let text = std::fs::read_to_string(full)
+                .expect("readable source")
+                .replace("\r\n", "\n");
             SourceFile {
                 path,
                 text,

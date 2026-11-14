@@ -22,21 +22,16 @@
 //!   the application (an OS shortcut) cannot be told from a maximise the
 //!   compositor has not applied yet, so it leaves the mode alone: the mode
 //!   then works at the smaller size, and Esc still leaves it.
-//!   WHY it is safe: a detached window maximised over the main window hides it,
-//!   and every action of a detached window is drained in the ROOT frame. On
-//!   native Wayland winit only emits `RedrawRequested` once the frame callback
-//!   of the last present has come, and a fully covered surface never gets
-//!   one, so the root frame, and with it the whole application, stopped. The
-//!   vendored winit now reports the ROOT (the only window that opts in) as
-//!   occluded after 100 ms without a callback while a redraw is wanted
-//!   (`vendor/winit/STOKESFORGE.md`, "Frame starvation"); a detached window is
-//!   never reported, as it would get no pass and lose its input, and a covered one
-//!   repaints at its callback. eframe then keeps running the occluded root's
-//!   `logic` and `ui` unpainted, about every 100 ms, as long as a viewport is
-//!   visible. The detached window's request wakes the root, the root applies it
-//!   and publishes the result to the viewport in the same pass
-//!   ([`StokesForgeApp::republish_detached_tabs`]). Cost: about 100 ms between
-//!   a command and its paint while the main window is covered.
+//!   WHY it is safe (#475, L1): a detached graph maximised over the main window
+//!   hides it, but it no longer needs the root. The window locks the application
+//!   in its own pass, paints from the shared state and applies its actions at once
+//!   (`detached_graph.rs`): a covered root, which on native Wayland gets no frame
+//!   callback, delays nothing the graph does. What still goes through the root is
+//!   Reattach and Close under X11 and on Windows (a flag the root drains) and the
+//!   dialogs (painted by the root, #472: the window shows a band). Every window
+//!   serves itself (the workbook and the panels like the graph, L2 and L3), so no
+//!   occlusion report is needed and none exists (the vendored winit patch of #457
+//!   was removed in L5).
 //! - **Keys.** The root reads them at the start of the frame, before any
 //!   window is painted ([`StokesForgeApp::begin_layout_frame`]); a detached
 //!   viewport reads them at the top of its own frame. Esc therefore reaches the
@@ -82,7 +77,7 @@ impl StokesForgeApp {
     }
 
     fn is_floating_graph(&self, graph: NodeId) -> bool {
-        !self.detached_tabs.contains_key(&Tab::Graph(graph))
+        !self.detached_graphs.contains_key(&graph)
     }
 
     /// Turns the Page Layout Mode of `graph` on or off (`None`: toggles). A

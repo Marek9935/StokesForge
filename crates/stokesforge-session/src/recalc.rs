@@ -200,6 +200,13 @@ pub(crate) struct Recalculator {
     /// that pass: a calculation without a memo after `AddCalculation` or an
     /// undo is still recalculated.
     trust_loaded: bool,
+    /// The followed transposed sheets that were out of date in the file just
+    /// opened (#463, same rule as A1): the sheet stays "Out of date" instead of
+    /// being rewritten by the next unrelated command. Each entry is the source
+    /// as the file had it; the hold ends the moment the source differs from it
+    /// (a real change), and the sheet follows from then on. Never in the
+    /// history nor the `.stf`.
+    follow_hold: HashMap<NodeId, Vec<stokesforge_core::TransposeSourceColumn>>,
     /// Formula columns the pass decided to compute, monotonic (#439): one per
     /// column written by the pass or rewritten as a `NaN` block (cycle,
     /// unreadable formula), none for a clean column in targeted mode. The
@@ -226,6 +233,7 @@ impl Recalculator {
             stop: None,
             interrupted: false,
             trust_loaded: false,
+            follow_hold: HashMap::new(),
             evaluations: 0,
         }
     }
@@ -274,6 +282,7 @@ impl Recalculator {
     pub(crate) fn forget(&mut self) {
         self.memo.clear();
         self.calc_memo.clear();
+        self.follow_hold.clear();
     }
 
     /// The pass that follows a `Load` (A1, #316): the formula columns are
@@ -285,6 +294,13 @@ impl Recalculator {
     /// single-use: reset to `false` before returning.
     pub(crate) fn run_after_load(&mut self, project: &mut Project) {
         self.trust_loaded = true;
+        self.follow_hold = project
+            .tree()
+            .transposes()
+            .iter()
+            .filter(|(_, link)| link.auto_recalc && link.state(project.tree()).stale)
+            .map(|(sheet, link)| (*sheet, link.current_inputs(project.tree())))
+            .collect();
         self.run(project);
         self.trust_loaded = false;
     }
@@ -318,7 +334,7 @@ impl Recalculator {
     /// formula text — never the size of the data.
     pub(crate) fn run(&mut self, project: &mut Project) {
         self.run_formulas(project);
-        self.run_calculation_rounds(project, None);
+        self.run_rounds(project, None);
     }
 
     /// Reruns analysis calculations, whatever their state ("Recalculate"
@@ -338,7 +354,7 @@ impl Recalculator {
             ids.iter().copied().collect()
         };
         self.run_formulas(project);
-        self.run_calculation_rounds(project, Some(forced));
+        self.run_rounds(project, Some(forced));
     }
 
     fn run_formulas(&mut self, project: &mut Project) {
@@ -526,7 +542,28 @@ impl Recalculator {
                 }
             }
         }
-        let (order, blocked) = topological_order(&edges);
+        let (order, mut blocked) = topological_order(&edges);
+        // The columns of a source that calculate from its own followed
+        // transposed sheet (#463, rules 2 and 3 of the issue, kept formulas of
+        // an older file, a Move or a paste) are blanked like a loop. Whether
+        // a column is one is a function of the structure; the outcome
+        // (`Blocked` or `Evaluated`) is in the fingerprint, so a column that
+        // starts or stops being one is rewritten in targeted mode as well.
+        let readers = project.tree().columns_reading_followed_sheet();
+        let order = if readers.is_empty() {
+            order
+        } else {
+            let already: HashSet<NodeId> = blocked.iter().copied().collect();
+            blocked.extend(
+                readers
+                    .keys()
+                    .filter(|id| parsed.contains_key(id) && !already.contains(id)),
+            );
+            order
+                .into_iter()
+                .filter(|id| !readers.contains_key(id))
+                .collect()
+        };
 
         for id in blocked {
             let Some(entry) = parsed.get(&id) else {
@@ -1019,22 +1056,24 @@ enum CalcAction {
 }
 
 impl Recalculator {
-    /// Walks the calculations in the order of their dependencies (the output of
-    /// one can be the input of another); if one rewrote data, goes over the
-    /// formulas again — which can read these outputs — then starts over, within
-    /// the limit of [`MAX_ROUNDS`]. With no calculation in the project, costs
-    /// nothing.
-    fn run_calculation_rounds(&mut self, project: &mut Project, forced: Option<HashSet<NodeId>>) {
-        if project.tree().calculations().is_empty() {
-            self.calc_memo.clear();
-            return;
-        }
+    /// The rounds that follow the first formula pass: the followed transposed
+    /// sheets catch up with their source (#463), then the calculations are
+    /// walked in the order of their dependencies (the output of one can be the
+    /// input of another); if one of the two wrote data, goes over the formulas
+    /// again — which can read these columns — then starts over, within the
+    /// limit of [`MAX_ROUNDS`]. A chain source formula → followed row →
+    /// formula of another sheet → automatic analysis settles in one pass. With
+    /// no calculation and no followed sheet in the project, costs nothing.
+    fn run_rounds(&mut self, project: &mut Project, forced: Option<HashSet<NodeId>>) {
         let mut forced = forced;
         for _ in 0..MAX_ROUNDS {
             if self.should_stop() {
                 return;
             }
-            let changed = self.run_calculations(project, forced.take().as_ref());
+            let mut changed = self.run_follows(project);
+            if !project.tree().calculations().is_empty() {
+                changed |= self.run_calculations(project, forced.take().as_ref());
+            }
             if !changed {
                 break;
             }
@@ -1042,6 +1081,55 @@ impl Recalculator {
         }
         let present = project.tree().calculations();
         self.calc_memo.retain(|id, _| present.contains_key(id));
+    }
+
+    /// The follow step (#463): every transposed sheet whose box is checked
+    /// catches up with its source (`Project::follow_transpose`), outside the
+    /// history. A sheet whose source calculates from it is not followed (that
+    /// is a loop; the formulas in the way are blanked by the formula pass), nor
+    /// is one held since the file was opened. Returns `true` if a column was
+    /// written.
+    fn run_follows(&mut self, project: &mut Project) -> bool {
+        self.follow_hold
+            .retain(|sheet, _| project.tree().transpose_link(*sheet).is_some());
+        let followed: Vec<NodeId> = project
+            .tree()
+            .transposes()
+            .iter()
+            .filter(|(_, link)| link.auto_recalc)
+            .map(|(sheet, _)| *sheet)
+            .collect();
+        if followed.is_empty() {
+            return false;
+        }
+        let looped: HashSet<NodeId> = project
+            .tree()
+            .columns_reading_followed_sheet()
+            .into_values()
+            .collect();
+        let mut changed = false;
+        for sheet in followed {
+            if self.should_stop() {
+                break;
+            }
+            if looped.contains(&sheet) {
+                continue;
+            }
+            if let Some(held) = self.follow_hold.get(&sheet) {
+                let unchanged = project
+                    .tree()
+                    .transpose_link(sheet)
+                    .is_some_and(|link| link.current_inputs(project.tree()) == *held);
+                if unchanged {
+                    continue;
+                }
+                self.follow_hold.remove(&sheet);
+            }
+            // A source that cannot be followed (text, no x') is not an error
+            // of the pass: the sheet keeps its numbers and stays out of date.
+            changed |= project.follow_transpose(sheet).unwrap_or(false);
+        }
+        changed
     }
 
     /// One round over all calculations. Returns `true` if data changed.

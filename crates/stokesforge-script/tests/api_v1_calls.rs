@@ -228,6 +228,13 @@ fn export_graph_writes_svg_pdf_and_png_like_the_application() {
         stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
         other => panic!("{other:?}"),
     };
+    // A new graph titles its axes with the column variables (#506): bound
+    // first, like the export does.
+    let spec = stokesforge_render_svg::bind_spec(
+        &snapshot.tree,
+        &spec,
+        &stokesforge_render_svg::FigureTexts::default(),
+    );
     let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();

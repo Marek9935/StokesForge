@@ -189,6 +189,7 @@ pub(super) enum DialogNature {
     /// Choice with no "yes" answer: same footer, secondary = the other answers.
     Choice(PlainSize),
     /// Wizard: `[Cancel] [message] [Back · Next] [Finish]`.
+    #[allow(dead_code)] // the Wizard shape waits for the next multi-step window
     Wizard(InteractiveSize),
     /// Settings **applied live**, with nothing to confirm or cancel:
     /// `[message] [Close]` (S-F2). Interactive (fields to fill in: focus
@@ -329,6 +330,10 @@ impl FrameOutcome {
 enum FooterMessage<'a> {
     Error(&'a str),
     Reason(&'a str),
+    /// Something the user may want to look at before the main button (the
+    /// import's « 2 points not checked »): warning color, never a reason for
+    /// greying.
+    Warning(&'a str),
 }
 
 /// The footer decision, pure: an error if there is one; otherwise, if the main
@@ -337,10 +342,12 @@ fn footer_message<'a>(
     error: Option<&'a str>,
     accept_enabled: bool,
     reason: &'a str,
+    warning: &'a str,
 ) -> Option<FooterMessage<'a>> {
     match error.filter(|error| !error.is_empty()) {
         Some(error) => Some(FooterMessage::Error(error)),
         None if !accept_enabled && !reason.is_empty() => Some(FooterMessage::Reason(reason)),
+        None if !warning.is_empty() => Some(FooterMessage::Warning(warning)),
         None => None,
     }
 }
@@ -405,6 +412,9 @@ pub(super) enum AcceptButton<'a> {
 pub(super) struct DialogFooter<'a> {
     pub(super) accept_label: &'a str,
     pub(super) accept: AcceptButton<'a>,
+    /// A warning for the message area, shown when there is no error and the
+    /// main button is not greyed out (empty: none).
+    pub(super) warning: &'a str,
 }
 
 impl<'a> DialogFooter<'a> {
@@ -413,7 +423,14 @@ impl<'a> DialogFooter<'a> {
         Self {
             accept_label: label,
             accept: AcceptButton::Always { hint },
+            warning: "",
         }
+    }
+
+    /// The same footer with a warning in its message area.
+    pub(super) fn with_warning(mut self, warning: &'a str) -> Self {
+        self.warning = warning;
+        self
     }
 
     /// A main button that can be greyed out, with its reason (#226).
@@ -429,6 +446,7 @@ impl<'a> DialogFooter<'a> {
                 hint,
                 reason,
             },
+            warning: "",
         }
     }
 
@@ -485,7 +503,8 @@ pub(super) fn modal_dialog_with(
 /// A **wizard** (S-F6): Cancel on the left, the step buttons
 /// (`step_buttons`, added **from right to left**: Next then Back) grouped on
 /// the right against the final button (`footer`, Finish). Same window as
-/// [`modal_dialog_with`]; the import wizard is its use.
+/// [`modal_dialog_with`]; no window uses it today.
+#[allow(dead_code)] // the Wizard nature waits for the next multi-step window
 pub(super) fn modal_wizard(
     ctx: &egui::Context,
     id: egui::Id,
@@ -823,6 +842,21 @@ fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new(("stokesforge_modal_shown", ctx.viewport_id()))
 }
 
+/// Memory key of the "a gesture outside the dialog was blocked" request of one
+/// viewport (#533).
+fn blocked_gesture_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_modal_blocked_gesture", ctx.viewport_id()))
+}
+
+/// A gesture the open modal refused without a click on its backdrop (the
+/// window's cross, #533): the modal of this viewport flashes at its next paint,
+/// exactly as for a blocked click.
+pub(super) fn flash_open_modal(ctx: &egui::Context) {
+    let id = blocked_gesture_id(ctx);
+    ctx.data_mut(|data| data.insert_temp(id, true));
+    ctx.request_repaint();
+}
+
 /// Records that a modal window is painted in this viewport, in this frame.
 pub(super) fn mark_modal_shown(ctx: &egui::Context) {
     // Ids read before the lock: `viewport_id` locks the context too.
@@ -924,8 +958,11 @@ fn modal_frame(
         .show(ctx, |ui| {
             ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
         });
-    let blocked_click =
-        backdrop.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
+    // A gesture refused elsewhere (the window's cross, #533) flashes the same way.
+    let blocked_gesture_id = blocked_gesture_id(ctx);
+    let blocked_gesture = ctx.data_mut(|data| data.remove_temp::<bool>(blocked_gesture_id));
+    let blocked_click = blocked_gesture.unwrap_or(false)
+        || backdrop.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
     let now = ctx.input(|input| input.time);
     if blocked_click {
         ctx.data_mut(|data| data.insert_temp(flash_id, now));
@@ -999,6 +1036,7 @@ fn modal_frame(
                     error.as_deref(),
                     footer_spec.enabled(),
                     footer_spec.disabled_reason(),
+                    footer_spec.warning,
                 );
                 let focus_default = just_opened && focus == InitialFocus::DefaultButton;
                 clicks = paint_footer(
@@ -1223,6 +1261,9 @@ fn paint_footer_message(ui: &mut egui::Ui, message: Option<FooterMessage<'_>>) {
             egui::RichText::new(error).color(ui.visuals().error_fg_color)
         }
         Some(FooterMessage::Reason(reason)) => crate::theme::secondary_text(reason),
+        Some(FooterMessage::Warning(warning)) => {
+            egui::RichText::new(warning).color(crate::theme::warning_color(ui.visuals().dark_mode))
+        }
         None => return,
     };
     ui.add(egui::Label::new(text).truncate());
@@ -1396,15 +1437,24 @@ mod tests {
     #[test]
     fn the_error_takes_precedence_over_the_reason_for_greying() {
         assert_eq!(
-            footer_message(Some("Error"), false, "Reason"),
+            footer_message(Some("Error"), false, "Reason", ""),
             Some(FooterMessage::Error("Error"))
         );
         assert_eq!(
-            footer_message(None, false, "Reason"),
+            footer_message(None, false, "Reason", ""),
             Some(FooterMessage::Reason("Reason"))
         );
-        assert_eq!(footer_message(None, true, "Reason"), None);
-        assert_eq!(footer_message(Some(""), false, ""), None);
+        assert_eq!(footer_message(None, true, "Reason", ""), None);
+        assert_eq!(footer_message(Some(""), false, "", ""), None);
+        // A warning shows when nothing else does, and never hides them.
+        assert_eq!(
+            footer_message(None, true, "", "2 points not checked"),
+            Some(FooterMessage::Warning("2 points not checked"))
+        );
+        assert_eq!(
+            footer_message(None, false, "Reason", "2 points not checked"),
+            Some(FooterMessage::Reason("Reason"))
+        );
     }
 
     /// S-F10, S-M7 painted: main button greyed out, its reason is in the footer;
@@ -1977,7 +2027,7 @@ mod tests {
         assert!(always.enabled());
         assert_eq!(always.disabled_reason(), "", "witness: never a reason");
         assert_eq!(
-            footer_message(None, always.enabled(), always.disabled_reason()),
+            footer_message(None, always.enabled(), always.disabled_reason(), ""),
             None
         );
     }

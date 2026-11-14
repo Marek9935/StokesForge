@@ -32,8 +32,8 @@
 //! touching the structure.
 
 use stokesforge_core::{
-    CalculationDraft, Column, ColumnMeta, ColumnType, CopyInsertion, NodeCopy, NodeId, Tree,
-    ValueBlock, WindowMeta,
+    CalculationDraft, Column, ColumnMeta, ColumnType, CopyInsertion, NodeCopy, NodeId,
+    RawSheetMark, Tree, ValueBlock, WindowMeta,
 };
 use stokesforge_plot::{PlotSpec, SavedColors};
 
@@ -284,6 +284,14 @@ pub enum Command {
         /// New metadata.
         meta: WindowMeta,
     },
+    /// Sets or clears the mark of an untouched import on a sheet (#488): while
+    /// it is there the sheet keeps the generic name the import gave it.
+    SetSheetRawMark {
+        /// Target sheet.
+        sheet: NodeId,
+        /// New mark, or `None` to clear it.
+        mark: Option<RawSheetMark>,
+    },
     /// Replaces the text of a note.
     SetNoteText {
         /// Target note.
@@ -372,6 +380,15 @@ pub enum Command {
         /// Transposed sheet.
         sheet: NodeId,
     },
+    /// Checks or unchecks "Recalculate automatically" on a transposed sheet
+    /// (#463). Checking is refused while the source calculates from the sheet.
+    /// Structural: one entry, undo restores the sheet as it was.
+    SetTransposeAuto {
+        /// Transposed sheet.
+        sheet: NodeId,
+        /// The new state of the box.
+        auto: bool,
+    },
     /// Replaces the colors saved in the project, as a whole (saving or
     /// removing a color of the color picker). Data, not structure: no node
     /// moves.
@@ -441,6 +458,9 @@ impl Command {
             Command::AddNote { .. } => HistoryLabel::AddNote,
             Command::RemoveNode { id } => HistoryLabel::RemoveNode { name: name(*id) },
             Command::SetWindowMeta { id, .. } => HistoryLabel::SetWindowMeta { name: name(*id) },
+            Command::SetSheetRawMark { sheet, .. } => {
+                HistoryLabel::SetSheetRawMark { name: name(*sheet) }
+            }
             Command::SetNoteText { id, .. } => HistoryLabel::SetNoteText { name: name(*id) },
             Command::SetColumnMeta { column, .. } => HistoryLabel::SetColumnMeta {
                 column: column_ref(tree, *column),
@@ -453,6 +473,9 @@ impl Command {
             },
             Command::TransposeRows { .. } => HistoryLabel::TransposeRows,
             Command::RecalculateTranspose { .. } => HistoryLabel::RecalculateTranspose,
+            Command::SetTransposeAuto { auto, .. } => {
+                HistoryLabel::SetTransposeAuto { auto: *auto }
+            }
             Command::ReplaceAnalysisData { draft, .. } => {
                 HistoryLabel::ReplaceAnalysisData(draft.operation.kind())
             }
@@ -525,6 +548,7 @@ impl Command {
                 | Command::RemoveCalculation { .. }
                 | Command::TransposeRows { .. }
                 | Command::RecalculateTranspose { .. }
+                | Command::SetTransposeAuto { .. }
         )
     }
 }

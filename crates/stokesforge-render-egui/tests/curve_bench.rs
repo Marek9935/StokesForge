@@ -123,7 +123,7 @@ impl Bench {
                 self.view.apply(&mut framed);
                 let outcome = self
                     .cache
-                    .get_or_build(key, |shapes| {
+                    .get_or_build(key, |shapes, _| {
                         let t = Instant::now();
                         let plot = resolve_spec(project.tree(), &framed);
                         let text = ScreenText::new(&self.context, &self.text);

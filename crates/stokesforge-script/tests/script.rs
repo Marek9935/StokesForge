@@ -245,9 +245,11 @@ fn python_import_by_template_reads_and_undoes_in_one_gesture() {
     assert_eq!(*bench.session.snapshot().unwrap().tree, *imported.tree);
 }
 
-/// The automatic choice uses the same Jasco signature as the application.
+/// The same rule as the application (F1 of #488): the test store holds
+/// old-format templates, kept but not picked by themselves; the detector
+/// reads the file. A named template is used (see the test above).
 #[test]
-fn python_import_chooses_the_template_automatically() {
+fn python_import_does_not_pick_an_old_template_by_itself() {
     let bench = bench();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../test/import/jasco_uvvis_semicolon.csv");
@@ -274,7 +276,7 @@ fn python_import_chooses_the_template_automatically() {
         })
         .next()
         .unwrap();
-    assert!(source.recipe_json.contains("Jasco (semicolon)"));
+    assert!(!source.recipe_json.contains("Jasco (semicolon)"));
 }
 
 /// An Origin `.opj` imports one workbook per book and one sheet per `Data`

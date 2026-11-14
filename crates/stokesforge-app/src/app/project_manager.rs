@@ -65,8 +65,8 @@ use super::StokesForgeApp;
 /// What the Project Manager tree rendering accumulates or reads, through
 /// [`project_manager_contents_from_tree`]/[`project_tree_node_ui`] — one single
 /// bundle rather than five parameters, for the same two contexts as the rest of
-/// the module (fixed panel and detached OS window, see the head doc of
-/// [`StokesForgeApp::show_detached_project_manager`]).
+/// the module (fixed panel and detached OS window, which paint with the same
+/// [`StokesForgeApp::project_manager_body`], see `detached_panel.rs`).
 pub(super) struct PmInteraction<'a> {
     pub(super) actions: &'a mut Vec<Action>,
     pub(super) root: NodeId,
@@ -635,14 +635,9 @@ fn handle_tree_key(
     }
 }
 
-/// The body of the Project Manager, from an already built tree rather than a
-/// live `&AppState` — only the `show_viewport_deferred` callback of
-/// [`StokesForgeApp::show_detached_project_manager`] needs this form: it
-/// carries only a copy of the tree
-/// ([`ProjectManagerViewModel`](crate::app::window_detach::ProjectManagerViewModel)),
-/// never `AppState` itself. The fixed panel ([`StokesForgeApp::project_manager_panel`])
-/// passes `&self.state.project_tree()` directly — same function, two
-/// sources of tree.
+/// The body of the Project Manager, from a tree already read from the shared
+/// state ([`StokesForgeApp::project_manager_body`] reads it, for the fixed panel
+/// and for the detached window alike).
 pub(super) fn project_manager_contents_from_tree(
     ui: &mut egui::Ui,
     tree: &[ProjectTreeNode],
@@ -894,7 +889,8 @@ fn is_renaming(ctx: &egui::Context, memory_key: egui::Id, id: NodeId) -> bool {
 }
 
 /// Why this name is refused (S-T4, red frame): empty, or already taken by
-/// another child of the same folder.
+/// another child of the same folder under the sibling rule (case and the
+/// transpose mark `ᵀ` read as `T`, #494).
 fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {
@@ -906,7 +902,7 @@ fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Optio
                 (*id, name.as_str())
             }
         };
-        other != id && text == name
+        other != id && stokesforge_core::same_name_ignoring_case(text, name)
     });
     taken.then(|| tr!("field-refused-name-taken"))
 }
@@ -1350,7 +1346,7 @@ impl StokesForgeApp {
     /// guarantees by construction that it is never covered nor covers
     /// what comes after. Not called when [`StokesForgeApp::pm_detached`]
     /// is `true` — that frame, nothing replaces this panel, the real
-    /// separate OS window ([`StokesForgeApp::show_detached_project_manager`])
+    /// separate OS window (`detached_panel.rs`)
     /// takes its place. Stays resizable in width by dragging the edge
     /// (default behavior of `egui::Panel::left`) but fixed in
     /// position: no switch to the right nor repositioning by
@@ -1395,21 +1391,35 @@ impl StokesForgeApp {
                 if header.detach {
                     self.detach_project_manager();
                 }
-                let tree = self.state.project_tree();
-                let open = self.open_tabs();
-                let cut: HashSet<NodeId> = self.state.cut_objects().into_iter().collect();
-                let mut interaction = PmInteraction {
-                    actions,
-                    root: self.state.tree().root(),
-                    open_requests,
-                    selection: &mut self.pm_selection,
-                    open: &open,
-                    close_requests,
-                    cut: &cut,
-                    manual: self.state.tree().manual_order_folders(),
-                };
-                project_manager_contents_from_tree(ui, &tree, &mut interaction);
+                self.project_manager_body(ui, open_requests, close_requests, actions);
             });
+    }
+
+    /// The tree of the Project Manager, read from the shared state: THE painter
+    /// of the panel, docked (inside [`Self::project_manager_panel`]) and
+    /// detached (inside the window's pass, `detached_panel.rs`). The selection,
+    /// the open windows and the cut nodes are the application's own.
+    pub(super) fn project_manager_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        open_requests: &mut Vec<Tab>,
+        close_requests: &mut Vec<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        let tree = self.state.project_tree();
+        let open = self.open_tabs();
+        let cut: HashSet<NodeId> = self.state.cut_objects().into_iter().collect();
+        let mut interaction = PmInteraction {
+            actions,
+            root: self.state.tree().root(),
+            open_requests,
+            selection: &mut self.pm_selection,
+            open: &open,
+            close_requests,
+            cut: &cut,
+            manual: self.state.tree().manual_order_folders(),
+        };
+        project_manager_contents_from_tree(ui, &tree, &mut interaction);
     }
 }
 

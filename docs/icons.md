@@ -59,6 +59,7 @@ and only when it carries information that the shape does not:
 | `Neutral` | everything else (default) | dark blue-gray |
 | `Workbook`, `Graph`, `Matrix`, `Note`, `Folder` | the project object of this type | yellow, blue, violet, orange, sand |
 | `Danger` | the destructive action of a context | red |
+| `Accent`, `Muted` | the size padlock: closed (accent, filled) and open (muted, outline) (#505) | green, gray |
 
 Indicative budget: no more than about one colored icon in four in the same
 view. No color per tool family. The application theme is light and fixed
@@ -127,8 +128,9 @@ series that plots it. The warning hue stays that of the letter
 (`theme::stale_color`), not a palette role.
 
 The lock between the total width and height of a graph (#407, Graph
-Properties › General › Size) uses `lock-simple` (`Icon::LockClosed`) and
-`lock-simple-open` (`Icon::LockOpen`), neutral role; the tooltip says what the
+Properties › General › Size) uses `lock-simple-fill-modify` (`Icon::LockClosed`, body filled, `accent` role) and
+`lock-simple-open-outline-modify` (`Icon::LockOpen`, outline only, `muted` role) so the two
+states read at a glance (#505); the tooltip says what the
 state is and what a click does.
 
 ## Color swatches (#89)

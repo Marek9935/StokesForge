@@ -52,7 +52,7 @@ pub(super) fn geometry_rect(geometry: &WindowGeometry) -> egui::Rect {
 /// expanded size would paint a frame — and a highlight outline —
 /// around an empty area.
 ///
-/// Reused as is by [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs) (B9) to
+/// Reused as is by [`StokesForgeApp::show_detached_books`](crate::app::StokesForgeApp::show_detached_books) (B9) to
 /// compute the size to send to the OS viewport through
 /// `ViewportCommand::InnerSize`: same header band, same collapsed
 /// height — only what carries this size changes (the frame painted by
@@ -78,9 +78,9 @@ pub(super) fn floating_window_display_size(
 /// window reappear collapsed — even once expanded again — the next time
 /// the project is opened.
 ///
-/// Reused as is by [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs) (B9,
+/// Reused as is by [`StokesForgeApp::show_detached_books`](crate::app::StokesForgeApp::show_detached_books) (B9,
 /// `retours-2026-09-23-bugs.md`) with
-/// `DetachedTabViewModel::expanded_size` as the logical size: the
+/// `DetachedBook::expanded_size` as the logical size: the
 /// rectangle reported by the OS viewport during a collapse is, there too,
 /// the reduced rectangle that the `InnerSize` sent on the switch produced,
 /// not the size to persist.

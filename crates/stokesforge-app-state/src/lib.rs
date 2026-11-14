@@ -54,6 +54,7 @@ pub mod quantities;
 pub mod r_squared;
 pub mod recovery;
 pub mod selection;
+pub mod spring_load;
 pub mod startup;
 pub mod state;
 pub mod text_format;

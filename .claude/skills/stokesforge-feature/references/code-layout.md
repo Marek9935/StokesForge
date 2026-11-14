@@ -5,7 +5,7 @@ Read when adding or moving code in `stokesforge-app` (new surface, menu, window,
 ## Where the rule lives
 
 - Module → role table: `docs/application/shell-and-code.md` § Code split.
-- Layout rules (one module per surface, explicit imports, `app.rs` = orchestration, tests follow their code): `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, first point "`app.rs` split".
+- Layout rules (one module per surface, explicit imports, `app.rs` = orchestration, tests follow their code): `.claude/rules/app.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, first point "`app.rs` split".
 - In-place splitting, witnesses: `docs/tests.md` § Re-split of interface functions (#124) ; `CLAUDE.md` § Delegation and model choice.
 - Guards that read the code (single reader): `docs/tests.md` § Guards not to break.
 

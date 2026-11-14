@@ -7,7 +7,11 @@ use crate::recipe::ImportRecipe;
 /// The set of recipes saved by the user.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecipeStore {
-    recipes: Vec<ImportRecipe>,
+    pub(crate) recipes: Vec<ImportRecipe>,
+    /// Conditions of the templates and answers to doubts already given (#488),
+    /// additive fields: an older file has neither.
+    #[serde(flatten)]
+    pub(crate) extras: crate::templates::TemplateExtras,
 }
 
 impl RecipeStore {
@@ -17,8 +21,24 @@ impl RecipeStore {
     pub fn load() -> Self {
         recipes_path()
             .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|content| serde_json::from_str(&content).ok())
+            .and_then(|content| Self::from_json(&content))
             .unwrap_or_default()
+    }
+
+    /// Reads a store from its JSON text; `None` if it is not one. Every
+    /// template adopts the current reading of the sub-header roles
+    /// (`join_lines`, #488) here, the one place templates enter from disk, so
+    /// the wizard, a file drop and a reopened import agree. Templates live in
+    /// preferences, not in the `.stf` (invariant 12 does not apply); the
+    /// `.stf` column sources keep their stored value, and Refresh from Source
+    /// rewrites values only, never titles.
+    pub(crate) fn from_json(text: &str) -> Option<Self> {
+        let mut store: Self = serde_json::from_str(text).ok()?;
+        for recipe in &mut store.recipes {
+            recipe.adopt_joined_lines();
+        }
+        store.adopt_auto_match();
+        Some(store)
     }
 
     /// Writes every recipe to disk (creates the config folder if it does not
@@ -54,6 +74,8 @@ impl RecipeStore {
 
     pub fn remove(&mut self, name: &str) {
         self.recipes.retain(|r| r.name != name);
+        self.extras.conditions.remove(name);
+        self.extras.not_automatic.remove(name);
     }
 }
 
@@ -83,6 +105,24 @@ mod tests {
         assert_eq!(store.recipes().len(), 2);
         let jasco = store.recipes().iter().find(|r| r.name == "Jasco").unwrap();
         assert_eq!(jasco.footer_skip_lines, 3);
+    }
+
+    /// #488: a template saved before `join_lines` reads the new way once loaded.
+    #[test]
+    fn an_old_template_without_join_lines_adopts_it_at_load() {
+        let mut recipe = ImportRecipe::new("Old");
+        recipe.subheader_roles.join_lines = false;
+        let json = serde_json::to_string(&RecipeStore {
+            recipes: vec![recipe],
+            ..Default::default()
+        })
+        .unwrap()
+        .replace("\"join_lines\":false", "\"former_key\":false");
+        assert!(!json.contains("\"join_lines\""));
+        let raw: RecipeStore = serde_json::from_str(&json).unwrap();
+        assert!(!raw.recipes()[0].subheader_roles.join_lines);
+        let store = RecipeStore::from_json(&json).unwrap();
+        assert!(store.recipes()[0].subheader_roles.join_lines);
     }
 
     #[test]

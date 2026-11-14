@@ -119,6 +119,8 @@ fn exact_spec_stable_export_and_style_witness() {
     panel.bottom.range_min = Some(1.);
     panel.bottom.range_max = Some(10.);
     panel.left.label = "$I$".into();
+    // A new graph has no legend frame (#507, D6).
+    panel.legend.frame = false;
     // A graph created by a script is explicit (#394): the frames of the
     // 480 x 360 pt figure, the title band inside.
     let legacy = layout_of(&expected);
@@ -822,4 +824,115 @@ fn an_unnamed_python_graph_is_named_after_its_workbook() {
     for path in ["[Book1 plot]", "[Book1 plot 2]", "[Fig]"] {
         assert!(snap.tree.resolve(path).is_ok(), "{path} resolves");
     }
+}
+
+/// #499: `visible` keeps the bar's value when not given, `row_column=None`
+/// clears the column (not giving it keeps it). Witness: restoring
+/// `visible.unwrap_or(true)` or treating `None` as
+/// "not given" fails the assertions.
+#[test]
+fn color_bar_keeps_visible_and_clears_row_column() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1')\ngid = pyst.group_series(g, [0, 1])\npyst.color_bar(g, [gid], row_column=x, visible=False)\npyst.color_bar(g, title='t')\n"),
+    );
+    let bar = graph_spec(&b).panels[0].color_bar.clone().expect("a bar");
+    assert!(!bar.visible, "an omitted visible keeps the hidden bar");
+    assert!(bar.row_column.is_some(), "an omitted row_column keeps it");
+    run(&b, "pyst.color_bar(g, row_column=None, visible=True)\n");
+    let bar = graph_spec(&b).panels[0].color_bar.clone().expect("a bar");
+    assert!(bar.visible && bar.row_column.is_none());
+}
+
+/// #499: `length` / `thickness` set the strip size, bounded; a call that
+/// leaves them out keeps them; a non-finite value is refused. Witness: a
+/// size reset by the second call, or no bound, fails the assertions.
+#[test]
+fn color_bar_sets_and_keeps_its_size() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1')\ngid = pyst.group_series(g, [0, 1])\npyst.color_bar(g, [gid], length=150, thickness=1)\npyst.color_bar(g, title='t')\n"),
+    );
+    let bar = graph_spec(&b).panels[0].color_bar.clone().expect("a bar");
+    assert_eq!(bar.length, Some(150.0));
+    assert_eq!(
+        bar.thickness,
+        Some(stokesforge_plot::ColorBarSpec::MIN_THICKNESS)
+    );
+}
+
+/// #499: the groups of `pyst.color_bar` land in the graph's order whatever the
+/// order of the list, and each label stays with its group. Witness: keeping
+/// the order of the list reverses the segments.
+#[test]
+fn color_bar_follows_the_graph_order_of_the_groups() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y, y], x, name='Graph1')\npyst.group_series(g, [0, 1])\npyst.group_series(g, [2, 3])\nids = [d['id'] for d in pyst.series_groups(g)]\npyst.color_bar(g, [ids[1], ids[0]], labels=['second', 'first'])\n"),
+    );
+    let spec = graph_spec(&b);
+    let panel = &spec.panels[0];
+    let bar = panel.color_bar.as_ref().expect("a bar");
+    let order = panel.group_ids();
+    let groups: Vec<u32> = bar.segments.iter().map(|s| s.group).collect();
+    assert_eq!(groups, order);
+    assert_eq!(bar.segment_of(order[0]).unwrap().label, "first");
+    assert_eq!(bar.segment_of(order[1]).unwrap().label, "second");
+}
+
+/// #499: `pyst.color_bar` builds the bar of a layer in one undo step, gives a
+/// group without a retained gradient the first palette, keeps the range and
+/// label of a group already on the bar, and refuses an unknown option
+/// without writing. Witness: a second undo step, or a bar written before the
+/// refusal, fails the assertions.
+#[test]
+fn color_bar_is_one_undo_step_and_refuses_unknown_options() {
+    let b = bench();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1')\ngid = pyst.group_series(g, [0, 1])\n"),
+    );
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        "gid = pyst.series_groups(g)[0]['id']
+pyst.color_bar(g, [gid], labels=['switch'], position='right', title='t (min)', ticks='auto', chain=True)
+pyst.color_bar(g, scale='log')
+",
+    );
+    let spec = graph_spec(&b);
+    let panel = &spec.panels[0];
+    let bar = panel.color_bar.as_ref().expect("a bar");
+    assert_eq!(bar.segments.len(), 1);
+    assert_eq!(bar.segments[0].label, "switch");
+    assert_eq!(bar.position, stokesforge_plot::ColorBarPosition::Right);
+    assert_eq!(bar.scale, stokesforge_plot::ColorBarScale::Log);
+    assert!(bar.chain && bar.visible);
+    assert!(
+        panel.group_gradient(bar.segments[0].group).is_some(),
+        "the group retains a gradient"
+    );
+    // The whole script is one undo step.
+    b.session.undo().unwrap();
+    assert_eq!(*b.session.snapshot().unwrap().tree, *before.tree);
+
+    let after_refusals = b.session.snapshot().unwrap();
+    for refused in [
+        "pyst.color_bar(g, [gid], scale='cubic')",
+        "pyst.color_bar(g, [gid], position='middle')",
+        "pyst.color_bar(g, [99])",
+        "pyst.color_bar(g, [gid], labels=['a', 'b'])",
+        "pyst.color_bar(g, [gid, gid])",
+        "pyst.color_bar(g, [gid], colour='red')",
+    ] {
+        let out = b
+            .engine
+            .run(&format!("gid = pyst.series_groups(g)[0]['id']\n{refused}"))
+            .unwrap();
+        assert!(out.error.is_some(), "{refused} should be refused");
+    }
+    assert_eq!(*b.session.snapshot().unwrap().tree, *after_refusals.tree);
 }

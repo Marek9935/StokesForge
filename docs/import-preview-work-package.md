@@ -1,5 +1,15 @@
 # Work package "import preview" — handover note
 
+**Status (#488).** The window this note talks about, the six-step wizard, was
+replaced by the one-screen import (`docs/application/project-and-import.md`
+§ "Import wizard"). What stays true here: the engine (`layout`, `preview`,
+`data_end`, `HeaderLayout`, `SubheaderRoles`) and the decisions below. The
+sections that describe the wizard's steps ("Step-by-step wizard", the buttons
+"Re-evaluate Now" and "Detect Header", the "Metadata" step) are history: the
+detector now proposes the header layout by itself (`sniff`), a click on a line
+number of the grid gives a line its role, and the selection of the metadata
+keys is the « Do not keep this info » / « Keep this info » choice of the grid.
+
 **This document is not a reference page.** Unlike the rest of `docs/`, which
 describes the code as it is, this one describes a *work package*: what it
 aimed at, what it found along the way, and what it leaves open. Its lifetime
@@ -149,12 +159,14 @@ rather than making the load fail.
   A recipe that never touches it keeps the `HeaderSkip` behavior
   from before this work package, identically — minimize breakage, the same policy
   as the "mixed-type columns" work package.
-- **A subheader role range is read only on its first line**
-  (`SubheaderRoles::long_name`/`unit`/`comment`, field `from`). A range
-  `18` to `18` (OriginLab's reference example) does not suffer from it; a
-  real multi-line range spread across different columns is not
-  implemented — no instrument format met in the test fixtures
-  needed it. To extend if a real case requires it, not before.
+- **A subheader role range** (`SubheaderRoles::long_name`/`unit`/`comment`/
+  `x_prime`). *Decision reopened by #488:* Long Name and Comments **join** the
+  lines of their range (tokens of a column, empty ones skipped, one space
+  between), when the recipe carries `join_lines`; Units and x' read the `from`
+  line only. A recipe written before the field (`join_lines` false, serde
+  default) keeps the old reading, the first line only, so a stored range
+  `1` to `2` does not change meaning in an old `.stf` (invariant 12). A recipe
+  that goes through the import wizard is switched to `join_lines` true.
 - **The specification's `count_from_bottom` ("Line number start from
   bottom") was not implemented.** Unlike the other fields, an
   incorrect implementation would have been worse than its absence (counting from
@@ -206,8 +218,7 @@ one (an empty line included); a text in another column does not cut.
 Other options: no cut, first empty line, marker, N lines after
 the header, N lines before the end. The rule lives in `data_end.rs`, called by the
 shared `layout` split, so that `parse` **and** `preview` cut at the
-same place. `footer_skip_lines` applies first. The options and the right-click
-on the cut line are available in the wizard; see
+same place. `footer_skip_lines` applies first. The options are in the recipe, and the cut is the pair of handles of the grid; see
 `docs/application/project-and-import.md` § "Import wizard". The footer can be kept
 in the metadata with `keep_footer_metadata`.
 
@@ -216,21 +227,21 @@ in the metadata with `keep_footer_metadata`.
 `ImportRecipe::keep_header_metadata` (true), `keep_footer_metadata` (false) and
 `excluded_metadata` (excluded keys or sections) drive `ParsedTable::metadata()`
 (`crate::metadata`, key / value lines, `[...]` sections, lines without a key
-kept as they are). `stokesforge-app` copies them into `ColumnMeta::file_metadata`
+kept as they are; a sub-header line carrying a role (`Layout::subheader_roles`,
+the preview's own) is not metadata, #488). `stokesforge-app` copies them into `ColumnMeta::file_metadata`
 of each imported column — in the "Import" macro, with no
 edit command: read-only. Display: "Metadata" row of the header ("📋 N
 keys"), click → modal viewing window (`column_metadata_window`).
-The row can be hidden (Window menu); selection by key is in the
-"Metadata" step of the wizard; no automatic filling of units
-(decided).
+The row can be hidden (Window menu); a key is kept or left out from the grid of
+the import screen (`GridCmd::Exclude`); units are filled from the file only
+where the detector reads them (`KEY;value` lines, `props`).
 
 ## Step-by-step wizard (issue #6)
 
-`import_window` is now a six-step wizard (see
-`docs/application/project-and-import.md` § "Import wizard"). On the `stokesforge-import` side:
+*History: this was the six-step wizard, replaced by the one-screen import (#488, see
+`docs/application/project-and-import.md` § "Import wizard").* On the `stokesforge-import` side:
 `ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignore removes the column
-at import), `unify_header`, `detect_encoding`. The header setting no longer
-exposes the "Automatic detection" checkbox: only the button "Detect Header" acts (`HeaderLayout::auto_detect` stays in the recipe, with no effect).
+at import), `unify_header`, `detect_encoding`. `HeaderLayout::auto_detect` stays in the recipe, with no effect: the detector (`sniff`) proposes the layout when a file arrives.
 
 Numbers: a non-finite result (`inf`, `Infinity`, `1e400`) reads as `NaN` and the token stays visible as text (`Mixed` column), like `nan`; the automatic end of data and the subheader detection nevertheless count it as a number (`NumberFormat::is_numeric`).
 

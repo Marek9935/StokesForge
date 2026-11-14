@@ -26,6 +26,16 @@ use stokesforge_plot::{AxisScale, PlotType, SeriesAxis, SeriesSpec};
 
 use crate::scale::forward;
 use crate::texts::FigureTexts;
+use crate::variables::{self, VariableValues};
+
+/// The values of an entry's column, an unknown `#col.Z` reading the broken
+/// reference of `texts` (#501).
+fn known(fields: &stokesforge_core::ColumnFields, texts: &FigureTexts) -> VariableValues {
+    VariableValues {
+        unknown: texts.broken_reference.clone(),
+        ..VariableValues::from(fields)
+    }
+}
 
 /// A point in plot space.
 pub type Point = (f64, f64);
@@ -105,6 +115,11 @@ pub struct Prepared<'s> {
     /// A column of the series comes from a stale computation and the graph
     /// warns about it (#198): grayed line and « ! » marker.
     pub stale: bool,
+    /// The colour the series' value takes on its layer's colour bar (#499,
+    /// step C), computed at each draw and **never written to the spec**.
+    /// When set, the series is painted with it instead of its stored colour
+    /// and its legend entry is replaced by the bar.
+    pub value_color: Option<String>,
 }
 
 impl Prepared<'_> {
@@ -117,8 +132,37 @@ impl Prepared<'_> {
     ///
     /// A broken reference qualifies — it is even the only place where it can
     /// show, since it has nothing to draw.
+    ///
+    /// A series coloured by a colour bar (#499) is replaced by the bar: it
+    /// leaves the legend. The predicate is shared by the drawn entries and by
+    /// the rank of each row, so a click on a remaining entry still finds its
+    /// own series.
     pub fn in_legend(&self) -> bool {
-        self.spec.show_in_legend && (self.draws() || self.broken)
+        self.spec.show_in_legend && self.value_color.is_none() && (self.draws() || self.broken)
+    }
+
+    /// The line to paint: the stored one, or a copy in the value colour
+    /// (#499). Never modifies the spec.
+    pub fn line(&self) -> std::borrow::Cow<'_, stokesforge_plot::LineSpec> {
+        match &self.value_color {
+            None => std::borrow::Cow::Borrowed(&self.spec.line),
+            Some(color) => std::borrow::Cow::Owned(stokesforge_plot::LineSpec {
+                color: color.clone(),
+                ..self.spec.line.clone()
+            }),
+        }
+    }
+
+    /// The marker to paint: the stored one, or a copy whose fill is the
+    /// value colour (#499). Never modifies the spec.
+    pub fn symbol(&self) -> std::borrow::Cow<'_, stokesforge_plot::SymbolSpec> {
+        match &self.value_color {
+            None => std::borrow::Cow::Borrowed(&self.spec.symbol),
+            Some(color) => std::borrow::Cow::Owned(stokesforge_plot::SymbolSpec {
+                color: color.clone(),
+                ..self.spec.symbol.clone()
+            }),
+        }
     }
 
     /// The text of the legend entry, in the language of `texts`.
@@ -130,6 +174,17 @@ impl Prepared<'_> {
     pub fn legend_text(&self, texts: &FigureTexts) -> String {
         let name = match &self.label {
             SeriesLabel::Missing => return texts.broken_reference.clone(),
+            // A template is Typst source: a broken series cannot be annotated
+            // with it, so it says only that it is broken. Otherwise the
+            // variables of a template and of a typed name are bound by the one
+            // binder of #501, on the fields of the entry's column.
+            SeriesLabel::Template { .. } if self.broken => return texts.broken_reference.clone(),
+            SeriesLabel::Template { template, fields } => {
+                variables::bind(template, &known(fields, texts))
+            }
+            // A broken named series is annotated and drawn literally.
+            SeriesLabel::Typed { name, .. } if self.broken => name.clone(),
+            SeriesLabel::Typed { name, fields } => variables::bind(name, &known(fields, texts)),
             SeriesLabel::Text(name) => name.clone(),
             SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
         };
@@ -140,13 +195,17 @@ impl Prepared<'_> {
         }
     }
 
-    /// True if the legend text was **typed** (`SeriesSpec::name`): intended
-    /// Typst markup. False if taken from the column, hence shown as is
+    /// True if the legend text was **typed** (`SeriesSpec::name`), or comes
+    /// from a custom template (#499): intended Typst markup. False if taken from the column, hence shown as is
     /// (issue #33, `formula::literal_style`). Also false for a broken
     /// reference: the annotated text mixes the name with a sentence of the
     /// interface, which would be markup too, so it is all drawn literally.
     pub fn legend_is_typed(&self) -> bool {
-        !self.spec.name.is_empty() && !self.broken
+        !self.broken
+            && matches!(
+                self.label,
+                SeriesLabel::Typed { .. } | SeriesLabel::Template { .. }
+            )
     }
 }
 
@@ -169,6 +228,7 @@ pub fn prepare<'s>(
         unknown_type: matches!(spec.plot_type, PlotType::Unknown(_)),
         decimated: 0,
         stale: resolved.stale,
+        value_color: None,
     };
     if prepared.broken || prepared.unknown_type {
         return prepared;

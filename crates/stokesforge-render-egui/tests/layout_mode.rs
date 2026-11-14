@@ -4,8 +4,10 @@
 //! No graphics server: `egui::Context::run_ui` produces shapes without painting
 //! anything.
 
+use egui::Color32;
 use egui::{Pos2, Rect};
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
+use stokesforge_core::compose::{CellSide, MoveTarget};
 use stokesforge_core::{NodeId, Project};
 use stokesforge_plot::{
     FreeFrame, LayerPlacement, LineSpec, PanelSpec, Panels, PlotSpec, SeriesSpec,
@@ -251,7 +253,13 @@ fn drag(
             time,
             modifiers,
         ));
-        assert!(signals.is_empty(), "a signal before the release");
+        // Only the page-edge message (F3) may come while dragging.
+        assert!(
+            signals
+                .iter()
+                .all(|signal| matches!(signal, GraphEvent::PageEdgeReached)),
+            "a signal before the release"
+        );
     }
     signals.extend(frame(
         context,
@@ -261,6 +269,8 @@ fn drag(
         time + 0.05,
         modifiers,
     ));
+    // The page-edge message has its own test.
+    signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
     signals
 }
 
@@ -452,6 +462,18 @@ impl Fixture {
         fixture
     }
 
+    /// A 2 x 2 grid whose bottom right cell is a hole: `[A B; C _]`, bases
+    /// 0 1 on the top row and 2 under 0.
+    fn grid_with_hole() -> Self {
+        let fixture = Self::grid(2, 2, false, false, false);
+        let mut spec = spec_of(&fixture);
+        let mut panels: Vec<_> = spec.panels.iter().cloned().collect();
+        panels.pop();
+        spec.panels = Panels::new(panels);
+        fixture.replace(spec);
+        fixture
+    }
+
     /// Two panels far apart on a 17 x 17 grid: more cells than a layout stores
     /// frames for, so the figure falls back to a compact grid.
     fn compact() -> Self {
@@ -542,6 +564,7 @@ fn grid_edited(signals: &[GraphEvent]) -> (&[f64], &[f64]) {
             widths,
             heights,
             figure: false,
+            slack: None,
         }] => (widths, heights),
         other => panic!("one GridFramesEdited expected, got {other:?}"),
     }
@@ -659,6 +682,160 @@ fn a_boundary_drag_trades_the_two_columns_and_keeps_the_figure_size() {
     assert_eq!(spec_of(&fixture).frame_widths, vec![200.0, 200.0], "model");
 }
 
+/// The outer edge of a row, pulled inward, changes that row alone (#505): one
+/// event, only the first height down by 40, the slack on top 40, the image the
+/// same size, the preview held. Pulling it back outward eats the slack and stops at the page. An L
+/// corner still scales everything. Witness: the drag routed to the figure kind
+/// (every row would scale).
+#[test]
+fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let band = before.title_band as f32;
+    let from = Pos2::new(before.column_breaks[1] as f32 / 2.0, band + 1.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(0.0, 40.0),
+        egui::Modifiers::NONE,
+    );
+    let [GraphEvent::GridFramesEdited {
+        widths,
+        heights,
+        figure: false,
+        slack: Some(slack),
+    }] = signals.as_slice()
+    else {
+        panic!("one edge event expected, got {signals:?}");
+    };
+    assert_eq!(widths, &vec![200.0, 200.0]);
+    assert_eq!(heights, &vec![110.0, 150.0]);
+    assert_eq!(
+        (slack.top, slack.left, slack.right, slack.bottom),
+        (40.0, 0.0, 0.0, 0.0)
+    );
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, before.size, "the image keeps its size");
+    assert_eq!(after.grid_slack, [0, 40, 0, 0]);
+    assert_eq!(spec_of(&fixture).frame_heights, vec![150.0, 150.0], "model");
+
+    // The edge now sits at the outline, 40 lower; pulling it up eats the slack.
+    let committed = {
+        let mut spec = spec_of(&fixture);
+        spec.frame_heights = vec![110.0, 150.0];
+        spec.grid_slack = Some(*slack);
+        spec
+    };
+    fixture.replace(committed);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let outline_top = layout.grid_outline().expect("outline").1 as f32;
+    let from = Pos2::new(layout.column_breaks[1] as f32 / 2.0, outline_top + 1.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from - egui::vec2(0.0, 60.0),
+        egui::Modifiers::NONE,
+    );
+    let [GraphEvent::GridFramesEdited {
+        heights,
+        slack: Some(slack),
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one edge event expected, got {signals:?}");
+    };
+    assert_eq!(heights, &vec![150.0, 150.0], "the frame grows by the slack");
+    assert_eq!(
+        slack.top, 0.0,
+        "the slack is eaten and the edge stops there"
+    );
+    let grown = layout_of(&context, &mut view, &fixture);
+    assert_eq!(grown.size.1, layout.size.1, "the page never grows (P1)");
+
+    // The L corner is a page corner: it adds space below, the rows stay.
+    let (context, mut view) = in_mode(&fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner + egui::vec2(0.0, 30.0),
+        egui::Modifiers::NONE,
+    );
+    let [GraphEvent::GridFramesEdited {
+        heights,
+        figure: true,
+        slack: Some(slack),
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    assert_eq!(heights, &layout.frame_heights, "the rows keep their size");
+    assert_eq!(slack.bottom, f64::from(layout.grid_slack[3]) + 30.0);
+}
+
+/// #505 G9 (P2): Alt held at the press on an internal row line changes only the
+/// row above: one event, the first height down by 30, the second untouched, the
+/// slack at the bottom 30, the figure the same size. Without Alt the two
+/// rows trade, and Shift (snap off) does not make it alone. Witness: the flag
+/// read from Shift instead of Alt (the Shift trade below would fail).
+#[test]
+fn alt_on_an_internal_line_changes_one_row_and_makes_bottom_slack() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let from = Pos2::new(
+        before.column_breaks[1] as f32 / 2.0,
+        (before.row_breaks[1] + before.title_band) as f32,
+    );
+    let alt = egui::Modifiers::ALT;
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from - egui::vec2(0.0, 30.0),
+        alt,
+    );
+    let [GraphEvent::GridFramesEdited {
+        heights,
+        figure: false,
+        slack: Some(slack),
+        ..
+    }] = signals.as_slice()
+    else {
+        panic!("one event with slack expected, got {signals:?}");
+    };
+    assert_eq!(heights, &vec![120.0, 150.0]);
+    assert_eq!(slack.bottom, 30.0);
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, before.size, "the page keeps its size");
+
+    // Without Alt, and with Shift (no snap), the same drag trades the rows.
+    for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+        let (context, mut view) = in_mode(&fixture);
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            from,
+            from - egui::vec2(0.0, 30.0),
+            modifiers,
+        );
+        let (_, heights) = grid_edited(&signals);
+        assert_eq!(heights, [120.0, 180.0], "{modifiers:?}");
+    }
+}
+
 /// With four graphs the middle corner moves the column and the row in one
 /// event; a corner on one boundary and the figure edge moves that one; the
 /// figure's own corners and outer edges have no handle. A legacy graph starts
@@ -704,8 +881,8 @@ fn corners_move_every_boundary_they_lie_on() {
     let cursor = hover_at(&context, &mut view, &fixture, meeting(&layout, 1, 1), 5.2).cursor;
     assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
 
-    // The figure's own corners and outer edges grab nothing.
-    let (context, mut view) = in_mode(&fixture);
+    // The figure's own corners and outer edges grab an outer edge (#505),
+    // never an internal boundary and never the whole figure.
     let edge_middle = meeting(&layout, 0, 0) + egui::vec2(0.0, 75.0);
     let spots = [
         meeting(&layout, 0, 0),
@@ -714,17 +891,32 @@ fn corners_move_every_boundary_they_lie_on() {
         meeting(&layout, 2, 2),
         edge_middle,
     ];
+    let centre = meeting(&layout, 1, 1);
     for (n, at) in spots.into_iter().enumerate() {
-        let (i, j) = (n, 0);
+        let (context, mut view) = in_mode(&fixture);
         let signals = drag(
             &context,
             &mut view,
             &fixture,
             at,
-            at + egui::vec2(10.0, 10.0),
+            // Inward: an outward pull would stop at the page (no slack yet).
+            at + egui::vec2(
+                10.0 * (centre.x - at.x).signum(),
+                10.0 * (centre.y - at.y).signum(),
+            ),
             egui::Modifiers::NONE,
         );
-        assert!(signals.is_empty(), "({i}, {j}): {signals:?}");
+        assert!(
+            matches!(
+                signals.as_slice(),
+                [GraphEvent::GridFramesEdited {
+                    figure: false,
+                    slack: Some(_),
+                    ..
+                }]
+            ),
+            "({n}): {signals:?}"
+        );
     }
 
     // A legacy graph: the first gesture starts from the frames it is drawn with.
@@ -795,41 +987,556 @@ fn a_compact_fallback_grid_has_no_page_corner() {
     assert_eq!(l_corners(&out.shapes), 0, "no corner is drawn");
 }
 
-/// On a Regular grid the inside of a graph moves nothing and the arrow keys
-/// nudge nothing: no event, no preview. Witness: the guard removed from
-/// `nudge`.
+/// The number of rectangles outlined with the 2.5 point accent stroke (the
+/// target cell of a graph being moved).
+fn target_outlines(shapes: &[egui::epaint::ClippedShape]) -> usize {
+    fn walk(shape: &egui::Shape, count: &mut usize) {
+        match shape {
+            egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, count)),
+            egui::Shape::Rect(rect) if (rect.stroke.width - 2.5).abs() < 0.01 => *count += 1,
+            _ => {}
+        }
+    }
+    let mut count = 0;
+    for clipped in shapes {
+        walk(&clipped.shape, &mut count);
+    }
+    count
+}
+
+fn moved(signals: &[GraphEvent]) -> (usize, MoveTarget) {
+    match signals {
+        [GraphEvent::GridCellMoved { panel, target }] => (*panel, *target),
+        other => panic!("one GridCellMoved expected, got {other:?}"),
+    }
+}
+
+/// On a Regular grid a drag that starts inside a graph moves it (#491): nothing
+/// is sent or changed before the release, then one event names the cell under
+/// the pointer. Witness: the `MoveCell` start removed from `begin_layout_drag`.
 #[test]
-fn a_regular_grid_has_no_move_and_no_nudge() {
+fn dragging_inside_a_graph_of_a_regular_grid_sends_one_move_on_release() {
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
     let stored = spec_of(&fixture);
-    let inside = middle(&view, 0);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (from, to) = (middle(&view, 0), middle(&view, 3));
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        to,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(moved(&signals), (0, MoveTarget::Cell { row: 1, column: 1 }));
+    assert_eq!(spec_of(&fixture), stored, "the model is for the shell");
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.frame_widths, layout.frame_widths, "nothing previewed");
+}
+
+/// A drag that starts on a boundary keeps its meaning and priority (#491).
+/// Witness: the cell check moved before the handle check.
+#[test]
+fn a_drag_from_a_boundary_still_resizes_and_never_moves() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let from = meeting(&layout, 1, 0) + egui::vec2(0.0, 60.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(30.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let _ = grid_edited(&signals);
+}
+
+/// Released on its own cell, outside the figure, or without a drag: nothing
+/// is sent, and a plain click only selects (#491). Witness: `move_target`
+/// returns the source cell.
+#[test]
+fn releasing_on_the_same_cell_or_outside_sends_nothing() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let start = middle(&view, 0);
+    let same = drag(
+        &context,
+        &mut view,
+        &fixture,
+        start,
+        start + egui::vec2(12.0, 9.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(same.is_empty(), "{same:?}");
+    let outside = drag(
+        &context,
+        &mut view,
+        &fixture,
+        start,
+        Pos2::new(-60.0, -60.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(outside.is_empty(), "{outside:?}");
+    let target = middle(&view, 3);
+    click(
+        &context,
+        &mut view,
+        &fixture,
+        target,
+        egui::Modifiers::NONE,
+        5.0,
+    );
+    assert!(view.take_events().is_empty());
+}
+
+/// While the graph is dragged over another cell, that cell is outlined; over
+/// its own cell, nothing is (#491). Witness: the outline never painted.
+#[test]
+fn the_target_cell_is_outlined_while_a_graph_is_dragged() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let start = middle(&view, 0);
+    let none = egui::Modifiers::NONE;
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(start), button(start, true, none)],
+        0.1,
+        none,
+    );
+    let mid_drag = |view: &mut GraphView, to: Pos2, time: f64| {
+        let step = start + (to - start) * 0.5;
+        frame_with(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(step)],
+            time,
+            none,
+            1.0,
+        );
+        frame_with(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(to)],
+            time + 0.05,
+            none,
+            1.0,
+        )
+    };
+    let own = mid_drag(&mut view, start + egui::vec2(14.0, 10.0), 0.2);
+    let over_three = middle(&view, 3);
+    let other = mid_drag(&mut view, over_three, 0.4);
+    assert!(other.events.is_empty() && own.events.is_empty());
+    assert_eq!(
+        target_outlines(&other.shapes),
+        target_outlines(&own.shapes) + 1,
+        "one more outline over another cell"
+    );
+}
+
+/// A drop in the bottom edge band makes a new row beside the cell nearest the
+/// pointer (#491): [A B] with B dragged under A. Witness: the edge band test
+/// removed from `move_target`.
+#[test]
+fn dropping_in_the_bottom_edge_band_asks_for_a_new_row_beside_the_nearest_cell() {
+    let fixture = Fixture::grid(2, 1, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let under_a = Pos2::new(60.0, layout.size.1 as f32 - 10.0);
+    let (b, a) = (middle(&view, 1), middle(&view, 0));
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        b,
+        under_a,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            1,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 0,
+                side: CellSide::Below
+            }
+        )
+    );
+    // The right band gives a new column beside the nearest cell.
+    let beside_b = Pos2::new(layout.size.0 as f32 - 10.0, 60.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        beside_b,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 1,
+                side: CellSide::Right
+            }
+        )
+    );
+}
+
+/// A drop zone is a grid position (#503, retour 2): `[A B; C _]`, C dragged to
+/// the left band at the height of its own row opens column 0 at row 1, beside
+/// C's own position, not beside another row's cell. Witness: `drop_place`
+/// substituting the nearest cell other than the moving one (it answers A, row
+/// 0).
+#[test]
+fn a_band_zone_is_a_position_even_when_the_moving_graph_sits_there() {
+    let fixture = Fixture::grid_with_hole();
+    let (context, mut view) = in_mode(&fixture);
+    let c = middle(&view, 2);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        c,
+        Pos2::new(10.0, c.y),
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            2,
+            MoveTarget::NewLine {
+                row: 1,
+                column: 0,
+                side: CellSide::Left
+            }
+        )
+    );
+}
+
+/// The user's case (#503, retour 2): graph 1 of `[1 2; 3 4]` dropped on the left
+/// band at the height of its own row asks for a new column at row 0, and once
+/// applied the grid is `[1 _ 2; _ 3 4]`. Witness: the moving graph excluded
+/// from the zone's position (the graph lands on the second row).
+#[test]
+fn dropping_the_top_left_graph_on_its_own_left_band_gives_one_empty_cell_below_it() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let first = middle(&view, 0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        first,
+        Pos2::new(10.0, first.y),
+        egui::Modifiers::NONE,
+    );
+    let (panel, target) = moved(&signals);
+    assert_eq!(
+        (panel, target),
+        (
+            0,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 0,
+                side: CellSide::Left
+            }
+        )
+    );
+    let mut spec = spec_of(&fixture);
+    assert!(stokesforge_core::compose::move_cell(
+        &mut spec, panel, target
+    ));
+    let places: Vec<(usize, usize)> = spec.panels.iter().map(|p| (p.row, p.column)).collect();
+    assert_eq!(places, [(0, 0), (0, 2), (1, 1), (1, 2)], "[1 _ 2; _ 3 4]");
+}
+
+/// The left and top bands give a new column on the left and a new row above,
+/// beside the nearest cell (#503). Witness: the `Left` and `Above` entries
+/// removed from `edge_drop_side`.
+#[test]
+fn dropping_in_the_left_and_top_edge_bands_asks_for_a_cell_on_that_side() {
+    let fixture = Fixture::grid(2, 1, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let (b, a) = (middle(&view, 1), middle(&view, 0));
+    let left_of_a = Pos2::new(10.0, 80.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        b,
+        left_of_a,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            1,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 0,
+                side: CellSide::Left
+            }
+        )
+    );
+    let above_b = Pos2::new(a.x + 150.0, 8.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        above_b,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 1,
+                side: CellSide::Above
+            }
+        )
+    );
+}
+
+/// `[A B; C _]` (a hole bottom right).
+fn grid_with_a_hole() -> Fixture {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let mut spec = spec_of(&fixture);
+    let mut panels: Vec<_> = spec.panels.iter().cloned().collect();
+    panels.pop();
+    spec.panels = Panels::new(panels);
+    fixture.replace(spec);
+    fixture
+}
+
+/// Released on the line between two graphs, a graph asks for a new column (or
+/// row) there (#504), as a grid position like a band's (#503): C dropped on the
+/// A|B line opens a column right of column 0 at row 0; the moving graph's own
+/// neighbour and holes need no special case. Witness: the line test removed
+/// from `drop_place` (the release becomes a swap with the cell under the
+/// pointer).
+#[test]
+fn dropping_on_the_line_between_two_graphs_asks_for_a_cell_between_them() {
+    let fixture = grid_with_a_hole();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let c = middle(&view, 2);
+    let top_row_mid = f32::midpoint(
+        (layout.row_breaks[0] + layout.title_band) as f32,
+        (layout.row_breaks[1] + layout.title_band) as f32,
+    );
+    let on_line = Pos2::new(layout.column_breaks[1] as f32 + 2.0, top_row_mid);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        c,
+        on_line,
+        egui::Modifiers::NONE,
+    );
+    let between_a_and_b = MoveTarget::NewLine {
+        row: 0,
+        column: 0,
+        side: CellSide::Right,
+    };
+    assert_eq!(moved(&signals), (2, between_a_and_b));
+    // A, the moving graph, dropped on its own right line: the same position.
+    let a = middle(&view, 0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        on_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(moved(&signals), (0, between_a_and_b));
+    // The horizontal line under B, in the right column: a new row between B
+    // and the hole, below row 0 at column 1.
+    let right_col_mid = f32::midpoint(
+        layout.column_breaks[1] as f32,
+        layout.column_breaks[2] as f32,
+    );
+    let on_row_line = Pos2::new(
+        right_col_mid,
+        (layout.row_breaks[1] + layout.title_band) as f32 - 2.0,
+    );
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        c,
+        on_row_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            2,
+            MoveTarget::NewLine {
+                row: 0,
+                column: 1,
+                side: CellSide::Below
+            }
+        )
+    );
+    // The line at row 1 has C on one side and a hole on the other: it is still
+    // a zone, the new column opens at row 1.
+    let bottom_row_mid = f32::midpoint(
+        (layout.row_breaks[1] + layout.title_band) as f32,
+        (layout.row_breaks[2] + layout.title_band) as f32,
+    );
+    let hole_line = Pos2::new(layout.column_breaks[1] as f32 + 2.0, bottom_row_mid);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        a,
+        hole_line,
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(
+        moved(&signals),
+        (
+            0,
+            MoveTarget::NewLine {
+                row: 1,
+                column: 0,
+                side: CellSide::Right
+            }
+        ),
+        "witness: the hole fallback of the old zone found no neighbour to use"
+    );
+}
+
+/// The highlight of a drop between two graphs is as thick as an edge band
+/// (#504, retour 2), centred on the line. Witness: the old 4 pt bar.
+#[test]
+fn the_highlight_between_two_graphs_is_as_thick_as_a_band() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let row_mid = f32::midpoint(
+        (layout.row_breaks[0] + layout.title_band) as f32,
+        (layout.row_breaks[1] + layout.title_band) as f32,
+    );
+    let on_line = Pos2::new(layout.column_breaks[1] as f32 + 2.0, row_mid);
+    let place = view.drop_place(on_line, None).expect("a line zone");
+    assert_eq!(place.band, None);
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        view.paint_drop_places(ui.painter(), Some(place));
+    });
+    fn walk(shape: &egui::Shape, found: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Rect(rect)
+                if rect.fill == stokesforge_render_egui::edge_band::edge_band_fill() =>
+            {
+                found.push(rect.rect)
+            }
+            _ => {}
+        }
+    }
+    let mut bars = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut bars);
+    }
+    assert_eq!(bars.len(), 1, "one bar");
+    let bar = bars[0];
+    assert!(
+        (bar.width() - stokesforge_render_egui::edge_band::EDGE_BAND_WIDTH).abs() < 0.5,
+        "{bar:?}"
+    );
+    let line_x = view.display_rect().expect("drawn").min.x + layout.column_breaks[1] as f32;
+    assert!(
+        (bar.center().x - line_x).abs() < 14.0,
+        "centred on the line"
+    );
+}
+
+/// An arrow key moves the selected graph one cell, a hole included; at the
+/// edge of the grid it does nothing; Shift still counts one cell (#491).
+/// Witness: the guard of `nudge` restored.
+#[test]
+fn an_arrow_key_moves_the_selected_graph_one_cell_on_a_regular_grid() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let mut time = 1.0;
+    let mut press = |view: &mut GraphView, steps: (i32, i32)| {
+        view.nudge(steps, time);
+        time += 1.0;
+        frame(
+            &context,
+            view,
+            &fixture,
+            vec![],
+            time,
+            egui::Modifiers::NONE,
+        )
+    };
+    assert_eq!(
+        moved(&press(&mut view, (1, 0))),
+        (0, MoveTarget::Cell { row: 0, column: 1 })
+    );
+    assert_eq!(
+        moved(&press(&mut view, (0, 1))),
+        (0, MoveTarget::Cell { row: 1, column: 0 })
+    );
+    assert_eq!(
+        moved(&press(&mut view, (0, 10))),
+        (0, MoveTarget::Cell { row: 1, column: 0 }),
+        "Shift counts one cell"
+    );
+    assert!(press(&mut view, (-1, 0)).is_empty(), "left edge");
+    assert!(press(&mut view, (0, -1)).is_empty(), "top edge");
+    // A pending event is never kept as a preview.
+    assert!(!view.layout_dragging());
+}
+
+/// A grid with no frames to edit (compact fallback) cannot move a graph, by
+/// drag or by key (#491). Witness: the `editable` test removed.
+#[test]
+fn a_compact_fallback_grid_cannot_move_a_graph() {
+    let fixture = Fixture::compact();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let centre = |row: usize, column: usize| {
+        let (x, y, w, h) = layout.cell_rect(row, column).expect("cell");
+        Pos2::new(x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0)
+    };
+    let last = layout.column_breaks.len() - 2;
+    let (inside, other) = (centre(0, 0), centre(0, last));
     let signals = drag(
         &context,
         &mut view,
         &fixture,
         inside,
-        inside + egui::vec2(25.0, 18.0),
-        SHIFT,
+        other,
+        egui::Modifiers::NONE,
     );
     assert!(signals.is_empty(), "{signals:?}");
-    view.nudge((1, 0), 1.0);
-    let mut out = None;
-    for time in [1.1, 2.0, 2.5] {
-        let frame = frame_with(
-            &context,
-            &mut view,
-            &fixture,
-            vec![],
-            time,
-            egui::Modifiers::NONE,
-            1.0,
-        );
-        assert!(frame.events.is_empty(), "{:?}", frame.events);
-        out = Some(frame);
-    }
-    assert!(out.is_some_and(|out| out.cached), "no preview was set");
-    assert_eq!(spec_of(&fixture), stored);
+    view.nudge((1, 0), 9.0);
+    let after = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![],
+        10.0,
+        egui::Modifiers::NONE,
+    );
+    assert!(after.is_empty(), "{after:?}");
 }
 
 /// The number of L page corner polylines (stroke width 2.5) painted.
@@ -849,11 +1556,12 @@ fn l_corners(shapes: &[egui::epaint::ClippedShape]) -> usize {
     count
 }
 
-/// The pills sit on internal boundaries only and the squares on the corners
-/// that lie on one: a selected graph of a 2 x 2 shows 2 pills and 3 squares,
-/// a one-cell figure none. Witness: outer edges or figure corners included.
+/// The pills sit on the four sides of an editable graph (internal boundaries
+/// and, since #505, outer edges) and the squares on the corners that lie on an
+/// internal one: a selected graph of a 2 x 2 shows 4 pills and 3 squares, a
+/// one-cell figure 4 pills. Witness: the squares of figure corners included.
 #[test]
-fn regular_handles_are_drawn_on_internal_boundaries_only() {
+fn regular_handles_are_drawn_on_every_edge_and_squares_on_internal_corners_only() {
     fn marks(shapes: &[egui::epaint::ClippedShape]) -> (usize, usize) {
         fn walk(shape: &egui::Shape, counts: &mut (usize, usize)) {
             match shape {
@@ -890,23 +1598,156 @@ fn regular_handles_are_drawn_on_internal_boundaries_only() {
     );
     assert_eq!(
         marks(&out.shapes),
-        (3, 2),
+        (3, 4),
         "squares, pills of the top-left graph"
     );
     assert_eq!(l_corners(&out.shapes), 4, "the L page corners");
     let single = Fixture::grid(1, 1, false, false, false);
     let (context, mut view) = in_mode(&single);
     let out = hover_at(&context, &mut view, &single, Pos2::new(-100.0, -100.0), 1.0);
-    assert_eq!(marks(&out.shapes), (0, 0));
+    assert_eq!(marks(&out.shapes), (0, 4));
     assert_eq!(l_corners(&out.shapes), 4, "even on a one-cell figure");
 }
 
-/// An L corner of a Regular figure scales every column and row by one factor
-/// per axis, whichever corner; one event flagged as a figure resize, the
-/// figure bigger; nothing without a drag. Witness: only the last column
-/// scaled.
+/// With empty space around the grid the mode draws the page dashed (#505), and
+/// a solid page when there is none. Witness: the dash drawn without slack.
 #[test]
-fn an_l_corner_scales_the_whole_regular_figure() {
+fn the_page_outline_is_dashed_only_when_a_grid_has_slack() {
+    fn page_dashes(shapes: &[egui::epaint::ClippedShape]) -> usize {
+        fn walk(shape: &egui::Shape, count: &mut usize) {
+            match shape {
+                egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, count)),
+                egui::Shape::LineSegment { stroke, .. }
+                    if stroke.color == Color32::from_rgba_unmultiplied(110, 110, 125, 170) =>
+                {
+                    *count += 1;
+                }
+                _ => {}
+            }
+        }
+        let mut count = 0;
+        for clipped in shapes {
+            walk(&clipped.shape, &mut count);
+        }
+        count
+    }
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let away = Pos2::new(-100.0, -100.0);
+    let plain = hover_at(&context, &mut view, &fixture, away, 1.0);
+    assert_eq!(page_dashes(&plain.shapes), 0, "no slack, a solid page");
+    let mut spec = spec_of(&fixture);
+    spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        bottom: 40.0,
+        ..Default::default()
+    });
+    fixture.replace(spec);
+    let (context, mut view) = in_mode(&fixture);
+    let slacked = hover_at(&context, &mut view, &fixture, away, 1.0);
+    assert!(page_dashes(&slacked.shapes) > 4, "a dashed page");
+}
+
+/// Ctrl held at the press of an L corner keeps the page's ratio (#505): the
+/// page grows by the larger relative change, the graphs keep their frames; a
+/// plain drag of the same movement does not keep it. Witness: the Ctrl branch
+/// ignored (`keep_ratio` always false).
+#[test]
+fn ctrl_on_an_l_corner_keeps_the_ratio_of_the_page() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    let before = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    let grown = |modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            corner,
+            corner + egui::vec2(40.0, 10.0),
+            modifiers,
+        );
+        let [GraphEvent::GridFramesEdited {
+            figure: true,
+            slack: Some(slack),
+            ..
+        }] = signals.as_slice()
+        else {
+            panic!("one figure event expected, got {signals:?}");
+        };
+        (slack.right, slack.bottom)
+    };
+    assert_eq!(grown(egui::Modifiers::NONE), (40.0, 10.0));
+    let ctrl = egui::Modifiers {
+        ctrl: true,
+        ..egui::Modifiers::NONE
+    };
+    let (right, bottom) = grown(ctrl);
+    let ratio = f64::from(before.size.0) / f64::from(before.size.1 - before.title_band);
+    let (new_w, new_h) = (
+        f64::from(before.size.0) + right,
+        f64::from(before.size.1 - before.title_band) + bottom,
+    );
+    assert!(
+        (new_w / new_h - ratio).abs() < 0.01,
+        "{new_w} x {new_h} vs {ratio}"
+    );
+    assert!(right >= 40.0, "{right}");
+}
+
+/// F3 (#505): pulling an outer edge outward with no room left signals
+/// `PageEdgeReached` once during the drag, not once per frame; pulling it
+/// inward never does. Witness: the signal never sent.
+#[test]
+fn a_blocked_outer_edge_says_so_once_per_drag() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let run = |dy: f32| {
+        let (context, mut view) = in_mode(&fixture);
+        let before = layout_of(&context, &mut view, &fixture);
+        let band = before.title_band as f32;
+        let from = Pos2::new(before.column_breaks[1] as f32 / 2.0, band + 1.0);
+        let mut all = frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![
+                egui::Event::PointerMoved(from),
+                button(from, true, egui::Modifiers::NONE),
+            ],
+            0.1,
+            egui::Modifiers::NONE,
+        );
+        let mut time = 0.1;
+        for step in 1..=5 {
+            time += 0.05;
+            let pos = from + egui::vec2(0.0, dy) * (step as f32 / 5.0);
+            all.extend(frame(
+                &context,
+                &mut view,
+                &fixture,
+                vec![egui::Event::PointerMoved(pos)],
+                time,
+                egui::Modifiers::NONE,
+            ));
+        }
+        all.iter()
+            .filter(|event| matches!(event, GraphEvent::PageEdgeReached))
+            .count()
+    };
+    // The top edge pulled up (outward) with no slack: blocked.
+    assert_eq!(run(-30.0), 1);
+    // Pulled down (inward): fine.
+    assert_eq!(run(30.0), 0);
+}
+
+/// K1: an L corner of a Regular figure is a page corner. Pulled out it adds
+/// empty space on the two page edges that meet there (right and bottom for the
+/// bottom-right one, left and top for the top-left one), the graphs keep their
+/// frames; one event flagged as a figure resize, the page bigger; nothing
+/// without a drag. Witness: the old scaling path (`scaled_frames`) put back.
+#[test]
+fn an_l_corner_adds_empty_space_and_the_graphs_keep_their_size() {
     let fixture = Fixture::grid(2, 2, false, true, false);
     let (context, mut view) = in_mode(&fixture);
     let before = layout_of(&context, &mut view, &fixture);
@@ -924,18 +1765,21 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         widths,
         heights,
         figure: true,
+        slack: Some(slack),
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
-    assert_eq!(widths, &vec![220.0, 220.0]);
-    assert_eq!(heights, &vec![165.0, 165.0]);
-    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(widths, &before.frame_widths, "the graphs keep their size");
+    assert_eq!(heights, &before.frame_heights);
     assert_eq!(
-        after.size,
-        (before.size.0 + 40, before.size.1 + 30),
-        "bands keep their size"
+        (slack.left, slack.top, slack.right, slack.bottom),
+        (0.0, 0.0, 40.0, 30.0)
     );
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, (before.size.0 + 40, before.size.1 + 30));
+    assert_eq!(after.frame_widths, before.frame_widths);
+    assert_eq!(after.frame_heights, before.frame_heights);
     let (context, mut view) = in_mode(&fixture);
     assert_eq!(
         hover_at(
@@ -949,7 +1793,7 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         egui::CursorIcon::ResizeNwSe
     );
 
-    // A corner on the left or top scales too.
+    // The top-left corner adds space on the left and top.
     let (context, mut view) = in_mode(&fixture);
     // The figure's top is under the graph title, as the page of a free figure.
     let top_left = Pos2::new(-4.0, before.title_band as f32 - 4.0);
@@ -965,13 +1809,18 @@ fn an_l_corner_scales_the_whole_regular_figure() {
         widths,
         heights,
         figure: true,
+        slack: Some(slack),
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
     assert_eq!(
         (widths, heights),
-        (&vec![220.0, 220.0], &vec![165.0, 165.0])
+        (&before.frame_widths, &before.frame_heights)
+    );
+    assert_eq!(
+        (slack.left, slack.top, slack.right, slack.bottom),
+        (40.0, 30.0, 0.0, 0.0)
     );
 
     // No movement, no event.
@@ -987,97 +1836,87 @@ fn an_l_corner_scales_the_whole_regular_figure() {
     assert!(signals.is_empty(), "{signals:?}");
 }
 
-/// With the ratio lock closed, an L corner of a Regular figure keeps the image
-/// ratio whichever axis the pointer moved most. Witness: the lock not fed to
-/// the view (the other axis stays as dragged).
+/// K1: pulled inward, an L corner removes the empty space and stops at the
+/// graphs; the padlock of Figure size does not apply. With no space left,
+/// pulling in does nothing. Witness: slack allowed below zero (`max(0.0)`).
 #[test]
-fn a_locked_l_corner_keeps_the_ratio_of_the_regular_image() {
+fn an_l_corner_pulled_inward_stops_at_the_graphs() {
     let fixture = Fixture::grid(2, 2, false, true, false);
+    let mut spec = spec_of(&fixture);
+    spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        left: 0.0,
+        top: 0.0,
+        right: 30.0,
+        bottom: 20.0,
+    });
+    fixture.replace(spec);
     let (context, mut view) = in_mode(&fixture);
     let before = layout_of(&context, &mut view, &fixture);
     let (w, h) = (before.size.0 as f32, before.size.1 as f32);
-    let ratio = f64::from(h) / f64::from(w);
-    view.set_figure_ratio_lock(Some(ratio));
     let corner = Pos2::new(w + 4.0, h + 4.0);
-    // The pointer mostly goes right: the height follows.
     let signals = drag(
         &context,
         &mut view,
         &fixture,
         corner,
-        corner + egui::vec2(60.0, 2.0),
-        egui::Modifiers::NONE,
-    );
-    assert!(
-        matches!(
-            signals.as_slice(),
-            [GraphEvent::GridFramesEdited { figure: true, .. }]
-        ),
-        "{signals:?}"
-    );
-    let after = layout_of(&context, &mut view, &fixture);
-    let kept = f64::from(after.size.1) / f64::from(after.size.0);
-    assert!((kept - ratio).abs() < 0.004, "{kept} vs {ratio}");
-    assert!(after.size.0 >= before.size.0 + 59, "{:?}", after.size);
-}
-
-/// Same for the page corner of a Free figure.
-#[test]
-fn a_locked_page_corner_keeps_the_ratio_of_the_free_page() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let page = view.layout_page().expect("page");
-    view.set_figure_ratio_lock(Some(page.height / page.width));
-    let corner = screen(
-        &view,
-        page.left + page.width + 4.0,
-        page.top + page.height + 4.0,
-    );
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(100.0, 1.0),
-        SHIFT,
-    );
-    let (_, new_page) = edited(&signals);
-    let new_page = new_page.expect("a page");
-    assert!(
-        (new_page.height / new_page.width - page.height / page.width).abs() < 1e-3,
-        "{new_page:?} from {page:?}"
-    );
-    assert!(new_page.width > page.width + 90.0);
-}
-
-/// Pulled far inward, the columns and rows stop together at the minimum with
-/// their proportions. Witness: a per-frame clamp.
-#[test]
-fn an_l_corner_pulled_far_inward_stops_every_frame_together() {
-    let fixture = Fixture::grid(2, 1, false, false, false);
-    let mut spec = spec_of(&fixture);
-    spec.frame_widths = vec![100.0, 300.0];
-    fixture.replace(spec);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let corner = Pos2::new(layout.size.0 as f32 + 4.0, layout.size.1 as f32 + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner - egui::vec2(380.0, 100.0),
+        corner - egui::vec2(500.0, 500.0),
         egui::Modifiers::NONE,
     );
     let [GraphEvent::GridFramesEdited {
         widths,
+        heights,
         figure: true,
-        ..
+        slack: Some(slack),
     }] = signals.as_slice()
     else {
         panic!("one figure event expected, got {signals:?}");
     };
-    assert_eq!(widths, &vec![36.0, 108.0], "3:1 kept at the stop");
+    assert_eq!(widths, &before.frame_widths);
+    assert_eq!(heights, &before.frame_heights);
+    assert_eq!(
+        (slack.left, slack.top, slack.right, slack.bottom),
+        (0.0, 0.0, 0.0, 0.0),
+        "stops at the graphs"
+    );
+    let after = layout_of(&context, &mut view, &fixture);
+    assert_eq!(after.size, (before.size.0 - 30, before.size.1 - 20));
+}
+
+/// K1: the page edge snaps to the grid step like the lines, and Shift turns
+/// the snap off. Witness: the snap ignored.
+#[test]
+fn an_l_corner_snaps_to_the_grid_and_shift_does_not() {
+    let fixture = Fixture::grid(2, 2, false, true, false);
+    let (context, mut view) = in_mode(&fixture);
+    view.set_layout_grid(Some(50.0));
+    let before = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
+    let corner = Pos2::new(w + 4.0, h + 4.0);
+    let right = |modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        view.set_layout_grid(Some(50.0));
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            corner,
+            corner + egui::vec2(37.0, 0.0),
+            modifiers,
+        );
+        match signals.as_slice() {
+            [GraphEvent::GridFramesEdited {
+                slack: Some(slack), ..
+            }] => slack.right,
+            other => panic!("one figure event expected, got {other:?}"),
+        }
+    };
+    let snapped = right(egui::Modifiers::NONE);
+    assert_eq!(
+        (f64::from(before.size.0) + snapped) % 50.0,
+        0.0,
+        "{snapped}"
+    );
+    assert_eq!(right(SHIFT), 37.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,12 +2006,15 @@ fn a_corner_handle_of_the_selected_box_resizes_it() {
     );
 }
 
-/// Pulling a page corner scales the page and every box with it.
+/// K1: pulling a page corner of a Free figure resizes the page only: the
+/// graphs keep their frames (no frame in the event), one event. Witness: the
+/// boxes scaled with the page (`scaled_to_page`).
 #[test]
-fn a_page_corner_drag_scales_the_page_and_the_boxes() {
+fn a_page_corner_drag_resizes_the_page_and_the_boxes_stay() {
     let fixture = Fixture::free_two_layers();
     let (context, mut view) = in_mode(&fixture);
     let page = view.layout_page().expect("page");
+    let boxes = view.layout_boxes();
     let corner = screen(
         &view,
         page.left + page.width + 4.0,
@@ -1196,7 +2038,45 @@ fn a_page_corner_drag_scales_the_page_and_the_boxes() {
         (new_page.height - page.height - 50.0).abs() < 0.02,
         "{new_page:?}"
     );
-    assert_eq!(frames.len(), 2, "every box follows");
+    assert!(frames.is_empty(), "no box follows: {frames:?}");
+    for graph in boxes {
+        assert_eq!(box_of(&view, graph.base).frame, graph.frame);
+    }
+    // Pulled far inward from a bigger page it stops at the graphs.
+    let mut spec = spec_of(&fixture);
+    spec.free_page = Some(stokesforge_plot::FreePage {
+        width: page.width + 100.0,
+        height: page.height + 100.0,
+        ..page
+    });
+    fixture.replace(spec);
+    let (context, mut view) = in_mode(&fixture);
+    let big = view.layout_page().expect("page");
+    let corner = screen(
+        &view,
+        big.left + big.width + 4.0,
+        big.top + big.height + 4.0,
+    );
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner - egui::vec2(5000.0, 5000.0),
+        SHIFT,
+    );
+    let (frames, new_page) = edited(&signals);
+    let new_page = new_page.expect("a page");
+    assert!(frames.is_empty());
+    let right = view
+        .layout_boxes()
+        .iter()
+        .map(|graph| graph.outer.left + graph.outer.width)
+        .fold(f64::MIN, f64::max);
+    assert!(
+        (new_page.left + new_page.width - right).abs() < 0.02,
+        "{new_page:?} vs {right}"
+    );
 }
 
 /// Centre band: only the two graphs on the line move, in a 2 x 2. Side band:
@@ -1604,4 +2484,109 @@ fn the_guides_of_a_box_drag_show_while_the_pointer_is_down() {
     };
     assert!(guides_during(egui::Modifiers::NONE) > 0, "a guide shows");
     assert_eq!(guides_during(SHIFT), 0, "Shift: no magnets, no guide");
+}
+
+/// How many rectangles of the preview carry the "under the pointer" fill.
+fn active_band_rects(
+    context: &egui::Context,
+    view: &GraphView,
+    place: Option<stokesforge_render_egui::edge_band::DropPlace>,
+) -> Vec<Rect> {
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        view.paint_drop_places(ui.painter(), place);
+    });
+    fn walk(shape: &egui::Shape, found: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Vec(list) => list.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Path(path)
+                if path.fill == stokesforge_render_egui::edge_band::edge_band_fill() =>
+            {
+                found.push(Rect::from_points(&path.points))
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+/// The bottom band of a 2 x 2 has one segment per column, a drop under a
+/// column takes that segment's reference cell, and only that segment is
+/// filled (#503). Witness: filling the whole band (every segment active) gives
+/// two filled rectangles.
+#[test]
+fn a_bottom_band_has_one_segment_per_column_and_only_the_one_under_the_pointer_is_filled() {
+    use stokesforge_render_egui::edge_band::{DropAnchor, DropPlace};
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let segments = view.band_segments(CellSide::Below);
+    assert_eq!(segments.len(), 2);
+    assert_eq!(
+        segments.iter().map(|s| s.cell).collect::<Vec<_>>(),
+        vec![Some((1, 0)), Some((1, 1))]
+    );
+    let bounds = |polygon: &[Pos2]| Rect::from_points(polygon);
+    for column in [0, 1] {
+        let pointer = Pos2::new(
+            bounds(&segments[column].polygon).center().x,
+            layout.size.1 as f32 - 4.0,
+        );
+        let place = view.drop_place(pointer, None).expect("a drop place");
+        assert_eq!(
+            place,
+            DropPlace {
+                anchor: DropAnchor::Cell { row: 1, column },
+                side: CellSide::Below,
+                band: Some(CellSide::Below),
+                segment: column,
+            }
+        );
+        let filled = active_band_rects(&context, &view, Some(place));
+        assert_eq!(filled.len(), 1, "exactly the segment under the pointer");
+        assert!(
+            filled[0].center().x > bounds(&segments[column].polygon).min.x
+                && filled[0].center().x < bounds(&segments[column].polygon).max.x,
+            "the filled one lies under the pointer's column"
+        );
+    }
+    assert!(active_band_rects(&context, &view, None).is_empty());
+}
+
+/// With empty space under the grid (#505), the drop bands stick to the graphs,
+/// not to the page edge (V3): the bottom segments lie just under the last row,
+/// and a pointer in the empty space drops nowhere. Witness: building the bands
+/// on the whole image rect puts them at the image bottom.
+#[test]
+fn the_drop_bands_stick_to_the_grid_outline_when_the_page_has_slack() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let mut spec = spec_of(&fixture);
+    spec.grid_slack = Some(stokesforge_plot::GridSlack {
+        bottom: 50.0,
+        ..Default::default()
+    });
+    fixture.replace(spec);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (_, _, _, outline_bottom) = layout.grid_outline().expect("a grid");
+    let image_bottom = layout.size.1;
+    assert_eq!(image_bottom, outline_bottom + 50, "50 of empty space");
+    let segments = view.band_segments(CellSide::Below);
+    assert_eq!(segments.len(), 2);
+    for segment in &segments {
+        let bounds = Rect::from_points(&segment.polygon);
+        assert!(
+            (bounds.max.y - outline_bottom as f32).abs() < 0.5,
+            "the band ends at the last row ({}), not the page ({}): {bounds:?}",
+            outline_bottom,
+            image_bottom
+        );
+    }
+    let in_slack = Pos2::new(100.0, image_bottom as f32 - 4.0);
+    assert!(view.drop_place(in_slack, None).is_none());
+    let under_last_row = Pos2::new(100.0, outline_bottom as f32 - 4.0);
+    assert!(view.drop_place(under_last_row, None).is_some());
 }

@@ -117,6 +117,107 @@ system font → Noto Sans Math (fallback). Tests: `formula.rs`
 (`an_areas_font_is_set_in_the_source_with_its_math`), `geometry.rs`
 (`the_font_size_of_a_text_box_changes_its_size`), `stokesforge-render-svg/tests/typst.rs`.
 
+### Text variables and the legend text (#501, #499)
+
+Legend text (#499): the text of each entry is `core::series_label(series, tree,
+&panel.legend.text)`, the single function the legend and the series lists read
+(#25). `LegendText` (`stokesforge-plot/src/legend.rs`) says which header row
+gives it; a typed name still wins; an empty chosen row is an empty entry (only
+the default Long Name source falls back to the short name). A custom template is
+Typst that reads the text variables below. `SeriesLabel::Template { template,
+fields }` and `SeriesLabel::Typed { name, fields }` carry the text **as typed**
+and the raw fields of the entry's own column (core never builds Typst); the
+renderer binds them (`Prepared::legend_text`) and draws them with the rich style
+(`Prepared::legend_is_typed`), every other label literally. A broken series with
+a template says only that it is broken. The lists (Object Manager, series list)
+show `formula::plain_text` of the bound template (memoized; an empty text or a
+template that does not compile gives the grey fallback of the lists) and a typed
+name as typed. « Custom… » starts from `LegendTextFrom::template()` of the
+previous choice (`LegendText::choose_custom`, never over a typed template). A
+row series ignores the template. Test: `stokesforge-render-egui/tests/agreement.rs`
+(`#499` and `#501` sections).
+
+Text variables (#501): **one binder** gives the variables to every Typst text of
+a graph, the legend included. `VARIABLES` (`stokesforge-plot/src/legend.rs`, the
+one table: `long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`,
+`x-prime`/`xp`, the same names in every language; the help of every Typst field
+lists them from it, `figure_texts::variable_help_rows`). `variables::bind(text,
+values)` (`stokesforge-render/src/variables.rs`) puts in front of the text one
+`#let name = "value";` per variable it **uses as code** (`#ln`, `#if u != ""
+[…]`), the values as Typst string literals (`typst_string`: only `\` and `"`
+escaped, so they draw literally, #33), on one line framed by two comments that
+draw nothing. A math identifier (`$ln(x)$`) is never a variable, so the
+logarithm stays the logarithm; a text that uses no variable comes back
+byte-identical (same cache entry, same pixels); a `#let` of the user comes after
+the preamble and wins. `variables::bind_spec(tree, spec, texts)` binds the
+whole spec — graph and layer titles, axis titles (label and unit composed
+first), free texts, colour-bar title and break labels — and **every entry point
+calls it before `resolve_spec` and `figure_layout`** (screen, the three exports,
+the copy, `pyst`, `frame_sizes`), so the size is measured on what is drawn. The
+stored spec is never changed; Ctrl+Z restores the text.
+
+Which column a text reads (`core::resolve::text_context`, Origin-like): a
+bottom or top axis title the X column of the first series of the layer; a left
+or right axis title the Y column of the first series on that side; a graph or
+layer title and a free text the Y column of the first series of the layer (the
+graph title: of the first layer that has one); a colour-bar break label the Y
+column of the first series of its group, its title the first group of the bar;
+a legend entry its own series. A hidden series counts, a row series does not.
+`core::resolve::column_fields` gives the fields (the same for the legend). A
+reference with no column (no series, column deleted) makes every variable the
+translated « (broken reference) » of `FigureTexts`, on screen and in export.
+
+Explicit column (#501, lot 4, syntax of lot 5): `col` is a Typst dictionary,
+`#col.A.ln` (any of the ten names: `.long-name`, `.u`, `.xp`…) reads column `A`,
+whatever the context column; a name that is not a Typst identifier uses the
+standard `#col.at("Abs 1").ln`. `A` is the **Short Name**, looked up in the
+worksheet of the text's context column (a legend entry: of its series' column);
+no other sheet. The binder (`used_in`) parses the text (code only, never math,
+never a `.col` field) and collects the names it reads: the field accesses
+`col.<ident>` and the literal `col.at("<name>")`. The one-line preamble then
+holds `#let col = ("A": (long-name: "…", ln: "…", …), …);`, one dictionary per
+collected name, every value a `typst_string`. A collected name that is no
+column of the sheet (unknown, deleted, no context column) is still in the
+dictionary with every field « (broken reference) », so the text compiles (no
+red frame). Any other use (`#col.at(x)`, a bare `#col`, a method) puts **the
+whole sheet** in. Core attaches the sheet (`ColumnFields::sheet`,
+`resolve::with_sheet`) only when the text contains `col`, so the other texts are
+byte-identical and borrowed. `strip_preamble` walks any `#let …;` to the `;`
+outside a string. Renaming a Short Name breaks the references to it. The help
+row of every field: `#col.A.ln`.
+
+When Typst refuses a bound text, the `epaint` fallback (invariant 10) draws and
+measures what the user typed: `formula::fallback_text` strips the preamble, so a
+failed template shows `#ln #nope`, never the `#let` lines. The editors (the
+Graph Properties fields, the in-place editor, the Object Manager) show the
+typed source, never the value. A field diagnoses `variables::diagnose_text`
+(the text bound to empty values): `#ln` is valid, `#nope` is red. Tests:
+`variables.rs` (binder, `bind_spec` by text kind, broken reference, `col`), `resolve.rs`
+(`text_context`), `frame_sizes` in `shell.rs`, `agreement.rs` (legend template,
+typed name, variable title on screen and in the SVG, `col` in an axis title and a typed name), `plot_settings.rs`
+(`a_variable_is_valid_in_a_text_field_and_an_unknown_name_is_red`).
+
+Legend box (#507): `LegendSpec` carries the frame (shown, colour, thickness in
+pt), the background (empty = the panel's, else `#RRGGBB[AA]`), the number of
+columns, the row and column gaps and the swatch length; every empty / `None`
+value is today's constant (`LegendSpec::DEFAULT_*`, read through the clamping
+`*_pt` accessors), so a file that never set them draws the same pixels.
+`legend::draw` lays the entries out **column-major** (fill down first, then the
+next column; columns capped at the entries, one column width per column), the
+« … and N more » line spans the full width under the grid, and
+`DrawnLegendRow` carries `center_x` / `width` next to `center_y` / `height`:
+`hit::component_at` checks x as well, so a second column picks its own series,
+and `legend_entry_screen_box` returns the entry's cell (a lone column still
+spans the whole frame). The legend never moves the plot area: a corner legend
+grows away from its corner, a moved one around its centre. A **thick frame is a
+closed path**, not a `Rectangle`: the SVG backend of Plotters writes no width
+for a rectangle outline (frame off != thickness 0, and `paint::stroke_width`
+rounds, minimum 1). The object-manager thumbnail keeps the 26 pt swatch
+(`legend::KEY_WIDTH`). The colour bar uses the legend's font. Tests:
+`geometry.rs` (`the_default_legend_box_keeps_todays_formula`,
+`three_entries_on_two_columns_fill_down_first`), `hit.rs`,
+`render-svg/tests/legend_box.rs`, `agreement.rs` (`#507`).
+
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the
 whole legend, which can also be moved by dragging it from an entry.
@@ -881,8 +982,11 @@ not composed by Typst.
 resolves the Typst fonts **once**, at its creation (`TypstScreen::with_fonts`);
 if this resolution fails, everything stays plain text. It holds a
 `FormulaCache<FormulaTexture>` between two rebuilds of the figure, bounded by
-`FORMULA_CACHE_LIMIT` (256): beyond it, the cache is emptied **before** the next
-rebuild. Textures are therefore recompiled only if the text
+`FORMULA_CACHE_LIMIT` (256): beyond it, once the figure is rebuilt, the cache
+drops the entries nobody holds (`evict_unshared`), never an entry a displayed
+mesh needs: the cache only memoizes, the owner of the shapes holds the textures
+(`ShapeCache::textures`, filled through `TypstScreen::holding`; `ScaledShapes`
+holds its own, originals included; #508). Textures are therefore recompiled only if the text
 of a formula, its size, its color (issue #30) or the `pixels_per_point`
 changes, not at every rebuild.
 
@@ -1125,9 +1229,9 @@ The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometr
   user types or the rows wrap. Rulers and `LAYOUT_GRAB_MARGIN` shrink the contain
   rectangle, they never change the figure's own layout (invariant 5).
 - **The padlock is the application's** (`AppState::size_lock`, `Action::SetSizeLock`,
-  published to the graph windows each frame, copied by `fork_for_detached_view`):
-  Graph Properties and the strip share it, and `GraphView::set_figure_ratio_lock`
-  makes the L corners keep its ratio. A committed scale of the figure adopts the next
+  published to the graph windows each frame):
+  Graph Properties and the strip share it (the Figure size fields read it; Fit Layout to Page does not, it always scales one factor per axis; the L corners, which
+  only add or remove empty space since K1, do not). A committed scale of the figure adopts the next
   image (`SizeLock::adopt_next`), so a rounding never drifts the ratio.
 - **A window is maximised while the mode lasts, and the keys are read first.**
   `app/layout_window.rs` maximises a floating window on entering and a detached one
@@ -1156,7 +1260,11 @@ the same formula rasterized at `pixels_per_point × échelle` by
 `FormulaTexture::rerender` from the already compiled document (issue #31) — no
 recompilation, no new measurement. These enlarged textures live in
 `ScaledShapes`, outside the view's `FormulaCache` (they do not count in
-`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change. An
+`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change.
+`ScaledShapes` holds an `Arc` of every texture its meshes point to, the
+originals of scale 1 included, and its key carries `build` (the miss counter of
+the shape cache): a rebuild of the figure under the same display key never
+serves stale scaled shapes (#508). An
 image never exceeds `max_texture_side`: beyond it, the resolution is
 capped. Rasterizing directly at the displayed scale during collection was
 ruled out: the displayed rectangle would have entered the main cache key, hence
@@ -1241,3 +1349,32 @@ series and object from the tree, including for hidden contents; only one
 kind is selected at a time. Revalidation discards the addresses
 absent from the spec. The properties and the format bars reuse this
 same view in a detached window.
+
+Colour bar, lot 1 (#499 step C): `stokesforge-render/src/color_bar.rs::value_colors(panel)`
+gives the colour each series takes from its value on the layer's bar
+(`ResolvedSeries::value`, read by `core::series_value`); `Prepared::value_color`
+carries it, `Prepared::line()` / `symbol()` hand the painting a `Cow` copy so the
+spec is never changed, and `Prepared::in_legend()` drops a series that has one
+(drawn entries and `entry_ranks` share that predicate). The bar itself is drawn
+in a later lot.
+
+Colour bar, lot 2 (#499 step C): `color_bar::draw` runs after `legend::draw`. Each segment is a rounded bar (a cap and two
+circles per end) whose body is `Rectangle` stripes of 2 points reaching under the next one, never narrower than 3
+(egui draws a rectangle of 2 points or less as a faint line: seams on a scaled figure) (no gradient element in Plotters); the ticks are `scale::format_tick` through the
+epaint measurement, never Typst; the title and the break labels are `formula::rich_style`; a break is a
+drawn triangle (`Polygon`), not a glyph, centred on the gap and touching the bar's top, its tick and value label centred on
+the gap, its label under the bar after the value label, smaller (`BarStyles::small`); ticks leave the bar's edge outwards. Below / Right of the frame the bar owns a **band**
+(`color_bar::band(spec)`, a function of the spec alone, fixed thicknesses) that `CellPlan` adds to the
+gutters on that side: the image grows (and a Fixed figure reports `fixed_overflow`), the frame never
+changes, and `draw_panel` gives the chart `margin_bottom/right(MARGIN + band)` **for every layer of the
+cell** (superimposed layers must keep the same plot area). Those two places force the orientation
+(Below horizontal, Right vertical); corners and a dragged bar (`anchor`, wins over the position) are
+inside the frame and ask no band. In the legacy layout (no stored frame, no padding) nothing is reserved
+and an outside place draws at the bottom right corner. `DrawnText { ColorBar }` serves picking and drag
+exactly like the legend (`TextTarget::ColorBar` shares the legend's font (#507: title, ticks, break labels, measured through the same single measure; the band rows grow with a size above the label size) and has no colour, is not listed in
+the Object Manager). Test: `figure_layout.rs` (band), `agreement.rs` (stripes, ticks, labels on both
+backends), `cache_session.rs` (click and drag).
+
+Colour bar, size (#499): `ColorBarSpec::length` / `thickness` (points, `None` = automatic, bounded 20 / 4 to 4000) replace the automatic strip length (inside the frame only: below / right the strip follows the frame, the length is remembered) and `THICK`; `band` and `cross_size` read the thickness, the texts keep their size and are laid out around the strip by the one `draw`. The handles are `bar_resize.rs` of `stokesforge-render-egui` (look and grab radius of `shape_tools`): `color_bar::resize_handles` says which (eight for a dragged bar; the ones facing the frame for a corner bar; one for Below / Right), `color_bar::resized` is the pure arithmetic (bounds, opposite edge fixed for a dragged bar), the gesture is measured on the screen with the scale at the press (the figure grows with the band, so its scale moves during the pull). One `GraphEvent::ColorBarResized` on release becomes `Action::SetColorBarSize`, one `EditPlotSpec(ColorBar)` entry. Tests: `render/src/color_bar.rs` (arithmetic), `cache_session.rs` (gesture), `render-svg/tests/color_bar.rs`, `agreement.rs` (custom size on both backends).
+
+Colour bar, log scale: on a log scale only the curves whose value is <= 0 have no value (they keep their stored colour and the ordinary legend entry); the range and the ticks come from the valid values only.

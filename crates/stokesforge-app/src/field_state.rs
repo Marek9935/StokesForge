@@ -26,6 +26,14 @@
 //!    are calls of [`edit_text`] with their reading; the decision of the
 //!    cycle, [`decide`], is a pure function tested without a window.
 //!
+//! # A draft belongs to its target (#498)
+//!
+//! A field drawn inside [`for_target`] has an identifier that holds the target
+//! it edits, and a target pick (tab, list row) is applied *after* the page is
+//! drawn ([`pick_pending`], [`pick_allowed`]): the click frame validates the
+//! draft on the old target. An unreadable draft blocks the pick and stays open.
+//! A draft never outlives its focus: one left behind is dropped, not committed.
+//!
 //! Red and orange come from `theme.rs` (`field_refused_color`,
 //! `field_clamped_color`); the messages are `tr!` keys of the catalog.
 
@@ -236,14 +244,114 @@ pub fn decide<T>(
     }
 }
 
+/// Marks a field whose focus must be given back on the next pass.
+#[derive(Clone, Copy, Default)]
+struct Refocus;
+
 /// The draft of a field during input.
 #[derive(Clone, Debug)]
 struct Draft(String);
 
 /// The identifier of a field placed by [`edit_text`] under `id_salt`: that of
 /// its `TextEdit` and of its remembered state.
+///
+/// Inside [`for_target`] the identifier also holds the target, so the draft
+/// of a field belongs to the target it was typed for.
 pub fn field_id(ui: &egui::Ui, id_salt: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
-    ui.make_persistent_id(id_salt)
+    match current_target(ui.ctx()) {
+        Some(target) => ui.make_persistent_id((id_salt, target)),
+        None => ui.make_persistent_id(id_salt),
+    }
+}
+
+/// The target a [`for_target`] scope is drawing for (hash of its key).
+#[derive(Clone, Copy)]
+struct TargetScope(u64);
+
+fn scope_slot() -> egui::Id {
+    egui::Id::new("stokesforge_field_target_scope")
+}
+
+fn current_target(ctx: &egui::Context) -> Option<u64> {
+    ctx.data(|data| data.get_temp::<TargetScope>(scope_slot()))
+        .map(|scope| scope.0)
+}
+
+/// Draws `add` as the page of one **target** (an axis side, a series, a
+/// layout box...): every draft field inside gets an identifier that holds
+/// `key`, so its draft can never be committed into another target (#498).
+/// Not a `push_id` around the page: that would reset the labels column of a
+/// form and the scroll positions. A target pick (tab, list row) is applied
+/// *after* this scope is drawn, see [`pick_pending`] and [`pick_allowed`].
+pub fn for_target<R>(
+    ui: &mut egui::Ui,
+    key: impl std::hash::Hash,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    use std::hash::Hasher;
+    let ctx = ui.ctx().clone();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    let previous = ctx.data(|data| data.get_temp::<TargetScope>(scope_slot()));
+    ctx.data_mut(|data| data.insert_temp(scope_slot(), TargetScope(hasher.finish())));
+    let result = add(ui);
+    ctx.data_mut(|data| match previous {
+        Some(scope) => {
+            data.insert_temp(scope_slot(), scope);
+        }
+        None => {
+            data.remove::<TargetScope>(scope_slot());
+        }
+    });
+    result
+}
+
+/// What a target pick did in one pass.
+#[derive(Clone, Copy, Default)]
+struct PickFrame {
+    pass: u64,
+    pending: bool,
+    refused: bool,
+}
+
+fn pick_slot() -> egui::Id {
+    egui::Id::new("stokesforge_field_target_pick")
+}
+
+fn pick_frame(ctx: &egui::Context) -> PickFrame {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<PickFrame>(pick_slot()))
+        .filter(|frame| frame.pass == pass)
+        .unwrap_or(PickFrame {
+            pass,
+            ..PickFrame::default()
+        })
+}
+
+/// A target pick was clicked this pass (call it where the tab or the row
+/// reports the click, before the page is drawn). A field of a
+/// [`for_target`] scope that refuses its draft on leaving then stays open
+/// (red) instead of reverting, and the pick is dropped.
+pub fn pick_pending(ctx: &egui::Context) {
+    let frame = PickFrame {
+        pending: true,
+        ..pick_frame(ctx)
+    };
+    ctx.data_mut(|data| data.insert_temp(pick_slot(), frame));
+}
+
+/// Whether the pick noted by [`pick_pending`] may be applied: `false` when a
+/// field refused its draft this pass. Ask it after the page is drawn.
+pub fn pick_allowed(ctx: &egui::Context) -> bool {
+    !pick_frame(ctx).refused
+}
+
+fn refuse_pick(ctx: &egui::Context) {
+    let frame = PickFrame {
+        refused: true,
+        ..pick_frame(ctx)
+    };
+    ctx.data_mut(|data| data.insert_temp(pick_slot(), frame));
 }
 
 /// Abandons the draft of field `id` and the state it showed: the displayed
@@ -310,7 +418,25 @@ pub fn edit_text_with_arrow<T>(
     let ctx = ui.ctx().clone();
     let now = ui.input(|input| input.time);
 
-    let draft = ctx.data(|data| data.get_temp::<Draft>(id));
+    let mut draft = ctx.data(|data| data.get_temp::<Draft>(id));
+    // A draft outlives neither its focus nor the egui announcement of its
+    // loss: one left behind (field not drawn for a while, target changed)
+    // is dropped before it is shown, never committed.
+    // A refused leave that blocked a target pick gave the focus back (below);
+    // egui drops it at the end of that pass, so it is given once more.
+    let refocus = ctx.data(|data| data.get_temp::<Refocus>(id)).is_some();
+    if refocus {
+        ctx.data_mut(|data| data.remove::<Refocus>(id));
+    }
+    if draft.is_some() && refocus {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    } else if draft.is_some()
+        && !ctx.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+    {
+        ctx.data_mut(|data| data.remove::<Draft>(id));
+        clear(&ctx, id);
+        draft = None;
+    }
     // Leaving the field counts only for an open input: egui may
     // announce the focus loss on two frames in a row, and the second must
     // neither revalidate nor erase the state the first one set.
@@ -337,7 +463,25 @@ pub fn edit_text_with_arrow<T>(
     // Enter is consumed: a dialog that validates on Enter must not close
     // with the input (it looks at the focus, which the field has just lost).
     let enter = left && ui.input_mut(|i| i.consume_shortcut(&crate::app::shortcuts::KEY_ENTER));
-    let step = decide(&buffer, current, enter, escape, left || escape, &parse);
+    let mut pick_blocked = false;
+    let mut step = decide(&buffer, current, enter, escape, left || escape, &parse);
+    // A target pick is waiting (#498): an unreadable draft left by that click
+    // blocks the switch and stays open, as on Enter.
+    if let Step::Reject {
+        issue,
+        stay_open: false,
+    } = step
+    {
+        let blocks = current_target(&ctx).is_some() && pick_frame(&ctx).pending;
+        if blocks {
+            refuse_pick(&ctx);
+        }
+        pick_blocked = blocks;
+        step = Step::Reject {
+            issue,
+            stay_open: blocks,
+        };
+    }
 
     // Typing was already painted with the draft: a step that returns it is
     // visible only on the next frame, which must therefore be requested.
@@ -372,6 +516,9 @@ pub fn edit_text_with_arrow<T>(
             if stay_open {
                 ctx.data_mut(|data| data.insert_temp(id, Draft(buffer.clone())));
                 response.request_focus();
+                if pick_blocked {
+                    ctx.data_mut(|data| data.insert_temp(id, Refocus));
+                }
             } else {
                 ctx.data_mut(|data| data.remove::<Draft>(id));
                 flag(&ctx, id, issue, now, CLAMPED_SECONDS);
@@ -602,6 +749,37 @@ mod tests {
         frame_with(ctx, 0.0, vec![], out, Some(true));
         image(ctx, 0.1, vec![], out);
         image(ctx, 0.2, vec![type_text(text)], out);
+    }
+
+    /// A draft never outlives its focus (#498): a field that is not drawn for a
+    /// few frames, then drawn again, shows the value of the caller and
+    /// commits nothing. Witness: remove the stale-draft rule of
+    /// `edit_text_with_arrow` (the old draft is committed or shown).
+    #[test]
+    fn a_draft_does_not_outlive_its_focus() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "5", &mut out);
+        for step in 0..3 {
+            let mut input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 200.0),
+                )),
+                time: Some(0.3 + f64::from(step) * 0.1),
+                ..Default::default()
+            };
+            input.focused = true;
+            let _ = ctx.run_ui(input, |_ui| {});
+        }
+        let again = image(&ctx, 1.0, vec![], &mut out);
+        let after = image(&ctx, 1.1, vec![], &mut out);
+        assert_eq!(out, None, "the abandoned draft was not committed");
+        assert!(
+            painted(&again, "1") && !painted(&again, "15"),
+            "shows `current`"
+        );
+        assert!(painted(&after, "1") && !painted(&after, "15"));
     }
 
     #[test]

@@ -24,4 +24,12 @@ Filters = [
     "devel-file-in-non-devel-package",
     "hidden-file-or-dir",
     "zero-length",
+    # Bundled Python, numpy and scipy, shipped as upstream built them (#486).
+    # Scoped to their folder: the same defect in our own files stays an error.
+    "env-script-interpreter /opt/stokesforge/lib/python/",
+    "non-executable-script /opt/stokesforge/lib/python/",
+    "static-library-without-debuginfo /opt/stokesforge/lib/python/",
+    # No path to scope: the duplicated files (164 kB, in the bundled Python, out
+    # of about 400 MB).
+    "files-duplicated-waste",
 ]

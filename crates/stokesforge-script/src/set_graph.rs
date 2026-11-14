@@ -40,8 +40,6 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     // The X axis (bottom) and the Y axis (left or right depending on `axis`).
     "x_title",
     "y_title",
-    "x_unit",
-    "y_unit",
     "x_scale",
     "y_scale",
     "x_from",
@@ -59,6 +57,18 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     // The targeted panel's legend.
     "legend_visible",
     "legend_position",
+    // Which header row gives the legend entries (#499), and its template.
+    "legend_text_from",
+    "legend_template",
+    // The legend's box (#507), lengths in points.
+    "legend_frame",
+    "legend_frame_color",
+    "legend_frame_width",
+    "legend_background",
+    "legend_columns",
+    "legend_row_gap",
+    "legend_column_gap",
+    "legend_swatch_length",
     // The size (#399): plot area of the panel's column / row, Left / Top of the
     // first plot area (None = Auto), Figure size = Fixed. In `unit`.
     "plot_width",
@@ -101,7 +111,6 @@ fn short_number(value: f64) -> String {
 #[derive(Default)]
 struct AxisChange {
     title: Option<String>,
-    unit: Option<String>,
     scale: Option<AxisScale>,
     bounds: (Option<f64>, Option<f64>),
     auto_range: Option<bool>,
@@ -120,9 +129,6 @@ impl AxisChange {
         }
         if let Some(auto) = self.auto_range {
             axis.auto_range = auto;
-        }
-        if let Some(unit) = &self.unit {
-            axis.unit.clone_from(unit);
         }
         if let Some(inverted) = self.inverted {
             axis.inverted = inverted;
@@ -153,6 +159,16 @@ struct Changes {
     y: AxisChange,
     legend_visible: Option<bool>,
     legend_position: Option<LegendPosition>,
+    legend_text_from: Option<stokesforge_plot::LegendTextFrom>,
+    legend_template: Option<String>,
+    legend_frame: Option<bool>,
+    legend_frame_color: Option<String>,
+    legend_frame_width: Option<f64>,
+    legend_background: Option<String>,
+    legend_columns: Option<u32>,
+    legend_row_gap: Option<f64>,
+    legend_column_gap: Option<f64>,
+    legend_swatch_length: Option<f64>,
     /// Sizes in points (already converted and checked). Left / Top: the inner
     /// `None` is Auto.
     plot_width: Option<f64>,
@@ -250,6 +266,23 @@ impl Changes {
                 }
                 Ok(points.clamp(low, high))
             };
+            // A legend length in points (D4: never `unit`), refused outside
+            // `[low, high]`.
+            let points = |low: f64, high: f64| {
+                let number = value
+                    .extract::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .ok_or_else(|| invalid(format!("{key} must be a finite number")))?;
+                if number < low || number > high {
+                    return Err(invalid(format!(
+                        "{key} must be between {} and {} pt",
+                        short_number(low),
+                        short_number(high)
+                    )));
+                }
+                Ok(number)
+            };
             // Left / Top: a length from the image edge, or `None` = Auto.
             let offset = || {
                 if value.is_none() {
@@ -289,8 +322,6 @@ impl Changes {
                 "panel_title" => changes.panel_title = Some(string()?),
                 "x_title" => changes.x.title = Some(string()?),
                 "y_title" => changes.y.title = Some(string()?),
-                "x_unit" => changes.x.unit = Some(string()?),
-                "y_unit" => changes.y.unit = Some(string()?),
                 "x_scale" => changes.x.scale = Some(scale()?),
                 "y_scale" => changes.y.scale = Some(scale()?),
                 "x_from" => changes.x.bounds.0 = Some(bound()?),
@@ -319,6 +350,49 @@ impl Changes {
                         }
                     })
                 }
+                "legend_text_from" => {
+                    let text = string()?;
+                    let from = stokesforge_plot::LegendTextFrom::from_key(&text);
+                    if matches!(from, stokesforge_plot::LegendTextFrom::Unknown(_)) {
+                        return Err(invalid(
+                            "unknown legend text source: use long_name, comments, x_prime, units, short_name, long_name_units, long_name_comments or custom",
+                        ));
+                    }
+                    changes.legend_text_from = Some(from);
+                }
+                "legend_template" => changes.legend_template = Some(string()?),
+                "legend_frame" => changes.legend_frame = Some(boolean()?),
+                "legend_frame_color" => changes.legend_frame_color = Some(color()?),
+                "legend_frame_width" => {
+                    changes.legend_frame_width =
+                        Some(points(0.25, stokesforge_plot::LegendSpec::MAX_LENGTH)?)
+                }
+                "legend_background" => changes.legend_background = Some(color()?),
+                "legend_columns" => {
+                    changes.legend_columns = Some(
+                        value
+                            .extract::<u32>()
+                            .ok()
+                            .filter(|n| (1..=1000).contains(n))
+                            .ok_or_else(|| {
+                                invalid(format!("{key} must be an integer between 1 and 1000"))
+                            })?,
+                    )
+                }
+                "legend_row_gap" => {
+                    changes.legend_row_gap =
+                        Some(points(0.0, stokesforge_plot::LegendSpec::MAX_LENGTH)?)
+                }
+                "legend_column_gap" => {
+                    changes.legend_column_gap =
+                        Some(points(0.0, stokesforge_plot::LegendSpec::MAX_LENGTH)?)
+                }
+                "legend_swatch_length" => {
+                    changes.legend_swatch_length = Some(points(
+                        stokesforge_plot::LegendSpec::MIN_SWATCH_LENGTH,
+                        stokesforge_plot::LegendSpec::MAX_LENGTH,
+                    )?)
+                }
                 _ => {
                     return Err(invalid(format!(
                         "unknown graph option: {key} (accepted: {})",
@@ -337,11 +411,13 @@ impl Changes {
         Ok(changes)
     }
 
-    /// Fits the total size of the image along `axis`, the frames following in
+    /// Fits the total size of the image along `axis`, measured on the text as
+    /// drawn (#501), the frames written into the stored `spec` only, the frames following in
     /// proportion (#407). A value out of the range the graph allows is refused
     /// with that range, never brought back.
     fn fit_figure(
         &self,
+        tree: &stokesforge_core::Tree,
         spec: &mut PlotSpec,
         key: &str,
         axis: SizeAxis,
@@ -349,15 +425,20 @@ impl Changes {
     ) -> Result<(), HostError> {
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let choice = stokesforge_render_svg::FontChoice::default();
-        let fitted =
-            stokesforge_render_svg::fit_figure_size(spec, &measurer, &choice, axis, points)
-                .ok()
-                .flatten()
-                .ok_or_else(|| {
-                    HostError::InvalidValue(format!(
-                        "{key} cannot be set: the graph has no plot area to scale"
-                    ))
-                })?;
+        let fitted = stokesforge_render_svg::fit_figure_size(
+            &bound(tree, spec),
+            &measurer,
+            &choice,
+            axis,
+            points,
+        )
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            HostError::InvalidValue(format!(
+                "{key} cannot be set: the graph has no plot area to scale"
+            ))
+        })?;
         let (low, high) = fitted.range;
         if points < low - LENGTH_TOLERANCE || points > high + LENGTH_TOLERANCE {
             return Err(HostError::InvalidValue(format!(
@@ -375,6 +456,7 @@ impl Changes {
     /// panel, `cell` its `(row, column)`.
     fn apply(
         &self,
+        tree: &stokesforge_core::Tree,
         spec: &mut PlotSpec,
         layer: usize,
         cell: (usize, usize),
@@ -386,7 +468,13 @@ impl Changes {
         if free != (spec.layer_placement == LayerPlacement::Free) {
             let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
             let choice = stokesforge_render_svg::FontChoice::default();
-            if !stokesforge_render_svg::set_layer_placement(spec, free, &measurer, &choice) {
+            if !stokesforge_render_svg::set_layer_placement(
+                spec,
+                free,
+                &measurer,
+                &choice,
+                &|spec| bound(tree, spec),
+            ) {
                 return Err(HostError::InvalidValue(
                     "the layer placement cannot be switched: the layers do not fit a grid"
                         .to_owned(),
@@ -441,6 +529,37 @@ impl Changes {
         }
         if let Some(position) = self.legend_position {
             panel.legend.position = position;
+        }
+        if let Some(from) = &self.legend_text_from {
+            panel.legend.text.from = from.clone();
+        }
+        if let Some(template) = &self.legend_template {
+            panel.legend.text.template.clone_from(template);
+        }
+        let legend = &mut panel.legend;
+        if let Some(frame) = self.legend_frame {
+            legend.frame = frame;
+        }
+        if let Some(color) = &self.legend_frame_color {
+            legend.frame_color.clone_from(color);
+        }
+        if let Some(width) = self.legend_frame_width {
+            legend.frame_width = Some(width);
+        }
+        if let Some(background) = &self.legend_background {
+            legend.background.clone_from(background);
+        }
+        if let Some(columns) = self.legend_columns {
+            legend.columns = columns;
+        }
+        if let Some(gap) = self.legend_row_gap {
+            legend.row_gap = Some(gap);
+        }
+        if let Some(gap) = self.legend_column_gap {
+            legend.column_gap = Some(gap);
+        }
+        if let Some(length) = self.legend_swatch_length {
+            legend.swatch_length = Some(length);
         }
         // The size, through the setters of the interface (#399). They only
         // refuse a graph that stores no plot area and could not be given any
@@ -499,10 +618,10 @@ impl Changes {
         // the axes, Fixed, Left / Top and the placement set above. Width
         // first: the height is measured at the new width.
         if let Some(width) = self.figure_width {
-            self.fit_figure(spec, "figure_width", SizeAxis::Width, width)?;
+            self.fit_figure(tree, spec, "figure_width", SizeAxis::Width, width)?;
         }
         if let Some(height) = self.figure_height {
-            self.fit_figure(spec, "figure_height", SizeAxis::Height, height)?;
+            self.fit_figure(tree, spec, "figure_height", SizeAxis::Height, height)?;
         }
         Ok(())
     }
@@ -532,14 +651,14 @@ fn set_graph_native(
         // writes nothing, the graph staying as it was. A switch to free fixes
         // them itself; a free graph is never legacy.
         if changes.sets_size() && !switching && before.layer_placement == LayerPlacement::Grid {
-            bridge::fix_frames(Some(&before), &mut spec);
+            bridge::fix_frames(&snapshot.tree, Some(&before), &mut spec);
         }
         let reference = if switching {
             before.clone()
         } else {
             spec.clone()
         };
-        changes.apply(&mut spec, layer, panel, side)?;
+        changes.apply(&snapshot.tree, &mut spec, layer, panel, side)?;
         let changed = spec != reference;
         Ok::<_, HostError>((spec, changed))
     };
@@ -568,8 +687,18 @@ fn set_graph_native(
 /// automatic), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
 /// `decimal_comma` (booleans). The panel `panel=(row, column)`: `panel_title`,
 /// `legend_visible`, `legend_position` (`'top_left'`, `'top_right'`,
-/// `'bottom_left'`, `'bottom_right'`). The X axis (bottom) and the Y axis
-/// (`axis='left'` or `'right'`): `x_title`/`y_title`, `x_unit`/`y_unit`,
+/// `'bottom_left'`, `'bottom_right'`), `legend_text_from` (`'long_name'`,
+/// `'comments'`, `'x_prime'`, `'units'`, `'short_name'`, `'long_name_units'`,
+/// `'long_name_comments'`, `'custom'`) and `legend_template` (Typst markup of
+/// `'custom'`, which reads the string variables `long-name`/`ln`,
+/// `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp`: for example
+/// `'*#ln* #if u != "" [(#u)]'`). The legend box, lengths in points (never
+/// `unit`): `legend_frame` (boolean), `legend_frame_color` (`'#RRGGBB'`, `''` =
+/// automatic), `legend_frame_width` (0.25 to 400), `legend_background`
+/// (`'#RRGGBB[AA]'`, `''` = automatic), `legend_columns` (1 to 1000, entries
+/// fill down first), `legend_row_gap` and `legend_column_gap` (0 to 400) and
+/// `legend_swatch_length` (4 to 400). The X axis (bottom) and the Y axis
+/// (`axis='left'` or `'right'`): `x_title`/`y_title`,
 /// `x_scale`/`y_scale` (`'linear'`, `'log'`), `x_from` and `x_to` (given
 /// together and different; `from > to` draws the axis reversed) and
 /// `y_from`/`y_to`, `x_auto_range`/`y_auto_range` (turns view framing back to
@@ -633,4 +762,9 @@ pub(crate) fn set_graph(
     let (id, epoch) = (graph.id, graph.epoch);
     py.detach(|| set_graph_native(&context, id, epoch, panel, side, &changes))
         .map_err(to_py_error)
+}
+
+/// The spec as drawn (#501): variables bound, for measuring only. Never stored.
+fn bound<'a>(tree: &stokesforge_core::Tree, spec: &'a PlotSpec) -> std::borrow::Cow<'a, PlotSpec> {
+    stokesforge_render_svg::bind_spec(tree, spec, &stokesforge_render_svg::FigureTexts::default())
 }

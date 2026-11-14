@@ -30,7 +30,7 @@ pub enum DialogKind {
 /// until it is named here and in [`OpenDialog::kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenDialog {
-    /// The import wizard.
+    /// The import window.
     ImportWizard,
     /// The Origin chooser: sheets of `.opj` projects to import (#490).
     OriginImport,

@@ -89,25 +89,25 @@ For the full list of import problems, see [Common problems](../guide/import.md#c
 
 ### The decimal comma
 
-**Cause.** The file writes `1,5` and the **Decimal separator** is **Dot**, which is the default of a new template.
+**Cause.** The file writes `1,5` and the **Decimal separator** is read as a dot.
 
-**What to do.** Choose **Comma** or **Auto** for the **Decimal separator**. In a cell that you type yourself, a decimal comma is accepted: the status bar says `"1,5" was read as 1.5 (decimal comma)`.
+**What to do.** Click the **Decimal separator** at the left of the Import window and choose the comma. In a cell that you type yourself, a decimal comma is accepted: the status bar says `"1,5" was read as 1.5 (decimal comma)`.
 
 ### The column names are the first row of data, or the units are missing
 
-**Cause.** The wizard does not know that the first line is a header.
+**Cause.** The Import window does not know that the first line is a header.
 
-**What to do.** In step 3, tick **Names in first line**, or set the **Header** and the **Subheader lines**, then give the roles **Long Name** and **Units** their line numbers. See [Step 3: header and data end](../guide/import.md#step-3-header-and-data-end).
+**What to do.** In the Import window, click the line number of the names line and give it the role **Long Name**, then the units line the role **Units**. See [Give a line a role](../guide/import.md#give-a-line-a-role).
 
-### Messages of the Import Wizard
+### Messages of the Import window
 
 | Message | What it means and what to do |
 |---|---|
-| "The file is not readable text" | The file is binary. Export a text version from the instrument software. |
-| "The file is empty" | The file has no content. Check that the export finished. |
-| "No data found after the header. Check the number of header lines" | The header takes more lines than the file has. Change the header in step 3. |
-| "A space cannot both separate the columns and group the thousands. Choose another delimiter or another thousands separator" | **Whitespace** as the delimiter and **Space** as the thousands separator cannot be used together. |
-| "Choose a file before detecting the header" | **Detect Header** needs a file in the list of step 1. |
+| "This file is not text (the format of the device software)…" | The file is binary. Export a text version from the instrument software. |
+| "This file is empty." | The file has no content. Check that the export finished. |
+| "No line of numbers was found in this file." | The file holds text only. Check that it is the right file. |
+| "This file holds NMR data (JCAMP-DX). StokesForge does not read NMR spectra." | NMR is not supported. |
+| "A space cannot both separate the columns and group the thousands…" | Choose another delimiter or another thousands separator. |
 | "An import is already running" | Wait for the import to end, or click **Stop** in the status bar. |
 
 ## Graphs
@@ -159,7 +159,7 @@ See [Axes](../guide/graphs.md#axes) and [Zoom and pan](../guide/graphs.md#zoom-a
 | Message | What to do |
 |---|---|
 | "There are already three overlaid layers in this graph" | A graph holds at most three overlay layers. |
-| "Graph properties are open. Apply or cancel them before changing a detached window" | Click **OK** or **Cancel** in **Graph Properties**. |
+| "… is open in the main window. Apply or cancel it first" | Click **OK** or **Cancel** in the window the message names, in the main window. |
 | "Apply or cancel the graph properties before dropping files" | Close **Graph Properties** first. |
 
 ## Analysis

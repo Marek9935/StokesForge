@@ -29,9 +29,9 @@ use crate::{GraphEvent, GraphTool, GraphView};
 /// tremor and creates nothing.
 const MIN_DRAW_DISTANCE: f32 = 4.0;
 /// Half-side of a handle, in screen pixels, and the radius where it is grabbed.
-const HANDLE_HALF: f32 = 4.0;
-const HANDLE_GRAB: f32 = 8.0;
-const SELECTION_BLUE: Color32 = Color32::from_rgb(90, 150, 255);
+pub(crate) const HANDLE_HALF: f32 = 4.0;
+pub(crate) const HANDLE_GRAB: f32 = 8.0;
+pub(crate) const SELECTION_BLUE: Color32 = Color32::from_rgb(90, 150, 255);
 
 /// A resize handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -50,9 +50,9 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::compose::{
-    current_plot_spec, free_role_layer, insert_cell, overlay_base, overlays_full, panel_plot_type,
-    remove_cell, role_layer_of, row_series, series_from_columns, spec_has_x, x_prime_columns,
-    CellSide, OVERLAY_ROLES,
+    current_plot_spec, free_role_layer, insert_cell_at_with, insert_cell_with, overlay_base,
+    overlays_full, panel_plot_type, remove_cell, role_layer_of, row_series, series_from_columns,
+    spec_has_x, x_prime_columns, CellSide, OVERLAY_ROLES,
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -63,8 +63,9 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec, PanelSpec, Panels,
-    PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorBarSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec,
+    PanelSpec, Panels, PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor,
+    TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -76,7 +77,7 @@ use crate::cell_sides;
 use crate::errors;
 use crate::history_text::history_text;
 use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
-use crate::selection::{GridCursor, Selection};
+use crate::selection::{ColumnRanks, GridCursor, Selection};
 use crate::tr;
 use crate::tree_drop::{final_order, plan_moves, MovePlace};
 use crate::user_colors::UserColors;
@@ -84,12 +85,43 @@ use crate::user_colors::UserColors;
 mod analysis;
 mod autosave;
 mod column_use;
+mod import_advanced;
+mod import_apply;
+mod import_auto;
+mod import_check;
+mod import_grid;
+mod import_template;
+mod import_tocheck;
+mod server;
+pub use import_advanced::{
+    apply_advanced, AdvancedChange, AdvancedRow, AdvancedSetting, ADVANCED_SETTINGS,
+};
+pub use import_auto::{
+    prop_choices_on, why_text, AutoCheck, AutoInfo, AutoPill, FileChoice, FileMark, ImportAuto,
+    PropChoice, PropRow,
+};
+pub use import_check::{
+    analyse, Answer, CheckAction, CheckFinding, CheckKind, CheckView, ChipId, Confidence,
+    DetectedFormat, Evidence, Fingerprint, FoundGroup, FoundRole, FoundRow, ImportChecks, KeyEntry,
+    Piece, Question, Review, ReviewInfo, Source,
+};
+pub use import_grid::{
+    apply_lines, assign_role, boundary_line, build_rows, fold_range, kv_of, lines_view,
+    row_of_line, spans_of, zones_in, zones_of, GridCmd, Kv, LineRoleCmd, LinesView, Row, Spans,
+    Zone, FOLD_KEEP, FOLD_MIN, ROLE_CMDS, ZONES,
+};
+pub use import_template::{
+    automatic_conditions, condition_sentence, doubt_text, template_count_warnings, template_rules,
+    AutoCondition, ConditionRow, ManageState, Offer, RememberedAnswer, SaveDraft, TemplateRow,
+};
+pub use import_tocheck::{ShownFileStatus, ToCheckPoint, ToCheckSource};
 pub mod open_dialog;
 mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
-pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
+pub use autosave::{AutosaveJob, Garbage, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
+pub use import_apply::ImportRun;
 pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
 
 /// How long a command waits for the formula recalculation it started to
@@ -115,6 +147,14 @@ pub enum LayerArrange {
     Match(stokesforge_core::compose::Dimension),
     /// Spread the cells with equal gaps between their outer rectangles.
     Distribute(stokesforge_render::pipeline::DistributeAxis),
+}
+
+/// What a new cell is placed beside: a layer (the menu, free placement) or a
+/// grid position (a drop zone, #503).
+#[derive(Debug, Clone, Copy)]
+enum CellAnchor {
+    Layer(usize),
+    Position(usize, usize),
 }
 
 /// What the user can ask for. The window layer only produces these values; it
@@ -459,6 +499,18 @@ pub enum Action {
         /// Target sheet.
         sheet: NodeId,
     },
+    /// Pastes `text` rotated a quarter turn (Paste Transposed, Ctrl+Alt+V,
+    /// #495): the copied block (the internal copy if `text` is what we pushed
+    /// to the clipboard, otherwise the outside text as a table) is transposed,
+    /// then pasted like [`Action::Paste`] from the anchor: a frozen copy, values
+    /// only, one undo step. `egui` sends it as the same `Event::Paste` as
+    /// Ctrl+V; the grid tells them apart by `modifiers.alt`.
+    PasteTransposed {
+        /// Target sheet.
+        sheet: NodeId,
+        /// Text received from the system clipboard.
+        text: String,
+    },
     /// Changes the type of all the `columns` in **a single undo step**
     /// (columns menu on a multiple selection, #159).
     SetColumnsType {
@@ -563,8 +615,16 @@ pub enum Action {
         /// Files to import.
         paths: Vec<std::path::PathBuf>,
     },
-    /// Reopens the last import in the wizard (or in the Origin chooser when
-    /// the last import was an Origin one), to correct it: if it is still the
+    /// Like [`Action::StartImport`], with the recipe of each file (the import
+    /// screen keeps one per kind of file and per template).
+    StartImportEach {
+        destination: ImportDestination,
+        each: Vec<(PathBuf, stokesforge_import::ImportRecipe)>,
+        /// Refused files that were left out: the status bar says how many.
+        skipped: usize,
+    },
+    /// Reopens the last import in the import window, to correct it: every
+    /// file of the batch comes back with its own recipe. If it is still the
     /// last history entry, it is undone first.
     ReopenLastImport,
     /// Origin chooser (#490): ticks or unticks one sheet of the file at rank
@@ -681,6 +741,14 @@ pub enum Action {
     },
     /// Answer to this confirmation (`true`: overwrite and update).
     ConfirmTransposeRelink(bool),
+    /// Checks or unchecks "Recalculate automatically" on a transposed sheet
+    /// (#463). Checking can be refused: the status bar says why.
+    SetTransposeAuto {
+        /// The transposed sheet.
+        sheet: NodeId,
+        /// The new state of the box.
+        auto: bool,
+    },
     /// Reopens one of the last analyses run (#249) on the current
     /// selection: the window opens with its settings; with `run` (Ctrl+click)
     /// it is run at once if nothing is missing.
@@ -825,6 +893,22 @@ pub enum Action {
         /// Dragged columns; empty for the menu.
         columns: Vec<NodeId>,
     },
+    /// [`Action::AddCell`] by **grid position** (#503): the new column (row)
+    /// opens beside the cell `(row, column)` of a regular grid, whether a graph
+    /// or a hole is there. What a drop on an edge band or a line sends: the
+    /// zone is a position, not a graph. One undo step.
+    AddCellAt {
+        /// Target graph.
+        graph: NodeId,
+        /// Row of the reference position.
+        row: usize,
+        /// Column of the reference position.
+        column: usize,
+        /// Which side of it the new cell goes.
+        side: CellSide,
+        /// Dragged columns; empty for none.
+        columns: Vec<NodeId>,
+    },
     /// Sets the frame (plot area) width of grid column `index` or the frame
     /// height of grid row `index` of the graph, in points (#394). The one path
     /// of the size fields of Graph Properties and of a drag handle on the outer
@@ -859,6 +943,51 @@ pub enum Action {
         /// The whole figure was scaled (history kind `ResizeFigure`), else a
         /// boundary or a corner was pulled (`ResizeCell`).
         figure: bool,
+        /// The empty space around the grid after an outer edge was pulled
+        /// (#505); `None` leaves it as it is.
+        slack: Option<stokesforge_plot::GridSlack>,
+    },
+    /// An outer edge or an Alt-dragged line is pulled past the page edge
+    /// (#505, F3): the status bar says how to enlarge the page. Changes no
+    /// model.
+    PageEdgeReached,
+    /// Fits the page of a graph to its layers (#505): on a Regular Grid the
+    /// empty space around the grid is cleared, in Free the page becomes the
+    /// bounding box of the graphs (margins included). One undo step
+    /// ([`PlotEditKind::FitPage`]); nothing sent, no undo step, when there is
+    /// nothing to fit. The size lock follows the new figure.
+    FitPageToLayout {
+        /// Target graph.
+        graph: NodeId,
+    },
+    /// Fits the layout of a graph to its page (#505, K1), the inverse of
+    /// [`Action::FitPageToLayout`]: the graphs scale to fill the page, which
+    /// keeps its size. Regular Grid: one factor per axis, bands frozen, the
+    /// empty space around the grid goes to zero; Free: the graph boxes are
+    /// scaled from their bounding box to the page. The padlock of Figure size
+    /// plays no part: always one factor per axis. One undo step
+    /// ([`PlotEditKind::FitLayout`]); nothing sent, no undo step, when there is
+    /// nothing to do.
+    FitLayoutToPage {
+        /// Target graph.
+        graph: NodeId,
+    },
+    /// Moves a graph (the cell of layer `panel`, overlays included) on a
+    /// regular grid (#491): what a drag inside a graph, or an arrow key, commits
+    /// in the Page Layout Mode. To a cell (swap if occupied, a hole accepted) or
+    /// into a new column or row beside another cell
+    /// ([`stokesforge_core::compose::move_cell`]); a column or row left empty
+    /// disappears with its size. Layer numbers do not change. One undo step
+    /// ([`PlotEditKind::MoveLayer`]); nothing sent on free placement, for a
+    /// missing layer or cell, or when nothing changes. A graph without stored
+    /// frames is first given the ones it is drawn with.
+    MoveGridCell {
+        /// Target graph.
+        graph: NodeId,
+        /// A layer of the moved cell.
+        panel: usize,
+        /// Where it goes.
+        target: stokesforge_core::compose::MoveTarget,
     },
     /// Sets several frames of a free graph and its page in one go: what a
     /// gesture of the Page Layout Mode commits (#426). Each `(base layer,
@@ -1177,6 +1306,9 @@ pub enum Action {
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
+    /// The « Text from » and custom template given to the legend of new
+    /// graphs (#499, #502); the graphs that exist keep their own.
+    SetNewGraphLegendText(stokesforge_plot::LegendText),
     /// The default of "Keep in Results" for the analyses (M5, #148); the choice
     /// of an operation already run is remembered apart.
     SetAnalysisKeepResults(bool),
@@ -1299,6 +1431,21 @@ pub enum Action {
         /// Its new anchor; `None` puts it back at its default place.
         anchor: Option<TextAnchor>,
     },
+    /// Sets the strip size of a colour bar inside the frame (#499): the
+    /// resize handle that was pulled and released. One undo entry
+    /// ([`PlotEditKind::ColorBar`]). A `None` field is left as it is.
+    SetColorBarSize {
+        /// Target graph.
+        graph: NodeId,
+        /// Index of the layer in the graph's panels.
+        panel: usize,
+        /// Strip length in points (bounded by the model).
+        length: Option<f64>,
+        /// Strip thickness in points (bounded by the model).
+        thickness: Option<f64>,
+        /// New anchor of a dragged bar.
+        anchor: Option<TextAnchor>,
+    },
     /// Sets the font and size of a title or of the legend (issues #77,
     /// #78): an attribute of the whole area, not a tag in its text.
     /// A model change ([`Command::SetPlotSpec`]).
@@ -1379,6 +1526,20 @@ pub enum SaveTarget {
     User,
 }
 
+impl Action {
+    /// Whether this action opens the Properties macro (or a shape-edit macro).
+    /// The root pass dispatches such an action last, so an entry that commits
+    /// through an action of the same frame lands before the macro (#533).
+    pub fn opens_plot_macro(&self) -> bool {
+        matches!(
+            self,
+            Action::OpenPlotSettings { .. }
+                | Action::OpenObjectProperties { .. }
+                | Action::BeginShapeEdit
+        )
+    }
+}
+
 impl SaveTarget {
     /// Label of the choice.
     pub fn label(self) -> String {
@@ -1388,6 +1549,9 @@ impl SaveTarget {
         }
     }
 }
+
+/// A function that wakes the server thread, callable from any thread (#475).
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 /// Severity of a status bar message (S-M4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1659,9 +1823,8 @@ fn column_all_numeric_after(column: &Column, write: Option<(usize, &ValueBlock)>
 }
 
 /// Body of [`AppState::cell_text`], factored over a `&Tree` rather than over
-/// `&self`: this is what lets a detached window
-/// (`stokesforge_app::app::StokesForgeApp::show_detached_tabs`, which carries only a clone
-/// of [`Snapshot`], never `AppState` itself — see its top-level doc) paint
+/// `&self`: this is what lets a window that holds only a clone of
+/// [`Snapshot`] (the detached panels) paint
 /// a grid identical to that of the dock, without duplicating the display rule
 /// (`MISSING_TEXT_DISPLAY`, scientific toggle A9/C4 — see
 /// [`AppState::cell_text`] for the detail of these choices).
@@ -1767,11 +1930,79 @@ fn row_series_name(row: usize) -> String {
     crate::tr!("graph-row-series", number = (row + 1))
 }
 
-/// Displayed name of a series in the list of the properties window: the
-/// same rule as the graph legend, [`stokesforge_core::series_label`] (single
-/// source, issue #25).
-pub fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
-    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree))
+/// Displayed name of a series in the lists (Object Manager, series list of
+/// the properties window): the legend's name ([`series_legend_label`]), or, when
+/// the chosen « Text from » row is empty for the column, a grey fallback that
+/// names the column (#499). The second value is `true` for that fallback, so
+/// the list paints it muted. The decision « empty » stays in
+/// [`stokesforge_core::series_label`] (single source, issue #25); the
+/// legend itself stays empty.
+pub fn series_list_entry(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> (String, bool) {
+    let label = stokesforge_core::series_label(series, tree, text);
+    let shown = crate::figure_texts::series_label_text(&label);
+    let named = matches!(
+        label,
+        stokesforge_core::SeriesLabel::Text(_)
+            | stokesforge_core::SeriesLabel::Typed { .. }
+            | stokesforge_core::SeriesLabel::Template { .. }
+    );
+    // An empty text, or a template that does not compile or shows nothing.
+    if series.row.is_none() && named && shown.trim().is_empty() {
+        let sheet = tree
+            .parent(series.y)
+            .ok()
+            .flatten()
+            .and_then(|id| tree.node(id))
+            .map(|node| node.name().to_string())
+            .unwrap_or_default();
+        let letters = tree.column_letters(series.y).unwrap_or_default();
+        let column = format!("{sheet} {letters}").trim().to_string();
+        return (crate::tr!("graph-series-empty-text", column = column), true);
+    }
+    (shown, false)
+}
+
+/// [`series_list_entry`] without the flag: the text of a list row.
+pub fn series_list_label(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> String {
+    series_list_entry(tree, series, text).0
+}
+
+/// The name the legend shows for a series (empty stays empty), same rule as
+/// the graph legend, [`stokesforge_core::series_label`] (single source, issue
+/// #25). It is what the legend-entry name editor starts from.
+///
+/// `text` is the « Text from » setting of the legend of the panel that holds
+/// the series (#499).
+pub fn series_legend_label(
+    tree: &Tree,
+    series: &stokesforge_plot::SeriesSpec,
+    text: &stokesforge_plot::LegendText,
+) -> String {
+    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree, text))
+}
+
+/// Label of a column in the « Value of column… » picker (#499): the letter
+/// and the Long Name (« A — Wavelength »), the letter alone without a long name.
+pub fn column_letter_name(tree: &Tree, column: NodeId) -> String {
+    let letters = tree.column_letters(column).unwrap_or_default();
+    let long = tree
+        .node(column)
+        .and_then(Node::as_column)
+        .map(|c| c.meta().long_name.clone())
+        .unwrap_or_default();
+    if long.is_empty() {
+        letters
+    } else {
+        format!("{letters} \u{2014} {long}")
+    }
 }
 
 /// Payload of the drag of **whole rows** of a sheet to an open
@@ -1887,6 +2118,11 @@ pub enum AlertKind {
     /// The session actor is dead (#310): the model is lost. Close closes
     /// the application; the message says where the backup copy was written.
     SessionLost,
+    /// A row analysis (or the recalculation of a transposed sheet) uses the
+    /// column numbers 1, 2, 3... as x' because the source has none (#493): a
+    /// plain warning, twin of `LowRSquared`. Close keeps the analysis; while the
+    /// analysis window is open it also offers to cancel it.
+    NoXPrime,
 }
 
 /// Row drop waiting for the answer to the axis dialog (#166).
@@ -2137,6 +2373,21 @@ struct FormulaRefusalMemo {
     revision: stokesforge_session::Revision,
     epoch: u64,
     refusal: Option<String>,
+}
+
+/// What the grid asks of a worksheet for every cell of every frame, computed once
+/// per snapshot (#534): the visible columns with their ranks and the row count.
+struct SheetIndex {
+    ranks: ColumnRanks,
+    rows: usize,
+}
+
+/// The [`SheetIndex`] of the worksheets drawn since the last snapshot (see
+/// [`AppState::sheet_index`]): valid for one revision and epoch of the project.
+struct SheetIndexMemo {
+    revision: stokesforge_session::Revision,
+    epoch: u64,
+    sheets: std::collections::HashMap<NodeId, std::sync::Arc<SheetIndex>>,
 }
 
 /// What is known of the formulas of one revision (see
@@ -2391,6 +2642,61 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
 }
 
+/// The block of `clipboard` rotated a quarter turn, for Paste Transposed
+/// (#495): what was a row becomes a column. Values only, frozen: a column
+/// copied in full gives its body as a row (header and formula dropped, its
+/// `data` already holds the values even for a Formulas copy), and a copied x'
+/// row (the only header field a column of values can take) becomes a data row;
+/// the other header rows are dropped. A single value stays a value. A missing
+/// cell of a ragged block becomes an empty one. `None` when nothing is left
+/// (no x' row among the copied fields, no cell at all).
+fn transposed_clipboard(clipboard: &GridClipboard) -> Option<GridClipboard> {
+    let data_rows = |rows: Vec<Vec<String>>| {
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        (width > 0).then(|| {
+            GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: rows
+                    .into_iter()
+                    .map(|mut row| {
+                        row.resize(width, String::new());
+                        row
+                    })
+                    .collect(),
+            })
+        })
+    };
+    match clipboard {
+        GridClipboard::Text(text) => Some(GridClipboard::Text(text.clone())),
+        GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => {
+            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+            data_rows(
+                (0..width)
+                    .map(|column| {
+                        rows.iter()
+                            .map(|row| row.get(column).cloned().unwrap_or_default())
+                            .collect()
+                    })
+                    .collect(),
+            )
+        }
+        GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows }) => {
+            if *start != HeaderField::XPrime {
+                return None;
+            }
+            data_rows(
+                rows.first()?
+                    .iter()
+                    .map(|value| vec![value.clone()])
+                    .collect(),
+            )
+        }
+        GridClipboard::FullColumns(columns) => {
+            data_rows(columns.iter().map(|column| column.data.clone()).collect())
+        }
+    }
+}
+
 /// A comma range the Formula field rewrote (#433): the formula it stored and
 /// the sentence still to hand to the grid. The orange lives only while the
 /// column holds that formula. Typing and pasting both make one, through
@@ -2634,6 +2940,8 @@ pub enum PlotTarget {
     Annotation(AnnotationRef),
     /// The legend (frame or entry, issue #53).
     Legend,
+    /// The colour bar (#499).
+    ColorBar,
     /// A graphic object: rectangle, ellipse, line or arrow (issue #76).
     Object(ShapeRef),
 }
@@ -2649,6 +2957,7 @@ impl PlotTarget {
             PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", side = axis.key()),
             PlotTarget::Annotation(_) => tr!("plot-target-text"),
             PlotTarget::Legend => tr!("plot-target-legend"),
+            PlotTarget::ColorBar => tr!("plot-target-color-bar"),
             PlotTarget::Object(_) => tr!("plot-target-object"),
         }
     }
@@ -2662,6 +2971,8 @@ impl PlotTarget {
                 (PlotSettingsTab::PlotArea, None)
             }
             PlotTarget::Legend => (PlotSettingsTab::Legend, None),
+            // The colour bar is a folded section of the Legend tab.
+            PlotTarget::ColorBar => (PlotSettingsTab::Legend, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
             }
@@ -2686,6 +2997,10 @@ pub struct PlotSettings {
     pub tab: PlotSettingsTab,
     /// Axis displayed in the "Axes" tab.
     pub axis: PlotAxis,
+    /// One-shot request: unfold the « Color bar » section of the Legend tab
+    /// and scroll it into view (opened from the bar itself). The page clears
+    /// it once it has done so.
+    pub color_bar_unfold: bool,
 }
 
 /// Edit draft of the graph properties window: a whole
@@ -2778,32 +3093,34 @@ fn reads_well(bytes: &[u8], recipe: &stokesforge_import::ImportRecipe) -> bool {
     })
 }
 
-/// Last successful import: what is needed to reopen it in the wizard
-/// to correct it ("Reopen Last Import…").
+/// Last successful import: what is needed to reopen it in the import window
+/// to correct it ("Reopen Last Import…"). Every file keeps its own recipe.
 #[derive(Debug, Clone)]
 struct LastImport {
     destination: ImportDestination,
-    recipe: stokesforge_import::ImportRecipe,
-    paths: Vec<PathBuf>,
+    /// The files imported, each with the recipe it was read with.
+    each: Vec<(PathBuf, stokesforge_import::ImportRecipe)>,
 }
 
-/// Where a background import comes from: the wizard/menu (a recipe chosen
-/// by the user) or a file drop (one template per file).
+/// Where a background import comes from: a recipe for all the files
+/// (`Action::StartImport`), a recipe for each file (the import window), or a
+/// file drop (the recipe of each file is chosen by the template store and the
+/// detector, `stokesforge_import::recipe_for_file`).
 enum ImportSource {
-    Menu(stokesforge_import::ImportRecipe),
+    Menu(Box<stokesforge_import::ImportRecipe>),
+    Each(Vec<(PathBuf, stokesforge_import::ImportRecipe)>),
     Drop {
-        /// Template of the files that the automatic choice does not recognize.
-        fallback: stokesforge_import::ImportRecipe,
         /// Workbook under the cursor at the time of the drop.
         target_book: Option<NodeId>,
     },
 }
 
-/// What the import thread returns: the items read, the files that cannot
-/// be read (drop only) and the templates used.
+/// What the import thread returns: the items read, the files that need the
+/// import window (drop only: a doubt left, a refusal, a table that does not
+/// read) and the templates used.
 struct ImportReply {
     items: Vec<ImportItem>,
-    unreadable: Vec<PathBuf>,
+    for_window: Vec<PathBuf>,
     models: Vec<String>,
     /// The Origin projects among the files (#490): read here, on the
     /// background thread, and given to the chooser instead of the recipes.
@@ -2826,6 +3143,8 @@ struct ImportJob {
     /// Reply received but not applied: the graph properties are
     /// open and their history macro would absorb the import.
     ready: Option<ImportReply>,
+    /// Refused files that were left out of the import.
+    skipped: usize,
 }
 
 /// Transient state of the import window (see `stokesforge_app::app` for its
@@ -2846,22 +3165,10 @@ pub struct ImportState {
     pub paths: Vec<std::path::PathBuf>,
     /// Saved templates, loaded once when the window opens.
     pub store: stokesforge_import::RecipeStore,
-    /// Name under which to save the current recipe as a template (text
-    /// field of the window, distinct from `recipe.name`: we do not want to
-    /// overwrite the name of the loaded template until "Save Template"
-    /// has been clicked).
-    pub save_as_name: String,
-    /// Current step of the wizard.
-    pub step: ImportStep,
     /// File shown in the preview (index in `paths`).
     pub preview_index: usize,
-    /// Template whose deletion awaits a confirmation.
-    pub confirm_delete: Option<String>,
     /// Recently imported files, loaded at opening.
     pub recent: stokesforge_import::RecentFiles,
-    /// Recipe as it was when the template was loaded: serves to say
-    /// that it was modified without being saved.
-    baseline: stokesforge_import::ImportRecipe,
     /// Preview held during typing (S-T1, #224): the recipe as it
     /// was before the typing and the instant of the last change; as long as it
     /// is there, previews are computed on this recipe, not on `recipe`.
@@ -2871,6 +3178,23 @@ pub struct ImportState {
     /// Bytes of the chosen files, read once per path (the file
     /// is no longer reread each frame).
     bytes: std::cell::RefCell<ImportBytesCache>,
+    /// What the detector and the templates said about each file, and the
+    /// recipe edited per kind of file.
+    pub auto: ImportAuto,
+    /// The map of the file shown and the parse of each file, rebuilt only when
+    /// the file or the recipe changes.
+    pub(crate) cache: std::cell::RefCell<import_auto::ImportCache>,
+    /// What the screen is sure of, what it doubts, the templates in use.
+    pub checks: ImportChecks,
+    /// A column names line that is not just above the data (the recipe cannot
+    /// hold it, the grid remembers it).
+    pub names_unwired: Option<usize>,
+    /// The first-use guide is open.
+    pub guide_open: bool,
+    /// Which opening of the import window this is (a new number at each
+    /// `open_import`): the interface keys the state of its folds with it, so
+    /// that "Advanced" starts closed at each opening.
+    pub opening: u64,
 }
 
 /// Typing pause before a preview is recomputed (S-T1, #224), in seconds.
@@ -2912,23 +3236,10 @@ impl ImportState {
     }
 }
 
-/// Setting offered by the right-click on a line of the preview.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportLineAction {
-    /// "Start Data Here".
-    DataStartsHere,
-    /// "Use as Units Line".
-    UnitsLine,
-    /// "End Data Here" (the line is the first of the footer).
-    DataEndsHere,
-    /// "Disable Auto Data End".
-    NoAutoCut,
-}
-
 /// Bytes read per path (or the read failure message).
 type ImportBytesCache = std::collections::HashMap<PathBuf, Result<Arc<Vec<u8>>, ImportReadError>>;
 
-/// Why the import wizard cannot show a file: data, without a
+/// Why the import window cannot show a file: data, without a
 /// sentence — `errors::import::read_message` puts it into a sentence at display.
 #[derive(Debug, Clone)]
 pub enum ImportReadError {
@@ -2941,76 +3252,6 @@ pub enum ImportReadError {
     },
     /// The content of the file is not a readable table.
     Parse(stokesforge_import::ImportError),
-}
-
-/// The six steps of the import wizard, in the manner of Origin's ASCII wizard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ImportStep {
-    /// File(s) and template.
-    Files,
-    /// Delimiter and decimal.
-    Format,
-    /// Header and end of the data.
-    Header,
-    /// Column-by-column designation.
-    Columns,
-    /// Metadata to keep.
-    Metadata,
-    /// Destination and saving of the template.
-    Destination,
-}
-
-impl ImportStep {
-    /// All the steps, in order.
-    pub const ALL: [ImportStep; 6] = [
-        ImportStep::Files,
-        ImportStep::Format,
-        ImportStep::Header,
-        ImportStep::Columns,
-        ImportStep::Metadata,
-        ImportStep::Destination,
-    ];
-
-    /// Displayed title.
-    pub fn title(self) -> String {
-        match self {
-            ImportStep::Files => tr!("import-step-files-title"),
-            ImportStep::Format => tr!("import-step-format-title"),
-            ImportStep::Header => tr!("import-step-header-title"),
-            ImportStep::Columns => tr!("import-step-columns-title"),
-            ImportStep::Metadata => tr!("common-metadata"),
-            ImportStep::Destination => tr!("import-destination"),
-        }
-    }
-
-    fn index(self) -> usize {
-        Self::ALL.iter().position(|step| *step == self).unwrap_or(0)
-    }
-
-    /// Next step (the last one stays itself).
-    pub fn next(self) -> Self {
-        Self::ALL[(self.index() + 1).min(Self::ALL.len() - 1)]
-    }
-
-    /// Previous step (the first one stays itself).
-    pub fn previous(self) -> Self {
-        Self::ALL[self.index().saturating_sub(1)]
-    }
-}
-
-/// A column of the import result, for the "Columns" step.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ImportColumnPreview {
-    /// Name (column names line) or empty.
-    pub name: String,
-    /// Long name (subheader) or empty.
-    pub long_name: String,
-    /// Unit (subheader) or empty.
-    pub unit: String,
-    /// Mixed-type column (text kept).
-    pub mixed: bool,
-    /// First values, formatted.
-    pub samples: Vec<String>,
 }
 
 /// Kind of window of the [`ProjectTreeNode`] shown by the Project
@@ -3085,6 +3326,9 @@ pub struct AppState {
     handle: SessionHandle,
     /// Last snapshot received: frozen, to be refreshed after any mutation.
     snapshot: Snapshot,
+    /// Deferred drops of the server thread (see `Garbage`).
+    garbage: autosave::Garbage,
+    defer_garbage: bool,
     /// Sheet shown in the grid of each **open** workbook —
     /// the `Workbook -> Worksheet` selected in its own tab
     /// `app::tab::Tab::Book`. A workbook with no entry here (or
@@ -3224,6 +3468,10 @@ pub struct AppState {
     /// formula walks the sheets. The error, not the sentence: a language change
     /// is followed.
     formula_issue_memo: std::cell::RefCell<Option<FormulaIssueMemo>>,
+    /// Column ranks and row count of the worksheets drawn, per snapshot (#534): the
+    /// grid asks the selection about every cell, and walking the worksheet for each
+    /// made a frame of a 1000-column sheet cost seconds.
+    sheet_index_memo: std::cell::RefCell<Option<SheetIndexMemo>>,
     /// A comma range just rewritten in the F(x)= field of a column (#433): the
     /// grid takes it once and paints the orange state for 10 s.
     formula_rewrites: Vec<FormulaRewrite>,
@@ -3249,10 +3497,6 @@ pub struct AppState {
     /// whether the text received from egui is our own copy (replays the structure)
     /// or external text (see [`external_clipboard_from_text`]).
     clipboard_text: Option<String>,
-    /// A local copy in the detached viewport must be transferred once to
-    /// the root; without this flag, its stale copy would overwrite any more
-    /// recent copy made in another window at every frame.
-    clipboard_dirty: bool,
     /// Selection on which Delete has just **emptied** the cells (not yet
     /// deleted) — see [`AppState::consume_delete_key`]. `Some`
     /// between the two steps of a double press on Delete: a second
@@ -3302,6 +3546,16 @@ pub struct AppState {
     pending_full_copy: Option<NodeId>,
     /// Import in progress on a background thread.
     import_job: Option<ImportJob>,
+    /// A finished import is being applied by the server thread, with the lock
+    /// released (#475): a second import, a new project and the autosave wait.
+    import_applying: bool,
+    /// What the script's thread calls after sending its reply: wakes the server
+    /// thread at once instead of leaving it to its 50 ms look (#475). A plain
+    /// closure: the state knows nothing of the thread nor of egui.
+    waker: Option<Wake>,
+    /// Workbooks created by an import that the thread applied: the paint pass
+    /// opens them as windows (#475).
+    books_to_open: Vec<NodeId>,
     /// Start of a formula recalculation the interface did not wait for (#239);
     /// `None` when none is running. As long as it is set, the snapshot is
     /// not refreshed (the actor would answer only at the end) and the status bar
@@ -3455,11 +3709,11 @@ impl AppState {
             header_editing: None,
             formula_refusal_memo: std::cell::RefCell::new(None),
             formula_issue_memo: std::cell::RefCell::new(None),
+            sheet_index_memo: std::cell::RefCell::new(None),
             formula_rewrites: Vec::new(),
             seen_bound: 0,
             grid_clipboard: None,
             clipboard_text: None,
-            clipboard_dirty: false,
             delete_repeat: None,
             import_state: None,
             projects_to_open: Vec::new(),
@@ -3475,7 +3729,12 @@ impl AppState {
             column_use: None,
             pending_full_copy: None,
             import_job: None,
+            import_applying: false,
+            waker: None,
+            books_to_open: Vec::new(),
             recalc_since: None,
+            garbage: autosave::Garbage::default(),
+            defer_garbage: false,
             applied_revision: 0,
             session_lost: false,
             quit_without_prompt: false,
@@ -3496,29 +3755,6 @@ impl AppState {
         state.seed_low_r2();
         state.refresh_low_r2_groups();
         Ok(state)
-    }
-
-    /// Gives a detached viewport (workbook or note) its own transient
-    /// state — grid, cell or note entry —, backed by the same
-    /// actor. It can thus use exactly the same widgets as the
-    /// floating window without locking the root's state.
-    pub fn fork_for_detached_view(&self) -> SessionResult<Self> {
-        // Sender identity specific to the detached view: with a plain `clone`,
-        // its writes would be absorbed into a macro opened by the
-        // root (graph properties) then carried away by its undo
-        // (issue #21).
-        let mut view = Self::new(self.handle.with_new_identity(), self.path.clone())?;
-        view.snapshot = self.snapshot.clone();
-        view.selected_sheets = self.selected_sheets.clone();
-        view.renaming_sheet = self.renaming_sheet;
-        view.size_locks = self.size_locks.clone();
-        view.selection = self.selection.clone();
-        view.editing = self.editing.clone();
-        view.header_editing = self.header_editing.clone();
-        view.grid_clipboard = self.grid_clipboard.clone();
-        view.clipboard_text = self.clipboard_text.clone();
-        view.clipboard_dirty = false;
-        Ok(view)
     }
 
     /// Says in the status bar, as a warning kept until the next message (like
@@ -3572,77 +3808,23 @@ impl AppState {
         }
     }
 
-    /// Refreshes a viewport's read without touching its selection or
-    /// its entry buffers. The snapshot comes from the main state.
-    pub fn sync_detached_snapshot(&mut self, snapshot: Snapshot) {
-        self.snapshot = snapshot;
-        self.revalidate_selection();
+    /// A new sender identity for a detached window (#21, #475): a handle to the
+    /// same session that the actor does not take for the main window's. The
+    /// window keeps it and puts it into the state for its own pass only
+    /// ([`Self::replace_session_identity`]), so that a write it makes while the
+    /// main window holds a macro open is refused instead of absorbed into that
+    /// macro (and carried away by its undo).
+    #[must_use]
+    pub fn new_session_identity(&self) -> SessionHandle {
+        self.handle.with_new_identity()
     }
 
-    /// Synchronizes the tab editor without overwriting the local selection.
-    pub fn sync_detached_sheet_editor(&mut self, root: &Self) {
-        self.renaming_sheet = root.renaming_sheet;
-        self.size_locks = root.size_locks.clone();
-    }
-
-    /// Joins the interaction of a detached workbook to the main command
-    /// path before its deferred actions are dispatched.
-    ///
-    /// Returns the messages the local view recorded since the last drain (an
-    /// unreadable system clipboard, a refused write...): they are recorded here
-    /// too, at every level, and handed back so that the shell can show the
-    /// warnings and errors in the window they come from (#471).
-    pub fn adopt_detached_book_view(
-        &mut self,
-        source: &mut Self,
-        book: NodeId,
-    ) -> Vec<StatusMessage> {
-        if let Some(sheet) = source.selected_sheet_in(book) {
-            self.selected_sheets.insert(book, sheet);
-        }
-        for (sheet, _) in source.worksheets_of(book) {
-            if let Some(selection) = source.selection.get(&sheet) {
-                self.selection.insert(sheet, selection.clone());
-            } else {
-                self.selection.remove(&sheet);
-            }
-        }
-        if source.clipboard_dirty {
-            self.grid_clipboard = source.grid_clipboard.clone();
-            self.clipboard_text = source.clipboard_text.clone();
-            source.clipboard_dirty = false;
-        }
-        // The Ctrl+Shift+C question is asked in the main window (#306).
-        if let Some(sheet) = source.pending_full_copy.take() {
-            self.pending_full_copy = Some(sheet);
-        }
-        source.status = None;
-        let pulled: Vec<StatusMessage> = source.status_log.drain(..).collect();
-        for message in &pulled {
-            for _ in 0..message.count {
-                self.record(message.text.clone(), message.level);
-            }
-        }
-        pulled
-    }
-
-    /// The opposite way of [`Self::adopt_detached_book_view`]: once the
-    /// pass's actions are applied, hands the selection of the workbook's sheets
-    /// back to its local view. Without it, a move made by an action (Enter in a
-    /// cell selects the row below) is overwritten by the view's stale selection
-    /// at the next adoption. Returns whether the view changed.
-    pub fn return_selection_to_detached_view(&self, view: &mut Self, book: NodeId) -> bool {
-        let mut changed = false;
-        for (sheet, _) in self.worksheets_of(book) {
-            if view.selection.get(&sheet) != self.selection.get(&sheet) {
-                changed = true;
-                match self.selection.get(&sheet) {
-                    Some(selection) => view.selection.insert(sheet, selection.clone()),
-                    None => view.selection.remove(&sheet),
-                };
-            }
-        }
-        changed
+    /// Swaps the sender identity the state writes with; returns the previous
+    /// one. The shell pairs the two calls with a guard that gives it back, even
+    /// on a panic.
+    #[must_use]
+    pub fn replace_session_identity(&mut self, handle: SessionHandle) -> SessionHandle {
+        std::mem::replace(&mut self.handle, handle)
     }
 
     /// Last snapshot received.
@@ -3913,6 +4095,18 @@ impl AppState {
         cfg!(feature = "python")
     }
 
+    /// Calls the waker, if one is set: wakes the server thread now.
+    pub fn wake_server(&self) {
+        if let Some(wake) = &self.waker {
+            wake();
+        }
+    }
+
+    /// Sets what wakes the server thread when a script ends (#475).
+    pub fn set_waker(&mut self, waker: Wake) {
+        self.waker = Some(waker);
+    }
+
     /// True while a script is running (between [`Action::RunScript`] and the
     /// [`AppState::poll_script`] that collects its result).
     #[must_use]
@@ -3974,6 +4168,27 @@ impl AppState {
         self.snapshot.history.can_redo
     }
 
+    /// The columns and the row count of `sheet`, computed once per snapshot (#534).
+    fn sheet_index(&self, sheet: NodeId) -> std::sync::Arc<SheetIndex> {
+        let (revision, epoch) = (self.snapshot.revision, self.snapshot.epoch);
+        let mut memo = self.sheet_index_memo.borrow_mut();
+        let current = match memo.take() {
+            Some(current) if current.revision == revision && current.epoch == epoch => current,
+            _ => SheetIndexMemo {
+                revision,
+                epoch,
+                sheets: std::collections::HashMap::new(),
+            },
+        };
+        let current = memo.insert(current);
+        std::sync::Arc::clone(current.sheets.entry(sheet).or_insert_with(|| {
+            std::sync::Arc::new(SheetIndex {
+                ranks: ColumnRanks::new(&self.snapshot.tree, sheet),
+                rows: row_count_in(&self.snapshot.tree, sheet),
+            })
+        }))
+    }
+
     /// Columns of `sheet`, in model order: `(NodeId, name, type)`.
     /// Empty if `sheet` is not (or no longer) a sheet of this project.
     pub fn visible_columns(&self, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
@@ -4028,6 +4243,30 @@ impl AppState {
         (!rows.is_empty()).then_some(RowDragPayload { sheet, rows })
     }
 
+    /// The rows an **analysis** of the selection would take (#493): whole rows
+    /// (row-number gutter) of a sheet with at least one Y column, x' or not.
+    /// Without x' the transposed sheet numbers the columns 1, 2, 3... The
+    /// gestures that plot rows keep [`AppState::row_drag_payload`].
+    pub fn analysis_rows_target(&self, sheet: NodeId) -> Option<RowDragPayload> {
+        let selection = self.selection(sheet)?;
+        let tree = &self.snapshot.tree;
+        let has_y = tree.children(sheet).ok()?.iter().any(|id| {
+            tree.node(*id)
+                .and_then(|n| n.as_column())
+                .is_some_and(|c| c.meta().role == stokesforge_core::ColumnRole::Y)
+        });
+        if !selection.is_full_rows() || !has_y {
+            return None;
+        }
+        let row_count = self.row_count(sheet);
+        let rows: Vec<usize> = selection
+            .full_row_indices()
+            .into_iter()
+            .filter(|row| *row < row_count)
+            .collect();
+        (!rows.is_empty()).then_some(RowDragPayload { sheet, rows })
+    }
+
     /// The row drop waiting for the choice of the X axis (#166), with the
     /// number of rows concerned, or `None`.
     pub fn pending_row_drop(&self) -> Option<(NodeId, usize)> {
@@ -4040,7 +4279,7 @@ impl AppState {
     /// columns, not the length of the first: a sheet is not a
     /// rectangular table. 0 if `sheet` is not (or no longer) a sheet.
     pub fn row_count(&self, sheet: NodeId) -> usize {
-        row_count_in(&self.snapshot.tree, sheet)
+        self.sheet_index(sheet).rows
     }
 
     /// Index of the **entry row** of `sheet`: the empty row the grid always
@@ -4417,10 +4656,7 @@ impl AppState {
     /// for keyboard navigation ([`AppState::move_selection`]/
     /// [`AppState::move_selection_tab`]) as for [`AppState::paste`].
     fn column_order(&self, sheet: NodeId) -> Vec<NodeId> {
-        self.visible_columns(sheet)
-            .into_iter()
-            .map(|(id, _, _)| id)
-            .collect()
+        self.sheet_index(sheet).ranks.ids().to_vec()
     }
 
     /// Moves the selection of `sheet` by one cell in `direction` (arrow
@@ -4638,24 +4874,21 @@ impl AppState {
     /// A selection of whole columns (letter click, Ctrl+A) never contains the
     /// entry row ([`AppState::entry_row`]).
     pub fn is_selected(&self, sheet: NodeId, column: NodeId, row: usize) -> bool {
-        if row >= self.row_count(sheet)
-            && self
-                .selection
-                .get(&sheet)
-                .is_some_and(Selection::is_columns)
-        {
+        let Some(selection) = self.selection.get(&sheet) else {
+            return false;
+        };
+        let index = self.sheet_index(sheet);
+        if selection.is_columns() && row >= index.rows {
             return false;
         }
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.contains(&self.snapshot.tree, sheet, column, row))
+        selection.contains_ranked(&index.ranks, column, row)
     }
 
     /// True if `column` is selected entirely (click on its header
     /// letter).
     pub fn is_column_selected(&self, sheet: NodeId, column: NodeId) -> bool {
         self.selection.get(&sheet).is_some_and(|selection| {
-            selection.is_column_selected(&self.snapshot.tree, sheet, column)
+            selection.is_column_selected_ranked(&self.sheet_index(sheet).ranks, column)
         })
     }
 
@@ -4682,9 +4915,9 @@ impl AppState {
     /// [`AppState::is_column_selected`], which holds only for a direct click
     /// on the letter row.
     pub fn column_touched_by_selection(&self, sheet: NodeId, column: NodeId) -> bool {
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.touches_column(&self.snapshot.tree, sheet, column))
+        self.selection.get(&sheet).is_some_and(|selection| {
+            selection.touches_column_ranked(&self.sheet_index(sheet).ranks, column)
+        })
     }
 
     /// True if `row` is touched by the current selection of `sheet` —
@@ -4730,7 +4963,7 @@ impl AppState {
         field: HeaderField,
     ) -> bool {
         self.selection.get(&sheet).is_some_and(|selection| {
-            selection.is_header_field_selected(&self.snapshot.tree, sheet, column, field)
+            selection.is_header_field_selected_ranked(&self.sheet_index(sheet).ranks, column, field)
         })
     }
 
@@ -4895,7 +5128,6 @@ impl AppState {
         let text = grid_clipboard_to_text(&clipboard);
         self.grid_clipboard = Some(clipboard);
         self.clipboard_text = Some(text.clone());
-        self.clipboard_dirty = true;
         Some(text)
     }
 
@@ -4971,7 +5203,6 @@ impl AppState {
         let text = grid_clipboard_to_text(&clipboard);
         self.grid_clipboard = Some(clipboard);
         self.clipboard_text = Some(text.clone());
-        self.clipboard_dirty = true;
         Some(text)
     }
 
@@ -5130,6 +5361,11 @@ impl AppState {
                 }
                 _ => FormulaError::Cycle,
             });
+        }
+        if let Some(follow) = tree.formula_follow_error(column, None) {
+            // The source of a followed transposed sheet cannot calculate from
+            // it (#463): kept and uncomputed, like a loop.
+            return Some(follow);
         }
         if let Err(compile_error) = formula.compile() {
             // The kept text read strictly says why precisely (`Z` names no
@@ -5518,7 +5754,10 @@ impl AppState {
             return;
         }
         match self.handle.begin_macro(MacroKind::GraphProperties) {
-            Ok(_) => self.plot_macro_open = true,
+            Ok(_) => {
+                self.plot_macro_open = true;
+                self.refresh();
+            }
             Err(err) => self.fail(tr!(
                 "error-plot-settings-undo-group",
                 cause = errors::session::error_message(&err)
@@ -5550,6 +5789,27 @@ impl AppState {
         self.gesture(Self::commit_plot_edit_in_gesture);
     }
 
+    /// True if `draft` differs from the spec of `graph` in the model by the
+    /// part `same` copies back from the model alone (#499).
+    fn only_differs_by(
+        &self,
+        graph: NodeId,
+        draft: &PlotSpec,
+        same: impl Fn(&mut PanelSpec, &PanelSpec),
+    ) -> bool {
+        let Some(current) = self.plot_spec(graph) else {
+            return false;
+        };
+        if current.panels.len() != draft.panels.len() {
+            return false;
+        }
+        let mut aligned = draft.clone();
+        for (panel, original) in aligned.panels.iter_mut().zip(current.panels.iter()) {
+            same(panel, original);
+        }
+        aligned == current
+    }
+
     fn commit_plot_edit_in_gesture(&mut self) {
         let Some(edit) = self.plot_edit.clone() else {
             return;
@@ -5557,10 +5817,32 @@ impl AppState {
         if self.plot_spec(edit.graph).as_ref() == Some(&edit.spec) {
             return;
         }
-        self.dispatch(Action::SetPlotSpec {
-            graph: edit.graph,
-            spec: edit.spec.clone(),
-        });
+        let kind = if self.only_differs_by(edit.graph, &edit.spec, |panel, original| {
+            panel.legend.text = original.legend.text.clone();
+        }) {
+            // A change of the « Text from » setting alone has its own
+            // history label (#499).
+            Some(PlotEditKind::LegendText)
+        } else if self.only_differs_by(edit.graph, &edit.spec, |panel, original| {
+            panel.color_bar = original.color_bar.clone();
+        }) {
+            // Same for the colour bar alone (#499).
+            Some(PlotEditKind::ColorBar)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            self.execute(Command::EditPlotSpec {
+                graph: edit.graph,
+                spec: edit.spec.clone(),
+                kind,
+            });
+        } else {
+            self.dispatch(Action::SetPlotSpec {
+                graph: edit.graph,
+                spec: edit.spec.clone(),
+            });
+        }
         if let Some(current) = self.plot_edit.as_mut() {
             current.base = edit.spec;
         }
@@ -5730,6 +6012,14 @@ impl AppState {
         self.object_manager_open = open;
     }
 
+    /// Opens, for a test, the history macro of the graph properties with the
+    /// main window's sender and NO dialog: the state of #21 a detached window
+    /// must not slip a write into. [`Self::cancel_plot_settings`] rolls it back.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn open_root_macro_for_test(&mut self) {
+        self.begin_plot_macro();
+    }
+
     /// Scales (axes) listed in the Object Manager (#111), outside the project.
     pub fn object_manager_show_scales(&self) -> bool {
         self.object_manager_settings().show_scales
@@ -5848,10 +6138,10 @@ impl AppState {
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.creation_folder(),
                 name: None,
-                spec: PlotSpec {
+                spec: self.with_new_graph_defaults(PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
                     ..PlotSpec::empty("")
-                },
+                }),
             }),
             Action::SetFrameSize {
                 graph,
@@ -5864,7 +6154,16 @@ impl AppState {
                 widths,
                 heights,
                 figure,
-            } => self.set_grid_frames(graph, &widths, &heights, figure),
+                slack,
+            } => self.set_grid_frames(graph, &widths, &heights, figure, slack),
+            Action::PageEdgeReached => self.notice(tr!("status-page-edge-reached")),
+            Action::FitPageToLayout { graph } => self.fit_page_to_layout(graph),
+            Action::FitLayoutToPage { graph } => self.fit_layout_to_page(graph),
+            Action::MoveGridCell {
+                graph,
+                panel,
+                target,
+            } => self.move_grid_cell(graph, panel, target),
             Action::SetFreeLayout {
                 graph,
                 frames,
@@ -5971,6 +6270,7 @@ impl AppState {
             Action::DeleteSelectedCells { sheet } => self.delete_selected_cells(sheet),
             Action::Paste { sheet, text } => self.paste(sheet, text),
             Action::PasteAbsolute { sheet } => self.paste_absolute(sheet),
+            Action::PasteTransposed { sheet, text } => self.paste_transposed(sheet, text),
             Action::SelectAll { sheet } => self.select_all(sheet),
             Action::SetColumnLongName { column, text } => {
                 self.set_column_meta_field(column, |meta| meta.long_name = text);
@@ -6016,7 +6316,20 @@ impl AppState {
                 destination,
                 recipe,
                 paths,
-            } => self.start_import(destination, ImportSource::Menu(recipe), paths),
+            } => self.start_import(destination, ImportSource::Menu(Box::new(recipe)), paths),
+            Action::StartImportEach {
+                destination,
+                each,
+                skipped,
+            } => {
+                let paths = each.iter().map(|(path, _)| path.clone()).collect();
+                self.start_import(destination, ImportSource::Each(each), paths);
+                if skipped > 0 {
+                    if let Some(job) = &mut self.import_job {
+                        job.skipped = skipped;
+                    }
+                }
+            }
             Action::ReopenLastImport => self.reopen_last_import(),
             Action::ToggleOriginSheet { file, book, sheet } => {
                 self.toggle_origin_sheet(file, book, sheet);
@@ -6073,6 +6386,9 @@ impl AppState {
             Action::OpenRowAnalysis { preset, rows } => self.open_row_analysis(&preset, &rows),
             Action::RecalculateTranspose { sheet } => self.recalculate_transpose(sheet),
             Action::ConfirmTransposeRelink(accept) => self.confirm_transpose_relink(accept),
+            Action::SetTransposeAuto { sheet, auto } => {
+                self.execute(Command::SetTransposeAuto { sheet, auto });
+            }
             Action::OpenRecentAnalysis { index, run, target } => {
                 self.open_recent_analysis(index, run, target)
             }
@@ -6123,7 +6439,14 @@ impl AppState {
                 panel,
                 side,
                 columns,
-            } => self.add_cell(graph, panel, side, columns),
+            } => self.add_cell(graph, CellAnchor::Layer(panel), side, columns),
+            Action::AddCellAt {
+                graph,
+                row,
+                column,
+                side,
+                columns,
+            } => self.add_cell(graph, CellAnchor::Position(row, column), side, columns),
             Action::AddRowsToGraph {
                 graph,
                 panel,
@@ -6226,6 +6549,7 @@ impl AppState {
                     LayerArrange::Match(_) => PlotEditKind::MatchLayerSize,
                     LayerArrange::Distribute(_) => PlotEditKind::DistributeLayers,
                 };
+                let tree = std::sync::Arc::clone(&self.snapshot.tree);
                 self.edit_plot_object(graph, kind, |spec| match arrange {
                     LayerArrange::Align(edge) => {
                         stokesforge_core::compose::align_layers(spec, &targets, edge)
@@ -6235,7 +6559,7 @@ impl AppState {
                     }
                     LayerArrange::Distribute(axis) => {
                         let Some(frames) =
-                            crate::frame_sizes::distribute_frames(spec, &targets, axis)
+                            crate::frame_sizes::distribute_frames(&tree, spec, &targets, axis)
                         else {
                             return false;
                         };
@@ -6249,8 +6573,9 @@ impl AppState {
                 });
             }
             Action::SetLayerPlacement { graph, free } => {
+                let tree = std::sync::Arc::clone(&self.snapshot.tree);
                 self.edit_plot_object(graph, PlotEditKind::LayerPlacement, |spec| {
-                    crate::frame_sizes::set_placement_in_draft(spec, free)
+                    crate::frame_sizes::set_placement_in_draft(&tree, spec, free)
                 })
             }
             Action::PlaceSeries {
@@ -6362,6 +6687,9 @@ impl AppState {
                     T::Text(TextTarget::Legend { panel }) => {
                         (PlotSettingsTab::Legend, None, panel, None)
                     }
+                    T::Text(TextTarget::ColorBar { panel }) => {
+                        (PlotSettingsTab::Legend, None, panel, None)
+                    }
                     // The address is a field of the layer; the tab is named
                     // where the axis is drawn (#396).
                     T::Text(TextTarget::AxisTitle { panel, side }) => (
@@ -6386,6 +6714,11 @@ impl AppState {
                     _ => (PlotSettingsTab::Graph, None, 0, None),
                 };
                 self.open_plot_settings(graph, tab, axis);
+                if matches!(target, T::Text(TextTarget::ColorBar { .. })) {
+                    if let Some(settings) = self.plot_settings.as_mut() {
+                        settings.color_bar_unfold = true;
+                    }
+                }
                 if let Some(edit) = self.plot_edit.as_mut() {
                     edit.selected_panel = panel;
                     if let Some(series) = series {
@@ -6444,7 +6777,11 @@ impl AppState {
                 target,
                 shape,
             } => self.edit_annotations(graph, |spec| target.set(spec, *shape)),
-            Action::BeginShapeEdit => self.begin_plot_macro(),
+            Action::BeginShapeEdit => {
+                // An open entry becomes its own step before the macro (#533).
+                self.commit_open_entries();
+                self.begin_plot_macro();
+            }
             Action::EndShapeEdit { keep: true } => self.end_plot_macro(),
             Action::EndShapeEdit { keep: false } => self.abort_plot_macro(),
             Action::RemoveShape { graph, target } => {
@@ -6465,6 +6802,32 @@ impl AppState {
                 target,
                 anchor,
             } => self.edit_annotations(graph, |spec| target.set_anchor(spec, anchor)),
+            Action::SetColorBarSize {
+                graph,
+                panel,
+                length,
+                thickness,
+                anchor,
+            } => self.edit_plot_object(graph, PlotEditKind::ColorBar, |spec| {
+                let Some(bar) = spec
+                    .panels
+                    .get_mut(panel)
+                    .and_then(|panel| panel.color_bar.as_mut())
+                else {
+                    return false;
+                };
+                if let Some(length) = length {
+                    bar.length = ColorBarSpec::clamp_size(Some(length), ColorBarSpec::MIN_LENGTH);
+                }
+                if let Some(thickness) = thickness {
+                    bar.thickness =
+                        ColorBarSpec::clamp_size(Some(thickness), ColorBarSpec::MIN_THICKNESS);
+                }
+                if anchor.is_some() {
+                    bar.anchor = anchor;
+                }
+                true
+            }),
             Action::SetTextFont {
                 graph,
                 target,
@@ -6590,6 +6953,17 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetNewGraphLegendText(text) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_new_graph_legend_text(text)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetNewGraphDecimalComma(comma) => {
                 if let Err(error) = self
                     .object_manager_preferences
@@ -6661,6 +7035,14 @@ impl AppState {
     /// See [`Action::OpenPlotSettings`]. Switching to another graph first
     /// commits the draft of the previous one; a graph that no longer exists (or
     /// is not a graph) leaves everything as it is.
+    /// The Legend page has unfolded the colour bar section as asked: the
+    /// request is spent.
+    pub fn spend_color_bar_unfold(&mut self) {
+        if let Some(settings) = self.plot_settings.as_mut() {
+            settings.color_bar_unfold = false;
+        }
+    }
+
     fn open_plot_settings(&mut self, graph: NodeId, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
         if self.plot_spec(graph).is_none() {
             return;
@@ -6674,6 +7056,10 @@ impl AppState {
             self.end_plot_macro();
             self.plot_edit = None;
         }
+        // An entry still open (cell, header, note) becomes its own undo step
+        // BEFORE the macro opens: Cancel must never roll back what the user
+        // typed (#533). A refused value stays open, as on Save.
+        self.commit_open_entries();
         self.begin_plot_macro();
         self.begin_plot_edit(graph);
         let current_axis = self
@@ -6684,6 +7070,7 @@ impl AppState {
             graph,
             tab,
             axis: axis.or(current_axis).unwrap_or(PlotAxis::Bottom),
+            color_bar_unfold: false,
         });
     }
 
@@ -6723,7 +7110,8 @@ impl AppState {
                     self.copied_objects.clear();
                 }
                 let reopened = self.snapshot.epoch != snapshot.epoch;
-                self.snapshot = snapshot;
+                let previous = std::mem::replace(&mut self.snapshot, snapshot);
+                self.defer_drop(previous);
                 self.tell_bound_formulas(reopened);
                 self.revalidate_selection();
                 self.refresh_low_r2_groups();
@@ -6806,24 +7194,20 @@ impl AppState {
     }
 
     /// Opens the import window for `book`. Loads the [`stokesforge_import::
-    /// RecipeStore`] from disk once for the whole time
-    /// the window is open (never reloaded every frame) and
-    /// starts on its first saved template if there is one, otherwise on
-    /// a permissive default recipe ([`stokesforge_import::ImportRecipe::
-    /// new`]). Replaces without confirmation an import window already open
-    /// (same pattern as [`AppState::begin_edit`] for a cell
-    /// entry).
+    /// RecipeStore`] from disk once for the whole time the window is open
+    /// (never reloaded every frame). Every file the window receives picks its
+    /// own recipe: a saved template whose conditions it meets, else what the
+    /// detector read. Replaces without confirmation an import window already
+    /// open.
     pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
-        let active_book = book.into();
-        // Start on the first saved template, otherwise on the permissive
-        // recipe.
+        // A book that no longer exists (its last import was undone by « Reopen
+        // Last Import », or it was deleted) is no destination.
+        let active_book = book
+            .into()
+            .filter(|book| self.snapshot.tree.node(*book).is_some());
         let store = stokesforge_import::RecipeStore::load();
-        let recipe = store.recipes().first().cloned().unwrap_or_else(|| {
-            stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
-        });
-        let mut recipe = recipe;
+        let mut recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
         recipe.unify_header();
-        let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
             active_book,
             destination: active_book.map_or(
@@ -6832,26 +7216,35 @@ impl AppState {
             ),
             paths: Vec::new(),
             store,
-            save_as_name,
-            step: ImportStep::Files,
             preview_index: 0,
-            confirm_delete: None,
             recent: stokesforge_import::RecentFiles::load(),
-            baseline: recipe.clone(),
             held_preview: None,
             seen_recipe: recipe.clone(),
             recipe,
             bytes: Default::default(),
+            auto: ImportAuto::default(),
+            cache: Default::default(),
+            checks: ImportChecks::default(),
+            names_unwired: None,
+            guide_open: !self.object_manager_preferences.import_guide_hidden(),
+            opening: {
+                static OPENINGS: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
+                OPENINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
         });
     }
 
     /// Handles a file drop ([`Action::DropFiles`]). The `.stf` files are put
     /// in a queue for opening ([`AppState::take_projects_to_open`]). The
-    /// other files go through [`AppState::start_import`]: read on the
-    /// background thread with the recognized template, otherwise the last one used, failing
-    /// that the permissive recipe; those that read correctly go off in a
-    /// single cancellable import, the others open the import window
-    /// pre-filled to be set by hand.
+    /// other files go through [`AppState::start_import`], which reads each
+    /// with `stokesforge_import::recipe_for_file` (a saved template whose
+    /// conditions it meets, else the detector) on the background thread.
+    ///
+    /// If **any** file needs a look (a doubt left after the answers already
+    /// remembered, a refusal, a table that does not read), nothing is imported
+    /// and the import window opens on **all** the dropped files, each with the
+    /// recipe chosen for it. Otherwise everything is imported without a window.
     fn drop_files(&mut self, paths: Vec<PathBuf>, target_book: Option<NodeId>) {
         // An OS drop is not blocked by egui's modal layer, notably
         // from the detached explorer. The root owns the graph's macro:
@@ -6867,16 +7260,15 @@ impl AppState {
             let (origin, others): (Vec<PathBuf>, Vec<PathBuf>) = plan
                 .data
                 .into_iter()
-                .partition(|path| stokesforge_importer::is_origin_path(path));
+                .partition(|path| stokesforge_importer::is_origin_file(path));
             if !others.is_empty() {
                 self.warn(tr!("status-origin-drop-refused"));
             }
             self.route_origin_paths(origin);
             return;
         }
-        // The wizard is open: the drop adds the files to it instead of
-        // importing them on top (an Origin project among them goes to the
-        // chooser, see `add_import_paths`).
+        // The window is open: the drop adds the files to it instead of
+        // importing them on top.
         if self.import_state.is_some() {
             self.add_import_paths(plan.data);
             return;
@@ -6884,25 +7276,16 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
-        let fallback = self
-            .last_import
-            .as_ref()
-            .map(|last| last.recipe.clone())
-            .unwrap_or_else(|| {
-                stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
-            });
         self.start_import(
             plan.destination,
-            ImportSource::Drop {
-                fallback,
-                target_book,
-            },
+            ImportSource::Drop { target_book },
             plan.data,
         );
     }
 
     /// Starts the reading and analysis of the files on a background thread: single
-    /// entry point of the menu import ([`Action::StartImport`]) and of the drop.
+    /// entry point of the menu import ([`Action::StartImport`]), of the import
+    /// window ([`Action::StartImportEach`]) and of the drop.
     fn start_import(
         &mut self,
         destination: ImportDestination,
@@ -6912,7 +7295,7 @@ impl AppState {
         if paths.is_empty() {
             return;
         }
-        if self.import_job.is_some() {
+        if self.import_job.is_some() || self.import_applying {
             self.fail(tr!("error-import-running"));
             return;
         }
@@ -6923,67 +7306,94 @@ impl AppState {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let dropped = match &source {
-            ImportSource::Menu(_) => None,
-            ImportSource::Drop { target_book, .. } => Some(*target_book),
+            ImportSource::Menu(_) | ImportSource::Each(_) => None,
+            ImportSource::Drop { target_book } => Some(*target_book),
         };
         let spawned = thread::Builder::new()
             .name("stokesforge-app-import".to_owned())
             .spawn(move || {
                 let mut reply = ImportReply {
                     items: Vec::new(),
-                    unreadable: Vec::new(),
+                    for_window: Vec::new(),
                     models: Vec::new(),
                     origin: Vec::new(),
                 };
-                // One template per file for a drop: the automatic choice
-                // (extension, name, content signature), otherwise the last
-                // template actually used, otherwise the permissive recipe.
-                let store = match &source {
-                    ImportSource::Drop { .. } => Some(stokesforge_import::RecipeStore::load()),
-                    ImportSource::Menu(_) => None,
-                };
-                for path in paths {
-                    if worker_stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
+                let stopped = || worker_stop.load(std::sync::atomic::Ordering::Relaxed);
+                // An Origin project has no recipe: the chooser takes it.
+                let (origin_paths, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths
+                    .into_iter()
+                    .partition(|path| stokesforge_importer::is_origin_file(path));
+                for path in origin_paths {
+                    let read = stokesforge_importer::read_origin_file(&path).map(Arc::new);
+                    reply.origin.push((path, read));
+                    worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                match &source {
+                    ImportSource::Menu(recipe) => {
+                        for path in &paths {
+                            if stopped() {
+                                break;
+                            }
+                            reply.items.extend(import_items(path, recipe));
+                            worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
-                    // An Origin project has no recipe: the chooser takes it.
-                    if stokesforge_importer::is_origin_path(&path) {
-                        let read = stokesforge_importer::read_origin_file(&path).map(Arc::new);
-                        reply.origin.push((path, read));
-                        worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        continue;
+                    ImportSource::Each(each) => {
+                        for (path, recipe) in each {
+                            if stopped() {
+                                break;
+                            }
+                            reply.items.extend(import_items(path, recipe));
+                            worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
-                    match (&source, &store) {
-                        (ImportSource::Drop { fallback, .. }, Some(store)) => {
-                            let bytes = std::fs::read(&path).ok();
-                            let mut recipe = bytes
-                                .as_deref()
-                                .and_then(|bytes| {
-                                    stokesforge_import::choose_recipe(store.recipes(), &path, bytes)
-                                        .cloned()
-                                })
-                                .unwrap_or_else(|| fallback.clone());
-                            // The drop gesture adds one sheet per file:
-                            // the replace or merge options of the
-                            // last wizard must not change its
-                            // destination nor overwrite an existing sheet.
-                            recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
-                            recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
-                            if bytes.as_deref().is_some_and(|b| reads_well(b, &recipe)) {
+                    ImportSource::Drop { .. } => {
+                        // First every file is looked at: one recipe per file,
+                        // from the template store or the detector.
+                        let store = stokesforge_import::RecipeStore::load();
+                        let mut chosen = Vec::new();
+                        let mut needs_window = false;
+                        for path in &paths {
+                            if stopped() {
+                                return;
+                            }
+                            let bytes = std::fs::read(path).ok();
+                            let found = bytes.as_deref().and_then(|bytes| {
+                                stokesforge_import::recipe_for_file(&store, path, bytes, None).ok()
+                            });
+                            match (found, bytes.as_deref()) {
+                                (Some(found), Some(bytes))
+                                    if reads_well(bytes, &found.recipe)
+                                        && !import_check::drop_needs_a_look(
+                                            path, bytes, &found, &store,
+                                        ) =>
+                                {
+                                    chosen.push((path.clone(), found.recipe));
+                                }
+                                _ => needs_window = true,
+                            }
+                        }
+                        if needs_window {
+                            reply.for_window = paths.clone();
+                        } else {
+                            for (path, mut recipe) in chosen {
+                                if stopped() {
+                                    break;
+                                }
+                                // The drop gesture adds one sheet per file:
+                                // the replace or merge options of the
+                                // last import must not change its
+                                // destination nor overwrite an existing sheet.
+                                recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
+                                recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
                                 if !reply.models.contains(&recipe.name) {
                                     reply.models.push(recipe.name.clone());
                                 }
                                 reply.items.extend(import_items(&path, &recipe));
-                            } else {
-                                reply.unreadable.push(path);
+                                worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             }
                         }
-                        (ImportSource::Menu(recipe), _) => {
-                            reply.items.extend(import_items(&path, recipe));
-                        }
-                        (ImportSource::Drop { .. }, None) => {}
                     }
-                    worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 let _ = reply_tx.send(reply);
             });
@@ -6998,6 +7408,7 @@ impl AppState {
                     started: std::time::Instant::now(),
                     reply,
                     ready: None,
+                    skipped: 0,
                 });
                 self.progress(tr!("status-import-progress", done = 0, total = total));
             }
@@ -7042,6 +7453,23 @@ impl AppState {
     /// the analysis is done, creates the sheets. Returns true if the import has just
     /// been applied. Never blocks.
     pub fn poll_import(&mut self) -> bool {
+        if !self.poll_import_progress() {
+            return false;
+        }
+        // The graph properties hold the root's history macro:
+        // we keep the work and apply it when they close.
+        if self.plot_settings.is_some() {
+            return false;
+        }
+        // Applying the result is a gesture of its own (#453).
+        self.gesture(Self::apply_ready_import)
+    }
+
+    /// The first half of [`AppState::poll_import`], which creates nothing
+    /// (#475, the server thread calls it): collects the answer of the analysis
+    /// thread if it came, else says the progress. Returns true if the analysis
+    /// is done (its result waits to be applied by the paint pass).
+    pub(crate) fn poll_import_progress(&mut self) -> bool {
         let Some(job) = &mut self.import_job else {
             return false;
         };
@@ -7063,13 +7491,7 @@ impl AppState {
                 }
             }
         }
-        // The graph properties hold the root's history macro:
-        // we keep the work and apply it when they close.
-        if self.plot_settings.is_some() {
-            return false;
-        }
-        // Applying the result is a gesture of its own (#453).
-        self.gesture(Self::apply_ready_import)
+        true
     }
 
     /// The second half of [`AppState::poll_import`]: the analysis is done,
@@ -7082,36 +7504,84 @@ impl AppState {
             return false;
         };
         let origin = std::mem::take(&mut reply.origin);
-        // A job made of Origin projects only has nothing for the recipes: it
-        // must not open an empty "Import" entry nor say "0 of 0".
-        let origin_only =
-            reply.items.is_empty() && reply.unreadable.is_empty() && !origin.is_empty();
-        let applied = !origin_only && (job.dropped.is_none() || !reply.items.is_empty());
+        let applied = Self::import_is_applied(&job, &reply, &origin);
         if applied {
-            let count = reply.items.len();
-            self.apply_import(job.destination, reply.items);
-            if job.dropped.is_some() && !self.gesture_failed() {
-                self.notice(tr!(
-                    "status-import-dropped",
-                    count = count,
-                    models = reply.models.join(", ")
-                ));
-            }
+            let (destination, dropped, skipped) = (job.destination, job.dropped, job.skipped);
+            self.import_batch(
+                destination,
+                dropped.is_some(),
+                skipped,
+                reply.items,
+                &reply.models,
+            );
         }
-        if let Some(target_book) = job.dropped {
-            if !reply.unreadable.is_empty() {
-                if self.import_state.is_some() {
-                    self.add_import_paths(reply.unreadable);
-                } else {
+        self.import_leftovers(job.dropped, reply.for_window, origin);
+        applied
+    }
+
+    /// Does this reply create anything? A job made of Origin projects only has
+    /// nothing for the recipes: it must not open an empty "Import" entry nor
+    /// say "0 of 0".
+    fn import_is_applied(
+        job: &ImportJob,
+        reply: &ImportReply,
+        origin: &[origin_import::OriginRead],
+    ) -> bool {
+        let origin_only =
+            reply.items.is_empty() && reply.for_window.is_empty() && !origin.is_empty();
+        !origin_only && (job.dropped.is_none() || !reply.items.is_empty())
+    }
+
+    /// The commands of a finished import and the messages that go with them.
+    /// Runs on the state of the paint pass (no server thread) or on the scratch
+    /// state of [`import_apply`] (#475).
+    fn import_batch(
+        &mut self,
+        destination: ImportDestination,
+        dropped: bool,
+        skipped: usize,
+        items: Vec<ImportItem>,
+        models: &[String],
+    ) {
+        let count = items.len();
+        self.apply_import(destination, items);
+        if skipped > 0 {
+            self.warn(tr!("status-import-skipped", count = skipped));
+        }
+        if dropped && !self.gesture_failed() {
+            self.notice(tr!(
+                "status-import-dropped",
+                count = count,
+                models = models.join(", ")
+            ));
+        }
+    }
+
+    /// What a finished import leaves for the windows: files that the import
+    /// window takes over, Origin projects for the chooser. No command.
+    fn import_leftovers(
+        &mut self,
+        dropped: Option<Option<NodeId>>,
+        for_window: Vec<PathBuf>,
+        origin: Vec<origin_import::OriginRead>,
+    ) {
+        let mut waiting = 0;
+        if let Some(target_book) = dropped {
+            if !for_window.is_empty() {
+                if self.import_state.is_none() {
                     self.open_import(target_book);
-                    if let Some(import) = &mut self.import_state {
-                        import.paths = reply.unreadable;
-                    }
+                }
+                self.add_import_paths(for_window);
+                // The chooser waits behind the window the drop just opened.
+                if self.import_state.is_some() {
+                    waiting = origin.iter().filter(|read| read.1.is_ok()).count();
                 }
             }
         }
         self.add_origin_reads(origin);
-        applied
+        if waiting > 0 {
+            self.notice(tr!("status-import-origin-after-window", count = waiting));
+        }
     }
 
     /// Files imported successfully since the last call, for the
@@ -7284,6 +7754,7 @@ impl AppState {
     pub fn can_reopen_last_import(&self) -> bool {
         (self.last_import.is_some() || self.last_origin_import.is_some())
             && self.import_job.is_none()
+            && !self.import_applying
     }
 
     /// [`Action::ReopenLastImport`]: undoes the last import if it is still
@@ -7310,16 +7781,34 @@ impl AppState {
             _ => None,
         };
         self.open_import(book);
+        // Every file comes back and is read again (detector, templates), then
+        // gets back the recipe it was imported with.
+        self.add_import_paths(last.each.iter().map(|(path, _)| path.clone()).collect());
         if let Some(import) = &mut self.import_state {
-            import.recipe = last.recipe.clone();
-            import.baseline = last.recipe;
-            import.save_as_name = import.recipe.name.clone();
+            for (index, (path, recipe)) in last.each.iter().enumerate() {
+                // Reopened in the import window: current reading of the
+                // sub-header roles.
+                let mut recipe = recipe.clone();
+                recipe.adopt_joined_lines();
+                if let Some(Ok(found)) = import.auto.sniffs.get(path) {
+                    import
+                        .auto
+                        .kind_recipes
+                        .insert(found.kind.clone(), recipe.clone());
+                }
+                if let Some(choice) = import.auto.choices.get_mut(path) {
+                    choice.recipe = recipe.clone();
+                }
+                if index == 0 {
+                    import.seen_recipe = recipe.clone();
+                    import.recipe = recipe;
+                }
+            }
             if let ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll =
                 last.destination
             {
                 import.destination = last.destination;
             }
-            import.paths = last.paths;
         }
         self.notice(if undone {
             tr!("status-import-reopened-undone")
@@ -7359,31 +7848,6 @@ impl AppState {
         self.import_state = None;
     }
 
-    /// Starts over from a new permissive recipe (the "Reset" button).
-    /// No effect if the import window is not open.
-    pub fn new_import_recipe(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
-            state.baseline = state.recipe.clone();
-            state.save_as_name = state.recipe.name.clone();
-        }
-    }
-
-    /// Loads the template `name` of the `RecipeStore` into the recipe being
-    /// edited (selection in the drop-down list). No effect if `name`
-    /// is not a saved template, or if the window is not open.
-    pub fn select_import_recipe(&mut self, name: &str) {
-        if let Some(state) = &mut self.import_state {
-            if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
-                let mut recipe = recipe.clone();
-                recipe.unify_header();
-                state.recipe = recipe.clone();
-                state.baseline = recipe.clone();
-                state.save_as_name = recipe.name.clone();
-            }
-        }
-    }
-
     /// Replaces the chosen files ("Choose Files to Import", native picker
     /// opened by the window layer — `rfd` is a UI dependency,
     /// it has no place here). No effect if the window is not
@@ -7394,22 +7858,19 @@ impl AppState {
             state.paths = paths;
             state.preview_index = 0;
             state.bytes.borrow_mut().clear();
+            state.auto = ImportAuto::default();
+            state.checks = ImportChecks::default();
         }
         self.close_wizard_if_emptied(routed);
+        self.auto_sync_shown();
     }
 
-    /// Adds `paths` to the wizard's files (drop while it is
-    /// open, "Add Files…"), without duplicates.
-    ///
-    /// At the **first** addition, if the current template has not been modified, the
-    /// automatic choice of the template (extension, name, content signature)
-    /// can replace it: the message says which one was chosen.
+    /// Adds `paths` to the files of the import window (drop while it is
+    /// open, "Add Files…"), without duplicates. The detector reads each new
+    /// file once, and a saved template whose conditions it meets is applied
+    /// to it.
     pub fn add_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
         let (paths, routed) = self.take_origin_paths_out_of_wizard(paths);
-        let was_empty = self
-            .import_state
-            .as_ref()
-            .is_some_and(|state| state.paths.is_empty());
         if let Some(state) = &mut self.import_state {
             for path in paths {
                 if !state.paths.contains(&path) {
@@ -7417,33 +7878,8 @@ impl AppState {
                 }
             }
         }
-        if was_empty && !self.import_recipe_modified() {
-            self.choose_import_recipe_automatically();
-        }
+        self.auto_sync_shown();
         self.close_wizard_if_emptied(routed);
-    }
-
-    /// Chooses, from the file shown, the template that matches it
-    /// (`stokesforge_import::choose_recipe`) and loads it as the current recipe.
-    /// No effect if no template matches.
-    fn choose_import_recipe_automatically(&mut self) {
-        let Some(path) = self.import_preview_path() else {
-            return;
-        };
-        let Ok(bytes) = self.import_bytes(&path) else {
-            return;
-        };
-        let Some(state) = &self.import_state else {
-            return;
-        };
-        let Some(chosen) =
-            stokesforge_import::choose_recipe(state.store.recipes(), &path, &bytes).cloned()
-        else {
-            return;
-        };
-        let name = chosen.name.clone();
-        self.select_import_recipe(&name);
-        self.notice(tr!("status-template-chosen", name = name));
     }
 
     /// Writes the current template to `path` (JSON) to share it.
@@ -7489,19 +7925,17 @@ impl AppState {
             }
         };
         recipe.unify_header();
+        // A template file is not read by the store loader: adopt here.
+        recipe.adopt_joined_lines();
         let Some(state) = &mut self.import_state else {
             return;
         };
         let name = recipe.name.clone();
         state.store.upsert(recipe.clone());
+        // The criteria an older template carried are kept as conditions, not automatic.
+        state.store.adopt_old_criteria(&name);
         let saved = state.store.save();
-        // Like `save_import_recipe`: without a successful write, keep the old
-        // reference so that the imported template stays "modified" (unsaved).
-        if saved.is_ok() {
-            state.baseline = recipe.clone();
-        }
         state.recipe = recipe;
-        state.save_as_name = name.clone();
         match saved {
             Ok(()) => self.notice(tr!("status-template-imported", name = name)),
             Err(err) => self.fail(tr!(
@@ -7518,8 +7952,15 @@ impl AppState {
                 let path = state.paths.remove(index);
                 state.bytes.borrow_mut().remove(&path);
                 state.preview_index = state.preview_index.min(state.paths.len().saturating_sub(1));
+                state.auto.sniffs.remove(&path);
+                state.auto.choices.remove(&path);
+                state.checks.forget_file(&path);
+                if state.auto.current.as_ref() == Some(&path) {
+                    state.auto.current = None;
+                }
             }
         }
+        self.auto_sync_shown();
     }
 
     /// Chooses the file shown in the preview.
@@ -7529,20 +7970,7 @@ impl AppState {
                 state.preview_index = index;
             }
         }
-    }
-
-    /// Moves to the next / previous step of the wizard.
-    pub fn import_step_forward(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.step = state.step.next();
-        }
-    }
-
-    /// See [`AppState::import_step_forward`].
-    pub fn import_step_back(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.step = state.step.previous();
-        }
+        self.auto_sync_shown();
     }
 
     /// Bytes of file `path`, read only once then kept: the preview
@@ -7579,212 +8007,20 @@ impl AppState {
     /// Encoding detected for the file shown in the preview.
     pub fn import_encoding(&self) -> Option<&'static str> {
         let path = self.import_preview_path()?;
-        let bytes = self.import_bytes(&path).ok()?;
-        stokesforge_import::detect_encoding(&bytes)
-    }
-
-    /// What the import would give for each chosen file, with the current
-    /// recipe: `Ok` with the number of rows, or the error that awaits it —
-    /// shown **before** the click on Import.
-    pub fn import_file_statuses(&self) -> Vec<(PathBuf, Result<usize, ImportReadError>)> {
-        let Some(state) = self.import_state.as_ref() else {
-            return Vec::new();
-        };
-        state
-            .paths
-            .iter()
-            .map(|path| {
-                let status = self.import_bytes(path).and_then(|bytes| {
-                    stokesforge_import::parse(&bytes, &state.recipe)
-                        .map(|table| table.row_count())
-                        .map_err(ImportReadError::Parse)
-                });
-                (path.clone(), status)
-            })
-            .collect()
-    }
-
-    /// The current template differs from the one that was loaded or saved.
-    pub fn import_recipe_modified(&self) -> bool {
-        self.import_state
-            .as_ref()
-            .is_some_and(|state| state.recipe != state.baseline)
-    }
-
-    /// Requests the deletion of template `name` (it takes place only on
-    /// confirmation, [`AppState::confirm_delete_import_recipe`]).
-    pub fn request_delete_import_recipe(&mut self, name: &str) {
-        if let Some(state) = &mut self.import_state {
-            state.confirm_delete = Some(name.to_string());
-        }
-    }
-
-    /// Cancels the deletion request.
-    pub fn cancel_delete_import_recipe(&mut self) {
-        if let Some(state) = &mut self.import_state {
-            state.confirm_delete = None;
-        }
-    }
-
-    /// Deletes the template whose deletion was requested.
-    pub fn confirm_delete_import_recipe(&mut self) {
-        let name = self
+        // Cached: the detection reads the whole file.
+        if let Some(found) = self
             .import_state
-            .as_mut()
-            .and_then(|state| state.confirm_delete.take());
-        if let Some(name) = name {
-            self.delete_import_recipe(&name);
+            .as_ref()
+            .and_then(|state| state.cache.borrow().encoding.get(&path).copied())
+        {
+            return found;
         }
-    }
-
-    /// Columns of the import result of the file shown, with their first
-    /// values — "Columns" step.
-    pub fn import_column_previews(
-        &self,
-    ) -> Option<Result<Vec<ImportColumnPreview>, ImportReadError>> {
-        let table = self.import_preview()?;
-        Some(table.map(|table| {
-            table
-                .columns
-                .iter()
-                .map(|column| ImportColumnPreview {
-                    name: column.name.clone().unwrap_or_default(),
-                    long_name: column.long_name.clone().unwrap_or_default(),
-                    unit: column.unit.clone().unwrap_or_default(),
-                    mixed: column.texts.iter().any(Option::is_some),
-                    samples: column
-                        .values
-                        .iter()
-                        .zip(&column.texts)
-                        .take(3)
-                        .map(|(value, text)| match text {
-                            Some(text) => text.clone(),
-                            None if value.is_nan() => String::new(),
-                            None => format!("{value}"),
-                        })
-                        .collect(),
-                })
-                .collect()
-        }))
-    }
-
-    /// All the metadata the file shown could provide (header
-    /// and footer, without exclusion) — "Metadata" step, to tick
-    /// what is kept.
-    pub fn import_available_metadata(&self) -> Vec<stokesforge_import::MetadataLine> {
-        let Some(state) = self.import_state.as_ref() else {
-            return Vec::new();
-        };
-        let Some(path) = self.import_preview_path() else {
-            return Vec::new();
-        };
-        let Ok(bytes) = self.import_bytes(&path) else {
-            return Vec::new();
-        };
-        let mut recipe = state.recipe.clone();
-        recipe.keep_header_metadata = true;
-        recipe.keep_footer_metadata = true;
-        recipe.excluded_metadata.clear();
-        stokesforge_import::parse(&bytes, &recipe)
-            .map(|table| table.metadata().to_vec())
-            .unwrap_or_default()
-    }
-
-    /// Setting from a right-click on line `number` (1-based, number in the
-    /// file) of the preview. Leading blank lines do not count in the header
-    /// (as at import): the offset comes from the first line shown.
-    pub fn import_line_action(&mut self, action: ImportLineAction, number: usize) {
-        let Some(Ok(preview)) = self.import_line_preview() else {
-            return;
-        };
-        let Some(first) = preview.lines.first().map(|line| line.number) else {
-            return;
-        };
-        let Some(state) = &mut self.import_state else {
-            return;
-        };
-        let recipe = &mut state.recipe;
-        let header_total =
-            recipe.header_layout.main_header_lines + recipe.header_layout.subheader_lines;
-        let data_start = first + header_total + usize::from(recipe.has_column_header_row);
-        let offset = number.saturating_sub(first);
-        match action {
-            ImportLineAction::DataStartsHere => {
-                recipe.header = stokesforge_import::HeaderSkip::None;
-                let sub = recipe.header_layout.subheader_lines.min(offset);
-                recipe.header_layout.subheader_lines = sub;
-                recipe.header_layout.main_header_lines = offset - sub;
-                recipe.header_layout.auto_detect = false;
-            }
-            ImportLineAction::UnitsLine => {
-                // The line and those after it, up to the data, form the
-                // subheader; the line gives the units.
-                recipe.header = stokesforge_import::HeaderSkip::None;
-                let total = header_total.max(offset + 1);
-                recipe.header_layout.main_header_lines = offset;
-                recipe.header_layout.subheader_lines = total - offset;
-                recipe.header_layout.auto_detect = false;
-                recipe.subheader_roles.same_line_name_unit = false;
-                recipe.subheader_roles.unit =
-                    Some(stokesforge_import::SubheaderLineRange::single(1));
-            }
-            ImportLineAction::DataEndsHere => {
-                if number >= data_start {
-                    recipe.data_end =
-                        stokesforge_import::DataEnd::LinesAfterHeader(number - data_start);
-                }
-            }
-            ImportLineAction::NoAutoCut => recipe.data_end = stokesforge_import::DataEnd::None,
+        let bytes = self.import_bytes(&path).ok()?;
+        let found = stokesforge_import::detect_encoding(&bytes);
+        if let Some(state) = self.import_state.as_ref() {
+            state.cache.borrow_mut().encoding.insert(path, found);
         }
-    }
-
-    /// Saves the recipe being edited as a template named `save_as_name` (text
-    /// field of the window) in the `RecipeStore`, and persists the store to
-    /// disk. A write failure (config folder unreachable) becomes a
-    /// [`StatusMessage`], never a panic. No effect if the window is not open
-    /// or the name is empty.
-    pub fn save_import_recipe(&mut self) {
-        let Some(state) = &mut self.import_state else {
-            return;
-        };
-        let name = state.save_as_name.trim().to_string();
-        if name.is_empty() {
-            self.fail(tr!("error-template-name-required"));
-            return;
-        }
-        state.recipe.name = name;
-        state.store.upsert(state.recipe.clone());
-        let save_result = state.store.save();
-        let saved_name = state.recipe.name.clone();
-        if let Err(err) = save_result {
-            self.fail(tr!(
-                "error-template-save",
-                cause = errors::io::error_message(&err)
-            ));
-            return;
-        }
-        // The "modified" witness compares with the last successful save, not
-        // only with the template loaded at opening. On failure, keep the old
-        // reference so as not to announce a save.
-        state.baseline = state.recipe.clone();
-        self.notice(tr!("status-template-saved", name = saved_name));
-    }
-
-    /// Deletes the template `name` from the `RecipeStore` and persists the
-    /// store to disk. Same failure policy as [`AppState::save_import_recipe`].
-    pub fn delete_import_recipe(&mut self, name: &str) {
-        let Some(state) = &mut self.import_state else {
-            return;
-        };
-        state.store.remove(name);
-        if let Err(err) = state.store.save() {
-            self.fail(tr!(
-                "error-template-delete",
-                cause = errors::io::error_message(&err)
-            ));
-            return;
-        }
-        self.notice(tr!("status-template-deleted", name = name));
+        found
     }
 
     /// Preview of the **first** chosen file, reparsed with the current
@@ -7800,26 +8036,6 @@ impl AppState {
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
             stokesforge_import::parse(&bytes, state.preview_recipe())
-                .map_err(ImportReadError::Parse)
-        });
-        Some(result)
-    }
-
-    /// Preview of the split into lines (header/subheader/data/footer) of the
-    /// **first** chosen file, with the current settings. See
-    /// [`stokesforge_import::preview::preview`] for the cost budget.
-    /// Recomputed at each call, like [`AppState::import_preview`]: this
-    /// budget is exactly what makes recomputing at every frame acceptable,
-    /// even on a big file (the cell-by-cell work stays bounded by
-    /// `recipe.preview_lines`, never by the file size). `None` under the same
-    /// conditions as `import_preview`.
-    pub fn import_line_preview(
-        &self,
-    ) -> Option<Result<stokesforge_import::FilePreview, ImportReadError>> {
-        let state = self.import_state.as_ref()?;
-        let path = self.import_preview_path()?;
-        let result = self.import_bytes(&path).and_then(|bytes| {
-            stokesforge_import::preview(&bytes, state.preview_recipe())
                 .map_err(ImportReadError::Parse)
         });
         Some(result)
@@ -8056,14 +8272,6 @@ impl AppState {
         self.status_log.iter().filter(move |m| m.seq >= count)
     }
 
-    /// Does this forked view hold messages the root has not pulled yet? A view
-    /// forked by [`AppState::fork_for_detached_view`] has no status bar: the
-    /// root takes its messages at its next drain (#471).
-    #[must_use]
-    pub fn has_local_messages(&self) -> bool {
-        !self.status_log.is_empty()
-    }
-
     /// Records the refusal of a gesture made outside the main window because
     /// `dialog` is open there (#471) and returns its sentence. It goes to the
     /// status bar and the history as an orange, **never** through `warn`
@@ -8158,13 +8366,12 @@ impl AppState {
     /// any `dispatch`, each message is its own gesture, so the answer is that
     /// of the last message said.
     pub(crate) fn gesture_failed(&self) -> bool {
-        // The low R² warning (#288) is not a failure: the gesture that opened
-        // it succeeded.
+        // The low R² (#288) and no x' (#493) warnings are not failures: the
+        // gesture that opened them succeeded.
         self.dialog_error.is_some()
-            || self
-                .alert
-                .as_ref()
-                .is_some_and(|alert| alert.kind != AlertKind::LowRSquared)
+            || self.alert.as_ref().is_some_and(|alert| {
+                !matches!(alert.kind, AlertKind::LowRSquared | AlertKind::NoXPrime)
+            })
             || self.last_error_gesture == Some(self.gesture_id)
     }
 
@@ -8205,7 +8412,7 @@ impl AppState {
         if !spec.fixed_figure || crate::frame_sizes::is_legacy(spec) {
             return false;
         }
-        let Some(after) = crate::frame_sizes::figure_layout(spec) else {
+        let Some(after) = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, spec) else {
             return false;
         };
         if !after.fixed_overflow {
@@ -8213,7 +8420,7 @@ impl AppState {
         }
         let Some(before) = self
             .plot_spec(*graph)
-            .and_then(|before| crate::frame_sizes::figure_layout(&before))
+            .and_then(|before| crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &before))
         else {
             return true;
         };
@@ -8231,7 +8438,7 @@ impl AppState {
         match command {
             Command::SetPlotSpec { graph, mut spec } => {
                 if let Some(current) = self.plot_spec(graph) {
-                    crate::frame_sizes::fix_from(&current, &mut spec);
+                    crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
                 Command::SetPlotSpec { graph, spec }
             }
@@ -8241,7 +8448,7 @@ impl AppState {
                 kind,
             } => {
                 if let Some(current) = self.plot_spec(graph) {
-                    crate::frame_sizes::fix_from(&current, &mut spec);
+                    crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
                 Command::EditPlotSpec { graph, spec, kind }
             }
@@ -8250,7 +8457,7 @@ impl AppState {
                 name,
                 mut spec,
             } => {
-                crate::frame_sizes::fix_new(&mut spec);
+                crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
                 Command::AddGraph { parent, name, spec }
             }
             other => other,
@@ -8408,13 +8615,18 @@ impl AppState {
     /// project takes what is being typed (#465, #466). An entry the grid
     /// would refuse stays open and is left out. Never relies on the grid
     /// losing focus: a blocking dialog clears that action. Returns whether an
-    /// entry was committed. Public so the shell can call it on the view state
-    /// of a detached window (D1 of #465).
+    /// entry was committed. Public so the shell can call it when a click in
+    /// another window ends the entry (#475, L2).
     pub fn commit_open_entries(&mut self) -> bool {
         self.gesture(Self::commit_open_entries_in_gesture)
     }
 
     fn commit_open_entries_in_gesture(&mut self) -> bool {
+        // While the Properties macro is open a commit would join it and Cancel
+        // would roll it back: the entries stay open (#533).
+        if self.plot_macro_open {
+            return false;
+        }
         let mut committed = false;
         if self.editing.is_some() && self.cell_edit_refusal().is_none() {
             self.commit_edit();
@@ -8603,6 +8815,29 @@ impl AppState {
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// « Text from » and custom template of the legend of new graphs (#499,
+    /// #502).
+    pub fn new_graph_legend_text(&self) -> stokesforge_plot::LegendText {
+        self.object_manager_preferences
+            .new_graph_legend_text()
+            .clone()
+    }
+
+    /// A new graph spec carrying the defaults of a new graph: the legend
+    /// setting of the Preferences (#499), no legend frame (#507, D6; an opened
+    /// file keeps its own), and the axis titles read from the columns (#506,
+    /// [`stokesforge_core::resolve::with_default_axis_titles`]). All of it
+    /// rides in the creation command itself: one history step.
+    fn with_new_graph_defaults(&self, mut spec: PlotSpec) -> PlotSpec {
+        let text = self.new_graph_legend_text();
+        for panel in spec.panels.iter_mut() {
+            panel.legend.text.from = text.from.clone();
+            panel.legend.text.template = text.template.clone();
+            panel.legend.frame = false;
+        }
+        stokesforge_core::resolve::with_default_axis_titles(&self.snapshot.tree, spec)
     }
 
     /// The default folder of a kind of file dialog, as written in the preferences
@@ -8794,6 +9029,9 @@ impl AppState {
             ));
             return;
         };
+        // #501: the variables of the texts, before the resolution and the size.
+        let texts = crate::figure_texts::figure_texts();
+        let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let choice = stokesforge_render_svg::FontChoice::default();
@@ -8804,7 +9042,7 @@ impl AppState {
             &measurer,
             &choice,
             format,
-            &crate::figure_texts::figure_texts(),
+            &texts,
         ) {
             Ok(()) => self.notice(tr!(
                 "status-graph-exported",
@@ -8822,6 +9060,8 @@ impl AppState {
         use crate::preferences::CopyFormat;
         use stokesforge_render_svg::ExportFormat;
 
+        let texts = crate::figure_texts::figure_texts();
+        let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         // The order and the choice are those of Preferences › Export: the
@@ -8856,7 +9096,7 @@ impl AppState {
             &measurer,
             &choice,
             &formats,
-            &crate::figure_texts::figure_texts(),
+            &texts,
         ) {
             Ok(results) => results,
             Err(err) => {
@@ -8966,7 +9206,10 @@ impl AppState {
     /// Changing project must not pick up an import or script result launched
     /// on the old project, nor interrupt a macro.
     pub fn can_new_project(&self) -> bool {
-        !self.script_running() && self.import_job.is_none() && !self.snapshot.history.in_macro
+        !self.script_running()
+            && self.import_job.is_none()
+            && !self.import_applying
+            && !self.snapshot.history.in_macro
     }
 
     /// The gesture waiting for the "Discard Changes · Cancel · Save" answer
@@ -8999,8 +9242,32 @@ impl AppState {
     }
 
     /// Nothing holds the application back any more (Quit accepted); once only.
+    ///
+    /// While the server thread is still writing the recovery copy (#475), Quit
+    /// is held back and says why, once: the window stays open and closes as
+    /// soon as the write ends (the slot is already removed, its file goes with
+    /// the end of the write).
     pub fn take_quit_ready(&mut self) -> bool {
-        std::mem::take(&mut self.quit_ready)
+        if !self.quit_ready {
+            return false;
+        }
+        if self.autosave.in_flight {
+            if !self.autosave.quit_waiting {
+                self.autosave.quit_waiting = true;
+                self.notice(tr!("status-quit-waiting-autosave"));
+            }
+            return false;
+        }
+        self.autosave.quit_waiting = false;
+        self.autosave.closing = true;
+        self.quit_ready = false;
+        true
+    }
+
+    /// Quit is accepted and waits for the end of the recovery copy's write
+    /// (#475): the window keeps painting until it ends.
+    pub fn quit_waits_for_autosave(&self) -> bool {
+        self.quit_ready && self.autosave.in_flight
     }
 
     /// A gesture that would replace or close the project (S-F3): with no work
@@ -9129,8 +9396,20 @@ impl AppState {
             self.fail(tr!("error-sheet-no-workbook"));
             return;
         };
+        // The open entries are written before the sheet changes, whoever asks
+        // (tab, menu, script): leaving them to be dropped lost what was typed
+        // in a detached workbook, whose grid only commits on a click elsewhere
+        // (#524). A cell value the column refuses is dropped silently, as a
+        // click elsewhere does; a header field always writes (#433).
+        self.gesture(|state| {
+            if state.cell_edit_refusal().is_some() {
+                state.cancel_edit();
+            } else {
+                state.commit_edit_in_gesture();
+            }
+            state.commit_header_edit_in_gesture();
+        });
         self.selected_sheets.insert(book, id);
-        self.editing = None;
     }
 
     /// Transport to publish by the viewport that receives the copy gesture.
@@ -9738,14 +10017,19 @@ impl AppState {
         if name == current {
             return;
         }
+        // The sibling rule of the model (#494): case and `ᵀ` read as `T`; the
+        // message names the sheet that holds the name.
         let taken = self
             .worksheets_of(book)
-            .iter()
-            .any(|(id, other)| *id != sheet && other == name);
+            .into_iter()
+            .find(|(id, other)| {
+                *id != sheet && stokesforge_core::same_name_ignoring_case(other, name)
+            })
+            .map(|(_, other)| other);
         if name.is_empty() {
             self.fail(tr!("sheet-rename-empty", name = current));
-        } else if taken {
-            self.fail(tr!("sheet-rename-taken", name = name, old = current));
+        } else if let Some(taken) = taken {
+            self.fail(tr!("sheet-rename-taken", name = taken, old = current));
         } else {
             self.execute(Command::Rename {
                 id: sheet,
@@ -10128,28 +10412,9 @@ impl AppState {
     /// rebuilt into a [`GridClipboard`] by [`external_clipboard_from_text`].
     /// See [`AppState::apply_paste`] for the full behavior matrix.
     fn paste(&mut self, sheet: NodeId, text: String) {
-        if !self.paste_target_is_unambiguous(sheet) {
-            return;
-        }
-        if stokesforge_persistence::clipboard::is_object_clipboard(&text) {
-            self.fail(tr!("object-clipboard-use-manager"));
-            return;
-        }
-        let Some(selection) = self.selection.get(&sheet) else {
-            self.fail(tr!("error-paste-no-cell"));
+        let Some((anchor, clipboard, external)) = self.paste_source(sheet, &text) else {
             return;
         };
-        let Some(anchor) = selection.anchor(&self.snapshot.tree, sheet) else {
-            self.fail(tr!("error-paste-no-cell"));
-            return;
-        };
-        let internal = if self.clipboard_text.as_deref() == Some(text.as_str()) {
-            self.grid_clipboard.clone()
-        } else {
-            None
-        };
-        let external = internal.is_none();
-        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(&text));
         if external {
             if let Some(error) = self.external_paste_range_error(sheet, anchor, &clipboard) {
                 self.fail(errors::number::paste_error_message(&error));
@@ -10157,6 +10422,109 @@ impl AppState {
             }
         }
         self.apply_paste(sheet, anchor, &clipboard, false);
+    }
+
+    /// What a paste reads: the anchor of the selection and the block to paste,
+    /// and whether it is an **external** text (not our own copy). `None`, with
+    /// the message said, if the target is ambiguous, the text is an object
+    /// clipboard or nothing is selected. Shared by [`AppState::paste`] and
+    /// [`AppState::paste_transposed`].
+    fn paste_source(
+        &mut self,
+        sheet: NodeId,
+        text: &str,
+    ) -> Option<(GridCursor, GridClipboard, bool)> {
+        if !self.paste_target_is_unambiguous(sheet) {
+            return None;
+        }
+        if stokesforge_persistence::clipboard::is_object_clipboard(text) {
+            self.fail(tr!("object-clipboard-use-manager"));
+            return None;
+        }
+        let anchor = self
+            .selection
+            .get(&sheet)
+            .and_then(|selection| selection.anchor(&self.snapshot.tree, sheet));
+        let Some(anchor) = anchor else {
+            self.fail(tr!("error-paste-no-cell"));
+            return None;
+        };
+        let internal = if self.clipboard_text.as_deref() == Some(text) {
+            self.grid_clipboard.clone()
+        } else {
+            None
+        };
+        let external = internal.is_none();
+        let clipboard = internal.unwrap_or_else(|| external_clipboard_from_text(text));
+        Some((anchor, clipboard, external))
+    }
+
+    /// Paste Transposed ([`Action::PasteTransposed`], #495): the block of
+    /// [`AppState::paste_source`] rotated a quarter turn
+    /// ([`transposed_clipboard`]), then pasted like Paste from the anchor
+    /// (columns created beyond the edge, one undo step). On an x' cell, the
+    /// first row of the block goes into the x' of the successive columns.
+    fn paste_transposed(&mut self, sheet: NodeId, text: String) {
+        let Some((anchor, clipboard, external)) = self.paste_source(sheet, &text) else {
+            return;
+        };
+        // Header rows other than x' have no place once transposed.
+        let dropped_rows = match &clipboard {
+            GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows }) => {
+                rows.len() - usize::from(*start == HeaderField::XPrime && !rows.is_empty())
+            }
+            _ => 0,
+        };
+        let Some(transposed) = transposed_clipboard(&clipboard) else {
+            self.notice(tr!("status-paste-transposed-nothing"));
+            return;
+        };
+        if external {
+            if let Some(error) = self.external_paste_range_error(sheet, anchor, &transposed) {
+                self.fail(errors::number::paste_error_message(&error));
+                return;
+            }
+        }
+        // An x' anchor takes the first row: the one branch of `apply_paste`.
+        self.apply_paste(sheet, anchor, &transposed, false);
+        if dropped_rows > 0 {
+            self.warn(tr!(
+                "status-paste-header-rows-dropped",
+                count = dropped_rows
+            ));
+        }
+    }
+
+    /// Transposed paste anchored on an x' cell: the first row of `rows` goes
+    /// into the x' of the successive columns from `anchor_column`, creating
+    /// the missing ones like any paste; a cell that is not a number is refused
+    /// by itself (red message), an empty one clears x'; the other rows are
+    /// dropped and counted as fields.
+    fn paste_x_prime_row(&mut self, sheet: NodeId, anchor_column: NodeId, rows: &[Vec<String>]) {
+        let Some(first) = rows.first() else {
+            return;
+        };
+        let order = self.column_order(sheet);
+        let Some(position) = order.iter().position(|&id| id == anchor_column) else {
+            self.fail(tr!("error-column-gone"));
+            return;
+        };
+        let order_from_anchor = &order[position..];
+        let created = Self::plan_paste_columns(order_from_anchor.len(), first.len());
+        let grouped = first.len() > 1 || created > 0;
+        if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
+            self.fail(tr!("error-paste-group"));
+            return;
+        }
+        let targets = self.paste_targets(sheet, order_from_anchor, first.len(), created);
+        for (&column, text) in targets.iter().zip(first) {
+            let _ = self.paste_header_text(column, HeaderField::XPrime, text.clone());
+        }
+        if grouped {
+            self.end_grouped_macro();
+        }
+        self.notice_columns_added(created);
+        self.warn_dropped(rows.len() - 1);
     }
 
     /// The first number of an **external** text paste that a column reading
@@ -10189,18 +10557,22 @@ impl AppState {
         let first = order.iter().position(|&id| id == anchor_column)?;
         for (i, row) in rows.iter().enumerate() {
             for (offset, text) in row.iter().enumerate() {
-                // Columns beyond the sheet are dropped by the paste.
-                let Some(&column) = order.get(first + offset) else {
-                    break;
-                };
-                let Some(kind) = self
-                    .snapshot
-                    .tree
-                    .node(column)
-                    .and_then(Node::as_column)
-                    .map(Column::column_type)
-                else {
-                    continue;
+                // Columns beyond the sheet are created by the paste (Numeric,
+                // #495), up to the cap; the rest is dropped.
+                let kind = match order.get(first + offset) {
+                    Some(&column) => {
+                        let Some(kind) = self
+                            .snapshot
+                            .tree
+                            .node(column)
+                            .and_then(Node::as_column)
+                            .map(Column::column_type)
+                        else {
+                            continue;
+                        };
+                        kind
+                    }
+                    None => ColumnType::Numeric,
                 };
                 if text.trim().is_empty()
                     || (kind == ColumnType::DateTime
@@ -10294,6 +10666,37 @@ impl AppState {
         clipboard: &GridClipboard,
         absolute: bool,
     ) {
+        // The x' row is a row of values (#495): a data block on an x' cell
+        // fills the x' of the successive columns; a header copy that holds the
+        // x' row, pasted on a data cell, writes that row as data and drops the
+        // other header rows with a notice. Paste in Place keeps its ranks.
+        if !absolute {
+            match (clipboard, anchor) {
+                (
+                    GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }),
+                    GridCursor::Header(column, HeaderField::XPrime),
+                ) => return self.paste_x_prime_row(sheet, column, rows),
+                (
+                    GridClipboard::Relative(RelativeCopy::HeaderFields {
+                        start: HeaderField::XPrime,
+                        rows,
+                    }),
+                    GridCursor::Data(..),
+                ) if !rows.is_empty() => {
+                    let as_data = GridClipboard::Relative(RelativeCopy::DataRows {
+                        start: 0,
+                        rows: vec![rows[0].clone()],
+                    });
+                    self.apply_paste(sheet, anchor, &as_data, false);
+                    let dropped = rows.len() - 1;
+                    if dropped > 0 {
+                        self.warn(tr!("status-paste-header-rows-dropped", count = dropped));
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         let order = self.column_order(sheet);
         let anchor_column = grid_cursor_column(anchor);
         let Some(anchor_index) = order.iter().position(|&id| id == anchor_column) else {
@@ -10304,10 +10707,10 @@ impl AppState {
         match clipboard {
             GridClipboard::Text(text) => self.paste_single_value(anchor, text),
             GridClipboard::Relative(relative) => {
-                self.paste_relative(anchor, order_from_anchor, relative, absolute)
+                self.paste_relative(sheet, anchor, order_from_anchor, relative, absolute)
             }
             GridClipboard::FullColumns(columns) => {
-                self.paste_full_columns(anchor, order_from_anchor, columns, absolute)
+                self.paste_full_columns(sheet, anchor, order_from_anchor, columns, absolute)
             }
         }
     }
@@ -10401,28 +10804,68 @@ impl AppState {
         }
     }
 
-    /// Orange said when the copy overflows the sheet (#311): `columns` columns
-    /// beyond the right edge, `fields` header rows beyond Formula (field
-    /// paste anchored low). What overflows is dropped, never added: done, but
+    /// Orange said when the copy overflows the sheet (#311): `fields` header
+    /// rows beyond Formula (field paste anchored low, or a header row an x'
+    /// anchor has no place for). Missing columns are never an overflow: they
+    /// are created (#495). What overflows is dropped, never added: done, but
     /// not as asked, so it is an orange (S-R18, #453) that stays over the
     /// plain messages of the same paste. A red of the same paste still wins.
-    /// A single message if both overflow.
-    fn warn_dropped(&mut self, columns: usize, fields: usize) {
-        match (columns, fields) {
-            (0, 0) => {}
-            (columns, 0) => self.warn(tr!("status-paste-columns-dropped", count = columns)),
-            (0, fields) => self.warn(tr!("status-paste-fields-dropped", count = fields)),
-            (columns, fields) => self.warn(tr!(
-                "status-paste-columns-fields-dropped",
-                columns = columns,
-                fields = fields
-            )),
+    fn warn_dropped(&mut self, fields: usize) {
+        if fields > 0 {
+            self.warn(tr!("status-paste-fields-dropped", count = fields));
         }
     }
 
-    /// Number of columns to drop: `wanted` wanted, `available` places.
-    fn dropped_columns(wanted: usize, available: usize) -> usize {
+    /// Columns to create for a paste of `wanted` columns on a sheet with
+    /// `available` columns from the anchor on (#495): all the missing ones.
+    fn plan_paste_columns(available: usize, wanted: usize) -> usize {
         wanted.saturating_sub(available)
+    }
+
+    /// The columns a paste writes into: `order_from_anchor` plus the
+    /// `created` columns added now at the end of `sheet` (same command as Add
+    /// Column: automatic letter name, default role). The caller has opened its
+    /// `PasteCells` macro BEFORE, so one Undo removes the columns and the
+    /// values, and calls this BEFORE writing headers (a pasted formula reads
+    /// letters of the destination sheet). `wanted` caps the answer.
+    fn paste_targets(
+        &mut self,
+        sheet: NodeId,
+        order_from_anchor: &[NodeId],
+        wanted: usize,
+        created: usize,
+    ) -> Vec<NodeId> {
+        let mut targets: Vec<NodeId> = order_from_anchor.iter().copied().take(wanted).collect();
+        if created == 0 {
+            return targets;
+        }
+        for _ in 0..created {
+            self.execute(Command::AddColumn {
+                sheet,
+                index: None,
+                name: None,
+                column: Column::new(ColumnType::Numeric),
+            });
+        }
+        let order = self.column_order(sheet);
+        let known = order_from_anchor.len();
+        let anchor_position = order.len().saturating_sub(known + created);
+        // The columns after the old last one are the new ones.
+        targets.extend(
+            order
+                .iter()
+                .skip(anchor_position + known)
+                .copied()
+                .take(created),
+        );
+        targets
+    }
+
+    /// The plain notice of the columns a paste added (#495).
+    fn notice_columns_added(&mut self, created: usize) {
+        if created > 0 {
+            self.notice(tr!("status-paste-columns-added", count = created));
+        }
     }
 
     /// [`GridClipboard::Relative`]: see [`AppState::apply_paste`] for the
@@ -10430,6 +10873,7 @@ impl AppState {
     /// `relative` (fields against a data cell, or the reverse).
     fn paste_relative(
         &mut self,
+        sheet: NodeId,
         anchor: GridCursor,
         order_from_anchor: &[NodeId],
         relative: &RelativeCopy,
@@ -10438,14 +10882,10 @@ impl AppState {
         match (anchor, relative) {
             (GridCursor::Header(_, anchor_field), RelativeCopy::HeaderFields { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
-                let targets: Vec<NodeId> = order_from_anchor
-                    .iter()
-                    .copied()
-                    .take(column_count)
-                    .collect();
-                if targets.is_empty() {
+                if order_from_anchor.is_empty() || column_count == 0 {
                     return;
                 }
+                let created = Self::plan_paste_columns(order_from_anchor.len(), column_count);
                 let shift = if absolute {
                     0
                 } else {
@@ -10462,11 +10902,13 @@ impl AppState {
                             .then(|| (HeaderField::from_index(target as usize), cells))
                     })
                     .collect();
-                let grouped = writes.len() * targets.len() > 1;
+                let target_count = column_count;
+                let grouped = writes.len() * target_count > 1 || created > 0;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail(tr!("error-paste-group"));
                     return;
                 }
+                let targets = self.paste_targets(sheet, order_from_anchor, column_count, created);
                 let mut refusals: Vec<(NodeId, String)> = Vec::new();
                 for &(field, cells) in &writes {
                     for (index, &column) in targets.iter().enumerate() {
@@ -10482,30 +10924,25 @@ impl AppState {
                 }
                 // Header rows dropped: the low anchor pushes them beyond
                 // Formula (`writes` keeps only those that fit).
-                self.warn_dropped(
-                    Self::dropped_columns(column_count, targets.len()),
-                    rows.len() - writes.len(),
-                );
+                self.notice_columns_added(created);
+                self.warn_dropped(rows.len() - writes.len());
                 // The refusal of a formula goes last: it wins over the
                 // overflow notice, the other fields are pasted.
                 self.fail_formula_paste(&refusals);
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
-                let targets: Vec<NodeId> = order_from_anchor
-                    .iter()
-                    .copied()
-                    .take(column_count)
-                    .collect();
-                if targets.is_empty() || rows.is_empty() {
+                if order_from_anchor.is_empty() || column_count == 0 || rows.is_empty() {
                     return;
                 }
+                let created = Self::plan_paste_columns(order_from_anchor.len(), column_count);
                 let paste_row = if absolute { *start } else { anchor_row };
-                let grouped = targets.len() > 1;
+                let grouped = column_count > 1;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail(tr!("error-paste-group"));
                     return;
                 }
+                let targets = self.paste_targets(sheet, order_from_anchor, column_count, created);
                 for (index, &column) in targets.iter().enumerate() {
                     let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column)
                     else {
@@ -10522,7 +10959,8 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
-                self.warn_dropped(Self::dropped_columns(column_count, targets.len()), 0);
+                self.notice_columns_added(created);
+                self.warn_dropped(0);
             }
             // Copied fields + anchor on a data cell, or copied data rows +
             // anchor on a header field: different kinds, nothing is pasted
@@ -10537,19 +10975,17 @@ impl AppState {
     /// accepted is not written (it is recomputed).
     fn paste_full_columns(
         &mut self,
+        sheet: NodeId,
         anchor: GridCursor,
         order_from_anchor: &[NodeId],
         columns: &[FullColumnCopy],
         absolute: bool,
     ) {
-        let targets: Vec<NodeId> = order_from_anchor
-            .iter()
-            .copied()
-            .take(columns.len())
-            .collect();
-        if targets.is_empty() {
+        if order_from_anchor.is_empty() || columns.is_empty() {
             return;
         }
+        let created = Self::plan_paste_columns(order_from_anchor.len(), columns.len());
+        let target_count = columns.len();
         // Starting field of the header to write: all of them in absolute, from
         // the anchored field (nothing above) in relative if the anchor is a
         // field, none (header dropped) in relative if the anchor is a cell.
@@ -10581,17 +11017,18 @@ impl AppState {
         let header_ops = header_from
             .map(|from| HeaderField::COUNT - from)
             .unwrap_or(0)
-            * targets.len();
-        let body_ops = targets
+            * target_count;
+        let body_ops = columns
             .iter()
-            .zip(columns)
-            .filter(|(_, c)| !c.data.is_empty())
+            .take(target_count)
+            .filter(|c| !c.data.is_empty())
             .count();
-        let grouped = header_ops + body_ops > 1;
+        let grouped = header_ops + body_ops > 1 || created > 0;
         if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
             self.fail(tr!("error-paste-group"));
             return;
         }
+        let targets = self.paste_targets(sheet, order_from_anchor, columns.len(), created);
         // The formulas refused by this paste: the column, and why (#433).
         let mut refusals: Vec<(NodeId, String)> = Vec::new();
         // Per target, what this paste did with the Formula field. A column
@@ -10652,7 +11089,8 @@ impl AppState {
         if grouped {
             self.end_grouped_macro();
         }
-        self.warn_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
+        self.notice_columns_added(created);
+        self.warn_dropped(0);
         // The other fields and the values are pasted, the status bar says what
         // is not.
         self.fail_formula_paste(&refusals);
@@ -11082,7 +11520,7 @@ impl AppState {
         // to the chooser through the background import (#490).
         let (origin, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths
             .into_iter()
-            .partition(|path| stokesforge_importer::is_origin_path(path));
+            .partition(|path| stokesforge_importer::is_origin_file(path));
         self.route_origin_paths(origin);
         if paths.is_empty() {
             return;
@@ -11156,13 +11594,31 @@ impl AppState {
                 }
             } else {
                 let mut shared_book = None;
+                // One file into « New Workbook » is one new workbook for that
+                // file: it is named and filled like « One Workbook per File ».
+                let destination =
+                    if destination == ImportDestination::NewBookForAll && plans.len() == 1 {
+                        ImportDestination::NewBookPerFile
+                    } else {
+                        destination
+                    };
+                // A new workbook per file holds one sheet per file: the
+                // workbook takes the name of the file, the sheet is "Raw Data"
+                // until a value of an imported column changes (#488).
+                let raw_data_sheet = matches!(destination, ImportDestination::NewBookPerFile)
+                    && first_recipe.files_layout == stokesforge_import::FilesLayout::SheetPerFile;
                 for plan in &plans {
                     let Some(book) =
                         self.book_for_plan(destination, plan, &mut shared_book, &mut failures)
                     else {
                         continue;
                     };
-                    let Some(sheet) = self.add_named_sheet(book, &plan.name, &mut failures) else {
+                    let sheet_name = if raw_data_sheet {
+                        tr!("import-sheet-raw-data")
+                    } else {
+                        plan.name.clone()
+                    };
+                    let Some(sheet) = self.add_named_sheet(book, &sheet_name, &mut failures) else {
                         continue;
                     };
                     for &planned in &plan.columns {
@@ -11176,6 +11632,14 @@ impl AppState {
                                 column,
                             });
                         }
+                    }
+                    if raw_data_sheet {
+                        self.execute(Command::SetSheetRawMark {
+                            sheet,
+                            mark: Some(stokesforge_core::RawSheetMark {
+                                modified_base: tr!("import-sheet-modified-base"),
+                            }),
+                        });
                     }
                     for &item in &plan.items {
                         if !done_paths.contains(&items[item].path) {
@@ -11192,17 +11656,18 @@ impl AppState {
         if imported > 0 {
             // Material for "Reopen Last Import…" and the recent files.
             self.recent_to_record.extend(done_paths.iter().cloned());
-            if let Some(ImportItem {
-                recipe: first_recipe,
-                ..
-            }) = first_ok
-            {
+            let each: Vec<(PathBuf, stokesforge_import::ImportRecipe)> = done_paths
+                .iter()
+                .filter_map(|path| {
+                    items
+                        .iter()
+                        .find(|item| item.path == *path && item.table.is_ok())
+                        .map(|item| (path.clone(), item.recipe.clone()))
+                })
+                .collect();
+            if !each.is_empty() {
                 self.last_origin_import = None;
-                self.last_import = Some(LastImport {
-                    destination,
-                    recipe: first_recipe.clone(),
-                    paths: done_paths,
-                });
+                self.last_import = Some(LastImport { destination, each });
             }
         }
         // `self.execute` refreshes the snapshot at each command, but always
@@ -11276,9 +11741,34 @@ impl AppState {
             failures.push(tr!("error-import-create-sheet", name = name));
             return None;
         };
+        // A title already used in this workbook: the new sheet takes a free
+        // name ("Title (2)") instead of a red « Name already used » for an
+        // import that worked.
+        let taken: Vec<String> = self
+            .snapshot
+            .tree
+            .node(book)
+            .map(|node| {
+                node.children()
+                    .iter()
+                    .filter(|id| **id != sheet)
+                    .filter_map(|id| self.snapshot.tree.node(*id))
+                    .map(|child| child.name().to_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_taken = |candidate: &str| taken.contains(&candidate.to_lowercase());
+        let free = if is_taken(name) {
+            (2u64..)
+                .map(|n| format!("{name} ({n})"))
+                .find(|candidate| !is_taken(candidate))
+                .unwrap_or_else(|| name.to_string())
+        } else {
+            name.to_string()
+        };
         self.execute(Command::Rename {
             id: sheet,
-            name: name.to_string(),
+            name: free,
         });
         Some(sheet)
     }
@@ -11457,11 +11947,11 @@ impl AppState {
         // The new-graph default of the Preferences rides in the spec of the
         // creation itself: one command, one history step.
         // A fresh layer shows no mirror, so there is nothing to switch off.
-        let spec = PlotSpec {
+        let spec = self.with_new_graph_defaults(PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
-        };
+        });
         self.execute(Command::AddGraph {
             parent,
             name: None,
@@ -11581,23 +12071,53 @@ impl AppState {
     /// reference layer, like a drop on the graph). One `EditPlotSpec`, one undo
     /// step; nothing sent, and a message, if the grid is full, the layer is gone
     /// or the columns have no Y.
-    fn add_cell(&mut self, graph: NodeId, panel: usize, side: CellSide, columns: Vec<NodeId>) {
+    fn add_cell(
+        &mut self,
+        graph: NodeId,
+        anchor: CellAnchor,
+        side: CellSide,
+        columns: Vec<NodeId>,
+    ) {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
             return;
         };
-        let Some(reference) = spec.panels.get(panel) else {
+        // The layer whose plot type the new cell takes: the anchor itself, or
+        // for a grid position the graph there, else one of its row or column.
+        let reference = match anchor {
+            CellAnchor::Layer(panel) => Some(panel),
+            CellAnchor::Position(row, column) => spec
+                .cell_bases()
+                .into_iter()
+                .filter_map(|base| spec.panels.get(base).map(|p| (base, p.row, p.column)))
+                .min_by_key(|(_, r, c)| {
+                    (
+                        (*r, *c) != (row, column),
+                        *r != row && *c != column,
+                        r.abs_diff(row) + c.abs_diff(column),
+                    )
+                })
+                .map(|(base, _, _)| base),
+        };
+        let Some(panel) = reference.filter(|panel| spec.panels.get(*panel).is_some()) else {
             self.fail(tr!("error-layer-gone"));
             return;
         };
-        let plot_type = panel_plot_type(reference);
+        let plot_type = panel_plot_type(&spec.panels[panel]);
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         // Free placement (#398, L8): the new layer is placed beside the
         // reference, never over another one, in the same command.
-        let beside = crate::frame_sizes::place_beside(&spec, panel, side);
-        let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
+        let beside = crate::frame_sizes::place_beside(&self.snapshot.tree, &spec, panel, side);
+        let gutters = crate::frame_sizes::grid_gutters(&self.snapshot.tree, &spec);
+        let inserted = match anchor {
+            CellAnchor::Layer(panel) => insert_cell_with(&mut spec, panel, side, &gutters),
+            CellAnchor::Position(row, column) => {
+                insert_cell_at_with(&mut spec, (row, column), side, &gutters)
+            }
+        };
+        let Some(new_cell) = inserted else {
             self.fail(tr!("error-layer-grid-full"));
             return;
         };
@@ -11634,7 +12154,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         for (axis, index, size) in sizes {
             if !stokesforge_core::compose::set_frame_size(&mut spec, axis, index, size) {
                 return;
@@ -11697,7 +12217,14 @@ impl AppState {
             return;
         }
         let mut spec = before.clone();
-        if crate::frame_sizes::set_total_in_draft(&mut spec, axis, target, ratio).is_none()
+        if crate::frame_sizes::set_total_in_draft(
+            &self.snapshot.tree,
+            &mut spec,
+            axis,
+            target,
+            ratio,
+        )
+        .is_none()
             || spec == before
         {
             return;
@@ -11717,7 +12244,7 @@ impl AppState {
             return;
         };
         let mut spec = before.clone();
-        let drawn = crate::frame_sizes::figure_layout(&spec);
+        let drawn = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &spec);
         let (widths, heights) = drawn.map_or_else(Default::default, |layout| {
             (layout.frame_widths, layout.frame_heights)
         });
@@ -11732,14 +12259,21 @@ impl AppState {
     /// [`Action::SetGridFrames`]: both vectors written into one spec and
     /// committed as one step. A legacy graph is first given the frames it is
     /// drawn with, so the vectors always have the grid's lengths.
-    fn set_grid_frames(&mut self, graph: NodeId, widths: &[f64], heights: &[f64], figure: bool) {
+    fn set_grid_frames(
+        &mut self,
+        graph: NodeId,
+        widths: &[f64],
+        heights: &[f64],
+        figure: bool,
+        slack: Option<stokesforge_plot::GridSlack>,
+    ) {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
         if spec.layer_placement != stokesforge_plot::LayerPlacement::Grid {
             return;
         }
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         let bounds = |size: &f64| {
             size.clamp(
                 stokesforge_plot::MIN_FRAME_SIZE,
@@ -11754,6 +12288,10 @@ impl AppState {
         }
         spec.frame_widths = widths.iter().map(bounds).collect();
         spec.frame_heights = heights.iter().map(bounds).collect();
+        if let Some(slack) = slack {
+            // Stored sanitized: a hostile number never reaches the model.
+            spec.grid_slack = Some(slack.sanitized()).filter(|slack| !slack.is_zero());
+        }
         if self.plot_spec(graph).is_some_and(|before| before == spec) {
             return;
         }
@@ -11768,6 +12306,70 @@ impl AppState {
             } else {
                 PlotEditKind::ResizeCell
             },
+        });
+    }
+
+    /// [`Action::FitPageToLayout`]: the fitted spec committed as one step, or
+    /// nothing when the page already fits.
+    fn fit_page_to_layout(&mut self, graph: NodeId) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(spec) = crate::frame_sizes::spec_fitted_to_layers(&self.snapshot.tree, &before)
+        else {
+            return;
+        };
+        self.adopt_size_lock(graph);
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::FitPage,
+        });
+    }
+
+    /// [`Action::FitLayoutToPage`]: the fitted spec committed as one step, or
+    /// nothing when the graphs already fill the page.
+    fn fit_layout_to_page(&mut self, graph: NodeId) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(spec) =
+            crate::frame_sizes::spec_layout_fitted_to_page(&self.snapshot.tree, &before)
+        else {
+            return;
+        };
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::FitLayout,
+        });
+    }
+
+    /// [`Action::MoveGridCell`]: the move applied to one spec and committed as
+    /// one step. A legacy graph is first given the frames it is drawn with, so
+    /// the emptied column or row takes its size with it.
+    fn move_grid_cell(
+        &mut self,
+        graph: NodeId,
+        panel: usize,
+        target: stokesforge_core::compose::MoveTarget,
+    ) {
+        let Some(before) = self.plot_spec(graph) else {
+            return;
+        };
+        if before.layer_placement != stokesforge_plot::LayerPlacement::Grid {
+            return;
+        }
+        let mut spec = before.clone();
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
+        let gutters = crate::frame_sizes::grid_gutters(&self.snapshot.tree, &spec);
+        if !stokesforge_core::compose::move_cell_with(&mut spec, panel, target, &gutters) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::MoveLayer,
         });
     }
 
@@ -11813,7 +12415,7 @@ impl AppState {
             };
             // Without a stored page, the page is the figure as drawn.
             let old = before.sanitized_free_page().or_else(|| {
-                crate::frame_sizes::figure_layout(&before)
+                crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &before)
                     .and_then(|layout| layout.free_page_rect())
             });
             page_resized =
@@ -11844,7 +12446,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         if !remove_cell(&mut spec, panel) {
             if spec.panels.get(panel).is_some() {
                 self.fail(tr!("error-last-layer"));
@@ -12007,11 +12609,11 @@ impl AppState {
         };
         let mut panel = PanelSpec::default();
         panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
-        let spec = PlotSpec {
+        let spec = self.with_new_graph_defaults(PlotSpec {
             panels: Panels::new(vec![panel]),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
-        };
+        });
         self.execute(Command::AddGraph {
             parent,
             name: None,
@@ -12084,6 +12686,7 @@ impl AppState {
             .as_ref()
             .map(|source| source.path.clone());
         let (reply_tx, reply_rx) = mpsc::channel();
+        let waker = self.waker.clone();
 
         let spawned = thread::Builder::new()
             .name("stokesforge-app-script".to_owned())
@@ -12105,6 +12708,10 @@ impl AppState {
                 // (window closed during the run): the channel is then simply
                 // dropped.
                 let _ = reply_tx.send(reply);
+                // The server thread notices the end at once (#475).
+                if let Some(wake) = waker {
+                    wake();
+                }
             });
 
         match spawned {
@@ -12330,8 +12937,8 @@ mod tests {
     }
 
     use super::{
-        external_clipboard_from_text, grid_clipboard_to_text, GridClipboard, HeaderField,
-        RelativeCopy, MISSING_TEXT_DISPLAY,
+        external_clipboard_from_text, grid_clipboard_to_text, transposed_clipboard, FullColumnCopy,
+        GridClipboard, HeaderField, RelativeCopy, MISSING_TEXT_DISPLAY,
     };
     use stokesforge_core::number_format::format_exact as format_f64_for_display;
 
@@ -12467,6 +13074,91 @@ mod tests {
         assert_eq!(
             external_clipboard_from_text("\"a\nb\""),
             GridClipboard::Text("a\nb".to_string())
+        );
+    }
+
+    fn texts(rows: &[&[&str]]) -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|row| row.iter().map(|text| text.to_string()).collect())
+            .collect()
+    }
+
+    /// #495: a data rectangle is rotated, a ragged one is padded with empty
+    /// cells, a single value stays a value, nothing at all gives `None`.
+    #[test]
+    fn transposed_clipboard_rotates_data_rows() {
+        let rows = |rows: Vec<Vec<String>>| {
+            GridClipboard::Relative(RelativeCopy::DataRows { start: 7, rows })
+        };
+        assert_eq!(
+            transposed_clipboard(&rows(texts(&[&["a", "b", "c"], &["d", "e", "f"]]))),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["a", "d"], &["b", "e"], &["c", "f"]]),
+            }))
+        );
+        assert_eq!(
+            transposed_clipboard(&rows(texts(&[&["a", "b"], &["c"]]))),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["a", "c"], &["b", ""]]),
+            })),
+            "a missing cell becomes an empty one"
+        );
+        assert_eq!(transposed_clipboard(&rows(Vec::new())), None);
+        assert_eq!(
+            transposed_clipboard(&GridClipboard::Text("x".into())),
+            Some(GridClipboard::Text("x".into()))
+        );
+    }
+
+    /// #495: a full column gives its body as a row, header and formula
+    /// dropped; columns of different lengths are padded.
+    #[test]
+    fn transposed_clipboard_takes_the_body_of_full_columns() {
+        let column = |data: &[&str]| FullColumnCopy {
+            x_prime: "9".into(),
+            long_name: "name".into(),
+            unit: "u".into(),
+            comment: "c".into(),
+            formula: Some("A*2".into()),
+            data: data.iter().map(|text| text.to_string()).collect(),
+        };
+        assert_eq!(
+            transposed_clipboard(&GridClipboard::FullColumns(vec![
+                column(&["1", "2", "3"]),
+                column(&["4"]),
+            ])),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["1", "2", "3"], &["4", "", ""]]),
+            }))
+        );
+        assert_eq!(
+            transposed_clipboard(&GridClipboard::FullColumns(vec![column(&[])])),
+            None
+        );
+    }
+
+    /// #495: of the copied header fields only the x' row becomes a data row.
+    #[test]
+    fn transposed_clipboard_keeps_only_the_x_prime_row() {
+        let fields =
+            |start, rows| GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows });
+        assert_eq!(
+            transposed_clipboard(&fields(
+                HeaderField::XPrime,
+                texts(&[&["1", "2", "3"], &["n1", "n2", "n3"]])
+            )),
+            Some(GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: texts(&[&["1"], &["2"], &["3"]]),
+            }))
+        );
+        assert_eq!(
+            transposed_clipboard(&fields(HeaderField::LongName, texts(&[&["a", "b"]]))),
+            None,
+            "no x' row among the copied fields"
         );
     }
 

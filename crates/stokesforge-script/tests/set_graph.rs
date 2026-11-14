@@ -77,7 +77,7 @@ fn set_graph_sets_the_graph_and_the_panel() {
         "g = pyst.resolve('[G]')\n\
          pyst.set_graph(g, title='T', title_visible=True, stale_warning=False, decimal_comma=True,\n\
              background='#102030', title_color='#FF0000', panel_title='P',\n\
-             x_title='Time', y_title='Signal', x_unit='s', y_unit='V',\n\
+             x_title='Time (s)', y_title='Signal (V)',\n\
              x_scale='log', y_scale='linear', x_from=1, x_to=100,\n\
              y_from=10, y_to=0, x_grid=False, y_grid=True, y_inverted=True,\n\
              x_visible=True, y_visible=True,\n\
@@ -92,10 +92,8 @@ fn set_graph_sets_the_graph_and_the_panel() {
     assert_eq!(spec.title_color, "#FF0000");
     let panel = &spec.panels[0];
     assert_eq!(panel.title, "P");
-    assert_eq!(panel.bottom.label, "Time");
-    assert_eq!(panel.left.label, "Signal");
-    assert_eq!(panel.bottom.unit, "s");
-    assert_eq!(panel.left.unit, "V");
+    assert_eq!(panel.bottom.label, "Time (s)");
+    assert_eq!(panel.left.label, "Signal (V)");
     assert_eq!(panel.bottom.scale, AxisScale::Log);
     assert_eq!(panel.left.scale, AxisScale::Linear);
     assert!(!panel.bottom.auto_range);
@@ -120,6 +118,53 @@ fn set_graph_sets_the_graph_and_the_panel() {
         graph_spec(&b).panels[0].legend.position,
         LegendPosition::TopLeft
     );
+}
+
+/// #507: the legend box keys set the spec (lengths in points) and the bounds
+/// refuse what the model could not draw, leaving the graph untouched.
+/// Witness: a key not applied, or a bound that lets a zero column through.
+#[test]
+fn set_graph_sets_the_legend_box_and_refuses_out_of_range_values() {
+    let b = bench();
+    run(&b, GRAPH);
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), legend_frame=False, legend_frame_color='#112233',\n\
+             legend_frame_width=2.5, legend_background='#ffee0080', legend_columns=3,\n\
+             legend_row_gap=7, legend_column_gap=20.5, legend_swatch_length=41)",
+    );
+    let legend = &graph_spec(&b).panels[0].legend;
+    assert!(!legend.frame);
+    assert_eq!(legend.frame_color, "#112233");
+    assert_eq!(legend.frame_width, Some(2.5));
+    assert_eq!(legend.background, "#ffee0080");
+    assert_eq!(legend.columns, 3);
+    assert_eq!(legend.row_gap, Some(7.0));
+    assert_eq!(legend.column_gap, Some(20.5));
+    assert_eq!(legend.swatch_length, Some(41.0));
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), legend_frame_color='', legend_background='')",
+    );
+    let legend = &graph_spec(&b).panels[0].legend;
+    assert!(legend.frame_color.is_empty() && legend.background.is_empty());
+
+    let before = graph_spec(&b);
+    for body in [
+        "pyst.set_graph(g, legend_columns=0)",
+        "pyst.set_graph(g, legend_columns=-2)",
+        "pyst.set_graph(g, legend_columns=2.5)",
+        "pyst.set_graph(g, legend_row_gap=-1)",
+        "pyst.set_graph(g, legend_column_gap=float('nan'))",
+        "pyst.set_graph(g, legend_column_gap=float('inf'))",
+        "pyst.set_graph(g, legend_swatch_length=1)",
+        "pyst.set_graph(g, legend_frame_width=0)",
+        "pyst.set_graph(g, legend_frame='yes')",
+        "pyst.set_graph(g, legend_background='red')",
+    ] {
+        refused(&b, body);
+    }
+    assert_eq!(graph_spec(&b), before);
 }
 
 #[test]
@@ -186,6 +231,9 @@ fn set_graph_refuses_without_writing_anything() {
     run(&b, GRAPH);
     let before = graph_spec(&b);
     let history = b.session.snapshot().unwrap().history;
+    // The axis unit setting is gone (#506): it is an unknown key now.
+    let gone = refused(&b, "pyst.set_graph(g, x_unit='s')");
+    assert!(gone.contains("unknown graph option: x_unit"), "{gone}");
     let unknown = refused(&b, "pyst.set_graph(g, title='ok', titel='x')");
     assert!(unknown.contains("unknown graph option: titel"), "{unknown}");
     for body in [
@@ -590,7 +638,11 @@ fn free_1x2() -> Bench {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
     assert!(stokesforge_render_svg::set_layer_placement(
-        &mut spec, true, &measurer, &choice
+        &mut spec,
+        true,
+        &measurer,
+        &choice,
+        &stokesforge_render_svg::as_stored,
     ));
     store(&b, spec);
     b

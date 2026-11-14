@@ -122,19 +122,78 @@ pub fn offer(
     if representations.is_empty() {
         return Err(ClipboardError::Empty);
     }
-    let handle = display
-        .display_handle()
-        .map_err(|err| ClipboardError::Backend(err.to_string()))?;
-    match handle.as_raw() {
-        #[cfg(all(unix, not(target_os = "macos")))]
-        RawDisplayHandle::Wayland(wayland) => wayland::offer(wayland.display, representations),
-        #[cfg(all(unix, not(target_os = "macos")))]
-        RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_) => x11::offer(representations),
-        #[cfg(windows)]
-        RawDisplayHandle::Windows(_) => windows::offer(representations),
-        #[cfg(target_os = "macos")]
-        RawDisplayHandle::AppKit(_) => macos::offer(representations),
-        other => Err(ClipboardError::Unsupported(display_name(&other))),
+    Offerer::capture(display)?.offer(representations)
+}
+
+/// What offers content to the system clipboard, captured **once** from a
+/// display and usable afterwards without it, from any thread (the application
+/// captures it at the root and offers from the pass of a detached window, which
+/// has no window handle of its own, #475).
+///
+/// On Wayland it holds the shared worker of the display: drop it before the
+/// display goes away. The other platforms hold nothing.
+pub struct Offerer {
+    kind: Kind,
+}
+
+enum Kind {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    Wayland(smithay_clipboard::Clipboard),
+    #[cfg(all(unix, not(target_os = "macos")))]
+    X11,
+    #[cfg(windows)]
+    Windows,
+    #[cfg(target_os = "macos")]
+    AppKit,
+    /// A display without a backend: the offer says so.
+    Unsupported(&'static str),
+}
+
+impl Offerer {
+    /// Captures what is needed from `display`.
+    ///
+    /// # Errors
+    ///
+    /// [`ClipboardError::Backend`] if the display handle is unavailable.
+    pub fn capture(display: &impl HasDisplayHandle) -> Result<Self, ClipboardError> {
+        let handle = display
+            .display_handle()
+            .map_err(|err| ClipboardError::Backend(err.to_string()))?;
+        let kind = match handle.as_raw() {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            RawDisplayHandle::Wayland(wayland) => Kind::Wayland(wayland::open(wayland.display)),
+            #[cfg(all(unix, not(target_os = "macos")))]
+            RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_) => Kind::X11,
+            #[cfg(windows)]
+            RawDisplayHandle::Windows(_) => Kind::Windows,
+            #[cfg(target_os = "macos")]
+            RawDisplayHandle::AppKit(_) => Kind::AppKit,
+            other => Kind::Unsupported(display_name(&other)),
+        };
+        Ok(Self { kind })
+    }
+
+    /// Offers `representations` as the current content of the system
+    /// clipboard, replacing the previous one. See [`offer`].
+    ///
+    /// # Errors
+    ///
+    /// As [`offer`].
+    pub fn offer(&self, representations: &[Representation]) -> Result<(), ClipboardError> {
+        if representations.is_empty() {
+            return Err(ClipboardError::Empty);
+        }
+        match &self.kind {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            Kind::Wayland(clipboard) => wayland::offer(clipboard, representations),
+            #[cfg(all(unix, not(target_os = "macos")))]
+            Kind::X11 => x11::offer(representations),
+            #[cfg(windows)]
+            Kind::Windows => windows::offer(representations),
+            #[cfg(target_os = "macos")]
+            Kind::AppKit => macos::offer(representations),
+            Kind::Unsupported(name) => Err(ClipboardError::Unsupported(name)),
+        }
     }
 }
 

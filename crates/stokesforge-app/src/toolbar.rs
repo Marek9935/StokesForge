@@ -273,6 +273,10 @@ pub enum FormatTarget {
 /// shows them (issue #64).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectFormatState {
+    /// Which object it is (kind, layer, rank): the target of the thickness
+    /// field, so a draft typed for one object is never committed into
+    /// another (#498).
+    pub target: (u8, usize, usize),
     /// True for a rectangle or an ellipse: only those can be filled.
     pub closed: bool,
     pub line_color: String,
@@ -766,6 +770,7 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
     let state = env.object_format.clone();
     let enabled = state.is_some();
     let state = state.unwrap_or(ObjectFormatState {
+        target: (0, 0, 0),
         closed: false,
         line_color: String::new(),
         fill_color: String::new(),
@@ -852,12 +857,14 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
         // Thickness: an editable numeric field with its current values
         // (pick 3 or type 2.5), S-N9.
         let mut width = state.line_width;
-        let field = number_field(
-            ui,
-            "stokesforge_object_line_width",
-            &mut width,
-            &quantities::SHAPE_LINE_WIDTH,
-        );
+        let field = crate::field_state::for_target(ui, state.target, |ui| {
+            number_field(
+                ui,
+                "stokesforge_object_line_width",
+                &mut width,
+                &quantities::SHAPE_LINE_WIDTH,
+            )
+        });
         on_hover(
             field.response.clone(),
             tr!("format-object-line-width"),
@@ -1019,13 +1026,15 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
         } else {
             tr!("format-size")
         };
-        let field = auto_number_field(
-            ui,
-            "stokesforge_format_size",
-            &mut size,
-            &quantities::TEXT_FORMAT_SIZE,
-            &hint,
-        );
+        let field = crate::field_state::for_target(ui, env.text_style.source, |ui| {
+            auto_number_field(
+                ui,
+                "stokesforge_format_size",
+                &mut size,
+                &quantities::TEXT_FORMAT_SIZE,
+                &hint,
+            )
+        });
         on_hover(
             field.response.clone(),
             tr!("format-size"),

@@ -206,6 +206,11 @@ pub enum HistoryLabel {
         /// Name of the window.
         name: Option<String>,
     },
+    /// Marking a sheet as an untouched import (#488).
+    SetSheetRawMark {
+        /// Name of the sheet.
+        name: Option<String>,
+    },
     /// Changing the text of a note.
     SetNoteText {
         /// Name of the note.
@@ -248,6 +253,12 @@ pub enum HistoryLabel {
     TransposeRows,
     /// Refreshing a transposed sheet from its source (#253).
     RecalculateTranspose,
+    /// Checking or unchecking "Recalculate automatically" on a transposed
+    /// sheet (#463).
+    SetTransposeAuto {
+        /// The new state of the box.
+        auto: bool,
+    },
     /// Targeted edit of the graph content, always by replacing the spec.
     EditPlotSpec(PlotEditKind),
     /// A group of actions undone as one block.
@@ -304,9 +315,17 @@ pub enum PlotEditKind {
     DistributeLayers,
     /// A graph switched between the regular grid and free placement (#398).
     LayerPlacement,
+    /// The « Text from » setting of a legend changed (#499).
+    LegendText,
+    /// The colour bar of a layer edited (#499).
+    ColorBar,
+    /// The page of a graph fitted to its layers (#505).
+    FitPage,
+    /// The layout of a graph fitted to its page (#505, K1).
+    FitLayout,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 29] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -332,6 +351,10 @@ impl PlotEditKind {
         Self::MatchLayerSize,
         Self::DistributeLayers,
         Self::LayerPlacement,
+        Self::LegendText,
+        Self::ColorBar,
+        Self::FitPage,
+        Self::FitLayout,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -362,6 +385,10 @@ impl std::fmt::Display for PlotEditKind {
             Self::MatchLayerSize => "Match Layer Size",
             Self::DistributeLayers => "Distribute Layers",
             Self::LayerPlacement => "Change Layer Placement",
+            Self::LegendText => "Change Legend Text",
+            Self::ColorBar => "Change Color Bar",
+            Self::FitPage => "Fit Page to Layout",
+            Self::FitLayout => "Fit Layout to Page",
         })
     }
 }
@@ -449,6 +476,10 @@ impl fmt::Display for HistoryLabel {
                 write!(f, "Edit Properties of “{name}”")
             }
             HistoryLabel::SetWindowMeta { name: None } => f.write_str("Edit Window Properties"),
+            HistoryLabel::SetSheetRawMark { name: Some(name) } => {
+                write!(f, "Mark Sheet “{name}” as Raw Data")
+            }
+            HistoryLabel::SetSheetRawMark { name: None } => f.write_str("Mark Sheet as Raw Data"),
             HistoryLabel::SetNoteText { name: Some(name) } => write!(f, "Edit Note “{name}”"),
             HistoryLabel::SetNoteText { name: None } => f.write_str("Edit Note"),
             HistoryLabel::SetColumnMeta { column: Some(c) } => {
@@ -483,6 +514,12 @@ impl fmt::Display for HistoryLabel {
             }
             HistoryLabel::TransposeRows => f.write_str("Transpose Rows"),
             HistoryLabel::RecalculateTranspose => f.write_str("Recalculate Transposed Sheet"),
+            HistoryLabel::SetTransposeAuto { auto: true } => {
+                f.write_str("Check Recalculate Automatically")
+            }
+            HistoryLabel::SetTransposeAuto { auto: false } => {
+                f.write_str("Uncheck Recalculate Automatically")
+            }
             HistoryLabel::Macro(kind) => kind.fmt(f),
         }
     }

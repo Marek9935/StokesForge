@@ -35,6 +35,7 @@ In a detached window only Undo, Redo and Save work. The other shortcuts act in t
 | Cut | <kbd>Ctrl</kbd>+<kbd>X</kbd> |
 | Paste | <kbd>Ctrl</kbd>+<kbd>V</kbd> |
 | Paste at the same place | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> |
+| Paste with rows and columns swapped | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> |
 | Clear the selected cells, then delete them | <kbd>Del</kbd> |
 | Duplicate the sheet | <kbd>Ctrl</kbd>+<kbd>D</kbd> |
 
@@ -48,7 +49,7 @@ In a detached window only Undo, Redo and Save work. The other shortcuts act in t
 | Move the selected series down | <kbd>Ctrl</kbd>+<kbd>Down</kbd> |
 | Zoom | <kbd>Ctrl</kbd>+<kbd>Wheel</kbd> |
 | Turn Snap on or off (Page Layout Mode) | <kbd>G</kbd> |
-| Nudge the selected graphs (Page Layout Mode) | <kbd>Arrow</kbd> <kbd>keys</kbd> |
+| Nudge the selected graphs, or on a Regular Grid move the selected graph one cell (Page Layout Mode) | <kbd>Arrow</kbd> <kbd>keys</kbd> |
 | Nudge ten steps (Page Layout Mode) | <kbd>Shift</kbd>+<kbd>Arrow</kbd> <kbd>keys</kbd> |
 | Leave the Page Layout Mode | <kbd>Esc</kbd> |
 

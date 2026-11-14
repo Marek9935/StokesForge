@@ -106,10 +106,16 @@ impl Form<'_> {
 
     /// A row without a label: `field` in the fields column (checkbox,
     /// button, group of radios under its label).
+    ///
+    /// Its texts wrap within the column (#525): a horizontal row extends
+    /// them by default, and a long checkbox label (the French tick labels
+    /// checkbox of the Axes page) then ran past the dialog edge and widened
+    /// the `Ui`, so that the notes below wrapped past it too.
     pub(super) fn field<R>(&mut self, field: impl FnOnce(&mut egui::Ui) -> R) -> R {
         let indent = self.indent();
         self.ui
             .horizontal(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.add_space(indent);
                 field(ui)
             })
@@ -209,13 +215,26 @@ impl Form<'_> {
         title: impl Into<String>,
         add: impl FnOnce(&mut Form<'_>) -> R,
     ) -> Option<R> {
+        self.collapsible_open(id_salt, title, false, add)
+    }
+
+    /// [`Self::collapsible`] that is **open the first time** it is painted
+    /// when `default_open` (a block that holds a value already set); after
+    /// that, egui's memory keeps what the user chose.
+    pub(super) fn collapsible_open<R>(
+        &mut self,
+        id_salt: impl Hash + std::fmt::Debug,
+        title: impl Into<String>,
+        default_open: bool,
+        add: impl FnOnce(&mut Form<'_>) -> R,
+    ) -> Option<R> {
         let id = self
             .ui
             .make_persistent_id(("stokesforge_form_fold", id_salt));
         let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
             self.ui.ctx(),
             id,
-            false,
+            default_open,
         );
         let title = title.into();
         let accessible_title = title.clone();

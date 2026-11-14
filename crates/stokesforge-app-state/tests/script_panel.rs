@@ -130,6 +130,30 @@ fn run_and_wait(state: &mut AppState, source: &str) {
     }
 }
 
+// --- The end of a script wakes the server thread (#475) ---------------------
+
+/// The script's thread calls the waker after sending its reply: the server
+/// thread learns of the end at once, with no 50 ms look in between. When the
+/// waker fires the result is already there.
+#[test]
+fn the_end_of_a_script_calls_the_waker_after_the_reply_is_sent() {
+    let (_session, mut state, _sheet) = start();
+    let (woken_tx, woken) = std::sync::mpsc::channel();
+    state.set_waker(std::sync::Arc::new(move || {
+        let _ = woken_tx.send(());
+    }));
+    state.set_script_source("print(1)\n".to_string());
+    state.dispatch(Action::RunScript);
+    woken
+        .recv_timeout(TIMEOUT)
+        .expect("the end of the script woke the server thread");
+    state.poll_script();
+    assert!(
+        !state.script_running(),
+        "the reply was sent before the wake"
+    );
+}
+
 // --- 4. A script runs and its output comes back -----------------------------
 
 #[test]

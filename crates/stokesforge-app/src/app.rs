@@ -47,6 +47,14 @@
 //! dialog and deferred application phases to private methods. These
 //! extractions add neither a sub-Ui nor an egui id.
 //!
+//! # The server thread (#475)
+//!
+//! The follow-up of autosave, scripts, recalculations and the progress of an
+//! import runs in a background thread (`server.rs`) over the same `AppState`,
+//! behind one lock that this struct holds during a pass. `logic` keeps only the
+//! close request; applying a finished import and the busy-indicator repaints stay
+//! in the paint pass.
+//!
 //! # Where the rest lives
 //!
 //! The complete module → role table is in
@@ -136,14 +144,18 @@ mod analysis_handles;
 mod analysis_menu;
 mod analysis_preview;
 mod busy;
+mod color_bar_settings;
 mod column_formula_help;
 mod column_use;
 mod confirmations;
 mod contents;
 mod cursors;
 mod curve_settings;
+mod detached_book;
+mod detached_graph;
 #[cfg(test)]
 mod detached_keys;
+mod detached_panel;
 mod dialogs;
 mod empty_state;
 mod figure_copy;
@@ -159,6 +171,8 @@ pub(crate) mod hover_help;
 mod import_wizard;
 mod inplace_edit;
 mod keyboard_shortcuts_window;
+#[cfg(test)]
+mod layout_sweep;
 mod layout_window;
 mod list_row;
 #[cfg(test)]
@@ -187,6 +201,8 @@ mod recovery;
 mod reorder_list;
 mod results_pane;
 mod script_console;
+mod server;
+mod server_stats;
 pub(crate) mod shortcuts;
 mod stale_export;
 mod state_toggle;
@@ -196,16 +212,23 @@ pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
 mod transpose_ui;
+mod viewport_ghosts;
 mod window_band;
 mod window_chrome;
 mod window_detach;
 mod window_placement;
 mod window_stack;
+#[cfg(test)]
+mod window_stress;
 mod workbook;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+pub use server::{BenchState, PassHook, ServedApp};
+#[doc(hidden)]
+pub use server_stats::{bench_flush_stats, bench_write_in_flight};
 
 use about_window::about_window;
 use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
@@ -237,13 +260,11 @@ use status_history::{low_r2_list_window, status_history_window};
 use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use transpose_ui::transpose_relink_window;
-use window_detach::{
-    snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
-};
-use window_placement::geometry_rect;
+use window_detach::snapshot_stamp;
 use window_stack::window_nodes;
 
 use eframe::egui;
+use stokesforge_app_state::panel_layout::PanelKind;
 use stokesforge_core::{Node, NodeId};
 use stokesforge_render_egui::GraphView;
 use stokesforge_session::WindowGeometry;
@@ -277,6 +298,24 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 8;
 pub struct StokesForgeApp {
     /// The state, sole holder of the logic.
     state: AppState,
+    /// The windows `ui` wants published this pass (#475, step 2): `Some` when a
+    /// [`ServedApp`] publishes them after releasing the lock, `None`: published
+    /// at once (a test that drives `ui` on a plain app).
+    pending_viewports: Option<Vec<window_detach::PendingViewport>>,
+    /// The handle the windows take the application through, set when the
+    /// application is put behind its lock ([`server::AppSlot`]); weak, the
+    /// application does not keep itself alive.
+    shared_self: std::sync::Weak<parking_lot::Mutex<StokesForgeApp>>,
+    /// Offers a figure to the system clipboard, captured once by the root from
+    /// its window (no `Frame` in a detached window's pass, #475).
+    figure_offer: Option<Box<dyn figure_copy::FigureOffer>>,
+    /// The root already tried to capture [`Self::figure_offer`].
+    figure_offer_captured: bool,
+    /// The server thread's status (#475), once attached by [`ServedApp`];
+    /// `None`: no thread, the paint pass polls.
+    server: Option<Arc<server::ServerStatus>>,
+    /// The "background tasks stopped" warning has been said (once, #475).
+    server_stop_told: bool,
     /// Native file picker in progress, on a separate thread (#192).
     file_picker: FilePicker,
     /// Opens a folder in the system's file manager (Preferences › Folders);
@@ -295,20 +334,18 @@ pub struct StokesForgeApp {
     toolbars: ToolbarState,
     om_detached: bool,
     om_collapsed: bool,
-    om_view: Option<window_detach::DetachedObjectManager>,
     /// Visibility and collapse are view states, outside history and the .stf format.
     pm_open: bool,
     pm_collapsed: bool,
     script_open: bool,
     script_detached: bool,
-    script_view: Option<window_detach::DetachedScriptConsole>,
     active_detached: Option<Tab>,
     /// The content tabs currently open as floating windows, in the order in
     /// which they were last focused — the last element is the most recently
     /// focused (see the top doc of `window_stack.rs`, § Confined floating
     /// windows).
     /// Absent while maximized or detached into a separate OS window
-    /// (same invariant as `detached_tabs` for this second case).
+    /// (same invariant as `detached_books` for this second case).
     floating_tabs: Vec<Tab>,
     /// Cascade rank assigned to each currently open floating window, at its
     /// creation — used to compute its default position
@@ -370,26 +407,33 @@ pub struct StokesForgeApp {
     /// the single source; `panel_memory.rs` reads them and sends
     /// `Action::RememberPanelLayout` on every change.
     panel_memory: panel_memory::PanelMemory,
-    /// What the detached OS window of the Project Manager paints, resynchronized
-    /// from `self.state` at every frame by
-    /// [`StokesForgeApp::show_detached_project_manager`] — see its top doc.
-    /// `Arc<Mutex<_>>` only because the `show_viewport_deferred` callback
-    /// requires it (`Fn` + `Send + Sync + 'static`, no capture of `&mut
-    /// self`); it is **not** `AppState` itself behind a lock,
-    /// only this strict subset.
-    pm_view_model: Arc<Mutex<ProjectManagerViewModel>>,
-    /// What the detached OS window of the Project Manager writes (open
-    /// clicks, reattach request), drained every frame by
-    /// [`StokesForgeApp::ui`](eframe::App::ui) — same role as `open_requests`/`actions` for the
-    /// rest of the bench, just set by a deferred callback rather than collected
-    /// directly.
-    pm_requests: Arc<Mutex<DetachedProjectManagerRequests>>,
+    /// The detached window of each panel, in [`PanelKind::ALL`] order (#475, L3):
+    /// the flag of Reattach, whether it registers itself, its sender identity.
+    /// Reached by the window's own pass under the application lock.
+    panel_windows: [detached_panel::PanelWindow; 3],
+    /// What the detached panels showed the last time any window looked (a root
+    /// pass or a panel's own pass): a change wakes them.
+    panels_seen: Option<detached_panel::PanelsView>,
     /// Content tabs (`Book`/`Graph`/`Matrix`/`Note`) currently
     /// detached into a separate OS window — see the top doc of
     /// `window_detach.rs`, § Generic detaching of content tabs. One entry per detached tab; absent from
     /// `floating_tabs` while it is (same invariant as `pm_detached`
     /// for the Project Manager, generalized to several simultaneous tabs).
-    detached_tabs: HashMap<Tab, DetachedTab>,
+    /// The workbooks detached into their own OS window (#475, L2): the view
+    /// state of each, reached by the window's own pass under the application
+    /// lock. Absent from `floating_tabs` while detached.
+    detached_books: HashMap<NodeId, detached_book::DetachedBook>,
+    /// The graphs detached into their own OS window (#475, L1): the view state
+    /// of each, reached by the window's own pass under the application lock.
+    /// Absent from `floating_tabs` and from `graph_views` while detached.
+    detached_graphs: HashMap<NodeId, detached_graph::DetachedGraph>,
+    /// Native Wayland: a detached window closes itself in its own pass (#475,
+    /// L4). Read once by the root from its window handle; false under X11 and
+    /// on Windows, where the root closes it (see `detached_graph.rs`).
+    windows_close_themselves: bool,
+    /// The windows of graphs that closed themselves and that the root removed
+    /// from the list: each one needs one pass of its own to leave egui.
+    released_windows: Vec<egui::ViewportId>,
     /// Position of each floating window, in logical coordinates of the
     /// workspace, moved by the house title bar and bounded by
     /// `clamp_to_workspace` — sole source of truth of the position.
@@ -439,8 +483,6 @@ pub struct StokesForgeApp {
     /// The window asked to close (cross, Alt+F4, Quit): to be posted to
     /// the state like `Action::Quit` (#229).
     close_requested: bool,
-    /// The root asked winit to report it occluded (Wayland, #457), once.
-    occlusion_reported: bool,
     /// The state released the closing: the next request is no longer held back.
     quit_confirmed: bool,
     /// Whether a dialog was open in the main window at the end of the previous
@@ -476,60 +518,23 @@ impl StokesForgeApp {
     /// value is silently ignored: the bench must not refuse
     /// to start because of verification tooling.
     pub fn new(state: AppState) -> Self {
+        Self::build(state, false)
+    }
+
+    /// Like [`Self::new`] for a project **read from a file** (#513): a file
+    /// without saved window states opens no window, where an in-memory project
+    /// (the demo, a test) opens its first workbook and first graph.
+    pub fn new_from_file(state: AppState) -> Self {
+        Self::build(state, true)
+    }
+
+    fn build(state: AppState, from_file: bool) -> Self {
         let autoquit = std::env::var(AUTOQUIT_ENV)
             .ok()
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
 
-        let saved_window_geometries: HashMap<NodeId, WindowGeometry> =
-            (*state.snapshot().window_geometries).clone();
-        let floating_rects: HashMap<NodeId, egui::Rect> = saved_window_geometries
-            .iter()
-            .map(|(node, geometry)| (*node, geometry_rect(geometry)))
-            .collect();
-        let mut floating_tabs = Vec::new();
-        let mut cascade_rank = HashMap::new();
-        let mut next_cascade = 0u32;
-        let mut collapsed_tabs = HashSet::new();
-        let mut maximized_tab = None;
-        let mut open_initial = |tab: Tab| {
-            floating_tabs.push(tab);
-            cascade_rank.insert(tab, next_cascade);
-            next_cascade = next_cascade.wrapping_add(1);
-        };
-        if saved_window_geometries
-            .values()
-            .any(|geometry| geometry.view.is_some())
-        {
-            // Project saved with the state of the windows (issue #16): it is
-            // restored as is, a detached window coming back floating.
-            let mut restored: Vec<(u32, Tab, stokesforge_session::WindowView)> = Vec::new();
-            for (node, kind) in window_nodes(&state.project_tree()) {
-                let Some(view) = saved_window_geometries.get(&node).and_then(|g| g.view) else {
-                    continue;
-                };
-                if view.mode != stokesforge_session::WindowMode::Closed {
-                    restored.push((view.stack, tab_for_window(node, kind), view));
-                }
-            }
-            restored.sort_by_key(|(stack, tab, _)| (*stack, tab_node(*tab).raw()));
-            for (_, tab, view) in restored {
-                open_initial(tab);
-                if view.collapsed {
-                    collapsed_tabs.insert(tab);
-                }
-                if view.mode == stokesforge_session::WindowMode::Maximized {
-                    maximized_tab = Some(tab);
-                }
-            }
-        } else {
-            if let Some((first_book, _)) = state.books().into_iter().next() {
-                open_initial(Tab::Book(first_book));
-            }
-            if let Some((first_graph, _)) = state.graphs().into_iter().next() {
-                open_initial(Tab::Graph(first_graph));
-            }
-        }
+        let restored = window_detach::RestoredWindows::from_state(&state, from_file);
         // Without a workbook or graph to show, no floating window
         // opens — neither the script console nor the Project Manager has its
         // place here, they are fixed panels.
@@ -537,6 +542,12 @@ impl StokesForgeApp {
         let window_title = state.window_title();
         Self {
             state,
+            pending_viewports: None,
+            shared_self: std::sync::Weak::new(),
+            figure_offer: None,
+            figure_offer_captured: false,
+            server: None,
+            server_stop_told: false,
             file_picker: FilePicker::default(),
             folder_opener: open_folder_in_file_manager,
             window_title,
@@ -545,20 +556,18 @@ impl StokesForgeApp {
             toolbars: ToolbarState::default(),
             om_detached: false,
             om_collapsed: false,
-            om_view: None,
             pm_open: true,
             pm_collapsed: false,
             script_open: true,
             script_detached: false,
-            script_view: None,
             active_detached: None,
-            floating_tabs,
-            cascade_rank,
-            next_cascade,
+            floating_tabs: restored.floating_tabs,
+            cascade_rank: restored.cascade_rank,
+            next_cascade: restored.next_cascade,
             focus_next: None,
             graph_views: HashMap::new(),
-            collapsed_tabs,
-            maximized_tab,
+            collapsed_tabs: restored.collapsed_tabs,
+            maximized_tab: restored.maximized_tab,
             layout_entries: HashMap::new(),
             layout_actions: Vec::new(),
             action_origins: Vec::new(),
@@ -566,21 +575,23 @@ impl StokesForgeApp {
             pm_detached: false,
             script_collapsed: true,
             panel_memory: panel_memory::PanelMemory::default(),
-            pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
-            pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
-            detached_tabs: HashMap::new(),
+            panel_windows: Default::default(),
+            panels_seen: None,
+            detached_books: HashMap::new(),
+            detached_graphs: HashMap::new(),
+            windows_close_themselves: false,
+            released_windows: Vec::new(),
             window_positions: HashMap::new(),
             window_sizes: HashMap::new(),
             figure_follow: HashMap::new(),
             workspace_scroll: egui::Vec2::ZERO,
-            saved_window_geometries,
-            floating_rects,
+            saved_window_geometries: restored.saved_window_geometries,
+            floating_rects: restored.floating_rects,
             pm_selection: HashSet::new(),
             pm_last_active_tab: None,
             autoquit,
             first_frame: None,
             close_requested: false,
-            occlusion_reported: false,
             quit_confirmed: false,
             dialog_was_open: false,
             dialog_opener: None,
@@ -611,7 +622,7 @@ impl StokesForgeApp {
         }
     }
 
-    /// Opens the import wizard on the active workbook (maximized, or in the
+    /// Opens the import window on the active workbook (maximized, or in the
     /// foreground, or the only detached workbook) — File menu and Ctrl+".
     fn open_import_dialog(&mut self) {
         let active_book = self.active_book();
@@ -621,10 +632,7 @@ impl StokesForgeApp {
     /// The active workbook: maximized, otherwise in the foreground, otherwise the only
     /// detached workbook.
     fn active_book(&self) -> Option<NodeId> {
-        let mut detached_books = self.detached_tabs.keys().filter_map(|tab| match tab {
-            Tab::Book(book) => Some(*book),
-            _ => None,
-        });
+        let mut detached_books = self.detached_books.keys().copied();
         let only_detached_book = detached_books
             .next()
             .filter(|_| detached_books.next().is_none());
@@ -635,6 +643,57 @@ impl StokesForgeApp {
                 _ => None,
             })
             .or(only_detached_book)
+    }
+
+    /// Is `tab` detached into its own OS window (a graph, or a workbook)?
+    fn is_tab_detached(&self, tab: Tab) -> bool {
+        match tab {
+            Tab::Graph(graph) => self.detached_graphs.contains_key(&graph),
+            Tab::Book(book) => self.detached_books.contains_key(&book),
+            Tab::Matrix(_) | Tab::Note(_) => false,
+        }
+    }
+
+    /// Every content tab detached into its own OS window.
+    fn detached_tab_list(&self) -> Vec<Tab> {
+        self.detached_books
+            .keys()
+            .map(|book| Tab::Book(*book))
+            .chain(self.detached_graphs.keys().map(|graph| Tab::Graph(*graph)))
+            .collect()
+    }
+
+    /// Every OS window that is open right now besides the root: the detached
+    /// content windows and the detached panels. The windows [`server::wake`]
+    /// wakes, never a closed one.
+    fn open_viewports(&self) -> Vec<egui::ViewportId> {
+        self.detached_tab_list()
+            .iter()
+            .map(egui::ViewportId::from_hash_of)
+            .chain(
+                PanelKind::ALL
+                    .into_iter()
+                    .filter(|kind| self.panel_has_window(*kind))
+                    .map(detached_panel::panel_viewport_id),
+            )
+            .collect()
+    }
+
+    /// Takes down the detached window of `tab`, if any, and tells the OS to
+    /// close it. Returns whether there was one.
+    fn remove_detached_window(&mut self, ctx: &egui::Context, tab: Tab) -> bool {
+        let removed = match tab {
+            Tab::Graph(graph) => self.release_graph_window(graph).is_some(),
+            Tab::Book(book) => self.release_book_window(book).is_some(),
+            Tab::Matrix(_) | Tab::Note(_) => false,
+        };
+        if removed {
+            ctx.send_viewport_cmd_to(
+                egui::ViewportId::from_hash_of(tab),
+                egui::ViewportCommand::Close,
+            );
+        }
+        removed
     }
 
     /// [`Self::collect_shortcuts`], with Undo and Redo held back and returned: the
@@ -798,6 +857,17 @@ impl StokesForgeApp {
         }));
     }
 
+    /// What every pass of the application may need before it acts, whichever
+    /// window it paints (#475, step 2): the root runs it, and a detached window
+    /// will run it too from L1 on, so that a Save As started there is answered
+    /// in its own pass. Today only the file picker (its answer is applied
+    /// where its request came from). Not in it: the busy-indicator repaints and
+    /// the opening of the workbooks an import created (`poll_background_jobs`),
+    /// the window title and status, the figure offer: they belong to the root.
+    fn pass_prelude(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        self.poll_file_picker(ctx, actions);
+    }
+
     /// Starts the requested pickers, then applies the answer of the one that
     /// has just finished (#192). Never blocks.
     fn poll_file_picker(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
@@ -872,28 +942,40 @@ impl StokesForgeApp {
 
     fn active_content_tab(&mut self, ctx: &egui::Context) -> Option<Tab> {
         if !ctx.input(|input| input.focused) {
-            for (&tab, detached) in &self.detached_tabs {
-                if detached.view_model.lock().is_ok_and(|model| model.focused) {
-                    self.active_detached = Some(tab);
+            for (&book, window) in &self.detached_books {
+                if window.focused {
+                    self.active_detached = Some(Tab::Book(book));
+                }
+            }
+            for (&graph, window) in &self.detached_graphs {
+                if window.focused {
+                    self.active_detached = Some(Tab::Graph(graph));
                 }
             }
         }
+        self.current_content_tab()
+    }
+
+    /// [`Self::current_content_tab`] for the stress checks.
+    #[cfg(test)]
+    fn current_content_tab_for_test(&self) -> Option<Tab> {
+        self.current_content_tab()
+    }
+
+    /// The content tab in front, as the last root pass left it: what the
+    /// detached panels follow (#475).
+    fn current_content_tab(&self) -> Option<Tab> {
         self.active_detached
-            .filter(|tab| self.detached_tabs.contains_key(tab))
+            .filter(|tab| self.is_tab_detached(*tab))
             .or(self.maximized_tab)
             .or_else(|| self.floating_tabs.last().copied())
     }
 
     /// The bars and the export also read the detached view targeted by the panel.
     fn read_graph_view<R>(&self, graph: NodeId, read: impl FnOnce(&GraphView) -> R) -> Option<R> {
-        if let Some(detached) = self.detached_tabs.get(&Tab::Graph(graph)) {
-            let model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            model.graph_view.as_ref().map(read)
-        } else {
-            self.graph_views.get(&graph).map(read)
+        match self.detached_graphs.get(&graph) {
+            Some(window) => Some(read(&window.view)),
+            None => self.graph_views.get(&graph).map(read),
         }
     }
 
@@ -910,14 +992,9 @@ impl StokesForgeApp {
         graph: NodeId,
         run: impl FnOnce(&mut GraphView) -> R,
     ) -> Option<R> {
-        if let Some(detached) = self.detached_tabs.get(&Tab::Graph(graph)) {
-            let mut model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            Some(run(model.graph_view.get_or_insert_with(GraphView::default)))
-        } else {
-            Some(run(self.graph_views.entry(graph).or_default()))
+        match self.detached_graphs.get_mut(&graph) {
+            Some(window) => Some(run(&mut window.view)),
+            None => Some(run(self.graph_views.entry(graph).or_default())),
         }
     }
 
@@ -990,6 +1067,11 @@ impl StokesForgeApp {
         if self.state.take_quit_ready() {
             self.quit_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.state.quit_waits_for_autosave() {
+            // Quit waits for the recovery copy being written (#475): the
+            // thread wakes the window at the end of the write, and this look is
+            // the fallback.
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
     }
 
@@ -1041,17 +1123,21 @@ impl eframe::App for StokesForgeApp {
     /// question "Discard Changes · Cancel · Save" (S-F3, #229): held back here
     /// (also with the window minimized, where only `logic` runs), it becomes
     /// `Action::Quit`, and the window closes when the state releases it.
+    /// While a dialog is open (it blocks the main window), the cross only
+    /// flashes the dialog, like a click outside it, as in most applications
+    /// (#533): nothing can then quit in the middle of a dialog and its undo
+    /// group.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.quit_confirmed && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.close_requested = true;
+            self.close_requested = self.state.open_dialog().is_none();
+            if !self.close_requested {
+                dialogs::flash_open_modal(ctx);
+            }
         }
-        // Autosave (#317): here and not in `ui()`, which does not run
-        // with the window minimized; the wake-up is scheduled for the next
-        // deadline, no periodic redraw at rest.
-        if let Some(delay) = self.state.poll_autosave(Instant::now()) {
-            ctx.request_repaint_after(delay);
-        }
+        // The autosave (#317) is the server thread's (#475); `logic` polls it
+        // only when no thread runs (a bench, a test, a thread that ended).
+        self.poll_autosave_without_server(ctx);
     }
 
     /// The sizes and positions the detached panels reported since the last
@@ -1063,6 +1149,8 @@ impl eframe::App for StokesForgeApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` is an `Arc`: the clone avoids the read borrow of the painted Ui.
         let ctx = ui.ctx().clone();
+        // Before any window closes itself (a no-op after the first pass).
+        viewport_ghosts::install(&ctx);
         self.sync_window_title_and_status(&ctx);
         self.prepare_panel_windows();
         let published_stamp = snapshot_stamp(self.state.snapshot());
@@ -1078,16 +1166,11 @@ impl eframe::App for StokesForgeApp {
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
         window_band::publish_dialog(&ctx, self.state.open_dialog());
-        // Entries refused in a detached window: said through the same path as a
-        // refused action.
-        for viewport in window_band::take_refusals(&ctx) {
-            if let Some(dialog) = self.state.open_dialog() {
-                if self.viewport_is_open(viewport) {
-                    self.refuse_in_window(&ctx, viewport, dialog);
-                }
-            }
-        }
-        self.poll_file_picker(&ctx, &mut actions);
+        self.answer_refusals(&ctx);
+        // One entry in the application: a press in the main window ends the
+        // entry held by a detached workbook.
+        self.commit_entry_held_elsewhere(&ctx, detached_book::PassOf::Root);
+        self.pass_prelude(&ctx, &mut actions);
         if std::mem::take(&mut self.close_requested) {
             actions.push(Action::Quit {
                 pending_edits: false,
@@ -1097,7 +1180,7 @@ impl eframe::App for StokesForgeApp {
         let (metadata, x_prime) = self.state.workbook_header_defaults();
         grid::publish_header_row_defaults(&ctx, metadata, x_prime);
         analysis_menu::publish_last_presets(&ctx, &self.state);
-        graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
+        graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tab_list().iter());
         let history = self.collect_shortcuts_deferring_history(&ctx, &mut actions);
         self.begin_layout_frame(&ctx, active_graph(active_tab_kind(active_tab)));
         // Ctrl+C on the active graph, before panels and contents read
@@ -1108,17 +1191,17 @@ impl eframe::App for StokesForgeApp {
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
         self.show_toolbars(ui, &ctx, active_tab, &mut actions);
         self.status_bar(ui, &mut actions);
+        // A Reattach the panel windows raised is carried out before the panels
+        // are painted, so that the docked panel appears in the same pass.
+        self.drain_detached_panel_flags(&ctx);
         self.script_panel(ui, &ctx, &mut actions);
-        self.show_project_manager(
-            ui,
-            &ctx,
-            active_tab,
-            &mut open_requests,
-            &mut close_requests,
-            &mut actions,
-        );
+        self.show_project_manager(ui, &mut open_requests, &mut close_requests, &mut actions);
         self.object_manager_panel(ui, active_tab, &mut actions);
-        self.drain_detached_tabs(&ctx, &mut actions);
+        self.show_detached_panels(&ctx);
+        self.show_detached_books(&ctx);
+        self.drain_detached_book_flags(&ctx);
+        self.show_detached_graphs(&ctx);
+        self.drain_detached_graph_flags(&ctx);
         self.show_workspace(
             ui,
             active_tab,
@@ -1143,68 +1226,128 @@ impl eframe::App for StokesForgeApp {
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
-        // #457: a root covered by a detached window gets no frame callback and would
-        // freeze the actions of every window. Only the root opts in to the report:
-        // a reported window gets no pass and loses its input, which a detached
-        // window must not.
-        #[cfg(target_os = "linux")]
-        if !self.occlusion_reported {
-            if let Some(window) = frame.winit_window() {
-                {
-                    use winit::platform::wayland::WindowExtWayland as _;
-                    window.set_reports_occlusion(true);
-                }
-                self.occlusion_reported = true;
-            }
+        if let Some(wayland) = detached_graph::native_wayland(frame) {
+            self.windows_close_themselves = wayland;
         }
         self.sync_panel_layout(&mut actions);
         self.drain_layout_actions(&mut actions);
         actions.extend(history);
         self.dispatch_actions(&ctx, actions);
-        self.return_selection_to_detached_books(&ctx);
         self.close_when_ready(&ctx);
-        self.offer_figure(frame);
+        self.capture_figure_offer(frame);
+        self.offer_figure();
 
         self.sync_window_views();
         page_layout::note_field_focus(&ctx);
         let changed = snapshot_stamp(self.state.snapshot()) != published_stamp;
+        // What the detached panels show besides the model (selection, open
+        // windows, cut nodes, the selection of the graph in front) moved since
+        // they last looked: only they need to look again.
+        let panels_now = self.panels_view();
+        if panels_now != self.panels_seen {
+            for kind in PanelKind::ALL
+                .into_iter()
+                .filter(|kind| self.panel_has_window(*kind))
+            {
+                ctx.request_repaint_of(detached_panel::panel_viewport_id(kind));
+            }
+        }
+        self.panels_seen = panels_now;
         self.announce_opened_dialog(&ctx);
         if changed {
             // A command applied after publication wakes the viewports. The
             // detached windows get their snapshot and their wake-up now, not
-            // from the next root pass: when one of them covers the root, that
-            // pass runs only every 100 ms (`docs/windows.md`, #457), and the
-            // result of a click would wait for two of them.
+            // from the next root pass (a covered root gets none on native
+            // Wayland).
             ctx.request_repaint();
-            self.republish_detached_tabs(&ctx);
+            // The windows read the shared state and only need to look again.
+            server::wake(
+                &ctx,
+                true,
+                &self.open_viewports(),
+                Some(egui::ViewportId::ROOT),
+            );
         }
+        self.wake_released_windows(&ctx);
         self.screenshot(&ctx);
         self.autoquit(&ctx);
     }
 }
 
 impl StokesForgeApp {
+    /// For the bench: the graph starts detached into its own window.
+    #[doc(hidden)]
+    pub fn bench_detach_graph(&mut self, graph: NodeId) {
+        let tab = Tab::Graph(graph);
+        if !self.floating_tabs.contains(&tab) {
+            self.floating_tabs.push(tab);
+        }
+        self.detach_tab(tab);
+    }
+
+    /// For the bench: the workbook starts detached into its own window.
+    #[doc(hidden)]
+    pub fn bench_detach_book(&mut self, book: NodeId) {
+        let tab = Tab::Book(book);
+        if !self.floating_tabs.contains(&tab) {
+            self.floating_tabs.push(tab);
+        }
+        self.detach_tab(tab);
+    }
+
+    /// For the bench: the viewport of the detached window of `book`.
+    #[doc(hidden)]
+    pub fn bench_book_viewport(book: NodeId) -> egui::ViewportId {
+        detached_book::book_viewport(book)
+    }
+
+    /// For the bench: the Project Manager starts detached into its own window.
+    #[doc(hidden)]
+    pub fn bench_detach_project_manager(&mut self) {
+        self.pm_open = true;
+        self.detach_project_manager();
+    }
+
+    /// For the bench: the viewport of the detached Project Manager.
+    #[doc(hidden)]
+    pub fn bench_project_manager_viewport() -> egui::ViewportId {
+        detached_panel::panel_viewport_id(PanelKind::Project)
+    }
+
+    /// For the bench: the viewport of the detached window of `graph`.
+    #[doc(hidden)]
+    pub fn bench_graph_viewport(graph: NodeId) -> egui::ViewportId {
+        detached_graph::graph_viewport(graph)
+    }
+
     /// Collects the finished jobs before the panels read the snapshot.
     fn poll_background_jobs(&mut self, ctx: &egui::Context) {
         // Probes a script finished on its detached thread **before** painting:
         // without a push notification from the actor, this is the only place
         // that refreshes the snapshot after a script (see the top doc of
         // `stokesforge_app_state::state`). Never blocks, even without a running script.
-        self.state.poll_script();
+        self.tell_server_stopped();
+        self.poll_jobs_without_server();
         // The work also continues when its console is hidden or collapsed.
         if self.state.script_running() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         // Formula recalculation that the command did not wait for (#239): we
         // take over again at its end; meanwhile, the next frame comes.
-        self.state.poll_recalc();
         if self.state.recalc_work().is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         // Background import: progress, and creation of the sheets at the end. The
-        // created workbooks open as after an immediate import.
+        // created workbooks open as after an immediate import. With the server
+        // thread the sheets are created by the thread (#475); this pass only
+        // opens the windows of the workbooks it created.
         if self.state.import_progress().is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        for book in self.state.take_books_to_open() {
+            self.open_tab(Tab::Book(book));
+        }
+        if !self.server_running() && self.state.import_progress().is_some() {
             let root = self.state.tree().root();
             let before = self
                 .state
@@ -1261,125 +1404,36 @@ impl StokesForgeApp {
         }
     }
 
-    /// The panel or its detached viewport occupies a single step of the frame.
+    /// The docked Project Manager occupies a single step of the frame.
     fn show_project_manager(
         &mut self,
         ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        active_tab: Option<Tab>,
         open_requests: &mut Vec<Tab>,
         close_requests: &mut Vec<Tab>,
         actions: &mut Vec<Action>,
     ) {
-        if self.pm_detached {
-            // Draining before publication avoids publishing a stale selection.
-            // Empties what the detached OS window wrote since the
-            // last frame (see the top doc of
-            // `show_detached_project_manager`) — same moment as the rest of
-            // `open_requests`, before painting the fixed panel (which will not
-            // be painted this frame anyway) and the `CentralPanel`.
-            let (should_reattach, new_selection, mut new_close, incoming) = {
-                let mut requests = self
-                    .pm_requests
-                    .lock()
-                    .unwrap_or_else(|err| err.into_inner());
-                open_requests.append(&mut requests.open);
-                (
-                    std::mem::take(&mut requests.reattach),
-                    requests.selection.take(),
-                    std::mem::take(&mut requests.close),
-                    std::mem::take(&mut requests.actions),
-                )
-            };
-            // Selecting, opening a window and Reattach stay free; what writes
-            // is refused while a dialog is open in the main window.
-            self.accept_detached_actions(ctx, project_manager::viewport_id(), incoming, actions);
-            if let Some(selection) = new_selection {
-                self.pm_selection = selection;
-            }
-            close_requests.append(&mut new_close);
-            if should_reattach {
-                self.reattach_project_manager();
-                ctx.request_repaint();
-            }
-        }
-        if !self.pm_open {
+        // A detached panel is painted by its own window (`detached_panel.rs`).
+        if !self.pm_open || self.pm_detached {
             return;
         }
-        if self.pm_detached {
-            self.show_detached_project_manager(ctx, active_tab);
-        } else {
-            // Fixed panel, painted *before* the `CentralPanel` — see the top
-            // doc of the module, § What stays here: this is what guarantees by
-            // construction that it is never covered by it nor covers it,
-            // like the menu bar (`egui::Panel::top`) painted
-            // higher up.
-            self.project_manager_panel(ui, open_requests, close_requests, actions);
-        }
+        // Fixed panel, painted *before* the `CentralPanel` — see the top
+        // doc of the module, § What stays here: this is what guarantees by
+        // construction that it is never covered by it nor covers it,
+        // like the menu bar (`egui::Panel::top`) painted
+        // higher up.
+        self.project_manager_panel(ui, open_requests, close_requests, actions);
     }
 
-    /// The detached requests stay drained before the workspace.
-    pub(super) fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if !self.detached_tabs.is_empty() {
-            self.show_detached_tabs(ctx);
-            // Same draining as for the Project Manager, generalized to
-            // several tabs: each may have accumulated actions and/or
-            // asked to be reattached since the last frame.
-            let mut to_reattach: Vec<Tab> = Vec::new();
-            let mut to_close: Vec<Tab> = Vec::new();
-            let mut incoming: Vec<(egui::ViewportId, Vec<Action>)> = Vec::new();
-            let mut local_messages = Vec::new();
-            for (tab, detached) in &self.detached_tabs {
-                let viewport = egui::ViewportId::from_hash_of(tab);
-                if let Tab::Book(book) = tab {
-                    let mut model = detached
-                        .view_model
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner());
-                    if let Some(view_state) = model.view_state.as_mut() {
-                        local_messages.push((
-                            viewport,
-                            self.state.adopt_detached_book_view(view_state, *book),
-                        ));
-                    }
+    /// Entries refused in a detached window (a typed value while a dialog is
+    /// open in the main window): said through the same path as a refused
+    /// action. Run by the root and by the passes of the windows that serve
+    /// themselves, so that the band shows in the pass of the gesture.
+    pub(super) fn answer_refusals(&mut self, ctx: &egui::Context) {
+        for viewport in window_band::take_refusals(ctx) {
+            if let Some(dialog) = self.state.open_dialog() {
+                if self.viewport_is_open(viewport) {
+                    self.refuse_in_window(ctx, viewport, dialog);
                 }
-                let mut requests = detached
-                    .requests
-                    .lock()
-                    .unwrap_or_else(|err| err.into_inner());
-                incoming.push((viewport, std::mem::take(&mut requests.actions)));
-                if std::mem::take(&mut requests.reattach) {
-                    to_reattach.push(*tab);
-                }
-                if std::mem::take(&mut requests.close) {
-                    to_close.push(*tab);
-                }
-            }
-            // The messages the local view of a workbook recorded: said in its
-            // window when they are warnings or errors (#471).
-            for (viewport, messages) in local_messages {
-                if let Some(message) = messages
-                    .iter()
-                    .rfind(|message| message.level != StatusLevel::Info)
-                {
-                    self.band_in(ctx, viewport, message);
-                }
-            }
-            // During a dialog open in the main window (the modal graph
-            // properties window above all), a history macro is open by the
-            // root: letting the actions of a detached window in would have
-            // them absorbed, then undone with the graph (issue #21). They are
-            // refused, and the window says why.
-            for (viewport, window_actions) in incoming {
-                self.accept_detached_actions(ctx, viewport, window_actions, actions);
-            }
-            for tab in to_reattach {
-                window_band::clear(ctx, egui::ViewportId::from_hash_of(tab));
-                self.reattach_tab(tab);
-            }
-            for tab in to_close {
-                window_band::clear(ctx, egui::ViewportId::from_hash_of(tab));
-                self.close_detached_tab(tab);
             }
         }
     }
@@ -1493,7 +1547,7 @@ impl StokesForgeApp {
             self.detach_tab(tab);
         }
         if detached_this_frame {
-            // `show_detached_tabs` already published the viewports of this
+            // `show_detached_books` already published the viewports of this
             // frame before the header asked for the detachment. Without a
             // second root frame, eframe may thus stay idle
             // without ever creating the deferred viewport and calling its callback.
@@ -1510,8 +1564,8 @@ impl StokesForgeApp {
     fn open_tabs(&self) -> HashSet<Tab> {
         self.floating_tabs
             .iter()
-            .chain(self.detached_tabs.keys())
             .copied()
+            .chain(self.detached_tab_list())
             .collect()
     }
 
@@ -1527,34 +1581,21 @@ impl StokesForgeApp {
     }
 
     /// A save, or a gesture that may replace the project, takes the entries
-    /// open in the detached windows too (#465, #466): cell, header and note
-    /// through `AppState::commit_open_entries` on their own state, and the
-    /// graph text editors (titles, legends, free texts, egui-side) of the
-    /// floating and detached graphs through the usual actions. The main state
-    /// then reads the result before it saves or asks its question.
+    /// open in the graph views too (#465, #466): the graph text editors
+    /// (titles, legends, free texts, egui-side) of the floating and detached
+    /// graphs, through the usual actions. The cell, header and note entries are
+    /// the state's own, whatever window holds them (#475, L2): `AppState::save`
+    /// commits them.
     fn commit_view_entries(&mut self, ctx: &egui::Context) {
-        let mut committed = false;
         let mut actions = Vec::new();
         for (graph, view) in &mut self.graph_views {
             graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
         }
-        for (tab, detached) in &self.detached_tabs {
-            let mut model = detached
-                .view_model
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            if let Some(view) = model.view_state.as_mut() {
-                committed |= view.commit_open_entries();
-            }
-            if let (Tab::Graph(graph), Some(view)) = (tab, model.graph_view.as_mut()) {
-                graph_text_edit::commit_open_text_editors(ctx, view, *graph, &mut actions);
-            }
+        for (graph, window) in &mut self.detached_graphs {
+            graph_text_edit::commit_open_text_editors(ctx, &mut window.view, *graph, &mut actions);
         }
         for action in actions {
             self.state.dispatch(action);
-        }
-        if committed {
-            self.state.refresh();
         }
     }
 
@@ -1578,15 +1619,10 @@ impl StokesForgeApp {
             };
             let pending_edits = pending_edits
                 || self.graph_views.values().any(&graph_editing)
-                || self.detached_tabs.values().any(|detached| {
-                    detached.view_model.lock().map_or(true, |model| {
-                        model.view_state.as_ref().is_some_and(|state| {
-                            state.editing().is_some()
-                                || state.header_editing().is_some()
-                                || state.note_editing().is_some()
-                        }) || model.graph_view.as_ref().is_some_and(graph_editing)
-                    })
-                });
+                || self
+                    .detached_graphs
+                    .values()
+                    .any(|window| graph_editing(&window.view));
             match action {
                 Action::OpenProject { path, .. } => Action::OpenProject {
                     path,
@@ -1603,7 +1639,13 @@ impl StokesForgeApp {
     /// A confirmation request also stops the remaining actions of the frame.
     fn dispatch_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         let origins = std::mem::take(&mut self.action_origins);
-        for (index, action) in actions.into_iter().enumerate() {
+        // An action that opens the Properties macro goes LAST of its pass (stable
+        // order otherwise): a rename that commits through an action of the same
+        // frame lands before the macro, never inside it (#533). The origin of
+        // each action follows its original index.
+        let mut ordered: Vec<(usize, Action)> = actions.into_iter().enumerate().collect();
+        ordered.sort_by_key(|(_, action)| action.opens_plot_macro());
+        for (index, action) in ordered {
             let origin = origins
                 .iter()
                 .find(|(range, _)| range.contains(&index))
@@ -1664,17 +1706,8 @@ impl StokesForgeApp {
 
     /// The detached window or panel the person works in, if any.
     fn focused_detached_viewport(&self, ctx: &egui::Context) -> Option<egui::ViewportId> {
-        let open_viewports = self
-            .detached_tabs
-            .keys()
-            .map(egui::ViewportId::from_hash_of)
-            .chain(self.pm_detached.then(project_manager::viewport_id))
-            .chain(
-                self.om_detached
-                    .then(window_detach::object_manager_viewport),
-            )
-            .chain(self.script_detached.then(window_detach::script_viewport));
-        let mut focused = open_viewports.filter(|viewport| {
+        let open_viewports = self.open_viewports();
+        let mut focused = open_viewports.into_iter().filter(|viewport| {
             ctx.input(|input| {
                 input
                     .raw
@@ -1719,8 +1752,8 @@ impl StokesForgeApp {
 
     /// Is `viewport` a detached window or panel that is still open?
     fn viewport_is_open(&self, viewport: egui::ViewportId) -> bool {
-        self.detached_tabs
-            .keys()
+        self.detached_tab_list()
+            .iter()
             .any(|tab| egui::ViewportId::from_hash_of(tab) == viewport)
             || (self.pm_detached && viewport == project_manager::viewport_id())
             || (self.om_detached && viewport == window_detach::object_manager_viewport())
@@ -1851,6 +1884,7 @@ impl StokesForgeApp {
                 | Action::Save
                 | Action::SaveAs { .. }
                 | Action::ConfirmUnsaved(_)
+                | Action::RecoveryOpen { .. }
         );
         // The history and the gestures that change the rank of the series or the
         // composition of a group (#197, including its deletion: several
@@ -1870,14 +1904,11 @@ impl StokesForgeApp {
                     ..
                 }
         ) {
-            let graphs =
-                self.graph_views
-                    .keys()
-                    .copied()
-                    .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
-                        Tab::Graph(graph) => Some(*graph),
-                        _ => None,
-                    }));
+            let graphs = self
+                .graph_views
+                .keys()
+                .copied()
+                .chain(self.detached_graphs.keys().copied());
             graphs
                 .filter_map(|graph| {
                     let target = self
@@ -1895,7 +1926,7 @@ impl StokesForgeApp {
         // (framing, active layer, selection), so they follow the move.
         let layer_changes: Vec<LayerChange> = self.layer_changes_before(&action);
         let added_cell = match &action {
-            Action::AddCell { graph, .. } => Some(*graph),
+            Action::AddCell { graph, .. } | Action::AddCellAt { graph, .. } => Some(*graph),
             _ => None,
         };
         let selection_change = match &action {
@@ -1922,8 +1953,9 @@ impl StokesForgeApp {
             let source_open = self
                 .floating_tabs
                 .iter()
-                .chain(self.detached_tabs.keys())
-                .any(|tab| tab_node(*tab) == source);
+                .copied()
+                .chain(self.detached_tab_list())
+                .any(|tab| tab_node(tab) == source);
             if !duplicate || source_open {
                 if let Some((id, kind)) = window_nodes(&self.state.project_tree())
                     .into_iter()
@@ -1936,8 +1968,8 @@ impl StokesForgeApp {
         let removed: Vec<_> = self
             .floating_tabs
             .iter()
-            .chain(self.detached_tabs.keys())
             .copied()
+            .chain(self.detached_tab_list())
             .filter(|tab| {
                 self.state.tree().node(tab_node(*tab)).is_none_or(
                     |node| matches!(node.kind(), stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden),
@@ -1945,12 +1977,7 @@ impl StokesForgeApp {
             })
             .collect();
         for tab in &removed {
-            if self.detached_tabs.remove(tab).is_some() {
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::from_hash_of(tab),
-                    egui::ViewportCommand::Close,
-                );
-            }
+            self.remove_detached_window(ctx, *tab);
             self.pm_selection
                 .remove(&project_manager::PmEntry::Window(*tab));
             self.collapsed_tabs.remove(tab);
@@ -1996,6 +2023,8 @@ impl StokesForgeApp {
         }
         if replaces_project && self.state.snapshot().epoch != epoch_before {
             self.forget_project_views(ctx);
+            // The new project's windows come back as at startup (#513).
+            self.restore_project_windows(true);
         }
         if self.state.blocking_dialog() {
             ctx.request_repaint();
@@ -2068,10 +2097,7 @@ impl StokesForgeApp {
                 .graph_views
                 .keys()
                 .copied()
-                .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
-                    Tab::Graph(graph) => Some(*graph),
-                    _ => None,
-                }))
+                .chain(self.detached_graphs.keys().copied())
                 .collect(),
             _ => Vec::new(),
         };
@@ -2151,13 +2177,20 @@ impl StokesForgeApp {
         project_manager::forget_views(ctx);
         // NodeIds may be reused: forget all the
         // views and geometries of the old identity before painting.
-        for tab in self.detached_tabs.keys() {
+        for tab in self.detached_tab_list() {
             ctx.send_viewport_cmd_to(
                 egui::ViewportId::from_hash_of(tab),
                 egui::ViewportCommand::Close,
             );
         }
-        self.detached_tabs.clear();
+        let books: Vec<NodeId> = self.detached_books.keys().copied().collect();
+        for book in books {
+            self.release_book_window(book);
+        }
+        let graphs: Vec<NodeId> = self.detached_graphs.keys().copied().collect();
+        for graph in graphs {
+            self.release_graph_window(graph);
+        }
         self.floating_tabs.clear();
         self.cascade_rank.clear();
         self.next_cascade = 0;
@@ -2176,7 +2209,6 @@ impl StokesForgeApp {
         self.floating_rects.clear();
         self.pm_selection.clear();
         self.pm_last_active_tab = None;
-        self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
         ctx.memory_mut(|memory| {
             // In-place editors and deferred formats must not
             // outlive the window they targeted. Keep the
@@ -2488,83 +2520,6 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    #[test]
-    fn a_detached_command_publishes_its_result_in_the_pass_that_applied_it() {
-        use eframe::App as _;
-        let (session, _graph) = plotted_graph();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let book = app.state.books()[0].0;
-        let sheet = app.state.selected_sheet_in(book).unwrap();
-        let column = app.state.visible_columns(sheet)[0].0;
-        let tab = Tab::Book(book);
-        app.detach_tab(tab);
-        let ctx = egui::Context::default();
-        ctx.set_embed_viewports(false);
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        egui_extras::install_image_loaders(&ctx);
-        let mut frame = eframe::Frame::_new_kittest();
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            ..Default::default()
-        };
-        for _ in 0..8 {
-            ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame))
-                .textures_delta
-                .clear();
-        }
-        let mut idle = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
-        idle.textures_delta.clear();
-        assert_eq!(
-            idle.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
-            Duration::MAX
-        );
-        app.detached_tabs[&tab]
-            .requests
-            .lock()
-            .unwrap()
-            .actions
-            .push(Action::CommitCell {
-                column,
-                row: 0,
-                text: "42".into(),
-            });
-        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
-        output.textures_delta.clear();
-        assert_eq!(
-            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
-            Duration::ZERO,
-            "the command changed the snapshot after painting"
-        );
-        assert_eq!(app.state.cell_text(column, 0), "42");
-        // #457: the same root pass already published the result and woke the
-        // detached window, so a root that is only repainted every 100 ms (a
-        // detached window covers it) does not make the result wait for two.
-        assert_eq!(
-            output.viewport_output[&egui::ViewportId::from_hash_of(tab)].repaint_delay,
-            Duration::ZERO,
-            "the detached window is woken in the pass that applied the command"
-        );
-        assert_eq!(
-            app.detached_tabs[&tab]
-                .view_model
-                .lock()
-                .unwrap()
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .revision,
-            app.state.revision(),
-            "the pass publishes the result itself"
-        );
-        session.shutdown().unwrap();
-    }
-
     /// Stopping the dispatch also protects the actions already collected after Ctrl+N.
     #[test]
     fn the_confirmation_stops_the_following_actions_of_the_frame() {
@@ -2601,6 +2556,34 @@ mod tests {
         );
         assert!(app.state.unsaved_pending().is_none());
         assert_eq!(app.state.cell_text(column, 0), "42");
+        session.shutdown().unwrap();
+    }
+
+    /// #533: a rename that commits through an action of the same frame as the
+    /// click on Properties (a fast tap) lands BEFORE the macro opens, so Cancel
+    /// keeps the name. Witness: dispatch the actions in their collected order.
+    #[test]
+    fn a_rename_of_the_frame_lands_before_the_properties_macro() {
+        use stokesforge_app_state::state::PlotSettingsTab;
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let context = egui::Context::default();
+        app.dispatch_actions(
+            &context,
+            vec![
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Graph,
+                    axis: None,
+                },
+                Action::RenameObjects(vec![(book, "Renamed".into())]),
+            ],
+        );
+        assert!(app.state.plot_settings().is_some());
+        app.state.cancel_plot_settings();
+        assert_eq!(app.state.tree().node(book).unwrap().name(), "Renamed");
         session.shutdown().unwrap();
     }
 
@@ -2745,14 +2728,14 @@ mod tests {
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Graph(graph));
         app.detach_tab(Tab::Graph(graph));
-        assert!(app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(app.is_tab_detached(Tab::Graph(graph)));
         app.dispatch_actions(&context, vec![Action::DeleteObjects(vec![graph])]);
-        assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(!app.is_tab_detached(Tab::Graph(graph)));
         assert!(!app.state.tree().contains(graph));
         app.dispatch_actions(&context, vec![Action::Undo]);
         assert!(app.state.tree().contains(graph));
         assert!(!app.floating_tabs.contains(&Tab::Graph(graph)));
-        assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(!app.is_tab_detached(Tab::Graph(graph)));
         app.open_tab(Tab::Book(book));
         assert!(app.floating_tabs.contains(&Tab::Book(book)), "witness");
         // An undoable deletion asks nothing (S-F3, #229).
@@ -2892,10 +2875,14 @@ mod tests {
     /// and becomes `Action::Quit`; with unsaved work, the question
     /// "Discard Changes · Cancel · Save" opens and the window stays;
     /// Discard releases it, and the next request is no longer held back.
+    /// While a dialog is open (Graph Properties here), the cross only flashes
+    /// the dialog (#533). Witnesses: drop the `open_dialog` check in `logic`,
+    /// or the call to `flash_open_modal`.
     #[test]
     fn closing_the_window_asks_before_losing_work() {
         use eframe::App as _;
-        let (session, _) = plotted_graph();
+        use stokesforge_app_state::state::PlotSettingsTab;
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
@@ -2930,6 +2917,27 @@ mod tests {
                 .map(|viewport| viewport.commands.clone())
                 .unwrap_or_default()
         };
+        app.dispatch_actions(
+            &context,
+            vec![Action::OpenPlotSettings {
+                graph,
+                tab: PlotSettingsTab::Graph,
+                axis: None,
+            }],
+        );
+        let commands = image(&mut app, true);
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!commands.contains(&egui::ViewportCommand::Close));
+        assert!(app.state.unsaved_pending().is_none(), "no question");
+        assert!(app.state.plot_settings().is_some(), "Properties stays open");
+        let flash_start = egui::Id::new("stokesforge_plot_settings").with("flash_start");
+        assert!(
+            context
+                .data(|data| data.get_temp::<f64>(flash_start))
+                .is_some(),
+            "the cross flashes the dialog, like a click outside it"
+        );
+        app.state.cancel_plot_settings();
         let commands = image(&mut app, true);
         assert!(commands.contains(&egui::ViewportCommand::CancelClose));
         assert!(!commands.contains(&egui::ViewportCommand::Close));
@@ -2987,6 +2995,157 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #493: the "No x' Values" warning paints over the open analysis window with
+    /// "Cancel Analysis" and Close; Cancel Analysis dismisses it and cancels the
+    /// analysis; with no analysis window (Recalculate) Close is alone. Witness:
+    /// the old `AlertKind` match painted no such dialog.
+    #[test]
+    fn the_no_x_prime_warning_offers_to_cancel_the_analysis() {
+        use stokesforge_analysis::model::Model;
+        use stokesforge_app_state::analysis::Preset;
+
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        for name in ["S0", "S1"] {
+            project
+                .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+                .unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        app.state.dispatch(Action::OpenRowAnalysis {
+            preset: Preset::Fit(Model::Linear),
+            rows: vec![(sheet, 0)],
+        });
+        assert!(app.state.row_analysis_cancellable());
+
+        let frame = |app: &mut StokesForgeApp, events: Vec<egui::Event>| {
+            let mut actions = Vec::new();
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| app.blocking_confirmations(ui.ctx(), &mut actions),
+            );
+            output.textures_delta.clear();
+            (output, actions)
+        };
+        let center = |output: &egui::FullOutput, text: &str| -> Option<egui::Pos2> {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == text => {
+                        Some(shape.pos + shape.galley.rect.center().to_vec2())
+                    }
+                    _ => None,
+                })
+        };
+        frame(&mut app, Vec::new());
+        let (output, _) = frame(&mut app, Vec::new());
+        let cancel = tr!("alert-no-x-prime-cancel");
+        assert!(center(&output, &tr!("alert-no-x-prime-title")).is_some());
+        assert!(center(&output, &tr!("dialog-close")).is_some());
+        let position = center(&output, &cancel).expect("Cancel Analysis painted");
+        let click = |pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(position)]);
+        let mut pushed = Vec::new();
+        for pressed in [true, false] {
+            pushed.extend(frame(&mut app, vec![click(pressed)]).1);
+        }
+        assert_eq!(pushed, vec![Action::DismissAlert, Action::CloseAnalysis]);
+
+        // Recalculate case: no analysis window, Close alone.
+        app.state.dispatch(Action::DismissAlert);
+        app.state.dispatch(Action::CloseAnalysis);
+        assert!(!app.state.row_analysis_cancellable());
+        session.shutdown().unwrap();
+    }
+
+    /// #493: the warning is raised in the same frame as the analysis window (a
+    /// modal of the same order). It stays in front of it, otherwise it hides
+    /// behind it and, being blocking, freezes every button. Witness: without
+    /// `move_to_top` the analysis window layer stays above the warning.
+    #[test]
+    fn the_no_x_prime_warning_stays_in_front_of_the_analysis_window() {
+        use stokesforge_analysis::model::Model;
+        use stokesforge_app_state::analysis::Preset;
+
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        project
+            .add_column(sheet, None, Some("S0"), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        app.state.dispatch(Action::OpenRowAnalysis {
+            preset: Preset::Fit(Model::Linear),
+            rows: vec![(sheet, 0)],
+        });
+        let analysis =
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("analysis_window"));
+        let frame = |app: &mut StokesForgeApp, raise_analysis: bool| {
+            let screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 700.0),
+            ));
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect,
+                    ..egui::RawInput::default()
+                },
+                |ui| {
+                    egui::Area::new(analysis.id)
+                        .order(egui::Order::Foreground)
+                        .show(ui.ctx(), |ui| {
+                            ui.label("analysis");
+                        });
+                    if raise_analysis {
+                        ui.ctx().move_to_top(analysis);
+                    }
+                    app.blocking_confirmations(ui.ctx(), &mut Vec::new());
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut app, false);
+        // The user clicked the analysis window since: it is on top of the warning.
+        frame(&mut app, true);
+        frame(&mut app, false);
+        let top = context.memory(|memory| memory.layer_ids().last());
+        assert_eq!(
+            top,
+            Some(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("stokesforge_alert")
+            )),
+            "the warning is the top layer"
+        );
+        session.shutdown().unwrap();
+    }
+
     /// The first column of the detached workbook's first sheet, and its text at row 1.
     fn detached_first_cell(app: &mut StokesForgeApp, book: NodeId) -> (NodeId, String) {
         let sheet = app.state.selected_sheet_in(book).unwrap();
@@ -2994,8 +3153,9 @@ mod tests {
         (column, app.state.cell_text(column, 1))
     }
 
-    /// D1 of #465/#466: the entries open in a detached window are taken by a
-    /// save, Save As and the replacing gestures, like those of the main window.
+    /// D1 of #465/#466: the entry open in a detached window (the state's own,
+    /// #475 L2) is taken by a save, Save As and the replacing gestures, like
+    /// that of the main window.
     #[test]
     fn a_save_takes_the_entries_open_in_a_detached_window() {
         let dir = tempfile::tempdir().unwrap();
@@ -3006,14 +3166,8 @@ mod tests {
             let book = app.state.books()[0].0;
             app.detach_tab(Tab::Book(book));
             let (column, before) = detached_first_cell(&mut app, book);
-            // The entry lives in the detached window's own state.
-            {
-                let detached = &app.detached_tabs[&Tab::Book(book)];
-                let mut model = detached.view_model.lock().unwrap();
-                let view = model.view_state.as_mut().expect("detached view state");
-                view.begin_edit(column, 1);
-                view.editing_mut().unwrap().buffer = "77".to_string();
-            }
+            app.state.begin_edit(column, 1);
+            app.state.editing_mut().unwrap().buffer = "77".to_string();
             assert_ne!(before, "77", "witness: the cell differs");
             let target = dir.path().join(format!("{gesture}.stf"));
             let action = match gesture {
@@ -3032,17 +3186,8 @@ mod tests {
             };
             // A separate frame from the typing: nothing else commits the entry.
             app.dispatch_actions(&egui::Context::default(), vec![action]);
-            let detached = &app.detached_tabs[&Tab::Book(book)];
             assert!(
-                detached
-                    .view_model
-                    .lock()
-                    .unwrap()
-                    .view_state
-                    .as_ref()
-                    .unwrap()
-                    .editing()
-                    .is_none(),
+                app.state.editing().is_none(),
                 "{gesture}: the detached entry was taken"
             );
             assert_eq!(app.state.cell_text(column, 1), "77", "{gesture}");
@@ -3130,9 +3275,11 @@ mod tests {
         app.detach_tab(Tab::Graph(graph));
         let context = egui::Context::default();
         {
-            let detached = &app.detached_tabs[&Tab::Graph(graph)];
-            let mut model = detached.view_model.lock().unwrap();
-            let view = model.graph_view.as_mut().expect("detached graph view");
+            let view = &mut app
+                .detached_graphs
+                .get_mut(&graph)
+                .expect("detached graph view")
+                .view;
             graph_text_edit::start_text_editor(
                 &context,
                 view,
@@ -3171,13 +3318,8 @@ mod tests {
         let book = app.state.books()[0].0;
         app.detach_tab(Tab::Book(book));
         let (column, before) = detached_first_cell(&mut app, book);
-        {
-            let detached = &app.detached_tabs[&Tab::Book(book)];
-            let mut model = detached.view_model.lock().unwrap();
-            let view = model.view_state.as_mut().unwrap();
-            view.begin_edit(column, 1);
-            view.editing_mut().unwrap().buffer = "77".to_string();
-        }
+        app.state.begin_edit(column, 1);
+        app.state.editing_mut().unwrap().buffer = "77".to_string();
         app.dispatch_actions(&egui::Context::default(), vec![Action::Undo]);
         assert_eq!(app.state.cell_text(column, 1), before);
         session.shutdown().unwrap();
@@ -3289,7 +3431,7 @@ mod tests {
         );
         assert!(app.floating_rects.contains_key(&graph));
         assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
-        assert!(app.detached_tabs.contains_key(&Tab::Book(book)));
+        assert!(app.detached_books.contains_key(&book));
         paint(&mut app, vec![egui::Event::PointerMoved(discard)]);
         let button = |pressed| egui::Event::PointerButton {
             pos: discard,
@@ -3301,7 +3443,7 @@ mod tests {
         let output = paint(&mut app, vec![button(false)]);
         assert_eq!(app.state.tree().len(), 1);
         assert!(app.floating_tabs.is_empty());
-        assert!(app.detached_tabs.is_empty());
+        assert!(app.detached_books.is_empty());
         assert!(app.graph_views.is_empty());
         assert!(app.floating_rects.is_empty());
         assert!(!header_rows(&context, Some(book)).metadata);
@@ -3349,11 +3491,239 @@ mod tests {
             "the workbook, on top, stays on top"
         );
         assert!(app.collapsed_tabs.contains(&Tab::Graph(graph)));
-        assert!(app.detached_tabs.is_empty(), "detaching is not remembered");
+        assert!(app.detached_books.is_empty(), "detaching is not remembered");
         assert_eq!(app.floating_rects[&graph], rect);
     }
 
-    /// Ctrl+" opens the import wizard, on an AZERTY keyboard (the 3 key
+    /// #513: a project with a maximised workbook over a collapsed graph, saved
+    /// to a file; the app keeps running on it.
+    struct SavedWindows {
+        session: Session,
+        app: StokesForgeApp,
+        graph: NodeId,
+        book: NodeId,
+        rect: egui::Rect,
+        path: String,
+        _dir: tempfile::TempDir,
+    }
+
+    fn saved_windows(detach_book: bool) -> SavedWindows {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(400.0, 300.0));
+        app.remember_window_geometry(Tab::Graph(graph), rect);
+        app.remember_window_geometry(Tab::Book(book), rect.translate(egui::vec2(7.0, 7.0)));
+        app.floating_tabs = vec![Tab::Graph(graph), Tab::Book(book)];
+        app.collapsed_tabs.insert(Tab::Graph(graph));
+        if detach_book {
+            app.detach_tab(Tab::Book(book));
+        } else {
+            app.maximized_tab = Some(Tab::Book(book));
+        }
+        app.sync_window_views();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("windows.stf");
+        app.state.dispatch(Action::SaveAs {
+            path: path.display().to_string(),
+        });
+        SavedWindows {
+            session,
+            app,
+            graph,
+            book,
+            rect,
+            path: path.display().to_string(),
+            _dir: dir,
+        }
+    }
+
+    impl SavedWindows {
+        /// Closes every window of the running app, without telling the session.
+        fn close_everything(&mut self) {
+            self.app.floating_tabs.clear();
+            self.app.collapsed_tabs.clear();
+            self.app.maximized_tab = None;
+            self.app.floating_rects.clear();
+        }
+
+        fn open(&mut self, ctx: &egui::Context) {
+            let path = self.path.clone();
+            self.app.dispatch_action(
+                ctx,
+                Action::OpenProject {
+                    path,
+                    pending_edits: false,
+                },
+            );
+        }
+
+        fn assert_restored(&self) {
+            let (graph, book) = (self.graph, self.book);
+            assert_eq!(
+                self.app.floating_tabs,
+                vec![Tab::Graph(graph), Tab::Book(book)]
+            );
+            assert_eq!(self.app.maximized_tab, Some(Tab::Book(book)));
+            assert!(self.app.collapsed_tabs.contains(&Tab::Graph(graph)));
+            assert!(!self.app.collapsed_tabs.contains(&Tab::Book(book)));
+            assert_eq!(self.app.floating_rects[&graph], self.rect);
+        }
+    }
+
+    /// #513: File > Open in a running app restores the windows as startup
+    /// does. Witness: remove `restore_project_windows` after the forget.
+    #[test]
+    fn opening_a_project_restores_its_windows() {
+        let mut saved = saved_windows(false);
+        saved.close_everything();
+        let ctx = egui::Context::default();
+        saved.open(&ctx);
+        saved.assert_restored();
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: the same through the "Save?" confirmation. Witness: restore
+    /// before `forget_project_views`.
+    #[test]
+    fn opening_a_project_over_unsaved_work_restores_its_windows_after_discard() {
+        let mut saved = saved_windows(false);
+        let root = saved.app.state.tree().root();
+        let ctx = egui::Context::default();
+        saved
+            .app
+            .dispatch_action(&ctx, Action::AddFolder { parent: root });
+        saved.close_everything();
+        saved.open(&ctx);
+        assert!(saved.app.state.unsaved_pending().is_some());
+        assert!(saved.app.floating_tabs.is_empty());
+        saved.app.dispatch_action(
+            &ctx,
+            Action::ConfirmUnsaved(stokesforge_app_state::state::UnsavedChoice::Discard),
+        );
+        saved.assert_restored();
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: a window detached at save time comes back docked and open.
+    /// Witness: keep the detaching on load.
+    #[test]
+    fn a_window_detached_at_save_time_comes_back_floating() {
+        let mut saved = saved_windows(true);
+        assert!(saved.app.detached_books.contains_key(&saved.book));
+        let ctx = egui::Context::default();
+        saved.open(&ctx);
+        assert!(saved.app.detached_books.is_empty());
+        assert!(saved.app.detached_graphs.is_empty());
+        assert_eq!(
+            saved.app.floating_tabs,
+            vec![Tab::Graph(saved.graph), Tab::Book(saved.book)]
+        );
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: a file saved without window states opens no window, on Open and
+    /// at startup; an in-memory project still opens its first workbook and
+    /// first graph. Witness: drop the `from_file` condition (the file then
+    /// opens them), or delete the fallback (the in-memory project opens none).
+    #[test]
+    fn a_file_without_window_states_opens_no_window_but_an_in_memory_project_does() {
+        let (session, graph) = plotted_graph();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.stf");
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        assert_eq!(
+            app.floating_tabs,
+            vec![Tab::Book(book), Tab::Graph(graph)],
+            "in memory: the first workbook and first graph"
+        );
+        app.state.dispatch(Action::SaveAs {
+            path: path.display().to_string(),
+        });
+        let ctx = egui::Context::default();
+        app.dispatch_action(
+            &ctx,
+            Action::OpenProject {
+                path: path.display().to_string(),
+                pending_edits: false,
+            },
+        );
+        assert!(app.floating_tabs.is_empty(), "Open of a file");
+        // Startup from the same file.
+        let reloaded = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
+        reloaded.handle().load(&path).unwrap();
+        let state = AppState::new(reloaded.handle(), path.display().to_string()).unwrap();
+        assert!(StokesForgeApp::new_from_file(state)
+            .floating_tabs
+            .is_empty());
+        reloaded.shutdown().unwrap();
+        session.shutdown().unwrap();
+    }
+
+    /// #513: painting after an Open does not turn the project dirty (the
+    /// saved geometries match what is on screen). Witness: the helper leaves
+    /// `saved_window_geometries` empty.
+    #[test]
+    fn painting_after_an_open_leaves_the_project_clean() {
+        use eframe::App as _;
+        let mut saved = saved_windows(false);
+        saved.close_everything();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        saved.open(&context);
+        let mut frame = eframe::Frame::_new_kittest();
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| saved.app.ui(ui, &mut frame));
+            output.textures_delta.clear();
+        }
+        saved.app.dispatch_action(
+            &context,
+            Action::NewProject {
+                pending_edits: false,
+            },
+        );
+        assert!(saved.app.state.unsaved_pending().is_none());
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: Recover Projects > Open restores the copy's windows and forgets
+    /// the old ones. Witness: drop `RecoveryOpen` from `replaces_project`.
+    #[test]
+    fn recovering_a_copy_restores_its_windows() {
+        let saved = saved_windows(false);
+        let recovery = saved._dir.path().join("recovery");
+        let snapshot = saved.session.handle().snapshot().unwrap();
+        let copy = stokesforge_app_state::recovery::write_copy(&recovery, "", &snapshot).unwrap();
+        let session = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        assert!(app.floating_tabs.is_empty(), "nothing to lose");
+        app.state.set_recovery_dir(Some(recovery));
+        app.state.scan_recovery();
+        let ctx = egui::Context::default();
+        app.dispatch_action(&ctx, Action::RecoveryOpen(copy));
+        assert_eq!(app.maximized_tab, Some(Tab::Book(saved.book)));
+        assert_eq!(
+            app.floating_tabs,
+            vec![Tab::Graph(saved.graph), Tab::Book(saved.book)]
+        );
+        session.shutdown().unwrap();
+        saved.session.shutdown().unwrap();
+    }
+
+    /// Ctrl+" opens the import window, on an AZERTY keyboard (the 3 key
     /// without Shift) as on QWERTY (Shift+apostrophe), and not while it is
     /// already open.
     #[test]

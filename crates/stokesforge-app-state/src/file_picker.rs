@@ -146,6 +146,13 @@ struct Pending {
     receiver: Receiver<Picked>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// The answer the next [`FilePicker::start`] of this thread gives, instead
+    /// of opening a dialog (tests).
+    static SCRIPTED: std::cell::RefCell<Option<Picked>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The picker in progress, if there is one.
 #[derive(Default)]
 pub struct FilePicker {
@@ -168,6 +175,11 @@ impl FilePicker {
         candidates: FolderCandidates,
         wake: impl Fn() + Send + 'static,
     ) {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(answer) = SCRIPTED.with(|scripted| scripted.borrow_mut().take()) {
+            self.start_with(request, wake, move || answer);
+            return;
+        }
         let worker = request.clone();
         self.start_resolving(
             request,
@@ -214,6 +226,15 @@ impl FilePicker {
     #[cfg(any(test, feature = "test-support"))]
     pub fn start_fake(&mut self, request: PickRequest, answer: Picked) {
         self.start_with(request, || {}, move || answer);
+    }
+
+    /// Tests: the next [`Self::start`] made on this thread answers `answer` (on
+    /// the picker's thread, waking the interface as a real one) instead of
+    /// opening a dialog: never a real `rfd` in a test, even through the
+    /// application's own request path.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn script_next_answer(answer: Picked) {
+        SCRIPTED.with(|scripted| *scripted.borrow_mut() = Some(answer));
     }
 
     /// The answer of the finished picker, once only. Never blocks; a dead
