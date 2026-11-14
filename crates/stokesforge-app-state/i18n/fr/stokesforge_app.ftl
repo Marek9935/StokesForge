@@ -870,13 +870,9 @@ plot-area-gridlines-horizontal = Horizontales (graduations Y)
 
 # Onglet Axes
 
-plot-axes-title-section = Titre de l'axe
-plot-axes-quantity =
-    Grandeur
-    .hint = Nom ou symbole, p. ex. Nombre d'onde
-plot-axes-units =
-    Unités
-    .hint = Affichées après la grandeur, entre parenthèses
+plot-axes-title =
+    Titre de l'axe
+    .hint = Texte libre, dessiné tel quel. Les variables lisent la colonne : #ln nom long, #sn nom court, #u unités. Un nouveau graphe commence par « Nom long / Unités ».
 plot-axes-scale-section = Échelle
 plot-axes-log-scale =
     Échelle log
@@ -1873,7 +1869,7 @@ analysis-warning-irf-truncated = La réponse est coupée au-dessus de 1 % de so
 analysis-warning-bridged-reference-gap = { $count } point(s) ont été interpolés à travers une cellule vide de la colonne de référence
 analysis-warning-division-by-zero = { $count } division(s) par zéro ont été laissées vides
 analysis-warning-shifted-x = Le polynôme contraint a été ajusté sur des X loin de 0 : la précision peut être faible. Soustrayez d'abord la moyenne de X
-stale-series-hint = Pas à jour : son calcul doit être refait
+stale-series-hint = Pas à jour : son calcul doit être refait
 stale-export-title = Données pas à jour
 stale-export-message = Ce graphique montre { $count } calcul(s) pas à jour.
 stale-export-anyway = Exporter quand même

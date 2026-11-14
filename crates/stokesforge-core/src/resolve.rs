@@ -413,6 +413,31 @@ pub fn text_context(tree: &Tree, spec: &PlotSpec, target: TextTarget) -> Option<
     }
 }
 
+/// Gives the axes of a **new** graph their default title (#506): the Typst
+/// template [`stokesforge_plot::AXIS_TITLE_TEMPLATE`], on each axis whose
+/// context column exists *now*, so it never draws « broken reference » (an
+/// empty graph, a row series, a Y without X stay untitled). Only the bottom
+/// and left axes of a layer are filled; an overlaid layer's bottom (the X
+/// drawn on top, #167) stays empty, its left (the Y2, Y3, Y4 column) is
+/// filled. An axis that already has a title keeps it. Later additions (Add
+/// Layer, more series) fill nothing: call this at creation only.
+pub fn with_default_axis_titles(tree: &Tree, mut spec: PlotSpec) -> PlotSpec {
+    for index in 0..spec.panels.len() {
+        let overlay = spec.panels.get(index).is_some_and(|p| p.overlay.is_some());
+        let bottom = !overlay && text_context(tree, &spec, TextTarget::BottomAxis(index)).is_some();
+        let left = text_context(tree, &spec, TextTarget::LeftAxis(index)).is_some();
+        let Some(panel) = spec.panels.get_mut(index) else {
+            continue;
+        };
+        for (fill, axis) in [(bottom, &mut panel.bottom), (left, &mut panel.left)] {
+            if fill && axis.label.is_empty() {
+                axis.label = stokesforge_plot::AXIS_TITLE_TEMPLATE.to_owned();
+            }
+        }
+    }
+    spec
+}
+
 /// Displayed name of a series: `SeriesSpec::name` if set, otherwise the
 /// long name of the Y column, otherwise its node name, otherwise
 /// [`SeriesLabel::Missing`] if the column no longer exists.

@@ -8246,7 +8246,7 @@ fn plot_rows_and_empty_graph_names() {
 /// #507, D6: a graph created by `AddGraph`, `PlotColumns` or `PlotRows` has no
 /// legend frame, while a graph that is loaded keeps its own (the model
 /// default is the frame). Witness: a creation path that forgets
-/// `with_new_graph_legend` leaves the frame on.
+/// `with_new_graph_defaults` leaves the frame on.
 #[test]
 fn new_graphs_have_no_legend_frame() {
     let dir = tempfile::tempdir().expect("temporary directory");
@@ -8285,6 +8285,110 @@ fn new_graphs_have_no_legend_frame() {
     // The model default is still today's look: a spec that did not go
     // through a creation path keeps its frame.
     assert!(stokesforge_plot::LegendSpec::default().frame);
+}
+
+/// #506: a new graph titles its axes with the Typst template that reads the
+/// column, only where a column exists at creation; the fill rides in the
+/// creation command (one undo entry).
+#[test]
+fn new_graphs_title_their_axes_from_the_columns() {
+    use stokesforge_plot::AXIS_TITLE_TEMPLATE as TEMPLATE;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    let last_graph = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    let titles = |state: &AppState| {
+        let spec = state.plot_spec(last_graph(state)).unwrap();
+        spec.panels
+            .iter()
+            .map(|panel| (panel.bottom.label.clone(), panel.left.label.clone()))
+            .collect::<Vec<_>>()
+    };
+    let empty = || (String::new(), String::new());
+    let before = state.tree().len();
+
+    // An empty graph has no column to read: no title.
+    state.dispatch(Action::AddGraph);
+    assert_eq!(titles(&state), [empty()]);
+
+    // Y only: the X axis is the row number, no column, no title.
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![columns[1]],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(titles(&state), [(String::new(), TEMPLATE.to_owned())]);
+
+    // X + Y: both axes read their column. One undo removes the graph.
+    let (x, y) = (columns[0], columns[1]);
+    state.dispatch(Action::SetColumnRole {
+        column: x,
+        role: ColumnRole::X,
+    });
+    let count = state.tree().len();
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![y],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(titles(&state), [(TEMPLATE.to_owned(), TEMPLATE.to_owned())]);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().len(), count, "one entry removes the graph");
+
+    // Rows: a row series has no column context, no title.
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(titles(&state), [empty()]);
+    assert!(state.tree().len() > before);
+}
+
+/// #506: an overlaid layer (Y2) fills its Y axis; its X axis, drawn on top,
+/// stays empty.
+#[test]
+fn an_overlay_layer_titles_its_y_axis_only() {
+    use stokesforge_plot::AXIS_TITLE_TEMPLATE as TEMPLATE;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    // The X2 sits left of its Y2, as the pairing rule wants.
+    let y2 = column_id(&state, sheet, "D");
+    for (column, role) in [
+        (columns[0], ColumnRole::X),
+        (columns[1], ColumnRole::Y),
+        (columns[2], ColumnRole::X2),
+        (y2, ColumnRole::Y2),
+    ] {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![columns[0], columns[1], columns[2], y2],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph");
+    let spec = state.plot_spec(graph).unwrap();
+    assert_eq!(spec.panels.len(), 2);
+    assert_eq!(spec.panels[0].bottom.label, TEMPLATE);
+    assert_eq!(spec.panels[0].left.label, TEMPLATE);
+    assert_eq!(spec.panels[1].left.label, TEMPLATE);
+    assert!(
+        spec.panels[1].series[0].x.is_some(),
+        "the overlay has its X"
+    );
+    assert_eq!(spec.panels[1].bottom.label, "");
 }
 
 /// Plot of a row selection (#166): a fresh graph where each row is
@@ -12181,8 +12285,7 @@ fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
     let mut project = Project::new("Objets").unwrap();
     let mut first = PanelSpec::at(0, 0);
     first.title = "Layer A".into();
-    first.bottom.label = "Time".into();
-    first.bottom.unit = "s".into();
+    first.bottom.label = "Time (s)".into();
     first.left.label = "Signal".into();
     for name in ["A", "B", "C"] {
         let mut series = SeriesSpec::new(NodeId::from_raw(900));

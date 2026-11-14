@@ -871,13 +871,9 @@ plot-area-gridlines-horizontal = Horizontal (Y ticks)
 
 # Axes tab
 
-plot-axes-title-section = Axis title
-plot-axes-quantity =
-    Quantity
-    .hint = Name or symbol, e.g. Wavenumber
-plot-axes-units =
-    Units
-    .hint = Shown after the quantity, in parentheses
+plot-axes-title =
+    Axis title
+    .hint = Free text, drawn as typed. Variables read the column: #ln long name, #sn short name, #u units. A new graph starts with Long name / Units.
 plot-axes-scale-section = Scale
 plot-axes-log-scale =
     Log scale

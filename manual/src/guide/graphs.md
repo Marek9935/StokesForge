@@ -271,12 +271,9 @@ A side that another layer of the same plot area already uses is grayed out. Hove
 
 ### Axis title
 
-The **Axis title** section has two fields:
+The **Axis title** field is one free text. Write the name and the units together, for example `Wavenumber / cm⁻¹`. It accepts formulas (see [Titles and formulas](#titles-and-formulas)).
 
-- **Quantity**: the name or symbol, for example `Wavenumber`.
-- **Units**: shown after the quantity, in parentheses.
-
-With "Absorbance" and "a.u." you get "Absorbance (a.u.)". Both fields accept formulas (see [Titles and formulas](#titles-and-formulas)).
+A new graph fills the field for you with a formula that reads the column: its **Long Name**, or its **Short Name** when it has no long name, then ` / ` and its **Units** only when it has some. With the long name "Absorbance" and the units "a.u." you get `Absorbance / a.u.`. Type over it to write your own title. An axis with no title stays without one, and the title of a file made with an older version is kept as it was drawn, for example `Absorbance (a.u.)`.
 
 You can also double-click an axis title on the figure to edit it in place.
 
@@ -401,7 +398,7 @@ A title, an axis title, a text on the graph, a series name and the break labels 
 | `#comments` or `#c` | the **Comments** of the column |
 | `#x-prime` or `#xp` | the **x'** of the column |
 
-The names are the same in every interface language. The help icon of each field lists them. For example, `#ln (#u)` as an axis title gives `Absorbance (a.u.)`, and `#if u != "" [(#u)]` writes the units in parentheses only when there are some. The value is shown exactly as it is written in the column, whatever characters it holds. A formula such as `$ln(x)$` is still the logarithm.
+The names are the same in every interface language. The help icon of each field lists them. For example, `#ln (#u)` as an axis title gives `Absorbance (a.u.)`, and `#ln#if u != "" { " / " + u }` writes the units after a slash only when there are some. The title a new graph starts with is this kind of formula (see [Axis title](#axis-title)). The value is shown exactly as it is written in the column, whatever characters it holds. A formula such as `$ln(x)$` is still the logarithm.
 
 Which column a text reads depends on where it is:
 
@@ -416,13 +413,13 @@ To name a column yourself, write `#col("C")` followed by a dot and the variable:
 
 ### Axis titles with units
 
-Put a formula in the **Units** field to get a superscript:
+Write the units after a slash in the **Axis title** field, with a formula for a superscript:
 
-| Quantity | Units | Result |
-|---|---|---|
-| `Wavenumber` | `$"cm"^(-1)$` | Wavenumber (cm⁻¹) |
-| `Absorbance` | `a.u.` | Absorbance (a.u.) |
-| `$lambda$` | `nm` | λ (nm) |
+| Axis title | Result |
+|---|---|
+| `Wavenumber / $"cm"^(-1)$` | Wavenumber / cm⁻¹ |
+| `Absorbance / a.u.` | Absorbance / a.u. |
+| `$lambda$ / nm` | λ / nm |
 
 The tick labels are numbers and never go through this.
 

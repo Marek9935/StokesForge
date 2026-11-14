@@ -1583,8 +1583,8 @@ fn tick_direction_row(
     })
 }
 
-/// Edits an [`AxisSpec`], in four groups: the axis title (label,
-/// unit), its scale (logarithmic, From/To bounds: the axis direction is read
+/// Edits an [`AxisSpec`], in four groups: the axis title (one free text and
+/// its colour, #506), its scale (logarithmic, From/To bounds: the axis direction is read
 /// from their order), its display (axis, numbers, grid, color) and its
 /// ticks (tick marks, direction, minor ticks, "Advanced" block). Returns `true` if the draft must be committed — see the head doc
 /// of [`plot_settings_window`].
@@ -1596,18 +1596,13 @@ fn axis_editor(
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
-    form.section(tr!("plot-axes-title-section"));
+    // No section heading: it would read « Axis title » above « Axis title »
+    // (#506); the group only holds the title and its colour.
     commit |= formula_field(
         form,
-        &tr!("plot-axes-quantity"),
-        &tr!("plot-axes-quantity", "hint"),
+        &tr!("plot-axes-title"),
+        &tr!("plot-axes-title", "hint"),
         &mut axis.label,
-    );
-    commit |= formula_field(
-        form,
-        &tr!("plot-axes-units"),
-        &tr!("plot-axes-units", "hint"),
-        &mut axis.unit,
     );
     commit |= form.color(
         &tr!("plot-title-color"),
@@ -2987,12 +2982,12 @@ mod tests {
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &tr!("plot-axes-show-mirror")));
         assert!(is_painted(&painted, &tr!("plot-axes-show-tick-labels")));
-        assert!(!is_painted(&painted, &tr!("plot-axes-quantity")));
+        assert!(!is_painted(&painted, &tr!("plot-axes-title")));
         assert!(!is_painted(&painted, &tr!("plot-axes-color")));
 
         harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
         let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(&painted, &tr!("plot-axes-quantity")));
+        assert!(is_painted(&painted, &tr!("plot-axes-title")));
         assert!(!is_painted(&painted, &tr!("plot-axes-show-mirror")));
     }
 
@@ -5514,8 +5509,8 @@ mod tests {
                 form(ui, "trial", |form| {
                     formula_field(
                         form,
-                        &tr!("plot-axes-quantity"),
-                        &tr!("plot-axes-quantity", "hint"),
+                        &tr!("plot-axes-title"),
+                        &tr!("plot-axes-title", "hint"),
                         value,
                     )
                 });

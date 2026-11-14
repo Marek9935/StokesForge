@@ -30,6 +30,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Answers remembered | Réponses mémorisées |
 | Axes | Axes |
 | Axes… | Axes… |
+| Axis title | Titre de l'axe |
 | Below | En dessous |
 | Bottom | Bas |
 | Bring to Front | Amener devant |
