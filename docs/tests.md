@@ -1266,6 +1266,20 @@ The width is read in the bench on the flat fill of the column letter (`painted_w
 | entry after Role ▸, disabled without a width, whole selection | `the_reset_entry_follows_role_and_is_grayed_out_without_a_width`, `the_reset_handles_the_whole_selection` (`add_enabled(true)`: red; targeting only the clicked column: red) |
 | sheet entry: tab, Workbook ▸ Sheet, Workbook ▸ Columns | `the_tab_right_click_resets_the_whole_sheet`, `menus::tests::the_width_reset_is_in_workbook_sheet_and_columns` (entry always active, or a single column targeted for the sheet or the tab: red) |
 
+## Wide sheet (#534)
+
+Column virtualization: the table holds the visible window and two spacers. Bench: `grid::tests::wide_sheet_frame_cost` (`#[ignore]`, release, `--nocapture`). Each witness was seen red by mutation.
+
+| Rule | Witness |
+|---|---|
+| at offset 0 of 1000 columns only the visible ones and one margin column are painted | `a_wide_sheet_paints_only_its_visible_columns` (a read of what is painted; egui culls texts outside the clip, so it is NOT a witness of the table's content: the next row is) |
+| a frame registers at most twice the widgets of the same grid at 20 columns | `a_wide_sheet_registers_the_widgets_of_its_visible_columns` (all columns put back in the table: red) |
+| scrolled to the far right: last column painted at the edge, its cell edits, its letter selects; the content is as wide as the sum of the widths | `scrolled_to_the_far_right_the_last_column_is_reachable` (offset ignored by the window: red; a spacer 50 points too wide: red) |
+| the spacers keep the content width, whatever the viewport | `the_window_and_its_spacers_keep_the_content_width` (spacer +50: red) |
+| a resize after a horizontal scroll sends the width of the right column | `a_resize_after_a_horizontal_scroll_targets_the_right_column` (rank not shifted by the left spacer: red) |
+| a block selected past the window has no grip band at the window's border | `a_selected_block_has_no_grip_band_at_the_edge_of_the_window` (extents taken as block edges: red) |
+| no free area after the last column unless it is painted | `the_blank_column_target_needs_the_last_column_painted` (last painted column taken as the last: red) |
+
 ## Moving columns (#319)
 
 Submenu `Move ▸` (First · Left · Right · Last). Each rule has its witness, checked by mutation.

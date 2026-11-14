@@ -203,6 +203,37 @@ other, and a write made under the window's session identity (a cell entry closed
 by a click elsewhere, #524) is in the one snapshot at once, with nothing to pull
 back.
 
+**The table holds only the visible columns (#534).** A worksheet of 1000
+columns cost 0.2-0.3 s per frame, an empty `TableBuilder` of 1000 columns alone
+27 ms: egui_extras lays out every column of every visible row, and nothing
+culls columns. `grid_contents` therefore gives the table only the gutter, a
+**left spacer**, the columns that meet the horizontal viewport plus one margin
+column on each side, and a **right spacer** (`column_window`, `ColumnWindow`).
+A spacer is an exact, non-resizable column (`TableColumn::exact`) as wide as
+the columns it stands for with their spacings, so the content width, the
+horizontal bar and the scroll offset are those of the whole sheet. The geometry
+comes from the stored widths (`NodeId`, `DEFAULT_COLUMN_WIDTH`) and the viewport
+from the clip rectangle of the horizontal scroll area, never from what was
+painted. There is no cap on the number of columns.
+
+What follows from it: (1) the layout key and the `reset()` follow the **painted**
+columns (the table keeps its widths by position, a window that moves is a new
+list); widths come back from `TableColumn::initial` and the gutter from
+`gutter_width_id`, so nothing is lost. (2) The handle of a data column is
+`table_rank = first_rank + index in the window` (`ColumnWindow::first_rank`, the
+only place: `finished_column_resizes`). (3) While a resize handle is dragged the
+window of the previous frame is kept (`visible_column_window`), so ranks cannot
+move under the pointer. (4) Extents exist only for painted columns: the grip
+bands (`column_grip_bands`) know whether the block continues past the window and
+draw no edge there, the free area after the last column (`last_column_right`)
+exists only when the last column is painted, the "?" of the formula cell is
+omitted when its column is off-window. (5) `grid_rect` is the **viewport**, not
+the content rectangle of the scroll area (which starts left of the viewport once
+scrolled, so a click no longer took the keyboard focus). (6) A cell being edited
+that scrolls out of the window keeps its buffer in `AppState`, like a row does.
+Not seen: a column whose content widens it beyond its stored width is painted
+wider than the spacers assume; the margin column covers a small difference.
+
 **Same default width floating / maximized (#337).** Reported under
 #330: maximized, the workbook window made the never-set columns go from 57 to 62 px of spacing between letters. Cause: the first frame of an
 `egui::Window` is a sizing pass (`Ui::is_sizing_pass`) during which
@@ -571,6 +602,10 @@ fired).
   tabs (see "Generic detaching of content tabs") —
   a technical constraint of the `'static` closure of `show_viewport_deferred`,
   not a deliberate extension of the limit.
+- **The grid is virtualized on both axes (#534)**: rows by
+  `TableBuilder::body().rows()`, columns by the window and spacers of
+  "Column width", so a frame costs what is visible, not the size of the sheet.
+  Nothing caps the number of columns.
 - **Open windows and their mode are not restored**: startup
   opens the first workbook and the first graph. The saved positions
   and sizes are reused for the contents, but maximization and
