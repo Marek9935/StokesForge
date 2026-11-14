@@ -972,30 +972,6 @@ impl<V> FormulaCache<V> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// The artifacts currently cached, in any order — to find the artifact of
-    /// an already built shape (`stokesforge_render_egui::scaled`, issue #31,
-    /// which rasterizes a formula again at the displayed size).
-    pub fn values(&self) -> Vec<Arc<V>> {
-        self.entries
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .values()
-            .cloned()
-            .collect()
-    }
-
-    /// Empties the cache — to bound its size in a long-lived caller
-    /// (`stokesforge_render_egui::GraphView`, where each keystroke in a title
-    /// creates an entry). To be called only **before** rebuilding everything
-    /// that references the removed artifacts: a texture freed while a cached
-    /// shape still points to it would display empty.
-    pub fn clear(&self) {
-        self.entries
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .clear();
-    }
 }
 
 impl<V> std::fmt::Debug for FormulaCache<V> {

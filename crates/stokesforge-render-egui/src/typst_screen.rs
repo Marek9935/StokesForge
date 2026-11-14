@@ -284,9 +284,9 @@ fn rasterize(
         [pixmap.width() as usize, pixmap.height() as usize],
         pixmap.data(),
     );
-    // A name that is stable per content rather than a counter: two identical
-    // labels reuse the same entry of egui's texture atlas instead of
-    // allocating one per occurrence.
+    // The name is only metadata (egui's texture debugging): every
+    // `load_texture` allocates a new id, so two identical labels do not
+    // share an atlas entry — sharing goes through the `FormulaCache` entry.
     let handle = context.load_texture(
         format!("stokesforge-typst:{text}"),
         image,
@@ -394,7 +394,7 @@ pub fn formula_label(
         }
     };
     if env.cache.len() > LABEL_CACHE_LIMIT {
-        env.cache.clear();
+        env.cache.evict_unshared();
     }
     let fonts = env.fonts.clone()?;
     let screen = TypstScreen::with_fonts(ui.ctx(), &env.cache, &env.choice, fonts);

@@ -922,8 +922,11 @@ not composed by Typst.
 resolves the Typst fonts **once**, at its creation (`TypstScreen::with_fonts`);
 if this resolution fails, everything stays plain text. It holds a
 `FormulaCache<FormulaTexture>` between two rebuilds of the figure, bounded by
-`FORMULA_CACHE_LIMIT` (256): beyond it, the cache is emptied **before** the next
-rebuild. Textures are therefore recompiled only if the text
+`FORMULA_CACHE_LIMIT` (256): beyond it, once the figure is rebuilt, the cache
+drops the entries nobody holds (`evict_unshared`), never an entry a displayed
+mesh needs: the cache only memoizes, the owner of the shapes holds the textures
+(`ShapeCache::textures`, filled through `TypstScreen::holding`; `ScaledShapes`
+holds its own, originals included; #508). Textures are therefore recompiled only if the text
 of a formula, its size, its color (issue #30) or the `pixels_per_point`
 changes, not at every rebuild.
 
@@ -1197,7 +1200,11 @@ the same formula rasterized at `pixels_per_point × échelle` by
 `FormulaTexture::rerender` from the already compiled document (issue #31) — no
 recompilation, no new measurement. These enlarged textures live in
 `ScaledShapes`, outside the view's `FormulaCache` (they do not count in
-`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change. An
+`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change.
+`ScaledShapes` holds an `Arc` of every texture its meshes point to, the
+originals of scale 1 included, and its key carries `build` (the miss counter of
+the shape cache): a rebuild of the figure under the same display key never
+serves stale scaled shapes (#508). An
 image never exceeds `max_texture_side`: beyond it, the resolution is
 capped. Rasterizing directly at the displayed scale during collection was
 ruled out: the displayed rectangle would have entered the main cache key, hence
