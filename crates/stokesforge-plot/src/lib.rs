@@ -108,8 +108,8 @@ pub use color_bar::{
 };
 pub use gradient::{gradient_at, gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{
-    template_source, typst_literal, typst_string, LegendField, LegendPosition, LegendSpec,
-    LegendText, LegendTextFrom, VARIABLES,
+    typst_literal, typst_string, LegendField, LegendPosition, LegendSpec, LegendText,
+    LegendTextFrom, VARIABLES,
 };
 pub use length_unit::LengthUnit;
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};

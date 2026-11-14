@@ -514,7 +514,7 @@ fn plot_native(context: &ScriptContext, request: Request) -> Result<Target, Host
         bridge::set_graph_spec(session, graph, spec)?;
         Ok((graph, epoch))
     } else {
-        bridge::fix_frames(None, &mut spec);
+        bridge::fix_frames(&snapshot.tree, None, &mut spec);
         let id = bridge::add_created_node(
             session,
             parent.0,

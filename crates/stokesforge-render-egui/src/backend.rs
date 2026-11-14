@@ -400,6 +400,8 @@ impl DrawingBackend for EguiBackend<'_> {
             }
         }
 
+        // The fallback shows what the user typed, never the variable preamble.
+        let text = stokesforge_render::formula::fallback_text(text);
         let galley = self.text.layout(text, font_id(style), color(fill));
         let size = galley.rect.size();
         let anchor = style.anchor();
@@ -463,7 +465,11 @@ impl DrawingBackend for EguiBackend<'_> {
                 }
             }
         }
-        Ok(estimate(self.text, text, style))
+        Ok(estimate(
+            self.text,
+            stokesforge_render::formula::fallback_text(text),
+            style,
+        ))
     }
 
     // `blit_bitmap` is left as default: the specification says "no image

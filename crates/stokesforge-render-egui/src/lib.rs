@@ -1672,6 +1672,9 @@ impl GraphView {
         if let Some(preview) = &self.frame_preview {
             preview.apply(&mut spec);
         }
+        // #501: the variables are bound before measuring, so the size is that
+        // of the text drawn.
+        let spec = stokesforge_render::bind_spec(&snapshot.tree, &spec, &self.figure_texts);
         let text = ScreenText::new(context, &self.measurer);
         let mut shapes = Vec::new();
         let probe_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(1.0, 1.0));
@@ -1835,6 +1838,8 @@ impl GraphView {
                     target.set_font(&mut framed, font);
                 }
             }
+            // #501: the variables of the texts, before the resolution.
+            let framed = stokesforge_render::bind_spec(&tree, &framed, figure_texts);
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
             let Some(fonts) = typst_fonts.clone() else {

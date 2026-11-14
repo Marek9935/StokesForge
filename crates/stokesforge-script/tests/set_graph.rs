@@ -637,7 +637,11 @@ fn free_1x2() -> Bench {
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
     assert!(stokesforge_render_svg::set_layer_placement(
-        &mut spec, true, &measurer, &choice
+        &mut spec,
+        true,
+        &measurer,
+        &choice,
+        &stokesforge_render_svg::as_stored,
     ));
     store(&b, spec);
     b

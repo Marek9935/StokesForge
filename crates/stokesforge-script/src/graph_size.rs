@@ -79,6 +79,12 @@ pub(crate) fn graph_size<'py>(
                 .snapshot()
                 .map_err(HostError::from_session)?;
             let spec = bridge::graph_spec(&snapshot, id, epoch)?;
+            // #501: sized on the text drawn, variables bound.
+            let spec = stokesforge_render_svg::bind_spec(
+                &snapshot.tree,
+                &spec,
+                &stokesforge_render_svg::FigureTexts::default(),
+            );
             let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
             let choice = stokesforge_render_svg::FontChoice::default();
             let layout = stokesforge_render_svg::figure_layout(&spec, &measurer, &choice)

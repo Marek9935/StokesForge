@@ -1946,7 +1946,9 @@ pub fn series_list_entry(
     let shown = crate::figure_texts::series_label_text(&label);
     let named = matches!(
         label,
-        stokesforge_core::SeriesLabel::Text(_) | stokesforge_core::SeriesLabel::Template { .. }
+        stokesforge_core::SeriesLabel::Text(_)
+            | stokesforge_core::SeriesLabel::Typed { .. }
+            | stokesforge_core::SeriesLabel::Template { .. }
     );
     // An empty text, or a template that does not compile or shows nothing.
     if series.row.is_none() && named && shown.trim().is_empty() {
@@ -6512,6 +6514,7 @@ impl AppState {
                     LayerArrange::Match(_) => PlotEditKind::MatchLayerSize,
                     LayerArrange::Distribute(_) => PlotEditKind::DistributeLayers,
                 };
+                let tree = std::sync::Arc::clone(&self.snapshot.tree);
                 self.edit_plot_object(graph, kind, |spec| match arrange {
                     LayerArrange::Align(edge) => {
                         stokesforge_core::compose::align_layers(spec, &targets, edge)
@@ -6521,7 +6524,7 @@ impl AppState {
                     }
                     LayerArrange::Distribute(axis) => {
                         let Some(frames) =
-                            crate::frame_sizes::distribute_frames(spec, &targets, axis)
+                            crate::frame_sizes::distribute_frames(&tree, spec, &targets, axis)
                         else {
                             return false;
                         };
@@ -6535,8 +6538,9 @@ impl AppState {
                 });
             }
             Action::SetLayerPlacement { graph, free } => {
+                let tree = std::sync::Arc::clone(&self.snapshot.tree);
                 self.edit_plot_object(graph, PlotEditKind::LayerPlacement, |spec| {
-                    crate::frame_sizes::set_placement_in_draft(spec, free)
+                    crate::frame_sizes::set_placement_in_draft(&tree, spec, free)
                 })
             }
             Action::PlaceSeries {
@@ -8365,7 +8369,7 @@ impl AppState {
         if !spec.fixed_figure || crate::frame_sizes::is_legacy(spec) {
             return false;
         }
-        let Some(after) = crate::frame_sizes::figure_layout(spec) else {
+        let Some(after) = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, spec) else {
             return false;
         };
         if !after.fixed_overflow {
@@ -8373,7 +8377,7 @@ impl AppState {
         }
         let Some(before) = self
             .plot_spec(*graph)
-            .and_then(|before| crate::frame_sizes::figure_layout(&before))
+            .and_then(|before| crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &before))
         else {
             return true;
         };
@@ -8391,7 +8395,7 @@ impl AppState {
         match command {
             Command::SetPlotSpec { graph, mut spec } => {
                 if let Some(current) = self.plot_spec(graph) {
-                    crate::frame_sizes::fix_from(&current, &mut spec);
+                    crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
                 Command::SetPlotSpec { graph, spec }
             }
@@ -8401,7 +8405,7 @@ impl AppState {
                 kind,
             } => {
                 if let Some(current) = self.plot_spec(graph) {
-                    crate::frame_sizes::fix_from(&current, &mut spec);
+                    crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
                 Command::EditPlotSpec { graph, spec, kind }
             }
@@ -8410,7 +8414,7 @@ impl AppState {
                 name,
                 mut spec,
             } => {
-                crate::frame_sizes::fix_new(&mut spec);
+                crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
                 Command::AddGraph { parent, name, spec }
             }
             other => other,
@@ -8980,6 +8984,9 @@ impl AppState {
             ));
             return;
         };
+        // #501: the variables of the texts, before the resolution and the size.
+        let texts = crate::figure_texts::figure_texts();
+        let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let choice = stokesforge_render_svg::FontChoice::default();
@@ -8990,7 +8997,7 @@ impl AppState {
             &measurer,
             &choice,
             format,
-            &crate::figure_texts::figure_texts(),
+            &texts,
         ) {
             Ok(()) => self.notice(tr!(
                 "status-graph-exported",
@@ -9008,6 +9015,8 @@ impl AppState {
         use crate::preferences::CopyFormat;
         use stokesforge_render_svg::ExportFormat;
 
+        let texts = crate::figure_texts::figure_texts();
+        let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         // The order and the choice are those of Preferences › Export: the
@@ -9042,7 +9051,7 @@ impl AppState {
             &measurer,
             &choice,
             &formats,
-            &crate::figure_texts::figure_texts(),
+            &texts,
         ) {
             Ok(results) => results,
             Err(err) => {
@@ -12052,11 +12061,11 @@ impl AppState {
         let plot_type = panel_plot_type(&spec.panels[panel]);
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         // Free placement (#398, L8): the new layer is placed beside the
         // reference, never over another one, in the same command.
-        let beside = crate::frame_sizes::place_beside(&spec, panel, side);
-        let gutters = crate::frame_sizes::grid_gutters(&spec);
+        let beside = crate::frame_sizes::place_beside(&self.snapshot.tree, &spec, panel, side);
+        let gutters = crate::frame_sizes::grid_gutters(&self.snapshot.tree, &spec);
         let inserted = match anchor {
             CellAnchor::Layer(panel) => insert_cell_with(&mut spec, panel, side, &gutters),
             CellAnchor::Position(row, column) => {
@@ -12100,7 +12109,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         for (axis, index, size) in sizes {
             if !stokesforge_core::compose::set_frame_size(&mut spec, axis, index, size) {
                 return;
@@ -12163,7 +12172,14 @@ impl AppState {
             return;
         }
         let mut spec = before.clone();
-        if crate::frame_sizes::set_total_in_draft(&mut spec, axis, target, ratio).is_none()
+        if crate::frame_sizes::set_total_in_draft(
+            &self.snapshot.tree,
+            &mut spec,
+            axis,
+            target,
+            ratio,
+        )
+        .is_none()
             || spec == before
         {
             return;
@@ -12183,7 +12199,7 @@ impl AppState {
             return;
         };
         let mut spec = before.clone();
-        let drawn = crate::frame_sizes::figure_layout(&spec);
+        let drawn = crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &spec);
         let (widths, heights) = drawn.map_or_else(Default::default, |layout| {
             (layout.frame_widths, layout.frame_heights)
         });
@@ -12212,7 +12228,7 @@ impl AppState {
         if spec.layer_placement != stokesforge_plot::LayerPlacement::Grid {
             return;
         }
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         let bounds = |size: &f64| {
             size.clamp(
                 stokesforge_plot::MIN_FRAME_SIZE,
@@ -12254,7 +12270,8 @@ impl AppState {
         let Some(before) = self.plot_spec(graph) else {
             return;
         };
-        let Some(spec) = crate::frame_sizes::spec_fitted_to_layers(&before) else {
+        let Some(spec) = crate::frame_sizes::spec_fitted_to_layers(&self.snapshot.tree, &before)
+        else {
             return;
         };
         self.adopt_size_lock(graph);
@@ -12271,7 +12288,9 @@ impl AppState {
         let Some(before) = self.plot_spec(graph) else {
             return;
         };
-        let Some(spec) = crate::frame_sizes::spec_layout_fitted_to_page(&before) else {
+        let Some(spec) =
+            crate::frame_sizes::spec_layout_fitted_to_page(&self.snapshot.tree, &before)
+        else {
             return;
         };
         self.execute(Command::EditPlotSpec {
@@ -12297,8 +12316,8 @@ impl AppState {
             return;
         }
         let mut spec = before.clone();
-        crate::frame_sizes::fix_new(&mut spec);
-        let gutters = crate::frame_sizes::grid_gutters(&spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
+        let gutters = crate::frame_sizes::grid_gutters(&self.snapshot.tree, &spec);
         if !stokesforge_core::compose::move_cell_with(&mut spec, panel, target, &gutters) {
             return;
         }
@@ -12351,7 +12370,7 @@ impl AppState {
             };
             // Without a stored page, the page is the figure as drawn.
             let old = before.sanitized_free_page().or_else(|| {
-                crate::frame_sizes::figure_layout(&before)
+                crate::frame_sizes::figure_layout_in(&self.snapshot.tree, &before)
                     .and_then(|layout| layout.free_page_rect())
             });
             page_resized =
@@ -12382,7 +12401,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
-        crate::frame_sizes::fix_new(&mut spec);
+        crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
         if !remove_cell(&mut spec, panel) {
             if spec.panels.get(panel).is_some() {
                 self.fail(tr!("error-last-layer"));

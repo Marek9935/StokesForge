@@ -1370,6 +1370,105 @@ fn a_custom_template_agrees_and_leaves_the_column_text_literal() {
     );
 }
 
+/// The texts of the primitives `agree` drew on both backends for a legend
+/// that reads `text` (and a series named `name`, empty for none).
+fn legend_texts(text: stokesforge_plot::LegendText, name: &str, tag: &str) -> Vec<String> {
+    let mut fixture = legend_text_fixture(text);
+    fixture.spec.panels.get_mut(0).expect("panel").series[0].name = name.to_string();
+    let (primitives, _) = agree(fixture.project.tree(), &fixture.spec, SIZE, tag);
+    primitives
+        .iter()
+        .filter_map(|p| match p {
+            Primitive::Text(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #501: the legend template goes through the one binder, so `$ln(x)$` reaches
+/// Typst as typed and is the logarithm, not the long name. The drawn text of a
+/// formula is its source: the old always-on preamble put `#let ln = …` in front
+/// of it (a math identifier then read the variable, the #499 defect), which
+/// this exact comparison refuses. Witness: restore that preamble.
+#[test]
+fn a_legend_template_keeps_the_logarithm_in_math() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let drawn = legend_texts(
+        LegendText {
+            from: LegendTextFrom::Custom,
+            template: "$ln(x)$".to_string(),
+            ..LegendText::default()
+        },
+        "",
+        "template logarithm",
+    );
+    assert!(
+        drawn.iter().any(|text| text == "$ln(x)$"),
+        "the template did not reach Typst as typed: {drawn:?}"
+    );
+    assert!(!drawn.iter().any(|text| text.contains("the long name")));
+}
+
+/// #501: a template that fails shows what was typed, never the `#let` lines
+/// of a preamble. Witness: the old preamble was part of the fallback text.
+#[test]
+fn a_failed_legend_template_shows_the_typed_text() {
+    use stokesforge_plot::{LegendText, LegendTextFrom};
+    let drawn = legend_texts(
+        LegendText {
+            from: LegendTextFrom::Custom,
+            template: "#ln #nope".to_string(),
+            ..LegendText::default()
+        },
+        "",
+        "failed template",
+    );
+    assert!(
+        drawn.iter().any(|text| text == "#ln #nope"),
+        "the typed text is not the fallback: {drawn:?}"
+    );
+    assert!(!drawn.iter().any(|text| text.contains("#let")));
+}
+
+/// #501: a typed series name `#ln` shows the long name of its own column in
+/// the legend, on screen (the legend cell has the width of the same name typed
+/// out) and in the SVG export (the text is there, `#ln` is not). Witness: a
+/// name that is not bound draws `#ln`, a much narrower entry with no long name
+/// in the document.
+#[test]
+fn a_typed_series_name_reads_the_variables_of_its_column() {
+    use stokesforge_plot::LegendText;
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let figure = |name: &str| {
+        let mut fixture = legend_text_fixture(LegendText::default());
+        fixture.spec.panels.get_mut(0).expect("panel").series[0].name = name.to_string();
+        fixture
+    };
+    let width_of = |name: &str| {
+        let fixture = figure(name);
+        let drawn = drawn_with_typst(fixture.project.tree(), &fixture.spec, SIZE);
+        drawn.panels[0].legend_rows[0].width
+    };
+    assert_eq!(width_of("#ln"), width_of("the long name"));
+    assert_ne!(width_of("#ln"), width_of("#nonexistent-entry"));
+    let fixture = figure("#ln");
+    let plot = resolve_spec(fixture.project.tree(), &fixture.spec);
+    let document = stokesforge_render_svg::export_bytes(
+        &plot,
+        SIZE,
+        &measurer,
+        &choice,
+        stokesforge_render_svg::ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    let document = String::from_utf8(document).expect("utf-8");
+    assert!(document.contains("thelongname"), "{document}");
+    assert!(!document.contains("#ln") && !document.contains("sf-vars"));
+}
+
 /// An empty chosen row gives an empty entry; the figure still agrees.
 #[test]
 fn an_empty_legend_entry_agrees_between_the_backends() {
@@ -1532,4 +1631,172 @@ fn the_screen_and_the_export_agree_on_a_non_default_legend_box() {
     }
     let (changed, _) = agree(boxed.project.tree(), &boxed.spec, LARGE, "boxed legend");
     assert_ne!(plain, changed, "the settings change nothing");
+}
+
+// -- #501: the variables of the graph texts --
+
+/// The column ids of the sample's X and Y, and a rename of the Y long name.
+fn name_the_columns(fixture: &mut Sample, long_name: &str) {
+    let ids: Vec<NodeId> = fixture.spec.panels[0]
+        .series
+        .iter()
+        .flat_map(|s| [s.x, Some(s.y)])
+        .flatten()
+        .collect();
+    for id in ids {
+        fixture
+            .project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    long_name: long_name.to_owned(),
+                    unit: "mM".to_owned(),
+                    ..ColumnMeta::default()
+                },
+            )
+            .expect("meta");
+    }
+}
+
+/// A graph title `#ln`: bound before the layout and the drawing, the size the
+/// layout reserves is the one the screen draws and the SVG shows the long
+/// name, never the variable. Witness: the layout of the **unbound** spec is
+/// another one (the `#ln` source is measured), so a call site that forgets to
+/// bind would fail the equality with the drawn title band.
+#[test]
+fn a_variable_title_is_laid_out_and_drawn_bound_on_screen_and_in_the_export() {
+    let mut fixture = minimal();
+    name_the_columns(&mut fixture, "Absorbance (very long name) \u{394}A");
+    fixture.spec.title = "#ln".to_owned();
+    fixture.spec.frame_widths = vec![700.3];
+    fixture.spec.frame_heights = vec![310.4];
+    let tree = fixture.project.tree();
+    let texts = FigureTexts::default();
+    let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &texts);
+    assert!(matches!(bound, std::borrow::Cow::Owned(_)));
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout = stokesforge_render_svg::figure_layout(&bound, &measurer, &choice).expect("layout");
+    let unbound = stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice)
+        .expect("unbound layout");
+    assert_ne!(
+        layout.title_band, unbound.title_band,
+        "witness: the raw `#ln` source measures like the long name, the test proves nothing"
+    );
+
+    let drawn = drawn_with_typst(tree, &bound, layout.size);
+    assert_eq!(layout.title_band, drawn.title_height, "screen = layout");
+
+    let plot = resolve_spec(tree, &bound);
+    let document = stokesforge_render_svg::export_bytes(
+        &plot,
+        layout.size,
+        &measurer,
+        &choice,
+        stokesforge_render_svg::ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    let document = String::from_utf8(document).expect("utf-8");
+    assert!(document.contains("Absorbance(verylongname)"), "{document}");
+    assert!(!document.contains("sf-vars") && !document.contains("#ln"));
+}
+
+// -- #501 lot 4: `#col.C` names a column of the sheet --
+
+/// The minimal graph with two curves on the Y axis: column B (Absorbance, AU)
+/// then C (Fluorescence, cps), both in the sheet of the X column.
+fn two_series_fixture() -> Sample {
+    let mut fixture = minimal();
+    let first = fixture.spec.panels[0].series[0].clone();
+    let x = first.x.expect("x column");
+    let sheet = fixture
+        .project
+        .tree()
+        .parent(x)
+        .expect("tree")
+        .expect("sheet");
+    let mut curves = Vec::new();
+    for (name, long, unit) in [("B", "Absorbance", "AU"), ("C", "Fluorescence", "cps")] {
+        let meta = ColumnMeta {
+            long_name: long.to_owned(),
+            unit: unit.to_owned(),
+            ..ColumnMeta::default()
+        };
+        let column = Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float((0..64).map(f64::from).collect()),
+            meta,
+        )
+        .expect("column");
+        let id = fixture
+            .project
+            .add_column(sheet, None, Some(name), column)
+            .expect("add");
+        let mut series = first.clone();
+        series.name.clear();
+        series.y = id;
+        curves.push(series);
+    }
+    fixture.spec.panels.get_mut(0).expect("panel").series = curves;
+    fixture
+}
+
+fn svg_text(fixture: &Sample) -> String {
+    let tree = fixture.project.tree();
+    let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &FigureTexts::default());
+    let plot = resolve_spec(tree, &bound);
+    let bytes = stokesforge_render_svg::export_bytes(
+        &plot,
+        SIZE,
+        &TextMeasurer::default(),
+        &stokesforge_render_svg::FontChoice::default(),
+        stokesforge_render_svg::ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    String::from_utf8(bytes).expect("utf-8")
+}
+
+/// A Y axis title that names its columns reads both of them, where `#ln` reads
+/// only the first curve. Witness: a lookup in the wrong sheet, or the context
+/// column returned for every name, gives « Absorbance (AU), Absorbance (AU) »
+/// or the broken reference.
+#[test]
+fn an_axis_title_names_the_column_of_each_curve() {
+    let mut fixture = two_series_fixture();
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    panel.left.label = "#col.B.ln (#col.B.u), #col.C.ln (#col.C.u)".to_owned();
+    panel.left.unit.clear();
+    let tree = fixture.project.tree();
+    let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &FigureTexts::default());
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout = stokesforge_render_svg::figure_layout(&bound, &measurer, &choice).expect("layout");
+    let drawn = drawn_with_typst(tree, &bound, layout.size);
+    assert_eq!(layout.title_band, drawn.title_height, "screen = layout");
+    let document = svg_text(&fixture);
+    assert!(
+        document.contains("Absorbance(AU),Fluorescence(cps)"),
+        "{document}"
+    );
+    assert!(!document.contains("sf-vars") && !document.contains("#col"));
+}
+
+/// The legend binds a typed series name with the sheet of its own column.
+/// Witness: a legend that does not pass the sheet shows the broken reference
+/// and never « Fluorescence ».
+#[test]
+fn a_typed_series_name_names_another_column() {
+    let mut fixture = two_series_fixture();
+    let panel = fixture.spec.panels.get_mut(0).expect("panel");
+    panel.series[0].name = "#col.C.ln".to_owned();
+    // The second curve is named apart, so « Fluorescence » can only come from
+    // the first entry reading column C.
+    panel.series[1].name = "other".to_owned();
+    let document = svg_text(&fixture);
+    assert!(document.contains("Fluorescence"), "{document}");
+    assert!(!document.contains("#col"));
 }
