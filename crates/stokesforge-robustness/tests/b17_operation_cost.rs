@@ -336,3 +336,82 @@ fn b17_loading_a_folder_with_many_children_is_not_quadratic() {
         "loading {N} children: {elapsed:?} (quadratic?)"
     );
 }
+
+/// #534: the questions the grid asks about **every cell of every frame**
+/// (`is_selected`, `is_column_selected`, `column_touched_by_selection`,
+/// `is_header_field_selected`, `row_count`) must not cost an allocation that grows
+/// with the width of the worksheet: before, each walked the worksheet and cloned
+/// every column name (`visible_columns_in`), and Ctrl+A turned `columns()` into a
+/// quadratic scan, so one frame of a 1000-column sheet took seconds.
+#[test]
+fn b17_the_per_cell_selection_questions_do_not_grow_with_the_width_of_the_sheet() {
+    use stokesforge_app_state::state::{AppState, HeaderField};
+
+    fn bytes_for(columns: usize, how: &str) -> usize {
+        let mut project = Project::new("D").expect("valid project");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("workbook");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("worksheet");
+        let ids: Vec<NodeId> = (0..columns)
+            .map(|i| {
+                project
+                    .add_column(
+                        sheet,
+                        None,
+                        Some(&format!("a_rather_long_column_name_{i}")),
+                        Column::from_f64(&[1.0, 2.0, 3.0]),
+                    )
+                    .expect("column")
+            })
+            .collect();
+        let session = stokesforge_session::Session::spawn(project, None).expect("actor");
+        let mut state = AppState::new(session.handle(), "x.stf".to_string()).expect("state");
+        match how {
+            "none" => {}
+            "one cell" => state.select_cell(sheet, ids[0], 1),
+            "rectangle" => {
+                state.select_cell(sheet, ids[0], 0);
+                state.extend_selection(sheet, ids[columns - 1], 2);
+            }
+            "columns" => {
+                state.select_column(sheet, ids[0]);
+                state.extend_column_selection(sheet, ids[columns - 1]);
+            }
+            "Ctrl+A" => state.select_all(sheet),
+            "rows" => {
+                state.select_row(sheet, 0);
+                state.extend_row_selection(sheet, 2);
+            }
+            other => panic!("unknown selection {other}"),
+        }
+        let ask = |state: &AppState| {
+            let mut hits = 0;
+            for call in 0..100 {
+                let column = ids[(call * 7) % columns];
+                hits += usize::from(state.is_selected(sheet, column, call % 4));
+                hits += usize::from(state.is_column_selected(sheet, column));
+                hits += usize::from(state.column_touched_by_selection(sheet, column));
+                hits +=
+                    usize::from(state.is_header_field_selected(sheet, column, HeaderField::Unit));
+                hits += state.row_count(sheet);
+            }
+            hits
+        };
+        // The first question of a snapshot builds what the others read.
+        ask(&state);
+        let (_, bytes) = bytes_of(|| ask(&state));
+        bytes
+    }
+
+    for how in ["none", "one cell", "rectangle", "columns", "Ctrl+A", "rows"] {
+        let narrow = bytes_for(100, how);
+        let wide = bytes_for(1000, how);
+        println!("{how:>10}: 100 columns {narrow:>8} bytes, 1000 columns {wide:>8} bytes");
+        assert_eq!(
+            narrow, wide,
+            "with the selection `{how}`, 500 per-cell questions allocate {narrow} bytes on 100 \
+             columns and {wide} on 1000: the cost grows with the width of the sheet (the \
+             worksheet is walked, or its columns' names cloned, per cell, #534)"
+        );
+    }
+}

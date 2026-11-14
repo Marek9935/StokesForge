@@ -43,9 +43,11 @@
 //! touches the data: each is the counterpart of the other zone, as `Columns` is
 //! of `FullRows`.
 
-use stokesforge_core::{NodeId, Tree};
+use std::collections::HashMap;
 
-use crate::state::{visible_columns_in, HeaderField};
+use stokesforge_core::{Node, NodeId, Tree};
+
+use crate::state::HeaderField;
 
 /// Current selection in a worksheet's grid: a rectangle bounded to the header or
 /// to the data ([`SelectionKind::Rows`], never both at once — see the module's
@@ -85,7 +87,8 @@ enum SelectionKind {
         active: bool,
     },
     /// Set of whole columns (#159): the columns of `base` (set one by one by
-    /// Ctrl+click, or frozen by another gesture), plus, if `ranged`, the
+    /// Ctrl+click, or frozen by another gesture; kept **sorted** by identifier,
+    /// see [`sorted_set`], so that a membership test is a binary search, #534), plus, if `ranged`, the
     /// `anchor..=cursor` range (same rules as `Rows::anchor`/`cursor`, but in
     /// columns rather than cells) — drag or Shift-click on the letter row. `anchor`
     /// is the last column clicked. The order of `base` has no meaning:
@@ -124,14 +127,78 @@ enum SelectionKind {
     },
 }
 
-/// Visible columns of `sheet`, with no range to resolve — shared by
-/// [`SelectionKind::FullRows`] and [`SelectionKind::HeaderRows`], which each
-/// carry all the columns of the worksheet rather than a sub-range.
-fn all_visible_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
-    visible_columns_in(tree, sheet)
-        .into_iter()
-        .map(|(id, _, _)| id)
-        .collect()
+/// `columns` sorted by identifier, without duplicates: the form of a set of whole
+/// columns' `base` (#534).
+fn sorted_set(mut columns: Vec<NodeId>) -> Vec<NodeId> {
+    columns.sort_unstable();
+    columns.dedup();
+    columns
+}
+
+/// The visible columns of a worksheet in order, with the rank of each (#534).
+///
+/// Built **once** per snapshot ([`crate::state::AppState`] keeps it) so that the
+/// per-cell questions of the grid (`is_selected`, `touches_column`…) are answered
+/// by a rank lookup instead of walking the worksheet and cloning every column name
+/// at each call. It reads the same columns, in the same order, as
+/// [`crate::state::visible_columns_in`], without its names.
+#[derive(Debug, Clone, Default)]
+pub struct ColumnRanks {
+    ids: Vec<NodeId>,
+    ranks: HashMap<NodeId, usize>,
+}
+
+impl ColumnRanks {
+    /// The visible columns of `sheet`, in the worksheet's order.
+    pub fn new(tree: &Tree, sheet: NodeId) -> Self {
+        let ids: Vec<NodeId> = tree.node(sheet).map_or_else(Vec::new, |node| {
+            node.children()
+                .iter()
+                .filter(|id| tree.node(**id).and_then(Node::as_column).is_some())
+                .copied()
+                .collect()
+        });
+        let ranks = ids
+            .iter()
+            .enumerate()
+            .map(|(rank, id)| (*id, rank))
+            .collect();
+        Self { ids, ranks }
+    }
+
+    /// The columns in the worksheet's order.
+    pub fn ids(&self) -> &[NodeId] {
+        &self.ids
+    }
+
+    /// Position of `column` among the visible columns, `None` if it is not one.
+    pub fn rank(&self, column: NodeId) -> Option<usize> {
+        self.ranks.get(&column).copied()
+    }
+}
+
+/// The ranks `(lo, hi)` of the columns covered by `[a, b]`, whatever their order;
+/// `None` if one of them is not a visible column.
+fn rank_span(ranks: &ColumnRanks, a: NodeId, b: NodeId) -> Option<(usize, usize)> {
+    let (x, y) = (ranks.rank(a)?, ranks.rank(b)?);
+    Some((x.min(y), x.max(y)))
+}
+
+/// A rectangular block of the selection, with its columns as a span of ranks (see
+/// [`ColumnRanks`]) instead of a list of identifiers: what the per-cell questions
+/// read. `first..=last` are columns, `lo..=hi` ranks of rows (see
+/// [`GridCursor::rank`]).
+struct BlockSpan {
+    first: usize,
+    last: usize,
+    lo: isize,
+    hi: isize,
+}
+
+impl BlockSpan {
+    fn holds_column(&self, rank: usize) -> bool {
+        self.first <= rank && rank <= self.last
+    }
 }
 
 /// Unified starting point of keyboard navigation (arrows, Tab) and of mouse
@@ -160,7 +227,7 @@ impl GridCursor {
     /// header fields take `-5..=-1` (via [`HeaderField::rank`]), the data rows
     /// `0..` — comparable between two [`GridCursor`]s of the same column or of
     /// different columns, the column being resolved separately by position (see
-    /// [`order_range`]).
+    /// [`rank_span`]).
     fn rank(self) -> isize {
         match self {
             GridCursor::Data(_, row) => row as isize,
@@ -191,27 +258,6 @@ fn clamp_to_anchor_zone(anchor: GridCursor, target: GridCursor) -> GridCursor {
         }
         (GridCursor::Data(..), GridCursor::Header(column, _)) => GridCursor::Data(column, 0),
         _ => target,
-    }
-}
-
-/// Columns covered by `[a, b]` in the order of `sheet` — shared between
-/// [`SelectionKind::Rows`] and [`SelectionKind::Columns`], which both resolve a
-/// range of columns the same way, by position in [`visible_columns_in`] rather
-/// than by direct comparison of identifiers (a column can be dragged in reverse
-/// order, `a` after `b`).
-fn order_range(tree: &Tree, sheet: NodeId, a: NodeId, b: NodeId) -> Vec<NodeId> {
-    let order: Vec<NodeId> = visible_columns_in(tree, sheet)
-        .into_iter()
-        .map(|(id, _, _)| id)
-        .collect();
-    let start = order.iter().position(|&id| id == a);
-    let end = order.iter().position(|&id| id == b);
-    match (start, end) {
-        (Some(x), Some(y)) => {
-            let (lo, hi) = if x <= y { (x, y) } else { (y, x) };
-            order[lo..=hi].to_vec()
-        }
-        _ => Vec::new(),
     }
 }
 
@@ -356,7 +402,7 @@ impl Selection {
         let first = *columns.first()?;
         Some(Self {
             kind: SelectionKind::Columns {
-                base: columns.to_vec(),
+                base: sorted_set(columns.to_vec()),
                 anchor: first,
                 cursor: first,
                 ranged: false,
@@ -429,10 +475,24 @@ impl Selection {
         column: NodeId,
         field: HeaderField,
     ) -> bool {
+        self.is_header_field_selected_ranked(&ColumnRanks::new(tree, sheet), column, field)
+    }
+
+    /// [`Selection::is_header_field_selected`] over a [`ColumnRanks`] built once
+    /// (#534).
+    pub fn is_header_field_selected_ranked(
+        &self,
+        ranks: &ColumnRanks,
+        column: NodeId,
+        field: HeaderField,
+    ) -> bool {
+        let Some(column_rank) = ranks.rank(column) else {
+            return false;
+        };
         let rank = field.rank();
-        self.blocks(tree, sheet)
+        self.block_spans(ranks)
             .iter()
-            .any(|block| block.lo <= rank && rank <= block.hi && block.columns.contains(&column))
+            .any(|span| span.lo <= rank && rank <= span.hi && span.holds_column(column_rank))
     }
 
     pub fn extend_row_to(&mut self, target: GridCursor) {
@@ -466,8 +526,9 @@ impl Selection {
         if (anchor.rank() < 0) != (target.rank() < 0) {
             return false;
         }
-        let order = all_visible_columns(tree, sheet);
-        let Some(column) = order.iter().position(|&c| c == target.column()) else {
+        let ranks = ColumnRanks::new(tree, sheet);
+        let order = ranks.ids();
+        let Some(column) = ranks.rank(target.column()) else {
             return false;
         };
         let rank = target.rank();
@@ -476,14 +537,14 @@ impl Selection {
             rects.push((*anchor, *cursor));
         }
         let hit = rects.iter().any(|&(a, b)| {
-            rect_bounds(&order, a, b).is_some_and(|((c0, c1), (r0, r1))| {
+            rect_bounds(order, a, b).is_some_and(|((c0, c1), (r0, r1))| {
                 (c0..=c1).contains(&column) && (r0..=r1).contains(&rank)
             })
         });
         if hit {
             *extra = rects
                 .into_iter()
-                .flat_map(|(a, b)| rect_minus_cell(&order, a, b, column, rank))
+                .flat_map(|(a, b)| rect_minus_cell(order, a, b, column, rank))
                 .collect();
             *active = false;
         } else {
@@ -558,10 +619,10 @@ impl Selection {
             *anchor = column;
             *cursor = column;
             if selected.contains(&column) {
-                *base = selected.into_iter().filter(|&c| c != column).collect();
+                *base = sorted_set(selected.into_iter().filter(|&c| c != column).collect());
                 *ranged = false;
             } else {
-                *base = selected;
+                *base = sorted_set(selected);
                 *ranged = true;
             }
         }
@@ -610,11 +671,11 @@ impl Selection {
     pub fn is_contiguous(&self, tree: &Tree, sheet: NodeId) -> bool {
         match &self.kind {
             SelectionKind::Columns { .. } => {
-                let selected = self.columns(tree, sheet);
-                let order = all_visible_columns(tree, sheet);
-                let positions: Vec<usize> = selected
+                let ranks = ColumnRanks::new(tree, sheet);
+                let positions: Vec<usize> = self
+                    .columns(tree, sheet)
                     .iter()
-                    .filter_map(|c| order.iter().position(|o| o == c))
+                    .filter_map(|c| ranks.rank(*c))
                     .collect();
                 positions.windows(2).all(|w| w[1] == w[0] + 1)
             }
@@ -704,42 +765,58 @@ impl Selection {
     /// The rectangular blocks of the selection (see [`SelectionBlock`]); empty for a
     /// set of whole columns, which is read through [`Selection::columns`].
     pub(crate) fn blocks(&self, tree: &Tree, sheet: NodeId) -> Vec<SelectionBlock> {
+        let ranks = ColumnRanks::new(tree, sheet);
+        self.block_spans(&ranks)
+            .into_iter()
+            .map(|span| SelectionBlock {
+                columns: ranks.ids[span.first..=span.last].to_vec(),
+                lo: span.lo,
+                hi: span.hi,
+            })
+            .collect()
+    }
+
+    /// The blocks of [`Selection::blocks`], their columns as a span of ranks: the one
+    /// place that decides what a rectangle, a set of whole rows or a header field
+    /// covers, read by the blocks and by the per-cell questions alike (#534).
+    fn block_spans(&self, ranks: &ColumnRanks) -> Vec<BlockSpan> {
+        let Some(last) = ranks.ids.len().checked_sub(1) else {
+            return Vec::new();
+        };
         match &self.kind {
             SelectionKind::Rows { .. } => self
                 .rects()
                 .into_iter()
                 .filter_map(|(a, b)| {
-                    let columns = order_range(tree, sheet, a.column(), b.column());
-                    if columns.is_empty() {
-                        return None;
-                    }
+                    let (first, last) = rank_span(ranks, a.column(), b.column())?;
                     let (lo, hi) = rank_range(a, b);
-                    Some(SelectionBlock { columns, lo, hi })
+                    Some(BlockSpan {
+                        first,
+                        last,
+                        lo,
+                        hi,
+                    })
                 })
                 .collect(),
-            SelectionKind::FullRows { .. } => {
-                let columns = all_visible_columns(tree, sheet);
-                if columns.is_empty() {
-                    return Vec::new();
-                }
-                self.full_row_intervals()
-                    .into_iter()
-                    .map(|(lo, hi)| SelectionBlock {
-                        columns: columns.clone(),
-                        lo: lo as isize,
-                        hi: hi as isize,
-                    })
-                    .collect()
-            }
-            SelectionKind::HeaderRows { .. } => {
-                let columns = all_visible_columns(tree, sheet);
-                match self.full_rank_range() {
-                    Some((lo, hi)) if !columns.is_empty() => {
-                        vec![SelectionBlock { columns, lo, hi }]
-                    }
-                    _ => Vec::new(),
-                }
-            }
+            SelectionKind::FullRows { .. } => self
+                .full_row_intervals()
+                .into_iter()
+                .map(|(lo, hi)| BlockSpan {
+                    first: 0,
+                    last,
+                    lo: lo as isize,
+                    hi: hi as isize,
+                })
+                .collect(),
+            SelectionKind::HeaderRows { .. } => match self.full_rank_range() {
+                Some((lo, hi)) => vec![BlockSpan {
+                    first: 0,
+                    last,
+                    lo,
+                    hi,
+                }],
+                None => Vec::new(),
+            },
             SelectionKind::Columns { .. } => Vec::new(),
         }
     }
@@ -837,31 +914,13 @@ impl Selection {
     }
 
     pub fn columns(&self, tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
-        match &self.kind {
-            SelectionKind::Columns {
-                base,
-                anchor,
-                cursor,
-                ranged,
-            } => {
-                let range = if *ranged {
-                    order_range(tree, sheet, *anchor, *cursor)
-                } else {
-                    Vec::new()
-                };
-                all_visible_columns(tree, sheet)
-                    .into_iter()
-                    .filter(|c| base.contains(c) || range.contains(c))
-                    .collect()
-            }
-            _ => {
-                let blocks = self.blocks(tree, sheet);
-                all_visible_columns(tree, sheet)
-                    .into_iter()
-                    .filter(|c| blocks.iter().any(|block| block.columns.contains(c)))
-                    .collect()
-            }
-        }
+        let ranks = ColumnRanks::new(tree, sheet);
+        ranks
+            .ids()
+            .iter()
+            .copied()
+            .filter(|column| self.touches_column_ranked(&ranks, *column))
+            .collect()
     }
 
     /// The rows of a selection of **whole rows**, ascending and without duplicates
@@ -922,15 +981,21 @@ impl Selection {
     }
 
     pub fn contains(&self, tree: &Tree, sheet: NodeId, column: NodeId, row: usize) -> bool {
+        self.contains_ranked(&ColumnRanks::new(tree, sheet), column, row)
+    }
+
+    /// [`Selection::contains`] over a [`ColumnRanks`] built once: no walk of the
+    /// worksheet and no allocation that grows with its width (#534).
+    pub fn contains_ranked(&self, ranks: &ColumnRanks, column: NodeId, row: usize) -> bool {
         match &self.kind {
-            SelectionKind::Columns { .. } => self.columns(tree, sheet).contains(&column),
+            SelectionKind::Columns { .. } => self.touches_column_ranked(ranks, column),
             _ => {
+                let Some(rank) = ranks.rank(column) else {
+                    return false;
+                };
                 let row = row as isize;
-                self.blocks(tree, sheet).iter().any(|block| {
-                    block.hi >= 0
-                        && block.lo <= row
-                        && row <= block.hi
-                        && block.columns.contains(&column)
+                self.block_spans(ranks).iter().any(|span| {
+                    span.hi >= 0 && span.lo <= row && row <= span.hi && span.holds_column(rank)
                 })
             }
         }
@@ -943,8 +1008,13 @@ impl Selection {
     /// same columns (see [`Selection::is_row_selected`]/
     /// [`Selection::is_header_row_selected`] for their respective counterparts).
     pub fn is_column_selected(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {
+        self.is_column_selected_ranked(&ColumnRanks::new(tree, sheet), column)
+    }
+
+    /// [`Selection::is_column_selected`] over a [`ColumnRanks`] built once (#534).
+    pub fn is_column_selected_ranked(&self, ranks: &ColumnRanks, column: NodeId) -> bool {
         match &self.kind {
-            SelectionKind::Columns { .. } => self.columns(tree, sheet).contains(&column),
+            SelectionKind::Columns { .. } => self.touches_column_ranked(ranks, column),
             _ => false,
         }
     }
@@ -978,7 +1048,31 @@ impl Selection {
     /// cell of its column is selected without the column itself being so — the
     /// "your column is concerned" marker of a spreadsheet.
     pub fn touches_column(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {
-        self.columns(tree, sheet).contains(&column)
+        self.touches_column_ranked(&ColumnRanks::new(tree, sheet), column)
+    }
+
+    /// [`Selection::touches_column`] over a [`ColumnRanks`] built once (#534).
+    pub fn touches_column_ranked(&self, ranks: &ColumnRanks, column: NodeId) -> bool {
+        let Some(rank) = ranks.rank(column) else {
+            return false;
+        };
+        match &self.kind {
+            SelectionKind::Columns {
+                base,
+                anchor,
+                cursor,
+                ranged,
+            } => {
+                base.binary_search(&column).is_ok()
+                    || (*ranged
+                        && rank_span(ranks, *anchor, *cursor)
+                            .is_some_and(|(lo, hi)| lo <= rank && rank <= hi))
+            }
+            _ => self
+                .block_spans(ranks)
+                .iter()
+                .any(|span| span.holds_column(rank)),
+        }
     }
 
     pub fn touches_row(&self, row: usize) -> bool {
@@ -1058,12 +1152,12 @@ impl Selection {
                 .first()
                 .map(|&column| GridCursor::Data(column, 0)),
             SelectionKind::FullRows { .. } => {
-                let first_column = visible_columns_in(tree, sheet).into_iter().next()?.0;
+                let first_column = ColumnRanks::new(tree, sheet).ids().first().copied()?;
                 let first_row = self.full_row_intervals().first()?.0;
                 Some(GridCursor::Data(first_column, first_row))
             }
             SelectionKind::HeaderRows { anchor, .. } => {
-                let first_column = visible_columns_in(tree, sheet).into_iter().next()?.0;
+                let first_column = ColumnRanks::new(tree, sheet).ids().first().copied()?;
                 Some(GridCursor::Header(first_column, *anchor))
             }
         }
