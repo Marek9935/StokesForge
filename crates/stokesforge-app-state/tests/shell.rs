@@ -2484,16 +2484,20 @@ fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
     assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
-/// #311: more columns copied than the sheet has from the anchor:
-/// those that fit are written, the status counts the others.
+/// #495 (replaces #311 "dropped and counted"): more columns pasted than the
+/// sheet has from the anchor: the missing column is created, holds its
+/// values, the notice is plain, and one Undo removes the column and values.
 #[test]
-fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
+fn a_paste_wider_than_the_sheet_creates_the_missing_columns_in_one_undo() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
 
     state.select_cell(sheet1, signal, 0);
     state.dispatch(Action::Paste {
@@ -2503,13 +2507,24 @@ fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
     assert_eq!(cell(&state, signal, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 0), Cell::Float(2.0));
     assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "one column created");
+    let created = columns[3].0;
+    assert_eq!(cell(&state, created, 0), Cell::Float(3.0));
+    assert_eq!(cell(&state, created, 1), Cell::Float(6.0));
     let status = state.status().expect("a message");
     assert!(!status.is_error());
+    assert_eq!(status.level, StatusLevel::Info);
     assert!(
-        status.text.contains("One column"),
+        status.text.contains("One column was added"),
         "unexpected status: {}",
         status.text
     );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.visible_columns(sheet1).len(), 3, "column removed");
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
 /// #311: a paste that fits the width sets no overflow status.
@@ -2966,9 +2981,10 @@ fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
     );
 }
 
-/// #311 (E4): columns and fields that overflow together: a single message.
+/// #495: a header paste beyond the last column creates the column; the
+/// fields beyond Formula are still dropped, counted in their own notice.
 #[test]
-fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
+fn a_header_paste_beyond_the_edge_creates_the_column_and_counts_the_dropped_fields() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2991,11 +3007,15 @@ fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
     let status = state.status().expect("a status");
     assert!(!status.is_error(), "{}", status.text);
     assert!(
-        status
-            .text
-            .contains("1 column(s) and 1 header field(s) did not fit"),
+        status.text.contains("One header field did not fit"),
         "unexpected status: {}",
         status.text
+    );
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "the column was created");
+    assert!(
+        state.column_meta(columns[3].0).formula.is_some(),
+        "the created column received the pasted Formula field"
     );
 }
 

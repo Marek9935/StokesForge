@@ -261,6 +261,11 @@ pub(super) const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::Keyboar
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::V,
 );
+/// Ctrl+Alt+V — paste transposed (decorative, see [`SHORTCUT_COPY`]).
+pub(super) const SHORTCUT_PASTE_TRANSPOSED: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::ALT),
+    egui::Key::V,
+);
 
 /// Shortcut reminder for Backspace, spelled out in full rather than through
 /// `Context::format_shortcut`.
@@ -401,6 +406,7 @@ pub(super) const HELP: &[HelpEntry] = &[
     entry!(Workbook, "help-cut", shortcut SHORTCUT_CUT),
     entry!(Workbook, "help-paste", shortcut SHORTCUT_PASTE),
     entry!(Workbook, "help-paste-absolute", shortcut SHORTCUT_PASTE_ABSOLUTE),
+    entry!(Workbook, "help-paste-transposed", shortcut SHORTCUT_PASTE_TRANSPOSED),
     entry!(Workbook, "help-clear-cells", text shortcut_text_delete),
     entry!(Workbook, "help-duplicate-sheet", shortcut SHORTCUT_DUPLICATE_SHEET),
     entry!(Graph, "help-copy-graph", shortcut SHORTCUT_COPY),

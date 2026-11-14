@@ -314,6 +314,9 @@ action-paste = Coller
 action-paste-in-place = Coller à l'identique
     .hint = Colle à la position d'origine de la copie
     .disabled = Copier d'abord depuis la grille. Un texte venu d'ailleurs n'a pas de position d'origine
+action-paste-transposed = Coller transposé
+    .hint = Colle les cellules copiées en échangeant lignes et colonnes, en valeurs
+    .disabled = Sélectionner un seul bloc de cellules ou des colonnes contiguës pour coller
 action-clear = Effacer
     .hint = Vide les cellules sélectionnées
 action-remove-formula-keep-data = Retirer la formule, garder les données
@@ -390,10 +393,16 @@ status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
 status-paste-non-contiguous = Impossible de coller dans une sélection non contiguë
-status-paste-columns-dropped =
+status-paste-transposed-nothing = Rien à coller transposé : parmi les champs d'en-tête copiés, seul x' peut être collé
+status-paste-header-rows-dropped =
     { $count ->
-        [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
-       *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
+        [one] Une ligne d'en-tête autre que x' n'a pas été collée
+       *[other] { $count } lignes d'en-tête autres que x' n'ont pas été collées
+    }
+status-paste-columns-added =
+    { $count ->
+        [one] Une colonne a été ajoutée pour contenir le collage
+       *[other] { $count } colonnes ont été ajoutées pour contenir le collage
     }
 status-cell-decimal-comma = « { $text } » a été lu { $value } (virgule décimale)
 status-paste-fields-dropped =
@@ -401,7 +410,6 @@ status-paste-fields-dropped =
         [one] Un champ d'en-tête ne tenait pas dans la feuille et n'a pas été collé
        *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
     }
-status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
 status-formula-comma-rewritten = Lu comme la plage de { $from } à { $to } et réécrit { $rewritten }. Pour le nombre { $decimal }, l'écrire avec un point
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
@@ -2255,6 +2263,7 @@ help-copy-full-columns = Copier les colonnes entières
 help-cut = Couper
 help-paste = Coller
 help-paste-absolute = Coller au même endroit
+help-paste-transposed = Coller en échangeant lignes et colonnes
 help-clear-cells = Vider les cellules sélectionnées, puis les supprimer
 help-duplicate-sheet = Dupliquer la feuille
 help-copy-graph = Copier le graphique comme image (rien de sélectionné)
