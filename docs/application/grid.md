@@ -528,6 +528,23 @@ the tests of `app/grid.rs` (`app::grid::tests`). egui's focus does not show in a
 (`STOKESFORGE_APP_SCREENSHOT`): to be confirmed on a real window
 (`run-stokesforge` on X11 helps, without being worth native Wayland).
 
+### The grid follows the keyboard cursor (#534)
+
+When the active cell (data cell or header field) moves after an arrow, Tab or
+Enter, and leaves the viewport, the grid scrolls, on both axes, just enough to
+show it (`follow_offset`: the least movement; a cell wider than the view is
+aligned on its start; the first column also brings the row-number gutter back).
+The decision "which cell is active" stays in `AppState`; the grid watches
+`Selection::grid_cursor`: a navigation key arms the follow for 30 frames
+(`arm_follow`, so that a column added by Tab, created a few frames later, is
+followed too), the first change of cursor while armed asks for the scroll
+(`follow_cursor`, once), and any press or release of the mouse disarms: **a click
+never scrolls**. The offsets are not applied by a second path: they are handed
+to the workbook (`take_follow_scroll`) which stores them in the same on-hold
+slots as the mirrored bars (`pending_offset`, `pending_vertical_offset`),
+applied by the next frame. The row geometry is `row * ROW_HEIGHT` (no vertical
+spacing), the column geometry the stored widths.
+
 ### Body alignment: numbers right, text left
 
 `cell_widget` aligns each cell of the **body** of the grid like a

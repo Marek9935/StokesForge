@@ -1268,7 +1268,7 @@ The width is read in the bench on the flat fill of the column letter (`painted_w
 
 ## Wide sheet (#534)
 
-Column virtualization: the table holds the visible window and two spacers. Bench: `grid::tests::wide_sheet_frame_cost` (`#[ignore]`, release, `--nocapture`). Each witness was seen red by mutation.
+Column virtualization (the table holds the visible window and two spacers) and the grid following the keyboard cursor. Bench: `grid::tests::wide_sheet_frame_cost` (`#[ignore]`, release, `--nocapture`). Each witness was seen red by mutation.
 
 | Rule | Witness |
 |---|---|
@@ -1279,6 +1279,9 @@ Column virtualization: the table holds the visible window and two spacers. Bench
 | a resize after a horizontal scroll sends the width of the right column | `a_resize_after_a_horizontal_scroll_targets_the_right_column` (rank not shifted by the left spacer: red) |
 | a block selected past the window has no grip band at the window's border | `a_selected_block_has_no_grip_band_at_the_edge_of_the_window` (extents taken as block edges: red) |
 | no free area after the last column unless it is painted | `the_blank_column_target_needs_the_last_column_painted` (last painted column taken as the last: red) |
+| ArrowRight from the last visible column, ArrowDown below the last row, Tab adding a column: the active cell is fully visible | `the_right_arrow_scrolls_to_the_next_column`, `the_down_arrow_scrolls_to_the_next_row`, `tab_on_the_last_column_scrolls_to_the_new_column` (call to `follow_cursor` dropped: red) |
+| a click on a partly visible column does not scroll | `a_click_does_not_scroll_the_grid` (follow not conditioned on a key: red) |
+| the least scroll that shows a range | `follow_offset_scrolls_just_enough` |
 
 ## Moving columns (#319)
 

@@ -1942,6 +1942,7 @@ pub(super) fn grid_contents(
     if layout_changed {
         ui.data_mut(|data| data.insert_temp(layout_memory, layout_key));
     }
+    arm_follow(ui, sheet);
     let mut table = TableBuilder::new(ui)
         .id_salt(GRID_TABLE_SALT)
         .striped(true)
@@ -2042,6 +2043,21 @@ pub(super) fn grid_contents(
         grid_rect,
         focus_anchor,
         was_editing,
+    );
+    // #534: after the keyboard, so that a move made in this very frame is seen.
+    follow_cursor(
+        ui,
+        state,
+        sheet,
+        FollowGeometry {
+            column_ids: &column_ids,
+            widths: &nominal,
+            spacing: spacing_x,
+            gutter: gutter_width,
+            viewport,
+            body_offset: table_output.state.offset.y,
+            body_height: table_output.inner_rect.height(),
+        },
     );
     Some(table_output)
 }
@@ -2187,6 +2203,158 @@ fn last_column_right(
     fallback: f32,
 ) -> Option<f32> {
     (window.end == window.total).then(|| extents.last().map_or(fallback, |&(_, _, right)| right))
+}
+
+/// Horizontal range, in content coordinates, of the data column of rank `index`.
+/// The first column starts at 0: reaching it brings the gutter back into view.
+fn column_x_range(widths: &[f32], spacing: f32, gutter: f32, index: usize) -> (f32, f32) {
+    let left = gutter
+        + spacing
+        + widths[..index]
+            .iter()
+            .map(|width| width + spacing)
+            .sum::<f32>();
+    (if index == 0 { 0.0 } else { left }, left + widths[index])
+}
+
+/// The scroll offset that brings `start..end` into the view `offset..offset + len`
+/// with the least movement, or `None` when it is already inside. A range wider
+/// than the view is aligned on its start. Pure function.
+fn follow_offset(offset: f32, len: f32, start: f32, end: f32) -> Option<f32> {
+    if len.is_nan() || len <= 0.0 {
+        return None;
+    }
+    let target = if start < offset || end - start > len {
+        start
+    } else if end > offset + len {
+        end - len
+    } else {
+        return None;
+    };
+    let target = target.max(0.0);
+    ((target - offset).abs() > 0.5).then_some(target)
+}
+
+/// How many frames a keyboard move stays armed (#534): the cursor may be moved by
+/// an action applied a few frames after the key (a column added by Tab).
+const FOLLOW_ARMED_FRAMES: u8 = 30;
+
+/// What the grid remembers between frames to follow its keyboard cursor.
+#[derive(Clone, Copy, Default)]
+struct FollowMemory {
+    cursor: Option<GridCursor>,
+    armed: u8,
+}
+
+fn follow_memory_id(sheet: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_follow", sheet.raw()))
+}
+
+fn follow_scroll_id(sheet: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_follow_scroll", sheet.raw()))
+}
+
+/// Arms the follow on a keyboard move key and disarms it on any press or release
+/// of the mouse: a click never scrolls (#534). Read **before** the grid consumes
+/// the keys.
+fn arm_follow(ui: &egui::Ui, sheet: NodeId) {
+    let (key, pointer) = ui.input(|input| {
+        let key = input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    pressed: true,
+                    key: egui::Key::ArrowUp
+                        | egui::Key::ArrowDown
+                        | egui::Key::ArrowLeft
+                        | egui::Key::ArrowRight
+                        | egui::Key::Tab
+                        | egui::Key::Enter,
+                    ..
+                }
+            )
+        });
+        (
+            key,
+            input.pointer.any_pressed() || input.pointer.any_released(),
+        )
+    });
+    let id = follow_memory_id(sheet);
+    let mut memory = ui
+        .data(|data| data.get_temp::<FollowMemory>(id))
+        .unwrap_or_default();
+    memory.armed = if pointer {
+        0
+    } else if key {
+        FOLLOW_ARMED_FRAMES
+    } else {
+        memory.armed.saturating_sub(1)
+    };
+    ui.data_mut(|data| data.insert_temp(id, memory));
+}
+
+/// Everything [`follow_cursor`] needs to place a cell.
+struct FollowGeometry<'a> {
+    column_ids: &'a [NodeId],
+    widths: &'a [f32],
+    spacing: f32,
+    gutter: f32,
+    viewport: ColumnViewport,
+    /// Vertical offset and height of the table body.
+    body_offset: f32,
+    body_height: f32,
+}
+
+/// When the cursor moved after a keyboard key, asks for the scroll that shows its
+/// cell, once (#534). The offsets are left in memory for the workbook, which
+/// hands them to the scroll areas through the same on-hold mechanism as the
+/// mirrored bars ([`take_follow_scroll`]).
+fn follow_cursor(ui: &egui::Ui, state: &AppState, sheet: NodeId, geometry: FollowGeometry<'_>) {
+    let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
+    let id = follow_memory_id(sheet);
+    let mut memory = ui
+        .data(|data| data.get_temp::<FollowMemory>(id))
+        .unwrap_or_default();
+    if memory.cursor == cursor {
+        return;
+    }
+    memory.cursor = cursor;
+    let follow = memory.armed > 0;
+    if follow {
+        memory.armed = 0;
+    }
+    ui.data_mut(|data| data.insert_temp(id, memory));
+    let Some(cursor) = cursor.filter(|_| follow) else {
+        return;
+    };
+    let (column, row) = match cursor {
+        GridCursor::Data(column, row) => (column, Some(row)),
+        GridCursor::Header(column, _) => (column, None),
+    };
+    let Some(index) = geometry.column_ids.iter().position(|id| *id == column) else {
+        return;
+    };
+    let (left, right) = column_x_range(geometry.widths, geometry.spacing, geometry.gutter, index);
+    let horizontal = follow_offset(geometry.viewport.left, geometry.viewport.width, left, right);
+    let vertical = row.and_then(|row| {
+        follow_offset(
+            geometry.body_offset,
+            geometry.body_height,
+            row as f32 * ROW_HEIGHT,
+            (row + 1) as f32 * ROW_HEIGHT,
+        )
+    });
+    if horizontal.is_some() || vertical.is_some() {
+        ui.data_mut(|data| data.insert_temp(follow_scroll_id(sheet), (horizontal, vertical)));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// The scroll `(horizontal, vertical)` the grid of `sheet` asked for to follow the
+/// keyboard cursor, taken once (#534).
+pub(super) fn take_follow_scroll(ctx: &egui::Context, sheet: NodeId) -> (Option<f32>, Option<f32>) {
+    ctx.data_mut(|data| data.remove_temp::<(Option<f32>, Option<f32>)>(follow_scroll_id(sheet)))
+        .unwrap_or_default()
 }
 
 /// Where the grid keeps, in egui's temporary memory, the rendered width of the
@@ -7420,5 +7588,144 @@ mod tests {
                 "{view:?}: {total} for {whole}"
             );
         }
+    }
+
+    /// The least scroll that shows a range.
+    #[test]
+    fn follow_offset_scrolls_just_enough() {
+        assert_eq!(follow_offset(100.0, 300.0, 150.0, 200.0), None);
+        assert_eq!(follow_offset(100.0, 300.0, 350.0, 450.0), Some(150.0));
+        assert_eq!(follow_offset(100.0, 300.0, 50.0, 90.0), Some(50.0));
+        assert_eq!(follow_offset(100.0, 300.0, 100.0, 140.0), None);
+        assert_eq!(follow_offset(0.0, 0.0, 10.0, 20.0), None);
+    }
+
+    /// Text of the first-row cell of the visible column `index` in `wide_bench`.
+    fn cell_text_of(index: usize) -> String {
+        format!("{}", (index + 1) * 100 + 1)
+    }
+
+    /// → from the last fully visible column scrolls so that the next column is
+    /// fully visible. Witness: drop the call to `follow_cursor`.
+    #[test]
+    fn the_right_arrow_scrolls_to_the_next_column() {
+        let mut bench = wide_bench(1000, false);
+        let last = *painted_letters(&bench)
+            .iter()
+            .rfind(|index| {
+                letter_rect(&bench, **index)
+                    .is_some_and(|rect| rect.right() <= viewport_right(&bench))
+            })
+            .unwrap();
+        bench.click_on(&cell_text_of(last));
+        bench.press_key(egui::Key::ArrowRight, egui::Modifiers::NONE);
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[last + 1], 0))
+        );
+        let rect = letter_rect(&bench, last + 1).expect("the new active column is painted");
+        assert!(
+            rect.left() >= 0.0 && rect.right() <= viewport_right(&bench) + 0.5,
+            "fully visible: {rect:?}"
+        );
+    }
+
+    /// ↓ below the last visible row scrolls the table vertically. Witness: same.
+    #[test]
+    fn the_down_arrow_scrolls_to_the_next_row() {
+        let mut bench = Bench::with_shape(3, 200, |c, r| f64::from(c * 1000 + r));
+        let painted_rows = |bench: &Bench| -> Vec<u32> {
+            let texts = bench.texts();
+            (1..=200u32)
+                .filter(|r| texts.contains(&format!("{}", 1000 + r)))
+                .collect()
+        };
+        let last_row = *painted_rows(&bench).last().unwrap();
+        let lowest_y = bench.center_of(&format!("{}", 1000 + last_row)).unwrap().y;
+        let fully_visible = last_row - 1;
+        bench.click_on(&format!("{}", 1000 + fully_visible));
+        for _ in 0..4 {
+            bench.press_key(egui::Key::ArrowDown, egui::Modifiers::NONE);
+        }
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let target = fully_visible + 4;
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[0], target as usize - 1))
+        );
+        let at = bench
+            .center_of(&format!("{}", 1000 + target))
+            .expect("the active row is painted");
+        assert!(
+            at.y <= lowest_y + 0.5,
+            "no lower than the lowest row that was painted: {at:?} for {lowest_y}"
+        );
+    }
+
+    /// Tab on the last column adds a column and the grid scrolls to it. Witness:
+    /// same.
+    #[test]
+    fn tab_on_the_last_column_scrolls_to_the_new_column() {
+        let mut bench = wide_bench(1000, false);
+        scroll_right_by(&mut bench, 1.0e7);
+        bench.click_on(&cell_text_of(999));
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        bench.tab();
+        let added: Vec<Action> = bench
+            .seen
+            .iter()
+            .filter(|action| matches!(action, Action::AddColumnAndSelect { .. }))
+            .cloned()
+            .collect();
+        assert_eq!(added.len(), 1, "Tab on the last column adds a column");
+        bench.state.dispatch(added[0].clone());
+        for _ in 0..6 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(bench.state.visible_columns(bench.sheet).len(), 1001);
+        let rect = letter_rect(&bench, 1000).expect("the new column is painted");
+        assert!(
+            rect.left() >= 0.0 && rect.right() <= viewport_right(&bench) + 0.5,
+            "fully visible: {rect:?}"
+        );
+    }
+
+    /// A click on a partly visible column selects its cell and does not scroll.
+    /// Witness: follow whatever armed the move.
+    #[test]
+    fn a_click_does_not_scroll_the_grid() {
+        let mut bench = wide_bench(1000, false);
+        let partly = painted_letters(&bench)
+            .into_iter()
+            .find(|index| {
+                letter_rect(&bench, *index).is_some_and(|rect| {
+                    rect.left() < viewport_right(&bench) - 6.0
+                        && rect.right() > viewport_right(&bench) + 4.0
+                })
+            })
+            .expect("a column cut by the right edge");
+        let rect = letter_rect(&bench, partly).unwrap();
+        let y = bench.center_of("101").unwrap().y;
+        let first_before = bench.center_of(&visible_letter(&bench, 0)).unwrap();
+        click_at(&mut bench, egui::pos2(rect.left() + 3.0, y));
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[partly], 0))
+        );
+        assert_eq!(
+            bench.center_of(&visible_letter(&bench, 0)),
+            Some(first_before),
+            "no scroll"
+        );
     }
 }
