@@ -330,7 +330,7 @@ Each entry shows the name of its series. To rename a series, double-click its en
 
 For a series made from a row of a worksheet, **Row series** chooses between **Row number** and **Value of column…**, which shows the cell of the column you pick on that row.
 
-New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**.
+New graphs start with the **Legend text from** setting of **File** > **Preferences** > **Display** > **New**, including a **Custom…** template: it is typed once there, and every new graph starts with it.
 
 Drag the legend to move it anywhere on the figure. Right-click it and choose **Reset Position** to put it back. A series with **Show in legend** cleared does not appear.
 
@@ -409,7 +409,7 @@ Which column a text reads depends on where it is:
 
 If there is no such series, or its column was deleted, the variable shows **(broken reference)**. The fields and the editors always show what you typed, not the value. A name that is not a variable, such as `#nope`, turns the field red.
 
-To name a column yourself, write `#col("C")` followed by a dot and the variable: `#col("C").ln` is the **Long Name** of column C, `#col("C").u` its **Units**, and every variable above works the same way (`.long-name`, `.sn`, `.comments`, `.xp`…). The name between quotes is the **Short Name** of a column of the same worksheet as the column the text reads. With two curves, a Y axis title `#col("B").ln, #col("C").ln` gives `Absorbance, Fluorescence`, where `#ln` alone would only give the first. A name that no column has shows **(broken reference)**; renaming the Short Name of a column breaks the references to it.
+To name a column yourself, write `#col.A` followed by a dot and the variable: `#col.A.ln` is the **Long Name** of column A, `#col.A.u` its **Units**, and every variable above works the same way (`.long-name`, `.sn`, `.comments`, `.xp`…). `A` is the **Short Name** of a column of the same worksheet as the column the text reads. With two curves, a Y axis title `#col.B.ln, #col.C.ln` gives `Absorbance, Fluorescence`, where `#ln` alone would only give the first. A Short Name that is not a plain identifier (spaces, a leading digit…) goes through `at`: `#col.at("Abs 1").ln`. A name that no column has shows **(broken reference)**; renaming the Short Name of a column breaks the references to it.
 
 ### Axis titles with units
 

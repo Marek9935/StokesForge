@@ -37,7 +37,8 @@ use super::inplace_edit;
 use super::menu_sections::{menu_choice, MenuSections};
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
-    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_SELECT_ALL,
+    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE,
+    SHORTCUT_PASTE_TRANSPOSED, SHORTCUT_SELECT_ALL,
 };
 
 /// Height of a grid row, in points.
@@ -538,6 +539,23 @@ fn grid_clipboard_section(
         {
             state.forget_delete_repeat(sheet);
             actions.push(Action::PasteAbsolute { sheet });
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                menu.paste_enabled,
+                egui::Button::new(tr!("action-paste-transposed"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_TRANSPOSED)),
+            )
+            .on_hover_text(tr!("action-paste-transposed", "hint"))
+            .on_disabled_hover_text(tr!("action-paste-transposed", "disabled"))
+            .clicked()
+        {
+            state.forget_delete_repeat(sheet);
+            match system_clipboard_text() {
+                Some(text) => actions.push(Action::PasteTransposed { sheet, text }),
+                None => state.warn(tr!("status-clipboard-unreadable")),
+            }
             ui.close();
         }
     });
@@ -2575,6 +2593,40 @@ fn navigate_grid_selection(
     }
 }
 
+/// Shift and Alt held for a paste of this pass: held now **or** at the end of
+/// the previous pass of this viewport (#495). `Event::Paste` carries no
+/// modifiers, and `egui-winit` reads the clipboard while handling the V key: a
+/// slow clipboard owner (LibreOffice) blocks it long enough for the key
+/// releases to land in the same pass, so the end-of-pass modifiers alone would
+/// turn Ctrl+Alt+V into a plain paste. The value is remembered once per pass,
+/// so a second grid painted in the same pass reads the same answer.
+fn held_paste_modifiers(ctx: &egui::Context) -> egui::Modifiers {
+    #[derive(Clone, Copy, Default)]
+    struct Held {
+        pass: u64,
+        now: egui::Modifiers,
+        before: egui::Modifiers,
+    }
+    let id = egui::Id::new(("grid_paste_modifiers", ctx.viewport_id()));
+    let (pass, now) = (ctx.cumulative_pass_nr(), ctx.input(|i| i.modifiers));
+    let stored: Held = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    // Only the pass just before counts: a value read many passes ago (the grid
+    // was not focused meanwhile) says nothing about the keys held now.
+    let before = if stored.pass == pass {
+        stored.before
+    } else if stored.pass + 1 == pass {
+        stored.now
+    } else {
+        egui::Modifiers::NONE
+    };
+    ctx.data_mut(|d| d.insert_temp(id, Held { pass, now, before }));
+    egui::Modifiers {
+        shift: now.shift || before.shift,
+        alt: now.alt || before.alt,
+        ..now
+    }
+}
+
 fn grid_clipboard_shortcuts(
     ui: &egui::Ui,
     state: &mut AppState,
@@ -2592,9 +2644,10 @@ fn grid_clipboard_shortcuts(
     // held or not produces the **same** `Event::Copy`/`Event::Paste` — never an
     // `Event::Key` to capture with a separate shortcut (an earlier attempt wrongly
     // assumed so: `consume_shortcut` on a Ctrl+Shift+C/V shortcut never matched).
-    // The two are therefore told apart by reading `input.modifiers.shift` at the
-    // time of the event — always up to date at that point, `ModifiersChanged`
-    // coming before the keystroke itself. Backspace/Delete, for their part, have
+    // The two are therefore told apart by the Shift (and Alt, #495) held for the
+    // pass, `held_paste_modifiers`: held now or at the end of the previous pass,
+    // since a slow clipboard read lets the key releases land in the same pass
+    // as the paste. Backspace/Delete, for their part, have
     // no modifier and stay ordinary `Event::Key`s, captured via `consume_key` as
     // before. Delete is the only one of the two that does not dispatch a fixed
     // action: `AppState::consume_delete_key` decides whether it is a clear or a
@@ -2602,13 +2655,17 @@ fn grid_clipboard_shortcuts(
     // selection (see its doc).
     let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
         (false, false, None, false, false);
+    let mut paste_transposed_text = None;
+    let held = held_paste_modifiers(ui.ctx());
     ui.input(|input| {
-        let shift = input.modifiers.shift;
+        let (shift, alt) = (held.shift, held.alt);
         for event in &input.events {
             match event {
                 egui::Event::Copy if shift => copy_full_columns = true,
                 egui::Event::Copy => copy = true,
                 egui::Event::Cut => cut = true,
+                // Ctrl+Alt+V and Ctrl+Shift+Alt+V: Alt is read first (#495).
+                egui::Event::Paste(text) if alt => paste_transposed_text = Some(text.clone()),
                 egui::Event::Paste(_) if shift => paste_absolute = true,
                 egui::Event::Paste(text) => paste_text = Some(text.clone()),
                 _ => {}
@@ -2653,7 +2710,10 @@ fn grid_clipboard_shortcuts(
             actions.push(action);
         }
     }
-    if paste_absolute {
+    if let Some(text) = paste_transposed_text {
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::PasteTransposed { sheet, text });
+    } else if paste_absolute {
         state.forget_delete_repeat(sheet);
         actions.push(Action::PasteAbsolute { sheet });
     } else if let Some(text) = paste_text {
@@ -3593,6 +3653,58 @@ mod tests {
         assert_eq!(rows, [1, 2, 3]);
     }
 
+    /// #495: egui sends Ctrl+V, Ctrl+Shift+V and Ctrl+Alt+V as the same
+    /// `Event::Paste`; Alt is read before Shift, so Ctrl+Alt+V and
+    /// Ctrl+Shift+Alt+V paste transposed, the other two are unchanged.
+    #[test]
+    fn alt_turns_a_paste_event_into_a_transposed_paste() {
+        let mut bench = Bench::new();
+        bench.click_on("102");
+        let mut pressed = |modifiers: egui::Modifiers| -> Vec<Action> {
+            bench.image(vec![egui::Event::ModifiersChanged(modifiers)]);
+            bench.image(vec![egui::Event::Paste("1\t2".to_string())]);
+            let actions = bench.actions.clone();
+            bench.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+            actions
+        };
+        let ctrl = egui::Modifiers::COMMAND;
+        let plain = pressed(ctrl);
+        assert!(
+            matches!(plain.as_slice(), [Action::Paste { .. }]),
+            "{plain:?}"
+        );
+        let absolute = pressed(ctrl.plus(egui::Modifiers::SHIFT));
+        assert!(
+            matches!(absolute.as_slice(), [Action::PasteAbsolute { .. }]),
+            "{absolute:?}"
+        );
+        for modifiers in [
+            ctrl.plus(egui::Modifiers::ALT),
+            ctrl.plus(egui::Modifiers::ALT).plus(egui::Modifiers::SHIFT),
+        ] {
+            let transposed = pressed(modifiers);
+            assert!(
+                matches!(transposed.as_slice(), [Action::PasteTransposed { text, .. }] if text == "1\t2"),
+                "{transposed:?}"
+            );
+        }
+        // A slow clipboard owner: the paste and the key releases land in the
+        // same pass, so Alt is no longer held at its end; held at the end of
+        // the pass before, it still counts.
+        bench.image(vec![egui::Event::ModifiersChanged(
+            ctrl.plus(egui::Modifiers::ALT),
+        )]);
+        bench.image(vec![
+            egui::Event::Paste("1\t2".to_string()),
+            egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+        ]);
+        assert!(
+            matches!(bench.actions.as_slice(), [Action::PasteTransposed { .. }]),
+            "{:?}",
+            bench.actions
+        );
+    }
+
     /// An empty sheet (a new workbook) is editable: its entry row is row 0.
     #[test]
     fn an_empty_sheet_shows_and_takes_an_entry_row() {
@@ -3945,6 +4057,7 @@ mod tests {
     /// #465, T1: a click elsewhere ends the entry through the state, in the frame
     /// of the click. An action would be emptied by a blocking dialog that took
     /// the focus (`blocking_confirmations`) and the typed value would be lost.
+    /// (Opening Properties also commits what is still open, #533.)
     #[test]
     fn a_click_elsewhere_commits_the_cell_through_the_state() {
         let mut bench = Bench::new();

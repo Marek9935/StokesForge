@@ -27,6 +27,7 @@ use eframe::egui;
 use super::dialogs::{modal_live_settings, DialogOutcome, InteractiveSize, SizeClass};
 use super::form::{choice, form, ChoiceOption};
 use super::object_manager_ui::object_manager_group_label;
+use super::plot_settings::legend_template_field;
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
@@ -379,8 +380,9 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let before = (metadata, x_prime);
     let mut comma = state.new_graph_decimal_comma();
     let comma_before = comma;
-    let mut legend_text = state.new_graph_legend_text();
-    let legend_text_before = legend_text.clone();
+    let legend_text = state.new_graph_legend_text();
+    let mut picked_from = legend_text.from.clone();
+    let mut template_commit: Option<String> = None;
     form(ui, "preferences_display_new", |rows| {
         rows.section(tr!("preferences-new-workbooks"));
         rows.note(tr!("preferences-new-workbooks-note"));
@@ -400,16 +402,19 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
         rows.row(tr!("preferences-new-graph-legend-text"), |ui| {
             let options = LegendTextFrom::CHOICES
                 .iter()
-                .filter(|from| **from != LegendTextFrom::Custom)
                 .map(|from| ChoiceOption::new(from.clone(), legend_text_from_label(from)))
                 .collect::<Vec<_>>();
             choice(
                 ui,
                 "preferences_new_graph_legend_text",
-                &mut legend_text,
+                &mut picked_from,
                 &options,
             );
         });
+        if legend_text.from == LegendTextFrom::Custom {
+            template_commit =
+                legend_template_field(rows, "preferences_legend_template", &legend_text.template);
+        }
         rows.note(tr!("preferences-new-graph-legend-text", "hint"));
     });
     if (metadata, x_prime) != before {
@@ -418,8 +423,23 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     if comma != comma_before {
         actions.push(Action::SetNewGraphDecimalComma(comma));
     }
-    if legend_text != legend_text_before {
-        actions.push(Action::SetNewGraphLegendText(legend_text));
+    // One action for the pick and the template, so a pick that blurs the
+    // template field cannot undo the commit of that field.
+    let mut next = legend_text.clone();
+    if let Some(template) = template_commit {
+        next.template = template;
+    }
+    if picked_from != legend_text.from {
+        if picked_from == LegendTextFrom::Custom {
+            // Custom starts from the previous choice's template, never over
+            // what was typed (as in the Legend tab).
+            next.choose_custom();
+        } else {
+            next.from = picked_from;
+        }
+    }
+    if next != legend_text {
+        actions.push(Action::SetNewGraphLegendText(next));
     }
 }
 
@@ -1104,6 +1124,230 @@ mod tests {
             .click();
         harness.run();
         assert!(harness.state().state.new_graph_decimal_comma());
+    }
+
+    // -- Legend template default (#502) --
+
+    fn legend_actions(
+        harness: &egui_kittest::Harness<'static, Bench>,
+    ) -> Vec<stokesforge_plot::LegendText> {
+        harness
+            .state()
+            .seen
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetNewGraphLegendText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Opens Display > New and picks `to` in the « Legend text from » list.
+    fn pick_legend_choice(
+        harness: &mut egui_kittest::Harness<'static, Bench>,
+        _from: &LegendTextFrom,
+        to: &LegendTextFrom,
+    ) {
+        harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+        harness.run();
+        harness.get_by_label(&legend_text_from_label(to)).click();
+        harness.run();
+    }
+
+    fn template_field<'a>(
+        harness: &'a egui_kittest::Harness<'static, Bench>,
+    ) -> egui_kittest::Node<'a> {
+        use egui::accesskit::Role;
+        harness
+            .query_all_by_role(Role::TextInput)
+            .next()
+            .expect("the template field")
+    }
+
+    /// Display > New with Custom chosen: the field is prefilled from the
+    /// previous choice, hidden for any other choice.
+    fn custom_bench() -> egui_kittest::Harness<'static, Bench> {
+        let mut harness = bench();
+        go_to_display(&mut harness, &tr!("preferences-display-new"));
+        assert!(
+            harness
+                .query_by_label(&tr!("plot-legend-template"))
+                .is_none(),
+            "no Template row outside Custom"
+        );
+        pick_legend_choice(
+            &mut harness,
+            &LegendTextFrom::LongName,
+            &LegendTextFrom::Units,
+        );
+        pick_legend_choice(
+            &mut harness,
+            &LegendTextFrom::Units,
+            &LegendTextFrom::Custom,
+        );
+        harness
+    }
+
+    /// Custom starts from the previous choice's template; the field is the
+    /// Legend tab's one, with its label. Witness: no `choose_custom` leaves the
+    /// field empty.
+    #[test]
+    fn choosing_custom_prefills_the_template_from_the_previous_choice() {
+        let harness = custom_bench();
+        let last = legend_actions(&harness).pop().expect("an action");
+        assert_eq!(last.from, LegendTextFrom::Custom);
+        assert_eq!(last.template, LegendTextFrom::Units.template().unwrap());
+        assert!(harness
+            .query_by_label(&tr!("plot-legend-template"))
+            .is_some());
+        assert_eq!(
+            template_field(&harness).value().as_deref(),
+            Some(LegendTextFrom::Units.template().unwrap())
+        );
+    }
+
+    /// Typing pushes nothing; leaving the field pushes exactly one action.
+    /// Witness: committing on change pushes one action per keystroke.
+    #[test]
+    fn the_template_is_committed_once_when_the_field_is_left() {
+        let mut harness = custom_bench();
+        let before = legend_actions(&harness).len();
+        template_field(&harness).focus();
+        harness.run();
+        template_field(&harness).type_text("*#ln*");
+        harness.run();
+        assert_eq!(legend_actions(&harness).len(), before, "not while typing");
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness.run();
+        let all = legend_actions(&harness);
+        assert_eq!(all.len(), before + 1, "exactly one action");
+        assert!(
+            harness.state().state.preferences_open(),
+            "Enter ended the field, not the window"
+        );
+        let saved = harness.state().state.new_graph_legend_text();
+        assert_eq!(saved.from, LegendTextFrom::Custom);
+        assert!(saved.template.ends_with("*#ln*"), "{}", saved.template);
+    }
+
+    /// The text of the red bubble, found by hovering the field once left.
+    fn bubble_after_leaving(typed: &str) -> (bool, egui_kittest::Harness<'static, Bench>) {
+        let mut harness = custom_bench();
+        template_field(&harness).focus();
+        harness.run();
+        // Replace the prefilled text.
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        if typed.is_empty() {
+            harness.key_press(egui::Key::Backspace);
+        } else {
+            template_field(&harness).type_text(typed);
+        }
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness.run();
+        template_field(&harness).hover();
+        harness.run();
+        harness.run();
+        // The bubble of the red frame says the issue of the shared validation.
+        let shown = |message: Option<String>| {
+            message.is_some_and(|message| harness.query_by_label(&message).is_some())
+        };
+        let red = shown(crate::app::plot_settings::legend_template_issue(typed));
+        // What the field would say if it forgot the variables.
+        let without_preamble = stokesforge_render_egui::formula::diagnose(typed);
+        let wrong_red = shown(without_preamble.clone().filter(|_| typed.contains("#ln")));
+        assert!(
+            !wrong_red,
+            "diagnosed without the variables: {without_preamble:?}"
+        );
+        (red, harness)
+    }
+
+    /// S-T3 with the Legend tab's own code: a template that reads the variables
+    /// is fine once left. Witness: diagnosing without the variable preamble
+    /// flags `#ln`.
+    #[test]
+    fn a_valid_template_is_not_red_after_leaving_the_field() {
+        let (red, harness) = bubble_after_leaving("*#ln*");
+        assert!(!red);
+        assert_eq!(
+            harness.state().state.new_graph_legend_text().template,
+            "*#ln*"
+        );
+    }
+
+    /// An invalid template is red but saved anyway (invariant 10).
+    #[test]
+    fn an_invalid_template_is_red_and_saved() {
+        let (red, harness) = bubble_after_leaving("#(");
+        assert!(red);
+        assert_eq!(harness.state().state.new_graph_legend_text().template, "#(");
+    }
+
+    /// An empty template is red (« empty ») but is saved: the user may want
+    /// entries without text.
+    #[test]
+    fn an_empty_template_is_red_and_still_saved() {
+        let (red, harness) = bubble_after_leaving("");
+        assert!(red);
+        let saved = harness.state().state.new_graph_legend_text();
+        assert_eq!(saved.from, LegendTextFrom::Custom);
+        assert_eq!(saved.template, "");
+    }
+
+    /// S-F7: Escape gives the saved template back and saves nothing. Witness:
+    /// committing on any loss of focus saves the typed text.
+    #[test]
+    fn escape_gives_the_saved_template_back() {
+        let mut harness = custom_bench();
+        let before = legend_actions(&harness).len();
+        template_field(&harness).focus();
+        harness.run();
+        template_field(&harness).type_text("zzz");
+        harness.run();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        harness.run();
+        assert_eq!(legend_actions(&harness).len(), before, "no action");
+        assert_eq!(
+            template_field(&harness).value().as_deref(),
+            Some(LegendTextFrom::Units.template().unwrap())
+        );
+    }
+
+    /// Switching to another choice keeps the stored template; Custom finds it
+    /// again, without being overwritten by a prefill.
+    #[test]
+    fn another_choice_keeps_the_template_and_custom_finds_it_again() {
+        let mut harness = custom_bench();
+        template_field(&harness).focus();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        template_field(&harness).type_text("*#ln*");
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness.run();
+        pick_legend_choice(
+            &mut harness,
+            &LegendTextFrom::Custom,
+            &LegendTextFrom::Comments,
+        );
+        let saved = harness.state().state.new_graph_legend_text();
+        assert_eq!(saved.from, LegendTextFrom::Comments);
+        assert_eq!(saved.template, "*#ln*");
+        pick_legend_choice(
+            &mut harness,
+            &LegendTextFrom::Comments,
+            &LegendTextFrom::Custom,
+        );
+        let saved = harness.state().state.new_graph_legend_text();
+        assert_eq!(saved.from, LegendTextFrom::Custom);
+        assert_eq!(saved.template, "*#ln*");
     }
 
     // -- Folders rubric (#148, lot C) --

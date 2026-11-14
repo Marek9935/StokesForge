@@ -1703,7 +1703,7 @@ fn a_variable_title_is_laid_out_and_drawn_bound_on_screen_and_in_the_export() {
     assert!(!document.contains("sf-vars") && !document.contains("#ln"));
 }
 
-// -- #501 lot 4: `#col("C")` names a column of the sheet --
+// -- #501 lot 4: `#col.C` names a column of the sheet --
 
 /// The minimal graph with two curves on the Y axis: column B (Absorbance, AU)
 /// then C (Fluorescence, cps), both in the sheet of the X column.
@@ -1768,7 +1768,7 @@ fn svg_text(fixture: &Sample) -> String {
 fn an_axis_title_names_the_column_of_each_curve() {
     let mut fixture = two_series_fixture();
     let panel = fixture.spec.panels.get_mut(0).expect("panel");
-    panel.left.label = "#col(\"B\").ln (#col(\"B\").u), #col(\"C\").ln (#col(\"C\").u)".to_owned();
+    panel.left.label = "#col.B.ln (#col.B.u), #col.C.ln (#col.C.u)".to_owned();
     panel.left.unit.clear();
     let tree = fixture.project.tree();
     let bound = stokesforge_render::bind_spec(tree, &fixture.spec, &FigureTexts::default());
@@ -1792,7 +1792,7 @@ fn an_axis_title_names_the_column_of_each_curve() {
 fn a_typed_series_name_names_another_column() {
     let mut fixture = two_series_fixture();
     let panel = fixture.spec.panels.get_mut(0).expect("panel");
-    panel.series[0].name = "#col(\"C\").ln".to_owned();
+    panel.series[0].name = "#col.C.ln".to_owned();
     // The second curve is named apart, so « Fluorescence » can only come from
     // the first entry reading column C.
     panel.series[1].name = "other".to_owned();

@@ -124,6 +124,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Page Layout Mode | Mode mise en page |
 | Paste | Coller |
 | Paste in Place | Coller à l'identique |
+| Paste Transposed | Coller transposé |
 | Peaks and Deconvolution | Pics et déconvolution |
 | Peaks and Deconvolution… | Pics et déconvolution… |
 | Plot Area | Zone de tracé |

@@ -276,6 +276,7 @@ The right-click menu has **Clear** and **Delete and Shift Up**. **Delete and Shi
 | **Copy with Header** | | Copies the values and the column header |
 | **Paste** | <kbd>Ctrl</kbd>+<kbd>V</kbd> | Pastes at the selected cell |
 | **Paste in Place** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> | Pastes at the position the cells were copied from |
+| **Paste Transposed** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | Pastes the copied cells with rows and columns swapped |
 
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> copies the whole columns that the selection touches.
 
@@ -286,7 +287,11 @@ A few rules:
 - **Paste** needs a single block of cells or a run of contiguous columns as its target.
 - **Copy** and **Cut** work on several blocks only if they share their rows (side by side) or their columns (stacked). Otherwise they are greyed out.
 - Pasting over a **Mixed** column that ends up with only numbers turns it back to **Numeric**.
-- If part of the pasted data does not fit, the status bar says how many columns or header fields were left out.
+- If the pasted data reaches past the last column, the missing columns are added at the end of the sheet. The status bar says how many were added, and how many header fields below the last header field were left out.
+
+**Paste Transposed** turns the copied block a quarter turn: a copied column becomes a row, a row becomes a column, a block of 2 rows by 3 columns becomes 3 rows by 2 columns. It works on cells copied in StokesForge and on a table copied from a spreadsheet. The result is a plain copy of the values: it does not follow the source, and a column with a formula is pasted as its values. From **Copy with Header**, only the values of each column are used (name, unit and comment are left out). A long column pasted this way adds the columns it needs, like any paste.
+
+The x' row pastes like a row of data. Copy x' cells and paste them (<kbd>Ctrl</kbd>+<kbd>V</kbd>) onto a cell: the x' values land in a row; with **Paste Transposed**, in a column. Pasted onto an x' cell, the first row of a block fills the x' of the successive columns (a value that is not a number is refused and the others are written; an empty cell clears the x'), and the other rows are left out. When the copied header fields include the x' row, only that row is pasted onto a cell and the status bar says how many other header rows were left out.
 
 A paste is one action for Undo.
 
@@ -367,8 +372,9 @@ A whole-column function can read a column of **another sheet**, or of **another 
 
 The reference is one value of the function, so the range stays on the right: `at(Sheet3!B, 340)`, `integral(Sheet3!B, 10, 100)`, `max([Book2]Sheet5!B, 330, 350)`, and `B / max(Sheet3!B)` to normalize a column by the maximum of another sheet. The functions that accept it are `at`, `max`, `min`, `mean`, `sum`, `std` and `integral`. `Sheet3!B + 1`, `sqrt(Sheet3!B)` and `max(Sheet3!B, C)` (the row-by-row maximum) are refused: such a reference is read by a whole-column function only.
 
-- **Quotes.** A sheet name that holds anything other than ASCII letters and digits (a space, `_`, an accent, `ᵀ`), or that starts with a digit, is written between single quotes: `'Blanc 2'!B`. A quote inside the name is doubled: `'it''s'!B`. A workbook name between brackets needs no quotes.
+- **Quotes.** A sheet name that holds anything other than ASCII letters, digits and the transposed mark `ᵀ` (a space, `_`, an accent), or that starts with a digit, is written between single quotes: `'Blanc 2'!B`. A quote inside the name is doubled: `'it''s'!B`. A workbook name between brackets needs no quotes.
 - **Case.** Sheet and workbook names are read without regard to case: `sheet3!b` is `Sheet3!B`, and the field shows the real name. For the same reason, two objects next to each other can no longer differ only by case: `SHEET1` is refused beside `sheet1` (sheets, workbooks, folders, graphs, notes). Column names are not concerned. A project saved earlier that holds such names still opens; a formula that names one of them is refused as ambiguous.
+- **The transposed mark.** A transposed sheet is named `Sheet1ᵀ`, and you can call it with a plain capital `T`: `max(Sheet1T!B)` and `max([Book2]Sheet5T!B)` read `Sheet1ᵀ` and `Sheet5ᵀ`, and the field shows the real name, `max(Sheet1ᵀ!B)`, without quotes (`Sheet1ᵀ!B` typed without quotes works too). Only a capital `T` stands for `ᵀ`, never a small `t`: `Sheet1t!B` does not read `Sheet1ᵀ`. The same holds for workbook and folder names. A name that also holds a space still needs its quotes: `'Sheet1T 2'!B` reads `Sheet1ᵀ 2`. If an exact name exists, it wins: a sheet of your own named `Sheet1T` is read as itself. For this reason, a sheet, a workbook or a folder named `Sheet1T` or `Sheet1t` is refused beside `Sheet1ᵀ`, and the other way round; transposing `Sheet1` while your own `Sheet1T` exists names the new sheet `Sheet1ᵀ 2`.
 - **Which workbook.** `[Book2]` is looked up in the folder of the workbook that holds the formula first, then in the whole project. If several workbooks outside that folder carry the name, StokesForge asks for the path from the project root: `[Mesures/Book2]Sheet5!B` (`[/Book2]Sheet5!B` for a workbook at the root). The field always shows the shortest form that is not ambiguous.
 - **The X column.** The X of a column of another sheet is the one paired with it **in its own sheet**. In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3` and `x` is calculated in this sheet, row by row; an X column written with its own prefix (`at(B, x, Sheet3!D)`) is refused.
 - **The result.** The result column has the length of its own sheet, whatever the length of the column read. A sheet that holds only formulas of this kind (or constants such as `1+2`) has one row, so the result shows; it takes the length of the sheet as soon as the sheet has data columns.

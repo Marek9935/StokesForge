@@ -50,10 +50,10 @@ pub fn series_label_text(label: &SeriesLabel) -> String {
 /// [`stokesforge_render::variables::VARIABLES`]: what is typed (the two names,
 /// identical in every language) and what it gives (the field, as the header
 /// row is named on screen). Built from the table, so a new variable reaches
-/// every help; the last row is `#col("C").ln`, the explicit column (#501).
+/// every help; the last row is `#col.A.ln`, the explicit column (#501).
 pub fn variable_help_rows() -> Vec<(String, String)> {
     use stokesforge_plot::LegendField;
-    let named = ("#col(\"C\").ln".to_owned(), tr!("plot-variables-col"));
+    let named = ("#col.A.ln".to_owned(), tr!("plot-variables-col"));
     stokesforge_render::variables::VARIABLES
         .iter()
         .map(|(long, short, field)| {
@@ -127,7 +127,7 @@ mod tests {
                 "Units",
                 "Comments",
                 "x'",
-                "The same, read from column C of the sheet"
+                "The same, read from column A of the sheet"
             ]
         );
     }
@@ -137,8 +137,9 @@ mod tests {
     fn the_help_lists_the_explicit_column() {
         let rows = variable_help_rows();
         assert!(
-            rows.iter().any(|(names, gives)| names == "#col(\"C\").ln"
-                && gives.contains("column C of the sheet")),
+            rows.iter()
+                .any(|(names, gives)| names == "#col.A.ln"
+                    && gives.contains("column A of the sheet")),
             "{rows:?}"
         );
     }

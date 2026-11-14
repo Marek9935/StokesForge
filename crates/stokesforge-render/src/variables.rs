@@ -34,10 +34,10 @@ pub struct VariableValues {
     pub units: String,
     pub comments: String,
     pub x_prime: String,
-    /// The columns of the worksheet, for `#col("C")` (#501); each entry's
+    /// The columns of the worksheet, for `#col.C` (#501); each entry's
     /// `short_name` is the key. Empty when the text does not ask for it.
     pub sheet: Vec<VariableValues>,
-    /// What every field of an unknown column reads (`#col("Z").ln`): the
+    /// What every field of an unknown column reads (`#col.Z.ln`): the
     /// translated « broken reference », or empty where there is none (the
     /// diagnosis).
     pub unknown: String,
@@ -94,37 +94,54 @@ const START: &str = "/*sf-vars*/";
 /// Closes the preamble.
 const END: &str = "/*sf-end*/";
 
-/// What a text uses as code: the variable names, and `col(…)` (#501).
+/// What a text uses as code: the variable names, and `col` (#501).
 #[derive(Debug, Default)]
 struct Used {
     names: Vec<String>,
     /// `col` is used.
     col: bool,
-    /// The string literals passed to `col(…)`.
+    /// The column names the text reads: `col.A` and `col.at("A")`.
     literals: Vec<String>,
-    /// `col` is called with something else than a literal (or not called):
+    /// `col` is read some other way (`col.at(x)`, a bare `col`, a method):
     /// the whole sheet is then at hand.
     any_column: bool,
+}
+
+/// The field of `node` when it is `col.<field>`.
+fn col_field(node: &SyntaxNode) -> Option<String> {
+    use typst::syntax::ast;
+    let access = node.cast::<ast::FieldAccess>()?;
+    match access.target() {
+        ast::Expr::Ident(ident) if ident.as_str() == COL => Some(access.field().get().to_string()),
+        _ => None,
+    }
 }
 
 fn collect_identifiers(node: &SyntaxNode, used: &mut Used) {
     use typst::syntax::ast;
     match node.kind() {
-        // `x.ln`: the field is no variable.
+        // `x.ln`: the field is no variable. `col.A` names the column `A`.
         SyntaxKind::FieldAccess => {
+            if let Some(field) = col_field(node) {
+                used.col = true;
+                if field == "at" {
+                    // Only reached outside a call: `col.at` alone.
+                    used.any_column = true;
+                } else {
+                    used.literals.push(field);
+                }
+                return;
+            }
             if let Some(target) = node.children().next() {
                 collect_identifiers(target, used);
             }
             return;
         }
-        SyntaxKind::FuncCall
-            if node
-                .children()
-                .next()
-                .and_then(|callee| callee.cast::<ast::Ident>())
-                .is_some_and(|ident| ident.as_str() == COL) =>
-        {
+        // `col.at("Abs 1")`: the literal names the column; any other call on
+        // `col` (`col.at(x)`, `col.keys()`) puts the whole sheet in.
+        SyntaxKind::FuncCall if node.children().next().and_then(col_field).is_some() => {
             used.col = true;
+            let is_at = node.children().next().and_then(col_field).as_deref() == Some("at");
             let args = node
                 .children()
                 .find(|child| child.kind() == SyntaxKind::Args);
@@ -137,8 +154,8 @@ fn collect_identifiers(node: &SyntaxNode, used: &mut Used) {
                 })
             });
             match first.and_then(|node| node.cast::<ast::Str>()) {
-                Some(literal) => used.literals.push(literal.get().to_string()),
-                None => used.any_column = true,
+                Some(literal) if is_at => used.literals.push(literal.get().to_string()),
+                _ => used.any_column = true,
             }
             for child in node.children().skip(1) {
                 collect_identifiers(child, used);
@@ -162,7 +179,7 @@ fn collect_identifiers(node: &SyntaxNode, used: &mut Used) {
     }
 }
 
-/// The function `col` of the preamble (#501).
+/// The dictionary `col` of the preamble (#501).
 const COL: &str = "col";
 
 /// What `text` uses as code. A name can only be used if the text mentions it:
@@ -195,21 +212,28 @@ fn column_dictionary(values: &VariableValues) -> String {
     out
 }
 
-/// `#let col(n) = (…).at(n, default: (…));` over the columns the text names
-/// (all of the sheet if it names none by a literal).
+/// `#let col = ("A": (…), …);`: one dictionary per column the text reads (all
+/// of the sheet if it reads it some other way). A name the sheet has no column
+/// for is still there, every field the broken reference, so the text compiles.
 fn col_definition(used: &Used, values: &VariableValues) -> String {
     let mut seen: Vec<&str> = Vec::new();
     let mut entries = String::new();
+    let mut add = |name: &str, dictionary: String| {
+        entries.push_str(&format!("{}: {dictionary}, ", typst_string(name)));
+    };
     for column in &values.sheet {
         let name = column.short_name.as_str();
         let wanted = used.any_column || used.literals.iter().any(|literal| literal == name);
         if wanted && !seen.contains(&name) {
             seen.push(name);
-            entries.push_str(&format!(
-                "{}: {}, ",
-                typst_string(name),
-                column_dictionary(column)
-            ));
+            add(name, column_dictionary(column));
+        }
+    }
+    let broken = column_dictionary(&VariableValues::all(&values.unknown));
+    for literal in &used.literals {
+        if !seen.contains(&literal.as_str()) {
+            seen.push(literal);
+            add(literal, broken.clone());
         }
     }
     let dictionary = if entries.is_empty() {
@@ -217,8 +241,7 @@ fn col_definition(used: &Used, values: &VariableValues) -> String {
     } else {
         format!("({entries})")
     };
-    let broken = column_dictionary(&VariableValues::all(&values.unknown));
-    format!("#let {COL}(n) = {dictionary}.at(n, default: {broken});")
+    format!("#let {COL} = {dictionary};")
 }
 
 /// `text` with a preamble that defines the variables it uses as code. A text
@@ -594,14 +617,11 @@ mod tests {
     #[test]
     fn a_named_column_value_is_drawn_literally() {
         let long = "A *b* \" \\";
-        let bound = bind("#col(\"C\").ln", &sheet_values(long));
+        let bound = bind("#col.C.ln", &sheet_values(long));
         assert_eq!(plain_text(&bound).as_deref(), Some(long));
-        let both = bind(
-            "#col(\"B\").ln/#col(\"C\").u/#col(\"C\").long-name",
-            &sheet_values("F"),
-        );
+        let both = bind("#col.B.ln/#col.C.u/#col.C.long-name", &sheet_values("F"));
         assert_eq!(plain_text(&both).as_deref(), Some("Absorbance/cps/F"));
-        assert_eq!(strip_preamble(&bound), "#col(\"C\").ln");
+        assert_eq!(strip_preamble(&bound), "#col.C.ln");
     }
 
     /// Test 3: an unknown name, or a call with no sheet, reads the broken
@@ -609,20 +629,20 @@ mod tests {
     /// `default:` in the `.at`, the text fails to compile.
     #[test]
     fn an_unknown_column_reads_the_broken_reference() {
-        let bound = bind("#col(\"Z\").ln|#col(\"Z\").xp", &sheet_values("F"));
+        let bound = bind("#col.Z.ln|#col.Z.xp", &sheet_values("F"));
         assert_eq!(plain_text(&bound).as_deref(), Some("(broken)|(broken)"));
         let alone = VariableValues {
             unknown: "(broken)".to_owned(),
             ..Default::default()
         };
-        let bound = bind("#col(\"B\").u", &alone);
+        let bound = bind("#col.B.u", &alone);
         assert_eq!(plain_text(&bound).as_deref(), Some("(broken)"));
     }
 
     /// A non-literal argument reads the whole sheet.
     #[test]
     fn a_computed_column_name_reads_the_whole_sheet() {
-        let bound = bind("#let n = \"C\";#col(n).ln", &sheet_values("F"));
+        let bound = bind("#let n = \"C\";#col.at(n).ln", &sheet_values("F"));
         assert_eq!(plain_text(&bound).as_deref(), Some("F"));
     }
 
@@ -630,17 +650,17 @@ mod tests {
     /// Witness: an unconditional `col` preamble.
     #[test]
     fn col_is_a_variable_only_as_code() {
-        for text in ["$col$", "$col(x)$", "color red", "a.col", "Collected"] {
+        for text in ["$col$", "$col.A$", "color red", "a.col", "Collected"] {
             assert_eq!(bind(text, &sheet_values("F")), text);
             assert!(!mentions(text), "{text}");
         }
-        assert!(mentions("#col(\"B\").ln"));
+        assert!(mentions("#col.B.ln"));
     }
 
     #[test]
     fn the_users_own_col_wins() {
         let bound = bind(
-            "#let col(n) = (ln: \"mine\");#col(\"B\").ln",
+            "#let col = (B: (ln: \"mine\"));#col.B.ln",
             &sheet_values("F"),
         );
         assert_eq!(plain_text(&bound).as_deref(), Some("mine"));
@@ -651,9 +671,40 @@ mod tests {
     /// refuses `col` itself.
     #[test]
     fn the_diagnosis_knows_col_and_its_fields() {
-        assert_eq!(diagnose_text("#col(\"C\").ln"), None);
-        assert_eq!(diagnose_text("#col(\"Z\").u"), None);
-        assert_eq!(diagnose_text("#col(\"C\").xp #col(\"C\").comments"), None);
-        assert!(diagnose_text("#col(\"C\").nope").is_some());
+        assert_eq!(diagnose_text("#col.C.ln"), None);
+        assert_eq!(diagnose_text("#col.Z.u"), None);
+        assert_eq!(diagnose_text("#col.C.xp #col.C.comments"), None);
+        assert!(diagnose_text("#col.C.nope").is_some());
+    }
+
+    /// A name that is no Typst identifier is read with `col.at("…")`. Witness:
+    /// collecting only `col.<ident>` leaves `Abs 1` out and Typst fails (no
+    /// such key), and a binder that put the whole sheet in would show `C` in
+    /// the preamble.
+    #[test]
+    fn a_column_with_a_spaced_short_name_is_read_with_at() {
+        let column = |short: &str, long: &str| VariableValues {
+            long_name: long.to_owned(),
+            short_name: short.to_owned(),
+            ..Default::default()
+        };
+        let values = VariableValues {
+            sheet: vec![column("Abs 1", "Absorbance"), column("C", "Other")],
+            unknown: "(broken)".to_owned(),
+            ..Default::default()
+        };
+        let bound = bind("#col.at(\"Abs 1\").ln", &values);
+        assert_eq!(plain_text(&bound).as_deref(), Some("Absorbance"));
+        assert!(!bound.contains("\"C\":"), "only the named column: {bound}");
+        assert_eq!(strip_preamble(&bound), "#col.at(\"Abs 1\").ln");
+    }
+
+    /// `#col.Z.ln` with no column Z is the broken reference, not a Typst
+    /// error. Witness: put only the existing columns in the dictionary and
+    /// the text fails to compile (`plain_text` is `None`).
+    #[test]
+    fn a_name_that_is_no_column_is_still_defined_as_broken() {
+        let bound = bind("#col.Z.ln/#col.at(\"Q R\").u", &sheet_values("F"));
+        assert_eq!(plain_text(&bound).as_deref(), Some("(broken)/(broken)"));
     }
 }

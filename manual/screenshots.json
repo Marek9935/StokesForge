@@ -102,7 +102,7 @@
   {
     "image": "preferences-display-new.png",
     "page": "guide/projects-and-workbooks.md",
-    "shows": "The Preferences window, Display rubric, New tab (vertical sub-tabs at the left): the header rows of new workbooks and the decimal comma of new graphs."
+    "shows": "The Preferences window, Display rubric, New tab (vertical sub-tabs at the left): the header rows of new workbooks, the decimal comma of new graphs and the legend text of new graphs (with its Template row under Custom…)."
   },
   {
     "image": "preferences-folders.png",

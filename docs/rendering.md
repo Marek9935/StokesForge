@@ -167,22 +167,24 @@ a legend entry its own series. A hidden series counts, a row series does not.
 reference with no column (no series, column deleted) makes every variable the
 translated « (broken reference) » of `FigureTexts`, on screen and in export.
 
-Explicit column (#501, lot 4): `#col("C").ln` (any of the ten names:
-`.long-name`, `.u`, `.xp`…) reads column `C`, whatever the context column. `"C"`
-is the **Short Name**, looked up in the worksheet of the text's context column
-(a legend entry: of its series' column); no other sheet. The binder (`used_in`)
-spots `col` as a code identifier (never in math, never a `.col` field) and
-collects the string literals of its `col(…)` calls; the one-line preamble then
-holds `#let col(n) = ("B": (long-name: "…", ln: "…", …), …).at(n, default:
-(long-name: "(broken reference)", …));`, one dictionary per named column, every
-value a `typst_string`. A non-literal argument (`#col(n)`) puts **the whole
-sheet** in the dictionary; an unknown name, no context column or a deleted
-column reads the default, so every field is « (broken reference) » and the text
-still compiles (no red frame). Core attaches the sheet (`ColumnFields::sheet`,
+Explicit column (#501, lot 4, syntax of lot 5): `col` is a Typst dictionary,
+`#col.A.ln` (any of the ten names: `.long-name`, `.u`, `.xp`…) reads column `A`,
+whatever the context column; a name that is not a Typst identifier uses the
+standard `#col.at("Abs 1").ln`. `A` is the **Short Name**, looked up in the
+worksheet of the text's context column (a legend entry: of its series' column);
+no other sheet. The binder (`used_in`) parses the text (code only, never math,
+never a `.col` field) and collects the names it reads: the field accesses
+`col.<ident>` and the literal `col.at("<name>")`. The one-line preamble then
+holds `#let col = ("A": (long-name: "…", ln: "…", …), …);`, one dictionary per
+collected name, every value a `typst_string`. A collected name that is no
+column of the sheet (unknown, deleted, no context column) is still in the
+dictionary with every field « (broken reference) », so the text compiles (no
+red frame). Any other use (`#col.at(x)`, a bare `#col`, a method) puts **the
+whole sheet** in. Core attaches the sheet (`ColumnFields::sheet`,
 `resolve::with_sheet`) only when the text contains `col`, so the other texts are
 byte-identical and borrowed. `strip_preamble` walks any `#let …;` to the `;`
 outside a string. Renaming a Short Name breaks the references to it. The help
-row of every field: `#col("C").ln`.
+row of every field: `#col.A.ln`.
 
 When Typst refuses a bound text, the `epaint` fallback (invariant 10) draws and
 measures what the user typed: `formula::fallback_text` strips the preamble, so a

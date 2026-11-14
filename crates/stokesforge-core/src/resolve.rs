@@ -279,7 +279,7 @@ pub struct ColumnFields {
     pub units: String,
     pub comments: String,
     pub x_prime: String,
-    /// The fields of every column of the worksheet, for `#col("C")` (#501).
+    /// The fields of every column of the worksheet, for `#col.C` (#501).
     /// Empty unless the text asked for it ([`with_sheet`]): `column_fields`
     /// never fills it.
     pub sheet: Vec<ColumnFields>,
@@ -318,7 +318,7 @@ pub fn column_fields(tree: &Tree, column: NodeId) -> Option<ColumnFields> {
 }
 
 /// The fields of every column of the worksheet that holds `column`, in sheet
-/// order (#501, `#col("C")`). Empty if `column` is not a column of the tree.
+/// order (#501, `#col.C`). Empty if `column` is not a column of the tree.
 pub fn sheet_fields(tree: &Tree, column: NodeId) -> Vec<ColumnFields> {
     let Ok(Some(sheet)) = tree.parent(column) else {
         return Vec::new();
@@ -332,7 +332,7 @@ pub fn sheet_fields(tree: &Tree, column: NodeId) -> Vec<ColumnFields> {
         .collect()
 }
 
-/// `fields` with its worksheet attached when `text` may call `col(…)` (#501):
+/// `fields` with its worksheet attached when `text` may read `col` (#501):
 /// the other texts carry nothing extra.
 pub fn with_sheet(
     mut fields: ColumnFields,

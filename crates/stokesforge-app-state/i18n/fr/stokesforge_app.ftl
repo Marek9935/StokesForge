@@ -314,6 +314,9 @@ action-paste = Coller
 action-paste-in-place = Coller à l'identique
     .hint = Colle à la position d'origine de la copie
     .disabled = Copier d'abord depuis la grille. Un texte venu d'ailleurs n'a pas de position d'origine
+action-paste-transposed = Coller transposé
+    .hint = Colle les cellules copiées en échangeant lignes et colonnes, en valeurs
+    .disabled = Sélectionner un seul bloc de cellules ou des colonnes contiguës pour coller
 action-clear = Effacer
     .hint = Vide les cellules sélectionnées
 action-remove-formula-keep-data = Retirer la formule, garder les données
@@ -390,10 +393,16 @@ status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
 status-paste-non-contiguous = Impossible de coller dans une sélection non contiguë
-status-paste-columns-dropped =
+status-paste-transposed-nothing = Rien à coller transposé : parmi les champs d'en-tête copiés, seul x' peut être collé
+status-paste-header-rows-dropped =
     { $count ->
-        [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
-       *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
+        [one] Une ligne d'en-tête autre que x' n'a pas été collée
+       *[other] { $count } lignes d'en-tête autres que x' n'ont pas été collées
+    }
+status-paste-columns-added =
+    { $count ->
+        [one] Une colonne a été ajoutée pour contenir le collage
+       *[other] { $count } colonnes ont été ajoutées pour contenir le collage
     }
 status-cell-decimal-comma = « { $text } » a été lu { $value } (virgule décimale)
 status-paste-fields-dropped =
@@ -401,7 +410,6 @@ status-paste-fields-dropped =
         [one] Un champ d'en-tête ne tenait pas dans la feuille et n'a pas été collé
        *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
     }
-status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
 status-formula-comma-rewritten = Lu comme la plage de { $from } à { $to } et réécrit { $rewritten }. Pour le nombre { $decimal }, l'écrire avec un point
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
@@ -1047,6 +1055,7 @@ legend-text-from-custom = Personnalisé…
 legend-text-from-unknown = Nom long (réglage d'une version plus récente)
 plot-legend-template = Modèle
     .hint = Texte Typst de chaque entrée de légende.
+plot-legend-template-empty = Le modèle est vide : les entrées de légende n'ont pas de texte.
 plot-legend-row-text = Série de ligne
 plot-legend-row-number = Numéro de ligne
 plot-legend-row-column-value = Valeur de la colonne…
@@ -1129,7 +1138,7 @@ plot-theme-note = S'applique à tous les titres, axes, graduations et quadrillag
 # Mémo de la syntaxe Typst, sous chaque champ de titre
 
 plot-variables-memo-header = Variables
-plot-variables-col = Pareil, lu dans la colonne C de la feuille
+plot-variables-col = Pareil, lu dans la colonne A de la feuille
 plot-variables-note = Les titres d'axe lisent la colonne X ou Y de la première série, les autres textes sa colonne Y ; une entrée de légende lit sa propre série.
 plot-math-memo-header = Syntaxe mathématique
 plot-math-greek = Lettres grecques λ, Δ
@@ -1219,7 +1228,7 @@ formula-help-family-operators = Opérateurs
 formula-help-op-arithmetic = Additionner, soustraire, multiplier, diviser
 formula-help-op-power = Puissance
 formula-help-op-comparison = Comparaison : 1 si vrai, 0 si faux
-formula-help-reference = Colonne d'une autre feuille, lue par les fonctions de colonne (at, max, min, mean, sum, std, integral). Autre classeur : [Book2]Sheet5!B. Un nom avec une espace se met entre apostrophes : 'Blanc 2'!B
+formula-help-reference = Colonne d'une autre feuille, lue par les fonctions de colonne (at, max, min, mean, sum, std, integral). Autre classeur : [Book2]Sheet5!B. Un nom avec une espace se met entre apostrophes : 'Blanc 2'!B. Une feuille transposée Sheet1ᵀ peut s'écrire Sheet1T
 formula-help-family-powers = Puissances et logarithmes
 formula-help-family-trigonometry = Trigonométrie
 formula-help-family-error = Fonction d'erreur
@@ -2143,7 +2152,7 @@ preferences-new-graphs-note = Point de départ des graphiques que vous créez. C
 preferences-new-graph-decimal-comma = Virgule décimale sur les graduations
     .hint = Les nouveaux graphiques écrivent 1,5 au lieu de 1.5 sur tous les axes, à l'écran et dans les exports. Les graphiques existants et ceux créés par des scripts gardent leur réglage.
 preferences-new-graph-legend-text = Texte de légende issu de
-    .hint = La ligne d'en-tête que les nouveaux graphiques lisent pour les entrées de leur légende. Chaque graphique garde ensuite son réglage, dans Propriétés du graphique > Légende. Les graphiques existants et ceux créés par des scripts ne changent pas.
+    .hint = La ligne d'en-tête que les nouveaux graphiques lisent pour les entrées de leur légende, ou, avec Personnalisé, votre propre modèle. Chaque graphique garde ensuite son réglage, dans Propriétés du graphique > Légende. Les graphiques existants et ceux créés par des scripts ne changent pas.
 preferences-analysis-values = Valeurs
 preferences-analysis-values-note = Ce que propose la fenêtre d'une analyse la première fois que vous l'utilisez. Chaque analyse retient ensuite son dernier choix.
 preferences-export-graph = Exporter le graphique
@@ -2253,6 +2262,7 @@ help-copy-full-columns = Copier les colonnes entières
 help-cut = Couper
 help-paste = Coller
 help-paste-absolute = Coller au même endroit
+help-paste-transposed = Coller en échangeant lignes et colonnes
 help-clear-cells = Vider les cellules sélectionnées, puis les supprimer
 help-duplicate-sheet = Dupliquer la feuille
 help-copy-graph = Copier le graphique comme image (rien de sélectionné)

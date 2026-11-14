@@ -2484,16 +2484,20 @@ fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
     assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
-/// #311: more columns copied than the sheet has from the anchor:
-/// those that fit are written, the status counts the others.
+/// #495 (replaces #311 "dropped and counted"): more columns pasted than the
+/// sheet has from the anchor: the missing column is created, holds its
+/// values, the notice is plain, and one Undo removes the column and values.
 #[test]
-fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
+fn a_paste_wider_than_the_sheet_creates_the_missing_columns_in_one_undo() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
 
     state.select_cell(sheet1, signal, 0);
     state.dispatch(Action::Paste {
@@ -2503,13 +2507,24 @@ fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
     assert_eq!(cell(&state, signal, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 0), Cell::Float(2.0));
     assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "one column created");
+    let created = columns[3].0;
+    assert_eq!(cell(&state, created, 0), Cell::Float(3.0));
+    assert_eq!(cell(&state, created, 1), Cell::Float(6.0));
     let status = state.status().expect("a message");
     assert!(!status.is_error());
+    assert_eq!(status.level, StatusLevel::Info);
     assert!(
-        status.text.contains("One column"),
+        status.text.contains("One column was added"),
         "unexpected status: {}",
         status.text
     );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.visible_columns(sheet1).len(), 3, "column removed");
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
 /// #311: a paste that fits the width sets no overflow status.
@@ -2966,9 +2981,10 @@ fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
     );
 }
 
-/// #311 (E4): columns and fields that overflow together: a single message.
+/// #495: a header paste beyond the last column creates the column; the
+/// fields beyond Formula are still dropped, counted in their own notice.
 #[test]
-fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
+fn a_header_paste_beyond_the_edge_creates_the_column_and_counts_the_dropped_fields() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2991,11 +3007,15 @@ fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
     let status = state.status().expect("a status");
     assert!(!status.is_error(), "{}", status.text);
     assert!(
-        status
-            .text
-            .contains("1 column(s) and 1 header field(s) did not fit"),
+        status.text.contains("One header field did not fit"),
         "unexpected status: {}",
         status.text
+    );
+    let columns = state.visible_columns(sheet1);
+    assert_eq!(columns.len(), 4, "the column was created");
+    assert!(
+        state.column_meta(columns[3].0).formula.is_some(),
+        "the created column received the pasted Formula field"
     );
 }
 
@@ -9015,12 +9035,13 @@ fn the_color_bar_is_a_section_of_the_legend_tab() {
     );
 }
 
-/// #499: a new graph takes the « Text from » default of the Preferences, a
-/// graph that exists keeps its own. Witness: ignoring the preference leaves
-/// the long name.
+/// #499, #502: a new graph takes the « Text from » default of the Preferences
+/// (and, under Custom, its template), a graph that exists keeps its own.
+/// Witness: ignoring the preference leaves the long name; copying only `from`
+/// leaves the template empty.
 #[test]
 fn new_graphs_take_the_legend_text_preference() {
-    use stokesforge_plot::LegendTextFrom;
+    use stokesforge_plot::{LegendText, LegendTextFrom};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (session, _state, sheet, columns) = kinetics(dir.path());
     let file = dir.path().join("preferences.json");
@@ -9033,30 +9054,86 @@ fn new_graphs_take_the_legend_text_preference() {
             .and_then(|node| node.children().last().copied())
             .expect("graph")
     };
+    let text_of = |state: &AppState, graph| {
+        let text = &state.plot_spec(graph).unwrap().panels[0].legend.text;
+        (text.from.clone(), text.template.clone())
+    };
+    let choice = |from: LegendTextFrom, template: &str| LegendText {
+        from,
+        template: template.to_string(),
+        row_column: None,
+    };
     state.dispatch(Action::AddGraph);
     let old = last_graph(&state);
-    state.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Units));
+    state.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Units,
+        "",
+    )));
     state.dispatch(Action::AddGraph);
-    let from = |state: &AppState, graph| {
-        state.plot_spec(graph).unwrap().panels[0]
-            .legend
-            .text
-            .from
-            .clone()
-    };
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
+    assert_eq!(
+        text_of(&state, last_graph(&state)),
+        (LegendTextFrom::Units, String::new())
+    );
     state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: columns.clone(),
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&state, last_graph(&state)).0, LegendTextFrom::Units);
+    assert_eq!(text_of(&state, old).0, LegendTextFrom::LongName);
+    // Remembered, and Custom is a default now (#502).
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Units);
+    let template = "*#ln* (#u)";
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Custom,
+        template,
+    )));
+    assert_eq!(next.new_graph_legend_text().from, LegendTextFrom::Custom);
+    let wanted = (LegendTextFrom::Custom, template.to_string());
+    next.dispatch(Action::AddGraph);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotColumns {
         sheet,
         columns,
         plot_type: PlotType::Line,
     });
-    assert_eq!(from(&state, last_graph(&state)), LegendTextFrom::Units);
-    assert_eq!(from(&state, old), LegendTextFrom::LongName);
-    // Remembered; a custom template is not a default.
-    let mut next = state_on_preferences(&session, dir.path(), &file);
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::Units);
-    next.dispatch(Action::SetNewGraphLegendText(LegendTextFrom::Custom));
-    assert_eq!(next.new_graph_legend_text(), LegendTextFrom::LongName);
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    next.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(text_of(&next, last_graph(&next)), wanted);
+    assert_eq!(
+        text_of(&next, old).0,
+        LegendTextFrom::LongName,
+        "older graph"
+    );
+    // Another choice keeps the template; Custom finds it again.
+    next.dispatch(Action::SetNewGraphLegendText(choice(
+        LegendTextFrom::Comments,
+        template,
+    )));
+    next.dispatch(Action::AddGraph);
+    assert_eq!(
+        text_of(&next, last_graph(&next)),
+        (LegendTextFrom::Comments, template.to_string())
+    );
+    // An invalid and an empty template are saved and copied unchanged.
+    for odd in ["#(", ""] {
+        next.dispatch(Action::SetNewGraphLegendText(choice(
+            LegendTextFrom::Custom,
+            odd,
+        )));
+        next.dispatch(Action::AddGraph);
+        assert_eq!(
+            text_of(&next, last_graph(&next)),
+            (LegendTextFrom::Custom, odd.to_string())
+        );
+        let again = state_on_preferences(&session, dir.path(), &file);
+        assert_eq!(again.new_graph_legend_text().template, odd);
+    }
 }
 
 /// #499 F2: with « Text from » on an empty header row, the legend entry stays
@@ -10298,6 +10375,73 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     let _window = main.replace_session_identity(root);
     main.refresh();
     assert_eq!(cell_f64(&main, column, 0), 99.0);
+}
+
+// -- An open entry never joins the Properties macro (#533) --
+
+/// T0: the reported case, a docked cell entry committed by the grid on the
+/// click that opens Properties (before the action is dispatched), stays after
+/// Cancel.
+#[test]
+fn a_cell_entry_committed_by_the_click_survives_cancel_of_properties() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let graph = plotted_graph(&mut state);
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "77".to_string();
+    state.commit_open_entries();
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    state.cancel_plot_settings();
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(77.0));
+}
+
+/// T1: an entry still open when Properties opens commits BEFORE the macro, as
+/// its own step: a late commit, Cancel, and the value stays; one Undo brings
+/// the old value back. Witness: remove the commit in `open_plot_settings`.
+#[test]
+fn opening_properties_commits_the_open_entry_as_its_own_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let graph = plotted_graph(&mut state);
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "77".to_string();
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    assert!(state.editing().is_none(), "committed on opening");
+    let cell_label = state.undo_label();
+    state.commit_open_entries();
+    state.cancel_plot_settings();
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(77.0));
+    assert_eq!(
+        state.undo_label(),
+        cell_label,
+        "the cell's own step is on top"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0), "one undo");
+}
+
+/// T2: while the Properties macro is open, nothing commits an open entry: it
+/// stays open and the model is untouched. Witness: remove the `plot_macro_open`
+/// guard of `commit_open_entries_in_gesture`.
+#[test]
+fn no_open_entry_commits_while_the_properties_macro_is_open() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let time_col = column_id(&state, sheet1, "Time");
+    let graph = plotted_graph(&mut state);
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    state.begin_edit(time_col, 0);
+    state.editing_mut().unwrap().buffer = "77".to_string();
+    assert!(!state.commit_open_entries());
+    assert!(state.editing().is_some(), "the entry stays open");
+    state.cancel_plot_settings();
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    assert!(state.editing().is_some(), "and is still the user's");
 }
 
 // -- Heavy recalculation: indicator and Stop (issue #239) --
@@ -13250,6 +13394,41 @@ fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
     state.dispatch(Action::BeginRenameSheet(sheet1));
     state.dispatch(Action::CancelRenameSheet);
     assert_eq!(state.renaming_sheet(), None);
+}
+
+/// The sibling rule of the model (#494): a sheet cannot be renamed `NameT`
+/// or `namet` beside `Nameᵀ`, and the message names the sheet that holds the
+/// name, not the typed text.
+#[test]
+fn renaming_a_sheet_to_a_plain_t_beside_the_transpose_mark_is_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::AddWorksheet { book });
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let other = state.worksheets_of(book).last().unwrap().0;
+    state.dispatch(Action::CommitRenameSheet {
+        sheet: other,
+        name: "Kinetics\u{1D40}".to_string(),
+    });
+    assert_eq!(state.tree().node(other).unwrap().name(), "Kinetics\u{1D40}");
+
+    let revision = state.revision();
+    for name in ["KineticsT", "Kineticst"] {
+        state.dispatch(Action::BeginRenameSheet(sheet1));
+        state.dispatch(Action::CommitRenameSheet {
+            sheet: sheet1,
+            name: name.to_string(),
+        });
+        assert_eq!(
+            state.tree().node(sheet1).unwrap().name(),
+            "Sheet1",
+            "{name}"
+        );
+        let text = state.status().map(|s| s.text.clone()).unwrap_or_default();
+        assert!(text.contains("Kinetics\u{1D40}"), "{name}: {text}");
+        assert_eq!(state.revision(), revision, "no history entry");
+    }
 }
 
 /// Duplicate: "… copy 1", "… copy 2" (first free number), columns
