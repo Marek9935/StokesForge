@@ -362,7 +362,7 @@ PlotSpec
 ├── title, background
 └── panels : PanelSpec           (row/column grid, at least one panel; cells added and deleted from the interface, #357)
     ├── title
-    ├── bottom / left / right / top → AxisSpec  (scale, limits, grid)
+    ├── bottom / left / right / top → AxisSpec  (one free title text, scale, limits, grid; `unit` is legacy, empty after load, #506)
     ├── legend : LegendSpec
     ├── series : SeriesSpec
     │   ├── y : NodeId, x / x_error / y_error : Option<NodeId>

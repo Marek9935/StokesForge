@@ -252,7 +252,7 @@ fn mentions(text: &str) -> bool {
 
 /// True if any Typst text of `spec` may use a variable.
 fn any_mention(spec: &PlotSpec) -> bool {
-    let axis = |axis: &AxisSpec| mentions(&axis.label) || mentions(&axis.unit);
+    let axis = |axis: &AxisSpec| mentions(&axis.label);
     mentions(&spec.title)
         || spec.panels.iter().any(|panel| {
             mentions(&panel.title)
@@ -271,8 +271,7 @@ fn any_mention(spec: &PlotSpec) -> bool {
 }
 
 /// `spec` with the variables of every Typst text bound (#501): the graph and
-/// layer titles, the axis titles (label and unit composed first, the clone
-/// keeps the result as the label with an empty unit), the free annotations,
+/// layer titles, the axis titles, the free annotations,
 /// the colour-bar title and its break labels. Each text reads the column
 /// [`text_context`] gives it; a reference with no column makes every variable
 /// the translated « broken reference » of `texts`, like the legend.
@@ -324,9 +323,8 @@ pub fn bind_spec<'a>(tree: &Tree, spec: &'a PlotSpec, texts: &FigureTexts) -> Co
             ),
         ];
         for (axis, original, target) in axes {
-            if let Some(text) = bound(&original.display_label(), target) {
+            if let Some(text) = bound(&original.label, target) {
                 axis.label = text;
-                axis.unit.clear();
             }
         }
         for (annotation, original) in panel.annotations.iter_mut().zip(&source.annotations) {
@@ -429,6 +427,40 @@ mod tests {
         assert_eq!(plain_text(&bound).as_deref(), Some("Abs (mM)"));
     }
 
+    fn template_title(long: &str, short: &str, units: &str) -> Option<String> {
+        let values = VariableValues {
+            long_name: long.to_owned(),
+            short_name: short.to_owned(),
+            units: units.to_owned(),
+            ..Default::default()
+        };
+        plain_text(&bind(stokesforge_plot::AXIS_TITLE_TEMPLATE, &values))
+    }
+
+    /// The template of a new graph's axis title (#506): long name, else short
+    /// name, then ` / units` only with units. Witnesses: dropping the `u`
+    /// guard gives « Abs / »; dropping the else branch loses the short name.
+    #[test]
+    fn the_axis_title_template_reads_the_column() {
+        assert_eq!(
+            template_title("Abs", "A", "mM").as_deref(),
+            Some("Abs / mM")
+        );
+        assert_eq!(template_title("Abs", "A", "").as_deref(), Some("Abs"));
+        assert_eq!(template_title("", "B", "mM").as_deref(), Some("B / mM"));
+        assert_eq!(template_title("", "B", "").as_deref(), Some("B"));
+    }
+
+    /// Units are drawn literally, whatever they hold (the template writes them
+    /// as a code string, never markup).
+    #[test]
+    fn hostile_units_are_drawn_literally() {
+        assert_eq!(
+            template_title("Abs", "A", "*_#\"").as_deref(),
+            Some("Abs / *_#\"")
+        );
+    }
+
     /// A line marker typed at the start is no list item, bound or not: the
     /// layout puts its own strut on the same line as the text. Witness: a
     /// newline after the preamble turns `- Abs` into a list.
@@ -469,7 +501,6 @@ mod tests {
         let panel = sample.spec.panels.get_mut(0).expect("panel");
         panel.title = "#sn".to_owned();
         panel.bottom.label = "#sn".to_owned();
-        panel.bottom.unit = "#sn".to_owned();
         panel.annotations.push(AnnotationSpec::new("#sn", 0.0, 0.0));
         panel.series[0].group = Some(1);
         let mut bar = ColorBarSpec {
@@ -495,8 +526,7 @@ mod tests {
             assert!(text.contains(&preamble("Absorbance")), "{text}");
         }
         assert!(panel.bottom.label.contains(&preamble("Lambda")));
-        assert!(panel.bottom.unit.is_empty(), "the unit is composed away");
-        assert_eq!(strip_preamble(&panel.bottom.label), "#sn (#sn)");
+        assert_eq!(strip_preamble(&panel.bottom.label), "#sn");
         // The stored spec is untouched.
         assert_eq!(spec.title, "#sn");
     }

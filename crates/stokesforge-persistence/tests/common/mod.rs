@@ -496,3 +496,21 @@ pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
         sheet_name_from_file: true,
     }
 }
+
+/// `spec` as a load gives it back (#506): every axis title that carried a
+/// legacy unit reads as one text, the unit empty. The fixtures keep a unit on
+/// purpose, so the bytes they write stay those of the V1 witness.
+pub fn as_read_back(mut spec: PlotSpec) -> PlotSpec {
+    for panel in spec.panels.iter_mut() {
+        for axis in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.right,
+            &mut panel.top,
+        ] {
+            axis.label = axis.display_label();
+            axis.unit.clear();
+        }
+    }
+    spec
+}

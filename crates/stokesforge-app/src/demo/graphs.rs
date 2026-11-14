@@ -27,11 +27,14 @@ use stokesforge_plot::{
 
 use super::workbooks::{Book1, Measures};
 
-/// A titled axis, with its unit.
+/// A titled axis: the title is one text (#506), written « Title (unit) ».
 fn axis(title: &str, unit: &str) -> AxisSpec {
     AxisSpec {
-        label: title.into(),
-        unit: unit.into(),
+        label: if unit.is_empty() {
+            title.to_owned()
+        } else {
+            format!("{title} ({unit})")
+        },
         ..AxisSpec::default()
     }
 }
@@ -66,13 +69,11 @@ fn panel_with(
 pub(super) fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
     let mut panel = PanelSpec::at(0, 0);
     panel.bottom = AxisSpec {
-        label: "λ".into(),
-        unit: "nm".into(),
+        label: "λ (nm)".into(),
         ..AxisSpec::default()
     };
     panel.left = AxisSpec {
         label: "Measured absorbance".into(),
-        unit: "".into(),
         ..AxisSpec::default()
     };
     let mut series_spec = SeriesSpec::new_xy(x, y);
@@ -150,10 +151,8 @@ fn axes(m: &Measures) -> PlotSpec {
         vec![curve(Some(m.time), m.growth, "Growth", 1, PlotType::Line)],
     );
     let mut layer = PanelSpec::overlay_on(&base, OverlaySpec::SECOND_AXES);
-    layer.bottom.label = "Relative time".into();
-    layer.bottom.unit = "min".into();
-    layer.left.label = "Temperature".into();
-    layer.left.unit = "°C".into();
+    layer.bottom.label = "Relative time (min)".into();
+    layer.left.label = "Temperature (°C)".into();
     layer.series.push(curve(
         Some(m.time),
         m.oscillation,
