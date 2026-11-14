@@ -304,7 +304,9 @@ fn drag(
 
 /// A page-corner drag with raw motion (#512), the way a locked mouse sends
 /// it: press at `from`, a first absolute move by `kick` (egui starts a drag
-/// only once the pointer has moved; the lock comes with it), then one frame per entry of `motions` with a
+/// only once the pointer has moved), two probe frames that move the free pointer
+/// by `kick` more (absolute and raw agree: the lock comes with them), then one
+/// frame per entry of `motions` with a
 /// `MouseMoved` and the absolute pointer left where it is, one frame with
 /// nothing to let the display catch up, and the release. `contain` is the
 /// drawing area of the host. Returns the events of the release, the rectangle
@@ -345,6 +347,21 @@ fn drag_pushed(
     );
     time += 0.05;
     run(view, vec![egui::Event::PointerMoved(from + kick)], time);
+    // The probe (a free pointer: absolute and raw movement agree) takes the
+    // device for a relative one, so the mouse locks; `kick` more points.
+    let mut at = from + kick;
+    for _ in 0..2 {
+        time += 0.05;
+        at += kick / 2.0;
+        run(
+            view,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::MouseMoved(kick / 2.0),
+            ],
+            time,
+        );
+    }
     let mut shown = Vec::new();
     for motion in motions {
         time += 0.05;
@@ -355,7 +372,7 @@ fn drag_pushed(
     let (_, cursor) = run(view, vec![], time);
     shown.push(view.display_rect().expect("drawn"));
     time += 0.05;
-    let (mut signals, _) = run(view, vec![button(from + kick, false, modifiers)], time);
+    let (mut signals, _) = run(view, vec![button(at, false, modifiers)], time);
     signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
     (signals, shown, cursor)
 }
@@ -3069,10 +3086,24 @@ fn a_page_corner_drag_locks_the_mouse_and_releases_it_with_the_position() {
         press.commands.is_empty(),
         "no drag before the pointer moves"
     );
-    let started = run(
+    let first = run(
         vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0))],
         0.12,
     );
+    assert!(
+        first.commands.is_empty(),
+        "the probe has not decided: {:?}",
+        first.commands
+    );
+    let half = egui::vec2(0.0, 4.0);
+    let probe = |at: f32| {
+        vec![
+            egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0 + at)),
+            egui::Event::MouseMoved(half),
+        ]
+    };
+    run(probe(4.0), 0.13);
+    let started = run(probe(8.0), 0.14);
     assert!(started
         .commands
         .contains(&egui::ViewportCommand::CursorGrab(egui::CursorGrab::Locked)));
@@ -3087,7 +3118,10 @@ fn a_page_corner_drag_locks_the_mouse_and_releases_it_with_the_position() {
         held.commands
     );
     run(vec![], 0.2);
-    let release = run(vec![button(from + egui::vec2(0.0, 8.0), false, none)], 0.25);
+    let release = run(
+        vec![button(from + egui::vec2(0.0, 16.0), false, none)],
+        0.25,
+    );
     let position = release
         .commands
         .iter()
@@ -3135,6 +3169,16 @@ fn a_dropped_page_corner_drag_unlocks_at_the_next_pass() {
         vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0))],
         0.12,
     );
+    for (n, at) in [4.0_f32, 8.0].into_iter().enumerate() {
+        run(
+            &mut view,
+            vec![
+                egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0 + at)),
+                egui::Event::MouseMoved(egui::vec2(0.0, 4.0)),
+            ],
+            0.13 + n as f64 * 0.01,
+        );
+    }
     run(&mut view, vec![egui::Event::MouseMoved(PUSH)], 0.15);
     view.set_layout_mode(false);
     let next = run(&mut view, vec![], 0.2);
@@ -3170,4 +3214,374 @@ fn moving_a_cell_ignores_the_raw_motion() {
         events.extend(frame(&context, &mut view, &fixture, step, time, none));
     }
     assert_eq!(moved(&events), (0, MoveTarget::Cell { row: 1, column: 1 }));
+}
+
+/// A page-corner drag with a relative device, step by step (#512): `begin`
+/// presses and runs the probe (a free pointer moves 8 points, absolute and raw
+/// agree), then every `push` is one frame of raw motion with the absolute
+/// pointer frozen, as under the lock.
+struct Held<'a> {
+    context: &'a egui::Context,
+    fixture: &'a Fixture,
+    contain: Rect,
+    time: f64,
+    at: Pos2,
+}
+
+impl<'a> Held<'a> {
+    fn begin(
+        context: &'a egui::Context,
+        view: &mut GraphView,
+        fixture: &'a Fixture,
+        contain: Rect,
+        from: Pos2,
+        modifiers: egui::Modifiers,
+    ) -> Self {
+        let mut held = Held {
+            context,
+            fixture,
+            contain,
+            time: 0.1,
+            at: from,
+        };
+        held.run(
+            view,
+            vec![
+                egui::Event::PointerMoved(from),
+                button(from, true, modifiers),
+            ],
+            modifiers,
+        );
+        held.at += egui::vec2(8.0, 0.0);
+        let at = held.at;
+        held.run(view, vec![egui::Event::PointerMoved(at)], modifiers);
+        for _ in 0..2 {
+            held.at += egui::vec2(4.0, 0.0);
+            let at = held.at;
+            held.run(
+                view,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::MouseMoved(egui::vec2(4.0, 0.0)),
+                ],
+                modifiers,
+            );
+        }
+        held
+    }
+
+    fn run(
+        &mut self,
+        view: &mut GraphView,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> Out {
+        self.time += 0.016;
+        frame_in(
+            self.context,
+            view,
+            self.fixture,
+            events,
+            self.time,
+            modifiers,
+            1.0,
+            Some(self.contain),
+        )
+    }
+
+    fn push(&mut self, view: &mut GraphView, motion: egui::Vec2, m: egui::Modifiers) -> Out {
+        self.run(view, vec![egui::Event::MouseMoved(motion)], m)
+    }
+
+    fn release(&mut self, view: &mut GraphView, m: egui::Modifiers) -> Vec<GraphEvent> {
+        let at = self.at;
+        self.run(view, vec![button(at, false, m)], m).events
+    }
+}
+
+fn figure_slack(signals: &[GraphEvent]) -> stokesforge_plot::GridSlack {
+    let [GraphEvent::GridFramesEdited {
+        slack: Some(slack), ..
+    }] = signals
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    *slack
+}
+
+/// The page of the bottom-right corner of a Regular Grid, its press point, and
+/// a drawing area that leaves `room` points to the right of the figure.
+fn grid_corner(
+    context: &egui::Context,
+    view: &mut GraphView,
+    fixture: &Fixture,
+    room: f32,
+) -> (Pos2, Rect, f32) {
+    let layout = layout_of(context, view, fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    (
+        Pos2::new(w + 4.0, h + 4.0),
+        Rect::from_min_max(Pos2::ZERO, Pos2::new(w + room, h + 400.0)),
+        w,
+    )
+}
+
+/// #512, snap on: the display scale of a drag past the edge follows the raw,
+/// unsnapped pointer, so it falls smoothly (no step each time the snapped page
+/// goes to the next grid line), and the cursor drawn is the raw pointer, not
+/// the snapped corner. Witness for the scale: the snapped length given to the
+/// zoom-out (`settle`) makes one frame fall by a whole step; witness for the
+/// cursor: the cursor on the drawn (snapped) corner.
+#[test]
+fn with_the_snap_on_the_scale_and_the_cursor_follow_the_raw_pointer() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    view.set_layout_grid(Some(50.0));
+    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 150.0);
+    let none = egui::Modifiers::NONE;
+    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+    let start = view.page_corner_cursor().expect("cursor");
+    let mut travelled = 0.0;
+    let mut scales = vec![view.display_scale().expect("scale")];
+    for _ in 0..60 {
+        held.push(&mut view, egui::vec2(7.0, 0.0), none);
+        travelled += 7.0;
+        let cursor = view.page_corner_cursor().expect("cursor");
+        if start.x + travelled < contain.max.x - 60.0 {
+            assert!(
+                (cursor.x - (start.x + travelled)).abs() < 1e-3,
+                "the cursor is the raw pointer: {} vs {}",
+                cursor.x,
+                start.x + travelled
+            );
+        }
+        scales.push(view.display_scale().expect("scale"));
+    }
+    let falls: Vec<f32> = scales.windows(2).map(|pair| pair[0] - pair[1]).collect();
+    assert!(falls.iter().all(|fall| *fall >= -1e-6), "never zooms in");
+    let total: f32 = falls.iter().sum();
+    assert!(total > 0.05, "the display zoomed out: {total}");
+    let worst = falls.iter().cloned().fold(0.0_f32, f32::max);
+    let mean = total / falls.iter().filter(|fall| **fall > 1e-6).count() as f32;
+    assert!(
+        worst < 2.0 * mean,
+        "a step in the scale: the worst fall {worst} against the mean {mean}"
+    );
+}
+
+/// #512, snap on: the page glides to each new snapped size (it is between the
+/// old and the new one right after the move, and on the new one a moment
+/// later), and the release commits the snapped size whatever the glide had
+/// reached. Witness: the eased value committed (not a multiple of the step), or
+/// no glide (the page already on the target after one frame).
+#[test]
+fn with_the_snap_on_the_page_glides_and_the_release_commits_the_snapped_size() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let width = |context: &egui::Context, view: &mut GraphView| {
+        f64::from(layout_of(context, view, &fixture).size.0)
+    };
+    let none = egui::Modifiers::NONE;
+    let run = |frames_after: usize| {
+        let (context, mut view) = in_mode(&fixture);
+        view.set_layout_grid(Some(50.0));
+        let (from, contain, w) = grid_corner(&context, &mut view, &fixture, 600.0);
+        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+        // Lands in the middle of a step, 20 points past the line below.
+        let page = f64::from(w);
+        let wanted = (page / 50.0).ceil() * 50.0 + 26.0 + 50.0 - page - 12.0;
+        held.push(&mut view, egui::vec2(wanted as f32, 0.0), none);
+        let mut seen = vec![width(&context, &mut view)];
+        for _ in 0..frames_after {
+            held.push(&mut view, egui::Vec2::ZERO, none);
+            seen.push(width(&context, &mut view));
+        }
+        let slack = figure_slack(&held.release(&mut view, none));
+        (page, seen, slack.right)
+    };
+    let (page, seen, committed) = run(1);
+    assert_eq!(
+        (page + committed) % 50.0,
+        0.0,
+        "snapped: {page} + {committed}"
+    );
+    let target = page + committed;
+    assert!(
+        seen[0] > page && seen[0] < target - 0.5,
+        "gliding: {} between {page} and {target}",
+        seen[0]
+    );
+    let (_, settled, committed_later) = run(40);
+    assert_eq!(*settled.last().expect("frames"), target, "arrives");
+    assert_eq!(committed_later, committed);
+}
+
+/// #512: Ctrl pressed after the grab keeps the ratio the page had at the press,
+/// at once, in the same drag; released, the drag goes back to the plain one.
+/// Witness: `keep_ratio` frozen at the press (the first case gives the plain
+/// result, the second the ratio one).
+#[test]
+fn ctrl_pressed_or_released_during_the_drag_takes_effect_at_once() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let none = egui::Modifiers::NONE;
+    let ctrl = egui::Modifiers { ctrl: true, ..none };
+    let ratio = {
+        let (context, mut view) = in_mode(&fixture);
+        let layout = layout_of(&context, &mut view, &fixture);
+        f64::from(layout.size.1 - layout.title_band) / f64::from(layout.size.0)
+    };
+    // (at the press, during the drag, at the release) -> (right, bottom)
+    let run = |press: egui::Modifiers, during: egui::Modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 600.0);
+        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, press);
+        held.push(&mut view, egui::vec2(40.0, 0.0), press);
+        held.push(&mut view, egui::Vec2::ZERO, during);
+        let slack = figure_slack(&held.release(&mut view, during));
+        (slack.right, slack.bottom)
+    };
+    let (plain_right, plain_bottom) = run(none, none);
+    assert_eq!(plain_bottom, 0.0, "no ratio: the height stays");
+    let (right, bottom) = run(none, ctrl);
+    assert_eq!(right, plain_right, "the leading side is the same");
+    assert!(
+        (bottom - right * ratio).abs() <= 1.0,
+        "ratio kept: {right} x {bottom} (ratio {ratio})"
+    );
+    let released = run(ctrl, none);
+    assert_eq!(
+        released,
+        (plain_right, plain_bottom),
+        "released: plain again"
+    );
+}
+
+/// #512: Shift pressed after the grab drops the snap at once (the committed
+/// size is the raw one, not on a grid line). Witness: the snap read at the
+/// press.
+#[test]
+fn shift_pressed_during_the_drag_drops_the_snap_at_once() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let none = egui::Modifiers::NONE;
+    let shift = egui::Modifiers {
+        shift: true,
+        ..none
+    };
+    let run = |during: egui::Modifiers| {
+        let (context, mut view) = in_mode(&fixture);
+        view.set_layout_grid(Some(50.0));
+        let (from, contain, w) = grid_corner(&context, &mut view, &fixture, 600.0);
+        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+        held.push(&mut view, egui::vec2(33.0, 0.0), none);
+        held.push(&mut view, egui::Vec2::ZERO, during);
+        let right = figure_slack(&held.release(&mut view, during)).right;
+        (f64::from(w), right)
+    };
+    let (page, snapped) = run(none);
+    assert_eq!((page + snapped) % 50.0, 0.0);
+    let (_, raw) = run(shift);
+    // 8 of kick, 8 of probe and the 33 of the push.
+    assert_eq!(raw, 8.0 + 8.0 + 33.0, "the raw pull");
+}
+
+/// #512: an absolute pointing device (a virtual machine's tablet, Xwayland)
+/// reports window coordinates as raw motion. The probe takes it for absolute:
+/// no lock, no hidden cursor, and the page follows the absolute travel only.
+/// Witness: the probe removed (motion used at once) makes the page jump by
+/// 778 points; the lock command never appears.
+#[test]
+fn absolute_coordinates_as_raw_motion_leave_the_mouse_alone() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let page = view.layout_page().expect("page");
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let none = egui::Modifiers::NONE;
+    let mut time = 0.1;
+    let mut commands = Vec::new();
+    let mut cursors = Vec::new();
+    let mut at = from;
+    for step in 0..8 {
+        time += 0.016;
+        let mut events = Vec::new();
+        if step == 0 {
+            events.push(egui::Event::PointerMoved(from));
+            events.push(button(from, true, none));
+        } else {
+            at += egui::vec2(5.0, 0.0);
+            events.push(egui::Event::PointerMoved(at));
+            events.push(egui::Event::MouseMoved(egui::vec2(778.0, 514.0)));
+        }
+        let out = frame_in(
+            &context,
+            &mut view,
+            &fixture,
+            events,
+            time,
+            none,
+            1.0,
+            Some(contain),
+        );
+        commands.extend(out.commands);
+        cursors.push(out.cursor);
+    }
+    time += 0.016;
+    let out = frame_in(
+        &context,
+        &mut view,
+        &fixture,
+        vec![button(at, false, none)],
+        time,
+        none,
+        1.0,
+        Some(contain),
+    );
+    commands.extend(out.commands);
+    assert!(
+        !commands
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::CursorGrab(_))),
+        "{commands:?}"
+    );
+    assert!(cursors.iter().all(|icon| *icon != egui::CursorIcon::None));
+    let (_, new_page) = edited(&out.events);
+    let new_page = new_page.expect("a page");
+    let travel = f64::from(at.x - from.x);
+    assert!(
+        (new_page.width - page.width - travel).abs() < 1.5,
+        "the page follows the absolute travel ({travel}): {} -> {}",
+        page.width,
+        new_page.width
+    );
+}
+
+/// #512: after the lock, one frame of raw motion far beyond the probe's
+/// average is corrupt input: it moves nothing, the mouse is given back at the
+/// next pass and the drag goes on with the absolute pointer. Witness: the bound
+/// removed (the page jumps by 778 points).
+#[test]
+fn one_corrupt_frame_after_the_lock_falls_back_without_a_jump() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let page = view.layout_page().expect("page");
+    let (from, contain) = free_corner_and_area(&view, 400.0);
+    let none = egui::Modifiers::NONE;
+    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+    held.push(&mut view, egui::vec2(20.0, 0.0), none);
+    let corrupt = held.push(&mut view, egui::vec2(778.0, 514.0), none);
+    let next = held.push(&mut view, egui::Vec2::ZERO, none);
+    let gave_back = corrupt
+        .commands
+        .iter()
+        .chain(next.commands.iter())
+        .any(|command| *command == egui::ViewportCommand::CursorGrab(egui::CursorGrab::None));
+    assert!(gave_back, "{:?} {:?}", corrupt.commands, next.commands);
+    let (_, new_page) = edited(&held.release(&mut view, none));
+    let new_page = new_page.expect("a page");
+    assert!(
+        new_page.width - page.width < 60.0 && new_page.height - page.height < 60.0,
+        "no jump: {} x {} from {} x {}",
+        new_page.width,
+        new_page.height,
+        page.width,
+        page.height
+    );
 }

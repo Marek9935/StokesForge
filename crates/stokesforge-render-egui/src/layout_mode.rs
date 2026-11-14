@@ -58,7 +58,7 @@ use stokesforge_render::{
     MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT,
 };
 
-use crate::corner_follow::{follow_step, pointer_step, AxisFollow};
+use crate::corner_follow::{follow_step, glide_step, pointer_step, AxisFollow, PointerSource};
 use crate::corner_lock;
 use crate::{FramePreview, GraphEvent, GraphView};
 
@@ -173,8 +173,6 @@ enum DragKind {
         slack: GridSlack,
         /// The image `(width, height)` at the press.
         image: (f64, f64),
-        /// Ctrl was held at the press: the page keeps its ratio (#505).
-        keep_ratio: bool,
     },
     /// A graph of a regular grid dragged to another place (#491). Nothing
     /// is previewed on the figure; the target is outlined by the overlay.
@@ -268,13 +266,20 @@ struct CornerFollow {
     far: (bool, bool),
     /// Height of the title band above the page, in figure points.
     band: f32,
-    /// Raw relative motion arrived in this drag (see [`pointer_step`]).
-    raw_seen: bool,
+    /// What moves the pointer, found by the probe (see [`pointer_step`]).
+    source: PointerSource,
     /// A frame of this drag was already followed (the first one has no raw
     /// motion of its own).
     started: bool,
     /// The absolute pointer of the previous frame of this drag.
     last_abs: Pos2,
+    /// The page corner at the pointer, unsnapped: where the cursor is drawn.
+    /// It follows the raw movement, never the snapped page.
+    cursor: Pos2,
+    /// The page size shown now, gliding toward the snapped one, in points.
+    eased: (f64, f64),
+    /// The preview with the snapped page: what the release commits.
+    settled: Option<FramePreview>,
 }
 
 impl CornerFollow {
@@ -318,16 +323,6 @@ impl CornerFollow {
             Pos2::new(min_x, min_y),
             egui::vec2(figure.0 * s, figure.1 * s),
         )
-    }
-
-    /// Lets the display zoom out for the page that the geometry really gave
-    /// (snapped, rounded): it must stay in the drawing area.
-    fn settle(&mut self, shown: (f64, f64)) {
-        for (i, length) in [shown.0 as f32, shown.1 as f32].into_iter().enumerate() {
-            if let Some(fit) = self.axes[i].scale_to_fit(length) {
-                self.scale = self.scale.min(fit);
-            }
-        }
     }
 }
 
@@ -1128,6 +1123,17 @@ impl GraphView {
         };
         if response.drag_stopped_by(PointerButton::Primary) {
             let corner = self.page_corner_cursor();
+            // The page glided toward the snapped size; the release commits the
+            // snapped one, exactly.
+            let settled = self
+                .layout
+                .drag
+                .as_mut()
+                .and_then(|drag| drag.follow.as_mut())
+                .and_then(|follow| follow.settled.take());
+            if settled.is_some() {
+                self.set_frame_preview(settled);
+            }
             self.finish_layout_drag();
             corner_lock::release(context, corner);
             return;
@@ -1159,12 +1165,21 @@ impl GraphView {
             .drag
             .as_ref()
             .is_some_and(|drag| drag.follow.is_some());
-        if following {
+        // The mouse is locked only for a relative device (the probe decided);
+        // with an absolute one the system cursor stays and shows the resize.
+        let locked = self.layout.drag.as_ref().is_some_and(|drag| {
+            drag.follow
+                .as_ref()
+                .is_some_and(|follow| follow.source.locks())
+        });
+        if locked {
             corner_lock::renew(context);
+        }
+        if following {
             context.request_repaint();
         }
         let cursor = match &self.layout.drag {
-            Some(_) if following => None,
+            Some(_) if locked => None,
             Some(drag) => Some(match &drag.kind {
                 DragKind::Free { handle, .. } => handle_cursor(handle),
                 DragKind::Grid { handle, .. } => grid_cursor(handle),
@@ -1244,6 +1259,27 @@ impl GraphView {
             }
         };
         let shift = context.input(|input| input.modifiers.shift);
+        let ctrl = context.input(|input| input.modifiers.ctrl);
+        // The snapped preview first: it is the page the release commits.
+        let shown = self.preview_drag(&drag, pos, delta, shift, ctrl);
+        if let Some(shown) = shown {
+            self.glide_page_corner(context, &drag, pos, shown, shift, ctrl);
+        }
+    }
+
+    /// The preview of a drag for a pointer movement of `delta` points of page.
+    /// For a page corner, returns the page size it gave (snapped, rounded).
+    /// `shift` switches the snap off; `ctrl` keeps the ratio of a page corner of
+    /// a regular grid (both read live, so a key pressed or released during the
+    /// drag acts at once: the geometry is recomputed from the press every frame).
+    fn preview_drag(
+        &mut self,
+        drag: &LayoutDrag,
+        pos: Pos2,
+        delta: (f64, f64),
+        shift: bool,
+        ctrl: bool,
+    ) -> Option<(f64, f64)> {
         match &drag.kind {
             DragKind::Free {
                 handle,
@@ -1256,8 +1292,7 @@ impl GraphView {
                     threshold: MAGNET_THRESHOLD_POINTS / f64::from(drag.scale),
                     enabled: !shift,
                 };
-                let shown = self.drag_free(handle, boxes, *page, boundary.as_ref(), delta, snap);
-                self.settle_page_corner(shown);
+                return self.drag_free(handle, boxes, *page, boundary.as_ref(), delta, snap);
             }
             DragKind::Figure {
                 corner,
@@ -1265,13 +1300,12 @@ impl GraphView {
                 heights,
                 slack,
                 image,
-                keep_ratio,
             } => {
                 // Snapped like the lines: the page edge lands on a grid line
                 // counted from the top-left corner of the page. With Ctrl the
                 // ratio is kept exactly and the leading side snaps (#512).
                 let step = self.layout.grid.filter(|_| !shift);
-                let new_slack = if *keep_ratio {
+                let new_slack = if ctrl {
                     let delta = page_corner_ratio_delta(*corner, *image, delta, step);
                     page_corner_slack_keeping_ratio(*corner, *image, *slack, delta)
                 } else {
@@ -1292,7 +1326,7 @@ impl GraphView {
                         new.1 - old.1
                     }
                 };
-                self.settle_page_corner(Some((
+                let shown = Some((
                     image.0
                         + side(
                             corner.0,
@@ -1305,12 +1339,13 @@ impl GraphView {
                             (new_slack.bottom, new_slack.top),
                             (slack.bottom, slack.top),
                         ),
-                )));
+                ));
                 self.set_frame_preview(Some(FramePreview {
                     grid: Some((widths.clone(), heights.clone())),
                     slack: Some(new_slack),
                     ..FramePreview::default()
                 }));
+                return shown;
             }
             DragKind::MoveCell { base, source } => {
                 let (target, band) = self.move_target(pos, *base, *source);
@@ -1362,6 +1397,7 @@ impl GraphView {
                 }));
             }
         }
+        None
     }
 
     /// The follow state of a page-corner drag at the press (#512); `None` for
@@ -1430,6 +1466,20 @@ impl GraphView {
             }
             _ => return None,
         };
+        // Room kept for the snap, which rounds a length by half a grid step at
+        // most; with Ctrl the other side follows the leading one by the page
+        // ratio, so it may be rounded by that much more.
+        let stretch = match kind {
+            DragKind::Figure { .. } if length.0 > 0.0 && length.1 > 0.0 => {
+                (length.0 / length.1).max(length.1 / length.0).max(1.0)
+            }
+            _ => 1.0,
+        };
+        let reserve = self
+            .layout
+            .grid
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .map_or(0.0, |step| (step / 2.0 * stretch) as f32);
         let bounds = |low: f32, high: f32| {
             self.layout
                 .contain
@@ -1441,6 +1491,7 @@ impl GraphView {
                 anchor,
                 sign: if far { 1.0 } else { -1.0 },
                 lead,
+                reserve,
                 length: length as f32,
                 min: min as f32,
                 max: stokesforge_plot::MAX_FIGURE_EXTENT as f32,
@@ -1479,19 +1530,34 @@ impl GraphView {
             start: [length.0 as f32, length.1 as f32],
             far: corner,
             band,
-            raw_seen: false,
+            source: PointerSource::probing(),
             started: false,
             last_abs: press,
+            cursor: Pos2::new(axes[0].corner(scale), axes[1].corner(scale)),
+            eased: (f64::from(length.0 as f32), f64::from(length.1 as f32)),
+            settled: None,
         })
     }
 
     /// One frame of a page-corner drag (#512): the pointer movement turned into
     /// a page length and a display scale, as the pull of the corner in points.
     /// `None` when the drag in progress is not a page corner.
+    ///
+    /// Everything here is driven by the **unsnapped** pointer: the lengths, the
+    /// display scale, the cursor. The snap only shapes the page that is shown
+    /// ([`Self::glide_page_corner`]), so the figure never rescales by steps.
     fn follow_page_corner(&mut self, context: &Context, pos: Pos2) -> Option<(f64, f64)> {
         let motion = context.input(|input| input.pointer.motion());
+        let ctrl = context.input(|input| input.modifiers.ctrl);
         let contain = self.layout.contain;
-        let follow = self.layout.drag.as_mut()?.follow.as_mut()?;
+        let drag = self.layout.drag.as_mut()?;
+        // With Ctrl on a regular grid the page keeps the ratio it had at the
+        // press: the other side may be longer than the pointer's.
+        let ratio = match &drag.kind {
+            DragKind::Figure { corner, image, .. } if ctrl => Some((*corner, *image)),
+            _ => None,
+        };
+        let follow = drag.follow.as_mut()?;
         let absolute = if pos.x.is_finite() && pos.y.is_finite() {
             let moved = pos - follow.last_abs;
             follow.last_abs = pos;
@@ -1500,35 +1566,89 @@ impl GraphView {
             Vec2::ZERO
         };
         // The frame that starts the drag holds the motion made before the
-        // press was recognised: its absolute movement is the true one.
-        let motion = if follow.started { motion } else { None };
+        // press was recognised: its absolute movement is the true one, and it
+        // is no part of the probe.
+        let step = if follow.started {
+            pointer_step(&mut follow.source, motion, absolute)
+        } else {
+            absolute
+        };
         follow.started = true;
-        let step = pointer_step(&mut follow.raw_seen, motion, absolute);
         if let Some(contain) = contain {
             follow.axes[0].bounds = (contain.min.x, contain.max.x);
             follow.axes[1].bounds = (contain.min.y, contain.max.y);
         }
-        let (lengths, scale) = follow_step(follow.axes, follow.scale, step);
+        let (lengths, mut scale) = follow_step(follow.axes, follow.scale, step);
         follow.axes[0].length = lengths[0];
         follow.axes[1].length = lengths[1];
+        if let Some((corner, image)) = ratio {
+            let kept = page_corner_ratio_delta(corner, image, follow.delta(), None);
+            for (i, pulled) in [kept.0, kept.1].into_iter().enumerate() {
+                let length = follow.start[i] + follow.axes[i].sign * pulled as f32;
+                let axis = AxisFollow {
+                    length,
+                    ..follow.axes[i]
+                };
+                if let Some(fit) = axis.scale_to_fit(length) {
+                    scale = scale.min(fit);
+                }
+            }
+        }
         follow.scale = scale;
+        follow.cursor = Pos2::new(follow.axes[0].corner(scale), follow.axes[1].corner(scale));
         Some(follow.delta())
     }
 
-    /// The page a page-corner drag really gave this frame (snapped, rounded):
-    /// the display zooms out if it does not fit the drawing area.
-    fn settle_page_corner(&mut self, shown: Option<(f64, f64)>) {
-        let Some(shown) = shown else {
-            return;
-        };
-        if let Some(follow) = self
+    /// The page of a page-corner drag glides to the snapped size `shown`: the
+    /// preview is recomputed for the eased size, with no snap. Without a snap
+    /// (Shift, no grid) the page follows at once. The snapped preview is kept
+    /// for the release, which commits it whatever the glide had reached.
+    fn glide_page_corner(
+        &mut self,
+        context: &Context,
+        drag: &LayoutDrag,
+        pos: Pos2,
+        shown: (f64, f64),
+        shift: bool,
+        ctrl: bool,
+    ) {
+        let snapping = self.layout.grid.is_some() && !shift;
+        let settled = self.frame_preview.clone();
+        let dt = context.input(|input| {
+            if input.unstable_dt.is_finite() && input.unstable_dt > 0.0 {
+                input.unstable_dt
+            } else {
+                input.stable_dt
+            }
+        });
+        let Some(follow) = self
             .layout
             .drag
             .as_mut()
-            .and_then(|drag| drag.follow.as_mut())
-        {
-            follow.settle(shown);
+            .and_then(|active| active.follow.as_mut())
+        else {
+            return;
+        };
+        follow.settled = settled;
+        let eased = if snapping {
+            (
+                glide_step(follow.eased.0, shown.0, dt),
+                glide_step(follow.eased.1, shown.1, dt),
+            )
+        } else {
+            shown
+        };
+        follow.eased = eased;
+        if eased == shown {
+            return;
         }
+        let pulled = |i: usize, size: f64| {
+            f64::from(follow.axes[i].sign) * (size - f64::from(follow.start[i]))
+        };
+        let delta = (pulled(0, eased.0), pulled(1, eased.1));
+        // Another frame is needed to go on gliding, whatever the pointer does.
+        context.request_repaint();
+        self.preview_drag(drag, pos, delta, true, ctrl);
     }
 
     /// The drawing area of the figure on the screen (the host's `contain`): the
@@ -1547,23 +1667,12 @@ impl GraphView {
         Some(follow.rect(figure))
     }
 
-    /// The screen position of the page corner being dragged, as drawn.
+    /// The screen position of the pointer during a page-corner drag: the page
+    /// corner at the raw, unsnapped pointer, so the cursor drawn there moves
+    /// smoothly whatever the snap does to the page. `None` outside such a drag.
     pub fn page_corner_cursor(&self) -> Option<Pos2> {
         let follow = self.layout.drag.as_ref()?.follow.as_ref()?;
-        let display = self.display_rect?;
-        let scale = self.display_scale()?;
-        Some(Pos2::new(
-            if follow.far.0 {
-                display.max.x
-            } else {
-                display.min.x
-            },
-            if follow.far.1 {
-                display.max.y
-            } else {
-                display.min.y + follow.band * scale
-            },
-        ))
+        Some(follow.cursor)
     }
 
     /// Freezes the handle under the press; `false` if there is none.
@@ -1604,7 +1713,6 @@ impl GraphView {
                         f64::from(layout.size.0),
                         f64::from(layout.size.1.saturating_sub(layout.title_band)),
                     ),
-                    keep_ratio: context.input(|input| input.modifiers.ctrl),
                 }
             }
             (Some(grid), _) => {
@@ -1906,7 +2014,13 @@ impl GraphView {
         // #512: the system cursor is hidden and the mouse locked during a
         // page-corner drag, so the cursor is drawn here, on the corner.
         if let (Some(at), Some(follow)) = (
-            self.page_corner_cursor(),
+            self.page_corner_cursor().filter(|_| {
+                self.layout
+                    .drag
+                    .as_ref()
+                    .and_then(|drag| drag.follow.as_ref())
+                    .is_some_and(|follow| follow.source.locks())
+            }),
             self.layout
                 .drag
                 .as_ref()
