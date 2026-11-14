@@ -542,15 +542,19 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         // bands of their axes; a legacy graph (nothing stored) shares the area
         // equally, bands inside.
         let explicit = match explicit_frames(spec) {
-            Some(frames) => Some(ExplicitGrid::build(
-                spec,
-                &layout,
-                &plans,
-                frames,
-                Some(root_width),
-                &mut |text, font, size, width| text_band(root, text, font, size, width),
-                &mut |_| Ok(title_height),
-            )?),
+            Some(frames) => {
+                let edges = edge_reserves(spec, &layout, &frames.0, &area);
+                Some(ExplicitGrid::build(
+                    spec,
+                    &layout,
+                    &plans,
+                    frames,
+                    &edges,
+                    Some(root_width),
+                    &mut |text, font, size, width| text_band(root, text, font, size, width),
+                    &mut |_| Ok(title_height),
+                )?)
+            }
             None => None,
         };
         let (column_breaks, row_breaks) = match &explicit {
@@ -863,6 +867,91 @@ type CellPlans = (
     Vec<(u32, u32)>,
 );
 
+/// The room a column needs beside its frame so that the first and the last
+/// number of its horizontal axes are never cut by the figure edge (#529, A5):
+/// `(left, right)` in pixels from the frame edge, 0 where nothing overhangs.
+///
+/// Only an axis whose range is **written** (`has_explicit_range`) can be read
+/// without the data, and every graph writes its ranges now (#529, frozen
+/// ranges); an axis still on Auto (no data yet, a file not opened by the
+/// application, the CLI) asks for nothing and keeps the old margin. The ticks
+/// are the ones the draw places: same tick count (the plot width is the
+/// stored frame width, so there is no circularity), same format, same
+/// "label every", measured like the draw measures them. The reserve is the
+/// overhang beyond the frame edge, so a column whose edge labels fit inside
+/// [`MARGIN`] (or whose last tick is not at the edge) is not widened: the
+/// grid takes the larger of the two.
+fn edge_reserves<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    layout: &Layout,
+    frame_widths: &[f64],
+    probe: &DrawingArea<DB, Shift>,
+) -> Vec<(u32, u32)> {
+    let mut reserves = vec![(0_u32, 0_u32); layout.columns];
+    let style = text_style(LABEL_SIZE, (0, 0, 0, 255));
+    let width_of = |text: &str| -> f64 {
+        probe
+            .estimate_text_size(text, &style)
+            .map_or(0.0, |size| f64::from(size.0))
+    };
+    for (index, panel) in spec.panels.iter().enumerate() {
+        let Some(cell) = layout.cells.get(index).copied() else {
+            continue;
+        };
+        // A layer that follows the X axis of the one it covers adds none.
+        if panel.overlay.is_some_and(|overlay| !overlay.x_top) {
+            continue;
+        }
+        let axis = &panel.bottom;
+        if !axis.visible || !axis.tick_labels {
+            continue;
+        }
+        let Some(((low, high), reversed)) = explicit_range(axis, axis.scale) else {
+            continue;
+        };
+        let column = cell % layout.columns;
+        let Some(length) = frame_widths.get(column).copied().filter(|l| *l > 0.0) else {
+            continue;
+        };
+        let range = if axis.inverted || reversed {
+            (high, low)
+        } else {
+            (low, high)
+        };
+        let comma = spec.decimal_comma;
+        let count = scale::tick_count(
+            axis.scale,
+            range,
+            length,
+            scale::AxisDirection::Horizontal,
+            comma,
+            &width_of,
+        );
+        let format = scale::TickFormat::new(axis.scale, range, count)
+            .with_decimal_comma(comma)
+            .with_label_every(axis.label_every, range, count);
+        for tick in scale::linear_key_points(range, count) {
+            let text = format.format(tick);
+            if text.is_empty() {
+                continue;
+            }
+            let half = width_of(&text) / 2.0;
+            let position = (tick - range.0) / (range.1 - range.0) * length;
+            // One pixel more than the text: the measure is an estimate.
+            let left = (half - position).ceil() + 1.0;
+            let right = (position + half - length).ceil() + 1.0;
+            let slot = &mut reserves[column];
+            if left > 1.0 {
+                slot.0 = slot.0.max(left as u32);
+            }
+            if right > 1.0 {
+                slot.1 = slot.1.max(right as u32);
+            }
+        }
+    }
+    reserves
+}
+
 /// The plans of the cells (union of what their layers ask for) and the rank of
 /// each layer among the superimposed ones of its cell, from the spec alone.
 fn cell_plans<DB: DrawingBackend>(
@@ -1007,6 +1096,7 @@ impl ExplicitGrid {
         layout: &Layout,
         plans: &std::collections::HashMap<usize, CellPlan>,
         frames: (Vec<f64>, Vec<f64>),
+        edges: &[(u32, u32)],
         width: Option<u32>,
         measure: &mut MeasureBand<'_, E>,
         measure_title: &mut MeasureTitle<'_, E>,
@@ -1029,6 +1119,10 @@ impl ExplicitGrid {
             } else {
                 (gutters.left, gutters.right)
             };
+        }
+        // The edge numbers of the horizontal axes must fit (#529, A5).
+        for (slot, edge) in column_gutters.iter_mut().zip(edges) {
+            *slot = (slot.0.max(edge.0), slot.1.max(edge.1));
         }
         let min_left = column_gutters.first().map_or(MARGIN, |g| g.0);
         for (column, slot) in column_gutters.iter_mut().enumerate() {
@@ -1669,11 +1763,13 @@ pub fn figure_layout<DB: DrawingBackend>(
         });
     };
     let (plans, _, _) = cell_plans(spec, &layout, probe)?;
+    let edges = edge_reserves(spec, &layout, &frames.0, probe);
     let grid = ExplicitGrid::build(
         spec,
         &layout,
         &plans,
         frames,
+        &edges,
         None,
         &mut |text, font, size, width| text_band(probe, text, font, size, width),
         &mut |width| graph_title_band(spec, probe, width),
@@ -4391,6 +4487,26 @@ fn extent_of(
     seen.then_some((min, max))
 }
 
+/// The written framing of an axis, if complete and representable on `scale`:
+/// its bounds in the transformed space, low first, and whether it was written
+/// from high to low (the axis is then drawn reversed). The one reading of
+/// `range_min` / `range_max`, shared by [`axis_range`] and [`edge_reserves`].
+fn explicit_range(spec: &AxisSpec, scale: AxisScale) -> Option<((f64, f64), bool)> {
+    if !spec.has_explicit_range() {
+        return None;
+    }
+    match (spec.range_min, spec.range_max) {
+        (Some(min), Some(max)) if min.is_finite() && max.is_finite() && min != max => {
+            let (low, high) = (min.min(max), min.max(max));
+            match (scale::forward(scale, low), scale::forward(scale, high)) {
+                (Some(low), Some(high)) if low != high => Some(((low, high), min > max)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Bounds of an axis, in the transformed space.
 ///
 /// The explicit framing of the spec takes precedence if it is complete **and**
@@ -4405,21 +4521,9 @@ fn axis_range(
     role: AxisRole,
     margins: AutoMargins,
 ) -> (f64, f64) {
-    let mut reversed = false;
-    let explicit = spec
-        .has_explicit_range()
-        .then(|| match (spec.range_min, spec.range_max) {
-            (Some(min), Some(max)) if min.is_finite() && max.is_finite() && min != max => {
-                reversed = min > max;
-                let (low, high) = (min.min(max), min.max(max));
-                match (scale::forward(scale, low), scale::forward(scale, high)) {
-                    (Some(low), Some(high)) if low != high => Some((low, high)),
-                    _ => None,
-                }
-            }
-            _ => None,
-        })
-        .flatten();
+    let explicit = explicit_range(spec, scale);
+    let reversed = explicit.is_some_and(|(_, reversed)| reversed);
+    let explicit = explicit.map(|(range, _)| range);
 
     let (min, max) = match explicit {
         Some(range) => range,

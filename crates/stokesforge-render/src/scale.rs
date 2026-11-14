@@ -357,6 +357,10 @@ pub fn axis_ticks(
         .collect()
 }
 
+/// The widest aligned interval accepted, as a multiple of the wanted one: past
+/// it the layer's data would be squeezed into a sliver of its axis.
+const MAX_ALIGNED_SPAN: f64 = 2.5;
+
 /// Frames a linear axis of an overlaid layer (#174) so that its ticks fall
 /// **opposite** those of the covered layer's axis.
 ///
@@ -366,8 +370,9 @@ pub fn axis_ticks(
 /// interval contains `wanted`, has as many ticks as `base` and places them
 /// at the same fractions of the axis. Each candidate is checked against the
 /// ticks Plotters will actually place: we do not guess its algorithm. `labels`
-/// is the tick count of the covered axis ([`tick_count`]). `None`
-/// if nothing fits (the caller then keeps `wanted`).
+/// is the tick count of the covered axis ([`tick_count`]). The interval is at
+/// most [`MAX_ALIGNED_SPAN`] times `wanted`; `None` if nothing that tight fits
+/// (the caller then keeps `wanted`, ticks not opposite).
 pub fn aligned_range(base: (f64, f64), wanted: (f64, f64), labels: usize) -> Option<(f64, f64)> {
     let inverted = base.0 > base.1;
     if (wanted.0 > wanted.1) != inverted {
@@ -405,6 +410,10 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64), labels: usize) -> Opt
             if span < d1 - d0 {
                 continue;
             }
+            if span > MAX_ALIGNED_SPAN * (d1 - d0) {
+                // Steps only grow: nothing tight is left.
+                return None;
+            }
             // First tick `j · step`, placed `first_offset` steps from the low
             // edge: the low edge is `(j − first_offset) · step`.
             let lowest = (d1 - span) / step + first_offset;
@@ -413,17 +422,28 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64), labels: usize) -> Opt
             if lo_j > hi_j {
                 continue;
             }
-            let j = ((lowest + highest) / 2.0).round().clamp(lo_j, hi_j);
-            let low = (j - first_offset) * step;
-            let high = low + span;
-            let points = linear_key_points((low, high), labels);
-            let aligned = points.len() == fractions.len()
-                && points
-                    .iter()
-                    .zip(&fractions)
-                    .all(|(t, f)| ((t - low) / (high - low) - f).abs() < 1e-6);
-            if aligned {
-                return Some(if inverted { (high, low) } else { (low, high) });
+            // Every admissible first tick, the one nearest the middle first:
+            // Plotters' own choice of step depends on where the edges fall,
+            // so one position can be refused while its neighbour fits.
+            let middle = ((lowest + highest) / 2.0).round().clamp(lo_j, hi_j);
+            let count = (hi_j - lo_j) as i64;
+            for k in 0..=count.min(64) {
+                for j in [middle + k as f64, middle - k as f64] {
+                    if j < lo_j || j > hi_j {
+                        continue;
+                    }
+                    let low = (j - first_offset) * step;
+                    let high = low + span;
+                    let points = linear_key_points((low, high), labels);
+                    let aligned = points.len() == fractions.len()
+                        && points
+                            .iter()
+                            .zip(&fractions)
+                            .all(|(t, f)| ((t - low) / (high - low) - f).abs() < 1e-6);
+                    if aligned {
+                        return Some(if inverted { (high, low) } else { (low, high) });
+                    }
+                }
             }
         }
     }
@@ -725,6 +745,53 @@ mod tests {
         for (x, y) in a.iter().zip(&b) {
             assert!((x - y).abs() < 1e-6, "{a:?} / {b:?}");
         }
+    }
+
+    /// Opposite ticks: the same fractions of the axis, same count.
+    fn assert_opposite(base: (f64, f64), range: (f64, f64), labels: usize) {
+        let fractions = |r: (f64, f64)| -> Vec<f64> {
+            linear_key_points(r, labels)
+                .iter()
+                .map(|t| (t - r.0) / (r.1 - r.0))
+                .collect()
+        };
+        let (a, b) = (fractions(base), fractions(range));
+        assert_eq!(a.len(), b.len(), "{base:?} / {range:?}");
+        for (x, y) in a.iter().zip(&b) {
+            assert!((x - y).abs() < 1e-6, "{base:?} / {range:?}");
+        }
+    }
+
+    #[test]
+    fn a_first_base_tick_close_to_the_low_edge_still_aligns_tightly() {
+        // 3.95..6.2: the first base tick (4.0) sits 0.05 above the edge. The
+        // middle position of the first tick is refused by Plotters; its
+        // neighbour fits, and the result stays tight (was -10.5..12).
+        let (base, wanted) = ((3.95, 6.2), (0.0, 1.0));
+        let range = aligned_range(base, wanted, 11).expect("an alignment");
+        assert!(range.0 <= wanted.0 && range.1 >= wanted.1, "{range:?}");
+        assert!(range.1 - range.0 <= 2.5 * 1.0, "{range:?}");
+        assert_opposite(base, range, 11);
+    }
+
+    #[test]
+    fn a_last_base_tick_close_to_the_high_edge_still_aligns_tightly() {
+        // The mirror image: the last base tick (6.0) is 0.05 below the high
+        // edge; an inverted axis walks the same search.
+        let (base, wanted) = ((3.8, 6.05), (0.0, 1.0));
+        let range = aligned_range(base, wanted, 11).expect("an alignment");
+        assert!(range.0 <= wanted.0 && range.1 >= wanted.1, "{range:?}");
+        assert!(range.1 - range.0 <= 2.5 * 1.0, "{range:?}");
+        assert_opposite(base, range, 11);
+        let flipped = aligned_range((base.1, base.0), (wanted.1, wanted.0), 11)
+            .expect("an alignment, inverted");
+        assert_eq!(flipped, (range.1, range.0));
+    }
+
+    #[test]
+    fn no_alignment_within_the_bound_keeps_the_wanted_framing() {
+        // Data far from the base's scale: only a huge step would fit.
+        assert_eq!(aligned_range((4.01, 5.9), (10.0, 13.0), 6), None);
     }
 
     #[test]
