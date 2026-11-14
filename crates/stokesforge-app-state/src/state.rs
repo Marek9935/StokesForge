@@ -77,7 +77,7 @@ use crate::cell_sides;
 use crate::errors;
 use crate::history_text::history_text;
 use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
-use crate::selection::{GridCursor, Selection};
+use crate::selection::{ColumnRanks, GridCursor, Selection};
 use crate::tr;
 use crate::tree_drop::{final_order, plan_moves, MovePlace};
 use crate::user_colors::UserColors;
@@ -2361,6 +2361,21 @@ struct FormulaRefusalMemo {
     refusal: Option<String>,
 }
 
+/// What the grid asks of a worksheet for every cell of every frame, computed once
+/// per snapshot (#534): the visible columns with their ranks and the row count.
+struct SheetIndex {
+    ranks: ColumnRanks,
+    rows: usize,
+}
+
+/// The [`SheetIndex`] of the worksheets drawn since the last snapshot (see
+/// [`AppState::sheet_index`]): valid for one revision and epoch of the project.
+struct SheetIndexMemo {
+    revision: stokesforge_session::Revision,
+    epoch: u64,
+    sheets: std::collections::HashMap<NodeId, std::sync::Arc<SheetIndex>>,
+}
+
 /// What is known of the formulas of one revision (see
 /// [`AppState::formula_issue`]).
 struct FormulaIssueMemo {
@@ -3384,6 +3399,10 @@ pub struct AppState {
     /// formula walks the sheets. The error, not the sentence: a language change
     /// is followed.
     formula_issue_memo: std::cell::RefCell<Option<FormulaIssueMemo>>,
+    /// Column ranks and row count of the worksheets drawn, per snapshot (#534): the
+    /// grid asks the selection about every cell, and walking the worksheet for each
+    /// made a frame of a 1000-column sheet cost seconds.
+    sheet_index_memo: std::cell::RefCell<Option<SheetIndexMemo>>,
     /// A comma range just rewritten in the F(x)= field of a column (#433): the
     /// grid takes it once and paints the orange state for 10 s.
     formula_rewrites: Vec<FormulaRewrite>,
@@ -3621,6 +3640,7 @@ impl AppState {
             header_editing: None,
             formula_refusal_memo: std::cell::RefCell::new(None),
             formula_issue_memo: std::cell::RefCell::new(None),
+            sheet_index_memo: std::cell::RefCell::new(None),
             formula_rewrites: Vec::new(),
             seen_bound: 0,
             grid_clipboard: None,
@@ -4079,6 +4099,27 @@ impl AppState {
         self.snapshot.history.can_redo
     }
 
+    /// The columns and the row count of `sheet`, computed once per snapshot (#534).
+    fn sheet_index(&self, sheet: NodeId) -> std::sync::Arc<SheetIndex> {
+        let (revision, epoch) = (self.snapshot.revision, self.snapshot.epoch);
+        let mut memo = self.sheet_index_memo.borrow_mut();
+        let current = match memo.take() {
+            Some(current) if current.revision == revision && current.epoch == epoch => current,
+            _ => SheetIndexMemo {
+                revision,
+                epoch,
+                sheets: std::collections::HashMap::new(),
+            },
+        };
+        let current = memo.insert(current);
+        std::sync::Arc::clone(current.sheets.entry(sheet).or_insert_with(|| {
+            std::sync::Arc::new(SheetIndex {
+                ranks: ColumnRanks::new(&self.snapshot.tree, sheet),
+                rows: row_count_in(&self.snapshot.tree, sheet),
+            })
+        }))
+    }
+
     /// Columns of `sheet`, in model order: `(NodeId, name, type)`.
     /// Empty if `sheet` is not (or no longer) a sheet of this project.
     pub fn visible_columns(&self, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
@@ -4169,7 +4210,7 @@ impl AppState {
     /// columns, not the length of the first: a sheet is not a
     /// rectangular table. 0 if `sheet` is not (or no longer) a sheet.
     pub fn row_count(&self, sheet: NodeId) -> usize {
-        row_count_in(&self.snapshot.tree, sheet)
+        self.sheet_index(sheet).rows
     }
 
     /// Index of the **entry row** of `sheet`: the empty row the grid always
@@ -4546,10 +4587,7 @@ impl AppState {
     /// for keyboard navigation ([`AppState::move_selection`]/
     /// [`AppState::move_selection_tab`]) as for [`AppState::paste`].
     fn column_order(&self, sheet: NodeId) -> Vec<NodeId> {
-        self.visible_columns(sheet)
-            .into_iter()
-            .map(|(id, _, _)| id)
-            .collect()
+        self.sheet_index(sheet).ranks.ids().to_vec()
     }
 
     /// Moves the selection of `sheet` by one cell in `direction` (arrow
@@ -4767,24 +4805,21 @@ impl AppState {
     /// A selection of whole columns (letter click, Ctrl+A) never contains the
     /// entry row ([`AppState::entry_row`]).
     pub fn is_selected(&self, sheet: NodeId, column: NodeId, row: usize) -> bool {
-        if row >= self.row_count(sheet)
-            && self
-                .selection
-                .get(&sheet)
-                .is_some_and(Selection::is_columns)
-        {
+        let Some(selection) = self.selection.get(&sheet) else {
+            return false;
+        };
+        let index = self.sheet_index(sheet);
+        if selection.is_columns() && row >= index.rows {
             return false;
         }
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.contains(&self.snapshot.tree, sheet, column, row))
+        selection.contains_ranked(&index.ranks, column, row)
     }
 
     /// True if `column` is selected entirely (click on its header
     /// letter).
     pub fn is_column_selected(&self, sheet: NodeId, column: NodeId) -> bool {
         self.selection.get(&sheet).is_some_and(|selection| {
-            selection.is_column_selected(&self.snapshot.tree, sheet, column)
+            selection.is_column_selected_ranked(&self.sheet_index(sheet).ranks, column)
         })
     }
 
@@ -4811,9 +4846,9 @@ impl AppState {
     /// [`AppState::is_column_selected`], which holds only for a direct click
     /// on the letter row.
     pub fn column_touched_by_selection(&self, sheet: NodeId, column: NodeId) -> bool {
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.touches_column(&self.snapshot.tree, sheet, column))
+        self.selection.get(&sheet).is_some_and(|selection| {
+            selection.touches_column_ranked(&self.sheet_index(sheet).ranks, column)
+        })
     }
 
     /// True if `row` is touched by the current selection of `sheet` —
@@ -4859,7 +4894,7 @@ impl AppState {
         field: HeaderField,
     ) -> bool {
         self.selection.get(&sheet).is_some_and(|selection| {
-            selection.is_header_field_selected(&self.snapshot.tree, sheet, column, field)
+            selection.is_header_field_selected_ranked(&self.sheet_index(sheet).ranks, column, field)
         })
     }
 
