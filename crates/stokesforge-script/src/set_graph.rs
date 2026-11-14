@@ -40,8 +40,6 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     // The X axis (bottom) and the Y axis (left or right depending on `axis`).
     "x_title",
     "y_title",
-    "x_unit",
-    "y_unit",
     "x_scale",
     "y_scale",
     "x_from",
@@ -113,7 +111,6 @@ fn short_number(value: f64) -> String {
 #[derive(Default)]
 struct AxisChange {
     title: Option<String>,
-    unit: Option<String>,
     scale: Option<AxisScale>,
     bounds: (Option<f64>, Option<f64>),
     auto_range: Option<bool>,
@@ -132,9 +129,6 @@ impl AxisChange {
         }
         if let Some(auto) = self.auto_range {
             axis.auto_range = auto;
-        }
-        if let Some(unit) = &self.unit {
-            axis.unit.clone_from(unit);
         }
         if let Some(inverted) = self.inverted {
             axis.inverted = inverted;
@@ -328,8 +322,6 @@ impl Changes {
                 "panel_title" => changes.panel_title = Some(string()?),
                 "x_title" => changes.x.title = Some(string()?),
                 "y_title" => changes.y.title = Some(string()?),
-                "x_unit" => changes.x.unit = Some(string()?),
-                "y_unit" => changes.y.unit = Some(string()?),
                 "x_scale" => changes.x.scale = Some(scale()?),
                 "y_scale" => changes.y.scale = Some(scale()?),
                 "x_from" => changes.x.bounds.0 = Some(bound()?),
@@ -706,7 +698,7 @@ fn set_graph_native(
 /// (`'#RRGGBB[AA]'`, `''` = automatic), `legend_columns` (1 to 1000, entries
 /// fill down first), `legend_row_gap` and `legend_column_gap` (0 to 400) and
 /// `legend_swatch_length` (4 to 400). The X axis (bottom) and the Y axis
-/// (`axis='left'` or `'right'`): `x_title`/`y_title`, `x_unit`/`y_unit`,
+/// (`axis='left'` or `'right'`): `x_title`/`y_title`,
 /// `x_scale`/`y_scale` (`'linear'`, `'log'`), `x_from` and `x_to` (given
 /// together and different; `from > to` draws the axis reversed) and
 /// `y_from`/`y_to`, `x_auto_range`/`y_auto_range` (turns view framing back to
