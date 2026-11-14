@@ -1921,3 +1921,103 @@ fn a_handle_sliding_under_the_press_does_not_take_over_a_move() {
         "a move expected, got {signals:?}"
     );
 }
+
+// -- #508: one owner per screen formula texture --
+
+/// Every textured mesh of `shapes`, at any depth.
+fn meshes_of<'a>(
+    shapes: impl IntoIterator<Item = &'a egui::Shape>,
+    out: &mut Vec<egui::TextureId>,
+) {
+    for shape in shapes {
+        match shape {
+            egui::Shape::Mesh(mesh) => out.push(mesh.texture_id),
+            egui::Shape::Vec(inner) => meshes_of(inner, out),
+            _ => {}
+        }
+    }
+}
+
+/// #508: 300 title revisions, a legend repeating one text three times, and at
+/// every frame every mesh handed to egui points to a live texture, whether the
+/// figure is painted as is or scaled; the formula cache stays bounded. Witness:
+/// without the eviction the bound fails; if `TypstScreen::render` stops
+/// inserting into the held set, the first eviction frees textures the cached
+/// shapes still draw.
+fn every_painted_mesh_has_a_live_texture(scaled: bool) {
+    let fixture = Fixture::with_panel("Title 0", |panel| {
+        let first = panel.series[0].clone();
+        for _ in 0..3 {
+            let mut series = first.clone();
+            series.name = "Same legend text $alpha$".to_owned();
+            panel.series.push(series);
+        }
+    });
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let mut spec = match fixture
+        .snapshot()
+        .tree
+        .node(fixture.graph)
+        .expect("graph")
+        .kind()
+    {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("not a graph"),
+    };
+    for revision in 0..300 {
+        spec.title = format!("Title {revision} $alpha_{revision}$");
+        fixture
+            .handle()
+            .execute(Command::SetPlotSpec {
+                graph: fixture.graph,
+                spec: spec.clone(),
+            })
+            .expect("spec set");
+        let snapshot = fixture.snapshot();
+        // Twice: the rebuild frame, then a pure repaint.
+        for _ in 0..2 {
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                if scaled {
+                    let (w, h) = view
+                        .figure_layout(ui.ctx(), &snapshot, fixture.graph)
+                        .expect("layout")
+                        .size;
+                    let display =
+                        Rect::from_min_size(Pos2::ZERO, egui::vec2(w as f32, h as f32) * 1.37);
+                    view.paint_scaled(ui, display, &snapshot, fixture.graph)
+                        .expect("painting");
+                } else {
+                    view.paint(ui, rect, &snapshot, fixture.graph)
+                        .expect("painting");
+                }
+            });
+            let mut ids = Vec::new();
+            meshes_of(output.shapes.iter().map(|clipped| &clipped.shape), &mut ids);
+            assert!(!ids.is_empty(), "no formula painted at revision {revision}");
+            for id in ids {
+                assert!(
+                    context.tex_manager().read().meta(id).is_some(),
+                    "revision {revision}: a mesh paints the freed texture {id:?}"
+                );
+            }
+            consume(std::mem::take(&mut output));
+        }
+    }
+    assert!(
+        view.formula_count() <= stokesforge_render_egui::FORMULA_CACHE_LIMIT + 16,
+        "the formula cache grew to {}",
+        view.formula_count()
+    );
+}
+
+#[test]
+fn a_long_edit_never_paints_a_freed_texture() {
+    every_painted_mesh_has_a_live_texture(false);
+}
+
+#[test]
+fn a_long_edit_never_paints_a_freed_texture_when_scaled() {
+    every_painted_mesh_has_a_live_texture(true);
+}
