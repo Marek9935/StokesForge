@@ -708,6 +708,26 @@ fn group_editor(
         }
         commit = true;
     }
+    // The group's own colour-bar rows, and the way to the look of the bar (#510).
+    if on_bar {
+        let order = panel.group_ids();
+        if let Some(bar) = panel.color_bar.as_mut() {
+            commit |= super::color_bar_settings::group_bar_rows(f, bar, group, &order);
+        }
+        let ctx = f.ui().ctx().clone();
+        f.field(|ui| {
+            if ui
+                .link(tr!("curve-bar-to-look"))
+                .on_hover_text(tr!("curve-bar-to-look", "hint"))
+                .clicked()
+            {
+                super::color_bar_settings::request_link(
+                    &ctx,
+                    super::color_bar_settings::BarLink::ToBarLook,
+                );
+            }
+        });
+    }
     f.field(|ui| {
         if ui
             .button(tr!("curve-group-ungroup"))

@@ -1087,6 +1087,10 @@ plot-color-bar-group-on = Sur la barre
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
 plot-color-bar-range = Plage
 plot-color-bar-no-series-groups = Cette couche n'a aucun groupe de séries. Groupez d'abord ses courbes, dans la fenêtre Séries.
+plot-color-bar-groups-on = Groupes sur la barre : { $names }
+plot-color-bar-groups-none = Aucun groupe n'est encore sur la barre. Cochez « Sur la barre de couleurs » sur un groupe, dans la fenêtre Séries.
+plot-color-bar-to-series = Groupes sur la barre : Séries »
+    .hint = Ouvre la fenêtre Séries sur le premier groupe de la barre. La plage, l'étiquette de rupture et l'enchaînement de chaque groupe s'y règlent.
 plot-color-bar-chain =
     Enchaîner les segments
     .hint = Chaque segment commence où le précédent finit : des groupes de 0 à 57 et de 0 à 25 sont tracés de 0 à 57 et de 57 à 82. Les couleurs ne changent pas.
@@ -1122,6 +1126,8 @@ disabled-color-bar-off = Activez d'abord « Afficher la barre de couleurs »
 curve-on-color-bar =
     Sur la barre de couleurs
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
+curve-bar-to-look = Aspect de la barre : Propriétés du graphique »
+    .hint = Ouvre les propriétés du graphique, onglet Légende, section Barre de couleurs : valeur, échelle, position, orientation, graduations et titre.
 curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici.
 
 # Onglet Thème

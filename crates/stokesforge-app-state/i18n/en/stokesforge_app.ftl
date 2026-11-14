@@ -1088,6 +1088,10 @@ plot-color-bar-group-on = On the bar
     .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
 plot-color-bar-range = Range
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
+plot-color-bar-groups-on = Groups on the bar: { $names }
+plot-color-bar-groups-none = No group is on the bar yet. Tick « On the color bar » on a group, in the Series window.
+plot-color-bar-to-series = Groups on the bar: Series »
+    .hint = Opens the Series window on the first group on the bar. Each group's range, break label and chaining are set there.
 plot-color-bar-chain =
     Chain the segments
     .hint = Each segment starts where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change.
@@ -1123,6 +1127,8 @@ disabled-color-bar-off = Turn on « Show color bar » first
 curve-on-color-bar =
     On the color bar
     .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
+curve-bar-to-look = Look of the bar: Graph Properties »
+    .hint = Opens Graph Properties on the Legend tab, Color bar section: value, scale, position, orientation, ticks and title.
 curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
 
 # Theme tab

@@ -7037,6 +7037,13 @@ impl AppState {
     /// is not a graph) leaves everything as it is.
     /// The Legend page has unfolded the colour bar section as asked: the
     /// request is spent.
+    pub fn request_color_bar_unfold(&mut self) {
+        if let Some(settings) = self.plot_settings.as_mut() {
+            settings.color_bar_unfold = true;
+        }
+    }
+
+    /// See [`AppState::request_color_bar_unfold`].
     pub fn spend_color_bar_unfold(&mut self) {
         if let Some(settings) = self.plot_settings.as_mut() {
             settings.color_bar_unfold = false;

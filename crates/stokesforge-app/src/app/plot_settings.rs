@@ -401,6 +401,40 @@ fn plot_settings_contents(
     for action in gradient_actions {
         state.dispatch(action);
     }
+    // Link buttons between the colour-bar rows of the two windows (#510).
+    if let Some(link) = super::color_bar_settings::take_link(ui.ctx()) {
+        use super::color_bar_settings::BarLink;
+        let graph = settings.graph;
+        // The draft is not in the model yet: the targets of
+        // `OpenObjectProperties` may not exist there, so only the tab is
+        // switched and the draft's selection is set by hand.
+        let tab = match link {
+            BarLink::ToBarLook => PlotSettingsTab::Legend,
+            BarLink::ToSeries(_) => PlotSettingsTab::Series,
+        };
+        state.dispatch(Action::OpenPlotSettings {
+            graph,
+            tab,
+            axis: None,
+        });
+        chosen_tab = tab;
+        match link {
+            BarLink::ToBarLook => state.request_color_bar_unfold(),
+            BarLink::ToSeries(group) => {
+                if let Some(edit) = state.plot_edit_mut() {
+                    let first = group.and_then(|group| {
+                        edit.spec
+                            .panels
+                            .get(edit.selected_panel)
+                            .and_then(|panel| panel.group_members(group).first().copied())
+                    });
+                    if let Some(first) = first {
+                        edit.selected_series = first;
+                    }
+                }
+            }
+        }
+    }
     for request in env.requests {
         state.dispatch(match request.edit {
             SavedColorEdit::Save => Action::SaveColor {
