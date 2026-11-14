@@ -399,6 +399,18 @@ impl StokesForgeApp {
     /// A detached window counts as open: the detaching is not
     /// remembered, and the position of its OS window is never written.
     pub(super) fn sync_window_views(&mut self) {
+        // A detached window owns its collapse flag; `collapsed_tabs` no longer
+        // holds it while detached (#513).
+        let detached_collapsed = |node: NodeId| -> Option<bool> {
+            self.detached_books
+                .get(&node)
+                .map(|window| window.collapsed)
+                .or_else(|| {
+                    self.detached_graphs
+                        .get(&node)
+                        .map(|window| window.collapsed)
+                })
+        };
         let open_order: Vec<NodeId> = self
             .floating_tabs
             .iter()
@@ -431,7 +443,8 @@ impl StokesForgeApp {
             } else {
                 stokesforge_session::WindowMode::Closed
             };
-            let collapsed = self.collapsed_tabs.iter().any(|tab| tab_node(*tab) == node);
+            let collapsed = detached_collapsed(node)
+                .unwrap_or_else(|| self.collapsed_tabs.iter().any(|tab| tab_node(*tab) == node));
             let geometry = WindowGeometry {
                 x: f64::from(rect.min.x),
                 y: f64::from(rect.min.y),
@@ -448,6 +461,102 @@ impl StokesForgeApp {
                 self.saved_window_geometries.insert(node, geometry);
             }
         }
+    }
+}
+
+/// The window state of a project as the application shows it right after
+/// startup or an Open (#513): the inverse of
+/// [`StokesForgeApp::sync_window_views`].
+pub(super) struct RestoredWindows {
+    pub(super) floating_tabs: Vec<Tab>,
+    pub(super) cascade_rank: std::collections::HashMap<Tab, u32>,
+    pub(super) next_cascade: u32,
+    pub(super) collapsed_tabs: std::collections::HashSet<Tab>,
+    pub(super) maximized_tab: Option<Tab>,
+    pub(super) saved_window_geometries: std::collections::HashMap<NodeId, WindowGeometry>,
+    pub(super) floating_rects: std::collections::HashMap<NodeId, egui::Rect>,
+}
+
+impl RestoredWindows {
+    pub(super) fn from_state(state: &stokesforge_app_state::state::AppState) -> Self {
+        use stokesforge_session::WindowMode;
+        let saved_window_geometries: std::collections::HashMap<NodeId, WindowGeometry> =
+            (*state.snapshot().window_geometries).clone();
+        let floating_rects = saved_window_geometries
+            .iter()
+            .map(|(node, geometry)| (*node, super::window_placement::geometry_rect(geometry)))
+            .collect();
+        let mut restored = Self {
+            floating_tabs: Vec::new(),
+            cascade_rank: Default::default(),
+            next_cascade: 0,
+            collapsed_tabs: Default::default(),
+            maximized_tab: None,
+            saved_window_geometries,
+            floating_rects,
+        };
+        if restored
+            .saved_window_geometries
+            .values()
+            .any(|geometry| geometry.view.is_some())
+        {
+            // Project saved with the state of the windows (issue #16): it is
+            // restored as is, a detached window coming back floating.
+            let mut open = Vec::new();
+            for (node, kind) in super::window_stack::window_nodes(&state.project_tree()) {
+                let Some(view) = restored
+                    .saved_window_geometries
+                    .get(&node)
+                    .and_then(|g| g.view)
+                else {
+                    continue;
+                };
+                if view.mode != WindowMode::Closed {
+                    open.push((view.stack, super::tab::tab_for_window(node, kind), view));
+                }
+            }
+            open.sort_by_key(|(stack, tab, _)| (*stack, tab_node(*tab).raw()));
+            for (_, tab, view) in open {
+                restored.open(tab);
+                if view.collapsed {
+                    restored.collapsed_tabs.insert(tab);
+                }
+                if view.mode == WindowMode::Maximized {
+                    restored.maximized_tab = Some(tab);
+                }
+            }
+        } else {
+            // Fallback, a file saved before the window states (one separate
+            // branch): the first workbook and the first graph.
+            if let Some((first_book, _)) = state.books().into_iter().next() {
+                restored.open(Tab::Book(first_book));
+            }
+            if let Some((first_graph, _)) = state.graphs().into_iter().next() {
+                restored.open(Tab::Graph(first_graph));
+            }
+        }
+        restored
+    }
+
+    fn open(&mut self, tab: Tab) {
+        self.floating_tabs.push(tab);
+        self.cascade_rank.insert(tab, self.next_cascade);
+        self.next_cascade = self.next_cascade.wrapping_add(1);
+    }
+}
+
+impl StokesForgeApp {
+    /// Opens the windows of the project just loaded, after
+    /// `forget_project_views` emptied the old ones (#513).
+    pub(super) fn restore_project_windows(&mut self) {
+        let restored = RestoredWindows::from_state(&self.state);
+        self.floating_tabs = restored.floating_tabs;
+        self.cascade_rank = restored.cascade_rank;
+        self.next_cascade = restored.next_cascade;
+        self.collapsed_tabs = restored.collapsed_tabs;
+        self.maximized_tab = restored.maximized_tab;
+        self.saved_window_geometries = restored.saved_window_geometries;
+        self.floating_rects = restored.floating_rects;
     }
 }
 
@@ -936,6 +1045,22 @@ mod tests {
             assert_eq!(fixed(&bench), want, "{what} in the detached graph window");
         }
         bench.finish();
+    }
+
+    /// #513: a window collapsed after it was detached saves its own collapse.
+    /// Witness: read `collapsed_tabs` again for detached tabs.
+    #[test]
+    fn a_detached_window_collapsed_after_detaching_saves_its_collapse() {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let rect = egui::Rect::from_min_size(egui::pos2(40.0, 60.0), egui::vec2(500.0, 300.0));
+        app.remember_window_geometry(Tab::Graph(graph), rect);
+        app.detach_tab(Tab::Graph(graph));
+        app.detached_graphs.get_mut(&graph).unwrap().collapsed = true;
+        app.sync_window_views();
+        assert!(persisted_view(&session, graph).view.unwrap().collapsed);
+        session.shutdown().unwrap();
     }
 
     /// Issue #16: the state of each window (open/maximized/closed, collapsed,

@@ -219,10 +219,11 @@ refresh.
 
 **Detaching is not remembered**: a detached window is saved as
 open and comes back floating on reload; the position and size of its OS window
-are neither written nor read back. At startup, `StokesForgeApp::new`
-restores the open windows (in stacking order), the maximized one and
-the collapsed ones; with no saved state, it opens the first workbook and the
-first graph.
+are neither written nor read back. At startup (`StokesForgeApp::new`) and on
+every Open or Recover (`restore_project_windows`, right after
+`forget_project_views`), `RestoredWindows::from_state` restores the open windows (in stacking order), the maximized one and
+the collapsed ones; with no saved state (old file), it opens the first workbook
+and the first graph. A detached window saves its own collapse flag.
 
 
 ### Maximizing and detaching a window

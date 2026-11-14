@@ -600,10 +600,11 @@ fired).
   tabs (see "Generic detaching of content tabs") —
   a technical constraint of the `'static` closure of `show_viewport_deferred`,
   not a deliberate extension of the limit.
-- **Open windows and their mode are not restored**: startup
-  opens the first workbook and the first graph. The saved positions
-  and sizes are reused for the contents, but maximization and
-  detachment are not a persisted layout plan.
+- **Open windows and their mode are restored** at startup and on every Open
+  or Recover (#513): open, maximised, collapsed, stacking order and floating
+  geometry. Detachment is not part of the plan: a detached window comes back
+  docked and open. An old file without window states opens the first workbook
+  and the first graph.
 
 ### A detail that looks like a detail
 

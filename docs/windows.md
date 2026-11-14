@@ -158,7 +158,8 @@ imposed initial focus. Default sizes (`window_placement.rs`): workbook
 373 x 420 (two thirds of 560), graph 560 x 460, matrix and note 560 x 420;
 minimum 220 x 140. Opening: `open_tab` (`window_stack.rs`), from the Project Manager; a
 second opening on the same entry brings the window to the front without
-duplicating it. Each new window is offset in a cascade.
+duplicating it. Opening a project (startup, File > Open, Recover Projects) restores
+its saved windows (#513). Each new window is offset in a cascade.
 
 **Graph in the Page Layout Mode (#426).** The same window, same code
 (`graph_view_contents`), with two ruler strips (`RULER_WIDTH`) around the figure and

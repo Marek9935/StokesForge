@@ -12,7 +12,7 @@ One file holds the whole project:
 - **The analyses:** the calculations you ran, with their settings and their results. The result columns are ordinary columns of the workbook, so opening a file does not recalculate them. Only columns with a formula are computed again.
 - **Final corrections:** the record of a baseline or correction that replaced data, and the original data it replaced, so that **Restore Original Data** still works after you reopen the project.
 - **Where the data came from:** for imported columns, the source file, the import template and the file metadata, so that **Refresh from Source** works after you reopen the project.
-- **The look of your workspace:** position, size, open or closed state and stacking order of the windows, and the width of the columns you resized.
+- **The look of your workspace:** position, size, open, maximised, collapsed or closed state and stacking order of the windows (they come back when you open the project, including from **Recover Projects**; a file saved by an older version opens its first workbook and first graph), and the width of the columns you resized.
 - **Colors saved in the project** (the choice **Saved in project** in the color picker).
 
 The file does **not** contain:
