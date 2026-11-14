@@ -593,8 +593,10 @@ plot area along the axis direction and is placed at its band.
 strip). Clamped to a quarter of the plot area; none for a band with
 `offset > 0` or an edge with no axis area (`size == 0`); nearest edge wins in a
 corner. All axis gestures go through `component_at`, so they work there too.
-The axis beats the curve on the strip (double-click: shape, then axis, then
-curve; right-click looks for a curve only on the plot area); shapes, texts and
+On the strip a curve under the pointer beats the axis (#529: double-click
+looks for a shape, then a curve, then the axis; a marker on the frame edge is
+picked from outside the frame too; right-click looks for a curve only on the
+plot area); off the curve the strip picks the axis. Shapes, texts and
 annotations keep their priority. Known limit: a data right axis
 (`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
 the whole area. Test: `geometry.rs`, `layers.rs`, `hit.rs`.
