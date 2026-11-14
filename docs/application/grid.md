@@ -670,10 +670,11 @@ fired).
   `TableBuilder::body().rows()`, columns by the window and spacers of
   "Column width", so a frame costs what is visible, not the size of the sheet.
   Nothing caps the number of columns.
-- **Open windows and their mode are not restored**: startup
-  opens the first workbook and the first graph. The saved positions
-  and sizes are reused for the contents, but maximization and
-  detachment are not a persisted layout plan.
+- **Open windows and their mode are restored** at startup and on every Open
+  or Recover (#513): open, maximised, collapsed, stacking order and floating
+  geometry. Detachment is not part of the plan: a detached window comes back
+  docked and open. An old file without window states opens no window (the
+  in-memory demo still opens its first workbook and graph).
 
 ### A detail that looks like a detail
 
