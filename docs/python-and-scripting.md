@@ -387,6 +387,8 @@ serves to identify its window, not to title the figure (#103).
 | `x_error`, `y_error` | handles of the error columns; without them, each `y` takes the first X Error / Y Error column to its right, before the next Y (`compose::errors_for`, #360); `None` goes without |
 | `histogram_bins` | integer from 1 to 65,536 |
 
+A new graph (no `graph=`) whose `x_title` / `y_title` is not given gets the application's default axis titles (#506, `stokesforge_core::resolve::with_default_axis_titles`): the Typst template that reads the column. A title given, even `''`, wins.
+
 The automatic label comes from the column and stays literal text: metadata
 containing markup is not interpreted. Titles and labels given explicitly use
 Typst, like the application's properties.
@@ -434,7 +436,7 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 
 | Key | Value |
 |---|---|
-| `title`, `panel_title`, `x_title`, `y_title`, `x_unit`, `y_unit` | strings (Typst markup for the titles) |
+| `title`, `panel_title`, `x_title`, `y_title` | strings (Typst markup for the titles) |
 | `title_visible`, `stale_warning`, `decimal_comma` | booleans (graph) |
 | `title_color`, `background` | `#RRGGBB` or `#RRGGBBAA`; `""` = automatic (title) or white (background) |
 | `x_scale`, `y_scale` | `linear` or `log` |
@@ -704,7 +706,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.6"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.7"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -850,8 +852,6 @@ decimal_comma
 panel_title
 x_title
 y_title
-x_unit
-y_unit
 x_scale
 y_scale
 x_from

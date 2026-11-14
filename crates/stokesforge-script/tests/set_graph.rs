@@ -77,7 +77,7 @@ fn set_graph_sets_the_graph_and_the_panel() {
         "g = pyst.resolve('[G]')\n\
          pyst.set_graph(g, title='T', title_visible=True, stale_warning=False, decimal_comma=True,\n\
              background='#102030', title_color='#FF0000', panel_title='P',\n\
-             x_title='Time', y_title='Signal', x_unit='s', y_unit='V',\n\
+             x_title='Time (s)', y_title='Signal (V)',\n\
              x_scale='log', y_scale='linear', x_from=1, x_to=100,\n\
              y_from=10, y_to=0, x_grid=False, y_grid=True, y_inverted=True,\n\
              x_visible=True, y_visible=True,\n\
@@ -92,10 +92,8 @@ fn set_graph_sets_the_graph_and_the_panel() {
     assert_eq!(spec.title_color, "#FF0000");
     let panel = &spec.panels[0];
     assert_eq!(panel.title, "P");
-    assert_eq!(panel.bottom.label, "Time");
-    assert_eq!(panel.left.label, "Signal");
-    assert_eq!(panel.bottom.unit, "s");
-    assert_eq!(panel.left.unit, "V");
+    assert_eq!(panel.bottom.label, "Time (s)");
+    assert_eq!(panel.left.label, "Signal (V)");
     assert_eq!(panel.bottom.scale, AxisScale::Log);
     assert_eq!(panel.left.scale, AxisScale::Linear);
     assert!(!panel.bottom.auto_range);
@@ -233,6 +231,9 @@ fn set_graph_refuses_without_writing_anything() {
     run(&b, GRAPH);
     let before = graph_spec(&b);
     let history = b.session.snapshot().unwrap().history;
+    // The axis unit setting is gone (#506): it is an unknown key now.
+    let gone = refused(&b, "pyst.set_graph(g, x_unit='s')");
+    assert!(gone.contains("unknown graph option: x_unit"), "{gone}");
     let unknown = refused(&b, "pyst.set_graph(g, title='ok', titel='x')");
     assert!(unknown.contains("unknown graph option: titel"), "{unknown}");
     for body in [

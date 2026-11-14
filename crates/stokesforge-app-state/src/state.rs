@@ -6103,7 +6103,7 @@ impl AppState {
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.creation_folder(),
                 name: None,
-                spec: self.with_new_graph_legend(PlotSpec {
+                spec: self.with_new_graph_defaults(PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
                     ..PlotSpec::empty("")
                 }),
@@ -8782,17 +8782,19 @@ impl AppState {
             .clone()
     }
 
-    /// A new graph spec carrying the legend default of the Preferences
-    /// (#499): the setting rides in the creation command itself. A new graph
-    /// also has no legend frame (#507, D6); an opened file keeps its own.
-    fn with_new_graph_legend(&self, mut spec: PlotSpec) -> PlotSpec {
+    /// A new graph spec carrying the defaults of a new graph: the legend
+    /// setting of the Preferences (#499), no legend frame (#507, D6; an opened
+    /// file keeps its own), and the axis titles read from the columns (#506,
+    /// [`stokesforge_core::resolve::with_default_axis_titles`]). All of it
+    /// rides in the creation command itself: one history step.
+    fn with_new_graph_defaults(&self, mut spec: PlotSpec) -> PlotSpec {
         let text = self.new_graph_legend_text();
         for panel in spec.panels.iter_mut() {
             panel.legend.text.from = text.from.clone();
             panel.legend.text.template = text.template.clone();
             panel.legend.frame = false;
         }
-        spec
+        stokesforge_core::resolve::with_default_axis_titles(&self.snapshot.tree, spec)
     }
 
     /// The default folder of a kind of file dialog, as written in the preferences
@@ -11902,7 +11904,7 @@ impl AppState {
         // The new-graph default of the Preferences rides in the spec of the
         // creation itself: one command, one history step.
         // A fresh layer shows no mirror, so there is nothing to switch off.
-        let spec = self.with_new_graph_legend(PlotSpec {
+        let spec = self.with_new_graph_defaults(PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
@@ -12564,7 +12566,7 @@ impl AppState {
         };
         let mut panel = PanelSpec::default();
         panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
-        let spec = self.with_new_graph_legend(PlotSpec {
+        let spec = self.with_new_graph_defaults(PlotSpec {
             panels: Panels::new(vec![panel]),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()

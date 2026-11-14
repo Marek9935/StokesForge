@@ -356,8 +356,7 @@ const SHOTS: &[Shot] = &[
                 if let Some(series) = spec.panels.first().and_then(|p| p.series.first()).cloned() {
                     let layer = spec.panels.get_mut(1).expect("the overlay layer");
                     layer.series.push(series);
-                    layer.bottom.label = "Wavelength".to_owned();
-                    layer.bottom.unit = "nm".to_owned();
+                    layer.bottom.label = "Wavelength (nm)".to_owned();
                     // The bounds shown come from a painted graph, which this
                     // shot does not have: typed bounds show real numbers.
                     layer.bottom.auto_range = false;

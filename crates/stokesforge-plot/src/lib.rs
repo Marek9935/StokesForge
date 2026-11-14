@@ -101,7 +101,7 @@ pub mod text_font;
 pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
-pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection};
+pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection, AXIS_TITLE_TEMPLATE};
 pub use color_bar::{
     value_color, ColorBarOrientation, ColorBarPosition, ColorBarScale, ColorBarSegment,
     ColorBarSpec, ColorBarTicks, ColorBarValue,

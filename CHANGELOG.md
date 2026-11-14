@@ -83,6 +83,17 @@ without a message, see `docs/persistence.md`).
   workbooks are read: graphs and matrices are left out. `.opju` is not read
   yet. The CLI and `pyst.import_file` import the `Data` sheets of an `.opj`.
 
+### Changed
+
+- Axis title (#506): Graph Properties > Axes has one free field, **Axis title**;
+  the Units field is gone. A new graph fills its axis titles with a formula that
+  reads the column (long name, else short name, then ` / units` only when there
+  are some), and typed text replaces it. A file made with an older version keeps
+  its look: a title and a unit are joined into one text at load. In-place
+  editing keeps the whole text. `.stf` unchanged; `pyst` API 0.7: `set_graph`
+  loses `x_unit` and `y_unit` (the titles take the whole text), and `plot()`
+  titles the axes of a new graph like the application.
+
 ## [1.1.0] - 2026-11-11
 
 ### Added

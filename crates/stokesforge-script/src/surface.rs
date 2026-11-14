@@ -887,7 +887,7 @@ Known limits of this surface:
 /// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
 /// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
 /// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
-pub const PYST_API_VERSION: &str = "0.6";
+pub const PYST_API_VERSION: &str = "0.7";
 
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///

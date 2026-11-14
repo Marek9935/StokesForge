@@ -405,7 +405,22 @@ fn witness_project_bytes() -> Vec<u8> {
 
 #[test]
 fn the_v1_witness_reads_back_and_gives_the_expected_project() {
-    let (expected, expected_views) = witness_project();
+    let (mut expected, expected_views) = witness_project();
+    // The axis unit of the fixture reads back folded into its title (#506); the
+    // file itself keeps writing it (the next test).
+    let root = expected.root();
+    let graph = expected
+        .tree()
+        .child_by_name(root, "Fig1")
+        .expect("read")
+        .expect("Fig1");
+    let spec = match expected.tree().node(graph).expect("node").kind() {
+        stokesforge_core::NodeKind::Graph { spec, .. } => spec.clone(),
+        other => panic!("expected a graph, got {other:?}"),
+    };
+    expected
+        .set_plot_spec(graph, common::as_read_back(spec))
+        .expect("spec set");
     let (read_back, views, report) =
         load_with_report(&v1_file()).expect("the V1 witness reads back");
     assert!(report.is_clean(), "{report:?}");
