@@ -603,8 +603,8 @@ fired).
 - **Open windows and their mode are restored** at startup and on every Open
   or Recover (#513): open, maximised, collapsed, stacking order and floating
   geometry. Detachment is not part of the plan: a detached window comes back
-  docked and open. An old file without window states opens the first workbook
-  and the first graph.
+  docked and open. An old file without window states opens no window (the
+  in-memory demo still opens its first workbook and graph).
 
 ### A detail that looks like a detail
 

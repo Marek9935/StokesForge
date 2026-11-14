@@ -518,12 +518,23 @@ impl StokesForgeApp {
     /// value is silently ignored: the bench must not refuse
     /// to start because of verification tooling.
     pub fn new(state: AppState) -> Self {
+        Self::build(state, false)
+    }
+
+    /// Like [`Self::new`] for a project **read from a file** (#513): a file
+    /// without saved window states opens no window, where an in-memory project
+    /// (the demo, a test) opens its first workbook and first graph.
+    pub fn new_from_file(state: AppState) -> Self {
+        Self::build(state, true)
+    }
+
+    fn build(state: AppState, from_file: bool) -> Self {
         let autoquit = std::env::var(AUTOQUIT_ENV)
             .ok()
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
 
-        let restored = window_detach::RestoredWindows::from_state(&state);
+        let restored = window_detach::RestoredWindows::from_state(&state, from_file);
         // Without a workbook or graph to show, no floating window
         // opens — neither the script console nor the Project Manager has its
         // place here, they are fixed panels.
@@ -2013,7 +2024,7 @@ impl StokesForgeApp {
         if replaces_project && self.state.snapshot().epoch != epoch_before {
             self.forget_project_views(ctx);
             // The new project's windows come back as at startup (#513).
-            self.restore_project_windows();
+            self.restore_project_windows(true);
         }
         if self.state.blocking_dialog() {
             ctx.request_repaint();
@@ -3612,20 +3623,26 @@ mod tests {
         saved.session.shutdown().unwrap();
     }
 
-    /// #513: a file saved before the window states opens its first workbook
-    /// and first graph. Witness: delete the fallback branch.
+    /// #513: a file saved without window states opens no window, on Open and
+    /// at startup; an in-memory project still opens its first workbook and
+    /// first graph. Witness: drop the `from_file` condition (the file then
+    /// opens them), or delete the fallback (the in-memory project opens none).
     #[test]
-    fn opening_a_file_without_window_states_opens_the_first_book_and_graph() {
+    fn a_file_without_window_states_opens_no_window_but_an_in_memory_project_does() {
         let (session, graph) = plotted_graph();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("old.stf");
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        assert_eq!(
+            app.floating_tabs,
+            vec![Tab::Book(book), Tab::Graph(graph)],
+            "in memory: the first workbook and first graph"
+        );
         app.state.dispatch(Action::SaveAs {
             path: path.display().to_string(),
         });
-        let book = app.state.books()[0].0;
-        app.floating_tabs.clear();
         let ctx = egui::Context::default();
         app.dispatch_action(
             &ctx,
@@ -3634,7 +3651,15 @@ mod tests {
                 pending_edits: false,
             },
         );
-        assert_eq!(app.floating_tabs, vec![Tab::Book(book), Tab::Graph(graph)]);
+        assert!(app.floating_tabs.is_empty(), "Open of a file");
+        // Startup from the same file.
+        let reloaded = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
+        reloaded.handle().load(&path).unwrap();
+        let state = AppState::new(reloaded.handle(), path.display().to_string()).unwrap();
+        assert!(StokesForgeApp::new_from_file(state)
+            .floating_tabs
+            .is_empty());
+        reloaded.shutdown().unwrap();
         session.shutdown().unwrap();
     }
 

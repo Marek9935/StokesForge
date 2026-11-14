@@ -478,7 +478,10 @@ pub(super) struct RestoredWindows {
 }
 
 impl RestoredWindows {
-    pub(super) fn from_state(state: &stokesforge_app_state::state::AppState) -> Self {
+    pub(super) fn from_state(
+        state: &stokesforge_app_state::state::AppState,
+        from_file: bool,
+    ) -> Self {
         use stokesforge_session::WindowMode;
         let saved_window_geometries: std::collections::HashMap<NodeId, WindowGeometry> =
             (*state.snapshot().window_geometries).clone();
@@ -525,9 +528,10 @@ impl RestoredWindows {
                     restored.maximized_tab = Some(tab);
                 }
             }
-        } else {
-            // Fallback, a file saved before the window states (one separate
-            // branch): the first workbook and the first graph.
+        } else if !from_file {
+            // Fallback for a project that was not read from a file (the
+            // in-memory demo, tests): the first workbook and the first graph.
+            // A file without window states opens no window (#513).
             if let Some((first_book, _)) = state.books().into_iter().next() {
                 restored.open(Tab::Book(first_book));
             }
@@ -548,8 +552,8 @@ impl RestoredWindows {
 impl StokesForgeApp {
     /// Opens the windows of the project just loaded, after
     /// `forget_project_views` emptied the old ones (#513).
-    pub(super) fn restore_project_windows(&mut self) {
-        let restored = RestoredWindows::from_state(&self.state);
+    pub(super) fn restore_project_windows(&mut self, from_file: bool) {
+        let restored = RestoredWindows::from_state(&self.state, from_file);
         self.floating_tabs = restored.floating_tabs;
         self.cascade_rank = restored.cascade_rank;
         self.next_cascade = restored.next_cascade;
