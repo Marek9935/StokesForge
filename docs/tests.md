@@ -1280,6 +1280,11 @@ Column virtualization (the table holds the visible window and two spacers) and t
 | a block selected past the window has no grip band at the window's border | `a_selected_block_has_no_grip_band_at_the_edge_of_the_window` (extents taken as block edges: red) |
 | no free area after the last column unless it is painted | `the_blank_column_target_needs_the_last_column_painted` (last painted column taken as the last: red) |
 | ArrowRight from the last visible column, ArrowDown below the last row, Tab adding a column: the active cell is fully visible | `the_right_arrow_scrolls_to_the_next_column`, `the_down_arrow_scrolls_to_the_next_row`, `tab_on_the_last_column_scrolls_to_the_new_column` (call to `follow_cursor` dropped: red) |
+| an entry (cell or header field) scrolled out of the window, horizontally or vertically, takes typed characters and Backspace, and typing does not move the grid | `typing_in_a_cell_scrolled_out_of_view_reaches_its_buffer_without_scrolling` (call to `paint_unpainted_edit` dropped: red) |
+| Enter off-screen writes the text and the grid scrolls to the next row, on both axes; Tab off-screen writes, moves to the next column and scrolls | `enter_in_a_cell_scrolled_out_of_view_writes_it_and_scrolls_to_the_cursor`, `tab_in_a_cell_scrolled_out_of_view_moves_to_the_next_column_and_scrolls` (editor not drawn: red; `follow_cursor` disarmed: red) |
+| Escape off-screen cancels, writes nothing, does not scroll | `escape_in_a_cell_scrolled_out_of_view_cancels_without_scrolling` (editor not drawn: red) |
+| the entry keeps its text and focus when its cell scrolls back | `a_cell_scrolled_out_and_back_keeps_its_text_and_its_focus` (identifier from `ui.id()`: red) |
+| a header field (Long Name) off-screen behaves like a cell, Tab scrolls to the next column | `a_header_field_scrolled_out_of_view_is_typed_in_and_tab_scrolls` (editor not drawn: red; `follow_cursor` disarmed: red) |
 | a click on a partly visible column does not scroll | `a_click_does_not_scroll_the_grid` (follow not conditioned on a key: red) |
 | the least scroll that shows a range | `follow_offset_scrolls_just_enough` |
 

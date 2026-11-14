@@ -1402,8 +1402,10 @@ fn header_field_widget(
             // What the Formula row says while typing (unknown letter, column that reads
             // itself, modified `#REF`) is decided in `app-state`: the grid paints it. The
             // field always writes what is typed (#433), so it never stays open.
+            let visible = ui.is_rect_visible(rect);
             let refusal = state.header_edit_issue();
-            let help = field == HeaderField::Formula && state.show_column_formula_help();
+            let help = visible && field == HeaderField::Formula && state.show_column_formula_help();
+            mark_edit_painted(ui.ctx());
             let Some(edit) = state.header_editing_mut() else {
                 return;
             };
@@ -1418,7 +1420,7 @@ fn header_field_widget(
             // painted just right of the cell in a layer above the grid, over the
             // neighbouring column, so the field keeps the whole width of the cell.
             // The icon never takes the focus whose loss ends the edit.
-            let id = ui.id().with("header_edit");
+            let id = stable_edit_id(ui.ctx(), ("header_edit", column.raw(), field as u8));
             let mut paint = |ui: &mut egui::Ui, width: f32| {
                 inplace_edit::show(
                     ui,
@@ -1434,11 +1436,11 @@ fn header_field_widget(
             // A text that will not compute tints the cell itself (#410): the fill
             // follows the cell and never crosses its grid lines, unlike a frame.
             // The bubble with the reason stays.
-            if refusal.is_some() {
+            if refusal.is_some() && visible {
                 paint_refusal_tint(ui, rect);
             }
             let shown = paint(ui, f32::INFINITY);
-            if let Some(message) = refusal.as_deref() {
+            if let Some(message) = refusal.as_deref().filter(|_| visible) {
                 crate::field_state::show_bubble(
                     &shown.response,
                     &crate::field_state::FieldIssue::refused(message),
@@ -1998,6 +2000,10 @@ pub(super) fn grid_contents(
             );
         });
 
+    // #534: an entry whose cell the table did not build (scrolled out of the
+    // window, horizontally or vertically) is still typed in, before the keyboard.
+    paint_unpainted_edit(ui, state, actions, sheet, &column_ids);
+
     // A width is pushed only at the **end of a resize done by hand**: pushing the
     // rendered width on every frame would mark the project modified on every
     // opening (#325).
@@ -2060,6 +2066,79 @@ pub(super) fn grid_contents(
         },
     );
     Some(table_output)
+}
+
+/// Identifier of an in-place editor of the grid (#534). It names the edited cell or
+/// header field and the viewport, never the position in the table: the editor
+/// keeps its focus, caret and selection when it scrolls out of the painted window
+/// and back, where the table's cell identifiers (row and column index) would change.
+fn stable_edit_id(ctx: &egui::Context, key: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_edit", ctx.viewport_id(), key))
+}
+
+fn edit_painted_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_edit_painted", ctx.viewport_id()))
+}
+
+/// Notes that the open editor was drawn by the table in this pass.
+fn mark_edit_painted(ctx: &egui::Context) {
+    let (pass, id) = (ctx.cumulative_pass_nr(), edit_painted_id(ctx));
+    ctx.data_mut(|data| data.insert_temp(id, pass));
+}
+
+fn edit_painted(ctx: &egui::Context) -> bool {
+    let (pass, id) = (ctx.cumulative_pass_nr(), edit_painted_id(ctx));
+    ctx.data(|data| data.get_temp::<u64>(id)) == Some(pass)
+}
+
+/// An open cell or header editor that the table did not build this pass (its row
+/// or column is outside the painted window) is drawn all the same, by the same
+/// code, in a Ui whose clip is empty (#534): egui keeps the focus of a widget
+/// that is registered each frame, so typing, Backspace, Enter, Tab and Escape act
+/// as in a visible editor and nothing is lost. An empty clip draws nothing and
+/// makes the `TextEdit` skip its scroll-to-cursor, so typing never moves the grid;
+/// only the cursor that Enter or Tab moves does (`follow_cursor`).
+fn paint_unpainted_edit(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    column_ids: &[NodeId],
+) {
+    if edit_painted(ui.ctx()) {
+        return;
+    }
+    let cell = state
+        .editing()
+        .filter(|edit| column_ids.contains(&edit.column))
+        .map(|edit| (edit.column, edit.row));
+    let header = state
+        .header_editing()
+        .filter(|edit| column_ids.contains(&edit.column))
+        .map(|edit| (edit.column, edit.field));
+    if cell.is_none() && header.is_none() {
+        return;
+    }
+    let rect = egui::Rect::from_min_size(
+        ui.clip_rect().min,
+        egui::vec2(DEFAULT_COLUMN_WIDTH, HEADER_SUBROW_HEIGHT),
+    );
+    let mut hidden = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    hidden.set_clip_rect(egui::Rect::NOTHING);
+    if let Some((column, row)) = cell {
+        cell_widget(&mut hidden, state, actions, sheet, column, row);
+    } else if let Some((column, field)) = header {
+        header_field_widget(
+            &mut hidden,
+            state,
+            actions,
+            sheet,
+            column,
+            field,
+            HEADER_SUBROW_HEIGHT,
+            false,
+        );
+    }
 }
 
 /// The data columns the table paints (#534) and the two spacers that stand for the
@@ -3237,8 +3316,14 @@ fn edit_cell_widget(
 ) {
     // A number that an f64 cannot hold (`1e400`, `1e-400`) is refused where it is
     // typed (#429): decided in `app-state`, the grid tints the cell and keeps it open.
-    let refusal = state.cell_edit_refusal();
     let rect = ui.available_rect_before_wrap();
+    // Not visible: scrolled out of the painted window, the editor is drawn in a
+    // clipped Ui (`paint_unpainted_edit`): it types and ends like any other, but
+    // draws no tint and no bubble (#534).
+    let visible = ui.is_rect_visible(rect);
+    let refusal = state.cell_edit_refusal();
+    let id = stable_edit_id(ui.ctx(), ("cell_edit", column.raw(), row));
+    mark_edit_painted(ui.ctx());
     let Some(edit) = state.editing_mut() else {
         return;
     };
@@ -3247,7 +3332,7 @@ fn edit_cell_widget(
     } else {
         inplace_edit::Opening::SelectAll
     };
-    if refusal.is_some() {
+    if refusal.is_some() && visible {
         paint_refusal_tint(ui, rect);
     }
     // The shared in-place edit contract (#224): focus and selection on opening,
@@ -3258,7 +3343,7 @@ fn edit_cell_widget(
     // move the selection, as in any spreadsheet.
     let shown = inplace_edit::show(
         ui,
-        ui.id().with("cell_edit"),
+        id,
         egui::TextEdit::singleline(&mut edit.buffer)
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY),
@@ -3266,7 +3351,7 @@ fn edit_cell_widget(
         inplace_edit::FocusLoss::Ends,
         None,
     );
-    if let Some(message) = refusal.as_deref() {
+    if let Some(message) = refusal.as_deref().filter(|_| visible) {
         crate::field_state::show_bubble(
             &shown.response,
             &crate::field_state::FieldIssue::refused(message),
@@ -7694,6 +7779,222 @@ mod tests {
         assert!(
             rect.left() >= 0.0 && rect.right() <= viewport_right(&bench) + 0.5,
             "fully visible: {rect:?}"
+        );
+    }
+
+    // ---- #534: an entry keeps working when its cell is scrolled out of view ----
+
+    /// Scrolls the grid vertically by `delta` points (positive: towards the last
+    /// row) with the wheel, then lets the smooth scrolling finish.
+    fn scroll_down_by(bench: &mut Bench, delta: f32) {
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(400.0, 300.0))]);
+        bench.image(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -delta),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for _ in 0..60 {
+            bench.image(Vec::new());
+        }
+    }
+
+    /// Opens the editor of the first cell of the first column (double click) and
+    /// scrolls it out of the painted window: far to the right, or far down.
+    fn edit_first_cell_then_scroll_away(bench: &mut Bench, down: bool, text: &str) {
+        bench.click_on(text);
+        bench.click_on(text);
+        let edit = bench.state.editing().expect("the cell opens its editor");
+        assert_eq!((edit.column, edit.row), (bench.columns[0], 0));
+        if down {
+            scroll_down_by(bench, 1.0e5);
+        } else {
+            scroll_right_by(bench, 1.0e7);
+        }
+        assert!(
+            bench.center_of(text).is_none(),
+            "the edited cell is out of the painted window"
+        );
+        assert!(bench.state.editing().is_some(), "the entry is still open");
+    }
+
+    fn type_text(bench: &mut Bench, text: &str) {
+        bench.image(vec![egui::Event::Text(text.to_string())]);
+        bench.image(Vec::new());
+    }
+
+    /// Typed characters and Backspace reach the buffer of a cell scrolled out of
+    /// view, horizontally and vertically, and typing alone does not scroll the grid.
+    /// Witness: drop the call to `paint_unpainted_edit` (the buffer stays "101"; a
+    /// scroll_to_rect of the clipped editor would show as a moved window).
+    #[test]
+    fn typing_in_a_cell_scrolled_out_of_view_reaches_its_buffer_without_scrolling() {
+        for down in [false, true] {
+            let mut bench = if down {
+                Bench::with_shape(3, 200, |c, r| f64::from(c * 1000 + r))
+            } else {
+                wide_bench(1000, false)
+            };
+            let text = if down { "1001" } else { "101" };
+            edit_first_cell_then_scroll_away(&mut bench, down, text);
+            let before = bench.texts();
+            type_text(&mut bench, "abc");
+            type_text(&mut bench, "d");
+            bench.press_key(egui::Key::Backspace, egui::Modifiers::NONE);
+            let edit = bench.state.editing().expect("still open");
+            assert_eq!(edit.buffer, "abc", "down: {down}");
+            assert_eq!(
+                bench.texts(),
+                before,
+                "typing does not move the grid (down: {down})"
+            );
+        }
+    }
+
+    /// Enter in a cell scrolled out of view writes what was typed, goes down one
+    /// row and the grid scrolls back to the new cursor cell, on both axes.
+    /// Witness: drop the call to `paint_unpainted_edit` (nothing is written), or
+    /// the call to `follow_cursor`.
+    #[test]
+    fn enter_in_a_cell_scrolled_out_of_view_writes_it_and_scrolls_to_the_cursor() {
+        for down in [false, true] {
+            let mut bench = if down {
+                Bench::with_shape(3, 200, |c, r| f64::from(c * 1000 + r))
+            } else {
+                wide_bench(1000, false)
+            };
+            let text = if down { "1001" } else { "101" };
+            edit_first_cell_then_scroll_away(&mut bench, down, text);
+            type_text(&mut bench, "abc");
+            enter(&mut bench);
+            assert_commit_pushed(&bench, 0, "abc");
+            assert!(bench.state.editing().is_none(), "Enter closes the entry");
+            let commit = bench
+                .seen
+                .iter()
+                .find(|action| matches!(action, Action::CommitCellAndAdvance { .. }))
+                .cloned()
+                .unwrap();
+            bench.state.dispatch(commit);
+            for _ in 0..6 {
+                bench.image(Vec::new());
+            }
+            assert_eq!(
+                bench.cursor(),
+                Some(GridCursor::Data(bench.columns[0], 1)),
+                "down: {down}"
+            );
+            let next = if down { "1002" } else { "102" };
+            let at = bench
+                .center_of(next)
+                .unwrap_or_else(|| panic!("the new cursor cell is painted (down: {down})"));
+            assert!(
+                at.x > 0.0 && at.y > 0.0 && at.x < bench.size.x && at.y < bench.size.y,
+                "{at:?}"
+            );
+        }
+    }
+
+    /// Tab in a cell scrolled out of view writes it, moves to the next column and
+    /// the grid scrolls to it. Witness: same.
+    #[test]
+    fn tab_in_a_cell_scrolled_out_of_view_moves_to_the_next_column_and_scrolls() {
+        let mut bench = wide_bench(1000, false);
+        edit_first_cell_then_scroll_away(&mut bench, false, "101");
+        type_text(&mut bench, "abc");
+        bench.tab();
+        assert!(bench.state.editing().is_none(), "Tab closes the entry");
+        assert!(
+            bench.seen.iter().any(|action| matches!(action,
+                Action::CommitCell { column, row: 0, text }
+                if *column == bench.columns[0] && text == "abc")),
+            "seen: {:?}",
+            bench.seen
+        );
+        for _ in 0..6 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(bench.cursor(), Some(GridCursor::Data(bench.columns[1], 0)));
+        assert!(
+            bench.center_of(&cell_text_of(1)).is_some(),
+            "the next column is painted again"
+        );
+    }
+
+    /// Escape in a cell scrolled out of view cancels the entry, writes nothing and
+    /// leaves the grid where it is. Witness: drop the call to
+    /// `paint_unpainted_edit` (the entry stays open).
+    #[test]
+    fn escape_in_a_cell_scrolled_out_of_view_cancels_without_scrolling() {
+        let mut bench = wide_bench(1000, false);
+        edit_first_cell_then_scroll_away(&mut bench, false, "101");
+        type_text(&mut bench, "abc");
+        let before = bench.texts();
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert!(bench.state.editing().is_none(), "Escape closes the entry");
+        assert!(
+            !bench.seen.iter().any(|action| matches!(
+                action,
+                Action::CommitCell { .. } | Action::CommitCellAndAdvance { .. }
+            )),
+            "nothing is written: {:?}",
+            bench.seen
+        );
+        assert_eq!(bench.texts(), before, "the grid did not move");
+    }
+
+    /// The entry comes back where it was when its cell scrolls back into view:
+    /// same text, same focus (the identifier does not depend on the position in
+    /// the table). Witness: identifier taken from `ui.id()`.
+    #[test]
+    fn a_cell_scrolled_out_and_back_keeps_its_text_and_its_focus() {
+        let mut bench = wide_bench(1000, false);
+        edit_first_cell_then_scroll_away(&mut bench, false, "101");
+        type_text(&mut bench, "abc");
+        scroll_right_by(&mut bench, -1.0e7);
+        assert!(bench.state.editing().is_some());
+        type_text(&mut bench, "d");
+        assert_eq!(bench.state.editing().unwrap().buffer, "abcd");
+    }
+
+    /// A header field (Long Name) scrolled out of view behaves like a cell: typing
+    /// reaches it, Tab writes it, moves to the next column and the grid follows.
+    /// Witness: drop the call to `paint_unpainted_edit`.
+    #[test]
+    fn a_header_field_scrolled_out_of_view_is_typed_in_and_tab_scrolls() {
+        let mut bench = wide_bench(1000, false);
+        let (sheet, first) = (bench.sheet, bench.columns[0]);
+        bench
+            .state
+            .select_header_field(sheet, first, HeaderField::LongName);
+        bench.state.begin_header_edit(first, HeaderField::LongName);
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        scroll_right_by(&mut bench, 1.0e7);
+        assert!(!painted_letters(&bench).contains(&0));
+        let before = bench.texts();
+        type_text(&mut bench, "Zed");
+        assert_eq!(bench.state.header_editing().unwrap().buffer, "Zed");
+        assert_eq!(bench.texts(), before, "typing does not move the grid");
+        bench.tab();
+        assert!(
+            bench.state.header_editing().is_none(),
+            "Tab closes the field"
+        );
+        for _ in 0..6 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Header(bench.columns[1], HeaderField::LongName))
+        );
+        assert!(
+            painted_letters(&bench).contains(&1),
+            "the grid scrolled back to the next column"
         );
     }
 

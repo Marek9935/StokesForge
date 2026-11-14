@@ -229,8 +229,9 @@ draw no edge there, the free area after the last column (`last_column_right`)
 exists only when the last column is painted, the "?" of the formula cell is
 omitted when its column is off-window. (5) `grid_rect` is the **viewport**, not
 the content rectangle of the scroll area (which starts left of the viewport once
-scrolled, so a click no longer took the keyboard focus). (6) A cell being edited
-that scrolls out of the window keeps its buffer in `AppState`, like a row does.
+scrolled, so a click no longer took the keyboard focus). (6) A cell or header field being
+edited that scrolls out of the painted window, horizontally or vertically, stays
+editable (see "An entry scrolled out of view" below).
 Not seen: a column whose content widens it beyond its stored width is painted
 wider than the spacers assume; the margin column covers a small difference.
 
@@ -544,6 +545,23 @@ to the workbook (`take_follow_scroll`) which stores them in the same on-hold
 slots as the mirrored bars (`pending_offset`, `pending_vertical_offset`),
 applied by the next frame. The row geometry is `row * ROW_HEIGHT` (no vertical
 spacing), the column geometry the stored widths.
+
+**An entry scrolled out of view.** The table cannot build a row or a column that
+is outside its window, and egui drops the focus of a widget that is not
+registered for a frame, so an editor that scrolled away used to lose the typing.
+`paint_unpainted_edit` (called after the table, before the keyboard) draws the
+open editor anyway when the table did not (`mark_edit_painted` tells), by the
+**same** code (`cell_widget` / `header_field_widget`, so one text-editing
+implementation), in a child `Ui` whose clip is empty: nothing is drawn, no
+tint or bubble, and the `TextEdit` skips its scroll-to-cursor (it only does so
+for a visible rectangle), so **typing never moves the grid**. Characters,
+Backspace, Enter, Tab, Shift+Enter/Tab and Escape act as in a visible editor; Enter,
+Tab and the other cursor moves then scroll to the new cell through the follow
+above (Escape moves nothing and does not scroll). A click elsewhere ends the
+entry as ever (S-T4, `FocusLoss::Ends`). The editor's identifier comes from the
+cell or field (`stable_edit_id`), not from the table cell's (which holds the
+column index of the window), so focus, caret and selection survive a scroll out
+and back.
 
 ### Body alignment: numbers right, text left
 
