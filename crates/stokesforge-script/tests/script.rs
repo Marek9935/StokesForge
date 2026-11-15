@@ -370,6 +370,77 @@ fn python_import_reads_origin_workbooks_in_one_gesture() {
     assert!(!after.history.in_macro);
 }
 
+/// The `.opju` twin of the test above: same project written as `.opju`,
+/// Data sheets only, one undo; a truncated file changes nothing.
+#[test]
+fn python_import_reads_opju_workbooks_in_one_gesture() {
+    use stokesforge_import::origin::synthetic::{self, Column as OColumn};
+    use stokesforge_import::origin::OriginDesignation;
+    let bench = bench();
+    let dir = tempfile::tempdir().unwrap();
+    let sheet = |name: &str| synthetic::Sheet {
+        name: name.into(),
+        columns: vec![OColumn::numbers(
+            "A",
+            OriginDesignation::X,
+            &[1.0, 2.0, 3.0],
+        )],
+    };
+    let bytes = synthetic::write_opju(&synthetic::Project {
+        books: vec![synthetic::Book {
+            short_name: "B1".into(),
+            long_name: "Run".into(),
+            sheets: vec![sheet("Data"), sheet("Raw")],
+            horiba_xml: None,
+        }],
+        ..synthetic::Project::default()
+    });
+    let path = dir.path().join("runs.opju");
+    std::fs::write(&path, &bytes).unwrap();
+    let before = bench.session.snapshot().unwrap();
+
+    execute(
+        &bench,
+        &format!(
+            "sheets = pyst.import_file({:?})\nassert len(sheets) == 1\n",
+            path.to_str().unwrap()
+        ),
+    );
+    let imported = bench.session.snapshot().unwrap();
+    let existing = before
+        .tree
+        .node(before.tree.root())
+        .unwrap()
+        .children()
+        .len();
+    let all = imported.tree.node(imported.tree.root()).unwrap().children();
+    assert_eq!(all.len(), existing + 1);
+    let book = all[existing];
+    assert_eq!(imported.tree.node(book).unwrap().name(), "Run");
+    let sheets = imported.tree.node(book).unwrap().children();
+    assert_eq!(sheets.len(), 1, "Data only");
+    assert_eq!(imported.tree.node(sheets[0]).unwrap().name(), "Data");
+    execute(&bench, "assert pyst.undo()\n");
+    assert_eq!(*bench.session.snapshot().unwrap().tree, *before.tree);
+
+    let truncated = dir.path().join("cut.opju");
+    std::fs::write(&truncated, &bytes[..synthetic::FIRST_DATASET_OFFSET + 3]).unwrap();
+    let cut = bench
+        .engine
+        .run(&format!(
+            "pyst.import_file({:?})",
+            truncated.to_str().unwrap()
+        ))
+        .unwrap();
+    assert!(cut
+        .error
+        .as_deref()
+        .is_some_and(|e| e.contains("InvalidValueError")));
+    let after = bench.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert!(!after.history.in_macro);
+}
+
 /// Unknown template, missing or binary file: no mutation and no macro left
 /// open. An interface macro is never absorbed.
 #[test]

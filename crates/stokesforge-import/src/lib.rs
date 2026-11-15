@@ -22,7 +22,7 @@
 //! byte order mark, and as a fallback Windows-1252, the code page of device
 //! software on Windows.
 //!
-//! [`origin`] reads the workbooks of an Origin project (`.opj`), the binary
+//! [`origin`] reads the workbooks of an Origin project (`.opj`, `.opju`), the binary
 //! format Horiba's software writes: books, sheets, columns with their long
 //! names, units and values. It is not a text format and goes through no
 //! recipe.

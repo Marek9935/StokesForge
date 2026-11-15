@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x]
-//!                   [--out project.stf] FILE...   # FILE: text, or Origin .opj
+//!                   [--out project.stf] FILE...   # FILE: text, or Origin .opj/.opju
 //! stokesforge-cli recipes            # lists the saved templates
 //! stokesforge-cli run [--project input.stf] [--out output.stf] script.pyst
 //! ```
@@ -29,7 +29,7 @@ use stokesforge_import::{recipe_for_file, FilesLayout, RecipeStore};
 
 const USAGE: &str = "usage:
   stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.stf] FILE...
-      (an Origin .opj file is imported book by book, Data sheets only; --recipe and --layout do not apply to it)
+      (an Origin .opj or .opju file is imported book by book, Data sheets only; --recipe and --layout do not apply to it)
   stokesforge-cli recipes
   stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst\n  stokesforge-cli --version";
 
@@ -155,6 +155,7 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     // the application and `pyst.import_file`). An Origin project has no template.
     let mut items = Vec::new();
     let mut origin_files = Vec::new();
+    let mut partial_files: Vec<String> = Vec::new();
     let mut refused: Vec<String> = Vec::new();
     for path in &args.files {
         let bytes = std::fs::read(path).ok();
@@ -164,7 +165,12 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
                 .is_some_and(stokesforge_importer::is_origin_bytes);
         if is_origin {
             match stokesforge_importer::read_origin_file(path) {
-                Ok(project) => origin_files.push((path, project)),
+                Ok(project) => {
+                    if project.partial {
+                        partial_files.push(path.display().to_string());
+                    }
+                    origin_files.push((path, project));
+                }
                 Err(failure) => refused.push(failure.to_string()),
             }
             continue;
@@ -292,6 +298,13 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     }
     for failure in &failures {
         writeln!(out, "skipped: {failure}").map_err(|err| err.to_string())?;
+    }
+    for path in &partial_files {
+        writeln!(
+            out,
+            "{path}: part of the file could not be read; long names, units and X/Y roles may be missing"
+        )
+        .map_err(|err| err.to_string())?;
     }
     writeln!(
         out,

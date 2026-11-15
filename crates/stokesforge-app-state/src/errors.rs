@@ -683,7 +683,9 @@ pub mod origin {
     pub fn error_message(error: &OriginError) -> String {
         match error {
             OriginError::NotOrigin => tr!("error-import-origin-not-origin"),
-            OriginError::OpjuNotSupported => tr!("error-import-origin-opju"),
+            OriginError::OpjuUnsupported { .. } => tr!("error-import-origin-opju-unsupported"),
+            OriginError::TooManyCells { .. } => tr!("error-import-origin-too-many-cells"),
+            OriginError::TooMuchText { .. } => tr!("error-import-origin-too-much-text"),
             OriginError::UnsupportedVersion { .. } => tr!("error-import-origin-version"),
             OriginError::Truncated { .. } => tr!("error-import-origin-truncated"),
             OriginError::BadDelimiter { .. } => tr!("error-import-origin-bad-structure"),
@@ -700,7 +702,12 @@ pub mod origin {
         fn every_variant() -> Vec<OriginError> {
             let samples = vec![
                 OriginError::NotOrigin,
-                OriginError::OpjuNotSupported,
+                OriginError::OpjuUnsupported {
+                    offset: 16,
+                    what: "a block",
+                },
+                OriginError::TooManyCells { limit: 5 },
+                OriginError::TooMuchText { limit: 5 },
                 OriginError::UnsupportedVersion { version: 1.0 },
                 OriginError::Truncated { offset: 16 },
                 OriginError::BadDelimiter { offset: 16 },
@@ -711,17 +718,19 @@ pub mod origin {
                 OriginError::TooDeep,
                 OriginError::ShortRecord { what: "a header" },
             ];
-            let mut seen = [false; 8];
+            let mut seen = [false; 10];
             for sample in &samples {
                 let index = match sample {
                     OriginError::NotOrigin => 0,
-                    OriginError::OpjuNotSupported => 1,
-                    OriginError::UnsupportedVersion { .. } => 2,
-                    OriginError::Truncated { .. } => 3,
-                    OriginError::BadDelimiter { .. } => 4,
-                    OriginError::SizeOutOfRange { .. } => 5,
-                    OriginError::TooDeep => 6,
-                    OriginError::ShortRecord { .. } => 7,
+                    OriginError::OpjuUnsupported { .. } => 1,
+                    OriginError::TooManyCells { .. } => 2,
+                    OriginError::TooMuchText { .. } => 3,
+                    OriginError::UnsupportedVersion { .. } => 4,
+                    OriginError::Truncated { .. } => 5,
+                    OriginError::BadDelimiter { .. } => 6,
+                    OriginError::SizeOutOfRange { .. } => 7,
+                    OriginError::TooDeep => 8,
+                    OriginError::ShortRecord { .. } => 9,
                 };
                 seen[index] = true;
             }

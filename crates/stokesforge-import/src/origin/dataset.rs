@@ -64,14 +64,48 @@ fn classify(header: &[u8], data: &[u8]) -> Result<DatasetKind, OriginError> {
         v => usize::from(v),
     };
     let name = cstr(header, 0x58, 25);
+    Ok(match classify_name(&name, data_type) {
+        Named::Column {
+            book,
+            sheet,
+            column,
+        } => {
+            let (values, texts) = decode_cells(data, value_size, data_type);
+            DatasetKind::Column(ColumnData {
+                book,
+                sheet,
+                column,
+                values,
+                texts,
+            })
+        }
+        Named::Matrix(name) => DatasetKind::Matrix(name),
+        Named::Function => DatasetKind::Function,
+    })
+}
+
+/// What a dataset name designates, whatever the container (`.opj`, `.opju`).
+pub(crate) enum Named {
+    Column {
+        book: String,
+        sheet: usize,
+        column: String,
+    },
+    Matrix(String),
+    Function,
+}
+
+/// Classifies a dataset by its name (`Book_Column`, with `@N` for sheet N)
+/// and the data type of its header.
+pub(crate) fn classify_name(name: &str, data_type: u16) -> Named {
     // liborigin splits at the LAST underscore.
     let Some((book, column)) = name.rsplit_once('_').filter(|(_, c)| !c.is_empty()) else {
-        return Ok(if data_type == 0x6081 {
-            DatasetKind::Function
+        return if data_type == 0x6081 {
+            Named::Function
         } else {
             let base = name.split('@').next().unwrap_or("");
-            DatasetKind::Matrix(base.to_string())
-        });
+            Named::Matrix(base.to_string())
+        };
     };
     // The sheet number is the `@N` suffix of the column; none means sheet 1.
     let (column, sheet) = match column.rsplit_once('@') {
@@ -85,14 +119,67 @@ fn classify(header: &[u8], data: &[u8]) -> Result<DatasetKind, OriginError> {
         ),
         None => (column, 1),
     };
-    let (values, texts) = decode_cells(data, value_size, data_type);
-    Ok(DatasetKind::Column(ColumnData {
+    Named::Column {
         book: book.to_string(),
         sheet,
         column: column.to_string(),
-        values,
-        texts,
-    }))
+    }
+}
+
+/// Collects the cells of a column: a value per row, and the texts once one
+/// cell is text.
+pub(crate) struct ColumnBuilder {
+    values: Vec<f64>,
+    texts: Vec<Option<String>>,
+}
+
+impl ColumnBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            values: Vec::new(),
+            texts: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_capacity(rows: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(rows),
+            texts: Vec::new(),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub(crate) fn push(&mut self, value: f64, text: Option<String>) {
+        if text.is_some() && self.texts.len() < self.values.len() {
+            self.texts.resize(self.values.len(), None);
+        }
+        self.values.push(value);
+        if !self.texts.is_empty() || text.is_some() {
+            self.texts.push(text);
+        }
+    }
+
+    /// Sets the text of an existing row.
+    pub(crate) fn set_text(&mut self, row: usize, text: String) {
+        if self.texts.len() < self.values.len() {
+            self.texts.resize(self.values.len(), None);
+        }
+        if let Some(slot) = self.texts.get_mut(row) {
+            *slot = Some(text);
+        }
+    }
+
+    pub(crate) fn finish(self) -> (Vec<f64>, Vec<Option<String>>) {
+        (self.values, self.texts)
+    }
+}
+
+/// A stored double; Origin's missing-value literal reads as `NaN`.
+pub(crate) fn number_from_bits(bits: u64) -> f64 {
+    number(Some(f64::from_bits(bits)))
 }
 
 fn number(v: Option<f64>) -> f64 {
@@ -112,8 +199,7 @@ fn text_cell(raw: &[u8]) -> Option<String> {
 }
 
 fn decode_cells(data: &[u8], value_size: usize, data_type: u16) -> (Vec<f64>, Vec<Option<String>>) {
-    let mut values = Vec::with_capacity(data.len() / value_size);
-    let mut texts: Vec<Option<String>> = Vec::new();
+    let mut column = ColumnBuilder::with_capacity(data.len() / value_size);
     for cell in data.chunks_exact(value_size) {
         let (value, text) = if value_size <= 8 {
             // Numeric, date, time...: a plain f64 (narrower sizes are not seen).
@@ -128,13 +214,7 @@ fn decode_cells(data: &[u8], value_size: usize, data_type: u16) -> (Vec<f64>, Ve
         } else {
             (f64::NAN, text_cell(cell))
         };
-        if text.is_some() && texts.len() < values.len() {
-            texts.resize(values.len(), None);
-        }
-        values.push(value);
-        if !texts.is_empty() || text.is_some() {
-            texts.push(text);
-        }
+        column.push(value, text);
     }
-    (values, texts)
+    column.finish()
 }

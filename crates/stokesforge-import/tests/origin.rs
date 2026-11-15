@@ -301,14 +301,13 @@ fn annotation_groups_nest_at_most_64_deep() {
 }
 
 #[test]
-fn an_opju_file_is_refused_with_advice() {
+fn an_opju_file_with_no_body_is_an_error_not_a_refusal() {
     let err = read_project(b"CPYUA 4.3268 195\n\0\0\0\0\0").unwrap_err();
-    assert_eq!(err, OriginError::OpjuNotSupported);
-    let text = err.to_string();
-    assert!(
-        text.contains(".opj") && text.contains("Origin Viewer"),
-        "{text}"
-    );
+    assert!(matches!(
+        err,
+        OriginError::Truncated { .. } | OriginError::OpjuUnsupported { .. }
+    ));
+    assert!(err.to_string().contains("offset"), "{err}");
 }
 
 #[test]

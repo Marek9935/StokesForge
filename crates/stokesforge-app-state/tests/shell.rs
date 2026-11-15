@@ -18332,6 +18332,249 @@ mod origin_import {
         assert!(!sheets[2].contains('!'), "{sheets:?}");
     }
 
+    fn write_opju(path: &Path, books: Vec<synthetic::Book>, bad_annotation: Option<usize>) {
+        let bytes = synthetic::write_opju(&synthetic::Project {
+            books,
+            opju_bad_annotation: bad_annotation,
+            ..synthetic::Project::default()
+        });
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    type ImportedContent = Vec<(String, Vec<(String, Vec<u64>)>)>;
+
+    /// Every root workbook: its sheets, each with the first three values of
+    /// its first column.
+    fn imported_content(state: &AppState) -> ImportedContent {
+        let mut out = Vec::new();
+        for name in root_names(state) {
+            let book = book_named(state.tree(), &name);
+            let sheets = state
+                .worksheets_of(book)
+                .into_iter()
+                .map(|(id, sheet_name)| {
+                    let first = state.visible_columns(id)[0].0;
+                    let n = 3;
+                    // Bit patterns: a missing cell is NaN, which is never equal to itself.
+                    let values = (0..n)
+                        .map(|row| cell_f64(state, first, row).to_bits())
+                        .collect();
+                    (sheet_name, values)
+                })
+                .collect();
+            out.push((name, sheets));
+        }
+        out
+    }
+
+    #[test]
+    fn an_opju_goes_to_the_chooser_and_imports_like_its_opj_twin() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let opj_dir = dir.path().join("a");
+        let opju_dir = dir.path().join("b");
+        std::fs::create_dir_all(&opj_dir).unwrap();
+        std::fs::create_dir_all(&opju_dir).unwrap();
+        let mut results = Vec::new();
+        for (path, is_opju) in [
+            (opj_dir.join("kinetics.opj"), false),
+            (opju_dir.join("kinetics.opju"), true),
+        ] {
+            let (_session, mut state) = start_demo(dir.path());
+            if is_opju {
+                write_opju(&path, standard_books(), None);
+            } else {
+                write_opj(&path, standard_books());
+            }
+            drop_paths(&mut state, vec![path.clone()]);
+            assert!(state.origin_import_open(), "{}", path.display());
+            assert!(
+                state.import_state().is_none(),
+                "an .opju never reaches the text wizard"
+            );
+            assert!(!state.origin_import_files()[0].partial);
+            state.dispatch(Action::ImportOrigin);
+            no_red_message_ever(&state);
+            assert_eq!(state.take_imported_paths(), vec![path]);
+            results.push(imported_content(&state));
+        }
+        assert_eq!(results[0], results[1]);
+        assert!(results[0].iter().any(|(name, _)| name == "Kinetics"));
+    }
+
+    #[test]
+    fn the_chooser_says_when_part_of_an_opju_could_not_be_read() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let whole = dir.path().join("whole.opju");
+        write_opju(&whole, standard_books(), None);
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+
+        drop_paths(&mut state, vec![whole, cut, opj]);
+
+        let partial: Vec<bool> = state
+            .origin_import_files()
+            .iter()
+            .map(|file| file.partial)
+            .collect();
+        assert_eq!(partial, vec![false, true, false]);
+    }
+
+    #[test]
+    fn importing_a_partial_opju_ends_on_a_warning_that_names_the_partial_read() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let whole = dir.path().join("whole.opju");
+        write_opju(&whole, standard_books(), None);
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+
+        drop_paths(&mut state, vec![whole.clone()]);
+        state.dispatch(Action::ImportOrigin);
+        let status = state.status().unwrap();
+        assert_eq!(status.level, StatusLevel::Info, "a whole file: no warning");
+
+        drop_paths(&mut state, vec![cut]);
+        state.dispatch(Action::ImportOrigin);
+        let status = state.status().unwrap();
+        assert_eq!(status.level, StatusLevel::Warning, "{}", status.text);
+        assert_eq!(status.text, tr!("status-import-origin-partial", books = 2));
+    }
+
+    #[test]
+    fn the_unnamed_sheets_of_a_partial_opju_are_sheet1_sheet2_in_the_chooser_and_the_workbook() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let mut books = standard_books();
+        books[1] = book(
+            "B",
+            "Kinetics",
+            vec![
+                sheet(
+                    "Alpha",
+                    vec![column("T", OriginDesignation::X, &[0.0, 1.0])],
+                ),
+                sheet("Beta", vec![column("S", OriginDesignation::Y, &[4.0, 5.0])]),
+            ],
+        );
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, books, Some(1));
+        drop_paths(&mut state, vec![cut]);
+
+        let files = state.origin_import_files();
+        let names = |b: usize| -> Vec<String> {
+            files[0].books[b]
+                .sheets
+                .iter()
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        assert_eq!(
+            names(0),
+            ["Graph", "Data", "Note"],
+            "a named sheet keeps its name"
+        );
+        assert_eq!(names(1), ["Sheet1", "Sheet2"]);
+
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 0,
+        });
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 1,
+        });
+        state.dispatch(Action::ImportOrigin);
+        let content = imported_content(&state);
+        // The book the cut section did not describe has no long name left.
+        let sheet_names: Vec<&str> = content
+            .iter()
+            .flat_map(|(_, sheets)| sheets.iter().map(|(n, _)| n.as_str()))
+            .filter(|name| name.starts_with("Sheet"))
+            .collect();
+        assert_eq!(sheet_names, ["Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn importing_a_partial_opju_is_one_undo_entry_and_no_error() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+        drop_paths(&mut state, vec![cut]);
+        assert!(state.origin_import_files()[0].partial);
+
+        let books_before = root_names(&state).len();
+        state.dispatch(Action::ImportOrigin);
+
+        no_red_message_ever(&state);
+        assert!(!same_tree(&state, &tree_before));
+        // The book the cut window section did not describe is still imported.
+        assert_eq!(root_names(&state).len(), books_before + 2);
+        assert_eq!(
+            state.undo_label().unwrap(),
+            tr!(
+                "history-undo-entry",
+                label = history_text(&HistoryLabel::Macro(MacroKind::Import))
+            )
+        );
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before));
+        assert_eq!(history_len_probe(&state), probe, "no second entry left");
+    }
+
+    #[test]
+    fn a_truncated_opju_gives_the_origin_sentence_and_no_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let cut = dir.path().join("cut.opju");
+        let bytes = synthetic::write_opju(&synthetic::Project {
+            books: standard_books(),
+            ..synthetic::Project::default()
+        });
+        std::fs::write(&cut, &bytes[..synthetic::FIRST_DATASET_OFFSET + 3]).unwrap();
+        let probe = history_len_probe(&state);
+
+        drop_paths(&mut state, vec![cut]);
+
+        assert!(!state.origin_import_open());
+        let status = state.status().unwrap();
+        assert!(status.is_error());
+        assert!(status.text.contains("cut.opju"), "{}", status.text);
+        assert!(
+            !status.text.to_lowercase().contains("offset"),
+            "the raw Display leaked: {}",
+            status.text
+        );
+        assert_eq!(history_len_probe(&state), probe, "no empty Import entry");
+    }
+
+    #[test]
+    fn an_opju_renamed_dat_is_dropped_into_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let renamed = dir.path().join("measure.dat");
+        write_opju(&renamed, standard_books(), None);
+
+        drop_paths(&mut state, vec![renamed]);
+
+        assert!(state.origin_import_open());
+        assert!(state.import_state().is_none(), "never the text wizard");
+        no_red_message_ever(&state);
+    }
+
     #[test]
     fn cancelling_leaves_the_history_and_the_project_alone() {
         let _recipes = isolate_recipe_store();
