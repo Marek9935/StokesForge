@@ -24,12 +24,17 @@ use stokesforge_plot::PlotType;
 
 use crate::icons;
 use stokesforge_app_state::column_move::{target_order, ColumnMove};
+use stokesforge_app_state::grid_autoscroll::{
+    push_past, push_reaching, push_under_lock, scroll_step,
+};
 use stokesforge_app_state::selection::{GridCursor, Selection};
 use stokesforge_app_state::state::{
     Action, AppState, ColumnDragPayload, ColumnTypeLock, GridMenu, GridZone, HeaderField,
     MoveDirection, RowDragPayload,
 };
 use stokesforge_app_state::tr;
+use stokesforge_render_egui::pointer_lock;
+use stokesforge_render_egui::pointer_probe::{pointer_step, PointerSource};
 
 use super::empty_state::empty_state;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
@@ -805,6 +810,9 @@ fn column_letter_widget(
         }
         let modifiers = ui.input(|i| i.modifiers);
         let press_here = press_started_in(ui, rect);
+        if response.drag_started() {
+            mark_drag(ui.ctx(), sheet, DragZone::Letters);
+        }
         if response.clicked() || response.drag_started() {
             // Ctrl+click toggles the column, Shift+click takes the anchor → column range,
             // Ctrl+Shift+click adds it to the selection (#159).
@@ -823,6 +831,7 @@ fn column_letter_widget(
         } else if response.contains_pointer()
             && !press_here
             && !grid_drag_in_progress(ui.ctx())
+            && !cell_drag_marked(ui.ctx(), sheet)
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
@@ -1565,9 +1574,13 @@ fn header_field_widget(
         // — see the detailed comment of `cell_widget`.
         let modifiers = ui.input(|i| i.modifiers);
         let (command, shift) = (modifiers.command, modifiers.shift);
+        if response.drag_started() {
+            mark_drag(ui.ctx(), sheet, DragZone::HeaderField);
+        }
         let dragging = response.contains_pointer()
             && !press_started_in(ui, rect)
             && !grid_drag_in_progress(ui.ctx())
+            && !cell_drag_marked(ui.ctx(), sheet)
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some();
         if response.drag_started() && command {
@@ -1778,6 +1791,7 @@ fn header_row_label_widget(
         } else if response.clicked() && shift {
             state.extend_header_row_selection(sheet, field);
         } else if response.contains_pointer()
+            && !cell_drag_marked(ui.ctx(), sheet)
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
@@ -2068,19 +2082,27 @@ pub(super) fn grid_contents(
         focus_anchor,
         was_editing,
     );
+    let geometry = FollowGeometry {
+        column_ids: &column_ids,
+        widths: &nominal,
+        spacing: spacing_x,
+        gutter: gutter_width,
+        viewport,
+        body_offset: table_output.state.offset.y,
+        body_height: table_output.inner_rect.height(),
+    };
     // #534: after the keyboard, so that a move made in this very frame is seen.
-    follow_cursor(
+    follow_cursor(ui, state, sheet, geometry);
+    // #535: last, so that a scroll asked by a drag wins over the keyboard's.
+    grid_autoscroll(
         ui,
         state,
         sheet,
-        FollowGeometry {
-            column_ids: &column_ids,
-            widths: &nominal,
-            spacing: spacing_x,
-            gutter: gutter_width,
-            viewport,
-            body_offset: table_output.state.offset.y,
-            body_height: table_output.inner_rect.height(),
+        geometry,
+        &AutoscrollView {
+            body: table_output.inner_rect,
+            content_height: table_output.content_size.y,
+            row_count,
         },
     );
     Some(table_output)
@@ -2314,6 +2336,25 @@ fn column_x_range(widths: &[f32], spacing: f32, gutter: f32, index: usize) -> (f
     (if index == 0 { 0.0 } else { left }, left + widths[index])
 }
 
+/// Rank of the data column under the content x coordinate `x`: the inverse of
+/// [`column_x_range`]. The gutter and anything left of the first column give 0,
+/// the spacing after a column belongs to it, anything past the end gives the
+/// last. Never panics: `widths` empty gives 0, a NaN `x` gives 0.
+fn column_at(widths: &[f32], spacing: f32, gutter: f32, x: f32) -> usize {
+    if x.is_nan() {
+        return 0;
+    }
+    let mut left = gutter + spacing;
+    for (index, width) in widths.iter().enumerate() {
+        let next = left + width + spacing;
+        if x < next {
+            return index;
+        }
+        left = next;
+    }
+    widths.len().saturating_sub(1)
+}
+
 /// The scroll offset that brings `start..end` into the view `offset..offset + len`
 /// with the least movement, or `None` when it is already inside. A range wider
 /// than the view is aligned on its start. Pure function.
@@ -2372,7 +2413,8 @@ fn arm_follow(ui: &egui::Ui, sheet: NodeId) {
             )
         });
         (
-            key,
+            // A key during a mouse drag is not a keyboard move (#535).
+            key && !input.pointer.primary_down(),
             input.pointer.any_pressed() || input.pointer.any_released(),
         )
     });
@@ -2391,6 +2433,7 @@ fn arm_follow(ui: &egui::Ui, sheet: NodeId) {
 }
 
 /// Everything [`follow_cursor`] needs to place a cell.
+#[derive(Clone, Copy)]
 struct FollowGeometry<'a> {
     column_ids: &'a [NodeId],
     widths: &'a [f32],
@@ -2452,6 +2495,320 @@ fn follow_cursor(ui: &egui::Ui, state: &AppState, sheet: NodeId, geometry: Follo
 pub(super) fn take_follow_scroll(ctx: &egui::Context, sheet: NodeId) -> (Option<f32>, Option<f32>) {
     ctx.data_mut(|data| data.remove_temp::<(Option<f32>, Option<f32>)>(follow_scroll_id(sheet)))
         .unwrap_or_default()
+}
+
+/// Part of the grid a selection drag started in (#535): it decides which axes
+/// scroll and what the selection extends to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DragZone {
+    /// A data cell: both axes, a cell rectangle.
+    Cells,
+    /// A column letter: horizontal only, whole columns.
+    Letters,
+    /// A header field of a column: horizontal only.
+    HeaderField,
+    /// A row number: vertical only, whole rows.
+    Rows,
+}
+
+impl DragZone {
+    fn scrolls_horizontally(self) -> bool {
+        !matches!(self, Self::Rows)
+    }
+
+    fn scrolls_vertically(self) -> bool {
+        matches!(self, Self::Cells | Self::Rows)
+    }
+}
+
+/// Where the zone of the drag in progress is kept (per viewport and sheet:
+/// never `dragged_id`, the origin widget leaves the painted window once the grid
+/// scrolls).
+fn drag_marker_id(ctx: &egui::Context, sheet: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_drag_zone", ctx.viewport_id(), sheet.raw()))
+}
+
+fn autoscroll_memory_id(ctx: &egui::Context, sheet: NodeId) -> egui::Id {
+    egui::Id::new((
+        "stokesforge_grid_autoscroll",
+        ctx.viewport_id(),
+        sheet.raw(),
+    ))
+}
+
+/// A selection drag has just started in `zone`. A new drag forgets what the last
+/// one knew of the device.
+fn mark_drag(ctx: &egui::Context, sheet: NodeId, zone: DragZone) {
+    let (marker, memory) = (drag_marker_id(ctx, sheet), autoscroll_memory_id(ctx, sheet));
+    ctx.data_mut(|data| {
+        data.insert_temp(marker, zone);
+        data.remove::<AutoscrollMemory>(memory);
+    });
+}
+
+fn drag_zone(ctx: &egui::Context, sheet: NodeId) -> Option<DragZone> {
+    let marker = drag_marker_id(ctx, sheet);
+    ctx.data(|data| data.get_temp::<DragZone>(marker))
+}
+
+/// A drag that started in a data cell is in progress: the header rows, the
+/// letters and the row numbers then act as edges of the grid and must not turn
+/// the cell rectangle into whole columns, rows or header fields (#535).
+fn cell_drag_marked(ctx: &egui::Context, sheet: NodeId) -> bool {
+    drag_zone(ctx, sheet) == Some(DragZone::Cells)
+}
+
+/// What the autoscroll of a drag keeps between frames.
+#[derive(Clone, Copy)]
+struct AutoscrollMemory {
+    /// What moves the pointer, found by the probe at the start of the drag.
+    source: PointerSource,
+    last_position: Option<egui::Pos2>,
+    /// Push past the edge, per axis, signed (see `grid_autoscroll`).
+    push: egui::Vec2,
+    /// The mouse is locked at the edge.
+    locked: bool,
+    /// Where the pointer is held, on the edge.
+    held_at: egui::Pos2,
+    /// The hold was released by pushing back: no new hold until the pointer has
+    /// left the edge, else it would be caught again at once, where it stands.
+    released: bool,
+}
+
+/// The table's rectangles that [`grid_autoscroll`] needs.
+struct AutoscrollView {
+    /// The body of the table (rows), on screen.
+    body: egui::Rect,
+    content_height: f32,
+    row_count: usize,
+}
+
+/// Scroll room left in the direction of `push` on an axis at `offset`, whose
+/// largest offset is `max`.
+fn has_room(push: f32, offset: f32, max: f32) -> bool {
+    (push > 0.0 && offset < max - 0.5) || (push < 0.0 && offset > 0.5)
+}
+
+/// Keeps scrolling a selection drag that reached the edge of the grid (#535).
+///
+/// Marked by the zone the drag started in ([`mark_drag`]), cleared at the button
+/// up, on focus loss, and for a drag of columns or rows onto a graph. With a
+/// relative mouse the pointer is held on the edge (cursor lock, lease of
+/// `pointer_lock`, system cursor kept) and the raw motion accumulated past the
+/// edge is the push; with an absolute pointer (probe, `pointer_probe`) the
+/// cursor leaves the grid and its distance past the edge is the push. The push
+/// sets the scroll speed (`grid_autoscroll` of app-state); the scroll goes
+/// through the follow path of #534 (`take_follow_scroll`). The selection extends
+/// to the cell at the clamped pointer through the same `AppState::extend_*` the
+/// widgets call; app-state decides how far. Headers and row numbers are edges
+/// of a cell drag.
+fn grid_autoscroll(
+    ui: &egui::Ui,
+    state: &mut AppState,
+    sheet: NodeId,
+    geometry: FollowGeometry<'_>,
+    view: &AutoscrollView,
+) {
+    let ctx = ui.ctx();
+    let id = autoscroll_memory_id(ctx, sheet);
+    let zone = drag_zone(ctx, sheet);
+    let (down, focused, pointer, motion, dt) = ui.input(|input| {
+        (
+            input.pointer.primary_down(),
+            input.focused,
+            input.pointer.latest_pos(),
+            input.pointer.motion(),
+            input.stable_dt,
+        )
+    });
+    let mut memory = ctx.data(|data| data.get_temp::<AutoscrollMemory>(id));
+    let alive = zone.is_some() && down && focused && !grid_drag_in_progress(ctx);
+    let (Some(zone), true) = (zone, alive) else {
+        if let Some(memory) = memory.filter(|memory| memory.locked) {
+            pointer_lock::release(ctx, Some(memory.held_at));
+        }
+        let marker = drag_marker_id(ctx, sheet);
+        ctx.data_mut(|data| {
+            data.remove::<DragZone>(marker);
+            data.remove::<AutoscrollMemory>(id);
+        });
+        return;
+    };
+    let Some(pos) = pointer else {
+        return;
+    };
+    // The frame that starts the drag holds the motion made before the press was
+    // recognised: it is no part of the probe (as for the page corner, #512).
+    let fresh = memory.is_none();
+    let mut memory = memory.take().unwrap_or(AutoscrollMemory {
+        source: PointerSource::probing(),
+        last_position: None,
+        push: egui::Vec2::ZERO,
+        locked: false,
+        held_at: pos,
+        released: false,
+    });
+    let moved = memory
+        .last_position
+        .map_or(egui::Vec2::ZERO, |last| pos - last);
+    memory.last_position = Some(pos);
+    let step = if fresh {
+        egui::Vec2::ZERO
+    } else {
+        pointer_step(&mut memory.source, motion, moved)
+    };
+
+    // Edges of the grid on screen. A cell drag takes the header rows as its top
+    // edge (the body starts under them) and the row numbers as its left edge.
+    let clip = ui.clip_rect();
+    let origin = clip.left() - geometry.viewport.left;
+    let left = if zone == DragZone::Cells {
+        clip.left().max(origin + geometry.gutter)
+    } else {
+        clip.left()
+    };
+    let (horizontal, vertical) = ((left, clip.right()), (view.body.top(), view.body.bottom()));
+    let content_width = geometry
+        .widths
+        .iter()
+        .fold(geometry.gutter + geometry.spacing, |sum, width| {
+            sum + width + geometry.spacing
+        });
+    let max_x = (content_width - geometry.viewport.width).max(0.0);
+    let max_y = (view.content_height - view.body.height()).max(0.0);
+    let (offset_x, offset_y) = (geometry.viewport.left, geometry.body_offset);
+    let (use_x, use_y) = (zone.scrolls_horizontally(), zone.scrolls_vertically());
+    let room = |push: egui::Vec2| {
+        (
+            use_x && has_room(push.x, offset_x, max_x),
+            use_y && has_room(push.y, offset_y, max_y),
+        )
+    };
+    let inside = |pos: egui::Pos2| {
+        egui::pos2(
+            pos.x
+                .clamp(horizontal.0, (horizontal.1 - 0.5).max(horizontal.0)),
+            pos.y.clamp(vertical.0, (vertical.1 - 0.5).max(vertical.0)),
+        )
+    };
+
+    if memory.locked {
+        let mut push = memory.push;
+        push.x = if use_x {
+            push_under_lock(push.x, step.x)
+        } else {
+            0.0
+        };
+        push.y = if use_y {
+            push_under_lock(push.y, step.y)
+        } else {
+            0.0
+        };
+        memory.push = push;
+        if push == egui::Vec2::ZERO {
+            // Pushed back to the edge: the pointer is free again.
+            memory.locked = false;
+            memory.released = true;
+            pointer_lock::release(ctx, Some(memory.held_at));
+        } else {
+            pointer_lock::renew(ctx, false);
+        }
+    } else {
+        let reach = egui::vec2(
+            if use_x {
+                push_reaching(pos.x, horizontal.0, horizontal.1)
+            } else {
+                0.0
+            },
+            if use_y {
+                push_reaching(pos.y, vertical.0, vertical.1)
+            } else {
+                0.0
+            },
+        );
+        let (room_x, room_y) = room(reach);
+        if reach == egui::Vec2::ZERO {
+            memory.released = false;
+        }
+        if memory.source.locks() && !memory.released && (room_x || room_y) {
+            memory.locked = true;
+            memory.push = egui::vec2(
+                if room_x { reach.x } else { 0.0 },
+                if room_y { reach.y } else { 0.0 },
+            );
+            memory.held_at = inside(pos);
+            pointer_lock::renew(ctx, false);
+        } else {
+            memory.push = egui::vec2(
+                if use_x {
+                    push_past(pos.x, horizontal.0, horizontal.1)
+                } else {
+                    0.0
+                },
+                if use_y {
+                    push_past(pos.y, vertical.0, vertical.1)
+                } else {
+                    0.0
+                },
+            );
+        }
+    }
+    let push = memory.push;
+    let (room_x, room_y) = room(push);
+    ctx.data_mut(|data| data.insert_temp(id, memory));
+    if !(push.x != 0.0 || push.y != 0.0) {
+        return;
+    }
+
+    // The selection goes to the cell at the clamped pointer: the one held at the
+    // edge while locked.
+    let at = inside(if memory.locked { memory.held_at } else { pos });
+    let index = column_at(
+        geometry.widths,
+        geometry.spacing,
+        geometry.gutter,
+        at.x - origin,
+    );
+    let row = ((at.y - view.body.top() + offset_y) / ROW_HEIGHT)
+        .floor()
+        .max(0.0) as usize;
+    if let Some(column) = geometry.column_ids.get(index).copied() {
+        match zone {
+            DragZone::Cells => state.extend_selection(sheet, column, row),
+            DragZone::Letters => state.extend_column_selection(sheet, column),
+            DragZone::HeaderField => {
+                if let Some(GridCursor::Header(_, field)) =
+                    state.selection(sheet).and_then(Selection::grid_cursor)
+                {
+                    state.extend_header_field_selection(sheet, column, field);
+                }
+            }
+            DragZone::Rows => {}
+        }
+    }
+    if zone == DragZone::Rows && view.row_count > 0 {
+        state.extend_row_selection(sheet, row.min(view.row_count - 1));
+    }
+
+    // The scroll, through the follow path of #534.
+    let horizontal_to = (room_x)
+        .then(|| (offset_x + scroll_step(push.x, dt)).clamp(0.0, max_x))
+        .filter(|to| (to - offset_x).abs() > 0.01);
+    let vertical_to = (room_y)
+        .then(|| (offset_y + scroll_step(push.y, dt)).clamp(0.0, max_y))
+        .filter(|to| (to - offset_y).abs() > 0.01);
+    if horizontal_to.is_some() || vertical_to.is_some() {
+        let slot = follow_scroll_id(sheet);
+        ctx.data_mut(|data| {
+            let (kept_x, kept_y) = data
+                .get_temp::<(Option<f32>, Option<f32>)>(slot)
+                .unwrap_or_default();
+            data.insert_temp(slot, (horizontal_to.or(kept_x), vertical_to.or(kept_y)));
+        });
+    }
+    if room_x || room_y {
+        ctx.request_repaint();
+    }
 }
 
 /// Where the grid keeps, in egui's temporary memory, the rendered width of the
@@ -3269,6 +3626,9 @@ fn row_number_widget(
         .selectable(false),
     );
     let modifiers = ui.input(|i| i.modifiers);
+    if response.drag_started() {
+        mark_drag(ui.ctx(), sheet, DragZone::Rows);
+    }
     if response.clicked() || response.drag_started() {
         // Ctrl+click toggles the row, Shift+click takes the anchor → row range,
         // Ctrl+Shift+click adds it to the selection (#159) — like the letters.
@@ -3281,6 +3641,7 @@ fn row_number_widget(
     } else if response.contains_pointer()
         && !press_started_in(ui, rect)
         && !grid_drag_in_progress(ui.ctx())
+        && !cell_drag_marked(ui.ctx(), sheet)
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
@@ -3553,6 +3914,9 @@ fn display_cell_widget(
     let in_entry_row = row >= state.entry_row(sheet);
     let command = modifiers.command && !in_entry_row;
     let shift = modifiers.shift;
+    if response.drag_started() {
+        mark_drag(ui.ctx(), sheet, DragZone::Cells);
+    }
     if response.drag_started() && command {
         // Ctrl+drag: a new rectangle, the previous ones stay (#159).
         state.add_cell_selection(sheet, column, row);
@@ -3621,7 +3985,7 @@ mod tests {
     //! The bench paints the whole workbook ([`book_contents`]) rather than the grid
     //! alone: it is the content shared by the floating workbook and the detached
     //! workbook, hence the path the user takes in both windows.
-    use super::super::test_support::frame_in;
+    use super::super::test_support::frame_in_after;
 
     use super::super::workbook::book_contents;
     use super::*;
@@ -3738,6 +4102,11 @@ mod tests {
         /// The viewport the bench paints in (the root unless a test moves it
         /// to a detached window).
         viewport: egui::ViewportId,
+        /// Seconds between two frames (`None`: egui's 1/60 s), for the drags that
+        /// scroll with time (#535).
+        step: Option<f64>,
+        /// The time of the last timed frame.
+        clock: f64,
     }
 
     /// The natures of modal window the bench can paint under the workbook.
@@ -3881,6 +4250,8 @@ mod tests {
                 modal: None,
                 cancels: 0,
                 viewport: egui::ViewportId::ROOT,
+                step: None,
+                clock: 0.0,
             };
             for _ in 0..3 {
                 bench.image(Vec::new());
@@ -3894,13 +4265,25 @@ mod tests {
             let modal = self.modal;
             let mut neighbor = false;
             let mut cancelled = false;
-            let output = frame_in(&self.context, self.viewport, self.size, events, |ui| {
-                neighbor = ui.button("before").has_focus();
-                book_contents(ui, state, actions, book);
-                if let Some(modal) = modal {
-                    cancelled |= modal.paint(ui.ctx(), state, actions);
-                }
+            // Each viewport keeps its own clock: the bench's one is monotone.
+            let time = self.step.map(|step| {
+                self.clock = self.clock.max(self.context.input(|input| input.time)) + step;
+                self.clock
             });
+            let output = frame_in_after(
+                &self.context,
+                self.viewport,
+                self.size,
+                events,
+                time,
+                |ui| {
+                    neighbor = ui.button("before").has_focus();
+                    book_contents(ui, state, actions, book);
+                    if let Some(modal) = modal {
+                        cancelled |= modal.paint(ui.ctx(), state, actions);
+                    }
+                },
+            );
             self.cancels += usize::from(cancelled);
             self.neighbor_focused = neighbor;
             self.last_frame = Some(output);
@@ -8140,5 +8523,529 @@ mod tests {
             Some(first_before),
             "no scroll"
         );
+    }
+
+    // ---- #535: dragging a selection past the edge of the grid ----------------
+
+    /// Table of `column_at` cases: widths 100 / 50 / 80, spacing 8, gutter 40.
+    /// The first column starts at 48 (gutter + spacing), the spacing after a
+    /// column belongs to it. Witness: spacing ignored moves every border by 8.
+    #[test]
+    fn column_at_is_the_inverse_of_column_x_range() {
+        let widths = [100.0, 50.0, 80.0];
+        let (gutter, spacing) = (40.0, 8.0);
+        for (x, expected) in [
+            (-5.0, 0),
+            (0.0, 0),
+            (30.0, 0),
+            (48.0, 0),
+            (155.9, 0),
+            (156.0, 1),
+            (213.9, 1),
+            (214.0, 2),
+            (301.9, 2),
+            (302.0, 2),
+            (1.0e6, 2),
+            (f32::NAN, 0),
+        ] {
+            assert_eq!(column_at(&widths, spacing, gutter, x), expected, "x = {x}");
+        }
+        for index in 0..widths.len() {
+            let (left, right) = column_x_range(&widths, spacing, gutter, index);
+            assert_eq!(column_at(&widths, spacing, gutter, left + 0.5), index);
+            assert_eq!(column_at(&widths, spacing, gutter, right - 0.5), index);
+        }
+        assert_eq!(
+            column_at(&[], spacing, gutter, 10.0),
+            0,
+            "no column: no panic"
+        );
+    }
+
+    fn press_event(pos: egui::Pos2) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Presses at `from` and moves to `to` in four steps (absolute pointer, no raw
+    /// motion: a device the probe takes for an absolute one).
+    fn press_and_drag(bench: &mut Bench, from: egui::Pos2, to: egui::Pos2) {
+        bench.image(vec![egui::Event::PointerMoved(from)]);
+        bench.image(vec![press_event(from)]);
+        for step in 1..=4 {
+            bench.image(vec![egui::Event::PointerMoved(
+                from + (to - from) * (step as f32 / 4.0),
+            )]);
+        }
+    }
+
+    fn hold(bench: &mut Bench, frames: usize) {
+        for _ in 0..frames {
+            bench.image(Vec::new());
+        }
+    }
+
+    fn release_at(bench: &mut Bench, pos: egui::Pos2) {
+        bench.image(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        bench.image(Vec::new());
+    }
+
+    /// A wide bench whose frames are 0.1 s apart.
+    fn timed_wide_bench() -> Bench {
+        let mut bench = wide_bench(1000, false);
+        bench.step = Some(0.1);
+        bench
+    }
+
+    fn first_painted(bench: &Bench) -> usize {
+        painted_letters(bench)[0]
+    }
+
+    fn rank_of(bench: &Bench, column: NodeId) -> usize {
+        bench.columns.iter().position(|id| *id == column).unwrap()
+    }
+
+    fn cursor_rank(bench: &Bench) -> usize {
+        match bench.cursor() {
+            Some(GridCursor::Data(column, _) | GridCursor::Header(column, _)) => {
+                rank_of(bench, column)
+            }
+            other => panic!("no cursor: {other:?}"),
+        }
+    }
+
+    fn cursor_row(bench: &Bench) -> usize {
+        match bench.cursor() {
+            Some(GridCursor::Data(_, row)) => row,
+            other => panic!("no cell cursor: {other:?}"),
+        }
+    }
+
+    /// The debug text of the viewport commands the last frame asked for.
+    fn commands(bench: &Bench) -> Vec<String> {
+        bench
+            .last_frame
+            .as_ref()
+            .and_then(|frame| frame.viewport_output.get(&bench.viewport))
+            .map(|output| output.commands.iter().map(|c| format!("{c:?}")).collect())
+            .unwrap_or_default()
+    }
+
+    fn repaint_requested(bench: &Bench) -> bool {
+        bench
+            .last_frame
+            .as_ref()
+            .and_then(|frame| frame.viewport_output.get(&bench.viewport))
+            .is_some_and(|output| output.repaint_delay.is_zero())
+    }
+
+    /// Cell press, then the pointer past the right edge, hands off: the grid keeps
+    /// scrolling and the selection keeps growing. Witness: the call to
+    /// `grid_autoscroll` removed.
+    #[test]
+    fn a_cell_drag_past_the_right_edge_scrolls_the_grid_with_the_hand_still() {
+        let mut bench = timed_wide_bench();
+        let last_visible = *painted_letters(&bench).last().unwrap();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        let to = to;
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert!(first_painted(&bench) > 0, "the grid scrolled");
+        assert!(
+            cursor_rank(&bench) > last_visible,
+            "the selection went past the last column that was visible"
+        );
+    }
+
+    /// A bigger push scrolls faster. Witness: a constant speed makes both equal.
+    #[test]
+    fn a_bigger_push_scrolls_further() {
+        let scrolled = |push: f32| {
+            let mut bench = timed_wide_bench();
+            let from = bench.center_of(&cell_text_of(0)).unwrap();
+            let to = egui::pos2(viewport_right(&bench) + push, from.y);
+            let to = to;
+            press_and_drag(&mut bench, from, to);
+            hold(&mut bench, 10);
+            first_painted(&bench)
+        };
+        let (slow, fast) = (scrolled(20.0), scrolled(120.0));
+        assert!(slow > 0 && fast > slow, "slow {slow}, fast {fast}");
+    }
+
+    /// Held past the edge the grid asks for repaints while it can move, and stops
+    /// asking at the end of the sheet. Witness: `request_repaint` removed (the
+    /// first), `has_room` ignored (the second).
+    #[test]
+    fn the_autoscroll_repaints_only_while_an_offset_can_move() {
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 3);
+        assert!(repaint_requested(&bench), "scrolling: repaint asked");
+        // Left of the first column nothing can move.
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(2)).unwrap();
+        let to = egui::pos2(-40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 3);
+        assert_eq!(first_painted(&bench), 0);
+        assert!(!repaint_requested(&bench), "nothing to scroll: no repaint");
+    }
+
+    /// Past the bottom: the rectangle grows with the scroll, a far cell is part of
+    /// it. Witness: the vertical axis dropped.
+    #[test]
+    fn a_cell_drag_past_the_bottom_grows_the_rectangle() {
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(from.x, bench.size.y + 40.0);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert!(bench.center_of(&cell_text_of(0)).is_none(), "scrolled down");
+        let row = cursor_row(&bench);
+        assert!(row > 40, "row {row}");
+        assert!(bench
+            .state
+            .is_selected(bench.sheet, bench.columns[0], row - 3));
+        assert!(bench.state.is_selected(bench.sheet, bench.columns[0], 0));
+    }
+
+    /// Left and up scroll too. Witness: only the far edges handled.
+    #[test]
+    fn all_four_edges_scroll() {
+        let mut bench = timed_wide_bench();
+        scroll_right_by(&mut bench, 3000.0);
+        let first = first_painted(&bench);
+        assert!(first > 10);
+        let y = bench.center_of(&cell_text_of(first + 3)).unwrap();
+        let to = egui::pos2(-40.0, y.y);
+        press_and_drag(&mut bench, y, to);
+        hold(&mut bench, 5);
+        assert!(first_painted(&bench) < first, "scrolled left");
+    }
+
+    /// From a column letter: horizontal only, whole columns. Witness: every zone
+    /// treated as cells (the pointer below the bottom scrolls down).
+    #[test]
+    fn a_letter_drag_scrolls_horizontally_only() {
+        let mut bench = timed_wide_bench();
+        let last_visible = *painted_letters(&bench).last().unwrap();
+        let from = letter_rect(&bench, 0).unwrap().center();
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert!(first_painted(&bench) > 0);
+        assert!(bench
+            .state
+            .is_column_selected(bench.sheet, bench.columns[last_visible + 1]));
+        // Below the bottom: no vertical scroll, still columns.
+        let mut bench = timed_wide_bench();
+        let from = letter_rect(&bench, 0).unwrap().center();
+        // Straight below the bottom, without crossing cells on the way.
+        bench.image(vec![egui::Event::PointerMoved(from)]);
+        bench.image(vec![press_event(from)]);
+        bench.image(vec![egui::Event::PointerMoved(
+            from + egui::vec2(12.0, 0.0),
+        )]);
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(
+            from.x + 12.0,
+            bench.size.y + 40.0,
+        ))]);
+        hold(&mut bench, 10);
+        assert!(
+            bench.center_of(&cell_text_of(0)).is_some(),
+            "no vertical scroll"
+        );
+        assert!(bench.state.selection(bench.sheet).unwrap().is_columns());
+    }
+
+    /// From a row number: vertical only, whole rows; past the last row nothing is
+    /// added and no action is pushed. Witness: every zone treated as cells.
+    #[test]
+    fn a_row_number_drag_scrolls_vertically_only_and_stops_at_the_last_row() {
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of("1").unwrap();
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert_eq!(first_painted(&bench), 0, "no horizontal scroll");
+        release_at(&mut bench, from);
+
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of("1").unwrap();
+        let to = egui::pos2(from.x, bench.size.y + 40.0);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert!(bench.center_of(&cell_text_of(0)).is_none(), "scrolled down");
+        assert!(bench.state.selection(bench.sheet).unwrap().is_full_rows());
+        assert!(bench.state.is_row_selected(bench.sheet, 40));
+        let seen = bench.seen.len();
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(
+            from.x,
+            bench.size.y + 400.0,
+        ))]);
+        hold(&mut bench, 15);
+        assert!(
+            bench.state.is_row_selected(bench.sheet, 199),
+            "to the last row"
+        );
+        assert!(!bench.state.is_row_selected(bench.sheet, 200));
+        assert_eq!(bench.seen.len(), seen, "no action");
+    }
+
+    /// An upward cell drag over the header rows and the letters scrolls the grid
+    /// up and keeps a cell rectangle (no jump to row 0, no whole columns).
+    /// Witness: the header widgets without `cell_drag_marked`.
+    #[test]
+    fn an_upward_cell_drag_over_the_header_scrolls_up_and_stays_a_cell_rectangle() {
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(from.x, bench.size.y + 40.0);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 8);
+        let before = cursor_row(&bench);
+        assert!(before > 20);
+        let header = letter_rect(&bench, first_painted(&bench) + 1)
+            .unwrap()
+            .center();
+        bench.image(vec![egui::Event::PointerMoved(header)]);
+        hold(&mut bench, 4);
+        let selection = bench.state.selection(bench.sheet).unwrap();
+        assert!(!selection.is_columns(), "not whole columns");
+        let after = cursor_row(&bench);
+        assert!(
+            bench.state.is_selected(bench.sheet, bench.columns[0], 0),
+            "the rectangle keeps its anchor"
+        );
+        assert!(after > 0, "no jump to row 0");
+        assert!(after < before, "scrolled up: {after} < {before}");
+    }
+
+    /// A click and the other drags never scroll: a text drag in an editor, a drag
+    /// of columns onto a graph, and any pointer move after the release. Witness:
+    /// the marker never cleared / `grid_drag_in_progress` ignored.
+    #[test]
+    fn the_other_gestures_and_the_release_do_not_scroll() {
+        // Editor text drag.
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        bench.state.begin_edit(bench.columns[0], 0);
+        hold(&mut bench, 2);
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert_eq!(
+            first_painted(&bench),
+            0,
+            "an editor text drag never scrolls"
+        );
+
+        // A drag of columns onto a graph.
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(from.x + 30.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        egui::DragAndDrop::set_payload(
+            &bench.context,
+            ColumnDragPayload {
+                sheet: bench.sheet,
+                columns: vec![bench.columns[0]],
+            },
+        );
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(
+            viewport_right(&bench) + 40.0,
+            from.y,
+        ))]);
+        hold(&mut bench, 10);
+        assert_eq!(
+            first_painted(&bench),
+            0,
+            "a drag onto a graph never scrolls"
+        );
+
+        // After the release.
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let out = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        let to = out;
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 3);
+        release_at(&mut bench, out);
+        let rank = first_painted(&bench);
+        hold(&mut bench, 10);
+        bench.image(vec![egui::Event::PointerMoved(out + egui::vec2(5.0, 0.0))]);
+        hold(&mut bench, 5);
+        assert_eq!(first_painted(&bench), rank, "no scroll after the release");
+    }
+
+    /// A column resize never autoscrolls. Witness: marker written by the resize.
+    #[test]
+    fn a_column_resize_does_not_scroll() {
+        let mut bench = timed_wide_bench();
+        let rect = letter_rect(&bench, 0).unwrap();
+        let from = egui::pos2(rect.right() + 3.0, rect.center().y);
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert_eq!(first_painted(&bench), 0, "a resize never scrolls");
+        release_at(&mut bench, from);
+    }
+
+    /// A detached window scrolls the same way. Witness: the marker keyed on ROOT.
+    #[test]
+    fn a_detached_viewport_autoscrolls_too() {
+        let mut bench = timed_wide_bench();
+        bench.viewport = egui::ViewportId::from_hash_of("detached");
+        hold(&mut bench, 4);
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert!(first_painted(&bench) > 0);
+    }
+
+    /// A relative mouse: from `from` along the row to the right edge, every frame
+    /// carrying the pointer move and the same raw motion. Returns the commands of
+    /// the frames, and the edge.
+    fn relative_drag_to_the_edge(bench: &mut Bench) -> (Vec<String>, egui::Pos2) {
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        bench.image(vec![egui::Event::PointerMoved(from)]);
+        bench.image(vec![press_event(from)]);
+        bench.image(vec![egui::Event::PointerMoved(
+            from + egui::vec2(20.0, 0.0),
+        )]);
+        let right = viewport_right(bench);
+        let mut seen = Vec::new();
+        let mut x = from.x + 20.0;
+        while x < right {
+            let next = (x + 100.0).min(right + 2.0);
+            bench.image(vec![
+                egui::Event::PointerMoved(egui::pos2(next, from.y)),
+                egui::Event::MouseMoved(egui::vec2(next - x, 0.0)),
+            ]);
+            seen.extend(commands(bench));
+            x = next;
+        }
+        (seen, egui::pos2(x, from.y))
+    }
+
+    /// Relative mouse at the edge: the lock is taken once, kept while pushing, the
+    /// system cursor stays (default icon), and the button up releases it. Witness:
+    /// the hide flag ignored gives the `None` icon; `renew` not called lets the
+    /// plugin unlock.
+    #[test]
+    fn a_relative_mouse_is_held_at_the_edge_and_released_at_the_button_up() {
+        let mut bench = timed_wide_bench();
+        let (seen, edge) = relative_drag_to_the_edge(&mut bench);
+        assert_eq!(
+            seen.iter().filter(|c| c.contains("Locked")).count(),
+            1,
+            "{seen:?}"
+        );
+        assert_eq!(
+            bench
+                .last_frame
+                .as_ref()
+                .unwrap()
+                .platform_output
+                .cursor_icon,
+            egui::CursorIcon::Default,
+            "the system cursor stays"
+        );
+        let mut pushing = Vec::new();
+        let mut offsets = Vec::new();
+        for _ in 0..6 {
+            bench.image(vec![egui::Event::MouseMoved(egui::vec2(30.0, 0.0))]);
+            pushing.extend(commands(&bench));
+            offsets.push(first_painted(&bench));
+        }
+        assert!(
+            pushing.is_empty(),
+            "lease renewed, nothing sent: {pushing:?}"
+        );
+        assert!(offsets.last() > offsets.first(), "{offsets:?}");
+        assert!(repaint_requested(&bench));
+        release_at(&mut bench, edge);
+        let released = commands(&bench);
+        let first = {
+            // The frame of the release itself.
+            bench.image(Vec::new());
+            released
+        };
+        let _ = first;
+        assert!(!bench.state.selection(bench.sheet).unwrap().is_columns());
+    }
+
+    /// The release frame sends the unlock. Witness: no `release`.
+    #[test]
+    fn the_button_up_unlocks_the_mouse() {
+        let mut bench = timed_wide_bench();
+        let (_, edge) = relative_drag_to_the_edge(&mut bench);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: edge,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(
+            commands(&bench).iter().any(|c| c.contains("Grab(None)")),
+            "{:?}",
+            commands(&bench)
+        );
+    }
+
+    /// Pushing back past the edge ends the hold, and the pointer is not caught
+    /// again where it stands. Witness: no `released` flag (locked again at once).
+    #[test]
+    fn pushing_back_releases_the_hold_for_good() {
+        let mut bench = timed_wide_bench();
+        let (_, _) = relative_drag_to_the_edge(&mut bench);
+        bench.image(vec![egui::Event::MouseMoved(egui::vec2(30.0, 0.0))]);
+        bench.image(vec![egui::Event::MouseMoved(egui::vec2(-2000.0, 0.0))]);
+        assert!(commands(&bench).iter().any(|c| c.contains("Grab(None)")));
+        let mut later = Vec::new();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+            later.extend(commands(&bench));
+        }
+        assert!(
+            later.iter().all(|c| !c.contains("Locked")),
+            "not caught again: {later:?}"
+        );
+    }
+
+    /// An absolute pointer is never locked: the cursor leaves the grid and its
+    /// distance sets the speed. Witness: the probe ignored.
+    #[test]
+    fn an_absolute_pointer_is_never_locked() {
+        let mut bench = timed_wide_bench();
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let mut seen = Vec::new();
+        bench.image(vec![egui::Event::PointerMoved(from)]);
+        bench.image(vec![press_event(from)]);
+        for step in 1..=12 {
+            // Raw motion of window coordinates (the Xwayland / VM tablet case).
+            bench.image(vec![
+                egui::Event::PointerMoved(from + egui::vec2(160.0 * step as f32, 0.0)),
+                egui::Event::MouseMoved(egui::vec2(5000.0, 3000.0)),
+            ]);
+            seen.extend(commands(&bench));
+        }
+        hold(&mut bench, 5);
+        seen.extend(commands(&bench));
+        assert!(first_painted(&bench) > 0, "scrolled all the same");
+        assert!(seen.iter().all(|c| !c.contains("Grab")), "{seen:?}");
     }
 }
