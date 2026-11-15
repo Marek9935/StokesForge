@@ -773,7 +773,7 @@ How it is held:
 - Migrated: graph properties (all pages, series editor shared
   with the series window), analysis form, import window
   (files, format, header, metadata, destination; the rules between
-  blocks became headings). The series window (group, scope,
+  blocks became headings). The series window (group page, curve page,
   color gradient — `curve_settings.rs`) is migrated, as are the tools of
   the scope of the Results panel (#241;
   its series × value table and the "from / to" lists stay

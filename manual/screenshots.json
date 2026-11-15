@@ -32,7 +32,7 @@
   {
     "image": "graphs-properties-series.png",
     "page": "guide/graphs.md",
-    "shows": "The Series Properties window of Graph1: series list, group, name, plot type, Y axis, Y error and X error, line and symbol settings."
+    "shows": "The Series Properties window of Graph1 on the curve page of the first series: series list, then Curve (name, plot type, Y axis, Y error and X error, Show in legend), Group, line and symbol settings."
   },
   {
     "image": "graphs-properties-general.png",
@@ -57,7 +57,7 @@
   {
     "image": "graphs-properties-color-bar.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the series group Kinetics with its On the bar box ticked and its Range row, Chain the segments, the value, scale, placement, ticks and title settings."
+    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the line Groups on the bar: Kinetics with its Series link, then the value, scale, placement, ticks and title settings."
   },
   {
     "image": "graphs-formula-title.png",

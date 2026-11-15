@@ -223,7 +223,6 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Delete Group | Supprimer le groupe | Removes the group and all its series from the graph (#197); in menus, it is « Delete » / « Supprimer » applied to the group | Effacer le groupe | G |
 | Select Members | Sélectionner les membres | Selects the group: the handles of all its series are shown (#197) | Sélectionner le groupe | G |
 | Series (Object Manager) | Séries | The node under a layer that lists its series; formerly « Plot Group » / « Groupe de tracés », renamed; do not call it a group (#177) | Plot Group, Groupe de tracés | G |
-| Whole group / This series only | Tout le groupe / Cette série seulement | Scope of the settings of a series that is in a group; the settings specific to one series are greyed out in "group" scope (#177) | Appliquer à tous | G |
 | Leave Group | Quitter le groupe | Detaches the series from its group, style kept (#177) | Dissocier, Sortir | G |
 | Sort | Trier | Puts a Project Manager folder back in automatic order: folders first, then natural name order (#425) | Order, Classer | G |
 | Color gradient | Nuancier | Gradient of colors spread over the series of a group: Blue to Red / Bleu vers Rouge… (#178; the arrow → is not in the interface font: a square is shown in its place, do not use it); can be saved in the project or for the user, with its name | Palette (qualitative, sans ordre), Dégradé | G |
