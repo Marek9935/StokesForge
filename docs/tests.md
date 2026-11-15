@@ -1292,11 +1292,11 @@ Column virtualization (the table holds the visible window and two spacers) and t
 
 ## Drag past the edge (#535)
 
-A selection drag that reaches an edge of the grid keeps scrolling; the push past the edge sets the speed; a relative mouse is held on the edge, an absolute pointer is not. The grid tests use `wide_bench(1000, false)` with `bench.step = Some(0.1)` (each frame 0.1 s after the previous one: `stable_dt` follows only after a frame that asked for a repaint) and read what is painted (first painted letter, cursor, selection kind, the viewport commands of the frame). Raw motion is injected with `Event::MouseMoved`; the guard never sees the lock commands in `grid.rs` (the tests read their `Debug`). Each witness named below was seen red by mutation; `a_column_resize_does_not_scroll`, `a_detached_viewport_autoscrolls_too`, `an_absolute_pointer_is_never_locked` (probe ignored) and the `all_four_edges_scroll` left edge have no mutation run.
+A selection drag that reaches an edge of the grid keeps scrolling; the push past the edge sets the speed; the pointer is never held. The grid tests use `wide_bench(1000, false)` with `bench.step = Some(0.1)` (each frame 0.1 s after the previous one: `stable_dt` follows only after a frame that asked for a repaint) and read what is painted (first painted letter, cursor, selection kind, the viewport commands of the frame). The cursor-lock guard stays untouched: the grid test builds the command names apart (`concat!`). Each witness named below was seen red by mutation; `a_column_resize_does_not_scroll`, `a_detached_viewport_autoscrolls_too`, `an_absolute_pointer_is_never_locked` (probe ignored) and the `all_four_edges_scroll` left edge have no mutation run.
 
 | Rule | Witness |
 |---|---|
-| speed: inside the edges 0, signed by the side, grows with the push, capped, proportional to the frame time (bounded), not finite gives 0, pushing back reduces then stops at 0, the lock starts one point before the edge | `grid_autoscroll::tests::*` (constant speed: red) |
+| speed: inside the edges 0, signed by the side, grows with the push, capped, proportional to the frame time (bounded), not finite gives 0 | `grid_autoscroll::tests::*` (constant speed: red) |
 | `column_at` is the inverse of `column_x_range` (gutter, spacing, past the end, NaN, no column) | `column_at_is_the_inverse_of_column_x_range` |
 | a cell press then the pointer past the right edge, no more event: the grid scrolls and the cursor goes past the last column that was visible | `a_cell_drag_past_the_right_edge_scrolls_the_grid_with_the_hand_still` (`grid_autoscroll` call removed: red) |
 | a bigger push scrolls further | `a_bigger_push_scrolls_further` (constant speed: red) |
@@ -1307,10 +1307,9 @@ A selection drag that reaches an edge of the grid keeps scrolling; the push past
 | an editor text drag, a drag of columns onto a graph, and the pointer after the release never scroll | `the_other_gestures_and_the_release_do_not_scroll` (button state ignored: red; `grid_drag_in_progress` ignored: red) |
 | a column resize does not scroll | `a_column_resize_does_not_scroll` |
 | a detached window scrolls the same | `a_detached_viewport_autoscrolls_too` |
-| relative mouse: lock taken once at the edge, lease renewed (nothing sent while pushing), system cursor kept (default icon), unlock at the button up | `a_relative_mouse_is_held_at_the_edge_and_released_at_the_button_up`, `the_button_up_unlocks_the_mouse` (hide flag true: red; `release` removed: red) |
-| pushing back releases the hold, not taken again where the pointer stands | `pushing_back_releases_the_hold_for_good` (`released` ignored: red) |
-| an absolute pointer is never locked, and scrolls by its distance | `an_absolute_pointer_is_never_locked` |
-| the probe (device kinds, outlier bound) and the lock guard | `pointer_probe::tests::*`, `cursor_lock_guard` (moved from Page Layout Mode, #512, unchanged) |
+| the pointer past the edge, even outside the window, keeps scrolling | `a_pointer_outside_the_window_still_scrolls` |
+| coming back over the grid stops the scroll and the hovered cell extends the selection | `coming_back_inside_stops_the_scroll_and_hover_selects` (push never 0 inside: red) |
+| the grid never sends a grab, a cursor position or an icon change | `the_grid_never_holds_or_changes_the_cursor` (stray icon set: red; stray grab command: red) |
 
 ## Moving columns (#319)
 

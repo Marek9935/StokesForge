@@ -24,17 +24,13 @@ use stokesforge_plot::PlotType;
 
 use crate::icons;
 use stokesforge_app_state::column_move::{target_order, ColumnMove};
-use stokesforge_app_state::grid_autoscroll::{
-    push_past, push_reaching, push_under_lock, scroll_step,
-};
+use stokesforge_app_state::grid_autoscroll::{push_past, scroll_step};
 use stokesforge_app_state::selection::{GridCursor, Selection};
 use stokesforge_app_state::state::{
     Action, AppState, ColumnDragPayload, ColumnTypeLock, GridMenu, GridZone, HeaderField,
     MoveDirection, RowDragPayload,
 };
 use stokesforge_app_state::tr;
-use stokesforge_render_egui::pointer_lock;
-use stokesforge_render_egui::pointer_probe::{pointer_step, PointerSource};
 
 use super::empty_state::empty_state;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
@@ -2528,22 +2524,10 @@ fn drag_marker_id(ctx: &egui::Context, sheet: NodeId) -> egui::Id {
     egui::Id::new(("stokesforge_grid_drag_zone", ctx.viewport_id(), sheet.raw()))
 }
 
-fn autoscroll_memory_id(ctx: &egui::Context, sheet: NodeId) -> egui::Id {
-    egui::Id::new((
-        "stokesforge_grid_autoscroll",
-        ctx.viewport_id(),
-        sheet.raw(),
-    ))
-}
-
-/// A selection drag has just started in `zone`. A new drag forgets what the last
-/// one knew of the device.
+/// A selection drag has just started in `zone`.
 fn mark_drag(ctx: &egui::Context, sheet: NodeId, zone: DragZone) {
-    let (marker, memory) = (drag_marker_id(ctx, sheet), autoscroll_memory_id(ctx, sheet));
-    ctx.data_mut(|data| {
-        data.insert_temp(marker, zone);
-        data.remove::<AutoscrollMemory>(memory);
-    });
+    let marker = drag_marker_id(ctx, sheet);
+    ctx.data_mut(|data| data.insert_temp(marker, zone));
 }
 
 fn drag_zone(ctx: &egui::Context, sheet: NodeId) -> Option<DragZone> {
@@ -2556,23 +2540,6 @@ fn drag_zone(ctx: &egui::Context, sheet: NodeId) -> Option<DragZone> {
 /// the cell rectangle into whole columns, rows or header fields (#535).
 fn cell_drag_marked(ctx: &egui::Context, sheet: NodeId) -> bool {
     drag_zone(ctx, sheet) == Some(DragZone::Cells)
-}
-
-/// What the autoscroll of a drag keeps between frames.
-#[derive(Clone, Copy)]
-struct AutoscrollMemory {
-    /// What moves the pointer, found by the probe at the start of the drag.
-    source: PointerSource,
-    last_position: Option<egui::Pos2>,
-    /// Push past the edge, per axis, signed (see `grid_autoscroll`).
-    push: egui::Vec2,
-    /// The mouse is locked at the edge.
-    locked: bool,
-    /// Where the pointer is held, on the edge.
-    held_at: egui::Pos2,
-    /// The hold was released by pushing back: no new hold until the pointer has
-    /// left the edge, else it would be caught again at once, where it stands.
-    released: bool,
 }
 
 /// The table's rectangles that [`grid_autoscroll`] needs.
@@ -2589,19 +2556,20 @@ fn has_room(push: f32, offset: f32, max: f32) -> bool {
     (push > 0.0 && offset < max - 0.5) || (push < 0.0 && offset > 0.5)
 }
 
-/// Keeps scrolling a selection drag that reached the edge of the grid (#535).
+/// Keeps scrolling a selection drag whose pointer is past an edge of the grid
+/// (#535), as a spreadsheet does.
 ///
 /// Marked by the zone the drag started in ([`mark_drag`]), cleared at the button
-/// up, on focus loss, and for a drag of columns or rows onto a graph. With a
-/// relative mouse the pointer is held on the edge (cursor lock, lease of
-/// `pointer_lock`, system cursor kept) and the raw motion accumulated past the
-/// edge is the push; with an absolute pointer (probe, `pointer_probe`) the
-/// cursor leaves the grid and its distance past the edge is the push. The push
-/// sets the scroll speed (`grid_autoscroll` of app-state); the scroll goes
-/// through the follow path of #534 (`take_follow_scroll`). The selection extends
-/// to the cell at the clamped pointer through the same `AppState::extend_*` the
-/// widgets call; app-state decides how far. Headers and row numbers are edges
-/// of a cell drag.
+/// up, on focus loss, and for a drag of columns or rows onto a graph. The
+/// pointer is never held: it may leave the grid and even the window (egui keeps
+/// the position during a press), and the system cursor is untouched. The signed
+/// distance of the pointer past each edge of the viewport (0 inside) sets the
+/// scroll speed (`grid_autoscroll` of app-state), and the grid keeps scrolling
+/// with the hand still. Back over the grid the scroll stops and the hovered
+/// cell extends the selection as before. The scroll goes through the follow
+/// path of #534 (`take_follow_scroll`); the selection extends to the cell at
+/// the clamped pointer through the same `AppState::extend_*` the widgets call,
+/// app-state decides how far. Headers and row numbers are edges of a cell drag.
 fn grid_autoscroll(
     ui: &egui::Ui,
     state: &mut AppState,
@@ -2610,52 +2578,23 @@ fn grid_autoscroll(
     view: &AutoscrollView,
 ) {
     let ctx = ui.ctx();
-    let id = autoscroll_memory_id(ctx, sheet);
     let zone = drag_zone(ctx, sheet);
-    let (down, focused, pointer, motion, dt) = ui.input(|input| {
+    let (down, focused, pointer, dt) = ui.input(|input| {
         (
             input.pointer.primary_down(),
             input.focused,
             input.pointer.latest_pos(),
-            input.pointer.motion(),
             input.stable_dt,
         )
     });
-    let mut memory = ctx.data(|data| data.get_temp::<AutoscrollMemory>(id));
     let alive = zone.is_some() && down && focused && !grid_drag_in_progress(ctx);
     let (Some(zone), true) = (zone, alive) else {
-        if let Some(memory) = memory.filter(|memory| memory.locked) {
-            pointer_lock::release(ctx, Some(memory.held_at));
-        }
         let marker = drag_marker_id(ctx, sheet);
-        ctx.data_mut(|data| {
-            data.remove::<DragZone>(marker);
-            data.remove::<AutoscrollMemory>(id);
-        });
+        ctx.data_mut(|data| data.remove::<DragZone>(marker));
         return;
     };
     let Some(pos) = pointer else {
         return;
-    };
-    // The frame that starts the drag holds the motion made before the press was
-    // recognised: it is no part of the probe (as for the page corner, #512).
-    let fresh = memory.is_none();
-    let mut memory = memory.take().unwrap_or(AutoscrollMemory {
-        source: PointerSource::probing(),
-        last_position: None,
-        push: egui::Vec2::ZERO,
-        locked: false,
-        held_at: pos,
-        released: false,
-    });
-    let moved = memory
-        .last_position
-        .map_or(egui::Vec2::ZERO, |last| pos - last);
-    memory.last_position = Some(pos);
-    let step = if fresh {
-        egui::Vec2::ZERO
-    } else {
-        pointer_step(&mut memory.source, motion, moved)
     };
 
     // Edges of the grid on screen. A cell drag takes the header rows as its top
@@ -2692,77 +2631,25 @@ fn grid_autoscroll(
         )
     };
 
-    if memory.locked {
-        let mut push = memory.push;
-        push.x = if use_x {
-            push_under_lock(push.x, step.x)
+    let push = egui::vec2(
+        if use_x {
+            push_past(pos.x, horizontal.0, horizontal.1)
         } else {
             0.0
-        };
-        push.y = if use_y {
-            push_under_lock(push.y, step.y)
+        },
+        if use_y {
+            push_past(pos.y, vertical.0, vertical.1)
         } else {
             0.0
-        };
-        memory.push = push;
-        if push == egui::Vec2::ZERO {
-            // Pushed back to the edge: the pointer is free again.
-            memory.locked = false;
-            memory.released = true;
-            pointer_lock::release(ctx, Some(memory.held_at));
-        } else {
-            pointer_lock::renew(ctx, false);
-        }
-    } else {
-        let reach = egui::vec2(
-            if use_x {
-                push_reaching(pos.x, horizontal.0, horizontal.1)
-            } else {
-                0.0
-            },
-            if use_y {
-                push_reaching(pos.y, vertical.0, vertical.1)
-            } else {
-                0.0
-            },
-        );
-        let (room_x, room_y) = room(reach);
-        if reach == egui::Vec2::ZERO {
-            memory.released = false;
-        }
-        if memory.source.locks() && !memory.released && (room_x || room_y) {
-            memory.locked = true;
-            memory.push = egui::vec2(
-                if room_x { reach.x } else { 0.0 },
-                if room_y { reach.y } else { 0.0 },
-            );
-            memory.held_at = inside(pos);
-            pointer_lock::renew(ctx, false);
-        } else {
-            memory.push = egui::vec2(
-                if use_x {
-                    push_past(pos.x, horizontal.0, horizontal.1)
-                } else {
-                    0.0
-                },
-                if use_y {
-                    push_past(pos.y, vertical.0, vertical.1)
-                } else {
-                    0.0
-                },
-            );
-        }
-    }
-    let push = memory.push;
+        },
+    );
     let (room_x, room_y) = room(push);
-    ctx.data_mut(|data| data.insert_temp(id, memory));
-    if !(push.x != 0.0 || push.y != 0.0) {
+    if push == egui::Vec2::ZERO {
         return;
     }
 
-    // The selection goes to the cell at the clamped pointer: the one held at the
-    // edge while locked.
-    let at = inside(if memory.locked { memory.held_at } else { pos });
+    // The selection goes to the cell at the clamped pointer.
+    let at = inside(pos);
     let index = column_at(
         geometry.widths,
         geometry.spacing,
@@ -8571,8 +8458,7 @@ mod tests {
         }
     }
 
-    /// Presses at `from` and moves to `to` in four steps (absolute pointer, no raw
-    /// motion: a device the probe takes for an absolute one).
+    /// Presses at `from` and moves to `to` in four steps (the pointer only).
     fn press_and_drag(bench: &mut Bench, from: egui::Pos2, to: egui::Pos2) {
         bench.image(vec![egui::Event::PointerMoved(from)]);
         bench.image(vec![press_event(from)]);
@@ -8914,136 +8800,88 @@ mod tests {
         assert!(first_painted(&bench) > 0);
     }
 
-    /// A relative mouse: from `from` along the row to the right edge, every frame
-    /// carrying the pointer move and the same raw motion. Returns the commands of
-    /// the frames, and the edge.
-    fn relative_drag_to_the_edge(bench: &mut Bench) -> (Vec<String>, egui::Pos2) {
+    /// The pointer goes far past the right edge, even past the window: the grid
+    /// keeps scrolling. Witness: the pointer clamped to the window.
+    #[test]
+    fn a_pointer_outside_the_window_still_scrolls() {
+        let mut bench = timed_wide_bench();
         let from = bench.center_of(&cell_text_of(0)).unwrap();
-        bench.image(vec![egui::Event::PointerMoved(from)]);
-        bench.image(vec![press_event(from)]);
-        bench.image(vec![egui::Event::PointerMoved(
-            from + egui::vec2(20.0, 0.0),
-        )]);
-        let right = viewport_right(bench);
-        let mut seen = Vec::new();
-        let mut x = from.x + 20.0;
-        while x < right {
-            let next = (x + 100.0).min(right + 2.0);
-            bench.image(vec![
-                egui::Event::PointerMoved(egui::pos2(next, from.y)),
-                egui::Event::MouseMoved(egui::vec2(next - x, 0.0)),
-            ]);
-            seen.extend(commands(bench));
-            x = next;
-        }
-        (seen, egui::pos2(x, from.y))
+        let to = egui::pos2(bench.size.x + 300.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        assert!(first_painted(&bench) > 0);
     }
 
-    /// Relative mouse at the edge: the lock is taken once, kept while pushing, the
-    /// system cursor stays (default icon), and the button up releases it. Witness:
-    /// the hide flag ignored gives the `None` icon; `renew` not called lets the
-    /// plugin unlock.
+    /// Coming back over the grid stops the scroll and the hovered cell extends
+    /// the selection as in a plain drag. Witness: the scroll not stopped (the
+    /// offset moves), or the extension not following the hover.
     #[test]
-    fn a_relative_mouse_is_held_at_the_edge_and_released_at_the_button_up() {
+    fn coming_back_inside_stops_the_scroll_and_hover_selects() {
         let mut bench = timed_wide_bench();
-        let (seen, edge) = relative_drag_to_the_edge(&mut bench);
-        assert_eq!(
-            seen.iter().filter(|c| c.contains("Locked")).count(),
-            1,
-            "{seen:?}"
-        );
-        assert_eq!(
-            bench
-                .last_frame
-                .as_ref()
-                .unwrap()
-                .platform_output
-                .cursor_icon,
-            egui::CursorIcon::Default,
-            "the system cursor stays"
-        );
-        let mut pushing = Vec::new();
-        let mut offsets = Vec::new();
-        for _ in 0..6 {
-            bench.image(vec![egui::Event::MouseMoved(egui::vec2(30.0, 0.0))]);
-            pushing.extend(commands(&bench));
-            offsets.push(first_painted(&bench));
-        }
-        assert!(
-            pushing.is_empty(),
-            "lease renewed, nothing sent: {pushing:?}"
-        );
-        assert!(offsets.last() > offsets.first(), "{offsets:?}");
-        assert!(repaint_requested(&bench));
-        release_at(&mut bench, edge);
-        let released = commands(&bench);
-        let first = {
-            // The frame of the release itself.
-            bench.image(Vec::new());
-            released
-        };
-        let _ = first;
-        assert!(!bench.state.selection(bench.sheet).unwrap().is_columns());
+        let from = bench.center_of(&cell_text_of(0)).unwrap();
+        let to = egui::pos2(viewport_right(&bench) + 80.0, from.y);
+        press_and_drag(&mut bench, from, to);
+        hold(&mut bench, 10);
+        let scrolled = first_painted(&bench);
+        assert!(scrolled > 0);
+        // Over the grid again: the scroll stops where it stands.
+        let inside = egui::pos2(viewport_right(&bench) - 30.0, from.y);
+        bench.image(vec![egui::Event::PointerMoved(inside)]);
+        hold(&mut bench, 3);
+        let stopped = first_painted(&bench);
+        hold(&mut bench, 10);
+        assert_eq!(first_painted(&bench), stopped, "the scroll stopped");
+        assert!(!repaint_requested(&bench), "no repaint once stopped");
+        // The hovered cell extends the selection, as in a plain drag.
+        let target = stopped + 1;
+        let rect = letter_rect(&bench, target).unwrap();
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(
+            rect.center().x,
+            from.y,
+        ))]);
+        hold(&mut bench, 3);
+        assert_eq!(first_painted(&bench), stopped, "still not scrolling");
+        assert_eq!(cursor_rank(&bench), target, "the hovered cell is selected");
     }
 
-    /// The release frame sends the unlock. Witness: no `release`.
+    /// The grid never grabs the cursor nor changes its icon, past the edge or
+    /// not. Witness: a stray grab or cursor-position command, or an icon
+    /// set by the autoscroll.
     #[test]
-    fn the_button_up_unlocks_the_mouse() {
-        let mut bench = timed_wide_bench();
-        let (_, edge) = relative_drag_to_the_edge(&mut bench);
-        bench.image(vec![egui::Event::PointerButton {
-            pos: edge,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }]);
-        assert!(
-            commands(&bench).iter().any(|c| c.contains("Grab(None)")),
-            "{:?}",
-            commands(&bench)
-        );
-    }
-
-    /// Pushing back past the edge ends the hold, and the pointer is not caught
-    /// again where it stands. Witness: no `released` flag (locked again at once).
-    #[test]
-    fn pushing_back_releases_the_hold_for_good() {
-        let mut bench = timed_wide_bench();
-        let (_, _) = relative_drag_to_the_edge(&mut bench);
-        bench.image(vec![egui::Event::MouseMoved(egui::vec2(30.0, 0.0))]);
-        bench.image(vec![egui::Event::MouseMoved(egui::vec2(-2000.0, 0.0))]);
-        assert!(commands(&bench).iter().any(|c| c.contains("Grab(None)")));
-        let mut later = Vec::new();
-        for _ in 0..3 {
-            bench.image(Vec::new());
-            later.extend(commands(&bench));
-        }
-        assert!(
-            later.iter().all(|c| !c.contains("Locked")),
-            "not caught again: {later:?}"
-        );
-    }
-
-    /// An absolute pointer is never locked: the cursor leaves the grid and its
-    /// distance sets the speed. Witness: the probe ignored.
-    #[test]
-    fn an_absolute_pointer_is_never_locked() {
+    fn the_grid_never_holds_or_changes_the_cursor() {
+        // Built apart: the cursor-lock guard bans the command names in sources.
+        const GRAB: &str = concat!("Cursor", "Grab");
+        const POSITION: &str = concat!("Cursor", "Position");
         let mut bench = timed_wide_bench();
         let from = bench.center_of(&cell_text_of(0)).unwrap();
         let mut seen = Vec::new();
         bench.image(vec![egui::Event::PointerMoved(from)]);
         bench.image(vec![press_event(from)]);
         for step in 1..=12 {
-            // Raw motion of window coordinates (the Xwayland / VM tablet case).
             bench.image(vec![
                 egui::Event::PointerMoved(from + egui::vec2(160.0 * step as f32, 0.0)),
-                egui::Event::MouseMoved(egui::vec2(5000.0, 3000.0)),
+                egui::Event::MouseMoved(egui::vec2(160.0, 0.0)),
             ]);
             seen.extend(commands(&bench));
         }
-        hold(&mut bench, 5);
-        seen.extend(commands(&bench));
+        for _ in 0..5 {
+            bench.image(Vec::new());
+            seen.extend(commands(&bench));
+        }
         assert!(first_painted(&bench) > 0, "scrolled all the same");
-        assert!(seen.iter().all(|c| !c.contains("Grab")), "{seen:?}");
+        assert!(
+            seen.iter()
+                .all(|c| !c.contains(GRAB) && !c.contains(POSITION) && !c.contains("Icon")),
+            "{seen:?}"
+        );
+        let icon = bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .platform_output
+            .cursor_icon;
+        assert_eq!(icon, egui::CursorIcon::Default, "the system cursor stays");
+        release_at(&mut bench, from);
+        assert!(commands(&bench).iter().all(|c| !c.contains("Cursor")));
     }
 }

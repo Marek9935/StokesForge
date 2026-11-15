@@ -1,14 +1,10 @@
 //! Speed of the grid's scroll while a selection is dragged past its edge
-//! (#535). Pure arithmetic only, no window and no model: the grid keeps the
-//! push between frames and applies the scroll.
+//! (#535), as in a spreadsheet. Pure arithmetic only, no window and no model.
 //!
-//! The **push** of an axis is how far the hand has gone past the edge, in
-//! points, signed: positive past the far edge (right, bottom), negative past
-//! the near one (left, top). With the mouse locked at the edge it is the raw
-//! motion accumulated since the lock ([`push_under_lock`]); with an absolute
-//! pointer it is the distance of the cursor past the edge ([`push_past`]). The
-//! speed grows with the push ([`scroll_speed`]) and is capped; pushing back
-//! reduces it, then stops it.
+//! The **push** of an axis is the distance of the pointer past the edge of the
+//! viewport, in points, signed: positive past the far edge (right, bottom),
+//! negative past the near one (left, top), 0 inside ([`push_past`]). The speed
+//! grows with the push ([`scroll_speed`]) and is capped; back inside, it is 0.
 
 /// Scroll speed per point of push, in points per second per point (1/s).
 /// Tuned at the trial on the user's screen.
@@ -21,10 +17,6 @@ pub const MAX_SPEED: f32 = 6000.0;
 /// stall must not throw the grid across the sheet.
 pub const MAX_FRAME_TIME: f32 = 0.1;
 
-/// How close to the edge, in points, the pointer counts as having reached it:
-/// the lock is taken there, with at least this push.
-pub const REACH_MARGIN: f32 = 1.0;
-
 fn finite(value: f32) -> f32 {
     if value.is_finite() {
         value
@@ -33,7 +25,7 @@ fn finite(value: f32) -> f32 {
     }
 }
 
-/// Signed distance of `pos` past the range `min..=max` (an absolute pointer):
+/// Signed distance of `pos` past the range `min..=max`:
 /// 0 inside, positive beyond `max`, negative before `min`. Not finite: 0.
 pub fn push_past(pos: f32, min: f32, max: f32) -> f32 {
     if !pos.is_finite() {
@@ -46,38 +38,6 @@ pub fn push_past(pos: f32, min: f32, max: f32) -> f32 {
         pos - min
     } else {
         0.0
-    }
-}
-
-/// The push at which a locked mouse starts: 0 while `pos` is more than
-/// [`REACH_MARGIN`] inside the range, else the distance past the edge, at
-/// least [`REACH_MARGIN`] (so that a pointer exactly on the edge holds). Signed
-/// as [`push_past`]. Not finite: 0.
-pub fn push_reaching(pos: f32, min: f32, max: f32) -> f32 {
-    if !pos.is_finite() {
-        return 0.0;
-    }
-    let (min, max) = (finite(min), finite(max));
-    if pos >= max - REACH_MARGIN {
-        (pos - max).max(0.0) + REACH_MARGIN
-    } else if pos <= min + REACH_MARGIN {
-        -((min - pos).max(0.0) + REACH_MARGIN)
-    } else {
-        0.0
-    }
-}
-
-/// The push after `motion` (points of raw mouse motion on this axis) while the
-/// mouse is locked at the edge. Pushing back to the edge ends it at exactly 0
-/// (the hold is released there: what is left of the motion is not kept). Not
-/// finite motion counts as none.
-pub fn push_under_lock(push: f32, motion: f32) -> f32 {
-    let push = finite(push);
-    let next = push + finite(motion);
-    if (push > 0.0 && next <= 0.0) || (push < 0.0 && next >= 0.0) {
-        0.0
-    } else {
-        next
     }
 }
 
@@ -146,39 +106,6 @@ mod tests {
             assert_eq!(scroll_step(bad, 0.05), 0.0);
             assert_eq!(scroll_step(30.0, bad), 0.0);
             assert_eq!(push_past(bad, 10.0, 100.0), 0.0);
-            assert_eq!(push_reaching(bad, 10.0, 100.0), 0.0);
-            assert_eq!(push_under_lock(bad, 5.0), 5.0);
-            assert_eq!(push_under_lock(5.0, bad), 5.0);
         }
-    }
-
-    /// Pushing back reduces the speed, then stops it and ends the hold at 0.
-    /// Witness: no clamp at zero leaves a negative push (the grid would scroll
-    /// the other way).
-    #[test]
-    fn pushing_back_slows_then_stops_at_zero() {
-        let mut push = push_under_lock(0.0, 0.0) + 40.0;
-        let fast = scroll_speed(push);
-        push = push_under_lock(push, -15.0);
-        assert_eq!(push, 25.0);
-        assert!(scroll_speed(push) < fast);
-        push = push_under_lock(push, -100.0);
-        assert_eq!(push, 0.0, "back past the edge: stopped, hold ended");
-        let mut near = push_under_lock(-10.0, 30.0);
-        assert_eq!(near, 0.0);
-        near = push_under_lock(near, 4.0);
-        assert_eq!(near, 4.0, "a push starts again only from a new hold");
-    }
-
-    /// The lock starts a point before the edge, with at least the margin, so a
-    /// pointer exactly on the edge holds. Witness: no margin gives 0 on the
-    /// edge.
-    #[test]
-    fn the_lock_starts_at_the_edge_with_a_minimum_push() {
-        assert_eq!(push_reaching(50.0, 0.0, 100.0), 0.0);
-        assert_eq!(push_reaching(100.0, 0.0, 100.0), REACH_MARGIN);
-        assert_eq!(push_reaching(112.0, 0.0, 100.0), 12.0 + REACH_MARGIN);
-        assert_eq!(push_reaching(0.0, 0.0, 100.0), -REACH_MARGIN);
-        assert_eq!(push_reaching(-5.0, 0.0, 100.0), -5.0 - REACH_MARGIN);
     }
 }

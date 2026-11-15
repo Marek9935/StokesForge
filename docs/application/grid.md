@@ -138,12 +138,11 @@ transient). During a **cell** drag the header rows and the column letters are th
 top edge and the row numbers the left edge: their widgets do not extend while a
 cell drag is marked (`cell_drag_marked`), so the rectangle stays a rectangle of
 cells (no jump to row 0, no switch to whole columns) and the grid scrolls instead.
-With a relative mouse (`pointer_probe`, decided by a probe at the start of the drag)
-the pointer is held on the edge (`pointer_lock::renew(ctx, false)`: the system
-cursor stays, default icon) and the push is the raw motion accumulated past the
-edge; pushing back to 0 releases the hold (`released`: no new hold until the pointer
-has left the edge); an absolute pointer is never locked and its distance past the
-edge is the push. A lock is only taken when the grid can still scroll that way.
+The pointer is never held (no cursor lock, no probe, no raw motion): it leaves
+the grid and even the window freely, and the system cursor is untouched. The push
+is the signed distance of `latest_pos` past each edge of the viewport (0 inside).
+Back over the grid the push is 0, the scroll stops and the hovered cell extends
+the selection as before.
 A repaint is requested only while an offset can still move.
 
 The consumers reason in **blocks** (`Selection::blocks`, one block =
