@@ -158,7 +158,7 @@ fn a_series_beyond_the_top_widens_only_the_top_in_a_second_step() {
     let status = bench.state.status().expect("message");
     assert_eq!(status.level, StatusLevel::Warning);
     assert!(
-        status.text.contains("Y axis widened") && status.text.contains("Ctrl+Z"),
+        status.text.contains("Widened the Y axis") && status.text.contains("Ctrl+Z"),
         "{}",
         status.text
     );

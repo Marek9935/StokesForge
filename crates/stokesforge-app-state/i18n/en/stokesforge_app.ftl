@@ -2318,8 +2318,8 @@ status-ranges-written =
     }
 status-axes-widened =
     { $count ->
-        [one] { $axes } axis widened to show the new series. Ctrl+Z undoes the new range
-       *[other] { $axes } axes widened to show the new series. Ctrl+Z undoes the new ranges
+        [one] Widened the { $axes } axis to show the new series. Ctrl+Z undoes the new range
+       *[other] Widened the { $axes } axes to show the new series. Ctrl+Z undoes the new ranges
     }
 widen-axis-x = X
 widen-axis-y = Y
