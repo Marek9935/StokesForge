@@ -1,5 +1,5 @@
-//! Guard (#512, #535): the two viewport commands that lock the mouse and move the
-//! cursor are sent by `src/pointer_lock.rs` only. A lock sent anywhere else
+//! Guard (#512): the two viewport commands that lock the mouse and move the
+//! cursor are sent by `src/corner_lock.rs` only. A lock sent anywhere else
 //! would have no lease, and a lock left on freezes the user's mouse.
 
 use std::fs;
@@ -31,7 +31,7 @@ fn uses(path: &str, text: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_cursor_lock_commands_stay_in_pointer_lock() {
+fn the_cursor_lock_commands_stay_in_corner_lock() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut files = Vec::new();
     rust_files(&crates, &mut files);
@@ -39,7 +39,7 @@ fn the_cursor_lock_commands_stay_in_pointer_lock() {
     let mut offenders = Vec::new();
     for file in files {
         let name = file.to_string_lossy().replace('\\', "/");
-        if name.ends_with("/stokesforge-render-egui/src/pointer_lock.rs")
+        if name.ends_with("/stokesforge-render-egui/src/corner_lock.rs")
             || name.ends_with("/tests/cursor_lock_guard.rs")
             // The benches read the commands the frames asked for.
             || name.ends_with("/stokesforge-render-egui/tests/layout_mode.rs")
@@ -52,7 +52,7 @@ fn the_cursor_lock_commands_stay_in_pointer_lock() {
     }
     assert!(
         offenders.is_empty(),
-        "lock the mouse through `pointer_lock` only: {offenders:?}"
+        "lock the mouse through `corner_lock` only: {offenders:?}"
     );
 }
 

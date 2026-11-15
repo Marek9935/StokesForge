@@ -34,7 +34,7 @@
 //! ([`GraphView::page_corner_rect`] is where the host draws the figure), and
 //! at the edge of the drawing area ([`GraphView::set_layout_contain`]) the
 //! display zooms out while the page keeps growing. To reach past the screen
-//! the mouse is locked for the gesture only, with a lease (`pointer_lock`).
+//! the mouse is locked for the gesture only, with a lease (`corner_lock`).
 //!
 //! In both, the primary drag does nothing else (no pan, no zoom, no object
 //! drag). This module only maps pointer events to the geometry, previews the
@@ -58,13 +58,12 @@ use stokesforge_render::{
     MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT,
 };
 
-use crate::corner_follow::{follow_step, glide_step, AxisFollow};
+use crate::corner_follow::{follow_step, glide_step, pointer_step, AxisFollow, PointerSource};
 
 /// Figure points by which the side that follows the ratio (Ctrl) is kept short
 /// of it: the leading side stays the leading one when the two sides tie.
 const RATIO_MARGIN: f32 = 0.01;
-use crate::pointer_lock;
-use crate::pointer_probe::{pointer_step, PointerSource};
+use crate::corner_lock;
 use crate::{FramePreview, GraphEvent, GraphView};
 
 /// Room the host must leave around the figure, and let its clip rectangle
@@ -1143,7 +1142,7 @@ impl GraphView {
                 self.set_frame_preview(settled);
             }
             self.finish_layout_drag();
-            pointer_lock::release(context, corner);
+            corner_lock::release(context, corner);
             return;
         }
         let pointer = response.interact_pointer_pos();
@@ -1181,7 +1180,7 @@ impl GraphView {
                 .is_some_and(|follow| follow.source.locks())
         });
         if locked {
-            pointer_lock::renew(context, true);
+            corner_lock::renew(context);
         }
         if following {
             context.request_repaint();
