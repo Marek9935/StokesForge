@@ -2267,7 +2267,7 @@ mod tests {
     //! of the windows by [`StokesForgeApp::new`], and the measurement of a full
     //! frame. Detaching is tested in `window_detach.rs`, each
     //! surface in its module.
-    use super::graph_window::tests::plotted_graph;
+    use super::graph_window::tests::{plotted_graph, plotted_graph_written};
     use super::grid::{header_rows, set_header_rows, HeaderRows};
     use super::*;
     use crate::theme;
@@ -3518,7 +3518,7 @@ mod tests {
     }
 
     fn saved_windows(detach_book: bool) -> SavedWindows {
-        let (session, graph) = plotted_graph();
+        let (session, graph) = plotted_graph_written();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let book = app.state.books()[0].0;

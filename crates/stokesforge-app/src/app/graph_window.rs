@@ -1444,6 +1444,24 @@ pub(super) mod tests {
             .unwrap();
         (Session::spawn(project, None).unwrap(), graph)
     }
+
+    /// [`plotted_graph`] with its axis ranges already written, as a graph
+    /// created by this version is (#529): reopening it changes nothing.
+    pub(in crate::app) fn plotted_graph_written() -> (Session, NodeId) {
+        let mut project = Project::new("Graph").unwrap();
+        let root = project.root();
+        let (x, y) = xy_columns(&mut project);
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        let graph = project
+            .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
+            .unwrap();
+        stokesforge_app_state::frame_sizes::freeze_loaded_graphs(
+            &mut project,
+            stokesforge_render::AutoMargins::default(),
+        );
+        (Session::spawn(project, None).unwrap(), graph)
+    }
     /// #12: a background with no color or semi-transparent is displayed over
     /// white; an opaque background needs no underlay.
     #[test]
