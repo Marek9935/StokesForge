@@ -200,9 +200,15 @@ fn row_grip_bands(
 /// height `top..bottom` — the letter row, where column edges serve for
 /// resizing, is excluded by the caller. Pure function: testable without a
 /// window, like the rest of this module's decisions.
+///
+/// The table paints only a window of the columns (#534): `extents` is that
+/// window, and `continues` says whether the column just before / just after it
+/// is selected too. A block that runs past the painted columns has no edge at the
+/// window's border, only at its real end.
 fn column_grip_bands(
     extents: &[ColumnExtent],
     selected: &[NodeId],
+    continues: (bool, bool),
     top: f32,
     bottom: f32,
 ) -> Vec<egui::Rect> {
@@ -217,7 +223,11 @@ fn column_grip_bands(
         while index + 1 < extents.len() && selected.contains(&extents[index + 1].0) {
             index += 1;
         }
-        for x in [extents[first].1, extents[index].2] {
+        let edges = [
+            (first > 0 || !continues.0).then_some(extents[first].1),
+            (index + 1 < extents.len() || !continues.1).then_some(extents[index].2),
+        ];
+        for x in edges.into_iter().flatten() {
             bands.push(egui::Rect::from_min_max(
                 egui::pos2(x - COLUMN_GRIP_HALF_WIDTH, top),
                 egui::pos2(x + COLUMN_GRIP_HALF_WIDTH, bottom),
@@ -1410,8 +1420,10 @@ fn header_field_widget(
             // What the Formula row says while typing (unknown letter, column that reads
             // itself, modified `#REF`) is decided in `app-state`: the grid paints it. The
             // field always writes what is typed (#433), so it never stays open.
+            let visible = ui.is_rect_visible(rect);
             let refusal = state.header_edit_issue();
-            let help = field == HeaderField::Formula && state.show_column_formula_help();
+            let help = visible && field == HeaderField::Formula && state.show_column_formula_help();
+            mark_edit_painted(ui.ctx());
             let Some(edit) = state.header_editing_mut() else {
                 return;
             };
@@ -1426,7 +1438,7 @@ fn header_field_widget(
             // painted just right of the cell in a layer above the grid, over the
             // neighbouring column, so the field keeps the whole width of the cell.
             // The icon never takes the focus whose loss ends the edit.
-            let id = ui.id().with("header_edit");
+            let id = stable_edit_id(ui.ctx(), ("header_edit", column.raw(), field as u8));
             let mut paint = |ui: &mut egui::Ui, width: f32| {
                 inplace_edit::show(
                     ui,
@@ -1442,11 +1454,11 @@ fn header_field_widget(
             // A text that will not compute tints the cell itself (#410): the fill
             // follows the cell and never crosses its grid lines, unlike a frame.
             // The bubble with the reason stays.
-            if refusal.is_some() {
+            if refusal.is_some() && visible {
                 paint_refusal_tint(ui, rect);
             }
             let shown = paint(ui, f32::INFINITY);
-            if let Some(message) = refusal.as_deref() {
+            if let Some(message) = refusal.as_deref().filter(|_| visible) {
                 crate::field_state::show_bubble(
                     &shown.response,
                     &crate::field_state::FieldIssue::refused(message),
@@ -1869,7 +1881,7 @@ pub(super) fn grid_contents(
             .context_menu(|ui| add_column_entry(ui, sheet, actions));
         return None;
     }
-    let (grid_rect, focus_anchor) = prepare_grid(ui, sheet);
+    let (grid_rect, focus_anchor, origin) = prepare_grid(ui, sheet);
     let was_editing = state.editing().is_some() || state.header_editing().is_some();
     let mut extents: Vec<ColumnExtent> = Vec::new();
     let mut row_extents: Vec<RowExtent> = Vec::new();
@@ -1884,16 +1896,57 @@ pub(super) fn grid_contents(
     // another project). Never a variable `id_salt`: the identifier of the vertical
     // scroll area derives from it, and the scrolling would be lost.
     let column_ids: Vec<NodeId> = columns.iter().map(|(id, _, _)| *id).collect();
+    // #534: the table holds only the columns that meet the horizontal viewport
+    // (plus one margin column on each side), between two exact spacer columns that
+    // stand for the others: the content width, hence the scroll bar and the
+    // offset, stay those of the whole worksheet, but a frame costs the visible
+    // columns, not the sheet's. Geometry comes from the stored widths (`NodeId`),
+    // never from what was painted.
+    let spacing_x = ui.spacing().item_spacing.x;
+    let nominal: Vec<f32> = column_ids
+        .iter()
+        .map(|id| state.column_width(*id).unwrap_or(DEFAULT_COLUMN_WIDTH))
+        .collect();
+    // `ui` is the content of the horizontal scroll area: its clip rectangle is the
+    // viewport, and `origin` (the left edge of the gutter) is left of it once scrolled.
+    let clip = ui.clip_rect();
+    let viewport = ColumnViewport {
+        left: clip.left() - origin,
+        width: clip.width(),
+    };
+    // `TableBuilder::reset` puts **all** the columns back to their initial width,
+    // gutter included: the gutter gives back the one it had in the previous frame
+    // (temporary memory, per worksheet), otherwise every drag of a column would
+    // bring it back to 90.
+    let gutter_width = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(gutter_width_id(sheet)))
+        .unwrap_or(ROW_NUMBER_COLUMN_WIDTH);
+    let window = visible_column_window(
+        ui,
+        &column_ids,
+        &nominal,
+        spacing_x,
+        gutter_width,
+        viewport.range(),
+    );
+    let shown = window.start..window.end;
     // #330: the stored widths of the visible columns enter the key, otherwise
     // putting a column back to the default (its key leaves the table) would change
     // nothing on screen — `TableColumn::initial` is read only after a `reset`.
     // Their value, not just their state: a width set by hand redoes the layout with
-    // the value sent.
-    let widths: Vec<Option<u32>> = column_ids
+    // the value sent. The key follows the **painted** columns: the table keeps its
+    // widths by position, so a window that moves is a new list of columns.
+    let widths: Vec<Option<u32>> = column_ids[shown.clone()]
         .iter()
         .map(|id| state.column_width(*id).map(f32::to_bits))
         .collect();
-    let layout_key = (state.snapshot().epoch, column_ids.clone(), widths);
+    let layout_key = (
+        state.snapshot().epoch,
+        column_ids[shown.clone()].to_vec(),
+        widths,
+        (window.start > 0, window.end < window.total),
+    );
     let layout_memory = ui.id().with("stokesforge_grid_layout");
     // #337: the first frame of an `egui::Window` is a measuring pass
     // (`Ui::is_sizing_pass`) during which egui_extras shrinks each column to the
@@ -1903,29 +1956,27 @@ pub(super) fn grid_contents(
     let sizing_memory = ui.id().with("stokesforge_grid_sizing_pass");
     let after_sizing_pass = ui.data(|data| data.get_temp::<bool>(sizing_memory)) == Some(true);
     ui.data_mut(|data| data.insert_temp(sizing_memory, ui.is_sizing_pass()));
+    type LayoutKey = (u64, Vec<NodeId>, Vec<Option<u32>>, (bool, bool));
     let layout_changed = after_sizing_pass
-        || ui.data(|data| data.get_temp::<(u64, Vec<NodeId>, Vec<Option<u32>>)>(layout_memory))
-            != Some(layout_key.clone());
+        || ui.data(|data| data.get_temp::<LayoutKey>(layout_memory)) != Some(layout_key.clone());
     if layout_changed {
         ui.data_mut(|data| data.insert_temp(layout_memory, layout_key));
     }
-    // `TableBuilder::reset` puts **all** the columns back to their initial width,
-    // gutter included: the gutter gives back the one it had in the previous frame
-    // (temporary memory, per worksheet), otherwise every drag of a column would
-    // bring it back to 90.
-    let gutter_width = ui
-        .ctx()
-        .data(|data| data.get_temp::<f32>(gutter_width_id(sheet)))
-        .unwrap_or(ROW_NUMBER_COLUMN_WIDTH);
+    arm_follow(ui, sheet);
     let mut table = TableBuilder::new(ui)
         .id_salt(GRID_TABLE_SALT)
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(TableColumn::initial(gutter_width).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH));
-    for id in &column_ids {
-        let width = state.column_width(*id).unwrap_or(DEFAULT_COLUMN_WIDTH);
-        table = table.column(TableColumn::initial(width).at_least(MIN_COLUMN_WIDTH));
+    if window.start > 0 {
+        table = table.column(TableColumn::exact(window.left).resizable(false));
+    }
+    for width in &nominal[shown.clone()] {
+        table = table.column(TableColumn::initial(*width).at_least(MIN_COLUMN_WIDTH));
+    }
+    if window.end < window.total {
+        table = table.column(TableColumn::exact(window.right).resizable(false));
     }
     if layout_changed {
         table.reset();
@@ -1945,7 +1996,15 @@ pub(super) fn grid_contents(
     }
     let table_output = table
         .header(header_height, |header| {
-            grid_table_header(header, state, actions, sheet, &columns, &mut extents);
+            grid_table_header(
+                header,
+                state,
+                actions,
+                sheet,
+                &columns[shown.clone()],
+                window,
+                &mut extents,
+            );
         })
         .body(|body| {
             grid_table_body(
@@ -1953,26 +2012,44 @@ pub(super) fn grid_contents(
                 state,
                 actions,
                 sheet,
-                &columns,
+                (&columns[shown.clone()], window),
                 row_count,
                 &mut row_extents,
             );
         });
 
+    // #534: an entry whose cell the table did not build (scrolled out of the
+    // window, horizontally or vertically) is still typed in, before the keyboard.
+    paint_unpainted_edit(ui, state, actions, sheet, &column_ids);
+
     // A width is pushed only at the **end of a resize done by hand**: pushing the
     // rendered width on every frame would mark the project modified on every
     // opening (#325).
-    for (column, width) in finished_column_resizes(ui, &column_ids, &extents) {
+    for (column, width) in finished_column_resizes(
+        ui,
+        &column_ids[shown.clone()],
+        window.first_rank(),
+        &extents,
+    ) {
         actions.push(Action::SetColumnWidth { column, width });
     }
 
     paint_formula_help_icon(ui, actions, sheet, &extents);
 
-    let last_column_right = extents
-        .last()
-        .map_or(grid_rect.left(), |&(_, _, right)| right);
-    grid_blank_column_target(ui, actions, sheet, grid_rect, last_column_right);
-    grid_column_drag_source(ui, state, sheet, grid_rect, &extents);
+    // The free area after the last column exists only when the last column is
+    // painted: otherwise the right spacer covers the viewport.
+    grid_blank_column_target(
+        ui,
+        actions,
+        sheet,
+        grid_rect,
+        last_column_right(&window, &extents, grid_rect.left()),
+    );
+    let beyond = (
+        window.start.checked_sub(1).map(|index| column_ids[index]),
+        column_ids.get(window.end).copied(),
+    );
+    grid_column_drag_source(ui, state, sheet, grid_rect, &extents, beyond);
     grid_row_drag_source(
         ui,
         state,
@@ -1991,7 +2068,390 @@ pub(super) fn grid_contents(
         focus_anchor,
         was_editing,
     );
+    // #534: after the keyboard, so that a move made in this very frame is seen.
+    follow_cursor(
+        ui,
+        state,
+        sheet,
+        FollowGeometry {
+            column_ids: &column_ids,
+            widths: &nominal,
+            spacing: spacing_x,
+            gutter: gutter_width,
+            viewport,
+            body_offset: table_output.state.offset.y,
+            body_height: table_output.inner_rect.height(),
+        },
+    );
     Some(table_output)
+}
+
+/// Identifier of an in-place editor of the grid (#534). It names the edited cell or
+/// header field and the viewport, never the position in the table: the editor
+/// keeps its focus, caret and selection when it scrolls out of the painted window
+/// and back, where the table's cell identifiers (row and column index) would change.
+fn stable_edit_id(ctx: &egui::Context, key: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_edit", ctx.viewport_id(), key))
+}
+
+fn edit_painted_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_edit_painted", ctx.viewport_id()))
+}
+
+/// Notes that the open editor was drawn by the table in this pass.
+fn mark_edit_painted(ctx: &egui::Context) {
+    let (pass, id) = (ctx.cumulative_pass_nr(), edit_painted_id(ctx));
+    ctx.data_mut(|data| data.insert_temp(id, pass));
+}
+
+fn edit_painted(ctx: &egui::Context) -> bool {
+    let (pass, id) = (ctx.cumulative_pass_nr(), edit_painted_id(ctx));
+    ctx.data(|data| data.get_temp::<u64>(id)) == Some(pass)
+}
+
+/// An open cell or header editor that the table did not build this pass (its row
+/// or column is outside the painted window) is drawn all the same, by the same
+/// code, in a Ui whose clip is empty (#534): egui keeps the focus of a widget
+/// that is registered each frame, so typing, Backspace, Enter, Tab and Escape act
+/// as in a visible editor and nothing is lost. An empty clip draws nothing and
+/// makes the `TextEdit` skip its scroll-to-cursor, so typing never moves the grid;
+/// only the cursor that Enter or Tab moves does (`follow_cursor`).
+fn paint_unpainted_edit(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    column_ids: &[NodeId],
+) {
+    if edit_painted(ui.ctx()) {
+        return;
+    }
+    let cell = state
+        .editing()
+        .filter(|edit| column_ids.contains(&edit.column))
+        .map(|edit| (edit.column, edit.row));
+    let header = state
+        .header_editing()
+        .filter(|edit| column_ids.contains(&edit.column))
+        .map(|edit| (edit.column, edit.field));
+    if cell.is_none() && header.is_none() {
+        return;
+    }
+    let rect = egui::Rect::from_min_size(
+        ui.clip_rect().min,
+        egui::vec2(DEFAULT_COLUMN_WIDTH, HEADER_SUBROW_HEIGHT),
+    );
+    let mut hidden = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    hidden.set_clip_rect(egui::Rect::NOTHING);
+    if let Some((column, row)) = cell {
+        cell_widget(&mut hidden, state, actions, sheet, column, row);
+    } else if let Some((column, field)) = header {
+        header_field_widget(
+            &mut hidden,
+            state,
+            actions,
+            sheet,
+            column,
+            field,
+            HEADER_SUBROW_HEIGHT,
+            false,
+        );
+    }
+}
+
+/// The data columns the table paints (#534) and the two spacers that stand for the
+/// others.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ColumnWindow {
+    /// Rank of the first painted data column.
+    start: usize,
+    /// One past the last painted data column.
+    end: usize,
+    /// Number of data columns of the worksheet.
+    total: usize,
+    /// Width of the spacer column of the `start` columns before the window
+    /// (meaningful only when `start > 0`).
+    left: f32,
+    /// Width of the spacer column of the columns after the window.
+    right: f32,
+}
+
+impl ColumnWindow {
+    /// The window `start..end` of columns of the given widths. A spacer is as wide
+    /// as the columns it replaces **with the spacing that separated them**, minus
+    /// the one spacing the table already puts between the spacer and its
+    /// neighbour: the whole row is as wide as with every column.
+    fn spanning(widths: &[f32], spacing: f32, start: usize, end: usize) -> Self {
+        let stand_in = |columns: &[f32]| {
+            if columns.is_empty() {
+                0.0
+            } else {
+                columns.iter().map(|width| width + spacing).sum::<f32>() - spacing
+            }
+        };
+        Self {
+            start,
+            end,
+            total: widths.len(),
+            left: stand_in(&widths[..start]),
+            right: stand_in(&widths[end..]),
+        }
+    }
+
+    /// Rank, in the table, of the first painted data column: after the gutter and
+    /// the left spacer.
+    fn first_rank(&self) -> usize {
+        1 + usize::from(self.start > 0)
+    }
+
+    /// Number of columns of the table.
+    fn table_columns(&self) -> usize {
+        self.first_rank() + (self.end - self.start) + usize::from(self.end < self.total)
+    }
+}
+
+/// Horizontal viewport of the grid, in content coordinates (the origin is the
+/// left edge of the row-number gutter).
+#[derive(Clone, Copy, Debug)]
+struct ColumnViewport {
+    left: f32,
+    width: f32,
+}
+
+impl ColumnViewport {
+    fn range(&self) -> (f32, f32) {
+        (self.left, self.left + self.width)
+    }
+}
+
+/// The columns that meet `view` (content coordinates), widened by one column on
+/// each side so that a cell grown a little by its content, or a scroll of one
+/// frame, never shows a hole. Never empty: a view past the end (or an unusable
+/// one) keeps the last (or the first) column. Pure function.
+fn column_window(widths: &[f32], spacing: f32, gutter: f32, view: (f32, f32)) -> ColumnWindow {
+    let total = widths.len();
+    let (mut first, mut last, mut cut_short) = (None, None, false);
+    let mut x = gutter + spacing;
+    for (index, width) in widths.iter().enumerate() {
+        let (left, right) = (x, x + width);
+        if left > view.1 {
+            cut_short = true;
+            break;
+        }
+        if right >= view.0 {
+            first.get_or_insert(index);
+            last = Some(index);
+        }
+        x = right + spacing;
+    }
+    let (first, last) = match (first, last) {
+        (Some(first), Some(last)) => (first, last),
+        _ if cut_short => (0, 0),
+        _ => (total.saturating_sub(1), total.saturating_sub(1)),
+    };
+    ColumnWindow::spanning(
+        widths,
+        spacing,
+        first.saturating_sub(1),
+        (last + 2).min(total),
+    )
+}
+
+/// The window to paint this frame. While a resize handle of the table is being
+/// dragged, the window of the previous frame is kept (when its columns are still
+/// the same): the handle identifiers are the table's **ranks**, and a window that
+/// moved under the pointer would hand the drag to another column.
+fn visible_column_window(
+    ui: &egui::Ui,
+    column_ids: &[NodeId],
+    widths: &[f32],
+    spacing: f32,
+    gutter: f32,
+    view: (f32, f32),
+) -> ColumnWindow {
+    let memory = ui.id().with("stokesforge_grid_window");
+    let previous = ui.data(|data| data.get_temp::<(usize, Vec<NodeId>)>(memory));
+    let mut window = column_window(widths, spacing, gutter, view);
+    if let (Some((start, ids)), Some(dragged)) = (previous, ui.ctx().dragged_id()) {
+        let end = start + ids.len();
+        let same = end <= column_ids.len() && column_ids[start..end] == ids[..];
+        let previous_window = ColumnWindow::spanning(widths, spacing, start, end);
+        let state_id = table_state_id(ui);
+        let on_a_handle = (0..previous_window.table_columns())
+            .any(|rank| resize_handle_id(state_id, rank) == dragged);
+        if same && !ids.is_empty() && on_a_handle {
+            window = previous_window;
+        }
+    }
+    ui.data_mut(|data| {
+        data.insert_temp(
+            memory,
+            (window.start, column_ids[window.start..window.end].to_vec()),
+        );
+    });
+    window
+}
+
+/// Right edge of the last column of the worksheet, for the free area after it:
+/// known only when that column is painted (#534).
+fn last_column_right(
+    window: &ColumnWindow,
+    extents: &[ColumnExtent],
+    fallback: f32,
+) -> Option<f32> {
+    (window.end == window.total).then(|| extents.last().map_or(fallback, |&(_, _, right)| right))
+}
+
+/// Horizontal range, in content coordinates, of the data column of rank `index`.
+/// The first column starts at 0: reaching it brings the gutter back into view.
+fn column_x_range(widths: &[f32], spacing: f32, gutter: f32, index: usize) -> (f32, f32) {
+    let left = gutter
+        + spacing
+        + widths[..index]
+            .iter()
+            .map(|width| width + spacing)
+            .sum::<f32>();
+    (if index == 0 { 0.0 } else { left }, left + widths[index])
+}
+
+/// The scroll offset that brings `start..end` into the view `offset..offset + len`
+/// with the least movement, or `None` when it is already inside. A range wider
+/// than the view is aligned on its start. Pure function.
+fn follow_offset(offset: f32, len: f32, start: f32, end: f32) -> Option<f32> {
+    if len.is_nan() || len <= 0.0 {
+        return None;
+    }
+    let target = if start < offset || end - start > len {
+        start
+    } else if end > offset + len {
+        end - len
+    } else {
+        return None;
+    };
+    let target = target.max(0.0);
+    ((target - offset).abs() > 0.5).then_some(target)
+}
+
+/// How many frames a keyboard move stays armed (#534): the cursor may be moved by
+/// an action applied a few frames after the key (a column added by Tab).
+const FOLLOW_ARMED_FRAMES: u8 = 30;
+
+/// What the grid remembers between frames to follow its keyboard cursor.
+#[derive(Clone, Copy, Default)]
+struct FollowMemory {
+    cursor: Option<GridCursor>,
+    armed: u8,
+}
+
+fn follow_memory_id(sheet: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_follow", sheet.raw()))
+}
+
+fn follow_scroll_id(sheet: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_grid_follow_scroll", sheet.raw()))
+}
+
+/// Arms the follow on a keyboard move key and disarms it on any press or release
+/// of the mouse: a click never scrolls (#534). Read **before** the grid consumes
+/// the keys.
+fn arm_follow(ui: &egui::Ui, sheet: NodeId) {
+    let (key, pointer) = ui.input(|input| {
+        let key = input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    pressed: true,
+                    key: egui::Key::ArrowUp
+                        | egui::Key::ArrowDown
+                        | egui::Key::ArrowLeft
+                        | egui::Key::ArrowRight
+                        | egui::Key::Tab
+                        | egui::Key::Enter,
+                    ..
+                }
+            )
+        });
+        (
+            key,
+            input.pointer.any_pressed() || input.pointer.any_released(),
+        )
+    });
+    let id = follow_memory_id(sheet);
+    let mut memory = ui
+        .data(|data| data.get_temp::<FollowMemory>(id))
+        .unwrap_or_default();
+    memory.armed = if pointer {
+        0
+    } else if key {
+        FOLLOW_ARMED_FRAMES
+    } else {
+        memory.armed.saturating_sub(1)
+    };
+    ui.data_mut(|data| data.insert_temp(id, memory));
+}
+
+/// Everything [`follow_cursor`] needs to place a cell.
+struct FollowGeometry<'a> {
+    column_ids: &'a [NodeId],
+    widths: &'a [f32],
+    spacing: f32,
+    gutter: f32,
+    viewport: ColumnViewport,
+    /// Vertical offset and height of the table body.
+    body_offset: f32,
+    body_height: f32,
+}
+
+/// When the cursor moved after a keyboard key, asks for the scroll that shows its
+/// cell, once (#534). The offsets are left in memory for the workbook, which
+/// hands them to the scroll areas through the same on-hold mechanism as the
+/// mirrored bars ([`take_follow_scroll`]).
+fn follow_cursor(ui: &egui::Ui, state: &AppState, sheet: NodeId, geometry: FollowGeometry<'_>) {
+    let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
+    let id = follow_memory_id(sheet);
+    let mut memory = ui
+        .data(|data| data.get_temp::<FollowMemory>(id))
+        .unwrap_or_default();
+    if memory.cursor == cursor {
+        return;
+    }
+    memory.cursor = cursor;
+    let follow = memory.armed > 0;
+    if follow {
+        memory.armed = 0;
+    }
+    ui.data_mut(|data| data.insert_temp(id, memory));
+    let Some(cursor) = cursor.filter(|_| follow) else {
+        return;
+    };
+    let (column, row) = match cursor {
+        GridCursor::Data(column, row) => (column, Some(row)),
+        GridCursor::Header(column, _) => (column, None),
+    };
+    let Some(index) = geometry.column_ids.iter().position(|id| *id == column) else {
+        return;
+    };
+    let (left, right) = column_x_range(geometry.widths, geometry.spacing, geometry.gutter, index);
+    let horizontal = follow_offset(geometry.viewport.left, geometry.viewport.width, left, right);
+    let vertical = row.and_then(|row| {
+        follow_offset(
+            geometry.body_offset,
+            geometry.body_height,
+            row as f32 * ROW_HEIGHT,
+            (row + 1) as f32 * ROW_HEIGHT,
+        )
+    });
+    if horizontal.is_some() || vertical.is_some() {
+        ui.data_mut(|data| data.insert_temp(follow_scroll_id(sheet), (horizontal, vertical)));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// The scroll `(horizontal, vertical)` the grid of `sheet` asked for to follow the
+/// keyboard cursor, taken once (#534).
+pub(super) fn take_follow_scroll(ctx: &egui::Context, sheet: NodeId) -> (Option<f32>, Option<f32>) {
+    ctx.data_mut(|data| data.remove_temp::<(Option<f32>, Option<f32>)>(follow_scroll_id(sheet)))
+        .unwrap_or_default()
 }
 
 /// Where the grid keeps, in egui's temporary memory, the rendered width of the
@@ -2011,22 +2471,35 @@ pub(super) fn forget_gutter_width(ctx: &egui::Context, sheet: NodeId) {
 /// identifiers of the resize handles.
 const GRID_TABLE_SALT: &str = "stokesforge_grid_table";
 
+/// Identifier of the grid table's state, the one egui_extras derives its resize
+/// handles from.
+fn table_state_id(ui: &egui::Ui) -> egui::Id {
+    ui.id().with(egui::IdSalt::new(GRID_TABLE_SALT))
+}
+
+/// The identifier egui_extras gives the resize handle of the table column of rank
+/// `rank` (`table.rs`, `state_id.with("resize_column")`).
+fn resize_handle_id(state_id: egui::Id, rank: usize) -> egui::Id {
+    state_id.with("resize_column").with(rank)
+}
+
 /// The columns whose manual resize has just ended (button released this frame),
-/// with their rendered width: `(column, width)`. The handle of data column `k`
-/// is the one of rank `k + 1` of the table (the row-number gutter has rank 0);
-/// its identifier is the one egui_extras gives it (`table.rs`,
-/// `state_id.with("resize_column")`).
+/// with their rendered width: `(column, width)`. `shown` are the painted data
+/// columns, whose first has rank `first_rank` in the table (after the row-number
+/// gutter, rank 0, and the left spacer if any, #534): this is the one place that
+/// maps a column to its handle.
 fn finished_column_resizes(
     ui: &egui::Ui,
-    column_ids: &[NodeId],
+    shown: &[NodeId],
+    first_rank: usize,
     extents: &[ColumnExtent],
 ) -> Vec<(NodeId, f32)> {
-    let state_id = ui.id().with(egui::IdSalt::new(GRID_TABLE_SALT));
-    column_ids
+    let state_id = table_state_id(ui);
+    shown
         .iter()
         .enumerate()
         .filter_map(|(index, id)| {
-            let handle = state_id.with("resize_column").with(index + 1);
+            let handle = resize_handle_id(state_id, first_rank + index);
             let finished = ui
                 .ctx()
                 .read_response(handle)
@@ -2038,7 +2511,7 @@ fn finished_column_resizes(
 }
 
 /// Prepares the spacings and the focusable anchor, without creating a new Ui.
-fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
+fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id, f32) {
     // Without this, egui's default vertical spacing between the table rows
     // (`Spacing::item_spacing.y`, which `TableBuilder` uses internally to separate
     // the lines) leaves a thin white line between each — the gutter's background
@@ -2050,7 +2523,14 @@ fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
     // Captured *before* the table, whose `.auto_shrink([false, false])` occupies
     // exactly all this available space: serves as the reference for the column
     // drag grip area further down ([`column_grip_bands`]).
-    let grid_rect = ui.available_rect_before_wrap();
+    //
+    // The content of the horizontal scroll area starts at `origin`, left of the
+    // viewport once scrolled: the rectangle is the **viewport's** (#534; a press
+    // had to be inside the rectangle at the content origin to take the focus, so a
+    // scrolled grid lost its keyboard).
+    let content = ui.available_rect_before_wrap();
+    let origin = content.left();
+    let grid_rect = content.translate(egui::vec2(ui.clip_rect().left() - origin, 0.0));
     // Focus anchor of the grid's keyboard focus (#38): a focusable widget
     // **only while it has the focus** (otherwise a Tab arriving while nothing
     // has focus would make the focus enter it by itself). It carries the event filter
@@ -2075,7 +2555,7 @@ fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
     if anchor_focused {
         ui.memory_mut(|memory| memory.set_focus_lock_filter(focus_anchor, GRID_KEYS));
     }
-    (grid_rect, focus_anchor)
+    (grid_rect, focus_anchor, origin)
 }
 
 /// Where [`header_field_widget`] leaves the edited `F(x)=` cell of `sheet` (and
@@ -2125,6 +2605,7 @@ fn grid_table_header(
     actions: &mut Vec<Action>,
     sheet: NodeId,
     columns: &[(NodeId, String, ColumnType)],
+    window: ColumnWindow,
     extents: &mut Vec<ColumnExtent>,
 ) {
     header.col(|ui| {
@@ -2136,22 +2617,29 @@ fn grid_table_header(
         }
         row_number_header_widget(ui, state, actions, sheet);
     });
-    for (index, (id, _, _)) in columns.iter().enumerate() {
+    if window.start > 0 {
+        header.col(|_| {});
+    }
+    for (offset, (id, _, _)) in columns.iter().enumerate() {
         header.col(|ui| {
             let rect = ui.max_rect();
             extents.push((*id, rect.left(), rect.right()));
-            column_header_widget(ui, state, actions, sheet, *id, index);
+            column_header_widget(ui, state, actions, sheet, *id, window.start + offset);
         });
+    }
+    if window.end < window.total {
+        header.col(|_| {});
     }
 }
 
-/// The body keeps the row virtualization in the same place in the table.
+/// The body keeps the row virtualization in the same place in the table; the
+/// columns are the window of #534.
 fn grid_table_body(
     body: egui_extras::TableBody<'_>,
     state: &mut AppState,
     actions: &mut Vec<Action>,
     sheet: NodeId,
-    columns: &[(NodeId, String, ColumnType)],
+    (columns, window): (&[(NodeId, String, ColumnType)], ColumnWindow),
     row_count: usize,
     row_extents: &mut Vec<RowExtent>,
 ) {
@@ -2167,10 +2655,16 @@ fn grid_table_body(
             row_extents.push((index, rect.top(), rect.bottom()));
             row_number_widget(ui, state, actions, sheet, index);
         });
+        if window.start > 0 {
+            row.col(|_| {});
+        }
         for (id, _, _) in columns {
             row.col(|ui| {
                 cell_widget(ui, state, actions, sheet, *id, index);
             });
+        }
+        if window.end < window.total {
+            row.col(|_| {});
         }
     });
 }
@@ -2180,11 +2674,15 @@ fn grid_blank_column_target(
     actions: &mut Vec<Action>,
     sheet: NodeId,
     grid_rect: egui::Rect,
-    last_column_right: f32,
+    last_column_right: Option<f32>,
 ) {
     // The free portion after the last column is a target distinct from the cells
     // and their menus. The bound comes from the header actually laid out
-    // (including resized widths), not from the default widths.
+    // (including resized widths), not from the default widths. `None` when the
+    // last column is not painted (#534): there is no free portion in the viewport.
+    let Some(last_column_right) = last_column_right else {
+        return;
+    };
     if last_column_right < grid_rect.right() {
         let rect = egui::Rect::from_min_max(
             egui::pos2(last_column_right, grid_rect.top()),
@@ -2216,6 +2714,7 @@ fn grid_column_drag_source(
     sheet: NodeId,
     grid_rect: egui::Rect,
     extents: &[ColumnExtent],
+    beyond: (Option<NodeId>, Option<NodeId>),
 ) {
     let ctx = ui.ctx().clone();
     let dragging = egui::DragAndDrop::payload::<ColumnDragPayload>(&ctx)
@@ -2232,11 +2731,23 @@ fn grid_column_drag_source(
     let Some(payload) = state.column_drag_payload(sheet) else {
         return;
     };
+    // The columns just outside the painted window (#534): a selected block that
+    // runs past it has no edge there.
+    let continues = (
+        beyond.0.is_some_and(|id| payload.columns.contains(&id)),
+        beyond.1.is_some_and(|id| payload.columns.contains(&id)),
+    );
     // Under the letter row: its column edges resize.
     let top = grid_rect.top() + HEADER_SUBROW_HEIGHT;
-    for (index, band) in column_grip_bands(extents, &payload.columns, top, grid_rect.bottom())
-        .into_iter()
-        .enumerate()
+    for (index, band) in column_grip_bands(
+        extents,
+        &payload.columns,
+        continues,
+        top,
+        grid_rect.bottom(),
+    )
+    .into_iter()
+    .enumerate()
     {
         let response = ui.interact(
             band,
@@ -2865,8 +3376,14 @@ fn edit_cell_widget(
 ) {
     // A number that an f64 cannot hold (`1e400`, `1e-400`) is refused where it is
     // typed (#429): decided in `app-state`, the grid tints the cell and keeps it open.
-    let refusal = state.cell_edit_refusal();
     let rect = ui.available_rect_before_wrap();
+    // Not visible: scrolled out of the painted window, the editor is drawn in a
+    // clipped Ui (`paint_unpainted_edit`): it types and ends like any other, but
+    // draws no tint and no bubble (#534).
+    let visible = ui.is_rect_visible(rect);
+    let refusal = state.cell_edit_refusal();
+    let id = stable_edit_id(ui.ctx(), ("cell_edit", column.raw(), row));
+    mark_edit_painted(ui.ctx());
     let Some(edit) = state.editing_mut() else {
         return;
     };
@@ -2875,7 +3392,7 @@ fn edit_cell_widget(
     } else {
         inplace_edit::Opening::SelectAll
     };
-    if refusal.is_some() {
+    if refusal.is_some() && visible {
         paint_refusal_tint(ui, rect);
     }
     // The shared in-place edit contract (#224): focus and selection on opening,
@@ -2886,7 +3403,7 @@ fn edit_cell_widget(
     // move the selection, as in any spreadsheet.
     let shown = inplace_edit::show(
         ui,
-        ui.id().with("cell_edit"),
+        id,
         egui::TextEdit::singleline(&mut edit.buffer)
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY),
@@ -2894,7 +3411,7 @@ fn edit_cell_widget(
         inplace_edit::FocusLoss::Ends,
         None,
     );
-    if let Some(message) = refusal.as_deref() {
+    if let Some(message) = refusal.as_deref().filter(|_| visible) {
         crate::field_state::show_bubble(
             &shown.response,
             &crate::field_state::FieldIssue::refused(message),
@@ -3125,7 +3642,7 @@ mod tests {
             .collect();
         let half = COLUMN_GRIP_HALF_WIDTH;
 
-        let bands = column_grip_bands(&extents, &[ids[1], ids[2]], 20.0, 200.0);
+        let bands = column_grip_bands(&extents, &[ids[1], ids[2]], (false, false), 20.0, 200.0);
         assert_eq!(bands.len(), 2, "one block: its two edges");
         assert_eq!(
             (bands[0].left(), bands[0].right()),
@@ -3137,12 +3654,18 @@ mod tests {
         );
         assert_eq!((bands[0].top(), bands[0].bottom()), (20.0, 200.0));
 
-        let bands = column_grip_bands(&extents, &[ids[0], ids[3], ids[4]], 20.0, 200.0);
+        let bands = column_grip_bands(
+            &extents,
+            &[ids[0], ids[3], ids[4]],
+            (false, false),
+            20.0,
+            200.0,
+        );
         assert_eq!(bands.len(), 4, "two non-contiguous blocks: two pairs");
         assert_eq!(bands[2].center().x, 300.0);
         assert_eq!(bands[3].center().x, 500.0);
 
-        assert!(column_grip_bands(&extents, &[], 20.0, 200.0).is_empty());
+        assert!(column_grip_bands(&extents, &[], (false, false), 20.0, 200.0).is_empty());
     }
 
     /// #166: the row grip bands border each **block** of selected rows — above the
@@ -6786,6 +7309,836 @@ mod tests {
         assert!(
             layer.is_none_or(|layer| layer.order != egui::Order::Foreground),
             "{layer:?}"
+        );
+    }
+    // ---- #534: cost of a frame on a wide worksheet (bench, run by hand) ----
+
+    /// Median, in milliseconds, of `frames` frames after two warm-up frames.
+    fn median_frame_ms(bench: &mut Bench, frames: usize) -> f64 {
+        let position = egui::pos2(400.0, 300.0);
+        for _ in 0..2 {
+            bench.image(vec![egui::Event::PointerMoved(position)]);
+        }
+        let mut times: Vec<f64> = (0..frames)
+            .map(|index| {
+                let moved = position + egui::vec2(index as f32 % 2.0, 0.0);
+                let start = std::time::Instant::now();
+                bench.image(vec![egui::Event::PointerMoved(moved)]);
+                start.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        times[times.len() / 2]
+    }
+
+    /// Widgets registered by the last pass of the bench's viewport.
+    fn widgets_in_last_pass(bench: &Bench) -> usize {
+        bench.context.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .layers()
+                .map(|(_, rects)| rects.len())
+                .sum()
+        })
+    }
+
+    /// Selection variants of the #534 bench.
+    #[derive(Clone, Copy, Debug)]
+    enum WideSelection {
+        Nothing,
+        OneCell,
+        CellRectangle,
+        Columns,
+        CtrlA,
+        Rows,
+    }
+
+    fn apply_wide_selection(bench: &mut Bench, selection: WideSelection) {
+        let (sheet, first, last) = (
+            bench.sheet,
+            bench.columns[0],
+            *bench.columns.last().unwrap(),
+        );
+        match selection {
+            WideSelection::Nothing => {}
+            WideSelection::OneCell => bench.state.select_cell(sheet, first, 3),
+            WideSelection::CellRectangle => {
+                bench.state.select_cell(sheet, first, 3);
+                bench.state.extend_selection(sheet, last, 20);
+            }
+            WideSelection::Columns => {
+                bench.state.select_column(sheet, first);
+                bench.state.extend_column_selection(sheet, last);
+            }
+            WideSelection::CtrlA => bench.state.select_all(sheet),
+            WideSelection::Rows => {
+                bench.state.select_row(sheet, 0);
+                bench.state.extend_row_selection(sheet, 150);
+            }
+        }
+        bench.image(Vec::new());
+    }
+
+    fn wide_bench(columns: u32, all_header_rows: bool) -> Bench {
+        let mut bench = Bench::with_shape(columns, 200, |c, r| f64::from(c * 100 + r));
+        bench.size = egui::vec2(1920.0, 1080.0);
+        set_header_rows(
+            &bench.context,
+            bench.book,
+            HeaderRows {
+                metadata: all_header_rows,
+                x_prime: all_header_rows,
+            },
+        );
+        bench.image(Vec::new());
+        bench
+    }
+
+    /// #534: frame cost of the workbook grid by width and selection. Run with
+    /// `cargo test --release -p stokesforge-app wide_sheet_frame_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "bench: #534 wide sheet frame cost"]
+    fn wide_sheet_frame_cost() {
+        use WideSelection::*;
+        println!("variant | header rows | frame ms at 10 / 100 / 1000 columns | widgets at 1000");
+        for (name, selection) in [
+            ("none", Nothing),
+            ("one cell", OneCell),
+            ("cell rectangle", CellRectangle),
+            ("columns 1..n", Columns),
+            ("Ctrl+A", CtrlA),
+            ("whole rows", Rows),
+        ] {
+            for all_header_rows in [true, false] {
+                let mut line = Vec::new();
+                let mut widgets = 0;
+                for columns in [10, 100, 1000] {
+                    let mut bench = wide_bench(columns, all_header_rows);
+                    apply_wide_selection(&mut bench, selection);
+                    line.push(format!("{:.2}", median_frame_ms(&mut bench, 10)));
+                    widgets = widgets_in_last_pass(&bench);
+                }
+                println!(
+                    "{name} | {} | {} | {widgets}",
+                    if all_header_rows { "all" } else { "off" },
+                    line.join(" / ")
+                );
+            }
+        }
+    }
+
+    /// #534: egui-only twin: `TableBuilder` of 1000 columns by 30 rows, empty cells
+    /// against one label per cell, with the widgets of the pass.
+    #[test]
+    #[ignore = "bench: #534 wide sheet frame cost"]
+    fn wide_table_builder_alone_cost() {
+        for columns in [10usize, 100, 1000] {
+            for labels in [false, true] {
+                let context = egui::Context::default();
+                context.set_fonts(stokesforge_render_egui::font_definitions());
+                let frame = || {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1920.0, 1080.0),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut output = context.run_ui(input, |ui| {
+                        egui::ScrollArea::horizontal().show(ui, |ui| {
+                            TableBuilder::new(ui)
+                                .columns(TableColumn::initial(80.0).at_least(40.0), columns)
+                                .auto_shrink([false, false])
+                                .header(20.0, |mut header| {
+                                    for _ in 0..columns {
+                                        header.col(|ui| {
+                                            if labels {
+                                                ui.label("A");
+                                            }
+                                        });
+                                    }
+                                })
+                                .body(|body| {
+                                    body.rows(20.0, 30, |mut row| {
+                                        for _ in 0..columns {
+                                            row.col(|ui| {
+                                                if labels {
+                                                    ui.label("1.5");
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                        });
+                    });
+                    output.textures_delta.clear();
+                };
+                for _ in 0..3 {
+                    frame();
+                }
+                let mut times: Vec<f64> = (0..10)
+                    .map(|_| {
+                        let start = std::time::Instant::now();
+                        frame();
+                        start.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                times.sort_by(f64::total_cmp);
+                let widgets: usize = context.viewport(|viewport| {
+                    viewport
+                        .prev_pass
+                        .widgets
+                        .layers()
+                        .map(|(_, rects)| rects.len())
+                        .sum()
+                });
+                println!(
+                    "table {columns} cols x 30 rows, {}: {:.2} ms, {widgets} widgets",
+                    if labels {
+                        "label per cell"
+                    } else {
+                        "empty cells"
+                    },
+                    times[5]
+                );
+            }
+        }
+    }
+
+    /// #534: the state queries the grid makes per cell, 30 rows by 1000 columns.
+    #[test]
+    #[ignore = "bench: #534 wide sheet frame cost"]
+    fn wide_sheet_state_queries_cost() {
+        use WideSelection::*;
+        let time = |label: &str, work: &mut dyn FnMut()| {
+            work();
+            let start = std::time::Instant::now();
+            for _ in 0..5 {
+                work();
+            }
+            println!(
+                "  {label}: {:.3} ms",
+                start.elapsed().as_secs_f64() * 1000.0 / 5.0
+            );
+        };
+        for (name, selection) in [
+            ("none", Nothing),
+            ("one cell", OneCell),
+            ("cell rectangle", CellRectangle),
+            ("columns 1..n", Columns),
+            ("Ctrl+A", CtrlA),
+            ("whole rows", Rows),
+        ] {
+            let mut bench = wide_bench(1000, true);
+            apply_wide_selection(&mut bench, selection);
+            let (state, sheet, columns) = (&bench.state, bench.sheet, bench.columns.clone());
+            println!("selection {name}, 30 rows x 1000 columns:");
+            time("is_selected", &mut || {
+                let mut hits = 0;
+                for row in 0..30 {
+                    for column in &columns {
+                        hits += usize::from(state.is_selected(sheet, *column, row));
+                    }
+                }
+                std::hint::black_box(hits);
+            });
+            if matches!(selection, Nothing) {
+                time("cell_display", &mut || {
+                    for row in 0..30 {
+                        for column in &columns {
+                            std::hint::black_box(state.cell_display(*column, row));
+                        }
+                    }
+                });
+                time("cell_is_numeric", &mut || {
+                    for row in 0..30 {
+                        for column in &columns {
+                            std::hint::black_box(state.cell_is_numeric(*column, row));
+                        }
+                    }
+                });
+                time(
+                    "column_staleness (1000 columns, once per header)",
+                    &mut || {
+                        for column in &columns {
+                            std::hint::black_box(state.column_staleness(*column));
+                        }
+                    },
+                );
+                time("visible_columns", &mut || {
+                    std::hint::black_box(state.visible_columns(sheet));
+                });
+                time("layout_key build", &mut || {
+                    let ids: Vec<NodeId> = state
+                        .visible_columns(sheet)
+                        .iter()
+                        .map(|(id, _, _)| *id)
+                        .collect();
+                    let widths: Vec<Option<u32>> = ids
+                        .iter()
+                        .map(|id| state.column_width(*id).map(f32::to_bits))
+                        .collect();
+                    std::hint::black_box((state.snapshot().epoch, ids.clone(), widths));
+                });
+            }
+        }
+    }
+
+    // ---- #534: column virtualization and keyboard follow ----
+
+    /// Ranks of the visible columns whose letter is painted in the last frame.
+    fn painted_letters(bench: &Bench) -> Vec<usize> {
+        let texts: std::collections::HashSet<String> = bench.texts().into_iter().collect();
+        let count = bench.state.visible_columns(bench.sheet).len();
+        (0..count)
+            .filter(|index| texts.contains(&visible_letter(bench, *index)))
+            .collect()
+    }
+
+    /// Painted cell of the letter of the visible column `index`.
+    fn letter_rect(bench: &Bench, index: usize) -> Option<egui::Rect> {
+        let center = bench.center_of(&visible_letter(bench, index))?;
+        bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect)
+                    if (rect.rect.height() - HEADER_SUBROW_HEIGHT).abs() < 0.5
+                        && rect.rect.contains(center) =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+    }
+
+    /// Right edge of the grid's viewport in the bench: the vertical bar's strip is
+    /// reserved on the right.
+    fn viewport_right(bench: &Bench) -> f32 {
+        bench.size.x - theme::scroll_bar_allocated_width()
+    }
+
+    /// Scrolls the grid horizontally by `delta` points (positive: towards the
+    /// last column) with the wheel, then lets the smooth scrolling finish.
+    fn scroll_right_by(bench: &mut Bench, delta: f32) {
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(400.0, 300.0))]);
+        bench.image(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(-delta, 0.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for _ in 0..60 {
+            bench.image(Vec::new());
+        }
+    }
+
+    /// At offset 0 of a 1000-column worksheet only the visible columns (and one
+    /// margin column) are painted: no letter of column 1000. Not a witness of the
+    /// table's content (egui does not emit a text outside the clip rectangle, so
+    /// it stays green with every column in the table): the widget count below is.
+    #[test]
+    fn a_wide_sheet_paints_only_its_visible_columns() {
+        let bench = wide_bench(1000, false);
+        let painted = painted_letters(&bench);
+        let visible = (bench.size.x / (DEFAULT_COLUMN_WIDTH + 8.0)) as usize;
+        assert!(
+            painted.len() > 10,
+            "the visible columns are there: {painted:?}"
+        );
+        assert!(
+            painted.len() <= visible + 3,
+            "{} columns painted for about {visible} visible",
+            painted.len()
+        );
+        assert_eq!(painted[0], 0);
+        assert!(!painted.contains(&999), "column 1000 is not painted");
+        // The cells follow: the first row of column 1000 is not painted either.
+        assert!(bench.center_of("100001").is_none());
+    }
+
+    /// A frame at 1000 columns registers about as many widgets as at 20. Witness:
+    /// put every column back in the table.
+    #[test]
+    fn a_wide_sheet_registers_the_widgets_of_its_visible_columns() {
+        let few = widgets_in_last_pass(&wide_bench(20, false));
+        let many = widgets_in_last_pass(&wide_bench(1000, false));
+        assert!(many > 0 && few > 0);
+        assert!(
+            many <= 2 * few,
+            "{many} widgets at 1000 columns, {few} at 20"
+        );
+    }
+
+    /// Scrolled to the far right: the last column is painted at the edge (the
+    /// content is exactly as wide as the sum of the widths), a double click on its
+    /// cell edits it, a click on its letter selects it. Witness: a window computed
+    /// without the offset, or a wrong spacer width.
+    #[test]
+    fn scrolled_to_the_far_right_the_last_column_is_reachable() {
+        let mut bench = wide_bench(1000, false);
+        scroll_right_by(&mut bench, 1.0e7);
+        let painted = painted_letters(&bench);
+        assert_eq!(painted.last(), Some(&999), "{painted:?}");
+        assert!(!painted.contains(&0));
+        let rect = letter_rect(&bench, 999).expect("fill of the last letter");
+        assert!(
+            (rect.right() - viewport_right(&bench)).abs() < 12.0,
+            "the last column ends at the edge of the viewport: {} for {}",
+            rect.right(),
+            viewport_right(&bench)
+        );
+        bench.click_on("100001");
+        bench.click_on("100001");
+        let edit = bench.state.editing().expect("the cell opens its editor");
+        assert_eq!((edit.column, edit.row), (bench.columns[999], 0));
+        bench.click_on(&visible_letter(&bench, 999));
+        assert!(bench
+            .state
+            .is_column_selected(bench.sheet, bench.columns[999]));
+    }
+
+    /// A column resized after a horizontal scroll sends its own width: the
+    /// table ranks are shifted by the window and the left spacer. Witness: ranks
+    /// taken from the first painted column.
+    #[test]
+    fn a_resize_after_a_horizontal_scroll_targets_the_right_column() {
+        let mut bench = wide_bench(1000, false);
+        scroll_right_by(&mut bench, 20000.0);
+        let painted = painted_letters(&bench);
+        assert!(painted[0] > 100, "scrolled: {painted:?}");
+        let target = painted[3];
+        let before = painted_width(&bench, target);
+        let (during, end) = resize(&mut bench, target, 30.0);
+        assert!(during.is_empty(), "nothing during the drag: {during:?}");
+        let [Action::SetColumnWidth { column, width }] = end.as_slice() else {
+            panic!("one width on release, saw {end:?}");
+        };
+        assert_eq!(*column, bench.columns[target]);
+        assert!(nearly_equal(*width, before + 30.0), "{width}");
+    }
+
+    /// A selected block that runs past the painted window has no grip band at the
+    /// window's border, only at its real ends. Witness: extents taken as block
+    /// edges.
+    #[test]
+    fn a_selected_block_has_no_grip_band_at_the_edge_of_the_window() {
+        let bench = Bench::with_shape(8, 0, |_, _| 0.0);
+        let ids = &bench.columns;
+        let extents: Vec<ColumnExtent> = ids[2..6]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, 100.0 * i as f32, 100.0 * i as f32 + 90.0))
+            .collect();
+        // Selected 0..=7: the block continues on both sides of the window.
+        assert!(column_grip_bands(&extents, ids, (true, true), 20.0, 200.0).is_empty());
+        // It ends inside the window on the right only.
+        let bands = column_grip_bands(&extents, &ids[..4], (true, false), 20.0, 200.0);
+        assert_eq!(bands.len(), 1);
+        assert_eq!(bands[0].center().x, 190.0);
+        // Not selected: nothing.
+        assert!(column_grip_bands(&extents, &[], (false, false), 20.0, 200.0).is_empty());
+    }
+
+    /// The free area after the last column exists only when the last column is
+    /// painted. Witness: the right edge of the last painted column taken as the
+    /// last column's.
+    #[test]
+    fn the_blank_column_target_needs_the_last_column_painted() {
+        let widths = [54.0; 10];
+        let extents = [(NodeId::from_raw(1), 10.0, 64.0)];
+        let inside = ColumnWindow::spanning(&widths, 8.0, 2, 5);
+        assert_eq!(last_column_right(&inside, &extents, 0.0), None);
+        let at_the_end = ColumnWindow::spanning(&widths, 8.0, 7, 10);
+        assert_eq!(last_column_right(&at_the_end, &extents, 0.0), Some(64.0));
+    }
+
+    /// The window and the spacers: the row is as wide as with every column.
+    #[test]
+    fn the_window_and_its_spacers_keep_the_content_width() {
+        let widths: Vec<f32> = (0..50).map(|i| 40.0 + i as f32).collect();
+        let (spacing, gutter) = (8.0, 90.0);
+        let whole = gutter + spacing + widths.iter().map(|w| w + spacing).sum::<f32>() - spacing;
+        for view in [
+            (0.0, 300.0),
+            (500.0, 900.0),
+            (1.0e6, 1.0e6 + 300.0),
+            (-50.0, -10.0),
+        ] {
+            let window = column_window(&widths, spacing, gutter, view);
+            assert!(window.end > window.start);
+            let shown: f32 = widths[window.start..window.end].iter().sum::<f32>()
+                + spacing * (window.end - window.start - 1) as f32;
+            let mut total = gutter + spacing + shown;
+            if window.start > 0 {
+                total += spacing + window.left;
+            }
+            if window.end < window.total {
+                total += spacing + window.right;
+            }
+            assert!(
+                (total - whole).abs() < 0.01,
+                "{view:?}: {total} for {whole}"
+            );
+        }
+    }
+
+    /// The least scroll that shows a range.
+    #[test]
+    fn follow_offset_scrolls_just_enough() {
+        assert_eq!(follow_offset(100.0, 300.0, 150.0, 200.0), None);
+        assert_eq!(follow_offset(100.0, 300.0, 350.0, 450.0), Some(150.0));
+        assert_eq!(follow_offset(100.0, 300.0, 50.0, 90.0), Some(50.0));
+        assert_eq!(follow_offset(100.0, 300.0, 100.0, 140.0), None);
+        assert_eq!(follow_offset(0.0, 0.0, 10.0, 20.0), None);
+    }
+
+    /// Text of the first-row cell of the visible column `index` in `wide_bench`.
+    fn cell_text_of(index: usize) -> String {
+        format!("{}", (index + 1) * 100 + 1)
+    }
+
+    /// → from the last fully visible column scrolls so that the next column is
+    /// fully visible. Witness: drop the call to `follow_cursor`.
+    #[test]
+    fn the_right_arrow_scrolls_to_the_next_column() {
+        let mut bench = wide_bench(1000, false);
+        let last = *painted_letters(&bench)
+            .iter()
+            .rfind(|index| {
+                letter_rect(&bench, **index)
+                    .is_some_and(|rect| rect.right() <= viewport_right(&bench))
+            })
+            .unwrap();
+        bench.click_on(&cell_text_of(last));
+        bench.press_key(egui::Key::ArrowRight, egui::Modifiers::NONE);
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[last + 1], 0))
+        );
+        let rect = letter_rect(&bench, last + 1).expect("the new active column is painted");
+        assert!(
+            rect.left() >= 0.0 && rect.right() <= viewport_right(&bench) + 0.5,
+            "fully visible: {rect:?}"
+        );
+    }
+
+    /// ↓ below the last visible row scrolls the table vertically. Witness: same.
+    #[test]
+    fn the_down_arrow_scrolls_to_the_next_row() {
+        let mut bench = Bench::with_shape(3, 200, |c, r| f64::from(c * 1000 + r));
+        let painted_rows = |bench: &Bench| -> Vec<u32> {
+            let texts = bench.texts();
+            (1..=200u32)
+                .filter(|r| texts.contains(&format!("{}", 1000 + r)))
+                .collect()
+        };
+        let last_row = *painted_rows(&bench).last().unwrap();
+        let lowest_y = bench.center_of(&format!("{}", 1000 + last_row)).unwrap().y;
+        let fully_visible = last_row - 1;
+        bench.click_on(&format!("{}", 1000 + fully_visible));
+        for _ in 0..4 {
+            bench.press_key(egui::Key::ArrowDown, egui::Modifiers::NONE);
+        }
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let target = fully_visible + 4;
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[0], target as usize - 1))
+        );
+        let at = bench
+            .center_of(&format!("{}", 1000 + target))
+            .expect("the active row is painted");
+        assert!(
+            at.y <= lowest_y + 0.5,
+            "no lower than the lowest row that was painted: {at:?} for {lowest_y}"
+        );
+    }
+
+    /// Tab on the last column adds a column and the grid scrolls to it. Witness:
+    /// same.
+    #[test]
+    fn tab_on_the_last_column_scrolls_to_the_new_column() {
+        let mut bench = wide_bench(1000, false);
+        scroll_right_by(&mut bench, 1.0e7);
+        bench.click_on(&cell_text_of(999));
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        bench.tab();
+        let added: Vec<Action> = bench
+            .seen
+            .iter()
+            .filter(|action| matches!(action, Action::AddColumnAndSelect { .. }))
+            .cloned()
+            .collect();
+        assert_eq!(added.len(), 1, "Tab on the last column adds a column");
+        bench.state.dispatch(added[0].clone());
+        for _ in 0..6 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(bench.state.visible_columns(bench.sheet).len(), 1001);
+        let rect = letter_rect(&bench, 1000).expect("the new column is painted");
+        assert!(
+            rect.left() >= 0.0 && rect.right() <= viewport_right(&bench) + 0.5,
+            "fully visible: {rect:?}"
+        );
+    }
+
+    // ---- #534: an entry keeps working when its cell is scrolled out of view ----
+
+    /// Scrolls the grid vertically by `delta` points (positive: towards the last
+    /// row) with the wheel, then lets the smooth scrolling finish.
+    fn scroll_down_by(bench: &mut Bench, delta: f32) {
+        bench.image(vec![egui::Event::PointerMoved(egui::pos2(400.0, 300.0))]);
+        bench.image(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -delta),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for _ in 0..60 {
+            bench.image(Vec::new());
+        }
+    }
+
+    /// Opens the editor of the first cell of the first column (double click) and
+    /// scrolls it out of the painted window: far to the right, or far down.
+    fn edit_first_cell_then_scroll_away(bench: &mut Bench, down: bool, text: &str) {
+        bench.click_on(text);
+        bench.click_on(text);
+        let edit = bench.state.editing().expect("the cell opens its editor");
+        assert_eq!((edit.column, edit.row), (bench.columns[0], 0));
+        if down {
+            scroll_down_by(bench, 1.0e5);
+        } else {
+            scroll_right_by(bench, 1.0e7);
+        }
+        assert!(
+            bench.center_of(text).is_none(),
+            "the edited cell is out of the painted window"
+        );
+        assert!(bench.state.editing().is_some(), "the entry is still open");
+    }
+
+    fn type_text(bench: &mut Bench, text: &str) {
+        bench.image(vec![egui::Event::Text(text.to_string())]);
+        bench.image(Vec::new());
+    }
+
+    /// Typed characters and Backspace reach the buffer of a cell scrolled out of
+    /// view, horizontally and vertically, and typing alone does not scroll the grid.
+    /// Witness: drop the call to `paint_unpainted_edit` (the buffer stays "101"; a
+    /// scroll_to_rect of the clipped editor would show as a moved window).
+    #[test]
+    fn typing_in_a_cell_scrolled_out_of_view_reaches_its_buffer_without_scrolling() {
+        for down in [false, true] {
+            let mut bench = if down {
+                Bench::with_shape(3, 200, |c, r| f64::from(c * 1000 + r))
+            } else {
+                wide_bench(1000, false)
+            };
+            let text = if down { "1001" } else { "101" };
+            edit_first_cell_then_scroll_away(&mut bench, down, text);
+            let before = bench.texts();
+            type_text(&mut bench, "abc");
+            type_text(&mut bench, "d");
+            bench.press_key(egui::Key::Backspace, egui::Modifiers::NONE);
+            let edit = bench.state.editing().expect("still open");
+            assert_eq!(edit.buffer, "abc", "down: {down}");
+            assert_eq!(
+                bench.texts(),
+                before,
+                "typing does not move the grid (down: {down})"
+            );
+        }
+    }
+
+    /// Enter in a cell scrolled out of view writes what was typed, goes down one
+    /// row and the grid scrolls back to the new cursor cell, on both axes.
+    /// Witness: drop the call to `paint_unpainted_edit` (nothing is written), or
+    /// the call to `follow_cursor`.
+    #[test]
+    fn enter_in_a_cell_scrolled_out_of_view_writes_it_and_scrolls_to_the_cursor() {
+        for down in [false, true] {
+            let mut bench = if down {
+                Bench::with_shape(3, 200, |c, r| f64::from(c * 1000 + r))
+            } else {
+                wide_bench(1000, false)
+            };
+            let text = if down { "1001" } else { "101" };
+            edit_first_cell_then_scroll_away(&mut bench, down, text);
+            type_text(&mut bench, "abc");
+            enter(&mut bench);
+            assert_commit_pushed(&bench, 0, "abc");
+            assert!(bench.state.editing().is_none(), "Enter closes the entry");
+            let commit = bench
+                .seen
+                .iter()
+                .find(|action| matches!(action, Action::CommitCellAndAdvance { .. }))
+                .cloned()
+                .unwrap();
+            bench.state.dispatch(commit);
+            for _ in 0..6 {
+                bench.image(Vec::new());
+            }
+            assert_eq!(
+                bench.cursor(),
+                Some(GridCursor::Data(bench.columns[0], 1)),
+                "down: {down}"
+            );
+            let next = if down { "1002" } else { "102" };
+            let at = bench
+                .center_of(next)
+                .unwrap_or_else(|| panic!("the new cursor cell is painted (down: {down})"));
+            assert!(
+                at.x > 0.0 && at.y > 0.0 && at.x < bench.size.x && at.y < bench.size.y,
+                "{at:?}"
+            );
+        }
+    }
+
+    /// Tab in a cell scrolled out of view writes it, moves to the next column and
+    /// the grid scrolls to it. Witness: same.
+    #[test]
+    fn tab_in_a_cell_scrolled_out_of_view_moves_to_the_next_column_and_scrolls() {
+        let mut bench = wide_bench(1000, false);
+        edit_first_cell_then_scroll_away(&mut bench, false, "101");
+        type_text(&mut bench, "abc");
+        bench.tab();
+        assert!(bench.state.editing().is_none(), "Tab closes the entry");
+        assert!(
+            bench.seen.iter().any(|action| matches!(action,
+                Action::CommitCell { column, row: 0, text }
+                if *column == bench.columns[0] && text == "abc")),
+            "seen: {:?}",
+            bench.seen
+        );
+        for _ in 0..6 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(bench.cursor(), Some(GridCursor::Data(bench.columns[1], 0)));
+        assert!(
+            bench.center_of(&cell_text_of(1)).is_some(),
+            "the next column is painted again"
+        );
+    }
+
+    /// Escape in a cell scrolled out of view cancels the entry, writes nothing and
+    /// leaves the grid where it is. Witness: drop the call to
+    /// `paint_unpainted_edit` (the entry stays open).
+    #[test]
+    fn escape_in_a_cell_scrolled_out_of_view_cancels_without_scrolling() {
+        let mut bench = wide_bench(1000, false);
+        edit_first_cell_then_scroll_away(&mut bench, false, "101");
+        type_text(&mut bench, "abc");
+        let before = bench.texts();
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert!(bench.state.editing().is_none(), "Escape closes the entry");
+        assert!(
+            !bench.seen.iter().any(|action| matches!(
+                action,
+                Action::CommitCell { .. } | Action::CommitCellAndAdvance { .. }
+            )),
+            "nothing is written: {:?}",
+            bench.seen
+        );
+        assert_eq!(bench.texts(), before, "the grid did not move");
+    }
+
+    /// The entry comes back where it was when its cell scrolls back into view:
+    /// same text, same focus (the identifier does not depend on the position in
+    /// the table). Witness: identifier taken from `ui.id()`.
+    #[test]
+    fn a_cell_scrolled_out_and_back_keeps_its_text_and_its_focus() {
+        let mut bench = wide_bench(1000, false);
+        edit_first_cell_then_scroll_away(&mut bench, false, "101");
+        type_text(&mut bench, "abc");
+        scroll_right_by(&mut bench, -1.0e7);
+        assert!(bench.state.editing().is_some());
+        type_text(&mut bench, "d");
+        assert_eq!(bench.state.editing().unwrap().buffer, "abcd");
+    }
+
+    /// A header field (Long Name) scrolled out of view behaves like a cell: typing
+    /// reaches it, Tab writes it, moves to the next column and the grid follows.
+    /// Witness: drop the call to `paint_unpainted_edit`.
+    #[test]
+    fn a_header_field_scrolled_out_of_view_is_typed_in_and_tab_scrolls() {
+        let mut bench = wide_bench(1000, false);
+        let (sheet, first) = (bench.sheet, bench.columns[0]);
+        bench
+            .state
+            .select_header_field(sheet, first, HeaderField::LongName);
+        bench.state.begin_header_edit(first, HeaderField::LongName);
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        scroll_right_by(&mut bench, 1.0e7);
+        assert!(!painted_letters(&bench).contains(&0));
+        let before = bench.texts();
+        type_text(&mut bench, "Zed");
+        assert_eq!(bench.state.header_editing().unwrap().buffer, "Zed");
+        assert_eq!(bench.texts(), before, "typing does not move the grid");
+        bench.tab();
+        assert!(
+            bench.state.header_editing().is_none(),
+            "Tab closes the field"
+        );
+        for _ in 0..6 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Header(bench.columns[1], HeaderField::LongName))
+        );
+        assert!(
+            painted_letters(&bench).contains(&1),
+            "the grid scrolled back to the next column"
+        );
+    }
+
+    /// A click on a partly visible column selects its cell and does not scroll.
+    /// Witness: follow whatever armed the move.
+    #[test]
+    fn a_click_does_not_scroll_the_grid() {
+        let mut bench = wide_bench(1000, false);
+        let partly = painted_letters(&bench)
+            .into_iter()
+            .find(|index| {
+                letter_rect(&bench, *index).is_some_and(|rect| {
+                    rect.left() < viewport_right(&bench) - 6.0
+                        && rect.right() > viewport_right(&bench) + 4.0
+                })
+            })
+            .expect("a column cut by the right edge");
+        let rect = letter_rect(&bench, partly).unwrap();
+        let y = bench.center_of("101").unwrap().y;
+        let first_before = bench.center_of(&visible_letter(&bench, 0)).unwrap();
+        click_at(&mut bench, egui::pos2(rect.left() + 3.0, y));
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[partly], 0))
+        );
+        assert_eq!(
+            bench.center_of(&visible_letter(&bench, 0)),
+            Some(first_before),
+            "no scroll"
         );
     }
 }

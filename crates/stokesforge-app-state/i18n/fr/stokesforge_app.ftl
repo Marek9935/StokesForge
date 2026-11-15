@@ -2033,6 +2033,10 @@ status-import-origin-left-wizard = { $count ->
     [one] Le fichier Origin a été déplacé
    *[other] { $count } fichiers Origin ont été déplacés
 } de la fenêtre d'import vers la fenêtre « Importer depuis Origin »
+status-import-origin-after-window = { $count ->
+    [one] Le fichier Origin s'ouvrira
+   *[other] Les { $count } fichiers Origin s'ouvriront
+} après la fenêtre Import
 status-origin-drop-refused = Seuls les fichiers Origin peuvent être ajoutés ici. Les autres fichiers déposés n'ont pas été importés
 origin-import-title = Importer depuis Origin
 origin-import-summary = À créer : { $sheets ->
