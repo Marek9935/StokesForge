@@ -59,6 +59,10 @@ use stokesforge_render::{
 };
 
 use crate::corner_follow::{follow_step, glide_step, pointer_step, AxisFollow, PointerSource};
+
+/// Figure points by which the side that follows the ratio (Ctrl) is kept short
+/// of it: the leading side stays the leading one when the two sides tie.
+const RATIO_MARGIN: f32 = 0.01;
 use crate::corner_lock;
 use crate::{FramePreview, GraphEvent, GraphView};
 
@@ -221,6 +225,9 @@ struct Nudge {
 #[derive(Debug, Default)]
 pub(crate) struct LayoutState {
     pub(crate) mode: bool,
+    /// The pass in which the running page-corner drag was already advanced by
+    /// [`GraphView::advance_page_corner_drag`] (the paint must not step twice).
+    advanced_pass: Option<u64>,
     /// The drawing area the host contains the figure in, fed each frame: where
     /// a dragged page corner stops and the display zooms out (#512).
     contain: Option<Rect>,
@@ -1246,6 +1253,16 @@ impl GraphView {
         {
             return;
         }
+        // The host already advanced this drag before it sized the figure.
+        if self.layout.advanced_pass == Some(context.cumulative_pass_nr()) {
+            return;
+        }
+        self.step_layout_drag(context, pos);
+    }
+
+    /// One frame of the drag in progress: the movement, the snapped preview,
+    /// the glide.
+    fn step_layout_drag(&mut self, context: &Context, pos: Pos2) {
         let Some(drag) = self.layout.drag.clone() else {
             return;
         };
@@ -1265,6 +1282,39 @@ impl GraphView {
         if let Some(shown) = shown {
             self.glide_page_corner(context, &drag, pos, shown, shift, ctrl);
         }
+    }
+
+    /// Advances a running page-corner drag by this frame's pointer, before the
+    /// host sizes the figure, so the figure it draws is the one of this frame
+    /// and not of the previous one (#512). The paint of the same pass then does
+    /// not step again. Does nothing outside such a drag (the press itself is
+    /// handled by the paint).
+    pub fn advance_page_corner_drag(&mut self, context: &Context) {
+        if !self.layout.mode
+            || !self
+                .layout
+                .drag
+                .as_ref()
+                .is_some_and(|drag| drag.follow.is_some())
+        {
+            return;
+        }
+        let pass = context.cumulative_pass_nr();
+        if self.layout.advanced_pass == Some(pass) {
+            return;
+        }
+        let pos = context.input(|input| {
+            input
+                .pointer
+                .primary_down()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        });
+        let Some(pos) = pos else {
+            return;
+        };
+        self.layout.advanced_pass = Some(pass);
+        self.step_layout_drag(context, pos);
     }
 
     /// The preview of a drag for a pointer movement of `delta` points of page.
@@ -1581,22 +1631,33 @@ impl GraphView {
         let (lengths, mut scale) = follow_step(follow.axes, follow.scale, step);
         follow.axes[0].length = lengths[0];
         follow.axes[1].length = lengths[1];
+        // What the geometry gets is the pull of the pointer itself: with Ctrl
+        // it keeps the ratio and snaps on the leading side by itself.
+        let pulled = follow.delta();
         if let Some((corner, image)) = ratio {
-            let kept = page_corner_ratio_delta(corner, image, follow.delta(), None);
-            for (i, pulled) in [kept.0, kept.1].into_iter().enumerate() {
-                let length = follow.start[i] + follow.axes[i].sign * pulled as f32;
-                let axis = AxisFollow {
-                    length,
-                    ..follow.axes[i]
-                };
-                if let Some(fit) = axis.scale_to_fit(length) {
+            let kept = page_corner_ratio_delta(corner, image, pulled, None);
+            let raw = [follow.axes[0].length, follow.axes[1].length];
+            for (i, pull) in [kept.0, kept.1].into_iter().enumerate() {
+                let axis = follow.axes[i];
+                let mut length = follow.start[i] + axis.sign * pull as f32;
+                // The side that follows is kept just short of the ratio, so
+                // that the leading side stays the leading one when the two tie.
+                if length > raw[i] + RATIO_MARGIN {
+                    length -= RATIO_MARGIN;
+                }
+                let length = length.clamp(axis.min.min(axis.max), axis.max);
+                if let Some(fit) = (AxisFollow { length, ..axis }).scale_to_fit(length) {
                     scale = scale.min(fit);
                 }
+                // The accumulator is projected onto the page that is shown: the
+                // corner is where the cursor is drawn, and a movement off the
+                // ratio line builds no hidden travel.
+                follow.axes[i].length = length;
             }
         }
         follow.scale = scale;
         follow.cursor = Pos2::new(follow.axes[0].corner(scale), follow.axes[1].corner(scale));
-        Some(follow.delta())
+        Some(pulled)
     }
 
     /// The page of a page-corner drag glides to the snapped size `shown`: the
@@ -2026,7 +2087,16 @@ impl GraphView {
                 .as_ref()
                 .and_then(|drag| drag.follow.as_ref()),
         ) {
-            let painter = painter.with_clip_rect(Rect::EVERYTHING);
+            // On a foreground layer of its own, clipped to the whole viewport:
+            // never under the figure's clip, never behind another widget.
+            let context = painter.ctx();
+            let layer = egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new(("page_corner_cursor", self.id)),
+            );
+            let painter = context
+                .layer_painter(layer)
+                .with_clip_rect(context.content_rect());
             paint_corner_cursor(&painter, at, follow.far.0 == follow.far.1);
         }
         let in_selection = |graph: &GraphBox| view.selected.contains(&graph.base);

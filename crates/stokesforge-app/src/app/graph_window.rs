@@ -381,6 +381,11 @@ pub(super) fn graph_view_contents(
     // `retours-2026-09-24-bugs.md`). The child Ui bounds the
     // interactions without growing the parent window.
     publish_figure_area(ui.ctx(), graph_id, area.size());
+    // #512: a page-corner drag takes this frame's pointer before the figure is
+    // sized, so the size drawn is not one frame behind the display scale.
+    if layout_mode {
+        view.advance_page_corner_drag(ui.ctx());
+    }
     let layout = view.figure_layout(ui.ctx(), snapshot, graph_id).ok();
     let (fig_w, fig_h) = layout.as_ref().map_or(DEFAULT_FIGURE_SIZE, |l| l.size);
     if let Some(layout) = layout.clone() {

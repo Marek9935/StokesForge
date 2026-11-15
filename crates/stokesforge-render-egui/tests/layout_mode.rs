@@ -160,6 +160,8 @@ struct Out {
     cursor: egui::CursorIcon,
     shapes: Vec<egui::epaint::ClippedShape>,
     cached: bool,
+    /// The rectangle the figure was drawn in.
+    rect: Rect,
     /// The viewport commands the frame asked for, in order.
     commands: Vec<egui::ViewportCommand>,
 }
@@ -190,17 +192,6 @@ fn frame_in(
     scale: f32,
     window: Option<Rect>,
 ) -> Out {
-    let layout = view
-        .figure_layout(context, &fixture.snapshot(), fixture.graph)
-        .expect("layout");
-    let size = egui::vec2(layout.size.0 as f32, layout.size.1 as f32);
-    let rect = Rect::from_min_size(Pos2::ZERO, size * scale);
-    // What the application does (#512): it feeds the drawing area, and draws
-    // the figure in the rectangle of a page-corner drag while there is one.
-    if let Some(window) = window {
-        view.set_layout_contain(window);
-    }
-    let rect = view.page_corner_rect((size.x, size.y)).unwrap_or(rect);
     let mut events = events;
     events.insert(0, egui::Event::ModifiersChanged(modifiers));
     let input = egui::RawInput {
@@ -209,7 +200,22 @@ fn frame_in(
         ..Default::default()
     };
     let mut cached = false;
+    let mut figure_rect = Rect::NOTHING;
     let mut output = context.run_ui(input, |ui| {
+        // What the application does (#512): it feeds the drawing area, advances
+        // a page-corner drag with this frame's pointer, sizes the figure, and
+        // draws it in the rectangle of the drag while there is one.
+        if let Some(window) = window {
+            view.set_layout_contain(window);
+        }
+        view.advance_page_corner_drag(ui.ctx());
+        let layout = view
+            .figure_layout(ui.ctx(), &fixture.snapshot(), fixture.graph)
+            .expect("layout");
+        let size = egui::vec2(layout.size.0 as f32, layout.size.1 as f32);
+        let rect = Rect::from_min_size(Pos2::ZERO, size * scale);
+        let rect = view.page_corner_rect((size.x, size.y)).unwrap_or(rect);
+        figure_rect = rect;
         cached = view
             .paint_scaled(ui, rect, &fixture.snapshot(), fixture.graph)
             .expect("painting");
@@ -226,6 +232,7 @@ fn frame_in(
         cursor: output.platform_output.cursor_icon,
         shapes: output.shapes,
         cached,
+        rect: figure_rect,
     }
 }
 
@@ -2953,9 +2960,9 @@ fn coming_back_in_after_the_edge_moves_the_corner_at_once() {
         &motions,
         egui::Modifiers::NONE,
     );
-    // The figure is drawn one frame after the pointer moved it.
-    assert!((shown[pushed + 1].max.x - contain.max.x).abs() < 1.0);
-    let back = shown[pushed + 2].max.x;
+    // The figure is drawn in the frame of the pointer that moved it (no lag).
+    assert!((shown[pushed].max.x - contain.max.x).abs() < 1.0);
+    let back = shown[pushed + 1].max.x;
     assert!(
         (back - (contain.max.x - 10.0)).abs() < 1.5,
         "{back} vs {}",
@@ -2988,9 +2995,10 @@ fn the_inward_stop_at_the_graphs_leaves_no_dead_zone() {
         ],
         egui::Modifiers::NONE,
     );
-    assert!((shown[2].max.x - w).abs() < 0.5, "stopped at the graphs");
+    // The figure is drawn in the frame of the pointer that moved it (no lag).
+    assert!((shown[1].max.x - w).abs() < 0.5, "stopped at the graphs");
     assert!(
-        (shown[3].max.x - shown[2].max.x - 10.0).abs() < 0.5,
+        (shown[2].max.x - shown[1].max.x - 10.0).abs() < 0.5,
         "grows at once: {shown:?}"
     );
 }
@@ -3447,11 +3455,14 @@ fn ctrl_pressed_or_released_during_the_drag_takes_effect_at_once() {
         (bottom - right * ratio).abs() <= 1.0,
         "ratio kept: {right} x {bottom} (ratio {ratio})"
     );
+    // Released, the drag is plain again from where the corner is shown (the
+    // cursor stays on it): the follower side keeps its ratio length and the
+    // next pull of the height is added to it, with no jump back.
     let released = run(ctrl, none);
-    assert_eq!(
-        released,
-        (plain_right, plain_bottom),
-        "released: plain again"
+    assert_eq!(released.0, plain_right);
+    assert!(
+        (released.1 - plain_right * ratio).abs() <= 1.0,
+        "the corner stays where it was shown: {released:?}"
     );
 }
 
@@ -3583,5 +3594,109 @@ fn one_corrupt_frame_after_the_lock_falls_back_without_a_jump() {
         new_page.height,
         page.width,
         page.height
+    );
+}
+
+fn with_ctrl() -> egui::Modifiers {
+    egui::Modifiers {
+        ctrl: true,
+        ..egui::Modifiers::NONE
+    }
+}
+
+/// #512, Ctrl: the cursor is drawn on the corner of the page as shown (ratio
+/// applied, clamped, zoomed out), never at the raw pointer, outward past the
+/// edge and back inward, on both axes, every frame. With no snap the shown
+/// page is the unsnapped one, so its far corner is the cursor. Witness: the
+/// cursor taken from the raw lengths (the pointer's own pull) leaves the corner
+/// of the non-leading axis (checked here too, so the test cannot pass empty).
+#[test]
+fn with_ctrl_the_cursor_stays_on_the_displayed_corner_on_both_axes() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 150.0);
+    let ctrl = with_ctrl();
+    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, ctrl);
+    let start = view.page_corner_cursor().expect("cursor");
+    let mut raw = start;
+    let mut off_the_pointer = 0.0_f32;
+    let motions = [(7.0, 1.0); 40]
+        .into_iter()
+        .chain([(-9.0, -2.0); 25])
+        .chain([(-3.0, 6.0); 10]);
+    for (dx, dy) in motions {
+        held.push(&mut view, egui::vec2(dx, dy), ctrl);
+        raw += egui::vec2(dx, dy);
+        let cursor = view.page_corner_cursor().expect("cursor");
+        let corner = view.display_rect().expect("drawn").max;
+        assert!(
+            (cursor - corner).abs().max_elem() <= 0.75,
+            "cursor {cursor:?} off the displayed corner {corner:?}"
+        );
+        off_the_pointer = off_the_pointer.max((cursor - raw).abs().max_elem());
+    }
+    assert!(off_the_pointer > 5.0, "the raw pointer is not the corner");
+}
+
+/// #512, Ctrl: moving the mouse perpendicular to the ratio line builds no
+/// hidden travel, so the way back moves the corner at once. Witness: the raw
+/// accumulator not projected onto the shown corner each frame (the 20 points
+/// of height pulled inward are repaid before the corner answers).
+#[test]
+fn with_ctrl_moving_off_the_ratio_line_leaves_no_dead_zone() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 600.0);
+    let ctrl = with_ctrl();
+    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, ctrl);
+    for _ in 0..5 {
+        held.push(&mut view, egui::vec2(0.0, -4.0), ctrl);
+    }
+    let before = view.display_rect().expect("drawn").max;
+    held.push(&mut view, egui::vec2(0.0, 6.0), ctrl);
+    let after = view.display_rect().expect("drawn").max;
+    assert!(
+        after.y - before.y > 4.0 && after.x > before.x,
+        "the corner answers at once: {before:?} -> {after:?}"
+    );
+}
+
+/// #512: the cursor is painted on a foreground layer clipped to the whole
+/// viewport, so the figure's clip never cuts it. Witness: painted with the
+/// figure's painter (the last shape is then a handle, with another clip).
+#[test]
+fn the_drawn_cursor_is_on_a_foreground_layer_clipped_to_the_viewport() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 150.0);
+    let none = egui::Modifiers::NONE;
+    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+    let out = held.push(&mut view, egui::vec2(5.0, 0.0), none);
+    let cursor = view.page_corner_cursor().expect("cursor");
+    let last = out.shapes.last().expect("shapes");
+    assert_eq!(last.clip_rect, context.content_rect());
+    assert!(
+        last.shape.visual_bounding_rect().contains(cursor),
+        "the last shape is the cursor: {:?} around {cursor:?}",
+        last.shape.visual_bounding_rect()
+    );
+}
+
+/// #512: the figure of a frame is sized and placed from this frame's pointer
+/// (the host advances the drag before it sizes the figure). Witness: the drag
+/// stepped during the paint, after the rectangle was taken (the figure is a
+/// frame behind: the rectangle does not move in the frame of the push).
+#[test]
+fn the_figure_follows_the_pointer_of_the_same_frame() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 600.0);
+    let none = egui::Modifiers::NONE;
+    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+    let before = held.push(&mut view, egui::Vec2::ZERO, none).rect;
+    let after = held.push(&mut view, egui::vec2(30.0, 0.0), none).rect;
+    assert!(
+        (after.max.x - before.max.x - 30.0).abs() < 0.5,
+        "{before:?} -> {after:?}"
     );
 }

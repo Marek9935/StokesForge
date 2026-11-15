@@ -44,7 +44,7 @@ pub(crate) const OUTLIER_FACTOR: f32 = 50.0;
 pub(crate) const OUTLIER_FLOOR: f32 = 400.0;
 
 /// Time constant, in seconds, of the glide of the page to a new snapped size.
-pub(crate) const GLIDE_TIME_CONSTANT: f32 = 0.06;
+pub(crate) const GLIDE_TIME_CONSTANT: f32 = 0.03;
 
 /// What moves the pointer of a page-corner drag, found out by a probe at the
 /// start of the drag (#512).
@@ -509,10 +509,10 @@ mod tests {
     /// one from `dt` makes the 4 x 15 ms run differ from the 1 x 60 ms one.
     #[test]
     fn the_glide_is_frame_rate_independent_and_converges() {
-        let once = glide_step(0.0, 100.0, 0.060);
+        let once = glide_step(0.0, 100.0, GLIDE_TIME_CONSTANT);
         let mut split = 0.0;
         for _ in 0..4 {
-            split = glide_step(split, 100.0, 0.015);
+            split = glide_step(split, 100.0, GLIDE_TIME_CONSTANT / 4.0);
         }
         assert!((once - split).abs() < 0.5, "{once} vs {split}");
         assert!((once - 100.0 * (1.0 - (-1.0_f64).exp())).abs() < 1e-6);
