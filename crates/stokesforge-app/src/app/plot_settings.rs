@@ -1905,18 +1905,26 @@ pub(super) fn series_style_editor(
         form.section(tr!("plot-series-line-section"));
         if colors {
             let out = form.enabled(color_reason.is_none(), |form| {
-                form.color(
-                    &tr!("plot-series-line-color"),
-                    &mut series.line.color,
-                    ColorUsage::Curves,
-                    None,
-                    env,
-                )
+                let label = tr!("plot-series-line-color");
+                form.row(&label, |ui| {
+                    let changed = crate::color_picker::color_button(
+                        ui,
+                        &label,
+                        &mut series.line.color,
+                        ColorUsage::Curves,
+                        None,
+                        env,
+                    );
+                    // A "?" beside the swatch: the swatch's own tooltip (its
+                    // hex) would hide a bubble on the whole row (#510 D4).
+                    if let Some(hint) = &color_hint {
+                        super::hover_help::help_text(ui, hint.clone());
+                    }
+                    changed
+                })
             });
             if let Some(reason) = &color_reason {
                 out.response.on_disabled_hover_text(reason);
-            } else if let Some(hint) = &color_hint {
-                out.response.on_hover_text(hint);
             }
             commit |= out.inner;
         }
