@@ -225,7 +225,7 @@ These columns do not remember a source file, so **Refresh from Source** does not
 
 ### When a file cannot be read completely
 
-Some `.opju` files use a part of the format StokesForge does not read yet. If only the part that holds the workbook names is concerned, the window opens and shows the note "Part of this file could not be read: some workbooks may lack names". If the data themselves cannot be read, the file is refused with a message; save the project as `.opj` from Origin, or open it in the free Origin Viewer and save it as `.opj`.
+Some `.opju` files use a part of the format StokesForge does not read yet. If only the part that holds the descriptions is concerned, the window opens and shows, in orange under the file name, "Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles". After the import, the status bar repeats it in orange ("Imported 3 workbooks; part of the file could not be read"). A sheet that has lost its name is called `Sheet1`, `Sheet2`… (Origin's default names), in the window and in the workbook. If the data themselves cannot be read, the file is refused with the message "This .opju file uses a part of the format StokesForge cannot read yet. Open it in the free Origin Viewer and save it as .opj (Origin 2018 to 2022b can also save .opj)". A file that announces more data or text than it can hold is refused as damaged.
 
 ### From the command line and scripts
 

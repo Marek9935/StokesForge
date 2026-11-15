@@ -401,6 +401,7 @@ fn a_broken_annotation_in_the_second_book_keeps_the_first_whole() {
         (first.short_name.as_str(), first.long_name.as_str()),
         ("Book1", "Book1 long")
     );
+    // A sheet that has a name keeps it in a partial read.
     assert_eq!(first.sheets[0].name, "Data");
     let a = &first.sheets[0].columns[0];
     assert_eq!(
@@ -420,7 +421,9 @@ fn a_broken_annotation_in_the_second_book_keeps_the_first_whole() {
     );
     assert!(second.info.is_empty());
     assert_eq!(second.sheets.len(), 2);
-    assert!(second.sheets.iter().all(|s| s.name.is_empty()));
+    // Origin's default names: the headers that carried the real ones are lost.
+    let names: Vec<_> = second.sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Sheet1", "Sheet2"]);
     let b = &second.sheets[1].columns[0];
     assert_eq!(
         (

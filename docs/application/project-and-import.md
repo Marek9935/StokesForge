@@ -140,7 +140,7 @@ ticked book and one sheet per ticked sheet in one `MacroKind::Import` group (one
 history entry, one undo); a name the model would refuse (invalid, or already a
 sibling's, case aside) is not sent: the object keeps its automatic name and
 nothing is said. Origin columns have no import source, so Refresh from Source
-stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` note above that file. Reopen Last Import after an Origin import undoes it (if
+stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
 still on top) and reopens the chooser on the same parsed files and ticks; the
 most recent import, text or Origin, decides between wizard and chooser.
 

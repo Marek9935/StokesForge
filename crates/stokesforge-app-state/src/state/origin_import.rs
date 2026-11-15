@@ -365,6 +365,7 @@ impl AppState {
         self.origin_import = None;
         let mut failures: Vec<String> = Vec::new();
         let mut done_paths: Vec<PathBuf> = Vec::new();
+        let mut partial_imported = false;
         let (mut book_count, mut sheet_count) = (0, 0);
         for file in &files {
             let mut created = false;
@@ -411,6 +412,7 @@ impl AppState {
                 }
             }
             if created {
+                partial_imported |= file.project.partial;
                 done_paths.push(file.path.clone());
             }
         }
@@ -422,14 +424,16 @@ impl AppState {
             self.recent_to_record.extend(done_paths);
             self.last_origin_import = Some(files);
         }
-        if failures.is_empty() {
+        if !failures.is_empty() {
+            self.fail(failures.join(" ; "));
+        } else if partial_imported {
+            self.warn(tr!("status-import-origin-partial", books = book_count));
+        } else {
             self.notice(tr!(
                 "status-import-origin-done",
                 books = book_count,
                 sheets = sheet_count
             ));
-        } else {
-            self.fail(failures.join(" ; "));
         }
     }
 

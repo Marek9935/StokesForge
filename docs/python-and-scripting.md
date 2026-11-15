@@ -654,7 +654,10 @@ workbook; the modes that modify an active sheet concern the wizard.
 An Origin project (`.opj` or `.opju`) is read too: one workbook per Origin book and one
 sheet per `Data` sheet (every sheet with columns when a book has none named
 `Data`), columns carrying their long names, units, roles and the Horiba
-information; a template name with an `.opj` or `.opju` is refused.
+information; a template name with an `.opj` or `.opju` is refused. An `.opju` read only
+in part (`OriginProject::partial`) is imported without a word from `pyst` (the API is frozen:
+no warning channel); `stokesforge-cli import` prints a warning line, the application an
+orange one.
 A single `pyst.undo()` or Ctrl+Z removes the whole import. The sheet it creates
 is named after the file and carries no "Raw Data" mark (#488: only the
 application's **One Workbook per File** marks its sheet). A script that writes

@@ -304,6 +304,46 @@ fn a_truncated_opju_is_skipped_by_name_and_does_not_panic() {
 }
 
 #[test]
+fn a_partly_read_opju_prints_a_warning_line_and_still_writes_the_books() {
+    let dir = isolated();
+    let path = dir.path().join("cut.opju");
+    use stokesforge_import::origin::{synthetic, OriginDesignation};
+    let book = |name: &str| synthetic::Book {
+        short_name: name.into(),
+        long_name: String::new(),
+        sheets: vec![synthetic::Sheet {
+            name: "Data".into(),
+            columns: vec![synthetic::Column::numbers(
+                "A",
+                OriginDesignation::Y,
+                &[1.0, 2.0],
+            )],
+        }],
+        horiba_xml: None,
+    };
+    let bytes = synthetic::write_opju(&synthetic::Project {
+        books: vec![book("B1"), book("B2")],
+        opju_bad_annotation: Some(1),
+        ..Default::default()
+    });
+    std::fs::write(&path, bytes).unwrap();
+    let out_path = dir.path().join("out.stf");
+    let (result, output) = run(&[
+        "import",
+        "--out",
+        out_path.to_str().unwrap(),
+        path.to_str().unwrap(),
+    ]);
+    result.unwrap();
+    assert!(
+        output.contains("cut.opju: part of the file could not be read; long names, units and X/Y roles may be missing"),
+        "{output}"
+    );
+    assert!(output.contains("Origin book \"B2\""), "{output}");
+    assert!(out_path.exists());
+}
+
+#[test]
 fn an_opju_project_gives_the_same_workbooks_as_its_opj_twin() {
     let dir = isolated();
     let mut projects = Vec::new();

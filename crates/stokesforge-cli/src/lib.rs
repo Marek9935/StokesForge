@@ -155,6 +155,7 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     // the application and `pyst.import_file`). An Origin project has no template.
     let mut items = Vec::new();
     let mut origin_files = Vec::new();
+    let mut partial_files: Vec<String> = Vec::new();
     let mut refused: Vec<String> = Vec::new();
     for path in &args.files {
         let bytes = std::fs::read(path).ok();
@@ -164,7 +165,12 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
                 .is_some_and(stokesforge_importer::is_origin_bytes);
         if is_origin {
             match stokesforge_importer::read_origin_file(path) {
-                Ok(project) => origin_files.push((path, project)),
+                Ok(project) => {
+                    if project.partial {
+                        partial_files.push(path.display().to_string());
+                    }
+                    origin_files.push((path, project));
+                }
                 Err(failure) => refused.push(failure.to_string()),
             }
             continue;
@@ -292,6 +298,13 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     }
     for failure in &failures {
         writeln!(out, "skipped: {failure}").map_err(|err| err.to_string())?;
+    }
+    for path in &partial_files {
+        writeln!(
+            out,
+            "{path}: part of the file could not be read; long names, units and X/Y roles may be missing"
+        )
+        .map_err(|err| err.to_string())?;
     }
     writeln!(
         out,

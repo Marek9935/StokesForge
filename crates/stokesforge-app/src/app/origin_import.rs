@@ -72,18 +72,25 @@ pub(super) fn origin_import_window(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for (file_index, file) in files.iter().enumerate() {
-                        if file.partial {
-                            ui.label(theme::dimmed_text(tr!("origin-import-partial")));
-                        }
+                        let partial_note = |ui: &mut egui::Ui| {
+                            if file.partial {
+                                ui.label(
+                                    egui::RichText::new(tr!("origin-import-partial"))
+                                        .color(theme::warning_color(ui.visuals().dark_mode)),
+                                );
+                            }
+                        };
                         if files.len() == 1 {
                             ui.label(theme::bold(&file.file_name))
                                 .on_hover_text(file.path.display().to_string());
+                            partial_note(ui);
                             books(ui, file_index, &file.books, &mut requested);
                         } else {
                             egui::CollapsingHeader::new(theme::bold(&file.file_name))
                                 .id_salt(("stokesforge_origin_file", file_index))
                                 .default_open(true)
                                 .show(ui, |ui| {
+                                    partial_note(ui);
                                     books(ui, file_index, &file.books, &mut requested);
                                 })
                                 .header_response

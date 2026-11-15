@@ -18403,6 +18403,85 @@ mod origin_import {
     }
 
     #[test]
+    fn importing_a_partial_opju_ends_on_a_warning_that_names_the_partial_read() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let whole = dir.path().join("whole.opju");
+        write_opju(&whole, standard_books(), None);
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+
+        drop_paths(&mut state, vec![whole.clone()]);
+        state.dispatch(Action::ImportOrigin);
+        let status = state.status().unwrap();
+        assert_eq!(status.level, StatusLevel::Info, "a whole file: no warning");
+
+        drop_paths(&mut state, vec![cut]);
+        state.dispatch(Action::ImportOrigin);
+        let status = state.status().unwrap();
+        assert_eq!(status.level, StatusLevel::Warning, "{}", status.text);
+        assert_eq!(status.text, tr!("status-import-origin-partial", books = 2));
+    }
+
+    #[test]
+    fn the_unnamed_sheets_of_a_partial_opju_are_sheet1_sheet2_in_the_chooser_and_the_workbook() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let mut books = standard_books();
+        books[1] = book(
+            "B",
+            "Kinetics",
+            vec![
+                sheet(
+                    "Alpha",
+                    vec![column("T", OriginDesignation::X, &[0.0, 1.0])],
+                ),
+                sheet("Beta", vec![column("S", OriginDesignation::Y, &[4.0, 5.0])]),
+            ],
+        );
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, books, Some(1));
+        drop_paths(&mut state, vec![cut]);
+
+        let files = state.origin_import_files();
+        let names = |b: usize| -> Vec<String> {
+            files[0].books[b]
+                .sheets
+                .iter()
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        assert_eq!(
+            names(0),
+            ["Graph", "Data", "Note"],
+            "a named sheet keeps its name"
+        );
+        assert_eq!(names(1), ["Sheet1", "Sheet2"]);
+
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 0,
+        });
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 1,
+        });
+        state.dispatch(Action::ImportOrigin);
+        let content = imported_content(&state);
+        // The book the cut section did not describe has no long name left.
+        let sheet_names: Vec<&str> = content
+            .iter()
+            .flat_map(|(_, sheets)| sheets.iter().map(|(n, _)| n.as_str()))
+            .filter(|name| name.starts_with("Sheet"))
+            .collect();
+        assert_eq!(sheet_names, ["Sheet1", "Sheet2"]);
+    }
+
+    #[test]
     fn importing_a_partial_opju_is_one_undo_entry_and_no_error() {
         let _recipes = isolate_recipe_store();
         let dir = tempfile::tempdir().unwrap();

@@ -244,7 +244,14 @@ fn assemble(
                     storage: String::new(),
                     layers: Vec::new(),
                 };
-                books.push(build_book(window, columns));
+                let mut book = build_book(window, columns);
+                // No header named the sheets: Origin's default names.
+                for (index, sheet) in book.sheets.iter_mut().enumerate() {
+                    if sheet.name.is_empty() {
+                        sheet.name = format!("Sheet{}", index + 1);
+                    }
+                }
+                books.push(book);
             }
         }
     }
