@@ -12986,6 +12986,39 @@ fn object_manager_placement_of_series_groups_and_objects_is_undoable() {
     assert_eq!(state.revision(), revision);
 }
 
+/// #510: a series group opens the Series window on its group page
+/// (`selected_group`), a series on its curve page. Witness: the `SeriesGroup`
+/// arm that leaves `selected_group` empty fails the first assertion.
+#[test]
+fn object_manager_properties_choose_the_group_page_or_the_curve_page() {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
+    use stokesforge_plot::{SeriesGroupRef, SeriesRef};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut project, graph, mut spec) = object_manager_project();
+    {
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.series[1].group = Some(1);
+        panel.series[2].group = Some(1);
+    }
+    project.set_plot_spec(graph, spec).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("pages.stf"));
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: T::SeriesGroup(SeriesGroupRef::new(0, 1)),
+    });
+    assert_eq!(state.plot_settings().unwrap().tab, PlotSettingsTab::Series);
+    let edit = state.plot_edit().unwrap();
+    assert_eq!(edit.selected_group, Some(1));
+    assert_eq!(edit.selected_series, 1, "its first member");
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: T::Series(SeriesRef::new(0, 2)),
+    });
+    let edit = state.plot_edit().unwrap();
+    assert_eq!(edit.selected_group, None, "a curve opens the curve page");
+    assert_eq!(edit.selected_series, 2);
+}
+
 #[test]
 fn object_manager_properties_open_the_series_of_the_right_layer_and_undo() {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;

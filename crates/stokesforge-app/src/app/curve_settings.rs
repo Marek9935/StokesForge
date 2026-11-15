@@ -7,12 +7,11 @@
 //!
 //! The window is that of [`super::plot_settings`] (same draft, same
 //! validation, same history macro): [`PlotSettingsTab::Series`] no longer
-//! appears in the graph's tab strip, it chooses this page. A series of a
-//! group is edited according to a **scope** chosen in plain words
-//! ([`EditScope`]): "This series only" (nothing touches the others, this is
-//! the exception) or "Whole group" (line and symbol style copied into each
-//! member, gradient applied; the settings specific to a series (name, type,
-//! visibility, colors) are grayed out with a tooltip). The common style is
+//! appears in the graph's tab strip, it chooses this page. **The selection in
+//! the list chooses the page** (#510): a group header opens the **group page**
+//! (its name, its colors, its place on the color bar, and the line and symbol
+//! of all its curves), a curve opens the **curve page** (its own fields, its
+//! group membership, and its own line and symbol). The common style is
 //! **written into each series**: no exception flag to keep track of, and
 //! "Leave Group" gives a series back to itself.
 //!
@@ -29,7 +28,6 @@ use stokesforge_plot::{
 };
 
 use crate::color_picker::{color_field, gradient_strip, gradient_swatch, ColorUsage, PickerEnv};
-use crate::icons::ICON_SIZE;
 use crate::theme;
 use stokesforge_app_state::object_drag::{step_panel, DragItem, DropOver};
 use stokesforge_app_state::object_manager::group_title;
@@ -37,14 +35,14 @@ use stokesforge_app_state::state::{series_list_entry, Action, SaveTarget};
 use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
-use super::form::{choice, form, ChoiceOption, Form};
+use super::form::{form, ChoiceOption, Form};
 use super::hover_help::help_text;
 use super::list_row::{
     list_row_draggable, list_row_draggable_dimmed, raise_to_list_row_height, restore_row_height,
     with_list_row_height,
 };
 use super::object_dnd::{self, Hover};
-use super::plot_settings::series_editor;
+use super::plot_settings::{series_curve_editor, series_style_editor};
 use super::reorder_list::reorder_row_with;
 
 /// Width of the series list, on the left.
@@ -58,15 +56,6 @@ const PREVIEW_STEPS: usize = 24;
 /// Number of samples in the swatch of a list entry.
 const ENTRY_STEPS: usize = 12;
 
-/// What the settings of a series that is in a group apply to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditScope {
-    /// This series only: the other members do not move.
-    Series,
-    /// Whole group.
-    Group,
-}
-
 /// The color gradient chosen in the list (window state, never written to the model).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GradientChoice {
@@ -78,16 +67,19 @@ enum GradientChoice {
     Custom,
 }
 
-/// Series page of the layer `panel`: the list, then the group and the
-/// settings of the series `selected`. Returns `true` if the draft must be
-/// validated; see the head doc of `plot_settings_window`. Saves and deletions
-/// of color gradients go out in `actions`.
+/// Series page of the layer `panel`: the list, then the page of what it
+/// selects: the group `selected_group` if any, else the series `selected`.
+/// Returns `true` if the draft must be validated; see the head doc of
+/// `plot_settings_window`. Saves and deletions of color gradients go out in
+/// `actions`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn curve_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     layer: usize,
     tree: &Tree,
     selected: &mut usize,
+    selected_group: &mut Option<u32>,
     env: &mut PickerEnv,
     actions: &mut Vec<Action>,
 ) -> bool {
@@ -96,6 +88,11 @@ pub(super) fn curve_settings_page(
         return false;
     }
     *selected = (*selected).min(panel.series.len() - 1);
+    // A group that is gone (deleted, or taken away by an Undo under the draft)
+    // leaves the page to a curve that exists.
+    if selected_group.is_some_and(|group| panel.group_members(group).is_empty()) {
+        *selected_group = None;
+    }
     let mut commit = false;
     // A click in the list is applied after the page is drawn (#498): a
     // draft being typed is validated on the series it was typed for.
@@ -103,7 +100,14 @@ pub(super) fn curve_settings_page(
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(LIST_WIDTH);
-            commit |= series_list(ui, panel, layer, tree, selected, &mut pick);
+            commit |= series_list(
+                ui,
+                panel,
+                layer,
+                tree,
+                (selected, selected_group),
+                &mut pick,
+            );
         });
         ui.separator();
         ui.vertical(|ui| {
@@ -111,15 +115,34 @@ pub(super) fn curve_settings_page(
                 .id_salt("curve_settings_editor")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    commit |= series_page(ui, panel, layer, tree, selected, env, actions);
+                    commit |= match *selected_group {
+                        Some(group) => group_page(
+                            ui,
+                            panel,
+                            layer,
+                            group,
+                            (selected, selected_group),
+                            env,
+                            actions,
+                        ),
+                        None => curve_page(ui, panel, layer, tree, selected, env),
+                    };
                 });
         });
     });
-    if let Some((index, whole_group)) = pick {
+    if let Some(pick) = pick {
         if crate::field_state::pick_allowed(ui.ctx()) {
-            *selected = index;
-            if whole_group {
-                ui.data_mut(|d| d.insert_temp(egui::Id::new("curve_edit_scope"), EditScope::Group));
+            match pick {
+                PagePick::Curve(index) => {
+                    *selected = index;
+                    *selected_group = None;
+                }
+                PagePick::Group(group) => {
+                    *selected_group = Some(group);
+                    if let Some(first) = panel.group_members(group).first() {
+                        *selected = *first;
+                    }
+                }
             }
             ui.ctx().request_repaint();
         }
@@ -127,11 +150,19 @@ pub(super) fn curve_settings_page(
     commit
 }
 
-/// A row clicked in the list, applied once the page is drawn: the series
-/// to edit and whether the scope becomes "Whole group" (a group header).
-type ListPick = Option<(usize, bool)>;
+/// The page a click in the list chooses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PagePick {
+    /// The page of the series of this rank.
+    Curve(usize),
+    /// The page of this group.
+    Group(u32),
+}
 
-/// Whole group: copies into the members of `group` what the series `index`
+/// A row clicked in the list, applied once the page is drawn (#498).
+type ListPick = Option<PagePick>;
+
+/// Group page: copies into the members of `group` what the series `index`
 /// has just changed in its line and symbol style relative to `before` (only
 /// what changed: the exceptions already set on the other fields are kept).
 fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index: usize) {
@@ -181,11 +212,13 @@ fn series_row(
     panel: &mut PanelSpec,
     tree: &Tree,
     index: usize,
-    selected: &mut usize,
+    (selected, selected_group): (&mut usize, &mut Option<u32>),
     dnd: &ListDnd,
     commit: &mut bool,
     pick: &mut ListPick,
 ) -> f32 {
+    // One highlight in the list: a row only on a curve page.
+    let highlighted = selected_group.is_none() && *selected == index;
     let (label, fallback) = series_list_entry(tree, &panel.series[index], &panel.legend.text);
     let row = ui
         .push_id(index, |ui| {
@@ -212,7 +245,7 @@ fn series_row(
                             }
                             // The whole row, outside the box, is clicked and dragged.
                             let response =
-                                list_row_draggable_dimmed(ui, &label, *selected == index, fallback);
+                                list_row_draggable_dimmed(ui, &label, highlighted, fallback);
                             clicked = response.clicked();
                             Some(response)
                         },
@@ -224,13 +257,14 @@ fn series_row(
         .inner;
     let (outcome, clicked) = row.inner;
     if clicked {
-        if index != *selected {
+        if !highlighted {
             crate::field_state::pick_pending(ui.ctx());
         }
-        *pick = Some((index, false));
+        *pick = Some(PagePick::Curve(index));
     }
     if outcome.grabbed {
         *selected = index;
+        *selected_group = None;
         object_dnd::begin(
             ui.ctx(),
             None,
@@ -260,7 +294,7 @@ fn series_list(
     panel: &mut PanelSpec,
     layer: usize,
     tree: &Tree,
-    selected: &mut usize,
+    (selected, selected_group): (&mut usize, &mut Option<u32>),
     pick: &mut ListPick,
 ) -> bool {
     let mut commit = false;
@@ -282,7 +316,16 @@ fn series_list(
             for slot in panel.slots() {
                 match slot {
                     SeriesSlot::Single(index) => {
-                        series_row(ui, panel, tree, index, selected, &dnd, &mut commit, pick);
+                        series_row(
+                            ui,
+                            panel,
+                            tree,
+                            index,
+                            (&mut *selected, &mut *selected_group),
+                            &dnd,
+                            &mut commit,
+                            pick,
+                        );
                     }
                     SeriesSlot::Group { id, members } => {
                         let state = ui.make_persistent_id(("curve_list_group", layer, id));
@@ -296,15 +339,9 @@ fn series_list(
                         header
                             .show_header(ui, |ui| {
                                 // As in the Object Manager (#208): the header is
-                                // highlighted when the group is what is being edited, and a
-                                // click chooses the group (its first series, scope
-                                // "Whole group").
-                                let scope_id = egui::Id::new("curve_edit_scope");
-                                let scope = ui
-                                    .data(|d| d.get_temp(scope_id))
-                                    .unwrap_or(EditScope::Group);
-                                let on_group =
-                                    scope == EditScope::Group && members.contains(selected);
+                                // highlighted when the group page is shown, and a
+                                // click chooses that page.
+                                let on_group = *selected_group == Some(id);
                                 let title = group_title(panel, id);
                                 let mut clicked = false;
                                 let outcome = reorder_row_with(
@@ -326,14 +363,12 @@ fn series_list(
                                     if let Some(first) = members.first() {
                                         *selected = *first;
                                     }
-                                    ui.data_mut(|d| d.insert_temp(scope_id, EditScope::Group));
+                                    *selected_group = Some(id);
                                 } else if clicked {
-                                    if let Some(first) = members.first() {
-                                        if !on_group || *first != *selected {
-                                            crate::field_state::pick_pending(ui.ctx());
-                                        }
-                                        *pick = Some((*first, true));
+                                    if !on_group {
+                                        crate::field_state::pick_pending(ui.ctx());
                                     }
+                                    *pick = Some(PagePick::Group(id));
                                 }
                                 if outcome.grabbed {
                                     object_dnd::begin(
@@ -361,7 +396,7 @@ fn series_list(
                                             panel,
                                             tree,
                                             member,
-                                            selected,
+                                            (&mut *selected, &mut *selected_group),
                                             &dnd,
                                             &mut commit,
                                             pick,
@@ -390,6 +425,11 @@ fn series_list(
             if let Some(rank) = order.iter().position(|old| old == selected) {
                 *selected = rank;
             }
+            if let Some(first) =
+                selected_group.and_then(|group| panel.group_members(group).first().copied())
+            {
+                *selected = first;
+            }
             commit = true;
         }
     }
@@ -398,7 +438,12 @@ fn series_list(
             (tr!("action-move-series-up"), true),
             (tr!("action-move-series-down"), false),
         ] {
-            let movable = panel.can_move_series(*selected, up);
+            // The buttons move what is selected: the group on a group page,
+            // the series on a curve page.
+            let movable = match *selected_group {
+                Some(group) => panel.can_move_group(group, up),
+                None => panel.can_move_series(*selected, up),
+            };
             if ui
                 .add_enabled(movable, egui::Button::new(label))
                 .on_disabled_hover_text(if up {
@@ -408,9 +453,21 @@ fn series_list(
                 })
                 .clicked()
             {
-                if let Some(index) = panel.move_series(*selected, up) {
-                    *selected = index;
-                    commit = true;
+                match *selected_group {
+                    Some(group) => {
+                        if panel.move_group(group, up) {
+                            if let Some(first) = panel.group_members(group).first() {
+                                *selected = *first;
+                            }
+                            commit = true;
+                        }
+                    }
+                    None => {
+                        if let Some(index) = panel.move_series(*selected, up) {
+                            *selected = index;
+                            commit = true;
+                        }
+                    }
                 }
             }
         }
@@ -418,37 +475,18 @@ fn series_list(
     commit
 }
 
-/// The right side: group, scope, color gradient, then the series settings.
-fn series_page(
+/// The curve page (#510): the fields of the series `index`, its group
+/// membership, then its own line and symbol (this curve only). Its colors are
+/// grayed out, with their reason, while the color bar of the layer gives them.
+fn curve_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     layer: usize,
     tree: &Tree,
     index: &mut usize,
     env: &mut PickerEnv,
-    actions: &mut Vec<Action>,
 ) -> bool {
-    let scope_id = egui::Id::new("curve_edit_scope");
-    let mut scope = ui
-        .data(|d| d.get_temp(scope_id))
-        .unwrap_or(EditScope::Group);
-    // The scope in force while this page is drawn is the one of the previous
-    // frame: a draft typed under the old scope is validated under it (#498).
-    let scope_in_force = scope;
-    let mut commit = membership_editor(ui, panel, layer, index, &mut scope);
-    ui.data_mut(|d| d.insert_temp(scope_id, scope));
-    // Deleting a group can empty the layer: nothing to edit afterwards.
-    if panel.series.is_empty() {
-        return commit;
-    }
-    *index = (*index).min(panel.series.len() - 1);
-    let group = panel.series[*index].group;
-    let whole_group = group.is_some() && scope_in_force == EditScope::Group;
-    // Outside a group there is nothing to spread: no color gradient (#213).
-    if let Some(group) = group {
-        commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
-    }
-
+    let mut commit = false;
     let before = panel.series[*index].clone();
     // The width "Auto (...)" shows is the one the rendering would deduce.
     let auto_bar_width = {
@@ -463,8 +501,27 @@ fn series_page(
             [series.x_error, series.y_error],
         )
     };
+    let has_overlay = panel.overlay.is_some();
+    // The key tells a curve page from a group page: group ids can equal ranks.
+    commit |= crate::field_state::for_target(ui, (layer, false, *index), |ui| {
+        series_curve_editor(
+            ui,
+            &mut panel.series[*index],
+            auto_bar_width,
+            has_overlay,
+            &error_columns,
+        )
+    });
+    // The Y axis (#358) goes through the panel, which makes the right axis
+    // visible. It is this curve's only (#510 D1: a group page would copy it).
+    let axis = panel.series[*index].axis;
+    if axis != before.axis {
+        panel.set_series_axis(*index, axis);
+    }
+    commit |= membership_editor(ui, panel, index);
     // The curves of a group on a visible bar take their color from it (#499).
-    let color_reason = group
+    let color_reason = panel.series[*index]
+        .group
         .filter(|group| {
             panel
                 .color_bar
@@ -472,53 +529,122 @@ fn series_page(
                 .is_some_and(|bar| bar.visible && bar.segment_of(*group).is_some())
         })
         .map(|_| tr!("curve-color-by-bar"));
-    let has_overlay = panel.overlay.is_some();
-    commit |= crate::field_state::for_target(ui, (layer, *index), |ui| {
-        series_editor(
-            ui,
-            &mut panel.series[*index],
-            env,
-            color_reason,
-            whole_group,
-            auto_bar_width,
-            has_overlay,
-            &error_columns,
-        )
+    commit |= crate::field_state::for_target(ui, (layer, false, *index), |ui| {
+        series_style_editor(ui, &mut panel.series[*index], env, color_reason, true)
     });
-    // The Y axis (#358) goes through the panel, which makes the right axis
-    // visible; in "whole group" scope every member gets it.
-    let axis = panel.series[*index].axis;
-    if axis != before.axis {
-        panel.set_series_axis(*index, axis);
-        if let (true, Some(group)) = (whole_group, group) {
-            for member in panel.group_members(group) {
-                panel.set_series_axis(member, axis);
-            }
-        }
-    }
-    if let (true, Some(group)) = (whole_group, group) {
-        propagate_style(panel, group, &before, *index);
-    }
     commit
 }
 
-/// Membership of the series `index`: dropdown, "Leave Group", then, if it is
-/// in a group, its gestures (name, order, ungroup, delete) and the scope
-/// choice with its explanatory sentence. A group stays contiguous (#197):
-/// changing membership moves the series, `index` follows it.
-fn membership_editor(
+/// The group page (#510): its gestures (name, ungroup, delete), its colors
+/// (gradient, place on the color bar with its rows) and the line and symbol of
+/// all its curves, written into each member. `selected` follows the first
+/// member; a group that disappears gives the page back to a curve.
+fn group_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     layer: usize,
-    index: &mut usize,
-    scope: &mut EditScope,
+    group: u32,
+    (selected, selected_group): (&mut usize, &mut Option<u32>),
+    env: &mut PickerEnv,
+    actions: &mut Vec<Action>,
 ) -> bool {
+    let Some(first) = panel.group_members(group).first().copied() else {
+        *selected_group = None;
+        return false;
+    };
+    *selected = first;
+    let mut commit = form(ui, "curve_group_form", |f| {
+        f.section(tr!("curve-group-section"));
+        group_editor(f, panel, layer, group, (selected, selected_group))
+    });
+    // Ungroup or Delete Group: the page goes back to a curve.
+    if selected_group.is_none() || panel.series.is_empty() {
+        return commit;
+    }
+    commit |= gradient_editor(ui, panel, group, env, actions);
+    commit |= group_bar_editor(ui, panel, layer, group);
+    // The line and symbol of the group: the first member is shown, what
+    // changes is copied into every member.
+    let before = panel.series[first].clone();
+    commit |= crate::field_state::for_target(ui, (layer, true, group), |ui| {
+        series_style_editor(ui, &mut panel.series[first], env, None, false)
+    });
+    propagate_style(panel, group, &before, first);
+    commit
+}
+
+/// « On the color bar » of the group, the rows of its segment (range, break
+/// label, chain) when it is on the bar, and the way to the look of the bar.
+fn group_bar_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, layer: usize, group: u32) -> bool {
+    let mut commit = false;
+    let order = panel.group_ids();
+    let ctx = ui.ctx().clone();
+    // The link is drawn below the range fields, which must know before they
+    // are drawn that a pick is pending (#498): the release over the link's
+    // rect of the previous frame says so.
+    let link_rect = egui::Id::new("curve_bar_link_rect");
+    let over_link = ctx
+        .data(|d| d.get_temp::<egui::Rect>(link_rect))
+        .is_some_and(|rect| {
+            ctx.input(|i| {
+                i.pointer.primary_released()
+                    && i.pointer.interact_pos().is_some_and(|at| rect.contains(at))
+            })
+        });
+    if over_link {
+        crate::field_state::pick_pending(&ctx);
+    }
+    // The range fields are drafts of this group's page: a click that leaves it
+    // validates them first (#498).
+    crate::field_state::for_target(ui, (layer, true, group), |ui| {
+        form(ui, "curve_group_bar", |f| {
+            let mut on_bar = panel
+                .color_bar
+                .as_ref()
+                .is_some_and(|bar| bar.segment_of(group).is_some());
+            if f.checkbox(
+                &mut on_bar,
+                tr!("curve-on-color-bar"),
+                Some(tr!("curve-on-color-bar", "hint")),
+            ) {
+                if on_bar {
+                    super::color_bar_settings::put_group_on_bar(panel, group);
+                } else {
+                    super::color_bar_settings::take_group_off_bar(panel, group);
+                }
+                commit = true;
+            }
+            if on_bar {
+                if let Some(bar) = panel.color_bar.as_mut() {
+                    commit |= super::color_bar_settings::group_bar_rows(f, bar, group, &order);
+                }
+                f.field(|ui| {
+                    let link = ui
+                        .link(tr!("curve-bar-to-look"))
+                        .on_hover_text(tr!("curve-bar-to-look", "hint"));
+                    ui.data_mut(|d| d.insert_temp(link_rect, link.rect));
+                    if link.clicked() {
+                        super::color_bar_settings::request_link(
+                            &ctx,
+                            super::color_bar_settings::BarLink::ToBarLook,
+                        );
+                    }
+                });
+            }
+        })
+    });
+    commit
+}
+
+/// Membership of the series `index`: dropdown and « Leave Group ». A group
+/// stays contiguous (#197): changing membership moves the series, `index`
+/// follows it.
+fn membership_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, index: &mut usize) -> bool {
     let mut commit = false;
     let group = panel.series[*index].group;
     let mut chosen = group;
     let mut new_group = false;
     form(ui, "curve_membership", |f| {
-        f.section(tr!("curve-group-section"));
         f.row(tr!("curve-group-field"), |ui| {
             let entry = |id: u32| {
                 tr!(
@@ -559,70 +685,21 @@ fn membership_editor(
                 commit = true;
             }
         }
-        if let Some(group) = panel.series[*index].group {
-            commit |= group_editor(f, panel, layer, group, index);
-            let count = panel.group_members(group).len();
-            f.row(tr!("curve-scope-field"), |ui| {
-                // The two options are one under the other: the "?" sits
-                // at the level of the last one, "Whole group".
-                ui.horizontal(|ui| {
-                    let options = ui.vertical(|ui| {
-                        choice(
-                            ui,
-                            "curve_scope",
-                            scope,
-                            &[
-                                ChoiceOption::new(EditScope::Series, tr!("curve-scope-series")),
-                                ChoiceOption::new(
-                                    EditScope::Group,
-                                    tr!("curve-scope-group", count = count),
-                                ),
-                            ],
-                        );
-                    });
-                    // What applies depending on the scope: under the "?" (#213),
-                    // no longer in a grayed note.
-                    let text = match scope {
-                        EditScope::Group => tr!("curve-scope-group-note"),
-                        EditScope::Series => tr!("curve-scope-series-note"),
-                    };
-                    let rect = options.response.rect;
-                    let at = egui::pos2(
-                        ui.cursor().min.x,
-                        rect.bottom() - ICON_SIZE.max(ui.spacing().interact_size.y),
-                    );
-                    ui.scope_builder(
-                        egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
-                            at,
-                            egui::vec2(
-                                ICON_SIZE * 2.0,
-                                ICON_SIZE.max(ui.spacing().interact_size.y),
-                            ),
-                        )),
-                        |ui| {
-                            ui.centered_and_justified(|ui| {
-                                help_text(ui, text);
-                            });
-                        },
-                    );
-                });
-            });
-        }
         commit
     })
 }
 
-/// The gestures of the group `group` (#197): its name, its rank in the
-/// drawing order, its dissolution (the series stay) and its deletion with its
-/// series. `index` is the edited series: it follows its content when the
-/// group changes rank, and falls back on the group's place when it is
-/// deleted. Returns `true` if the group changed.
+/// The gestures of the group `group` (#197): its name, its dissolution (the
+/// series stay) and its deletion with its series. Its place in the drawing
+/// order is changed from the list (Move Up / Move Down). After either
+/// gesture the page is a curve's: `selected_group` is cleared and `selected`
+/// falls back on the group's place.
 fn group_editor(
     f: &mut Form<'_>,
     panel: &mut PanelSpec,
     layer: usize,
     group: u32,
-    index: &mut usize,
+    (selected, selected_group): (&mut usize, &mut Option<u32>),
 ) -> bool {
     let mut commit = false;
     // The text being typed lives only as long as the focus: the rest of the
@@ -654,67 +731,13 @@ fn group_editor(
         }
     });
     f.field(|ui| {
-        for up in [true, false] {
-            let (label, hint) = if up {
-                (
-                    tr!("curve-group-move-up"),
-                    tr!("curve-group-move-up", "hint"),
-                )
-            } else {
-                (
-                    tr!("curve-group-move-down"),
-                    tr!("curve-group-move-down", "hint"),
-                )
-            };
-            if ui
-                .add_enabled(panel.can_move_group(group, up), egui::Button::new(label))
-                .on_hover_text(hint)
-                .on_disabled_hover_text(if up {
-                    tr!("disabled-move-first")
-                } else {
-                    tr!("disabled-move-last")
-                })
-                .clicked()
-            {
-                let place = panel
-                    .group_members(group)
-                    .iter()
-                    .position(|member| member == index);
-                if panel.move_group(group, up) {
-                    if let Some(member) =
-                        place.and_then(|p| panel.group_members(group).get(p).copied())
-                    {
-                        *index = member;
-                    }
-                    commit = true;
-                }
-            }
-        }
-    });
-    // On the color bar of the layer (#499): the curves are coloured by value.
-    let mut on_bar = panel
-        .color_bar
-        .as_ref()
-        .is_some_and(|bar| bar.segment_of(group).is_some());
-    if f.checkbox(
-        &mut on_bar,
-        tr!("curve-on-color-bar"),
-        Some(tr!("curve-on-color-bar", "hint")),
-    ) {
-        if on_bar {
-            super::color_bar_settings::put_group_on_bar(panel, group);
-        } else {
-            super::color_bar_settings::take_group_off_bar(panel, group);
-        }
-        commit = true;
-    }
-    f.field(|ui| {
         if ui
             .button(tr!("curve-group-ungroup"))
             .on_hover_text(tr!("curve-group-ungroup", "hint"))
             .clicked()
             && panel.dissolve_group(group)
         {
+            *selected_group = None;
             commit = true;
         }
         if ui
@@ -724,7 +747,8 @@ fn group_editor(
         {
             let first = panel.group_members(group).first().copied().unwrap_or(0);
             if panel.remove_group(group) {
-                *index = first.min(panel.series.len().saturating_sub(1));
+                *selected = first.min(panel.series.len().saturating_sub(1));
+                *selected_group = None;
                 commit = true;
             }
         }
@@ -834,16 +858,13 @@ fn gradient_popup_entry(
 /// spreads the colors evenly over the series of the group in the order of the
 /// list, and the group **retains** it: the list shows the group's one, empty
 /// until one has been chosen (the strip is then grayed out and nothing is
-/// applied). A series that joins the group receives its color. Grayed out
-/// unless the scope is "Whole group" (`enabled`), with the tooltip that says
-/// so. The gradient applies as soon as it is chosen or a stop changes (draft,
-/// validated by OK). Outside a group, the page does not call it: there is
-/// nothing to spread.
+/// applied). A series that joins the group receives its color. The gradient
+/// applies as soon as it is chosen or a stop changes (draft, validated by
+/// OK). Only the group page calls it (#510).
 fn gradient_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     group: u32,
-    enabled: bool,
     env: &mut PickerEnv,
     actions: &mut Vec<Action>,
 ) -> bool {
@@ -871,9 +892,9 @@ fn gradient_editor(
     let choice_before = choice.clone();
     let custom_before = custom.clone();
     let mut commit = false;
-    let out = ui.add_enabled_ui(enabled, |ui| {
+    {
         form(ui, "curve_gradient_form", |f| {
-            f.section(tr!("curve-gradient-section"));
+            f.section(tr!("curve-colors-section"));
             f.row(tr!("curve-gradient-field"), |ui| {
                 let selected_text = match &choice {
                     None => String::new(),
@@ -1017,7 +1038,7 @@ fn gradient_editor(
             let active = choice
                 .as_ref()
                 .map(|choice| choice_stops(choice, env, &custom));
-            if enabled && (choice != choice_before || custom != custom_before) {
+            if choice != choice_before || custom != custom_before {
                 if let Some(active) = &active {
                     commit |= panel.set_group_gradient(group, active);
                 }
@@ -1029,10 +1050,7 @@ fn gradient_editor(
                 .map(|stops| gradient_colors(stops, PREVIEW_STEPS))
                 .unwrap_or_default();
             gradient_strip(f.ui(), &strip);
-        })
-    });
-    if !enabled {
-        out.response.on_hover_text(tr!("curve-gradient-locked"));
+        });
     }
     ui.data_mut(|d| {
         if let Some(choice) = choice {
@@ -1109,7 +1127,7 @@ mod tests {
     fn page(
         ctx: &egui::Context,
         panel: &mut PanelSpec,
-        selected: &mut usize,
+        (selected, group): (&mut usize, &mut Option<u32>),
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, bool) {
         let project = stokesforge_core::Project::new("Series").unwrap();
@@ -1124,6 +1142,7 @@ mod tests {
                     0,
                     project.tree(),
                     selected,
+                    group,
                     &mut env,
                     &mut actions,
                 );
@@ -1157,15 +1176,21 @@ mod tests {
     fn click_at(
         ctx: &egui::Context,
         panel: &mut PanelSpec,
-        selected: &mut usize,
+        (selected, group): (&mut usize, &mut Option<u32>),
         pos: egui::Pos2,
     ) -> bool {
-        let mut commit = page(ctx, panel, selected, vec![egui::Event::PointerMoved(pos)]).1;
+        let mut commit = page(
+            ctx,
+            panel,
+            (&mut *selected, &mut *group),
+            vec![egui::Event::PointerMoved(pos)],
+        )
+        .1;
         for pressed in [true, false] {
             commit |= page(
                 ctx,
                 panel,
-                selected,
+                (&mut *selected, &mut *group),
                 vec![egui::Event::PointerButton {
                     pos,
                     button: egui::PointerButton::Primary,
@@ -1186,8 +1211,9 @@ mod tests {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         let mut selected = 0;
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let (single, header, member) = (
             center_of(&output, "A"),
             center_of(&output, "Batch"),
@@ -1217,8 +1243,9 @@ mod tests {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         let mut selected = 0;
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         for name in ["A", "B"] {
             let label = center_of(&output, name);
             let boxes: Vec<egui::Rect> = output
@@ -1260,27 +1287,31 @@ mod tests {
         let mut panel = layer_with_group();
         panel.series[1].line.width = 4.5;
         let mut selected = 1;
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let pos = center_of(&output, &tr!("curve-group-ungroup"));
-        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert!(click_at(&ctx, &mut panel, (&mut selected, &mut group), pos));
         assert!(panel.series.iter().all(|s| s.group.is_none()));
         assert_eq!(panel.series[1].line.width, 4.5, "the style stays");
         assert_eq!(panel.series.len(), 4);
+        assert_eq!(group, None, "the page is a curve's now");
 
         let mut panel = layer_with_group();
         let mut selected = 3;
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let pos = center_of(&output, &tr!("curve-group-delete"));
-        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert!(click_at(&ctx, &mut panel, (&mut selected, &mut group), pos));
         assert_eq!(panel.series.len(), 1, "A stays single");
         assert!(panel.group_names.is_empty());
-        let (_, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (_, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         assert_eq!(
             selected, 0,
             "the selection falls back on an existing series"
         );
+        assert_eq!(group, None, "the page is a curve's now");
     }
 
     /// #499: « On the color bar » on the group page puts the group on the
@@ -1292,10 +1323,11 @@ mod tests {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         let mut selected = 1;
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let pos = center_of(&output, &tr!("curve-on-color-bar"));
-        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert!(click_at(&ctx, &mut panel, (&mut selected, &mut group), pos));
         let bar = panel.color_bar.as_ref().expect("a bar was created");
         assert!(bar.visible);
         assert_eq!(bar.segments.len(), 1);
@@ -1305,10 +1337,10 @@ mod tests {
             "the group retains a gradient in the same edit"
         );
 
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let pos = center_of(&output, &tr!("curve-on-color-bar"));
-        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert!(click_at(&ctx, &mut panel, (&mut selected, &mut group), pos));
         assert!(panel.color_bar.as_ref().unwrap().segments.is_empty());
     }
 
@@ -1320,22 +1352,23 @@ mod tests {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         let mut selected = 0; // "A", outside a group
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let width = format!("{}", panel.series[0].line.width);
         let field = center_of(&output, &width);
-        click_at(&ctx, &mut panel, &mut selected, field);
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), field);
         page(
             &ctx,
             &mut panel,
-            &mut selected,
+            (&mut selected, &mut group),
             vec![egui::Event::Text("7".into())],
         );
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let row = center_of(&output, "C");
         let untouched = panel.series[2].line.width;
-        click_at(&ctx, &mut panel, &mut selected, row);
-        page(&ctx, &mut panel, &mut selected, Vec::new());
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), row);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         assert_eq!(panel.series[0].line.width, 7.0, "A took the width");
         assert_eq!(panel.series[2].line.width, untouched, "C is untouched");
         assert_eq!(selected, 2, "the clicked row is the edited series");
@@ -1356,8 +1389,9 @@ mod tests {
         }
         assert!(panel.rename_group(2, "Second"));
         let mut selected = 1; // "B", first member of "Batch"
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         // "Batch" is painted twice: the list header (left) and the name field.
         let field = super::super::test_support::texts(&output.shapes)
             .into_iter()
@@ -1365,17 +1399,17 @@ mod tests {
             .max_by(|a, b| a.center.x.total_cmp(&b.center.x))
             .expect("the name field")
             .center;
-        click_at(&ctx, &mut panel, &mut selected, field);
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), field);
         page(
             &ctx,
             &mut panel,
-            &mut selected,
+            (&mut selected, &mut group),
             vec![egui::Event::Text("Foo".into())],
         );
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let header = center_of(&output, "Second");
-        click_at(&ctx, &mut panel, &mut selected, header);
-        page(&ctx, &mut panel, &mut selected, Vec::new());
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), header);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         // The caret sits inside the old name: the typed text is in the middle.
         assert!(
             panel
@@ -1389,11 +1423,7 @@ mod tests {
             Some("Second"),
             "the second is untouched"
         );
-        assert_eq!(
-            panel.series[selected].group,
-            Some(2),
-            "the clicked group is open"
-        );
+        assert_eq!(group, Some(2), "the clicked group's page is open");
     }
 
     /// #197: joining a group places the series after its members, and
@@ -1402,6 +1432,7 @@ mod tests {
     fn joining_a_group_moves_the_series_and_the_selection_follows() {
         let mut panel = layer_with_group();
         let mut ui_selected = 0;
+        let mut group: Option<u32> = None;
         let ctx = super::super::test_support::context();
         // "A" (rank 0) joins group 1 by the same path as the dropdown.
         let moved = panel.set_series_group(ui_selected, Some(1)).unwrap();
@@ -1415,7 +1446,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["B", "C", "D", "A"]
         );
-        let (output, _) = page(&ctx, &mut panel, &mut ui_selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut ui_selected, &mut group), Vec::new());
         assert!(center_of(&output, "A").y > center_of(&output, "D").y);
     }
 
@@ -1429,20 +1460,27 @@ mod tests {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         let mut selected = 0; // "A", outside a group
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let list = center_of(&output, &tr!("curve-group-none"));
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        // Other rows of the page also read "None": the one of the Group row.
+        let row_y = center_of(&output, &tr!("curve-group-field")).y;
+        let list = super::super::test_support::texts(&output.shapes)
+            .into_iter()
+            .find(|t| t.text == tr!("curve-group-none") && (t.center.y - row_y).abs() < 4.0)
+            .expect("the Group dropdown")
+            .center;
         assert!(
-            !click_at(&ctx, &mut panel, &mut selected, list),
+            !click_at(&ctx, &mut panel, (&mut selected, &mut group), list),
             "opening the list changes nothing"
         );
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let pos = center_of(
             &output,
             &tr!("curve-group-entry", group = "Batch", count = 3),
         );
         assert!(
-            click_at(&ctx, &mut panel, &mut selected, pos),
+            click_at(&ctx, &mut panel, (&mut selected, &mut group), pos),
             "the choice asks for validation"
         );
         let names: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
@@ -1453,7 +1491,7 @@ mod tests {
             panel.series[selected].name, "A",
             "the editor follows the series"
         );
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         assert!(
             super::super::test_support::texts(&output.shapes)
                 .iter()
@@ -1462,23 +1500,297 @@ mod tests {
         );
     }
 
-    /// #197: Move Group Down keeps the edited series (the same one, not the same
-    /// rank) in the editor.
+    /// The texts painted at the left of the list (its header and rows).
+    fn bold_in_the_list(output: &egui::FullOutput, text: &str) -> Option<bool> {
+        super::super::test_support::texts(&output.shapes)
+            .into_iter()
+            .filter(|t| t.text == text)
+            .min_by(|a, b| a.center.x.total_cmp(&b.center.x))
+            .map(|t| t.bold)
+    }
+
+    /// #510: the list selection chooses the page. A group header opens the
+    /// group page (Name, Ungroup, gradient; no curve fields), a member the
+    /// curve page (curve fields, Leave Group; no Ungroup, no gradient).
+    /// Witness: a header pick that sets only the series leaves the curve page.
     #[test]
-    fn moving_the_group_down_keeps_the_edited_series() {
+    fn the_list_selection_chooses_the_group_page_or_the_curve_page() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut selected = 0;
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let header = center_of(&output, "Batch");
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), header);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert_eq!(group, Some(1));
+        let shown = |output: &egui::FullOutput, key: String| {
+            super::super::test_support::texts(&output.shapes)
+                .iter()
+                .any(|t| t.text == key)
+        };
+        assert!(shown(&output, tr!("curve-group-ungroup")));
+        assert!(shown(&output, tr!("curve-gradient-field")));
+        assert!(!shown(&output, tr!("plot-series-plot-type")));
+        assert!(!shown(&output, tr!("curve-group-leave")));
+
+        // One highlight: the header, no row.
+        assert_eq!(bold_in_the_list(&output, "Batch"), Some(true));
+        for row in ["A", "B", "C", "D"] {
+            assert_eq!(bold_in_the_list(&output, row), Some(false), "{row}");
+        }
+
+        let member = center_of(&output, "C");
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), member);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert_eq!((selected, group), (2, None));
+        assert!(shown(&output, tr!("curve-group-leave")));
+        assert!(shown(&output, tr!("plot-series-plot-type")));
+        assert!(!shown(&output, tr!("curve-group-ungroup")));
+        assert!(!shown(&output, tr!("curve-gradient-field")));
+        // The reverse: the row, no header.
+        assert_eq!(bold_in_the_list(&output, "C"), Some(true));
+        assert_eq!(bold_in_the_list(&output, "Batch"), Some(false));
+        assert_eq!(bold_in_the_list(&output, "B"), Some(false));
+    }
+
+    /// #510: a width typed on the group page reaches every member, and the
+    /// member page opened by the next click is untouched; the reverse, a width
+    /// typed on a curve page, changes that member only. Witness: a group page
+    /// that uses the same target as its first member leaves the draft
+    /// unvalidated when the click moves on.
+    #[test]
+    fn a_width_typed_on_the_group_page_reaches_every_member_and_not_the_reverse() {
+        let ctx = super::super::test_support::context();
+        // Group page, then the first member.
+        let mut panel = layer_with_group();
+        let mut selected = 1;
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let width = format!("{}", panel.series[1].line.width);
+        let field = center_of(&output, &width);
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), field);
+        page(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            vec![egui::Event::Text("7".into())],
+        );
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let row = center_of(&output, "B");
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), row);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        for member in 1..=3 {
+            assert_eq!(panel.series[member].line.width, 7.0, "member {member}");
+        }
+        assert_eq!(
+            panel.series[0].line.width,
+            SeriesSpec::new(NodeId::from_raw(1)).line.width
+        );
+        assert_eq!((selected, group), (1, None), "the member page is open");
+
+        // Curve page of C, then the header.
+        let mut panel = layer_with_group();
+        let mut selected = 2;
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let before = panel.series[2].line.width;
+        let field = center_of(&output, &format!("{before}"));
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), field);
+        page(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            vec![egui::Event::Text("9".into())],
+        );
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let header = center_of(&output, "Batch");
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), header);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert_eq!(panel.series[2].line.width, 9.0, "C took the width");
+        assert_eq!(panel.series[1].line.width, before, "B untouched");
+        assert_eq!(panel.series[3].line.width, before, "D untouched");
+        assert_eq!(group, Some(1), "the group page is open");
+
+        // A draft left open on the group page does not show on the page of its
+        // first member when the page changes by another way than a pick: the
+        // two pages have different targets.
+        let mut panel = layer_with_group();
+        let mut selected = 1;
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let width = format!("{}", panel.series[1].line.width);
+        let field = center_of(&output, &width);
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), field);
+        page(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            vec![egui::Event::Text("9".into())],
+        );
+        group = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert!(
+            super::super::test_support::texts(&output.shapes)
+                .iter()
+                .any(|t| t.text == width),
+            "the member page shows its own width"
+        );
+    }
+
+    /// #510: the list's Move Up / Move Down move what is selected: the whole
+    /// group on a group page (which stays on it), one series within its group
+    /// on a curve page. Witness: `move_series` whatever the page.
+    #[test]
+    fn the_list_buttons_move_the_selected_group_or_the_selected_series() {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         let mut extra = SeriesSpec::new(NodeId::from_raw(5));
         extra.name = "E".into();
         panel.series.push(extra);
-        let mut selected = 1; // "B", first member of the group
-        page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let pos = center_of(&output, &tr!("curve-group-move-down"));
-        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        let mut selected = 1;
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let down = center_of(&output, &tr!("action-move-series-down"));
+        assert!(click_at(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            down
+        ));
         let names: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, ["A", "E", "B", "C", "D"], "witness: the group moved");
+        assert_eq!(names, ["A", "E", "B", "C", "D"], "the group moved");
+        assert_eq!(group, Some(1), "the group page stays");
         assert_eq!(panel.series[selected].name, "B");
+
+        // On a member: it moves within its group.
+        let mut panel = layer_with_group();
+        let mut selected = 1;
+        let mut group: Option<u32> = None;
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let down = center_of(&output, &tr!("action-move-series-down"));
+        assert!(click_at(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            down
+        ));
+        let names: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["A", "C", "B", "D"], "B moved within the group");
+        assert_eq!(panel.series[selected].name, "B");
+        assert_eq!(group, None);
+    }
+
+    /// #510: « On the color bar » shows the group's Range and Chain rows, and a
+    /// typed From reaches its segment; the Break label sits on the first of
+    /// two groups on the bar, not on the last. Witnesses: rows shown off the
+    /// bar, or a break label forced on, fail.
+    #[test]
+    fn the_group_page_carries_the_rows_of_its_segment_on_the_bar() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        for (n, name) in [(5, "E"), (6, "F")] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(n));
+            series.name = name.into();
+            series.group = Some(2);
+            panel.series.push(series);
+        }
+        let mut selected = 1;
+        let mut group: Option<u32> = Some(1);
+        let shown = |output: &egui::FullOutput, key: String| {
+            super::super::test_support::texts(&output.shapes)
+                .iter()
+                .any(|t| t.text == key)
+        };
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert!(!shown(&output, tr!("plot-color-bar-range")), "off the bar");
+        assert!(!shown(&output, tr!("plot-color-bar-chain")));
+        assert!(
+            !shown(&output, tr!("curve-bar-to-look")),
+            "no link off the bar"
+        );
+        // Group 1 on the bar alone: no break.
+        let tick = center_of(&output, &tr!("curve-on-color-bar"));
+        assert!(click_at(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            tick
+        ));
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert!(shown(&output, tr!("plot-color-bar-range")));
+        assert!(shown(&output, tr!("plot-color-bar-chain")));
+        assert!(!shown(&output, tr!("plot-color-bar-group-break")), "alone");
+        // A typed From reaches the segment (the hint "Auto" is painted twice).
+        let from = super::super::test_support::texts(&output.shapes)
+            .into_iter()
+            .filter(|t| t.text == tr!("common-auto"))
+            .min_by(|a, b| a.center.x.total_cmp(&b.center.x))
+            .expect("the From field")
+            .center;
+        click_at(&ctx, &mut panel, (&mut selected, &mut group), from);
+        page(
+            &ctx,
+            &mut panel,
+            (&mut selected, &mut group),
+            vec![egui::Event::Text("3".into())],
+        );
+        let key = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        page(&ctx, &mut panel, (&mut selected, &mut group), vec![key]);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert_eq!(
+            panel.color_bar.as_ref().unwrap().segments[0].from,
+            Some(3.0)
+        );
+        // Both groups on the bar: the break label on the first one only.
+        super::super::color_bar_settings::put_group_on_bar(&mut panel, 2);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert!(shown(&output, tr!("plot-color-bar-group-break")), "group 1");
+        group = Some(2);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert!(shown(&output, tr!("plot-color-bar-range")));
+        assert!(
+            !shown(&output, tr!("plot-color-bar-group-break")),
+            "group 2"
+        );
+    }
+
+    /// #510: a group that no longer exists under the draft (an Undo, a
+    /// script) leaves the group page for the page of a curve that exists.
+    /// Witness: a stale `selected_group` keeps drawing a page of nothing.
+    #[test]
+    fn a_group_removed_under_the_draft_gives_the_page_back_to_a_curve() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut selected = 1;
+        let mut group: Option<u32> = Some(1);
+        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert!(panel.remove_group(1));
+        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
+        assert_eq!(group, None);
+        assert!(selected < panel.series.len());
+        assert!(super::super::test_support::texts(&output.shapes)
+            .iter()
+            .any(|t| t.text == tr!("plot-series-plot-type")));
     }
 
     /// The live series page, to drive a drag and drop frame by
@@ -1487,6 +1799,7 @@ mod tests {
         project: stokesforge_core::Project,
         panel: PanelSpec,
         selected: usize,
+        group: Option<u32>,
         committed: bool,
     }
 
@@ -1503,6 +1816,7 @@ mod tests {
                         0,
                         bench.project.tree(),
                         &mut bench.selected,
+                        &mut bench.group,
                         &mut env,
                         &mut actions,
                     );
@@ -1511,6 +1825,7 @@ mod tests {
                     project: stokesforge_core::Project::new("Series").unwrap(),
                     panel,
                     selected,
+                    group: None,
                     committed: false,
                 },
             );
@@ -1591,7 +1906,8 @@ mod tests {
         let bench = harness.state();
         assert_eq!(names(&bench.panel), ["B", "C", "D", "A"]);
         assert_eq!(bench.panel.group_members(1), [0, 1, 2]);
-        // Grabbing the header chooses the group (its first series, "B"), which follows.
+        // Grabbing the header chooses the group page, on its first series "B".
+        assert_eq!(bench.group, Some(1));
         assert_eq!(bench.panel.series[bench.selected].name, "B");
     }
 

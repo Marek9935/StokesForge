@@ -956,6 +956,8 @@ plot-series-symbol-color = Symbol color
 curve-window-title = Series Properties — { $name }
 curve-group-name = Group { $number }
 curve-group-section = Group
+curve-section = Curve
+curve-colors-section = Colors
 curve-group-field = Group
 curve-group-none = None
 curve-group-new = New group
@@ -973,19 +975,6 @@ curve-group-ungroup =
 curve-group-delete =
     Delete Group
     .hint = Deletes the group and all its series from the graph
-curve-group-move-up =
-    Move Group Up
-    .hint = Moves the whole group up in the drawing order
-curve-group-move-down =
-    Move Group Down
-    .hint = Moves the whole group down in the drawing order
-curve-scope-field = Edit
-curve-scope-series = This series only
-curve-scope-group = Whole group ({ $count } series)
-curve-scope-group-note = Line style, line width, symbol shape and size apply to every series of the group. Name, type, visibility and colors stay per series; spread colors with the gradient below.
-curve-scope-series-note = Changes apply to this series only. It stays in its group; use Leave Group to detach it.
-curve-scope-locked = Per-series setting: switch to "This series only" to change it
-curve-gradient-locked = Switch to "Whole group" to apply a gradient
 curve-gradient-saved = { $name } ({ $target })
 curve-gradient-delete =
     Delete
@@ -998,7 +987,6 @@ curve-gradient-save =
     Save
     .hint = Saves the custom gradient in the project or for the user
     .disabled = Give the gradient a name first
-curve-gradient-section = Color gradient
 curve-gradient-field = Gradient
 curve-gradient-custom = Custom
 curve-gradient-stop = Color { $number }
@@ -1084,10 +1072,12 @@ plot-color-bar-show =
 plot-color-bar-groups-section = Series groups
 plot-color-bar-group-break = Break label
     .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
-plot-color-bar-group-on = On the bar
-    .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
 plot-color-bar-range = Range
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
+plot-color-bar-groups-on = Groups on the bar: { $names }
+plot-color-bar-groups-none = No group is on the bar yet. Tick « On the color bar » on a group, in the Series window.
+plot-color-bar-to-series = Groups on the bar: Series »
+    .hint = Opens the Series window on the first group on the bar. Each group's range, break label and chaining are set there.
 plot-color-bar-chain =
     Chain the segments
     .hint = Each segment starts where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change.
@@ -1123,6 +1113,8 @@ disabled-color-bar-off = Turn on « Show color bar » first
 curve-on-color-bar =
     On the color bar
     .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
+curve-bar-to-look = Look of the bar: Graph Properties »
+    .hint = Opens Graph Properties on the Legend tab, Color bar section: value, scale, position, orientation, ticks and title.
 curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
 
 # Theme tab

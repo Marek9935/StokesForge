@@ -3026,6 +3026,10 @@ pub struct PlotEdit {
     /// Series currently chosen in the list, for detailed editing —
     /// pure UI state, never sent to the model.
     pub selected_series: usize,
+    /// The series group whose page the Series window shows (#510): `Some`
+    /// on a group header of the list, `None` on a curve. UI state, never sent
+    /// to the model.
+    pub selected_group: Option<u32>,
     /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
     /// True once `selected_panel` has been set from the graph's active layer
@@ -5668,6 +5672,7 @@ impl AppState {
             graph,
             spec: model.clone(),
             selected_series: 0,
+            selected_group: None,
             selected_panel: 0,
             panel_initialized: false,
             base: model,
@@ -6724,6 +6729,12 @@ impl AppState {
                     if let Some(series) = series {
                         edit.selected_series = series;
                     }
+                    // A group header opens the group page, anything else the
+                    // page of a curve (#510).
+                    edit.selected_group = match target {
+                        T::SeriesGroup(g) => Some(g.group),
+                        _ => None,
+                    };
                 }
             }
             Action::SetPlotSpec { graph, spec } => {
@@ -7032,9 +7043,14 @@ impl AppState {
         }
     }
 
-    /// See [`Action::OpenPlotSettings`]. Switching to another graph first
-    /// commits the draft of the previous one; a graph that no longer exists (or
-    /// is not a graph) leaves everything as it is.
+    /// The Series window asks the Legend page to unfold its colour bar
+    /// section (#510): the link of a group page to the look of the bar.
+    pub fn request_color_bar_unfold(&mut self) {
+        if let Some(settings) = self.plot_settings.as_mut() {
+            settings.color_bar_unfold = true;
+        }
+    }
+
     /// The Legend page has unfolded the colour bar section as asked: the
     /// request is spent.
     pub fn spend_color_bar_unfold(&mut self) {
@@ -7043,6 +7059,9 @@ impl AppState {
         }
     }
 
+    /// See [`Action::OpenPlotSettings`]. Switching to another graph first
+    /// commits the draft of the previous one; a graph that no longer exists (or
+    /// is not a graph) leaves everything as it is.
     fn open_plot_settings(&mut self, graph: NodeId, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
         if self.plot_spec(graph).is_none() {
             return;
@@ -12463,6 +12482,7 @@ impl AppState {
         if let Some(edit) = self.plot_edit.as_mut().filter(|edit| edit.graph == graph) {
             edit.selected_panel = 0;
             edit.selected_series = 0;
+            edit.selected_group = None;
         }
         self.execute(Command::EditPlotSpec {
             graph,
