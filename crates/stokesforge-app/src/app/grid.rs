@@ -8657,7 +8657,6 @@ mod tests {
         let last_visible = *painted_letters(&bench).last().unwrap();
         let from = bench.center_of(&cell_text_of(0)).unwrap();
         let to = egui::pos2(viewport_right(&bench) + 40.0, from.y);
-        let to = to;
         press_and_drag(&mut bench, from, to);
         hold(&mut bench, 10);
         assert!(first_painted(&bench) > 0, "the grid scrolled");
@@ -8674,7 +8673,6 @@ mod tests {
             let mut bench = timed_wide_bench();
             let from = bench.center_of(&cell_text_of(0)).unwrap();
             let to = egui::pos2(viewport_right(&bench) + push, from.y);
-            let to = to;
             press_and_drag(&mut bench, from, to);
             hold(&mut bench, 10);
             first_painted(&bench)
