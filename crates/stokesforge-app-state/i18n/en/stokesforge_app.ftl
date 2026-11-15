@@ -957,6 +957,7 @@ curve-window-title = Series Properties — { $name }
 curve-group-name = Group { $number }
 curve-group-section = Group
 curve-section = Curve
+curve-group-curves-section = All curves
 curve-colors-section = Colors
 curve-group-field = Group
 curve-group-none = None
@@ -1115,6 +1116,7 @@ curve-on-color-bar =
     .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
 curve-bar-to-look = Look of the bar: Graph Properties »
     .hint = Opens Graph Properties on the Legend tab, Color bar section: value, scale, position, orientation, ticks and title.
+curve-color-overrides-gradient = Overrides the group's gradient
 curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
 
 # Theme tab

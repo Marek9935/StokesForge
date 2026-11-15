@@ -956,6 +956,7 @@ curve-window-title = Propriétés des séries — { $name }
 curve-group-name = Groupe { $number }
 curve-group-section = Groupe
 curve-section = Courbe
+curve-group-curves-section = Toutes les courbes
 curve-colors-section = Couleurs
 curve-group-field = Groupe
 curve-group-none = Aucun
@@ -1114,6 +1115,7 @@ curve-on-color-bar =
     .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
 curve-bar-to-look = Aspect de la barre : Propriétés du graphique »
     .hint = Ouvre les propriétés du graphique, onglet Légende, section Barre de couleurs : valeur, échelle, position, orientation, graduations et titre.
+curve-color-overrides-gradient = Remplace le nuancier du groupe
 curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici.
 
 # Onglet Thème

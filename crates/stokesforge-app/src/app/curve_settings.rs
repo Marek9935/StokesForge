@@ -42,7 +42,7 @@ use super::list_row::{
     with_list_row_height,
 };
 use super::object_dnd::{self, Hover};
-use super::plot_settings::{series_curve_editor, series_style_editor};
+use super::plot_settings::{series_curve_editor, series_group_editor, series_style_editor};
 use super::reorder_list::reorder_row_with;
 
 /// Width of the series list, on the left.
@@ -120,6 +120,7 @@ pub(super) fn curve_settings_page(
                             ui,
                             panel,
                             layer,
+                            tree,
                             group,
                             (selected, selected_group),
                             env,
@@ -520,8 +521,8 @@ fn curve_page(
     }
     commit |= membership_editor(ui, panel, index);
     // The curves of a group on a visible bar take their color from it (#499).
-    let color_reason = panel.series[*index]
-        .group
+    let group = panel.series[*index].group;
+    let color_reason = group
         .filter(|group| {
             panel
                 .color_bar
@@ -530,7 +531,17 @@ fn curve_page(
         })
         .map(|_| tr!("curve-color-by-bar"));
     commit |= crate::field_state::for_target(ui, (layer, false, *index), |ui| {
-        series_style_editor(ui, &mut panel.series[*index], env, color_reason, true)
+        // A color set here overrides the gradient of the group (#510 D4).
+        let hint = (color_reason.is_none()
+            && group.is_some_and(|group| panel.group_gradient(group).is_some()))
+        .then(|| tr!("curve-color-overrides-gradient"));
+        series_style_editor(
+            ui,
+            &mut panel.series[*index],
+            env,
+            (color_reason, hint),
+            true,
+        )
     });
     commit
 }
@@ -539,10 +550,12 @@ fn curve_page(
 /// (gradient, place on the color bar with its rows) and the line and symbol of
 /// all its curves, written into each member. `selected` follows the first
 /// member; a group that disappears gives the page back to a curve.
+#[allow(clippy::too_many_arguments)]
 fn group_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     layer: usize,
+    tree: &Tree,
     group: u32,
     (selected, selected_group): (&mut usize, &mut Option<u32>),
     env: &mut PickerEnv,
@@ -563,11 +576,42 @@ fn group_page(
     }
     commit |= gradient_editor(ui, panel, group, env, actions);
     commit |= group_bar_editor(ui, panel, layer, group);
-    // The line and symbol of the group: the first member is shown, what
-    // changes is copied into every member.
+    // What the curves share: the first member is shown, what changes is copied
+    // into every member. Bins and Width only when EVERY curve has that type.
+    let members = panel.group_members(group);
+    let all = |plot_type: stokesforge_plot::PlotType| {
+        members
+            .iter()
+            .all(|member| panel.series[*member].plot_type == plot_type)
+    };
+    let shared = (
+        all(stokesforge_plot::PlotType::Histogram),
+        all(stokesforge_plot::PlotType::Bar),
+    );
+    let auto_bar_width = {
+        let resolved = stokesforge_core::resolve::resolve_series(tree, &panel.series[first]);
+        stokesforge_core::resolve::bar_width(resolved.x.as_ref().map(|x| x.as_slice()), None)
+    };
+    let has_overlay = panel.overlay.is_some();
     let before = panel.series[first].clone();
     commit |= crate::field_state::for_target(ui, (layer, true, group), |ui| {
-        series_style_editor(ui, &mut panel.series[first], env, None, false)
+        series_group_editor(
+            ui,
+            &mut panel.series[first],
+            shared,
+            auto_bar_width,
+            has_overlay,
+        )
+    });
+    // The Y axis goes through the panel, which makes the right axis visible.
+    let axis = panel.series[first].axis;
+    if axis != before.axis {
+        for member in panel.group_members(group) {
+            panel.set_series_axis(member, axis);
+        }
+    }
+    commit |= crate::field_state::for_target(ui, (layer, true, group), |ui| {
+        series_style_editor(ui, &mut panel.series[first], env, (None, None), false)
     });
     propagate_style(panel, group, &before, first);
     commit
@@ -1791,6 +1835,51 @@ mod tests {
         assert!(super::super::test_support::texts(&output.shapes)
             .iter()
             .any(|t| t.text == tr!("plot-series-plot-type")));
+    }
+
+    /// Opens the color picker of the line color on the curve page of series
+    /// `selected`: true if the picker (its « Custom color » box) appears.
+    fn line_color_opens(panel: &mut PanelSpec, selected: usize) -> bool {
+        let ctx = super::super::test_support::context();
+        let mut selected = selected;
+        let mut group: Option<u32> = None;
+        page(&ctx, panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, panel, (&mut selected, &mut group), Vec::new());
+        let label = center_of(&output, &tr!("plot-series-line-color"));
+        let swatch = output
+            .shapes
+            .iter()
+            .filter_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect)
+                    if rect.rect.width() <= 24.0
+                        && (rect.rect.center().y - label.y).abs() < 3.0
+                        && rect.rect.center().x > label.x + 20.0 =>
+                {
+                    Some(rect.rect.center())
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("the color swatch");
+        click_at(&ctx, panel, (&mut selected, &mut group), swatch);
+        page(&ctx, panel, (&mut selected, &mut group), Vec::new());
+        let (output, _) = page(&ctx, panel, (&mut selected, &mut group), Vec::new());
+        super::super::test_support::texts(&output.shapes)
+            .iter()
+            .any(|t| t.text == tr!("color-custom"))
+    }
+
+    /// #510 D4: a member of a gradient group keeps an editable color on its
+    /// curve page; it is greyed only while a visible color bar gives it.
+    /// Witness: a reason taken from the gradient too greys the first case.
+    #[test]
+    fn a_member_of_a_gradient_group_keeps_its_own_color_unless_the_bar_gives_it() {
+        let mut panel = layer_with_group();
+        let first: Vec<&str> = stokesforge_plot::GRADIENT_PRESETS[0].stops.to_vec();
+        assert!(panel.set_group_gradient(1, &first));
+        assert!(line_color_opens(&mut panel, 1), "gradient only: editable");
+        super::super::color_bar_settings::put_group_on_bar(&mut panel, 1);
+        assert!(!line_color_opens(&mut panel, 1), "bar: greyed");
     }
 
     /// The live series page, to drive a drag and drop frame by

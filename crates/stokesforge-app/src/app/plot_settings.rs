@@ -1847,79 +1847,11 @@ pub(super) fn series_curve_editor(
         });
         // Bins and width (#359): only for the type they concern.
         match series.plot_type {
-            PlotType::Histogram => {
-                commit |= form.row(tr!("plot-series-bins"), |ui| {
-                    let mut bins = series.histogram_bins.get();
-                    let changed = number_field(
-                        ui,
-                        "series_histogram_bins",
-                        &mut bins,
-                        &quantities::HISTOGRAM_BINS,
-                    )
-                    .changed;
-                    match stokesforge_plot::BinCount::new(bins) {
-                        Some(count) if changed => {
-                            series.histogram_bins = count;
-                            true
-                        }
-                        _ => false,
-                    }
-                });
-            }
-            PlotType::Bar => {
-                let hint = tr!(
-                    "common-auto-value",
-                    value = crate::number_field::format_value(
-                        auto_bar_width,
-                        quantities::BAR_WIDTH.decimals
-                    )
-                );
-                commit |= form.row(tr!("plot-series-bar-width"), |ui| {
-                    auto_number_field(
-                        ui,
-                        "series_bar_width",
-                        &mut series.bar_width,
-                        &quantities::BAR_WIDTH,
-                        &hint,
-                    )
-                    .changed
-                });
-            }
+            PlotType::Histogram => commit |= bins_row(form, series),
+            PlotType::Bar => commit |= width_row(form, series, auto_bar_width),
             _ => {}
         }
-        // Y axis (#358): Left or Right. Here only the series field changes;
-        // `curve_page` applies it through `PanelSpec::set_series_axis` (the
-        // right axis becomes visible). Grayed out
-        // on an overlaid layer: the rendering ignores Right there.
-        commit |= form.row(tr!("plot-series-axis"), |ui| {
-            let shown = ui.add_enabled_ui(!overlay, |ui| {
-                choice(
-                    ui,
-                    "plot_config_series_axis",
-                    &mut series.axis,
-                    &[
-                        ChoiceOption::new(
-                            stokesforge_plot::SeriesAxis::Left,
-                            tr!("plot-axis-left"),
-                        ),
-                        ChoiceOption::new(
-                            stokesforge_plot::SeriesAxis::Right,
-                            tr!("plot-axis-right"),
-                        ),
-                    ],
-                )
-            });
-            if overlay {
-                shown
-                    .response
-                    .on_disabled_hover_text(tr!("plot-series-axis", "disabled"));
-            } else {
-                shown
-                    .response
-                    .on_hover_text(tr!("plot-series-axis", "hint"));
-            }
-            shown.inner
-        });
+        commit |= axis_row(form, series, overlay);
         // Error columns (#360): Y error and X error, "None" first. Per
         // series (the columns are data, not style). Not for a "row" series
         // (#166) nor a histogram, which has no point to put a whisker on.
@@ -1958,13 +1890,14 @@ pub(super) fn series_curve_editor(
 /// The line and the symbol of a series (#510), the page of a curve (this curve
 /// only) and the page of a group (the first member, copied to the others by
 /// the page). `colors` is false on the group page: the gradient provides
-/// them; `color_reason` greys them out, with its sentence, when the color bar
+/// them; `color_hint` is the hover of an editable color that overrides the
+/// group's gradient (#510 D4); `color_reason` greys them out, with its sentence, when the color bar
 /// of the layer provides them.
 pub(super) fn series_style_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
     env: &mut PickerEnv,
-    color_reason: Option<String>,
+    (color_reason, color_hint): (Option<String>, Option<String>),
     colors: bool,
 ) -> bool {
     form(ui, "plot_series_style", |form| {
@@ -1982,6 +1915,8 @@ pub(super) fn series_style_editor(
             });
             if let Some(reason) = &color_reason {
                 out.response.on_disabled_hover_text(reason);
+            } else if let Some(hint) = &color_hint {
+                out.response.on_hover_text(hint);
             }
             commit |= out.inner;
         }
@@ -2049,9 +1984,110 @@ pub(super) fn series_style_editor(
             });
             if let Some(reason) = &color_reason {
                 out.response.on_disabled_hover_text(reason);
+            } else if let Some(hint) = &color_hint {
+                out.response.on_hover_text(hint);
             }
             commit |= out.inner;
         }
+        commit
+    })
+}
+
+/// The Bins row of a Histogram series (#359).
+fn bins_row(form: &mut Form<'_>, series: &mut stokesforge_plot::SeriesSpec) -> bool {
+    form.row(tr!("plot-series-bins"), |ui| {
+        let mut bins = series.histogram_bins.get();
+        let changed = number_field(
+            ui,
+            "series_histogram_bins",
+            &mut bins,
+            &quantities::HISTOGRAM_BINS,
+        )
+        .changed;
+        match stokesforge_plot::BinCount::new(bins) {
+            Some(count) if changed => {
+                series.histogram_bins = count;
+                true
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The Width row of a Bar series (#359).
+fn width_row(
+    form: &mut Form<'_>,
+    series: &mut stokesforge_plot::SeriesSpec,
+    auto_bar_width: f64,
+) -> bool {
+    let hint = tr!(
+        "common-auto-value",
+        value = crate::number_field::format_value(auto_bar_width, quantities::BAR_WIDTH.decimals)
+    );
+    form.row(tr!("plot-series-bar-width"), |ui| {
+        auto_number_field(
+            ui,
+            "series_bar_width",
+            &mut series.bar_width,
+            &quantities::BAR_WIDTH,
+            &hint,
+        )
+        .changed
+    })
+}
+
+/// The Y axis row (#358): Left or Right. Only the series field changes; the
+/// page applies it through `PanelSpec::set_series_axis`.
+fn axis_row(form: &mut Form<'_>, series: &mut stokesforge_plot::SeriesSpec, overlay: bool) -> bool {
+    // Y axis (#358): Left or Right. Here only the series field changes;
+    // `curve_page` applies it through `PanelSpec::set_series_axis` (the
+    // right axis becomes visible). Grayed out
+    // on an overlaid layer: the rendering ignores Right there.
+    form.row(tr!("plot-series-axis"), |ui| {
+        let shown = ui.add_enabled_ui(!overlay, |ui| {
+            choice(
+                ui,
+                "plot_config_series_axis",
+                &mut series.axis,
+                &[
+                    ChoiceOption::new(stokesforge_plot::SeriesAxis::Left, tr!("plot-axis-left")),
+                    ChoiceOption::new(stokesforge_plot::SeriesAxis::Right, tr!("plot-axis-right")),
+                ],
+            )
+        });
+        if overlay {
+            shown
+                .response
+                .on_disabled_hover_text(tr!("plot-series-axis", "disabled"));
+        } else {
+            shown
+                .response
+                .on_hover_text(tr!("plot-series-axis", "hint"));
+        }
+        shown.inner
+    })
+}
+
+/// What the group page shares between its curves (#510 D1, D2): the Y axis,
+/// and Bins or Width when `bins` / `width` say every curve of the group has
+/// that type. The first member is edited; the page copies what changed.
+pub(super) fn series_group_editor(
+    ui: &mut egui::Ui,
+    series: &mut stokesforge_plot::SeriesSpec,
+    (bins, width): (bool, bool),
+    auto_bar_width: f64,
+    overlay: bool,
+) -> bool {
+    form(ui, "plot_group_editor", |form| {
+        let mut commit = false;
+        form.section(tr!("curve-group-curves-section"));
+        if bins {
+            commit |= bins_row(form, series);
+        }
+        if width {
+            commit |= width_row(form, series, auto_bar_width);
+        }
+        commit |= axis_row(form, series, overlay);
         commit
     })
 }
@@ -4839,62 +4875,65 @@ mod tests {
         assert!(harness.state.undo_label().is_none(), "history exhausted");
     }
 
-    /// "Whole group": Bins reach the Histogram members only, Width the Bar
-    /// members only; the plot type of the members stays what it was.
+    /// #510 D2: on the group page Bins reach every member (all Histogram) and
+    /// Width every member (all Bar); a mixed group shows neither row there.
+    /// Witness: « any member » instead of « all members » shows the row of a
+    /// mixed group.
     #[test]
-    #[ignore = "waits for #510 D1/D2"]
-    fn bins_and_width_are_copied_to_the_members_of_the_matching_type() {
-        let make = |first: PlotType| {
-            harness(|spec| {
+    fn bins_and_width_are_copied_to_the_members_of_a_uniform_group() {
+        let make = |kind: PlotType, mixed: bool| {
+            harness(move |spec| {
                 let panel = first_panel(spec);
                 let mut model = panel.series[0].clone();
                 panel.series.clear();
                 let mut series = Vec::new();
-                for plot_type in [first.clone(), first, PlotType::Line] {
-                    model.plot_type = plot_type;
+                for _ in 0..3 {
+                    model.plot_type = kind.clone();
                     series.push(model.clone());
                 }
-                // Third member: the other kind, to prove it is skipped.
-                series[2].plot_type = if series[0].plot_type == PlotType::Bar {
-                    PlotType::Histogram
-                } else {
-                    PlotType::Bar
-                };
+                if mixed {
+                    series[2].plot_type = PlotType::Line;
+                }
                 panel.push_series_batch(series);
             })
         };
+        let group_page = |harness: &mut Harness| {
+            harness.open(PlotSettingsTab::Series, None);
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        };
         let context = test_support::context();
 
-        let mut histogram = make(PlotType::Histogram);
-        histogram.open(PlotSettingsTab::Series, None);
-        histogram.state.plot_edit_mut().unwrap().selected_series = 0;
+        let mut histogram = make(PlotType::Histogram, false);
+        group_page(&mut histogram);
         let default = histogram.model().panels[0].series[1]
             .histogram_bins
             .get()
             .to_string();
         type_in(&mut histogram, &context, &default, "25");
         let after = histogram.model();
-        let series = &after.panels[0].series;
-        assert_eq!(series[0].histogram_bins.get(), 25);
-        assert_eq!(series[1].histogram_bins.get(), 25, "Histogram member");
-        assert_eq!(
-            series[2].histogram_bins.get().to_string(),
-            default,
-            "Bar member untouched"
-        );
-        assert_eq!(series[2].plot_type, PlotType::Bar, "type stays per series");
+        for member in &after.panels[0].series {
+            assert_eq!(member.histogram_bins.get(), 25);
+        }
 
-        let mut bar = make(PlotType::Bar);
-        bar.open(PlotSettingsTab::Series, None);
-        bar.state.plot_edit_mut().unwrap().selected_series = 0;
+        let mut bar = make(PlotType::Bar, false);
+        group_page(&mut bar);
         let painted = paint_window(&context, &mut bar.state, Vec::new());
         let auto = auto_width_text(&painted).expect("Auto (...)").text.clone();
         type_in(&mut bar, &context, &auto, "0.5");
-        let after = bar.model();
-        let series = &after.panels[0].series;
-        assert_eq!(series[0].bar_width, Some(0.5));
-        assert_eq!(series[1].bar_width, Some(0.5), "Bar member");
-        assert_eq!(series[2].bar_width, None, "Histogram member untouched");
+        for member in &bar.model().panels[0].series {
+            assert_eq!(member.bar_width, Some(0.5));
+        }
+
+        for kind in [PlotType::Histogram, PlotType::Bar] {
+            let mut mixed = make(kind, true);
+            group_page(&mut mixed);
+            let painted = paint_window(&context, &mut mixed.state, Vec::new());
+            assert!(!is_painted(&painted, &tr!("plot-series-bins")));
+            assert!(!is_painted(&painted, &tr!("plot-series-bar-width")));
+            assert!(is_painted(&painted, &tr!("plot-series-axis")), "axis stays");
+        }
     }
 
     // -- Y axis of a series (#358) ----------------------------------------
@@ -4981,10 +5020,10 @@ mod tests {
         assert_eq!(harness.model(), original, "nothing changes");
     }
 
-    /// "Whole group": the axis is copied to every member of the group, and
-    /// the right axis is shown.
+    /// #510 D1: on the group page the axis is copied to every member of the
+    /// group (through `set_series_axis`), and the right axis is shown.
+    /// Witness: the axis applied to the first member only.
     #[test]
-    #[ignore = "waits for #510 D1/D2"]
     fn the_axis_is_copied_to_the_whole_group() {
         let mut harness = harness(|spec| {
             hidden_right(spec);
@@ -4994,7 +5033,11 @@ mod tests {
             panel.push_series_batch(vec![model.clone(), model.clone(), model]);
         });
         harness.open(PlotSettingsTab::Series, None);
-        harness.state.plot_edit_mut().unwrap().selected_series = 0;
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        }
         let context = test_support::context();
         click_label(&context, &mut harness.state, &tr!("plot-axis-right"));
         let after = harness.model();

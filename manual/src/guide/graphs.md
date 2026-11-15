@@ -252,9 +252,10 @@ The **group page** (click the header) has:
 
 - **Group**: the **Name** of the group, **Ungroup** to turn the members back into single series, and **Delete Group** to delete the group and all its series.
 - **Colors**: a **Gradient** (**Blue to Red**, **Viridis**, **Plasma** and others, or **Custom** with your own colors added by **Add Color**), spread over the curves in list order. You can save a custom gradient in the project or for yourself. Then **On the color bar**, which puts the group on the color bar of the layer; once it is on the bar, its **Range**, its **Break label** and **Chain the segments** are set here, with the link **Look of the bar: Graph Properties »** to the rest of the bar (see [Color bar](#color-bar)).
+- **All curves**: the **Y axis**, and **Bins** or **Width (X units)** when every curve of the group is a histogram or a bar; a group that mixes types shows neither. What you change is copied to each member.
 - The **Line** and **Symbol** of every curve of the group: what you change is copied to each member.
 
-The **curve page** (click a curve) has the fields of that curve, then a **Group** row to choose **None**, an existing group or **New group**, and **Leave Group** to detach the curve, which keeps its style. Its line and symbol touch this curve only.
+The **curve page** (click a curve) has the fields of that curve, then a **Group** row to choose **None**, an existing group or **New group**, and **Leave Group** to detach the curve, which keeps its style. Its line and symbol touch this curve only. Its colors stay editable and override the gradient of the group; they are grayed out only while the color bar gives them.
 
 To change the order, select the group header or a curve and use **Move Up** and **Move Down** under the list: they move what is selected, the whole group or the one curve. You can also drag a header or a row.
 

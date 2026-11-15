@@ -629,8 +629,8 @@ in `stokesforge-plot` (read before writing, as requested):
   columns, Show in legend), its **group** (dropdown None / group name / New
   group, and "Leave Group" which detaches it; group created on simultaneous
   add, #177; entering a group places the series after its members), then its
-  own line and symbol (`series_style_editor`), colors greyed with their
-  reason while the bar gives them. The fields of a page carry a
+  own line and symbol (`series_style_editor`), colors editable (they override the gradient, hover `curve-color-overrides-gradient`, #510 D4), greyed with their
+  reason only while the bar gives them. The fields of a page carry a
   `field_state::for_target` key that tells a group page from a curve page.
   Gradients:
   provided (`GRADIENT_PRESETS`), saved (project or user, suffix
@@ -674,15 +674,15 @@ in `stokesforge-plot` (read before writing, as requested):
   (X units)** (`bar_width`) for a Bar series only (#359). Width follows S-C4:
   an emptied field or the word `auto` gives `None`, shown in gray as
   "Auto (<width>)" with the value of `stokesforge_core::resolve::bar_width`;
-  a finite value above 0.000001 fixes it. They are on the curve page only
-  (#510 D2 pending: the group page could copy them to the members of the
-  matching type, `propagate_style` already does it); the plot
+  a finite value above 0.000001 fixes it. They are on the curve page (this curve) and on the group page when EVERY
+  member has that type (hidden on a mixed group, #510 D2: `series_group_editor`,
+  copied by `propagate_style`); the plot
   type stays per series. Both go through the draft and `commit_plot_edit`
   (one history entry per validated entry); then **Y axis: Left / Right**
   (`SeriesSpec::axis`, #358), applied through `PanelSpec::set_series_axis`
   (Right makes the right axis visible, same rule as `pyst` `axis`; going back
-  to Left hides nothing). Curve page only (#510 D1 pending: the group page could
-  copy it to every member). Grayed out, with its reason, on an overlaid layer (the rendering
+  to Left hides nothing). On the curve page it is this curve's; on the group page (`series_group_editor`)
+  it is copied to every member through `set_series_axis` (#510 D1). Grayed out, with its reason, on an overlaid layer (the rendering
   ignores Right there, `pipeline.rs`). Known limit: the data cursor skips
   series on the right axis (`render/src/interact.rs`); then **Y error** and
   **X error** (#360, `SeriesSpec::y_error` / `x_error`): "None" first, then the
